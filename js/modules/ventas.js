@@ -262,7 +262,7 @@ if (metodo === "credito") {
             const cuentasDebito = tarjetasConfig.filter(t => t.tipo === "debito");
             let optsHTML = "";
             if (metodo === "transferencia") {
-                optsHTML = '<option value="">-- Selecciona cuenta --</option>';
+                optsHTML = '<option value="">-- Seleccione cuenta --</option>';
             } else {
                 optsHTML = '<option value="efectivo">💵 Efectivo</option>';
             }
