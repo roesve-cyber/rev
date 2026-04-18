@@ -243,19 +243,23 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
         return;
     }
 
+    const _escHtml = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
     // Summary per vendor
     const resumenRows = vendedores.map(v => {
         const res = calcularComisionesVendedor(v.id, fechaDesde, fechaHasta);
         if (res.numVentas === 0) return '';
+        const fDesdeEsc = _escHtml(fechaDesde || '');
+        const fHastaEsc = _escHtml(fechaHasta || '');
         return `<tr>
-          <td style="padding:10px;">${v.nombre}</td>
+          <td style="padding:10px;">${_escHtml(v.nombre)}</td>
           <td style="padding:10px;text-align:center;">${res.numVentas}</td>
           <td style="padding:10px;text-align:right;">${dinero(res.totalVendido)}</td>
           <td style="padding:10px;text-align:right;font-weight:bold;color:#7c3aed;">${dinero(res.totalComision)}</td>
           <td style="padding:10px;text-align:right;color:#d97706;">${dinero(res.pendiente)}</td>
           <td style="padding:10px;text-align:right;color:#16a34a;">${dinero(res.pagada)}</td>
           <td style="padding:10px;text-align:center;">
-            ${res.pendiente > 0 ? `<button onclick="pagarComisionVendedor(${v.id}, '${fechaDesde || ''}', '${fechaHasta || ''}')" style="padding:6px 12px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">✅ Marcar Pagada</button>` : '<span style="color:#16a34a;">✅ Al día</span>'}
+            ${res.pendiente > 0 ? `<button onclick="pagarComisionVendedor(${v.id}, '${fDesdeEsc}', '${fHastaEsc}')" style="padding:6px 12px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">✅ Marcar Pagada</button>` : '<span style="color:#16a34a;">✅ Al día</span>'}
           </td>
         </tr>`;
     }).filter(r => r !== '').join('');
@@ -271,13 +275,13 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
     }).slice().reverse();
 
     const detalleRows = filtradas.map(c => `<tr>
-      <td style="padding:8px;">${c.vendedorNombre}</td>
-      <td style="padding:8px;">${c.folio}</td>
+      <td style="padding:8px;">${_escHtml(c.vendedorNombre)}</td>
+      <td style="padding:8px;">${_escHtml(c.folio)}</td>
       <td style="padding:8px;text-align:right;">${dinero(c.totalVenta)}</td>
       <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
       <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX')}</td>
       <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre'}</td>
-      <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado}</span></td>
+      <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
       <td style="padding:8px;text-align:center;">${c.estado === 'Pendiente' ? `<button onclick="pagarComision(${c.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Pagar</button>` : '✅'}</td>
     </tr>`).join('');
 
