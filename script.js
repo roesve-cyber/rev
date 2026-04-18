@@ -2014,7 +2014,7 @@ function guardarCliente() {
             direccion,
             telefono,
             referencia,
-            fechaRegistro: new Date().toLocaleDateString()
+            fechaRegistro: new Date().toLocaleDateString('es-MX')
         });
     }
 
@@ -2207,8 +2207,9 @@ function registrarCompra() {
     if (!prov || !producto) return alert("⚠️ Proveedor o producto no encontrado.");
 
     const bancoSel = document.getElementById("compraBancoSeleccionado")?.value || "";
-    const fechaHoyStr = new Date().toLocaleDateString();
-    const fechaPagoMensaje = (metodo === "contado") ? "Hoy (Contado)" : calcularFechaPago(fechaHoyStr, bancoSel);
+    const fechaHoyISO = new Date().toISOString().split('T')[0];
+    const fechaHoyStr = new Date().toLocaleDateString('es-MX');
+    const fechaPagoMensaje = (metodo === "contado") ? "Hoy (Contado)" : calcularFechaPago(fechaHoyISO, bancoSel);
 
     const mensajeConfirmar =
         `¿Deseas registrar esta compra?\n\n` +
@@ -2243,7 +2244,8 @@ function registrarCompra() {
         productoId,
         proveedor: prov.nombre,
         total: totalCompra,
-        fecha: fechaHoyStr
+        fecha: fechaHoyStr,
+        fechaISO: fechaHoyISO
     };
     compras.push(nuevaCompra);
 
@@ -2825,13 +2827,21 @@ function actualizarYRefrescarBancos() {
     actualizarSelectBancos();
 }
 
-function calcularFechaPago(fechaCompraStr, bancoNombre) {
-    const infoBanco = tarjetasConfig.find(t => t.banco === bancoNombre);
-    if (!infoBanco) return fechaCompraStr;
+function _parseFecha(entrada) {
+    if (entrada instanceof Date) return new Date(entrada);
+    if (typeof entrada === 'string' && /^\d{4}-\d{2}-\d{2}/.test(entrada)) {
+        const [y, m, d] = entrada.split('T')[0].split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    const d = new Date(entrada);
+    return isNaN(d.getTime()) ? new Date() : d;
+}
 
-    let partes = fechaCompraStr.split('/');
-    let fecha = new Date(partes[2], partes[1] - 1, partes[0]);
-    if (isNaN(fecha.getTime())) fecha = new Date();
+function calcularFechaPago(fechaCompra, bancoNombre) {
+    const infoBanco = tarjetasConfig.find(t => t.banco === bancoNombre);
+    const fecha = _parseFecha(fechaCompra);
+
+    if (!infoBanco) return fecha.toLocaleDateString('es-MX');
 
     const diaCompra = fecha.getDate();
     const diaCorte  = parseInt(infoBanco.diaCorte);
@@ -2841,19 +2851,35 @@ function calcularFechaPago(fechaCompraStr, bancoNombre) {
     let anio = fecha.getFullYear();
 
     if (diaCompra > diaCorte) mes += 1;
-    if (diaLimite < diaCorte)  mes += 1;
+    if (diaLimite < diaCorte) mes += 1;
 
-    return new Date(anio, mes, diaLimite).toLocaleDateString();
+    return new Date(anio, mes, diaLimite).toLocaleDateString('es-MX');
 }
 
 function calcularCalendarioMSI(fechaRef, meses, nombreBanco) {
-    const config = tarjetasConfig.find(t => t.banco === nombreBanco) || { diaCorte: 15, diaLimite: 5 };
-    let cronograma = [];
-    let d = new Date(fechaRef);
-    let saltoMes = (d.getDate() > config.diaCorte) ? 2 : 1;
+    const config = tarjetasConfig.find(t => t.banco === nombreBanco)
+                   || { diaCorte: 15, diaLimite: 5 };
+
+    const fecha     = _parseFecha(fechaRef);
+    const diaCompra = fecha.getDate();
+    const diaCorte  = parseInt(config.diaCorte);
+    const diaLimite = parseInt(config.diaLimite);
+
+    let saltoMes = 0;
+    if (diaCompra > diaCorte) saltoMes += 1;
+    if (diaLimite < diaCorte) saltoMes += 1;
+
+    const cronograma = [];
     for (let i = 0; i < meses; i++) {
-        let fPago = new Date(d.getFullYear(), d.getMonth() + i + saltoMes, config.diaLimite);
-        cronograma.push({ n: i + 1, fecha: fPago.toISOString().split('T')[0] });
+        const fPago = new Date(
+            fecha.getFullYear(),
+            fecha.getMonth() + saltoMes + i,
+            diaLimite
+        );
+        cronograma.push({
+            n    : i + 1,
+            fecha: fPago.toISOString().split('T')[0]
+        });
     }
     return cronograma;
 }
@@ -4348,7 +4374,7 @@ function abrirModalCliente() {
         id: Date.now(),
         nombre,
         telefono,
-        fechaRegistro: new Date().toLocaleDateString()
+        fechaRegistro: new Date().toLocaleDateString('es-MX')
     };
 
     clientes.push(nuevo);
@@ -4432,7 +4458,7 @@ function renderCuentasXCobrar() {
 
         const saldo = Number(cuenta.saldoActual ?? 0);
         const color = saldo > 0 ? "#27ae60" : "#999";
-        const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString();
+        const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString('es-MX');
 
         html += `<tr>
             <td><strong>${cuenta.nombre}</strong><br><small style="color:#718096;">${cuenta.folio}</small></td>
@@ -4608,7 +4634,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         const cuenta = cuentas[idxCuenta];
         cuenta.abonos = cuenta.abonos || [];
         cuenta.abonos.push({
-            fecha: new Date().toLocaleDateString(),
+            fecha: new Date().toLocaleDateString('es-MX'),
             monto: montoAbono
         });
         cuenta.saldoActual = nuevoSaldo;
@@ -4625,7 +4651,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
         let movimientos = StorageService.get("movimientosCaja", []);
         movimientos.push({
-            fecha: new Date().toLocaleDateString(),
+            fecha: new Date().toLocaleDateString('es-MX'),
             monto: montoAbono,
             tipo: "Ingreso",
             concepto: `Abono a ${cuenta.nombre} - ${folio}`
@@ -4704,7 +4730,7 @@ function guardarClienteDesdeModal() {
         direccion,
         telefono,
         referencia,
-        fechaRegistro: new Date().toLocaleDateString()
+        fechaRegistro: new Date().toLocaleDateString('es-MX')
     };
 
     clientes.push(nuevo);
