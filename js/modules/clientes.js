@@ -667,6 +667,38 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         nuevoSaldo = 0;
     }
 
+    // ─── CALCULAR PAGARÉS CUBIERTOS ───
+    const _todosLosPagares = StorageService.get("pagaresSistema", []);
+    const _pagaresDelFolio = _todosLosPagares
+        .filter(p => p.folio === folio && p.estado !== "Pagado")
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    let _montoRestante = montoAbono;
+    const _pagaresCubiertos = [];
+    for (const pag of _pagaresDelFolio) {
+        if (_montoRestante >= pag.monto - 0.01) {
+            _pagaresCubiertos.push({ ...pag });
+            _montoRestante -= pag.monto;
+        } else {
+            break;
+        }
+    }
+
+    // Marcar pagarés cubiertos como Pagado
+    if (_pagaresCubiertos.length > 0) {
+        const fechaAbono = new Date().toLocaleDateString("es-MX");
+        const _todosActualizados = _todosLosPagares.map(p => {
+            if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
+                return { ...p, estado: "Pagado", fechaAbono, montoAbonado: p.monto };
+            }
+            return p;
+        });
+        StorageService.set("pagaresSistema", _todosActualizados);
+    }
+
+    // Pagarés restantes después del abono
+    const _pagaresRestantes = _pagaresDelFolio.filter(p => !_pagaresCubiertos.find(pc => pc.id === p.id));
+
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const idxCuenta = cuentas.findIndex(c => c.folio === folio);
     
@@ -711,77 +743,30 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         }
     }
 
+    // ─── GENERAR TICKET DE ABONO ───
+    const _cuentaData = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    generarTicketAbonoTermico({
+        folio,
+        cliente: {
+            nombre: _cuentaData?.nombre || folio,
+            telefono: _cuentaData?.telefono || '',
+            direccion: _cuentaData?.direccion || ''
+        },
+        montoAbono,
+        nuevoSaldo,
+        fecha: new Date().toLocaleDateString("es-MX"),
+        metodoCobro: document.getElementById("metodoCobroAbono")?.value || medioPago || "efectivo",
+        cuentaDestino: document.getElementById("cuentaDestinoAbono")?.value || etiqueta || "efectivo",
+        pagaresCubiertos: _pagaresCubiertos,
+        pagaresRestantes: _pagaresRestantes,
+        articulos: _cuentaData?.articulos || [],
+        totalVenta: _cuentaData?.totalContadoOriginal || 0,
+        enganche: _cuentaData?.engancheRecibido || 0
+    });
+
     alert("✅ Abono registrado exitosamente.");
     document.querySelector('[data-modal="abono-avanzado"]')?.remove();
     renderCuentasXCobrar();
-
-    // Generar ticket térmico de abono
-    const cuentasActual = StorageService.get("cuentasPorCobrar", []);
-    const cuentaTicket = cuentasActual.find(c => c.folio === folio);
-    if (cuentaTicket) {
-        const pagaresSistema = StorageService.get("pagaresSistema", []);
-        const pagaresCliente = pagaresSistema.filter(p => p.folio === folio);
-        const hoy = new Date();
-
-        let montoRestante = montoAbono;
-        const pagaresAfectados = [];
-        const pagaresOrdenados = pagaresCliente
-            .filter(p => p.estado !== "Pagado")
-            .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
-
-        for (const p of pagaresOrdenados) {
-            if (montoRestante <= 0) break;
-            if (montoRestante >= (p.monto || p.abono || 0)) {
-                pagaresAfectados.push({ ...p, cubierto: true });
-                montoRestante -= (p.monto || p.abono || 0);
-            } else {
-                pagaresAfectados.push({ ...p, cubierto: false, montoAplicado: montoRestante });
-                montoRestante = 0;
-            }
-        }
-
-        const pagaresPendientesFinal = pagaresCliente.filter(p =>
-            p.estado !== "Pagado" && !pagaresAfectados.find(a => a.id === p.id && a.cubierto)
-        );
-        const diasAtrasoTotal = pagaresPendientesFinal.reduce((sum, p) => {
-            const venc = new Date(p.fechaVencimiento);
-            return sum + (venc < hoy ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24)) : 0);
-        }, 0);
-
-        const etiquetasMetodo = {
-            efectivo: '💵 Efectivo',
-            transferencia: '🏦 Transferencia',
-            deposito: '🏧 Depósito'
-        };
-        const etiquetaCuenta = etiquetasMetodo[metodoCobro] || metodoCobro || '💵 Efectivo';
-
-        const folioAbono = 'REC-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Date.now().toString().slice(-4);
-
-        generarTicketAbono({
-            folio,
-            folioAbono,
-            fecha: new Date().toLocaleDateString('es-MX'),
-            cliente: {
-                nombre: cuentaTicket.nombre,
-                telefono: cuentaTicket.telefono || '',
-                direccion: cuentaTicket.direccion || ''
-            },
-            montoAbono,
-            saldoAnterior: saldoActual,
-            nuevoSaldo,
-            pagaresAfectados,
-            totalPagares: pagaresCliente.length,
-            pagaresPendientes: pagaresPendientesFinal.length,
-            diasAtrasoTotal,
-            etiquetaCuenta,
-            empresa: {
-                nombre: "MUEBLERÍA MI PUEBLITO",
-                direccion: "Santiago Cuaula, Tlaxcala",
-                telefono: "228 123 4567",
-                acreedor: "Roberto Escobedo Vega"
-            }
-        });
-    }
 }
 
 function generarTicketAbono(datosAbono) {
@@ -1013,8 +998,202 @@ function guardarClienteDesdeModal() {
     cargarClientesSelect();
 }
 
+function generarTicketAbonoTermico(datosAbono) {
+    const { folio, cliente, montoAbono, nuevoSaldo, fecha, metodoCobro, cuentaDestino,
+        pagaresCubiertos, pagaresRestantes, articulos, totalVenta, enganche } = datosAbono;
+
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const hoy = new Date();
+    const vencidos = pagaresRestantes.filter(p => new Date(p.fechaVencimiento) < hoy);
+    const montoVencido = vencidos.reduce((s, p) => s + p.monto, 0);
+
+    let mensajeEstado = '';
+    let mensajeClase = 'mensaje-ok';
+    if (nuevoSaldo === 0) {
+        mensajeEstado = `🎉 ¡Cuenta liquidada! Gracias por su compromiso, ${esc(cliente.nombre)}. ¡Hasta pronto!`;
+        mensajeClase = 'mensaje-ok';
+    } else if (vencidos.length > 0) {
+        mensajeEstado = `Le recordamos amablemente que tiene ${vencidos.length} pago(s) con fecha vencida por un total de ${dinero(montoVencido)}. Le agradecemos su pronta atención. 🙏`;
+        mensajeClase = 'mensaje-atraso';
+    } else {
+        mensajeEstado = `¡Gracias por su pago puntual! Está al corriente con sus pagos. ✅`;
+        mensajeClase = 'mensaje-ok';
+    }
+
+    const articulosHTML = articulos.length > 0 ? `
+        <div class="seccion-titulo">ARTÍCULOS DE LA VENTA</div>
+        <table>
+            <thead><tr><th>Producto</th><th style="text-align:right;">Cant.</th><th style="text-align:right;">Precio</th></tr></thead>
+            <tbody>
+                ${articulos.map(a => `
+                <tr>
+                    <td>${esc(a.nombre || '-')}</td>
+                    <td style="text-align:right;">${esc(String(a.cantidad || 1))}</td>
+                    <td style="text-align:right;">${dinero((a.precioContado || 0) * (a.cantidad || 1))}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>` : '';
+
+    const pagaresCubiertosHTML = pagaresCubiertos.length > 0 ? `
+        <div class="seccion-titulo">PAGARÉS CUBIERTOS</div>
+        <table>
+            <thead><tr><th>#</th><th>Vencía</th><th style="text-align:right;">Monto</th><th>Est.</th></tr></thead>
+            <tbody>
+                ${pagaresCubiertos.map((p, i) => `
+                <tr class="pagare-cubierto">
+                    <td>${i + 1}</td>
+                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX'))}</td>
+                    <td style="text-align:right;">${dinero(p.monto)}</td>
+                    <td>✅ PAG.</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>` : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo de Abono - ${esc(folio)}</title>
+    <style>
+        @page { size: 80mm auto; margin: 3mm; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 11px; width: 80mm; margin: 0 auto; padding: 0; color: #000; background: #fff; }
+        .ticket { width: 76mm; margin: 0 auto; padding: 3mm; }
+        .centrado { text-align: center; }
+        .derecha { text-align: right; }
+        .negrita { font-weight: bold; }
+        .grande { font-size: 15px; }
+        hr.separador { border: none; border-top: 1px dashed #000; margin: 5px 0; }
+        .encabezado { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .logo-ticket { width: 55px; height: 55px; object-fit: contain; }
+        .info-empresa { flex: 1; }
+        .seccion-titulo { background: #000; color: #fff; padding: 3px 6px; font-weight: bold; font-size: 10px; margin: 5px 0 3px 0; }
+        .fila { display: flex; justify-content: space-between; margin: 2px 0; font-size: 10px; }
+        .monto-abono-box { border: 2px solid #000; text-align: center; padding: 8px; margin: 8px 0; }
+        .monto-abono-label { font-size: 10px; }
+        .monto-abono-valor { font-size: 22px; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        td, th { padding: 2px 4px; text-align: left; }
+        th { border-bottom: 1px solid #000; font-weight: bold; }
+        .pagare-cubierto td { }
+        .mensaje-ok { border: 1px dashed #000; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
+        .mensaje-atraso { background: #000; color: #fff; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
+        .firma-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .linea-firma { border-top: 1px solid #000; padding-top: 4px; font-size: 9px; text-align: center; }
+        .pie { text-align: center; font-size: 9px; color: #555; margin-top: 10px; }
+        .no-print { display: flex; gap: 8px; padding: 10px; background: #f0f0f0; margin-bottom: 10px; }
+        .no-print button { flex: 1; padding: 10px; font-weight: bold; border: none; cursor: pointer; border-radius: 4px; font-size: 13px; }
+        @media print {
+            .no-print { display: none !important; }
+            body { margin: 0; width: 80mm; }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
+</head>
+<body>
+    <div class="no-print">
+        <button onclick="window.print()" style="background:#2c3e50; color:white;">🖨️ Imprimir / Guardar PDF</button>
+        <button onclick="exportarImagen()" style="background:#27ae60; color:white;">📷 Guardar como Imagen</button>
+    </div>
+
+    <div class="ticket" id="ticket-abono">
+        <div class="encabezado">
+            <img src="img/logo.png" class="logo-ticket" onerror="this.outerHTML='<span style=\\'font-size:36px;\\'>🏛️</span>'">
+            <div class="info-empresa">
+                <div class="negrita grande">MUEBLERÍA MI PUEBLITO</div>
+                <div style="font-size:9px;">Santiago Cuaula, Tlaxcala</div>
+                <div style="font-size:9px;">Tel. 228 123 4567</div>
+            </div>
+        </div>
+
+        <hr class="separador">
+
+        <div class="centrado negrita" style="font-size:14px; letter-spacing:1px;">RECIBO DE ABONO</div>
+        <div class="fila">
+            <span>Folio: <strong>${esc(folio)}</strong></span>
+            <span>Fecha: <strong>${esc(fecha)}</strong></span>
+        </div>
+
+        <hr class="separador">
+
+        <div class="seccion-titulo">DATOS DEL CLIENTE</div>
+        <div style="font-size:10px;">
+            <div><span class="negrita">Nombre:</span> ${esc(cliente.nombre)}</div>
+            ${cliente.telefono ? `<div><span class="negrita">Tel:</span> ${esc(cliente.telefono)}</div>` : ''}
+            ${cliente.direccion ? `<div><span class="negrita">Dir:</span> ${esc(cliente.direccion)}</div>` : ''}
+        </div>
+
+        ${articulosHTML}
+
+        <div class="monto-abono-box">
+            <div class="monto-abono-label">ABONO RECIBIDO</div>
+            <div class="monto-abono-valor">${dinero(montoAbono)}</div>
+            <div class="monto-abono-label">Vía: ${esc(metodoCobro)}</div>
+        </div>
+
+        <div class="seccion-titulo">RESUMEN DE CUENTA</div>
+        <div class="fila"><span>Total de la venta:</span><span>${dinero(totalVenta)}</span></div>
+        ${enganche > 0 ? `<div class="fila"><span>Enganche inicial:</span><span>${dinero(enganche)}</span></div>` : ''}
+        <div class="fila negrita"><span>Este abono:</span><span>${dinero(montoAbono)}</span></div>
+        <div class="fila negrita" style="border-top:1px solid #000; padding-top:3px; margin-top:3px;">
+            <span>SALDO PENDIENTE:</span>
+            <span style="font-size:13px;">${dinero(nuevoSaldo)}</span>
+        </div>
+
+        ${pagaresCubiertosHTML}
+
+        <div class="${mensajeClase}">${mensajeEstado}</div>
+
+        <hr class="separador">
+
+        <div class="firma-section">
+            <div>
+                <div style="height:35px;"></div>
+                <div class="linea-firma">FIRMA DEL CLIENTE</div>
+            </div>
+            <div>
+                <div style="height:35px;"></div>
+                <div class="linea-firma">VENDEDOR / EMPRESA</div>
+            </div>
+        </div>
+
+        <hr class="separador">
+        <div class="pie">
+            <div>Mueblería Mi Pueblito • Roberto Escobedo Vega</div>
+            <div>Este recibo es válido como comprobante de pago.</div>
+        </div>
+    </div>
+
+    <script>
+    function exportarImagen() {
+        const ticket = document.getElementById('ticket-abono');
+        if (typeof html2canvas === 'undefined') { alert('Cargando...'); return; }
+        html2canvas(ticket, { scale: 3, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'recibo-abono-' + ${JSON.stringify(esc(folio))} + '.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }).catch(err => { console.error(err); alert('Error al generar imagen'); });
+    }
+    <\/script>
+</body>
+</html>`;
+
+    const vent = window.open('', '_blank');
+    if (!vent) {
+        alert("⚠️ Habilita las ventanas emergentes para ver el recibo de abono.");
+        return;
+    }
+    vent.document.write(html);
+    vent.document.close();
+    vent.focus();
+    setTimeout(() => { vent.print(); }, 800);
+}
+
 // expose helpers for inline HTML event handlers
 window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
 window._getCuentaSeleccionada = _getCuentaSeleccionada;
 window._buildCuentaOrigen = _buildCuentaOrigen;
 window.generarTicketAbono = generarTicketAbono;
+window.generarTicketAbonoTermico = generarTicketAbonoTermico;
