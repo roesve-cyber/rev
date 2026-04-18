@@ -39,6 +39,7 @@ function navA(vistaId) {
         if (idLimpio === 'reporte-ventas') renderReporteVentas();
         if (idLimpio === 'reporte-compras') renderReporteCompras();
         if (idLimpio === 'reporte-flujo') renderReporteFlujo();
+        if (idLimpio === 'entregas') renderEntregas();
     }
 
     const sb = document.getElementById("sidebar");

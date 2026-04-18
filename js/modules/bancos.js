@@ -140,53 +140,41 @@ function renderDashboardMSI(bancoSeleccionado = 'Todos') {
     const deudas = StorageService.get("cuentasMSI", []);
 
     let totalesPorBanco = {};
+    let originalPorBanco = {};
     let deudaTotalGlobal = 0;
-    tarjetasConfig.forEach(t => { totalesPorBanco[t.banco] = 0; });
+    let deudaOriginalTotal = 0;
+    tarjetasConfig.forEach(t => { totalesPorBanco[t.banco] = 0; originalPorBanco[t.banco] = 0; });
     deudas.forEach(deuda => {
         if (!totalesPorBanco[deuda.banco]) totalesPorBanco[deuda.banco] = 0;
+        if (!originalPorBanco[deuda.banco]) originalPorBanco[deuda.banco] = 0;
         const totalVal  = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
         const cuotaVal  = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
         const pagos     = parseInt(deuda.pagosRealizados || 0);
         const restante  = totalVal - (pagos * cuotaVal);
-        totalesPorBanco[deuda.banco] += restante;
-        deudaTotalGlobal += restante;
+        totalesPorBanco[deuda.banco] += Math.max(0, restante);
+        originalPorBanco[deuda.banco] += totalVal;
+        deudaTotalGlobal += Math.max(0, restante);
+        deudaOriginalTotal += totalVal;
     });
 
-    let htmlBancos = `
-        <div class="tarjeta-banco-msi ${bancoSeleccionado === 'Todos' ? 'activo' : ''}" onclick="renderDashboardMSI('Todos')">
-            <span>🌍 Todos</span>
-            <span style="font-weight:bold; color:#e74c3c;">${dinero(deudaTotalGlobal)}</span>
-        </div>`;
-    Object.keys(totalesPorBanco).forEach(banco => {
-        htmlBancos += `
-            <div class="tarjeta-banco-msi ${bancoSeleccionado === banco ? 'activo' : ''}" onclick="renderDashboardMSI('${banco}')">
-                <span>🏦 ${banco}</span>
-                <span style="font-weight:bold;">${dinero(totalesPorBanco[banco])}</span>
-            </div>`;
-    });
-    contenedorBancos.innerHTML = htmlBancos;
-
-    if (tituloMeses) tituloMeses.innerText = `Proyección de Pagos (${bancoSeleccionado})`;
-
-    let cronograma = {};
+    // ── KPIs ──────────────────────────────────────────────────────────────
     const hoy = new Date();
     let mesAct  = hoy.getMonth() + 1;
     let anioAct = hoy.getFullYear();
 
+    let cronograma = {};
     for (let i = 0; i < 12; i++) {
         let m = mesAct + i;
         let a = anioAct;
         while (m > 12) { m -= 12; a++; }
         cronograma[`${a}-${m.toString().padStart(2, '0')}`] = { total: 0, detalles: [] };
     }
-
     deudas.forEach(deuda => {
         if (bancoSeleccionado !== 'Todos' && deuda.banco !== bancoSeleccionado) return;
         const totalVal = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
         const cuotaVal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
         const pagos    = parseInt(deuda.pagosRealizados || 0);
         const pendientes = cuotaVal > 0 ? Math.round(totalVal / cuotaVal) - pagos : 0;
-
         for (let i = 0; i < pendientes; i++) {
             let m = mesAct + i;
             let a = anioAct;
@@ -200,11 +188,91 @@ function renderDashboardMSI(bancoSeleccionado = 'Todos') {
     });
 
     const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+    const mesesConPagos = Object.values(cronograma).filter(d => d.total > 0);
+    const proximoPagoKey = Object.keys(cronograma).sort().find(k => cronograma[k].total > 0);
+    const [proximoAnio, proximoMes] = proximoPagoKey ? proximoPagoKey.split('-') : ['-', '-'];
+    const proximoPagoLabel = proximoPagoKey
+        ? `${mesesNombre[parseInt(proximoMes)-1]} ${proximoAnio}`
+        : 'Sin pagos';
+    const bancosActivos = Object.keys(totalesPorBanco).filter(b => (totalesPorBanco[b] || 0) > 0).length;
+    const promedioMensual = mesesConPagos.length > 0
+        ? mesesConPagos.reduce((s, d) => s + d.total, 0) / mesesConPagos.length
+        : 0;
+
+    const kpisHTML = `
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:15px; margin-bottom:25px;">
+            <div style="background:#fee2e2; padding:18px; border-radius:10px; text-align:center;">
+                <div style="font-size:22px; margin-bottom:4px;">💳</div>
+                <small style="color:#7f1d1d; font-weight:bold; font-size:11px;">TOTAL DEUDA MSI</small>
+                <div style="font-size:20px; font-weight:bold; color:#dc2626; margin-top:4px;">${dinero(deudaTotalGlobal)}</div>
+            </div>
+            <div style="background:#dbeafe; padding:18px; border-radius:10px; text-align:center;">
+                <div style="font-size:22px; margin-bottom:4px;">📅</div>
+                <small style="color:#1e3a8a; font-weight:bold; font-size:11px;">PRÓXIMO PAGO</small>
+                <div style="font-size:18px; font-weight:bold; color:#1d4ed8; margin-top:4px;">${proximoPagoLabel}</div>
+            </div>
+            <div style="background:#d1fae5; padding:18px; border-radius:10px; text-align:center;">
+                <div style="font-size:22px; margin-bottom:4px;">🏦</div>
+                <small style="color:#065f46; font-weight:bold; font-size:11px;">BANCOS ACTIVOS</small>
+                <div style="font-size:26px; font-weight:bold; color:#059669; margin-top:4px;">${bancosActivos}</div>
+            </div>
+            <div style="background:#fef3c7; padding:18px; border-radius:10px; text-align:center;">
+                <div style="font-size:22px; margin-bottom:4px;">💰</div>
+                <small style="color:#92400e; font-weight:bold; font-size:11px;">PROMEDIO MENSUAL</small>
+                <div style="font-size:20px; font-weight:bold; color:#d97706; margin-top:4px;">${dinero(promedioMensual)}</div>
+            </div>
+        </div>`;
+
+    const kpisContainer = document.getElementById('flujo-msi');
+    const existingKpis = document.getElementById('msi-kpis');
+    if (existingKpis) existingKpis.remove();
+    const kpisEl = document.createElement('div');
+    kpisEl.id = 'msi-kpis';
+    kpisEl.innerHTML = kpisHTML;
+    const gridMsi = kpisContainer?.querySelector('.grid-msi');
+    if (gridMsi) gridMsi.before(kpisEl);
+
+    // ── Tarjetas de bancos con barra de progreso ───────────────────────────
+    let htmlBancos = `
+        <div class="tarjeta-banco-msi ${bancoSeleccionado === 'Todos' ? 'activo' : ''}" onclick="renderDashboardMSI('Todos')" style="box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+            <span>🌍 Todos</span>
+            <span style="font-weight:bold; color:#e74c3c;">${dinero(deudaTotalGlobal)}</span>
+        </div>`;
+    Object.keys(totalesPorBanco).forEach(banco => {
+        const restante = totalesPorBanco[banco] || 0;
+        const original = originalPorBanco[banco] || 0;
+        const progreso = original > 0 ? Math.min(100, ((original - restante) / original) * 100).toFixed(0) : 0;
+        htmlBancos += `
+            <div class="tarjeta-banco-msi ${bancoSeleccionado === banco ? 'activo' : ''}" onclick="renderDashboardMSI('${banco}')" style="box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+                <span>🏦 ${banco}</span>
+                <span style="font-weight:bold;">${dinero(restante)}</span>
+                <div style="background:#e2e8f0; border-radius:4px; height:5px; margin-top:6px; width:100%;">
+                    <div style="background:#3498db; height:100%; border-radius:4px; width:${progreso}%;"></div>
+                </div>
+                <small style="color:#718096; font-size:11px;">${progreso}% pagado</small>
+            </div>`;
+    });
+    contenedorBancos.innerHTML = htmlBancos;
+
+    if (tituloMeses) tituloMeses.innerText = `Proyección de Pagos (${bancoSeleccionado})`;
+
+    const claveActual = `${anioAct}-${mesAct.toString().padStart(2, '0')}`;
+    let mesNext = mesAct + 1;
+    let anioNext = anioAct;
+    if (mesNext > 12) { mesNext = 1; anioNext++; }
+    const claveSiguiente = `${anioNext}-${mesNext.toString().padStart(2, '0')}`;
+
     let htmlMeses = '';
     Object.keys(cronograma).sort().forEach(clave => {
         const [anio, mes] = clave.split('-');
         const data = cronograma[clave];
         if (data.total > 0) {
+            let bgColor = 'white';
+            let borderColor = '#e2e8f0';
+            if (clave === claveActual) { bgColor = '#fee2e2'; borderColor = '#e74c3c'; }
+            else if (clave === claveSiguiente) { bgColor = '#fef3c7'; borderColor = '#f59e0b'; }
+
             const detallesHtml = data.detalles.map(det => `
                 <div class="fila-conciliacion" onclick="this.classList.toggle('conciliado')">
                     <input type="checkbox" style="cursor:pointer">
@@ -212,7 +280,7 @@ function renderDashboardMSI(bancoSeleccionado = 'Todos') {
                 </div>`).join('');
 
             htmlMeses += `
-                <div class="mes-msi-card">
+                <div class="mes-msi-card" style="background:${bgColor}; border:1px solid ${borderColor}; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
                     <div style="width: 100%;">
                         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #edf2f7; padding-bottom:8px; margin-bottom:8px;">
                             <strong>📅 ${mesesNombre[parseInt(mes)-1]} ${anio}</strong>

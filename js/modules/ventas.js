@@ -1407,3 +1407,105 @@ function guardarTicketEnRegistro(datosVenta, folio) {
         console.error("❌ Error guardando ticket en registro");
     }
 }
+
+// ===== ENTREGAS =====
+function renderEntregas() {
+    const contenedor = document.getElementById("panel-entregas-pendientes");
+    if (!contenedor) return;
+
+    salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
+    const pendientes = salidasPendientesVenta.filter(s => s.estatus === "Pendiente");
+
+    if (pendientes.length === 0) {
+        contenedor.innerHTML = "<p style='color:#718096; padding:20px; background:white; border-radius:8px;'>✅ No hay entregas pendientes.</p>";
+        return;
+    }
+
+    let html = `
+        <table class="tabla-admin">
+            <thead><tr>
+                <th>Folio</th>
+                <th>Cliente</th>
+                <th>Fecha</th>
+                <th>Método Pago</th>
+                <th>Productos</th>
+                <th style="text-align:center;">Acciones</th>
+            </tr></thead>
+            <tbody>`;
+
+    pendientes.forEach(s => {
+        const resumen = (s.items || []).map(item => `${item.nombre} ×${item.cantidad || 1}`).join(', ');
+        html += `<tr>
+            <td><strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="abrirDetalleEntrega(${s.id})">${s.folioVenta}</strong></td>
+            <td>${s.clienteNombre || '—'}</td>
+            <td>${s.fecha || '—'}</td>
+            <td><small>${s.metodoPago || '—'}</small></td>
+            <td style="font-size:13px;">${resumen || '—'}</td>
+            <td style="text-align:center;">
+                <button onclick="abrirDetalleEntrega(${s.id})" style="background:#3498db; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer; margin-right:4px;">🔍 Detalle</button>
+            </td>
+        </tr>`;
+    });
+
+    contenedor.innerHTML = html + "</tbody></table>";
+}
+
+function abrirDetalleEntrega(idSalida) {
+    salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
+    const s = salidasPendientesVenta.find(x => x.id === idSalida);
+    if (!s) return;
+
+    const clienteObj = clientes.find(c => c.id === s.clienteId || c.id === Number(s.clienteId));
+    const direccion = clienteObj ? (clienteObj.direccion || '—') : '—';
+    const telefono = clienteObj ? (clienteObj.telefono || '—') : '—';
+
+    const itemsHtml = (s.items || []).map(i => `
+        <tr>
+            <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${i.nombre || '—'}</td>
+            <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${i.cantidad || 1}</td>
+            <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${dinero(i.precio || 0)}</td>
+        </tr>`).join('');
+
+    const totalVenta = (s.items || []).reduce((acc, i) => acc + ((i.precio || 0) * (i.cantidad || 1)), 0);
+
+    const modalHTML = `
+        <div data-modal="detalle-entrega" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:580px; max-height:90vh; overflow-y:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h2 style="margin:0;">🚚 Detalle de Entrega</h2>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
+                </div>
+                <div style="display:grid; gap:10px; margin-bottom:20px; background:#f8fafc; padding:15px; border-radius:8px;">
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Folio:</span><strong>${s.folioVenta}</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Cliente:</span><strong>${s.clienteNombre || '—'}</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Dirección:</span><span>${direccion}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Teléfono:</span><span>${telefono}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Fecha:</span><span>${s.fecha || '—'}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Método de Pago:</span><span>${s.metodoPago || '—'}</span></div>
+                </div>
+                <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:15px;">
+                    <thead><tr style="background:#f3f4f6;">
+                        <th style="padding:6px 8px; text-align:left;">Producto</th>
+                        <th style="padding:6px 8px; text-align:right;">Cant.</th>
+                        <th style="padding:6px 8px; text-align:right;">Precio</th>
+                    </tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+                <div style="text-align:right; font-size:16px; font-weight:bold; color:#2c3e50; margin-bottom:20px;">
+                    Total: ${dinero(totalVenta)}
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="aplicarSalidaPendienteVentas(${s.id}); document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();"
+                            style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                        ✅ Aplicar Entrega
+                    </button>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();"
+                            style="flex:1; padding:12px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">
+                        ✕ Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
