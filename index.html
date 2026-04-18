@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS Mueblería - Mi Pueblito</title>
+    <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<div class="header">
+    <div style="display:flex; align-items:center;">
+        <button class="menu-toggle" onclick="toggleMenu()">☰</button>
+        <h1>MUEBLERÍA MI PUEBLITO</h1>
+    </div>
+    <div class="carrito-header" onclick="navA('carrito')">
+        <span class="icono-carrito">🛒</span>
+        <span id="contadorCarrito" class="contador-badge" style="display:none;">0</span>
+    </div>
+</div>
+
+<!-- ===== SIDEBAR PRINCIPAL ===== -->
+<div id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+        <div class="logo-container-menu">
+            <img src="img/logo.png" class="logo-menu" alt="Logo" onerror="this.style.display='none'">
+            <span class="brand-name" style="color:white; font-weight:bold;">Mi Pueblito</span>
+        </div>
+        <button class="menu-toggle" onclick="toggleMenu()" style="margin:0;">✕</button>
+    </div>
+
+        <nav class="sidebar-nav">
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-prod')">📦 PRODUCTOS <span>▾</span></button>
+            <div id="sub-prod" class="submenu oculto-submenu">
+                <button onclick="navA('inventario')">📋 Inventario</button>
+                <button onclick="navA('configcategorias')">🏷️ Categorías</button>
+                <button onclick="abrirImportadorProductos()">📥 Importar Batch</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-compras')">🛒 COMPRAS <span>▾</span></button>
+            <div id="sub-compras" class="submenu oculto-submenu">
+                <button onclick="navA('compras')">➕ Nueva Compra</button>
+                <button onclick="navA('proveedores')">👥 Mis Proveedores</button>
+                <button onclick="navA('recepcion')">🚚 Recepción</button>
+                <button onclick="navA('cuentasporpagar')">💳 Cuentas por Pagar</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas')">💳 VENTAS <span>▾</span></button>
+            <div id="sub-ventas" class="submenu oculto-submenu">
+                <button onclick="navA('tienda')">🖼️ Catálogo</button>
+                <button onclick="navA('carrito')">🛒 Carrito</button>
+                <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
+                <button onclick="navA('seleccionarcliente')">✅ Finalizar Venta</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span>▾</span></button>
+            <div id="sub-cobranza" class="submenu oculto-submenu">
+                <button onclick="navA('cuentasxcobrar')">💰 Cuentas por Cobrar</button>
+                <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
+                <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
+                <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-bancos')">🏦 BANCOS <span>▾</span></button>
+            <div id="sub-bancos" class="submenu oculto-submenu">
+                <button onclick="navA('flujo-msi')">💳 MSI (Flujo)</button>
+                <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-logistica')">📦 LOGÍSTICA <span>▾</span></button>
+            <div id="sub-logistica" class="submenu oculto-submenu">
+                <button onclick="navA('logistica')">📋 Salidas / Requisiciones</button>
+            </div>
+        </div>
+
+        <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin:15px 0;">
+        <div style="padding: 0 20px;">
+            <small style="color: rgba(255,255,255,0.5); display: block; margin-bottom: 10px;">SISTEMA</small>
+            <a href="#" onclick="navA('configuracion')" style="color: white; text-decoration: none; font-size: 14px; display: block;">⚙️ Configuración</a>
+        </div>
+
+    </nav>
+</div>
+
+<!-- ===== OVERLAY ===== -->
+<div id="overlay" class="overlay" onclick="toggleMenu()"></div>
+
+<!-- ===== PANEL LATERAL DE CLIENTES ===== -->
+<div id="panelClientes" class="panel-clientes-sidebar">
+    <div class="panel-clientes-header">
+        <h3>👥 Clientes</h3>
+        <button class="btn-cerrar-panel" onclick="togglePanelClientes()">✕</button>
+    </div>
+    <div id="contenidoPanelClientes" style="flex:1; overflow-y:auto; padding:15px;"></div>
+</div>
+
+<!-- ===== CONTENIDO PRINCIPAL ===== -->
+<main id="app-container">
+    <!-- INICIO -->
+    <div id="inicio" class="vista">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; text-align: center;">
+            <img src="img/logo.png" style="width: 200px; opacity: 0.1; filter: grayscale(100%);" onerror="this.style.display='none'">
+            <h2 style="color: #bdc3c7; font-weight: 300; margin-top: 20px;">ADMINISTRACIÓN</h2>
+        </div>
+    </div>
+
+    <!-- VISOR MAESTRO -->
+    <div id="productos-visor" class="vista oculto">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>🔍 Visor Maestro de Producto</h2>
+            <button onclick="navA('inventario')" style="padding:8px 16px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">← Volver</button>
+        </div>
+        <div id="detalle-producto-maestro">
+            <p style="color:gray; text-align:center; padding:40px;">Selecciona un producto desde el inventario.</p>
+        </div>
+    </div>
+
+    <!-- CUENTAS POR COBRAR (MEJORADA) -->
+    <div id="cuentasxcobrar" class="vista oculto">
+        <div class="vista-header">
+            <h2>💳 Cuentas por Cobrar (Pagarés y Seguimiento)</h2>
+            <p>Control de ventas a crédito, pagarés, atrasos y abonos.</p>
+        </div>
+        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+            <input type="text" id="filtroClienteCobranza" placeholder="Buscar cliente..." 
+                   onkeyup="filtrarCuentasCobranza()" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <select id="filtroEstadoCobranza" onchange="filtrarCuentasCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
+                <option value="">-- Todos los estados --</option>
+                <option value="Al corriente">✅ Al corriente</option>
+                <option value="Atrasado">⚠️ Atrasado</option>
+                <option value="Crítico">🔴 Crítico</option>
+                <option value="Saldado">✔️ Saldado</option>
+            </select>
+            <button onclick="renderCuentasXCobrar()" style="padding:10px 20px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
+        </div>
+        <div id="tablaCuentasXCobrar"></div>
+    </div>
+
+    <!-- LISTA DE PRECIOS -->
+    <div id="listaprecios" class="vista oculto">
+        <div id="listaPrecios" style="background: white; min-height: 100vh;">
+        <!-- Se llenará con JavaScript -->
+        </div>
+    </div>
+
+
+    <!-- COBRANZA ESPERADA -->
+    <div id="cobranzaesperada" class="vista oculto">
+        <div class="vista-header">
+            <h2>📈 Cobranza Esperada - Proyección de Pagos</h2>
+            <p>Escalera mensual de pagarés vencidos y proyectados.</p>
+        </div>
+        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px;">
+            <button onclick="renderCobranzaEsperada()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
+            <button onclick="exportarCobranzaEsperada()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">📥 Exportar CSV</button>
+        </div>
+        <div id="escaleraCobranza"></div>
+    </div>
+
+    <!-- FLUJO DE CAJA -->
+    <div id="flujocaja" class="vista oculto">
+        <div class="vista-header">
+            <h2>💰 Flujo de Caja - Integración Completa</h2>
+            <p>Ingresos (ventas y abonos), egresos (compras, proveedores, MSI) y saldo proyectado.</p>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:20px;">
+            <div style="background:#d1fae5; padding:20px; border-radius:10px; text-align:center;">
+                <small style="color:#065f46;">INGRESOS CONTADO</small><br>
+                <strong style="font-size:24px; color:#059669;" id="totalIngresoContado">$0.00</strong>
+            </div>
+            <div style="background:#bfdbfe; padding:20px; border-radius:10px; text-align:center;">
+                <small style="color:#1e3a8a;">ABONOS ESPERADOS</small><br>
+                <strong style="font-size:24px; color:#1d4ed8;" id="totalAbonos">$0.00</strong>
+            </div>
+            <div style="background:#fee2e2; padding:20px; border-radius:10px; text-align:center;">
+                <small style="color:#7f1d1d;">EGRESOS A PROVEEDORES</small><br>
+                <strong style="font-size:24px; color:#dc2626;" id="totalEgresosProveedores">$0.00</strong>
+            </div>
+            <div style="background:#fef3c7; padding:20px; border-radius:10px; text-align:center;">
+                <small style="color:#92400e;">DEUDA MSI PENDIENTE</small><br>
+                <strong style="font-size:24px; color:#d97706;" id="totalDeudaMSI">$0.00</strong>
+            </div>
+        </div>
+        <div id="tablasFlujoCaja"></div>
+    </div>
+
+    <!-- REPORTES DINÁMICOS -->
+    <div id="reportes" class="vista oculto">
+        <div class="vista-header">
+            <h2>📊 Reportes Dinámicos</h2>
+            <p>Análisis de ventas, compras, cobranzas y más.</p>
+        </div>
+        <div class="reportes-filtros">
+            <select id="tipoReporte" onchange="actualizarReporte()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
+                <option value="ventas">📈 Ventas</option>
+                <option value="compras">🛒 Compras</option>
+                <option value="cobrar">💳 Cuentas por Cobrar</option>
+                <option value="pagar">💰 Cuentas por Pagar</option>
+                <option value="inventario">📦 Inventario</option>
+                <option value="clientes">👥 Clientes</option>
+            </select>
+            <input type="date" id="fechaInicio" onchange="actualizarReporte()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <input type="date" id="fechaFin" onchange="actualizarReporte()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <button onclick="exportarReporte()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">📥 Exportar</button>
+        </div>
+        <div id="contenidoReporte"></div>
+    </div>
+
+    <!-- IMPORTAR PRODUCTOS -->
+    <div id="importarproductos" class="vista oculto">
+        <div class="vista-header">
+            <h2>📦 Importar Productos (Batch)</h2>
+            <p>Carga masiva de productos con propiedades extendidas.</p>
+        </div>
+        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <div style="margin-bottom:20px;">
+                <h3>Formato CSV Requerido:</h3>
+                <code style="background:#f5f5f5; padding:10px; border-radius:5px; display:block; margin:10px 0; overflow-x:auto; font-size:11px;">
+nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
+                </code>
+            </div>
+            <div style="margin-bottom:20px;">
+                <label for="csvProductos" style="font-weight:bold; display:block; margin-bottom:10px;">Selecciona archivo CSV:</label>
+                <input type="file" id="csvProductos" accept=".csv" style="padding:10px; border:2px dashed #3498db; border-radius:5px; width:100%; cursor:pointer;">
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button onclick="previewProductosCSV()" style="flex:1; padding:12px; background:#3498db; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">👁️ Vista Previa</button>
+                <button onclick="importarProductosCSV()" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">✅ Importar</button>
+            </div>
+            <div id="previewProductosCSV" style="margin-top:20px;"></div>
+        </div>
+    </div>
+
+    <!-- CATEGORÍAS -->
+    <div id="configcategorias" class="vista oculto">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 0 10px;">
+            <h2>🏷️ Gestión de Categorías y Márgenes</h2>
+            <button onclick="nuevaCategoria()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">+ Nueva</button>
+        </div>
+        <div id="listaCategoriasCards" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; padding: 10px;"></div>
+    </div>
+
+    <!-- COMPRAS -->
+    <div id="compras" class="vista oculto">
+        <h2>🚚 Registro de Compras</h2>
+        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div><label>Producto:</label><select id="compraProducto" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
+                <div><label>Cantidad:</label><input type="number" id="compraCantidad" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+                <div><label>Costo Unitario:</label><input type="number" id="compraCosto" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+                <div><label>Proveedor:</label><select id="compraProveedor" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
+                <div><label>Método de Pago:</label><select id="compraMetodoPago" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;" onchange="gestionarCamposPago()"><option value="contado">Contado</option><option value="credito_proveedor">Crédito</option><option value="tarjeta_msi">MSI</option></select></div>
+                <div id="divSeleccionBanco" style="display:none;"><label>Banco:</label><select id="compraBancoSeleccionado" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
+                <div id="divMeses" style="display:none;"><label>Meses:</label><input type="number" id="compraMeses" value="12" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+                <div style="grid-column: span 2;"><label><input type="checkbox" id="compraIngresoInmediato" checked> Ingresa producto ahora</label></div>
+                <button onclick="registrarCompra()" style="grid-column: span 2; padding:15px; background:#2c3e50; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">💾 Registrar Compra</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TIENDA / CATÁLOGO -->
+    <div id="tienda" class="vista oculto">
+        <h2 style="margin-bottom:20px;">🖼️ Catálogo de Productos</h2>
+        <div id="gridProductos"></div>
+    </div>
+
+    <!-- RECEPCIÓN -->
+    <div id="recepcion" class="vista oculto">
+        <h2>🚚 Recepciones Pendientes</h2>
+        <div id="listaRecepcionesPendientes" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
+    </div>
+
+    <!-- PROVEEDORES -->
+    <div id="proveedores" class="vista oculto">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>🏢 Base de Proveedores</h2>
+            <button onclick="renderProveedores()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
+        </div>
+        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+            <input type="text" id="provNombre" placeholder="Nombre de la Empresa" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <input type="text" id="provContacto" placeholder="Contacto" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <button onclick="guardarProveedor()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Añadir</button>
+        </div>
+        <div id="tablaProveedores"></div>
+    </div>
+
+    <!-- CLIENTES (SIMPLIFICADO) -->
+    <div id="clientes" class="vista oculto">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>👥 Base de Datos de Clientes</h2>
+            <button onclick="renderClientes()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Refrescar</button>
+        </div>
+        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+            <input type="text" id="clienteNombre" placeholder="Nombre Completo" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <input type="text" id="clienteDireccion" placeholder="Dirección" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <input type="text" id="clienteTelefono" placeholder="Teléfono" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <input type="text" id="clienteReferencia" placeholder="Referencia" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <button onclick="guardarCliente()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Añadir</button>
+        </div>
+        <div id="listaClientes" style="margin-top: 10px;"></div>
+    </div>
+
+    <!-- CUENTAS POR PAGAR -->
+    <div id="cuentasporpagar" class="vista oculto">
+        <h2>💳 Cuentas por Pagar (Deudas a Proveedores)</h2>
+        <div id="listaCuentasPorPagar" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
+    </div>
+
+    <!-- INVENTARIO -->
+    <div id="inventario" class="vista oculto">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>📦 Control de Inventario</h2>
+            <div style="display:flex; gap:8px;">
+                <button onclick="abrirProductoForm()" style="background:#27ae60; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Nuevo</button>
+                <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄</button>
+            </div>
+        </div>
+        <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+            <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Categoría:</label><select id="filtroCategoria" onchange="actualizarSubcategoriasFiltro('filtroCategoria', 'filtroSubcategoria')" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
+            <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Subcategoría:</label><select id="filtroSubcategoria" onchange="aplicarFiltros()" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
+            <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar..." style="padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+            <button onclick="limpiarFiltros()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Limpiar</button>
+        </div>
+        <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px;"></div>
+    </div>
+
+    <!-- BANCOS -->
+    <div id="bancos" class="vista oculto">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+            <h2>⚙️ Gestión de Tarjetas</h2>
+            <button onclick="abrirModalBanco()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Agregar Banco</button>
+        </div>
+        <div id="tablaBancosConfig"></div>
+    </div>
+
+    <!-- FLUJO MSI -->
+    <div id="flujo-msi" class="vista oculto">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+            <h2 style="color:#2c3e50; margin:0;">📊 Flujo de Efectivo - MSI</h2>
+            <button onclick="renderDashboardMSI('Todos')" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Mostrar Todos</button>
+        </div>
+        <div class="grid-msi">
+            <div class="panel-bancos-msi">
+                <h3 style="margin-top:0; color:#4a5568; padding:15px; border-bottom:1px solid #eee;">Deuda por Banco</h3>
+                <div id="listaBancosMSI" style="padding:15px;"></div>
+            </div>
+            <div class="panel-meses-msi">
+                <h3 id="tituloMesesMSI" style="margin-top:0; color:#4a5568; padding:15px; border-bottom:1px solid #eee;">Proyección de Pagos</h3>
+                <div id="listaMesesMSI" style="padding:15px;"></div>
+            </div>
+        </div>
+        <div style="margin-top:20px;">
+            <h3 style="color:#4a5568;">📋 Seguimiento de Compras MSI</h3>
+            <div id="listaCuentasMSI"></div>
+        </div>
+    </div>
+
+    <!-- SELECCIONAR CLIENTE -->
+    <div id="seleccionarcliente" class="vista oculto">
+        <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:20px;">
+            <div id="resumenVentaCliente"></div>
+            <div style="background:white; padding:20px; border-radius:10px;">
+                <h3>👤 Seleccionar Cliente</h3>
+                <input type="text" id="buscarCliente" placeholder="Buscar cliente..."
+                    oninput="filtrarClientes()"
+                    style="width:100%; padding:10px; margin-bottom:10px;">
+                <select id="selectCliente" size="5" style="width:100%;"></select>
+                <button onclick="abrirModalCliente()" style="margin-top:10px; width:100%;">
+                    ➕ Nuevo Cliente
+                </button>
+                <div id="infoCliente" style="margin-top:15px;"></div>
+                <button onclick="confirmarVentaFinal()"
+                    style="margin-top:15px; width:100%; background:#27ae60; color:white; padding:12px;">
+                    ✅ Confirmar Venta
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONFIGURACIÓN -->
+    <div id="configuracion" class="vista oculto">
+        <h2>⚙️ Configuración del Sistema</h2>
+        <p style="color:gray;">Próximamente más opciones de configuración.</p>
+    </div>
+
+    <!-- CARRITO -->
+    <div id="carrito" class="vista oculto"></div>
+
+    <!-- LOGÍSTICA -->
+    <div id="logistica" class="vista oculto">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+            <h2 style="margin:0;">📋 Logística de ventas</h2>
+            <button type="button" onclick="renderLogistica()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄</button>
+        </div>
+        <p style="color:#4a5568; margin-bottom:20px;">Salidas de almacén pendientes y requisiciones de compra.</p>
+        <div id="panel-salidas-pendientes"></div>
+        <div id="panel-requisiciones-venta" style="margin-top:28px;"></div>
+    </div>
+        
+        <!-- MODAL IMPORTADOR DE PRODUCTOS -->
+    <div id="modalImportador" class="modal oculto" style="display:none;">
+        <div class="modal-content" style="width:90%; max-width:700px;">
+            <h2>📥 Importar Productos (Batch)</h2>
+            <div style="margin-top:20px;">
+                
+                <div style="margin-bottom:20px;">
+                    <label style="display:block; margin-bottom:10px; font-weight:bold;">📁 Selecciona archivo CSV o JSON:</label>
+                    <input type="file" id="fileInputProductos" accept=".csv,.json,.xlsx" 
+                           style="padding:10px; border:2px dashed #3498db; border-radius:5px; width:100%; cursor:pointer;">
+                </div>
+
+                <div style="margin-bottom:20px;">
+                    <label style="display:block; margin-bottom:10px; font-weight:bold;">O pega datos manualmente:</label>
+                    <textarea id="textAreaImportador" placeholder="Nombre,Categoría,Subcategoría,Costo,Precio,Imagen&#10;Sofá Gris,Salas,Sofás,5000,8000,https://..."
+                              style="width:100%; height:250px; padding:10px; border:1px solid #ddd; border-radius:5px; font-family:monospace; font-size:12px;"></textarea>
+                </div>
+
+                <div style="background:#f0fdf4; padding:12px; border-radius:5px; font-size:12px; margin-bottom:20px;">
+                    <strong>Formato esperado (CSV):</strong><br>
+                    Nombre,Categoría,Subcategoría,Costo,Precio,Imagen,Color,Marca,Modelo<br>
+                    <small>Sofá Gris,Salas,Sofás,5000,8000,https://...,Gris,Marca X,Modelo 2024</small>
+                </div>
+
+                <div style="display:flex; gap:10px;">
+                    <button onclick="procesarImportacion()" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Importar</button>
+                    <button onclick="cerrarImportador()" style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cancelar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- ===== MODALES ===== -->
+<div id="modalProducto" class="modal oculto" style="display:none;">
+    <div class="modal-content" style="width:95%; max-width:900px; padding:0; overflow:hidden;">
+        <div id="contenidoProducto"></div>
+    </div>
+</div>
+
+<div id="modalProductoForm" class="modal oculto" style="display:none;">
+    <div class="modal-content">
+        <h2 id="tituloModalProducto">📦 Nuevo Producto</h2>
+        <div style="display:flex; flex-direction:column; gap:12px; margin-top:15px;">
+            <div class="campo">
+                <label>Nombre del Producto</label>
+                <input type="text" id="pNombre" placeholder="Ej: Sala Esquinera Gris">
+            </div>
+            <div class="campo">
+                <label>Categoría / Subcategoría</label>
+                <select id="pSubcategoria"></select>
+            </div>
+<div class="campo">
+  <label>Margen (%)</label>
+  <input type="number" id="pMargenManual" placeholder="Ej: 30" min="0" max="99" step="0.1">
+</div>
+            <div class="campo">
+                <label>Costo de Compra ($)</label>
+                <input type="number" id="pCosto" placeholder="0.00" min="0">
+            </div>
+            <div class="campo">
+                <label>Precio ($)</label>
+                <input type="number" id="pPrecio" placeholder="Precio contado">
+            </div>
+            <div class="campo">
+                <label>Color</label>
+                <input type="text" id="pColor" placeholder="Ej: Gris, Negro">
+            </div>
+            <div class="campo">
+                <label>Marca</label>
+                <input type="text" id="pMarca" placeholder="Ej: Grupo Industrial">
+            </div>
+            <div class="campo">
+                <label>Modelo</label>
+                <input type="text" id="pModelo" placeholder="Ej: 2024">
+            </div>
+            <div class="campo">
+                <label>URL de Imagen (opcional)</label>
+                <input type="text" id="pImagen" placeholder="https://...">
+            </div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:20px;">
+            <button onclick="guardarProductoDB()" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Guardar</button>
+            <button onclick="cerrarProductoForm()" style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
