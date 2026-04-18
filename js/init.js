@@ -58,9 +58,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Verificar gastos recurrentes
         if (typeof verificarGastosRecurrentes === 'function') verificarGastosRecurrentes();
         
-        // Navegar a inicio
-        navA('inicio');
+        // Navegar a dashboard y verificar alertas
+        navA('dashboard');
         actualizarContadorCarrito();
+        verificarAlertasPagares();
         
         console.log("✅ Sistema cargado correctamente.");
         console.log("📊 Estado actual:");
