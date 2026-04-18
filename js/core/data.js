@@ -45,6 +45,7 @@ let clienteEditandoId = null;
 let clienteSeleccionado = null;
 let _planElegidoPendiente = null;
 let decisionesInventario = {};
+let _vendedorSeleccionado = null;
 
 // Funciones utilidades
 function dinero(valor) {

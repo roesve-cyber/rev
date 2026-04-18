@@ -186,6 +186,14 @@ function renderCarrito() {
 
                 <div id="resultadosPago" style="margin-top:20px; background:#f8fafc; padding:15px; border-radius:8px;"></div>
 
+                <div class="campo" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
+                    <label>👤 Vendedor:</label>
+                    <select id="selVendedor" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
+                        <option value="">-- Sin vendedor --</option>
+                        ${StorageService.get('vendedores', []).filter(v => v.activo).map(v => `<option value="${v.id}">${v.nombre}</option>`).join('')}
+                    </select>
+                </div>
+
                 <button onclick="irASeleccionCliente()"
                     style="width:100%; padding:15px; background:#27ae60; color:white; border:none; border-radius:8px; font-size:18px; font-weight:bold; margin-top:20px; cursor:pointer;">
                      ✅ Seleccionar cliente
@@ -410,6 +418,14 @@ function confirmarVentaFinal() {
     }
 
     console.log("✅ Todos los datos validados. Mostrando resumen...");
+    // Capture selected vendor from cart view
+    const selVnd = document.getElementById("selVendedor");
+    if (selVnd && selVnd.value) {
+        const vendedores = StorageService.get("vendedores", []);
+        _vendedorSeleccionado = vendedores.find(v => String(v.id) === String(selVnd.value)) || null;
+    } else {
+        _vendedorSeleccionado = null;
+    }
     mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido);
 }
 
@@ -819,7 +835,9 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             abonos: [],
             articulos: JSON.parse(JSON.stringify(carrito)),
             totalMercancia: totalContado,
-            periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal"
+            periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
+            vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
+            vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
         };
 
         cuentasPorCobrar.push(cuentaNueva);
@@ -917,6 +935,11 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     generarTicketMediaHoja(datosVenta);
 
+    // REGISTRAR COMISIÓN DEL VENDEDOR
+    if (_vendedorSeleccionado) {
+        registrarComisionVenta(folioVenta, totalContado, _vendedorSeleccionado.id);
+    }
+
     // Cerrar y eliminar todos los modales dinámicos
     document.querySelectorAll('[data-modal]').forEach(m => m.remove());
     document.querySelectorAll('.modal').forEach(m => {
@@ -928,6 +951,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     carrito = [];
     clienteSeleccionado = null;
     plazoSeleccionado = null;
+    _vendedorSeleccionado = null;
     if (!StorageService.set("carrito", carrito)) {
         console.error("❌ Error limpiando carrito");
     }
@@ -1410,6 +1434,8 @@ function guardarTicketEnRegistro(datosVenta, folio) {
         planesDisponibles: CalculatorService.calcularCredito(datosVenta.total),
         estado: "Activo",
         abonos: [],
+        vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
+        vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null,
         ultimaActualizacion: new Date().toISOString()
     };
 
