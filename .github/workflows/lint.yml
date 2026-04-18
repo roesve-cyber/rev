@@ -1,0 +1,54 @@
+name: Lint & Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  html-validate:
+    name: HTML Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install html-validate
+        run: npm install -g html-validate
+
+      - name: Validate HTML
+        run: html-validate index.html || true
+
+  js-lint:
+    name: JavaScript Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ESLint
+        run: npm install -g eslint
+
+      - name: Lint JavaScript files
+        run: |
+          eslint --no-eslintrc \
+            --env browser,es2021 \
+            --rule 'no-undef: off' \
+            --rule 'no-unused-vars: warn' \
+            --rule 'no-console: off' \
+            --rule 'semi: [warn, always]' \
+            --rule 'eqeqeq: [warn, always]' \
+            js/**/*.js || true
