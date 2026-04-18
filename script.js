@@ -306,6 +306,7 @@ let productoActualId = null;
 let clienteEditandoId = null;
 let clienteSeleccionado = null;
 let _planElegidoPendiente = null;
+let decisionesInventario = {};
 
 // Funciones utilidades
 function dinero(valor) {
@@ -3543,8 +3544,6 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
 /**
  * Guarda la decisión de cada producto (entregar o pendiente)
  */
-let decisionesInventario = {};
-
 function setDecisionInventario(productoId, entregar) {
     decisionesInventario[productoId] = { entregar };
     
