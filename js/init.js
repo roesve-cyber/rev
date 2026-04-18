@@ -52,6 +52,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Migración de datos antiguos
         migrarStorageCuentasPorCobrar();
         
+        // Inicializar notificaciones
+        if (typeof inicializarNotificaciones === 'function') inicializarNotificaciones();
+        
+        // Verificar gastos recurrentes
+        if (typeof verificarGastosRecurrentes === 'function') verificarGastosRecurrentes();
+        
         // Navegar a inicio
         navA('inicio');
         actualizarContadorCarrito();

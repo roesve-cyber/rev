@@ -1656,6 +1656,154 @@ function abrirEstadoCuentaCliente(clienteId) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
+// ===== CLIENTES MOROSOS =====
+function renderClientesMorosos() {
+    const cont = document.getElementById('contenidoMorosos');
+    if (!cont) return;
+    const hoy = new Date();
+    const pagares = StorageService.get('pagaresSistema', []);
+    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const clientesLista = StorageService.get('clientes', []);
+
+    // Filtros
+    const filtroNombre = (document.getElementById('morosoFiltroNombre')?.value || '').toLowerCase();
+    const filtroMin = parseFloat(document.getElementById('morosoFiltroMin')?.value) || 0;
+
+    // Agrupar por folio
+    const porFolio = {};
+    pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Vencido' || p.estado === 'Parcial').forEach(p => {
+        const fv = new Date(p.fechaVencimiento);
+        const diasAtraso = fv < hoy ? Math.floor((hoy - fv) / (1000 * 60 * 60 * 24)) : 0;
+        if (!porFolio[p.folio]) porFolio[p.folio] = { pagares: [], vencidos: 0, diasMax: 0, montoVencido: 0, saldoTotal: 0 };
+        porFolio[p.folio].pagares.push(p);
+        porFolio[p.folio].saldoTotal += p.monto || 0;
+        if (diasAtraso > 0) {
+            porFolio[p.folio].vencidos++;
+            porFolio[p.folio].montoVencido += p.monto || 0;
+            porFolio[p.folio].diasMax = Math.max(porFolio[p.folio].diasMax, diasAtraso);
+        }
+    });
+
+    // Solo folios con pagarés vencidos
+    let registros = Object.entries(porFolio)
+        .filter(([, v]) => v.vencidos > 0)
+        .map(([folio, v]) => {
+            const cuenta = cxc.find(c => c.folio === folio);
+            const nombre = cuenta ? cuenta.nombre : folio;
+            const clienteId = cuenta ? cuenta.clienteId : null;
+            const cli = clientesLista.find(c => String(c.id) === String(clienteId));
+            const telefono = cli ? (cli.telefono || '-') : '-';
+            return { folio, nombre, telefono, clienteId, ...v };
+        })
+        .sort((a, b) => b.montoVencido - a.montoVencido);
+
+    if (filtroNombre) registros = registros.filter(r => r.nombre.toLowerCase().includes(filtroNombre));
+    if (filtroMin > 0) registros = registros.filter(r => r.montoVencido >= filtroMin);
+
+    const totalMoroso = registros.reduce((s, r) => s + r.montoVencido, 0);
+
+    const rows = registros.map(r => {
+        let semaforo = '🟡';
+        if (r.diasMax > 60) semaforo = '🔴';
+        else if (r.diasMax >= 30) semaforo = '🟠';
+        return `<tr>
+          <td style="padding:10px;">${semaforo} ${r.nombre}</td>
+          <td style="padding:10px;text-align:center;">${r.telefono}</td>
+          <td style="padding:10px;text-align:center;">${r.vencidos}</td>
+          <td style="padding:10px;text-align:center;color:#dc2626;font-weight:bold;">${r.diasMax} días</td>
+          <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(r.montoVencido)}</td>
+          <td style="padding:10px;text-align:right;">${dinero(r.saldoTotal)}</td>
+          <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
+            ${r.telefono !== '-' ? `<a href="tel:${r.telefono}" style="font-size:18px;text-decoration:none;" title="Llamar">📞</a>` : ''}
+            <button onclick="abrirModalAbonoAvanzado('${r.folio}')" style="padding:3px 8px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Abonar</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    cont.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
+        <div style="background:#fef2f2;padding:20px;border-radius:10px;text-align:center;">
+          <small style="color:#dc2626;">CLIENTES MOROSOS</small><br>
+          <strong style="font-size:28px;color:#dc2626;">${registros.length}</strong>
+        </div>
+        <div style="background:#fef2f2;padding:20px;border-radius:10px;text-align:center;">
+          <small style="color:#dc2626;">MONTO VENCIDO TOTAL</small><br>
+          <strong style="font-size:22px;color:#dc2626;">${dinero(totalMoroso)}</strong>
+        </div>
+        <div style="background:#fef9c3;padding:20px;border-radius:10px;text-align:center;">
+          <small style="color:#92400e;">LEYENDA</small><br>
+          <span style="font-size:13px;">🔴 &gt;60d &nbsp; 🟠 30-60d &nbsp; 🟡 &lt;30d</span>
+        </div>
+      </div>
+      <div style="background:white;padding:16px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:16px;">
+        <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+          <div>
+            <label style="font-size:11px;font-weight:bold;color:#374151;">BUSCAR CLIENTE</label>
+            <input type="text" id="morosoFiltroNombre" oninput="renderClientesMorosos()" placeholder="Nombre..."
+                   style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:bold;color:#374151;">MONTO MÍNIMO ($)</label>
+            <input type="number" id="morosoFiltroMin" oninput="renderClientesMorosos()" placeholder="0" min="0"
+                   style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;width:120px;">
+          </div>
+          <button onclick="exportarMorososCSV()" style="padding:8px 16px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📥 Exportar CSV</button>
+        </div>
+      </div>
+      <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        ${registros.length === 0 ? '<p style="color:#9ca3af;text-align:center;padding:20px;">🎉 Sin clientes morosos.</p>' : `
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <thead><tr style="background:#f3f4f6;">
+              <th style="padding:10px;text-align:left;">Cliente</th>
+              <th style="padding:10px;text-align:center;">Teléfono</th>
+              <th style="padding:10px;text-align:center;"># Pagarés Vencidos</th>
+              <th style="padding:10px;text-align:center;">Días Máx.</th>
+              <th style="padding:10px;text-align:right;">Monto Vencido</th>
+              <th style="padding:10px;text-align:right;">Saldo Total</th>
+              <th style="padding:10px;text-align:center;">Acciones</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`}
+      </div>`;
+}
+
+function exportarMorososCSV() {
+    const cont = document.getElementById('contenidoMorosos');
+    if (!cont) return;
+    // Re-calcular datos sin filtros para exportar todo
+    const hoy = new Date();
+    const pagares = StorageService.get('pagaresSistema', []);
+    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const clientesLista = StorageService.get('clientes', []);
+    const porFolio = {};
+    pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Vencido' || p.estado === 'Parcial').forEach(p => {
+        const fv = new Date(p.fechaVencimiento);
+        const diasAtraso = fv < hoy ? Math.floor((hoy - fv) / (1000 * 60 * 60 * 24)) : 0;
+        if (!porFolio[p.folio]) porFolio[p.folio] = { pagares: [], vencidos: 0, diasMax: 0, montoVencido: 0, saldoTotal: 0 };
+        porFolio[p.folio].saldoTotal += p.monto || 0;
+        if (diasAtraso > 0) { porFolio[p.folio].vencidos++; porFolio[p.folio].montoVencido += p.monto || 0; porFolio[p.folio].diasMax = Math.max(porFolio[p.folio].diasMax, diasAtraso); }
+    });
+    const registros = Object.entries(porFolio).filter(([, v]) => v.vencidos > 0).map(([folio, v]) => {
+        const cuenta = cxc.find(c => c.folio === folio);
+        const nombre = cuenta ? cuenta.nombre : folio;
+        const clienteId = cuenta ? cuenta.clienteId : null;
+        const cli = clientesLista.find(c => String(c.id) === String(clienteId));
+        const telefono = cli ? (cli.telefono || '') : '';
+        return { folio, nombre, telefono, ...v };
+    }).sort((a, b) => b.montoVencido - a.montoVencido);
+    let csv = 'Cliente,Telefono,Folio,Pagares Vencidos,Dias Max Atraso,Monto Vencido,Saldo Total\n';
+    registros.forEach(r => {
+        csv += `"${r.nombre}","${r.telefono}","${r.folio}",${r.vencidos},${r.diasMax},${r.montoVencido.toFixed(2)},${r.saldoTotal.toFixed(2)}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'morosos.csv'; a.click();
+    URL.revokeObjectURL(url);
+}
+
 // expose helpers for inline HTML event handlers
 window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
 window._getCuentaSeleccionada = _getCuentaSeleccionada;
@@ -1666,3 +1814,6 @@ window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
 window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
 window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
 window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
+
+window.renderClientesMorosos = renderClientesMorosos;
+window.exportarMorososCSV = exportarMorososCSV;
