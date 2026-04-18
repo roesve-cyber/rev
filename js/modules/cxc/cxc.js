@@ -128,7 +128,7 @@ function abrirModalAbonoAvanzado(folio) {
     let modalHTML = `
         <div style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto;">
-                <h2 style="margin-top:0;">💰 Registrar Abono - ${cuenta.nombre}</h2>
+                <h2 style="margin-top:0;">💰 Registrar Abono - ${escapeHtml(cuenta.nombre)}</h2>
                 
                 <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">

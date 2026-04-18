@@ -148,7 +148,84 @@ function procesarDatosImportacion(texto) {
     mostrarProductos();
 }
 
+// ===== IMPORTADOR CSV (vista importarproductos) =====
+function previewProductosCSV() {
+    const fileInput = document.getElementById("csvProductos");
+    const previewDiv = document.getElementById("previewProductosCSV");
+    if (!previewDiv) return;
+
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        previewDiv.innerHTML = '<p style="color:#e74c3c;">⚠️ Selecciona un archivo CSV primero.</p>';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const texto = e.target.result.trim();
+        const lineas = texto.split('\n').filter(l => l.trim());
+        if (lineas.length < 2) {
+            previewDiv.innerHTML = '<p style="color:#e74c3c;">⚠️ El CSV debe tener encabezado + al menos 1 fila.</p>';
+            return;
+        }
+
+        const encabezados = lineas[0].split(',').map(h => h.trim());
+        let html = `<p style="color:#27ae60; margin-bottom:10px;">✅ ${lineas.length - 1} productos encontrados.</p>
+            <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:12px;">
+            <thead><tr style="background:#1a3a70; color:white;">`;
+        encabezados.forEach(h => {
+            html += `<th style="padding:8px; border:1px solid #ddd;">${h}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+
+        const maxPreview = Math.min(lineas.length, 6);
+        for (let i = 1; i < maxPreview; i++) {
+            const valores = lineas[i].split(',');
+            html += `<tr style="background:${i % 2 === 0 ? '#f9fafb' : 'white'};">`;
+            valores.forEach(v => {
+                html += `<td style="padding:6px 8px; border:1px solid #eee;">${v.trim()}</td>`;
+            });
+            html += '</tr>';
+        }
+        if (lineas.length > 6) {
+            html += `<tr><td colspan="${encabezados.length}" style="padding:8px; text-align:center; color:#718096; font-style:italic;">... y ${lineas.length - 6} más</td></tr>`;
+        }
+        html += '</tbody></table></div>';
+        previewDiv.innerHTML = html;
+
+        // Store text for importarProductosCSV
+        previewDiv.dataset.csvTexto = texto;
+    };
+    reader.readAsText(file);
+}
+
+function importarProductosCSV() {
+    const previewDiv = document.getElementById("previewProductosCSV");
+    const fileInput = document.getElementById("csvProductos");
+
+    let texto = previewDiv && previewDiv.dataset.csvTexto ? previewDiv.dataset.csvTexto : null;
+
+    if (!texto) {
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            alert("⚠️ Primero haz Vista Previa del archivo CSV.");
+            return;
+        }
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            procesarDatosImportacion(e.target.result.trim());
+        };
+        reader.readAsText(file);
+        return;
+    }
+
+    procesarDatosImportacion(texto);
+}
+
 window.abrirImportadorProductos = abrirImportadorProductos;
 window.cerrarImportador = cerrarImportador;
 window.procesarImportacion = procesarImportacion;
 window.procesarDatosImportacion = procesarDatosImportacion;
+window.previewProductosCSV = previewProductosCSV;
+window.importarProductosCSV = importarProductosCSV;

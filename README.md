@@ -37,7 +37,8 @@ js/
     ├── tickets/tickets.js              # Generación e historial de tickets
     ├── cxc/cxc.js                      # Cuentas por cobrar y cobranza esperada
     ├── logistica/logistica.js          # Salidas pendientes y requisiciones
-    └── importador/importador.js        # Importación masiva de productos (CSV/JSON)
+    ├── importador/importador.js        # Importación masiva de productos (CSV/JSON)
+    └── reportes/reportes.js            # Reportes dinámicos con exportación CSV
 js/init.js                              # DOMContentLoaded — arranque del sistema
 ```
 
@@ -53,3 +54,5 @@ js/init.js                              # DOMContentLoaded — arranque del sist
 - `eliminarProducto(id)`: eliminado el `confirm()` interno duplicado. La confirmación la hace `confirmarEliminarProducto()`.
 - `togglePanelClientes()`: nueva implementación que alterna visibilidad del panel `#panelClientes`.
 - `filtrarCuentasCobranza()`: stub agregado (referenciado en HTML pero ausente en script.js original).
+- `previewProductosCSV()` / `importarProductosCSV()`: implementadas (referenciadas en HTML pero ausentes en script.js original).
+- `actualizarReporte()` / `exportarReporte()`: implementadas en nuevo módulo `reportes/reportes.js` (referenciadas en HTML pero ausentes en script.js original).

@@ -91,7 +91,7 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
         const cantidad = p.cantidad || 1;
         const subtotal = (p.precioContado || 0) * cantidad;
         return `<tr>
-            <td>${p.nombre}</td>
+            <td>${escapeHtml(p.nombre)}</td>
             <td style="text-align:center;">${cantidad}</td>
             <td style="text-align:right;">${dinero(p.precioContado)}</td>
             <td style="text-align:right; font-weight:bold;">${dinero(subtotal)}</td>
@@ -106,9 +106,9 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
                 
                 <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
                     <h4 style="margin:0 0 10px 0; color:#166534;">👤 Cliente</h4>
-                    <p style="margin:5px 0;"><strong>${clienteSeleccionado.nombre}</strong></p>
-                    ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">📞 ${clienteSeleccionado.telefono}</p>` : ''}
-                    ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">📍 ${clienteSeleccionado.direccion}</p>` : ''}
+                    <p style="margin:5px 0;"><strong>${escapeHtml(clienteSeleccionado.nombre)}</strong></p>
+                    ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">📞 ${escapeHtml(clienteSeleccionado.telefono)}</p>` : ''}
+                    ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">📍 ${escapeHtml(clienteSeleccionado.direccion)}</p>` : ''}
                 </div>
 
                 <div style="margin-bottom:20px;">
@@ -211,7 +211,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
-                        <strong>${x.prod.nombre}</strong><br>
+                        <strong>${escapeHtml(x.prod.nombre)}</strong><br>
                         <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${x.item.cantidad || 1}</small>
                     </div>
                     <div style="display:flex; gap:8px;">
@@ -245,7 +245,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
-                    <strong>${x.prod.nombre}</strong><br>
+                    <strong>${escapeHtml(x.prod.nombre)}</strong><br>
                     <small style="color:#991b1b;">⚠️ Se creará REQUISICIÓN DE COMPRA automáticamente</small><br>
                     <small style="color:#7f1d1d;">Stock actual: 0 | Solicitado: ${x.item.cantidad || 1}</small>
                 </div>
