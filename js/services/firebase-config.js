@@ -3,12 +3,12 @@
 // https://console.firebase.google.com/
 
 const firebaseConfig = {
-    apiKey: "TU_API_KEY",
-    authDomain: "TU_PROJECT.firebaseapp.com",
-    projectId: "TU_PROJECT_ID",
-    storageBucket: "TU_PROJECT.appspot.com",
-    messagingSenderId: "TU_SENDER_ID",
-    appId: "TU_APP_ID"
+  apiKey: "AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
+  authDomain: "mmpueblito-8fb29.firebaseapp.com",
+  projectId: "mmpueblito-8fb29",
+  storageBucket: "mmpueblito-8fb29.firebasestorage.app",
+  messagingSenderId: "32950655624",
+  appId: "1:32950655624:web:42a8657431319f9a25dd3d"
 };
 
 // Inicializar Firebase (solo si el SDK está disponible y las credenciales fueron configuradas)
