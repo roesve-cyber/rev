@@ -1215,7 +1215,10 @@ function generarTicketMediaHoja(datosVenta) {
             <div class="ticket">
                 <!-- ENCABEZADO -->
                 <div class="encabezado">
-                    <div class="logo">🏛️</div>
+                    <div class="logo" style="width:70px; height:70px; display:flex; align-items:center; justify-content:center;">
+                        <img src="img/logo.png" style="max-width:65px; max-height:65px; object-fit:contain;" 
+                             onerror="this.style.display='none'; this.parentElement.innerHTML='🏛️';">
+                    </div>
                     <div class="titulo">
                         <h1>MUEBLERÍA<br>MI PUEBLITO</h1>
                         <p>"Calidad, Estilo y Precio que te hacen sentir en casa"</p>

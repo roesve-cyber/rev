@@ -714,6 +714,226 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     alert("✅ Abono registrado exitosamente.");
     document.querySelector('[data-modal="abono-avanzado"]')?.remove();
     renderCuentasXCobrar();
+
+    // Generar ticket térmico de abono
+    const cuentasActual = StorageService.get("cuentasPorCobrar", []);
+    const cuentaTicket = cuentasActual.find(c => c.folio === folio);
+    if (cuentaTicket) {
+        const pagaresSistema = StorageService.get("pagaresSistema", []);
+        const pagaresCliente = pagaresSistema.filter(p => p.folio === folio);
+        const hoy = new Date();
+
+        let montoRestante = montoAbono;
+        const pagaresAfectados = [];
+        const pagaresOrdenados = pagaresCliente
+            .filter(p => p.estado !== "Pagado")
+            .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+        for (const p of pagaresOrdenados) {
+            if (montoRestante <= 0) break;
+            if (montoRestante >= (p.monto || p.abono || 0)) {
+                pagaresAfectados.push({ ...p, cubierto: true });
+                montoRestante -= (p.monto || p.abono || 0);
+            } else {
+                pagaresAfectados.push({ ...p, cubierto: false, montoAplicado: montoRestante });
+                montoRestante = 0;
+            }
+        }
+
+        const pagaresPendientesFinal = pagaresCliente.filter(p =>
+            p.estado !== "Pagado" && !pagaresAfectados.find(a => a.id === p.id && a.cubierto)
+        );
+        const diasAtrasoTotal = pagaresPendientesFinal.reduce((sum, p) => {
+            const venc = new Date(p.fechaVencimiento);
+            return sum + (venc < hoy ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24)) : 0);
+        }, 0);
+
+        const etiquetasMetodo = {
+            efectivo: '💵 Efectivo',
+            transferencia: '🏦 Transferencia',
+            deposito: '🏧 Depósito'
+        };
+        const etiquetaCuenta = etiquetasMetodo[metodoCobro] || metodoCobro || '💵 Efectivo';
+
+        const folioAbono = 'REC-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Date.now().toString().slice(-4);
+
+        generarTicketAbono({
+            folio,
+            folioAbono,
+            fecha: new Date().toLocaleDateString('es-MX'),
+            cliente: {
+                nombre: cuentaTicket.nombre,
+                telefono: cuentaTicket.telefono || '',
+                direccion: cuentaTicket.direccion || ''
+            },
+            montoAbono,
+            saldoAnterior: saldoActual,
+            nuevoSaldo,
+            pagaresAfectados,
+            totalPagares: pagaresCliente.length,
+            pagaresPendientes: pagaresPendientesFinal.length,
+            diasAtrasoTotal,
+            etiquetaCuenta,
+            empresa: {
+                nombre: "MUEBLERÍA MI PUEBLITO",
+                direccion: "Santiago Cuaula, Tlaxcala",
+                telefono: "228 123 4567",
+                acreedor: "Roberto Escobedo Vega"
+            }
+        });
+    }
+}
+
+function generarTicketAbono(datosAbono) {
+    const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
+        pagaresAfectados, totalPagares, pagaresPendientes, diasAtrasoTotal,
+        etiquetaCuenta, empresa } = datosAbono;
+
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const dineroFmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const pagaresHTML = pagaresAfectados.length > 0
+        ? pagaresAfectados.map((p, i) => {
+            const monto = p.monto || p.abono || 0;
+            const fechaPag = esc(p.fechaVencimiento || p.vencimiento || '-');
+            if (p.cubierto) {
+                return `<tr style="background:#f0fdf4;">
+                    <td style="padding:3px 5px;">#${i + 1}</td>
+                    <td style="padding:3px 5px;">${fechaPag}</td>
+                    <td style="padding:3px 5px; text-align:right; text-decoration:line-through; color:#6b7280;">${dineroFmt(monto)}</td>
+                    <td style="padding:3px 5px; text-align:center; color:#27ae60;">✓</td>
+                </tr>`;
+            } else {
+                const aplicado = p.montoAplicado || 0;
+                return `<tr style="background:#fffbeb;">
+                    <td style="padding:3px 5px;">#${i + 1}</td>
+                    <td style="padding:3px 5px;">${fechaPag}</td>
+                    <td style="padding:3px 5px; text-align:right;">${dineroFmt(monto)}</td>
+                    <td style="padding:3px 5px; text-align:center; color:#f59e0b;">~${dineroFmt(aplicado)}</td>
+                </tr>`;
+            }
+        }).join('')
+        : `<tr><td colspan="4" style="padding:5px; text-align:center; color:#6b7280;">Sin pagarés registrados</td></tr>`;
+
+    const mensajeEstado = diasAtrasoTotal === 0 && pagaresPendientes === 0
+        ? `<div style="color:#27ae60; font-weight:bold; text-align:center; padding:6px 0;">✅ ¡Gracias! Está al corriente con sus pagos.</div>`
+        : `<div style="color:#f59e0b; text-align:center; padding:6px 0;">⚠️ Aún tiene ${pagaresPendientes} pagaré(s) pendiente(s).<br>Le recordamos mantener su cuenta al corriente.</div>`;
+
+    const ticketHTML = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo de Abono ${esc(folioAbono)}</title>
+    <style>
+        @page { size: 80mm auto; margin: 0; }
+        body {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            width: 72mm;
+            margin: 4mm auto;
+            color: #000;
+        }
+        .centro { text-align: center; }
+        .negrita { font-weight: bold; }
+        hr { border: none; border-top: 1px dashed #333; margin: 6px 0; }
+        .monto-grande { font-size: 20px; font-weight: bold; text-align: center; margin: 8px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        th { background: #e8e8e8; padding: 3px 5px; text-align: left; }
+        .fila-total { font-weight: bold; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body>
+<div id="ticket-contenido">
+    <div class="centro">
+        <img src="img/logo.png" style="max-width:50px; max-height:50px; object-fit:contain;" 
+             onerror="this.style.display='none';">
+        <div class="negrita" style="font-size:14px; margin-top:4px;">${esc(empresa.nombre)}</div>
+        <div>${esc(empresa.direccion)}</div>
+        <div>Tel. ${esc(empresa.telefono)}</div>
+    </div>
+    <hr>
+    <div class="centro negrita" style="font-size:13px;">── RECIBO DE PAGO ──</div>
+    <div>Folio: <span class="negrita">${esc(folioAbono)}</span></div>
+    <div>Fecha: <span class="negrita">${esc(fecha)}</span></div>
+    <hr>
+    <div class="negrita">CLIENTE</div>
+    <div>${esc(cliente.nombre)}</div>
+    ${cliente.telefono ? `<div>Tel: ${esc(cliente.telefono)}</div>` : ''}
+    <div>Venta: ${esc(folio)}</div>
+    <hr>
+    <div class="negrita">PAGARÉ(S) CUBIERTO(S)</div>
+    <table>
+        <thead><tr>
+            <th>#</th><th>Vcto.</th><th style="text-align:right;">Monto</th><th style="text-align:center;">Est.</th>
+        </tr></thead>
+        <tbody>${pagaresHTML}</tbody>
+    </table>
+    <hr>
+    <div class="negrita">ABONO RECIBIDO:</div>
+    <div class="monto-grande">${dineroFmt(montoAbono)}</div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Saldo anterior:</span><span>${dineroFmt(saldoAnterior)}</span>
+    </div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Nuevo saldo:</span><span class="negrita">${dineroFmt(nuevoSaldo)}</span>
+    </div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Forma de pago:</span><span>${esc(etiquetaCuenta)}</span>
+    </div>
+    <hr>
+    ${mensajeEstado}
+    <hr>
+    <div style="text-align:center; margin-top:10px;">
+        <div style="border-top:1px solid #333; width:70%; margin:0 auto 4px auto;"></div>
+        <div class="negrita">FIRMA DEL CLIENTE</div>
+    </div>
+    <div class="centro" style="margin-top:12px;">Gracias por su preferencia</div>
+</div>
+<div class="no-print" style="text-align:center; padding:15px; background:#f8f9fa; border-top:1px dashed #333; margin-top:10px;">
+    <button onclick="window.print()" 
+            style="margin:4px; padding:8px 14px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px;">
+        🖨️ Imprimir
+    </button>
+    <button onclick="exportarTicketImagen()" 
+            style="margin:4px; padding:8px 14px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px;">
+        📷 Guardar como Imagen
+    </button>
+    <button onclick="exportarTicketPDF()" 
+            style="margin:4px; padding:8px 14px; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px;">
+        📄 Guardar como PDF
+    </button>
+</div>
+<script>
+function exportarTicketImagen() {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = function() {
+        html2canvas(document.getElementById('ticket-contenido')).then(function(canvas) {
+            const link = document.createElement('a');
+            link.download = 'recibo-abono.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+    };
+    script.onerror = function() { window.print(); };
+    document.head.appendChild(script);
+}
+function exportarTicketPDF() {
+    window.print();
+}
+<\/script>
+</body>
+</html>`;
+
+    const ventana = window.open('', '_blank');
+    if (!ventana) {
+        alert("⚠️ Habilita las ventanas emergentes para ver el recibo.");
+        return;
+    }
+    ventana.document.write(ticketHTML);
+    ventana.document.close();
+    ventana.focus();
 }
 
 function abrirModalNuevoCliente() {
@@ -797,3 +1017,4 @@ function guardarClienteDesdeModal() {
 window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
 window._getCuentaSeleccionada = _getCuentaSeleccionada;
 window._buildCuentaOrigen = _buildCuentaOrigen;
+window.generarTicketAbono = generarTicketAbono;
