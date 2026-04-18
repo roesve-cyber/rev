@@ -1553,7 +1553,7 @@ function renderReimprimirVenta() {
         if (fechaDesde && fecha < fechaDesde) return false;
         if (fechaHasta && fecha > fechaHasta) return false;
         if (total < montoMin) return false;
-        if (isFinite(montoMax) && total > montoMax) return false;
+        if (montoMax !== Infinity && total > montoMax) return false;
         return true;
     }).sort((a, b) => new Date(b.fechaEmision) - new Date(a.fechaEmision));
 
@@ -1579,7 +1579,7 @@ function renderReimprimirVenta() {
         const fecha = t.fechaEmision ? new Date(t.fechaEmision).toLocaleDateString('es-MX') : '—';
         const total = t.venta?.total || 0;
         const metodo = t.venta?.metodoPago || '—';
-        const folioEsc = (t.folio || '').replace(/'/g, "\\'");
+        const folioEsc = (t.folio || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         html += `<tr>
             <td><strong style="color:#1d4ed8;">${t.folio || '—'}</strong></td>
             <td>${t.cliente?.nombre || '—'}</td>
@@ -1626,5 +1626,14 @@ function reimprimirTicketVenta(folio) {
     generarTicketMediaHoja(datosVenta);
 }
 
+function limpiarFiltrosReimpresion() {
+    ['rvFolio','rvCliente','rvFechaDesde','rvFechaHasta','rvMontoMin','rvMontoMax'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    renderReimprimirVenta();
+}
+
 window.renderReimprimirVenta = renderReimprimirVenta;
 window.reimprimirTicketVenta = reimprimirTicketVenta;
+window.limpiarFiltrosReimpresion = limpiarFiltrosReimpresion;

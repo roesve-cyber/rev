@@ -741,6 +741,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const idxCuenta = cuentas.findIndex(c => c.folio === folio);
+    let nuevoSaldoReal = 0;
     
     if (idxCuenta !== -1) {
         const cuenta = cuentas[idxCuenta];
@@ -809,7 +810,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         cuenta.saldoActual = _pagaresActualizados
             .filter(p => p.folio === folio && p.estado === 'Pendiente')
             .reduce((s, p) => s + (p.monto || 0), 0);
-        const nuevoSaldoReal = cuenta.saldoActual;
+        nuevoSaldoReal = cuenta.saldoActual;
         
         if (nuevoSaldoReal === 0) {
             cuenta.estado = "Saldado";
@@ -850,7 +851,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             direccion: _cuentaData?.direccion || ''
         },
         montoAbono,
-        nuevoSaldo: _cuentaData?.saldoActual ?? 0,
+        nuevoSaldo: nuevoSaldoReal,
         fecha: new Date().toLocaleDateString("es-MX"),
         metodoCobro: document.getElementById("metodoCobroAbono")?.value || medioPago || "efectivo",
         cuentaDestino: document.getElementById("cuentaDestinoAbono")?.value || etiqueta || "efectivo",
