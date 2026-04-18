@@ -305,6 +305,7 @@ let productoEditando = null;
 let productoActualId = null;
 let clienteEditandoId = null;
 let clienteSeleccionado = null;
+let _planElegidoPendiente = null;
 
 // Funciones utilidades
 function dinero(valor) {
@@ -370,6 +371,8 @@ function navA(vistaId) {
         modal.classList.add('oculto');
         modal.style.display = 'none';
     });
+    // Eliminar modales dinámicos del DOM
+    document.querySelectorAll('[data-modal]').forEach(modal => modal.remove());
     
     document.querySelectorAll('.vista').forEach(v => {
         v.classList.add('oculto');
@@ -593,14 +596,12 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
 }
 
 function eliminarProducto(id) {
-    if (confirm("¿Eliminar producto?")) {
-        productos = productos.filter(p => p.id !== id);
-        if (!StorageService.set("productos", productos)) {
-            console.error("❌ Error eliminando producto");
-            return;
-        }
-        renderInventario();
+    productos = productos.filter(p => p.id !== id);
+    if (!StorageService.set("productos", productos)) {
+        console.error("❌ Error eliminando producto");
+        return;
     }
+    renderInventario();
 }
 
 // ===== FORMULARIO DE PRODUCTOS =====
@@ -3349,8 +3350,13 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
         </tr>`;
     }).join('');
 
+    _planElegidoPendiente = planElegido;
+
+    // Eliminar modal anterior si existe
+    document.querySelector('[data-modal="resumen-venta"]')?.remove();
+
     const modalHTML = `
-    <div class="modal" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
+    <div class="modal" data-modal="resumen-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
             <div style="background:white; padding:30px; border-radius:15px; width:95%; max-width:700px; margin:20px auto;">
                 
                 <h2 style="margin-top:0; color:#2c3e50;">📋 Resumen de Transacción</h2>
@@ -3390,7 +3396,7 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
                 </div>
 
                 <div style="display:flex; gap:10px;">
-                    <button onclick="procesarVentaConInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar}, '${JSON.stringify(planElegido).replace(/'/g, "&apos;")}')" 
+                    <button onclick="procesarVentaConInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar})" 
                             style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
                         ✅ Confirmar Venta
                     </button>
@@ -3405,34 +3411,22 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 function cancelarYVolverAlCarrito() {
-    // Ocultar todos los modales
+    // Ocultar modales estáticos
     document.querySelectorAll('.modal').forEach(modal => {
         modal.classList.add('oculto');
         modal.style.display = 'none';
     });
+    // Eliminar modales dinámicos del DOM
+    document.querySelectorAll('[data-modal]').forEach(modal => modal.remove());
     
     // Ir al carrito
     navA('carrito');
 }
 
-function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegidoStr) {
+function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
     console.log("🔄 Procesando venta con inventario...");
-    
-    let planElegido = null;
-    
-    if (typeof planElegidoStr === 'string' && planElegidoStr !== 'null') {
-        try {
-            planElegido = JSON.parse(planElegidoStr);
-        } catch (e) {
-            console.error("Error al parsear plan:", e);
-            planElegido = null;
-        }
-    } else if (typeof planElegidoStr === 'object' && planElegidoStr !== null) {
-        planElegido = planElegidoStr;
-    }
-    
-    console.log("Plan elegido final:", planElegido);
-    mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido);
+    console.log("Plan elegido final:", _planElegidoPendiente);
+    mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, _planElegidoPendiente);
 }
 
 /**
@@ -3442,13 +3436,15 @@ function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFi
 function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido) {
     let productosConStock = [];
     let productosSinStock = [];
-    let decisiones = {}; // { productoId: { entregar: true/false } }
 
-    // Clasificar productos
+    // Reiniciar decisiones para evitar estado residual de un diálogo anterior
+    decisionesInventario = {};
+
+    // Clasificar productos: solo "con stock" si hay suficiente para la cantidad solicitada
     carrito.forEach(item => {
         const prod = productos.find(p => p.id === item.id);
         if (prod) {
-            if ((prod.stock || 0) > 0) {
+            if ((prod.stock || 0) >= (item.cantidad || 1)) {
                 productosConStock.push({ item, prod });
             } else {
                 productosSinStock.push({ item, prod });
@@ -3508,7 +3504,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
                     <strong>${x.prod.nombre}</strong><br>
                     <small style="color:#991b1b;">⚠️ Se creará REQUISICIÓN DE COMPRA automáticamente</small><br>
-                    <small style="color:#7f1d1d;">Stock actual: 0 | Solicitado: ${x.item.cantidad || 1}</small>
+                    <small style="color:#7f1d1d;">Stock actual: ${x.prod.stock || 0} | Solicitado: ${x.item.cantidad || 1}</small>
                 </div>
             `;
         });
@@ -3516,8 +3512,11 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         htmlProductos += `</div>`;
     }
 
+    // Eliminar modal anterior si existe
+    document.querySelector('[data-modal="dialogo-inventario"]')?.remove();
+
     const modalHTML = `
-        <div class="modal" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
+        <div class="modal" data-modal="dialogo-inventario" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
             <div style="background:white; padding:30px; border-radius:15px; width:95%; max-width:700px; margin:20px auto;">
                 
                 <h2 style="margin-top:0; color:#2c3e50;">📦 Gestión de Inventario</h2>
@@ -3526,7 +3525,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                 ${htmlProductos}
                 
                 <div style="display:flex; gap:10px; margin-top:20px;">
-                    <button onclick="confirmarDecisionesInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar}, '${JSON.stringify(planElegido).replace(/'/g, "&apos;")}')" 
+                    <button onclick="confirmarDecisionesInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar})" 
                             style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
                         ✅ Procesar Venta
                     </button>
@@ -3569,14 +3568,8 @@ function setDecisionInventario(productoId, entregar) {
 /**
  * Confirma todas las decisiones y procesa la venta
  */
-function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegidoStr) {
-    let planElegido = null;
-    
-    try {
-        planElegido = JSON.parse(planElegidoStr);
-    } catch (e) {
-        planElegido = null;
-    }
+function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
+    const planElegido = _planElegidoPendiente;
 
     const folioVenta = "V-" + Date.now().toString().slice(-6);
     const fechaHoy = new Date().toLocaleDateString("es-MX");
@@ -3591,7 +3584,7 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
         if (!prod) return;
 
         const decision = decisionesInventario[item.id];
-        const tieneStock = (prod.stock || 0) > 0;
+        const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
 
         if (tieneStock && decision && decision.entregar) {
             // ENTREGAR AHORA
@@ -3628,10 +3621,26 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     let entregasPendientes = [];
 
-    // PASO 1: ACTUALIZAR STOCK
+    // PASO 1: ACTUALIZAR STOCK (solo si hay stock suficiente; guard anti-negativo)
     productosConStock.forEach(x => {
-        x.prod.stock = (x.prod.stock || 0) - (x.item.cantidad || 1);
-        registrarMovimiento(x.prod.id, `Venta - ${folioVenta}`, x.item.cantidad || 1, "salida");
+        const cantRequerida = x.item.cantidad || 1;
+        const stockActual = x.prod.stock || 0;
+        if (stockActual >= cantRequerida) {
+            x.prod.stock = stockActual - cantRequerida;
+            registrarMovimiento(x.prod.id, `Venta - ${folioVenta}`, cantRequerida, "salida");
+        } else {
+            // Stock insuficiente en este punto (no debería ocurrir con la clasificación correcta)
+            console.warn(`⚠️ Stock insuficiente para ${x.prod.nombre} al procesar venta. Creando requisición.`);
+            requisicionesCompra.push({
+                id: Date.now() + Math.random(),
+                fecha: fechaHoy,
+                producto: x.prod.nombre,
+                folioVenta,
+                cantidad: cantRequerida - stockActual,
+                motivo: "Stock insuficiente al confirmar entrega",
+                estatus: "Pendiente"
+            });
+        }
     });
 
     // PASO 2: CREAR ENTREGAS PENDIENTES
@@ -4798,15 +4807,21 @@ function aplicarSalidaPendienteVentas(idSalida) {
         const cant = it.cantidad || 1;
         const pIdx = productos.findIndex((p) => p.id === it.productoId);
         if (pIdx === -1) return;
-        productos[pIdx].stock = (productos[pIdx].stock || 0) - cant;
-        registrarMovimiento(it.productoId, `Salida venta (diferida) ${salida.folioVenta}`, cant, "salida");
-        if (productos[pIdx].stock < 0) {
+        const stockActual = productos[pIdx].stock || 0;
+        const cantADescontar = Math.min(cant, stockActual);
+        const cantFaltante = cant - cantADescontar;
+        productos[pIdx].stock = stockActual - cantADescontar;
+        if (cantADescontar > 0) {
+            registrarMovimiento(it.productoId, `Salida venta (diferida) ${salida.folioVenta}`, cantADescontar, "salida");
+        }
+        if (cantFaltante > 0) {
             requisicionesCompra.push({
                 id: Date.now(),
                 fecha: fechaHoy,
                 producto: it.nombre || productos[pIdx].nombre,
                 folioVenta: salida.folioVenta,
-                motivo: "Stock negativo al aplicar salida diferida",
+                cantidad: cantFaltante,
+                motivo: `Stock insuficiente al aplicar salida diferida (faltan ${cantFaltante})`,
                 estatus: "Pendiente"
             });
         }
