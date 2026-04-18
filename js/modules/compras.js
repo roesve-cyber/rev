@@ -372,7 +372,7 @@ function renderCuentasPorPagar() {
     deudas.forEach(c => {
         html += `
             <tr>
-                <td>${c.fecha}<br><strong>${c.proveedor}</strong></td>
+                <td>${c.fecha}<br><strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="verDetalleCompra(${c.id})">${c.proveedor}</strong></td>
                 <td><small>${c.metodo || c.formaPagoTexto || '-'}</small></td>
                 <td>${dinero(c.total)}</td>
                 <td style="color:red; font-weight:bold;">${dinero(c.saldoPendiente)}</td>
@@ -387,14 +387,122 @@ function renderCuentasPorPagar() {
     contenedor.innerHTML = html + "</tbody></table>";
 }
 
+function verDetalleCompra(idCuenta) {
+    const cuentas = StorageService.get("cuentasPorPagar", []);
+    const c = cuentas.find(x => x.id === idCuenta);
+    if (!c) return;
+
+    const modalHTML = `
+        <div data-modal="true" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h2 style="margin:0;">📦 Detalle de Compra</h2>
+                    <button onclick="this.closest('[data-modal]').remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
+                </div>
+                <div style="display:grid; gap:12px;">
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
+                        <span style="color:#6b7280;">Proveedor</span>
+                        <strong>${c.proveedor}</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
+                        <span style="color:#6b7280;">Fecha de Compra</span>
+                        <strong>${c.fecha}</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
+                        <span style="color:#6b7280;">Método de Pago</span>
+                        <strong>${c.formaPagoTexto || c.metodo || '-'}</strong>
+                    </div>
+                    <div style="border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
+                        <span style="color:#6b7280;">Productos:</span>
+                        <table style="width:100%; margin-top:8px; font-size:14px; border-collapse:collapse;">
+                            <thead><tr style="background:#f9fafb;">
+                                <th style="padding:6px 8px; text-align:left;">Producto</th>
+                                <th style="padding:6px 8px; text-align:right;">Cantidad</th>
+                            </tr></thead>
+                            <tbody>
+                                <tr>
+                                    <td style="padding:6px 8px;">${c.producto || '-'}</td>
+                                    <td style="padding:6px 8px; text-align:right;">${c.cantidad || 1}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
+                        <span style="color:#6b7280;">Total de Compra</span>
+                        <strong>${dinero(c.total)}</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; padding-bottom:8px;">
+                        <span style="color:#6b7280;">Saldo Pendiente</span>
+                        <strong style="color:#e74c3c;">${dinero(c.saldoPendiente)}</strong>
+                    </div>
+                </div>
+                <div style="margin-top:20px; text-align:right;">
+                    <button onclick="this.closest('[data-modal]').remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
 function registrarAbonoProveedor(idCuenta) {
     let cuentas = StorageService.get("cuentasPorPagar", []);
     const index = cuentas.findIndex(c => c.id === idCuenta);
     if (index === -1) return;
 
     const cuenta = cuentas[index];
-    const montoAbono = parseFloat(prompt(`¿Cuánto vas a abonar a ${cuenta.proveedor}?\nSaldo actual: ${dinero(cuenta.saldoPendiente)}`));
+    const bancosDebito = (tarjetasConfig || []).filter(b => b.tipo === "debito");
+    const opcionesOrigen = [
+        ...(cuentasEfectivo || [{ id: "efectivo", nombre: "💵 Efectivo" }]).map(c => `<option value="${c.id}">${c.nombre}</option>`),
+        ...bancosDebito.map(b => `<option value="banco_${b.banco}">🏦 ${b.banco}</option>`)
+    ].join('') || '<option value="efectivo">💵 Caja / Efectivo</option>';
 
+    const modalHTML = `
+        <div data-modal="true" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:500px;">
+                <h2 style="margin-top:0;">💵 Registrar Abono a Proveedor</h2>
+                <div style="background:#f0f4ff; padding:15px; border-radius:8px; margin-bottom:20px;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                        <div><small style="color:#4b5563;">Proveedor</small><br><strong>${cuenta.proveedor}</strong></div>
+                        <div><small style="color:#4b5563;">Saldo Pendiente</small><br><strong style="color:#e74c3c;">${dinero(cuenta.saldoPendiente)}</strong></div>
+                    </div>
+                </div>
+                <div class="campo" style="margin-bottom:15px;">
+                    <label>Cuenta de Origen:</label>
+                    <select id="cuentaOrigenAbono" style="padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; width:100%;">
+                        ${opcionesOrigen}
+                    </select>
+                </div>
+                <div class="campo" style="margin-bottom:20px;">
+                    <label>Monto del Abono ($):</label>
+                    <input type="number" id="montoAbonoProveedor" placeholder="0.00" min="0" max="${cuenta.saldoPendiente}" 
+                           style="padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; width:100%;">
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="confirmarAbonoProveedor(${idCuenta})" 
+                            style="flex:1; padding:12px; background:#2c3e50; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                        ✅ Confirmar Abono
+                    </button>
+                    <button onclick="this.closest('[data-modal]').remove();" 
+                            style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
+                        ✕ Cancelar
+                    </button>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function confirmarAbonoProveedor(idCuenta) {
+    const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor").value);
+    const cuentaOrigen = document.getElementById("cuentaOrigenAbono")?.value || "efectivo";
+
+    let cuentas = StorageService.get("cuentasPorPagar", []);
+    const index = cuentas.findIndex(c => c.id === idCuenta);
+    if (index === -1) return;
+
+    const cuenta = cuentas[index];
     const validacion = ValidatorService.validarMonto(montoAbono, cuenta.saldoPendiente);
     if (!validacion.valid) {
         alert("⚠️ " + validacion.error);
@@ -407,6 +515,20 @@ function registrarAbonoProveedor(idCuenta) {
         console.error("❌ Error guardando abono");
         return;
     }
-    alert("Abono registrado correctamente.");
+
+    let movimientos = StorageService.get("movimientosCaja", []);
+    movimientos.push({
+        fecha: new Date().toLocaleDateString('es-MX'),
+        monto: montoAbono,
+        tipo: "Egreso",
+        concepto: `Abono a proveedor ${cuenta.proveedor}`,
+        cuenta: cuentaOrigen
+    });
+    if (!StorageService.set("movimientosCaja", movimientos)) {
+        console.error("❌ Error guardando movimiento de caja");
+    }
+
+    document.querySelector('[data-modal]').remove();
+    alert("✅ Abono registrado correctamente.");
     renderCuentasPorPagar();
 }

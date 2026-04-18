@@ -350,8 +350,53 @@ function abrirModalAbonoAvanzado(folio) {
     const diasDesdeVenta = Math.floor((hoy - fechaVenta) / (1000 * 60 * 60 * 24));
     const aplicaPoliticaContado = diasDesdeVenta < 30;
 
+    const articulos = cuenta.articulos || [];
+    const articulosHTML = articulos.length > 0 ? `
+        <div style="margin-bottom:20px;">
+            <strong style="color:#374151;">🛒 Artículos de la Venta:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:14px;">
+                <thead><tr style="background:#f3f4f6;">
+                    <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">Producto</th>
+                    <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb;">Cant.</th>
+                </tr></thead>
+                <tbody>
+                    ${articulos.map(a => `<tr>
+                        <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${a.nombre || a.productoNombre || '-'}</td>
+                        <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${a.cantidad || 1}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>` : '';
+
+    const pagaresHTML = pagaresCliente.length > 0 ? `
+        <div style="margin-bottom:20px;">
+            <strong style="color:#374151;">📋 Pagarés Pendientes:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:14px;">
+                <thead><tr style="background:#fef3c7;">
+                    <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">#</th>
+                    <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">Vencimiento</th>
+                    <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb;">Monto</th>
+                    <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #e5e7eb;">Estado</th>
+                </tr></thead>
+                <tbody>
+                    ${pagaresCliente.map((p, i) => `<tr>
+                        <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${i + 1}</td>
+                        <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${p.fechaVencimiento || p.vencimiento || '-'}</td>
+                        <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${dinero(p.monto || p.abono || 0)}</td>
+                        <td style="padding:6px 8px; text-align:center; border-bottom:1px solid #f3f4f6;"><span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:9999px; font-size:12px;">${p.estado || 'Pendiente'}</span></td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>` : '';
+
+    const bancosDebito = (tarjetasConfig || []).filter(b => b.tipo === "debito");
+    const opcionesDestino = [
+        ...(cuentasEfectivo || [{ id: "efectivo", nombre: "💵 Efectivo" }]).map(c => `<option value="${c.id}">${c.nombre}</option>`),
+        ...bancosDebito.map(b => `<option value="banco_${b.banco}">🏦 ${b.banco}</option>`)
+    ].join('') || '<option value="efectivo">💵 Caja / Efectivo</option>';
+
     let modalHTML = `
-        <div style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+        <div data-modal="true" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto;">
                 <h2 style="margin-top:0;">💰 Registrar Abono - ${cuenta.nombre}</h2>
                 
@@ -360,6 +405,16 @@ function abrirModalAbonoAvanzado(folio) {
                         <div><small style="color:#4b5563;">Saldo Actual</small><br><strong style="font-size:20px; color:#27ae60;">${dinero(saldo)}</strong></div>
                         <div><small style="color:#4b5563;">Pagarés Pendientes</small><br><strong style="font-size:20px; color:#e74c3c;">${pagaresCliente.length}</strong></div>
                     </div>
+                </div>
+
+                ${articulosHTML}
+                ${pagaresHTML}
+
+                <div class="campo" style="margin-bottom:15px;">
+                    <label>Cuenta Receptora:</label>
+                    <select id="cuentaDestinoAbono" style="padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; width:100%;">
+                        ${opcionesDestino}
+                    </select>
                 </div>
 
                 <div class="campo" style="margin-bottom:20px;">
@@ -386,7 +441,7 @@ function abrirModalAbonoAvanzado(folio) {
                             style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
                         ✅ Registrar Abono
                     </button>
-                    <button onclick="this.closest('div').parentElement.remove();" 
+                    <button onclick="this.closest('[data-modal]').remove();" 
                             style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
                         ✕ Cancelar
                     </button>
@@ -400,6 +455,7 @@ function abrirModalAbonoAvanzado(folio) {
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica) {
     const montoAbono = parseFloat(document.getElementById("montoAbono").value);
     const usarPolitica = document.getElementById("chkLiquidarContado")?.checked && aplicaPolitica;
+    const cuentaDestino = document.getElementById("cuentaDestinoAbono")?.value || "efectivo";
 
     if (isNaN(montoAbono) || montoAbono <= 0) {
         alert("Ingresa un monto válido.");
@@ -428,7 +484,8 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         cuenta.abonos = cuenta.abonos || [];
         cuenta.abonos.push({
             fecha: new Date().toLocaleDateString(),
-            monto: montoAbono
+            monto: montoAbono,
+            cuentaDestino
         });
         cuenta.saldoActual = nuevoSaldo;
         
@@ -447,7 +504,8 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             fecha: new Date().toLocaleDateString(),
             monto: montoAbono,
             tipo: "Ingreso",
-            concepto: `Abono a ${cuenta.nombre} - ${folio}`
+            concepto: `Abono a ${cuenta.nombre} - ${folio}`,
+            cuenta: cuentaDestino
         });
         if (!StorageService.set("movimientosCaja", movimientos)) {
             console.error("❌ Error guardando movimiento de caja");
@@ -455,13 +513,13 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     }
 
     alert("✅ Abono registrado exitosamente.");
-    document.querySelector('div[style*="position:fixed"]').remove();
+    document.querySelector('[data-modal]').remove();
     renderCuentasXCobrar();
 }
 
 function abrirModalNuevoCliente() {
     const modalHTML = `
-        <div style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+        <div data-modal="true" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto;">
                 <h2 style="margin-top:0;">➕ Nuevo Cliente</h2>
                 
@@ -494,7 +552,7 @@ function abrirModalNuevoCliente() {
                             style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
                         ✅ Guardar Cliente
                     </button>
-                    <button onclick="this.closest('div').parentElement.remove();" 
+                    <button onclick="this.closest('[data-modal]').remove();" 
                             style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
                         ✕ Cancelar
                     </button>
@@ -532,6 +590,6 @@ function guardarClienteDesdeModal() {
         return;
     }
     alert("✅ Cliente agregado exitosamente.");
-    document.querySelector('div[style*="position:fixed"]').remove();
+    document.querySelector('[data-modal]').remove();
     cargarClientesSelect();
 }
