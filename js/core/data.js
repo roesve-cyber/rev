@@ -34,6 +34,10 @@ let requisicionesCompra = StorageService.get("requisicionesCompra", []);
 let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
 let pagaresSistema = StorageService.get("pagaresSistema", []);
 
+let cuentasEfectivo = StorageService.get("cuentasEfectivo", [
+    { id: "efectivo", nombre: "💵 Efectivo", tipo: "efectivo", saldo: 0 }
+]);
+
 let plazoSeleccionado = null;
 let productoEditando = null;
 let productoActualId = null;

@@ -82,7 +82,8 @@ function prepararVistaCompras() {
 function actualizarSelectBancos() {
     const select = document.getElementById("compraBancoSeleccionado");
     if (!select) return;
-    select.innerHTML = tarjetasConfig.map(t => `<option value="${t.banco}">${t.banco}</option>`).join('');
+    const bancosMSI = tarjetasConfig.filter(t => !t.tipo || t.tipo === "credito");
+    select.innerHTML = bancosMSI.map(t => `<option value="${t.banco}">${t.banco}</option>`).join('');
 }
 
 function gestionarCamposPago() {

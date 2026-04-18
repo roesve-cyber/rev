@@ -7,6 +7,7 @@ function renderBancosConfig() {
         <table class="tabla-admin">
             <thead><tr>
                 <th>Banco</th>
+                <th>Tipo</th>
                 <th>Día de Corte</th>
                 <th>Día Límite de Pago</th>
                 <th>Acciones</th>
@@ -14,13 +15,20 @@ function renderBancosConfig() {
             <tbody>`;
 
     tarjetasConfig.forEach((t, index) => {
-        const notaMes = (parseInt(t.diaCorte) > parseInt(t.diaLimite))
+        const tipo = t.tipo || "credito";
+        const tipoLabel = tipo === "debito"
+            ? '<span style="color:#2b6cb0; font-weight:bold;">🏦 Débito</span>'
+            : '<span style="color:#6b21a8; font-weight:bold;">💳 Crédito MSI</span>';
+        const notaMes = (tipo !== "debito" && parseInt(t.diaCorte) > parseInt(t.diaLimite))
             ? '<br><small style="color:orange;">(Mes siguiente)</small>' : '';
+        const diaCorteStr = tipo === "debito" ? '—' : `Día ${t.diaCorte}`;
+        const diaLimiteStr = tipo === "debito" ? '—' : `Día ${t.diaLimite} ${notaMes}`;
         html += `
             <tr>
                 <td><strong>${t.banco}</strong></td>
-                <td>Día ${t.diaCorte}</td>
-                <td>Día ${t.diaLimite} ${notaMes}</td>
+                <td>${tipoLabel}</td>
+                <td>${diaCorteStr}</td>
+                <td>${diaLimiteStr}</td>
                 <td>
                     <button onclick="prepararEdicionBanco(${index})" style="background:#3182ce; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:5px;">Modificar</button>
                     <button onclick="eliminarBanco(${index})" style="background:#e74c3c; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Eliminar</button>
@@ -32,15 +40,23 @@ function renderBancosConfig() {
 }
 
 function abrirModalBanco() {
-    const nombre = prompt("Nombre del Banco:");
+    const nombre = prompt("Nombre del Banco / Cuenta:");
     if (!nombre) return;
-    const corte  = parseInt(prompt("Día de corte (1-31):"));
-    const limite = parseInt(prompt("Día límite de pago (1-31):"));
-    if (!isNaN(corte) && !isNaN(limite)) {
-        tarjetasConfig.push({ banco: nombre.toUpperCase(), diaCorte: corte, diaLimite: limite });
+    const tipoOpc = prompt("Tipo de cuenta:\n1 = Débito\n2 = Crédito (MSI)");
+    const tipo = tipoOpc === "1" ? "debito" : "credito";
+
+    if (tipo === "debito") {
+        tarjetasConfig.push({ banco: nombre.toUpperCase(), tipo: "debito", diaCorte: 0, diaLimite: 0 });
         actualizarYRefrescarBancos();
     } else {
-        alert("Por favor ingresa números válidos.");
+        const corte  = parseInt(prompt("Día de corte (1-31):"));
+        const limite = parseInt(prompt("Día límite de pago (1-31):"));
+        if (!isNaN(corte) && !isNaN(limite)) {
+            tarjetasConfig.push({ banco: nombre.toUpperCase(), tipo: "credito", diaCorte: corte, diaLimite: limite });
+            actualizarYRefrescarBancos();
+        } else {
+            alert("Por favor ingresa números válidos.");
+        }
     }
 }
 
@@ -48,13 +64,19 @@ function prepararEdicionBanco(index) {
     const banco = tarjetasConfig[index];
     const nuevoNombre = prompt("Nombre del Banco:", banco.banco);
     if (nuevoNombre === null) return;
-    const nuevoCorte  = parseInt(prompt("Día de Corte (1-31):", banco.diaCorte));
-    const nuevoLimite = parseInt(prompt("Día Límite de Pago (1-31):", banco.diaLimite));
-    if (!nuevoNombre || isNaN(nuevoCorte) || isNaN(nuevoLimite)) {
-        alert("Datos inválidos.");
-        return;
+    const tipo = banco.tipo || "credito";
+    if (tipo === "debito") {
+        if (!nuevoNombre) { alert("Datos inválidos."); return; }
+        tarjetasConfig[index] = { banco: nuevoNombre.toUpperCase(), tipo: "debito", diaCorte: 0, diaLimite: 0 };
+    } else {
+        const nuevoCorte  = parseInt(prompt("Día de Corte (1-31):", banco.diaCorte));
+        const nuevoLimite = parseInt(prompt("Día Límite de Pago (1-31):", banco.diaLimite));
+        if (!nuevoNombre || isNaN(nuevoCorte) || isNaN(nuevoLimite)) {
+            alert("Datos inválidos.");
+            return;
+        }
+        tarjetasConfig[index] = { banco: nuevoNombre.toUpperCase(), tipo: "credito", diaCorte: nuevoCorte, diaLimite: nuevoLimite };
     }
-    tarjetasConfig[index] = { banco: nuevoNombre.toUpperCase(), diaCorte: nuevoCorte, diaLimite: nuevoLimite };
     actualizarYRefrescarBancos();
     alert("¡Cuenta modificada con éxito!");
 }
@@ -244,4 +266,60 @@ function renderCuentasMSI() {
             </tr>`;
     });
     contenedor.innerHTML = html + "</tbody></table>";
+}
+
+// ===== FLUJO DE CAJA =====
+function renderFlujoCaja() {
+    const contenedor = document.getElementById("tablasFlujoCaja");
+    if (!contenedor) return;
+
+    const movimientos = StorageService.get("movimientosCaja", []);
+
+    let totalIngresos = 0;
+    let totalEgresos = 0;
+
+    let html = `
+        <div style="overflow-x:auto;">
+        <table class="tabla-admin" style="width:100%;">
+            <thead><tr>
+                <th>Fecha</th>
+                <th>Folio</th>
+                <th>Concepto</th>
+                <th>Referencia</th>
+                <th>Cuenta</th>
+                <th>Tipo</th>
+                <th style="text-align:right;">Monto</th>
+            </tr></thead>
+            <tbody>`;
+
+    if (movimientos.length === 0) {
+        html += `<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">Sin movimientos registrados.</td></tr>`;
+    } else {
+        [...movimientos].reverse().forEach(m => {
+            const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
+            if (esIngreso) totalIngresos += parseFloat(m.monto) || 0;
+            else totalEgresos += parseFloat(m.monto) || 0;
+            const colorTipo = esIngreso ? "#059669" : "#dc2626";
+            const labelTipo = esIngreso ? "⬆️ Ingreso" : "⬇️ Egreso";
+            const cuenta = m.cuenta || "efectivo";
+            html += `
+                <tr>
+                    <td>${m.fecha || ""}</td>
+                    <td>${m.folio || "—"}</td>
+                    <td>${m.concepto || ""}</td>
+                    <td>${m.referencia || "—"}</td>
+                    <td><strong>${cuenta}</strong></td>
+                    <td style="color:${colorTipo}; font-weight:bold;">${labelTipo}</td>
+                    <td style="text-align:right; font-weight:bold; color:${colorTipo};">${dinero(m.monto)}</td>
+                </tr>`;
+        });
+    }
+
+    html += `</tbody></table></div>`;
+    contenedor.innerHTML = html;
+
+    const elIngresos = document.getElementById("totalIngresoContado");
+    if (elIngresos) elIngresos.textContent = dinero(totalIngresos);
+    const elEgresos = document.getElementById("totalEgresosProveedores");
+    if (elEgresos) elEgresos.textContent = dinero(totalEgresos);
 }
