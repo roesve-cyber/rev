@@ -15,7 +15,61 @@ Construido con HTML, CSS y JavaScript puro (sin bundlers). Datos locales en `loc
 
 ---
 
-## 🔥 Configurar Firebase Firestore
+## 🔐 Configurar Firebase Auth
+
+### 1. Activar autenticación Email/Contraseña
+
+1. En Firebase Console → **Authentication** → **Sign-in method**.
+2. Habilita **Correo electrónico/contraseña** y guarda los cambios.
+
+### 2. Crear el primer usuario administrador
+
+1. En **Authentication → Users → Agregar usuario**.
+2. Ingresa un correo y contraseña para el administrador.
+3. Copia el **UID** que aparece en la tabla de usuarios.
+
+### 3. Crear el perfil del admin en Firestore
+
+1. En **Firestore Database → Datos → Nueva colección**: nombre `usuarios`.
+2. ID del documento: pega el UID copiado en el paso anterior.
+3. Agrega los campos:
+   - `nombre` (string): `"Administrador"` (o el nombre real)
+   - `rol` (string): `"admin"`
+   - `email` (string): el correo del admin
+   - `activo` (boolean): `true`
+
+### 4. Pegar las reglas de seguridad
+
+En **Firestore → Reglas**, pega el contenido del archivo `firestore.rules` incluido en este repositorio:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /posData/{document} {
+      allow read, write: if request.auth != null;
+    }
+    match /usuarios/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && (
+        request.auth.uid == uid ||
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin'
+      );
+    }
+  }
+}
+```
+
+### 5. Flujo de inicio de sesión
+
+Una vez configurado Firebase Auth, la pantalla de login solicitará **email + contraseña** en lugar de usuario + PIN.
+
+- Si Firebase está activo → autenticación real con Firebase Auth + perfil desde Firestore.
+- Si Firebase no está configurado → fallback a usuarios locales (usuario/PIN en localStorage).
+
+---
+
+
 
 ### 1. Crear proyecto en Firebase Console
 
@@ -156,9 +210,14 @@ rev/
 
 ## 👤 Usuarios por defecto
 
+> Si Firebase Auth **no está configurado**, el sistema usa usuarios locales de `localStorage`:
+
 | Usuario | PIN  | Rol         |
 |---------|------|-------------|
 | admin   | 1234 | Administrador (acceso total) |
 | vendedor | 0000 | Vendedor (solo menú de ventas) |
 
+> Con Firebase Auth activo, el login solicita **email + contraseña**. Los usuarios deben crearse en Firebase Console (ver sección **Configurar Firebase Auth**).
+
 Puedes gestionar usuarios en **⚙️ CONFIGURACIÓN → Usuarios del sistema** (solo admins).
+
