@@ -301,6 +301,8 @@ let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
 let pagaresSistema = StorageService.get("pagaresSistema", []);
 
 let plazoSeleccionado = null;
+let _metodoPagoGuardado = null;
+let _engancheGuardado = 0;
 let productoEditando = null;
 let productoActualId = null;
 let clienteEditandoId = null;
@@ -3291,7 +3293,8 @@ function confirmarVentaFinal() {
         return;
     }
 
-    const metodoPago = document.getElementById("selMetodoPago")?.value;
+    const metodoPago = _metodoPagoGuardado
+        || document.getElementById("selMetodoPago")?.value;
     console.log("Método de pago:", metodoPago);
     
     if (!metodoPago) {
@@ -3302,7 +3305,8 @@ function confirmarVentaFinal() {
     const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
     console.log("Total contado:", totalContado);
     
-    let enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
+    let enganche = _engancheGuardado
+        ?? (parseFloat(document.getElementById("numEnganche")?.value) || 0);
     if (enganche < 0) enganche = 0;
     
     if (enganche > totalContado) {
@@ -4324,6 +4328,8 @@ function guardarTicketEnRegistro(datosVenta, folio) {
 
 // ===== CUENTAS POR COBRAR =====
 function irASeleccionCliente() {
+    _metodoPagoGuardado = document.getElementById("selMetodoPago")?.value || "contado";
+    _engancheGuardado   = parseFloat(document.getElementById("numEnganche")?.value) || 0;
     navA("seleccionarcliente");
     renderResumenVentaCliente();
     cargarClientesSelect();
