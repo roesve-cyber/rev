@@ -132,7 +132,8 @@ function renderClientes() {
                 <td><small>${c.referencia || '-'}</small></td>
                 <td style="text-align:center;">
                     <button onclick="prepararEdicionCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px; margin-right:10px;">✏️</button>
-                    <button onclick="eliminarCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px;">🗑️</button>
+                    <button onclick="eliminarCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px; margin-right:10px;">🗑️</button>
+                    <button onclick="abrirEstadoCuentaCliente(${c.id})" style="padding:4px 8px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📋 Estado</button>
                 </td>
             </tr>`;
     });
@@ -283,6 +284,8 @@ function renderCuentasXCobrar() {
     if (!contenedor) return;
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagaresSistema = StorageService.get("pagaresSistema", []);
+    const hoy = new Date();
 
     if (cuentas.length === 0) {
         contenedor.innerHTML = `<div style="background:#f0fdf4; padding:40px; text-align:center; border-radius:10px;"><p style="font-size:18px; color:#27ae60; font-weight:bold;">✅ ¡No hay cuentas pendientes!</p></div>`;
@@ -295,6 +298,7 @@ function renderCuentasXCobrar() {
             <th>Fecha Venta</th>
             <th>Total Venta</th>
             <th>Saldo Actual</th>
+            <th>Pagarés</th>
             <th>Estatus</th>
             <th>Acciones</th>
         </tr></thead>
@@ -308,14 +312,26 @@ function renderCuentasXCobrar() {
         const color = saldo > 0 ? "#27ae60" : "#999";
         const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString();
 
+        const pagaresDelFolio = pagaresSistema.filter(p => p.folio === cuenta.folio);
+        const pagaresPendientes = pagaresDelFolio.filter(p => p.estado === "Pendiente");
+        const pagaresVencidos = pagaresPendientes.filter(p => new Date(p.fechaVencimiento) < hoy);
+        const pagaresTexto = pagaresPendientes.length > 0
+            ? `<span style="color:#374151;">${pagaresPendientes.length} pendiente(s)</span>`
+            : `<span style="color:#27ae60;">✅ Al corriente</span>`;
+        const vencidosTexto = pagaresVencidos.length > 0
+            ? `<br><span style="color:#dc2626; font-weight:bold; font-size:12px;">⚠️ ${pagaresVencidos.length} vencido(s)</span>`
+            : '';
+
         html += `<tr>
             <td><strong>${cuenta.nombre}</strong><br><small style="color:#718096;">${cuenta.folio}</small></td>
             <td>${fechaVenta}</td>
             <td>${dinero(cuenta.totalContadoOriginal ?? 0)}${enganche > 0 ? `<br><small style="color:#27ae60;">✅ Enganche: ${dinero(enganche)}</small>` : ''}</td>
             <td style="font-weight:bold; color:${color};">${dinero(saldo)}</td>
+            <td>${pagaresTexto}${vencidosTexto}</td>
             <td>${cuenta.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</td>
-            <td>
-                <button onclick="abrirModalAbonoAvanzado('${cuenta.folio}')" style="padding:6px 12px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer;">💰 Abonar</button>
+            <td style="white-space:nowrap;">
+                <button onclick="abrirModalAbonoAvanzado('${cuenta.folio}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:4px;">💰 Abonar</button>
+                <button onclick="abrirEstadoCuentaFolio('${cuenta.folio}')" style="padding:6px 10px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer;">📋 Estado</button>
             </td>
         </tr>`;
     });
@@ -1243,9 +1259,380 @@ function generarTicketAbonoTermico(datosAbono) {
     setTimeout(() => { vent.print(); }, 800);
 }
 
+// ===== ESTADO DE CUENTA POR FOLIO =====
+function abrirEstadoCuentaFolio(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagaresSistema = StorageService.get("pagaresSistema", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return alert("Cuenta no encontrada.");
+
+    const hoy = new Date();
+    const pagaresDelFolio = pagaresSistema
+        .filter(p => p.folio === folio)
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    const abonos = cuenta.abonos || [];
+    const totalAbonado = abonos.reduce((s, a) => s + (a.monto || 0), 0);
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    const saldoActual = Number(cuenta.saldoActual || 0);
+    const totalVenta = Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0);
+    const pagaresVencidos = pagaresDelFolio.filter(p => p.estado === "Pendiente" && new Date(p.fechaVencimiento) < hoy);
+    const montoVencido = pagaresVencidos.reduce((s, p) => s + (p.monto || 0), 0);
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+    const amortizacionHTML = pagaresDelFolio.length > 0
+        ? pagaresDelFolio.map((p, i) => {
+            const vencido = p.estado === "Pendiente" && new Date(p.fechaVencimiento) < hoy;
+            const rowStyle = vencido ? 'background:#fee2e2;' : (p.estado === "Pagado" ? 'background:#f0fdf4;' : '');
+            const estadoBadge = p.estado === "Pagado"
+                ? `<span style="background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:9999px; font-size:12px;">✅ Pagado</span>`
+                : vencido
+                    ? `<span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:9999px; font-size:12px;">⚠️ Vencido</span>`
+                    : p.estado === "Cancelado"
+                        ? `<span style="background:#e5e7eb; color:#374151; padding:2px 8px; border-radius:9999px; font-size:12px;">✖ Cancelado</span>`
+                        : `<span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:9999px; font-size:12px;">⏳ Pendiente</span>`;
+            return `<tr style="${rowStyle}">
+                <td style="padding:8px; text-align:center;">${i + 1}</td>
+                <td style="padding:8px;">${esc(p.fechaVencimiento || '-')}</td>
+                <td style="padding:8px; text-align:right;">${dinero(p.monto || 0)}</td>
+                <td style="padding:8px; text-align:center;">${estadoBadge}</td>
+                <td style="padding:8px;">${esc(p.fechaAbono || '-')}</td>
+                <td style="padding:8px; text-align:right;">${p.montoAbonado ? dinero(p.montoAbonado) : '-'}</td>
+            </tr>`;
+        }).join('')
+        : `<tr><td colspan="6" style="padding:12px; text-align:center; color:#6b7280;">Sin pagarés registrados</td></tr>`;
+
+    const abonosHTML = abonos.length > 0
+        ? abonos.map(a => `<tr>
+            <td style="padding:8px;">${esc(a.fecha || '-')}</td>
+            <td style="padding:8px; text-align:right; font-weight:bold;">${dinero(a.monto || 0)}</td>
+            <td style="padding:8px;">${esc(a.etiquetaCuenta || a.medioPago || '-')}</td>
+        </tr>`).join('')
+        : `<tr><td colspan="3" style="padding:12px; text-align:center; color:#6b7280;">Sin abonos registrados</td></tr>`;
+
+    const modalHTML = `
+        <div data-modal="estado-cuenta-folio" style="position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
+            <div id="estadoCuentaFolioDoc" style="background:white; padding:30px; border-radius:15px; width:95%; max-width:900px; margin:0 auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid #e5e7eb; padding-bottom:15px;">
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <img src="img/logo.png" style="width:60px; height:60px; object-fit:contain;" onerror="this.style.display='none'">
+                        <div>
+                            <div style="font-size:20px; font-weight:bold; color:#1e3a5f;">MUEBLERÍA MI PUEBLITO</div>
+                            <div style="font-size:14px; color:#6b7280;">Estado de Cuenta — ${esc(folio)}</div>
+                        </div>
+                    </div>
+                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-folio&quot;]')?.remove();" style="background:none; border:none; font-size:24px; cursor:pointer; color:#6b7280;">✕</button>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
+                    <div style="background:#f8fafc; padding:15px; border-radius:8px;">
+                        <div style="font-size:12px; color:#6b7280; margin-bottom:4px;">CLIENTE</div>
+                        <div style="font-weight:bold; font-size:16px;">${esc(cuenta.nombre)}</div>
+                        ${cuenta.telefono ? `<div style="font-size:13px; color:#4b5563;">📞 ${esc(cuenta.telefono)}</div>` : ''}
+                        ${cuenta.direccion ? `<div style="font-size:13px; color:#4b5563;">📍 ${esc(cuenta.direccion)}</div>` : ''}
+                    </div>
+                    <div style="background:#f8fafc; padding:15px; border-radius:8px;">
+                        <div style="font-size:12px; color:#6b7280; margin-bottom:4px;">DATOS DE VENTA</div>
+                        <div style="font-size:13px;"><b>Folio:</b> ${esc(folio)}</div>
+                        <div style="font-size:13px;"><b>Fecha:</b> ${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX') : '-'}</div>
+                        <div style="font-size:13px;"><b>Modalidad:</b> ${cuenta.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:14px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:#1d4ed8;">TOTAL VENTA</div>
+                        <div style="font-size:18px; font-weight:bold; color:#1e40af;">${dinero(totalVenta)}</div>
+                    </div>
+                    <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:14px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:#15803d;">ENGANCHE</div>
+                        <div style="font-size:18px; font-weight:bold; color:#166534;">${dinero(enganche)}</div>
+                    </div>
+                    <div style="background:#fefce8; border:1px solid #fde68a; padding:14px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:#92400e;">TOTAL ABONADO</div>
+                        <div style="font-size:18px; font-weight:bold; color:#78350f;">${dinero(totalAbonado)}</div>
+                    </div>
+                    <div style="background:${saldoActual > 0 ? '#fef2f2' : '#f0fdf4'}; border:1px solid ${saldoActual > 0 ? '#fecaca' : '#bbf7d0'}; padding:14px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:${saldoActual > 0 ? '#b91c1c' : '#15803d'};">SALDO ACTUAL</div>
+                        <div style="font-size:18px; font-weight:bold; color:${saldoActual > 0 ? '#991b1b' : '#166534'};">${dinero(saldoActual)}</div>
+                    </div>
+                </div>
+
+                ${pagaresVencidos.length > 0 ? `
+                <div style="background:#fee2e2; border:1px solid #fecaca; padding:12px; border-radius:8px; margin-bottom:20px;">
+                    <span style="color:#991b1b; font-weight:bold;">⚠️ ${pagaresVencidos.length} pagaré(s) vencido(s) — Total vencido: ${dinero(montoVencido)}</span>
+                </div>` : ''}
+
+                <div style="margin-bottom:20px;">
+                    <h3 style="margin:0 0 10px 0; color:#1e3a5f;">📋 Tabla de Amortización</h3>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                            <thead><tr style="background:#1e3a5f; color:white;">
+                                <th style="padding:10px; text-align:center;">#</th>
+                                <th style="padding:10px; text-align:left;">Vencimiento</th>
+                                <th style="padding:10px; text-align:right;">Monto</th>
+                                <th style="padding:10px; text-align:center;">Estado</th>
+                                <th style="padding:10px; text-align:left;">Fecha Pago</th>
+                                <th style="padding:10px; text-align:right;">Monto Abonado</th>
+                            </tr></thead>
+                            <tbody>${amortizacionHTML}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:20px;">
+                    <h3 style="margin:0 0 10px 0; color:#1e3a5f;">💰 Historial de Abonos</h3>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                            <thead><tr style="background:#f3f4f6;">
+                                <th style="padding:10px; text-align:left;">Fecha</th>
+                                <th style="padding:10px; text-align:right;">Monto</th>
+                                <th style="padding:10px; text-align:left;">Método / Cuenta</th>
+                            </tr></thead>
+                            <tbody>${abonosHTML}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;">
+                    <button onclick="imprimirEstadoCuentaFolio('${folio}')" style="padding:10px 20px; background:#2c3e50; color:white; border:none; border-radius:6px; cursor:pointer;">🖨️ Imprimir</button>
+                    <button onclick="guardarImagenEstadoCuenta('estadoCuentaFolioDoc')" style="padding:10px 20px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer;">📷 Guardar Imagen</button>
+                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-folio&quot;]')?.remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cerrar</button>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function imprimirEstadoCuentaFolio(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagaresSistema = StorageService.get("pagaresSistema", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+
+    const hoy = new Date();
+    const pagaresDelFolio = pagaresSistema
+        .filter(p => p.folio === folio)
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    const abonos = cuenta.abonos || [];
+    const totalAbonado = abonos.reduce((s, a) => s + (a.monto || 0), 0);
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    const saldoActual = Number(cuenta.saldoActual || 0);
+    const totalVenta = Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0);
+    const pagaresVencidos = pagaresDelFolio.filter(p => p.estado === "Pendiente" && new Date(p.fechaVencimiento) < hoy);
+    const montoVencido = pagaresVencidos.reduce((s, p) => s + (p.monto || 0), 0);
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+    const amortizacionRows = pagaresDelFolio.map((p, i) => {
+        const vencido = p.estado === "Pendiente" && new Date(p.fechaVencimiento) < hoy;
+        const rowBg = vencido ? '#fee2e2' : (p.estado === "Pagado" ? '#f0fdf4' : '#fff');
+        const estadoLabel = p.estado === "Pagado" ? '✅ Pagado' : vencido ? '⚠️ Vencido' : p.estado === "Cancelado" ? '✖ Cancelado' : '⏳ Pendiente';
+        return `<tr style="background:${rowBg};">
+            <td style="padding:6px 8px; text-align:center; border-bottom:1px solid #e5e7eb;">${i + 1}</td>
+            <td style="padding:6px 8px; border-bottom:1px solid #e5e7eb;">${esc(p.fechaVencimiento || '-')}</td>
+            <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb;">${dinero(p.monto || 0)}</td>
+            <td style="padding:6px 8px; text-align:center; border-bottom:1px solid #e5e7eb;">${estadoLabel}</td>
+            <td style="padding:6px 8px; border-bottom:1px solid #e5e7eb;">${esc(p.fechaAbono || '-')}</td>
+            <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb;">${p.montoAbonado ? dinero(p.montoAbonado) : '-'}</td>
+        </tr>`;
+    }).join('');
+
+    const abonosRows = abonos.map(a => `<tr>
+        <td style="padding:6px 8px; border-bottom:1px solid #e5e7eb;">${esc(a.fecha || '-')}</td>
+        <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb; font-weight:bold;">${dinero(a.monto || 0)}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid #e5e7eb;">${esc(a.etiquetaCuenta || a.medioPago || '-')}</td>
+    </tr>`).join('') || `<tr><td colspan="3" style="padding:8px; text-align:center; color:#6b7280;">Sin abonos</td></tr>`;
+
+    const printHTML = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Estado de Cuenta - ${esc(folio)}</title>
+    <style>
+        @page { size: letter; margin: 15mm; }
+        body { font-family: Arial, sans-serif; font-size: 12px; color: #000; }
+        h2 { margin: 0; font-size: 18px; }
+        h3 { margin: 15px 0 8px 0; font-size: 14px; border-bottom: 2px solid #1e3a5f; padding-bottom: 4px; color: #1e3a5f; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th { background: #1e3a5f; color: white; padding: 8px; text-align: left; font-size: 11px; }
+        td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 15px; }
+        .kpi { border: 1px solid #ddd; padding: 10px; text-align: center; border-radius: 6px; }
+        .kpi-label { font-size: 10px; color: #6b7280; }
+        .kpi-value { font-size: 16px; font-weight: bold; margin-top: 4px; }
+        .alert-vencidos { background: #fee2e2; border: 1px solid #fecaca; padding: 8px 12px; border-radius: 6px; color: #991b1b; font-weight: bold; margin-bottom: 12px; }
+        .header-row { display: flex; align-items: center; gap: 16px; margin-bottom: 15px; border-bottom: 2px solid #1e3a5f; padding-bottom: 12px; }
+        .logo { width: 55px; height: 55px; object-fit: contain; }
+        @media print { body { margin: 0; } }
+    </style>
+</head>
+<body>
+    <div class="header-row">
+        <img src="img/logo.png" class="logo" onerror="this.style.display='none'">
+        <div>
+            <h2>MUEBLERÍA MI PUEBLITO</h2>
+            <div>Estado de Cuenta — Folio: <b>${esc(folio)}</b> &nbsp;|&nbsp; Fecha: ${new Date().toLocaleDateString('es-MX')}</div>
+            <div>Cliente: <b>${esc(cuenta.nombre)}</b>${cuenta.telefono ? ' &nbsp;|&nbsp; Tel: ' + esc(cuenta.telefono) : ''}</div>
+        </div>
+    </div>
+
+    <div class="kpi-grid">
+        <div class="kpi"><div class="kpi-label">TOTAL VENTA</div><div class="kpi-value">${dinero(totalVenta)}</div></div>
+        <div class="kpi"><div class="kpi-label">ENGANCHE</div><div class="kpi-value">${dinero(enganche)}</div></div>
+        <div class="kpi"><div class="kpi-label">TOTAL ABONADO</div><div class="kpi-value">${dinero(totalAbonado)}</div></div>
+        <div class="kpi"><div class="kpi-label">SALDO ACTUAL</div><div class="kpi-value">${dinero(saldoActual)}</div></div>
+    </div>
+
+    ${pagaresVencidos.length > 0 ? `<div class="alert-vencidos">⚠️ ${pagaresVencidos.length} pagaré(s) vencido(s) — Total vencido: ${dinero(montoVencido)}</div>` : ''}
+
+    <h3>📋 Tabla de Amortización</h3>
+    <table>
+        <thead><tr>
+            <th style="text-align:center;">#</th>
+            <th>Vencimiento</th>
+            <th style="text-align:right;">Monto</th>
+            <th style="text-align:center;">Estado</th>
+            <th>Fecha Pago</th>
+            <th style="text-align:right;">Abonado</th>
+        </tr></thead>
+        <tbody>${amortizacionRows || '<tr><td colspan="6" style="padding:8px; text-align:center;">Sin pagarés</td></tr>'}</tbody>
+    </table>
+
+    <h3>💰 Historial de Abonos</h3>
+    <table>
+        <thead><tr>
+            <th>Fecha</th>
+            <th style="text-align:right;">Monto</th>
+            <th>Método / Cuenta</th>
+        </tr></thead>
+        <tbody>${abonosRows}</tbody>
+    </table>
+
+    <script>window.onload = function(){ window.print(); };<\/script>
+</body>
+</html>`;
+
+    const vent = window.open('', '_blank');
+    if (!vent) { alert("⚠️ Habilita las ventanas emergentes para imprimir."); return; }
+    vent.document.write(printHTML);
+    vent.document.close();
+}
+
+function guardarImagenEstadoCuenta(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = function() {
+        html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'estado-cuenta-' + elementId + '.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }).catch(err => { console.error(err); alert('No se pudo generar la imagen. Usa el botón 🖨️ Imprimir para guardar el documento como PDF desde tu navegador.'); });
+    };
+    script.onerror = function() { alert('No se pudo cargar la herramienta de imagen. Verifica tu conexión a internet o usa el botón 🖨️ Imprimir para guardar el estado de cuenta como PDF.'); };
+    document.head.appendChild(script);
+}
+
+// ===== ESTADO DE CUENTA POR CLIENTE =====
+function abrirEstadoCuentaCliente(clienteId) {
+    const clientesData = StorageService.get("clientes", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagaresSistema = StorageService.get("pagaresSistema", []);
+    const cliente = clientesData.find(c => c.id === clienteId);
+    if (!cliente) return alert("Cliente no encontrado.");
+
+    const hoy = new Date();
+    const cuentasCliente = cuentas.filter(c => c.clienteId === clienteId || c.nombre === cliente.nombre);
+    const cuentasActivas = cuentasCliente.filter(c => c.estado !== "Saldado");
+    const totalAdeudado = cuentasActivas.reduce((s, c) => s + Number(c.saldoActual || 0), 0);
+    const foliosActivos = cuentasActivas.length;
+    const pagaresCliente = pagaresSistema.filter(p => cuentasCliente.some(c => c.folio === p.folio));
+    const pagaresVencidosGlobal = pagaresCliente.filter(p => p.estado === "Pendiente" && new Date(p.fechaVencimiento) < hoy);
+    const montoVencidoGlobal = pagaresVencidosGlobal.reduce((s, p) => s + (p.monto || 0), 0);
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+    const foliosHTML = cuentasActivas.length > 0
+        ? cuentasActivas.map(cuenta => {
+            const pagaresDelFolio = pagaresSistema.filter(p => p.folio === cuenta.folio);
+            const pendientes = pagaresDelFolio.filter(p => p.estado === "Pendiente");
+            const vencidos = pendientes.filter(p => new Date(p.fechaVencimiento) < hoy);
+            const abonos = cuenta.abonos || [];
+            const totalAbonado = abonos.reduce((s, a) => s + (a.monto || 0), 0);
+            return `<div style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:12px; overflow:hidden;">
+                <div style="background:#f8fafc; padding:12px 16px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <span style="font-weight:bold; color:#1e3a5f;">${esc(cuenta.folio)}</span>
+                        <span style="margin-left:12px; font-size:13px; color:#6b7280;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX') : '-'}</span>
+                        ${vencidos.length > 0 ? `<span style="margin-left:10px; background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:9999px; font-size:12px;">⚠️ ${vencidos.length} vencido(s)</span>` : ''}
+                    </div>
+                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove(); abrirEstadoCuentaFolio('${esc(cuenta.folio)}');" style="padding:6px 12px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📋 Ver detalle</button>
+                </div>
+                <div style="padding:12px 16px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px; font-size:13px;">
+                    <div><span style="color:#6b7280;">Total venta:</span><br><b>${dinero(cuenta.totalContadoOriginal || 0)}</b></div>
+                    <div><span style="color:#6b7280;">Total abonado:</span><br><b style="color:#059669;">${dinero(totalAbonado)}</b></div>
+                    <div><span style="color:#6b7280;">Saldo actual:</span><br><b style="color:${Number(cuenta.saldoActual || 0) > 0 ? '#dc2626' : '#059669'};">${dinero(cuenta.saldoActual || 0)}</b></div>
+                </div>
+                <div style="padding:0 16px 12px 16px; font-size:13px; color:#6b7280;">
+                    Pagarés: ${pendientes.length} pendiente(s) de ${pagaresDelFolio.length} total
+                </div>
+            </div>`;
+        }).join('')
+        : `<div style="padding:20px; text-align:center; color:#6b7280;">Este cliente no tiene cuentas activas.</div>`;
+
+    const modalHTML = `
+        <div data-modal="estado-cuenta-cliente" style="position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
+            <div id="estadoCuentaClienteDoc" style="background:white; padding:30px; border-radius:15px; width:95%; max-width:850px; margin:0 auto;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid #e5e7eb; padding-bottom:15px;">
+                    <div style="display:flex; align-items:center; gap:16px;">
+                        <img src="img/logo.png" style="width:55px; height:55px; object-fit:contain;" onerror="this.style.display='none'">
+                        <div>
+                            <div style="font-size:20px; font-weight:bold; color:#1e3a5f;">MUEBLERÍA MI PUEBLITO</div>
+                            <div style="font-size:15px; color:#374151; font-weight:600;">Estado de Cuenta — ${esc(cliente.nombre)}</div>
+                            ${cliente.telefono ? `<div style="font-size:13px; color:#6b7280;">📞 ${esc(cliente.telefono)}</div>` : ''}
+                            ${cliente.direccion ? `<div style="font-size:13px; color:#6b7280;">📍 ${esc(cliente.direccion)}</div>` : ''}
+                        </div>
+                    </div>
+                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove();" style="background:none; border:none; font-size:24px; cursor:pointer; color:#6b7280;">✕</button>
+                </div>
+
+                <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-bottom:20px;">
+                    <div style="background:#fef2f2; border:1px solid #fecaca; padding:16px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:#b91c1c;">TOTAL ADEUDADO</div>
+                        <div style="font-size:22px; font-weight:bold; color:#991b1b;">${dinero(totalAdeudado)}</div>
+                    </div>
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:16px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:#1d4ed8;">FOLIOS ACTIVOS</div>
+                        <div style="font-size:22px; font-weight:bold; color:#1e40af;">${foliosActivos}</div>
+                    </div>
+                    <div style="background:${pagaresVencidosGlobal.length > 0 ? '#fee2e2' : '#f0fdf4'}; border:1px solid ${pagaresVencidosGlobal.length > 0 ? '#fecaca' : '#bbf7d0'}; padding:16px; border-radius:8px; text-align:center;">
+                        <div style="font-size:11px; color:${pagaresVencidosGlobal.length > 0 ? '#b91c1c' : '#15803d'};">PAGARÉS VENCIDOS</div>
+                        <div style="font-size:22px; font-weight:bold; color:${pagaresVencidosGlobal.length > 0 ? '#991b1b' : '#166534'};">${pagaresVencidosGlobal.length}</div>
+                        ${pagaresVencidosGlobal.length > 0 ? `<div style="font-size:12px; color:#991b1b;">${dinero(montoVencidoGlobal)}</div>` : ''}
+                    </div>
+                </div>
+
+                <h3 style="margin:0 0 12px 0; color:#1e3a5f;">📁 Detalle por Folio</h3>
+                ${foliosHTML}
+
+                <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; margin-top:15px;">
+                    <button onclick="guardarImagenEstadoCuenta('estadoCuentaClienteDoc')" style="padding:10px 20px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer;">📷 Guardar Imagen</button>
+                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cerrar</button>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
 // expose helpers for inline HTML event handlers
 window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
 window._getCuentaSeleccionada = _getCuentaSeleccionada;
 window._buildCuentaOrigen = _buildCuentaOrigen;
 window.generarTicketAbono = generarTicketAbono;
 window.generarTicketAbonoTermico = generarTicketAbonoTermico;
+window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
+window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
+window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
+window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
