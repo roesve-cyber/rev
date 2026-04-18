@@ -307,13 +307,14 @@ function renderCuentasXCobrar() {
     cuentas.forEach(cuenta => {
         if (cuenta.estado === "Saldado") return;
 
-        const saldo = Number(cuenta.saldoActual ?? 0);
         const enganche = Number(cuenta.engancheRecibido ?? 0);
-        const color = saldo > 0 ? "#27ae60" : "#999";
         const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString();
 
         const pagaresDelFolio = pagaresSistema.filter(p => p.folio === cuenta.folio);
         const pagaresPendientes = pagaresDelFolio.filter(p => p.estado === "Pendiente");
+        // Saldo real = suma de pagarés pendientes
+        const saldo = pagaresPendientes.reduce((s, p) => s + (p.monto || 0), 0);
+        const color = saldo > 0 ? "#27ae60" : "#999";
         const pagaresVencidos = pagaresPendientes.filter(p => new Date(p.fechaVencimiento) < hoy);
         const pagaresTexto = pagaresPendientes.length > 0
             ? `<span style="color:#374151;">${pagaresPendientes.length} pendiente(s)</span>`
@@ -505,7 +506,7 @@ function _actualizarCuentaEspecifica(idSufijo) {
     const divCuenta = document.getElementById('divCuentaEspecifica_' + idSufijo);
     const selCuenta = document.getElementById('cuentaEspecifica_' + idSufijo);
     if (!divCuenta || !selCuenta) return;
-    const tarjetas = tarjetasConfig || [];
+    const tarjetas = (typeof tarjetasConfig !== 'undefined' && tarjetasConfig) || StorageService.get('tarjetasConfig', []);
     if (medio === 'efectivo') {
         divCuenta.style.display = 'none';
         selCuenta.innerHTML = '<option value="caja">💵 Caja / Efectivo</option>';
@@ -557,9 +558,14 @@ function abrirModalAbonoAvanzado(folio) {
     
     if (!cuenta) return alert("Cuenta no encontrada.");
 
-    const pagaresCliente = pagares.filter(p => p.folio === folio && p.estado !== "Pagado");
+    // Todos los pagarés del folio (pagados + pendientes), ordenados por vencimiento
+    const todosPagares = pagares
+        .filter(p => p.folio === folio)
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    // Saldo real = suma de pagarés con estado Pendiente
+    const pagaresCliente = todosPagares.filter(p => p.estado === 'Pendiente');
+    const saldo = pagaresCliente.reduce((s, p) => s + (p.monto || 0), 0);
     const original = cuenta.totalContadoOriginal ?? 0;
-    const saldo = cuenta.saldoActual ?? 0;
     const fechaVenta = new Date(cuenta.fechaVenta);
     const hoy = new Date();
     const diasDesdeVenta = Math.floor((hoy - fechaVenta) / (1000 * 60 * 60 * 24));
@@ -583,23 +589,41 @@ function abrirModalAbonoAvanzado(folio) {
             </table>
         </div>` : '';
 
-    const pagaresHTML = pagaresCliente.length > 0 ? `
+    const pagaresHTML = todosPagares.length > 0 ? `
         <div style="margin-bottom:20px;">
-            <strong style="color:#374151;">📋 Pagarés Pendientes:</strong>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:14px;">
+            <strong style="color:#374151;">📋 Pagarés del Folio:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
                 <thead><tr style="background:#fef3c7;">
-                    <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">#</th>
-                    <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">Vencimiento</th>
-                    <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb;">Monto</th>
-                    <th style="padding:6px 8px; text-align:center; border-bottom:1px solid #e5e7eb;">Estado</th>
+                    <th style="padding:5px 7px; text-align:left; border-bottom:1px solid #e5e7eb;">#</th>
+                    <th style="padding:5px 7px; text-align:left; border-bottom:1px solid #e5e7eb;">Fecha Vencimiento</th>
+                    <th style="padding:5px 7px; text-align:right; border-bottom:1px solid #e5e7eb;">Monto</th>
+                    <th style="padding:5px 7px; text-align:center; border-bottom:1px solid #e5e7eb;">Estado</th>
+                    <th style="padding:5px 7px; text-align:center; border-bottom:1px solid #e5e7eb;">Días Atraso</th>
                 </tr></thead>
                 <tbody>
-                    ${pagaresCliente.map((p, i) => `<tr>
-                        <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${i + 1}</td>
-                        <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${p.fechaVencimiento || p.vencimiento || '-'}</td>
-                        <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${dinero(p.monto || p.abono || 0)}</td>
-                        <td style="padding:6px 8px; text-align:center; border-bottom:1px solid #f3f4f6;"><span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:9999px; font-size:12px;">${p.estado || 'Pendiente'}</span></td>
-                    </tr>`).join('')}
+                    ${todosPagares.map((p, i) => {
+                        const monto = p.monto || p.abono || 0;
+                        const fechaVenc = new Date(p.fechaVencimiento);
+                        const esPagado = p.estado === 'Pagado' || p.estado === 'Cancelado';
+                        const diasAtraso = !esPagado && fechaVenc < hoy
+                            ? Math.floor((hoy - fechaVenc) / (1000 * 60 * 60 * 24))
+                            : 0;
+                        const esVencido = !esPagado && diasAtraso > 0;
+                        const montoStyle = esPagado ? 'text-decoration:line-through; color:#27ae60;' : '';
+                        const rowStyle = esPagado ? 'background:#f0fdf4;' : (esVencido ? 'background:#fff1f2;' : '');
+                        const estadoBadge = esPagado
+                            ? `<span style="background:#d1fae5; color:#065f46; padding:2px 7px; border-radius:9999px; font-size:11px;">${p.estado}</span>`
+                            : (esVencido
+                                ? `<span style="background:#fee2e2; color:#dc2626; padding:2px 7px; border-radius:9999px; font-size:11px;">Vencido</span>`
+                                : `<span style="background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:9999px; font-size:11px;">Al corriente</span>`);
+                        return `<tr style="${rowStyle}">
+                            <td style="padding:5px 7px; border-bottom:1px solid #f3f4f6;">${i + 1}</td>
+                            <td style="padding:5px 7px; border-bottom:1px solid #f3f4f6;">${p.fechaVencimiento || p.vencimiento || '-'}</td>
+                            <td style="padding:5px 7px; text-align:right; border-bottom:1px solid #f3f4f6; ${montoStyle}">${dinero(monto)}</td>
+                            <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6;">${estadoBadge}</td>
+                            <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6; color:${esVencido ? '#dc2626' : '#6b7280'}; font-weight:${esVencido ? 'bold' : 'normal'};">${esVencido ? diasAtraso + ' días' : '-'}</td>
+                        </tr>`;
+                    }).join('')}
                 </tbody>
             </table>
         </div>` : '';
@@ -780,9 +804,14 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             medioPago,
             etiquetaCuenta: etiqueta
         });
-        cuenta.saldoActual = nuevoSaldo;
+        // Recalcular saldo desde pagarés pendientes restantes
+        const _pagaresActualizados = StorageService.get("pagaresSistema", []);
+        cuenta.saldoActual = _pagaresActualizados
+            .filter(p => p.folio === folio && p.estado === 'Pendiente')
+            .reduce((s, p) => s + (p.monto || 0), 0);
+        const nuevoSaldoReal = cuenta.saldoActual;
         
-        if (nuevoSaldo === 0) {
+        if (nuevoSaldoReal === 0) {
             cuenta.estado = "Saldado";
         }
 
@@ -821,7 +850,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             direccion: _cuentaData?.direccion || ''
         },
         montoAbono,
-        nuevoSaldo,
+        nuevoSaldo: _cuentaData?.saldoActual ?? 0,
         fecha: new Date().toLocaleDateString("es-MX"),
         metodoCobro: document.getElementById("metodoCobroAbono")?.value || medioPago || "efectivo",
         cuentaDestino: document.getElementById("cuentaDestinoAbono")?.value || etiqueta || "efectivo",

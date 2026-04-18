@@ -59,6 +59,7 @@
                 <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
                 <button onclick="navA('seleccionarcliente')">✅ Finalizar Venta</button>
                 <button onclick="navA('entregas')">🚚 Entregas</button>
+                <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
             </div>
         </div>
 
@@ -568,6 +569,62 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
             <p>Saldo actual por cuenta basado en movimientos registrados.</p>
         </div>
         <div id="tablaCuentasBancarias"></div>
+    </div>
+
+    <!-- REIMPRIMIR TICKET DE VENTA -->
+    <div id="reimprimir-venta" class="vista oculto">
+        <div class="vista-header">
+            <h2>🖨️ Reimprimir Ticket de Venta</h2>
+            <p>Busca y reimprime cualquier ticket de venta registrado en el sistema.</p>
+        </div>
+        <!-- Filtros de búsqueda -->
+        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.06); margin-bottom:20px;">
+            <h3 style="margin:0 0 15px 0; color:#1e40af;">🔍 Buscar Venta</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FOLIO</label>
+                    <input type="text" id="rvFolio" placeholder="Ej: VTA-001"
+                           oninput="renderReimprimirVenta()"
+                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">CLIENTE</label>
+                    <input type="text" id="rvCliente" placeholder="Nombre del cliente"
+                           oninput="renderReimprimirVenta()"
+                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:12px; align-items:end;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FECHA DESDE</label>
+                    <input type="date" id="rvFechaDesde" onchange="renderReimprimirVenta()"
+                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FECHA HASTA</label>
+                    <input type="date" id="rvFechaHasta" onchange="renderReimprimirVenta()"
+                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">MONTO MÍN ($)</label>
+                    <input type="number" id="rvMontoMin" placeholder="0" min="0" onchange="renderReimprimirVenta()"
+                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">MONTO MÁX ($)</label>
+                    <input type="number" id="rvMontoMax" placeholder="Sin límite" min="0" onchange="renderReimprimirVenta()"
+                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:10px;">
+                <button onclick="renderReimprimirVenta()"
+                        style="padding:9px 18px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔍 Buscar</button>
+                <button onclick="document.getElementById('rvFolio').value=''; document.getElementById('rvCliente').value=''; document.getElementById('rvFechaDesde').value=''; document.getElementById('rvFechaHasta').value=''; document.getElementById('rvMontoMin').value=''; document.getElementById('rvMontoMax').value=''; renderReimprimirVenta();"
+                        style="padding:9px 18px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Limpiar</button>
+            </div>
+        </div>
+        <!-- Resultados -->
+        <div id="contenidoReimprimirVenta"></div>
     </div>
 </main>
 

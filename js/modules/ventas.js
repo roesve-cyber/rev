@@ -1520,3 +1520,111 @@ function abrirDetalleEntrega(idSalida) {
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
+
+// ===== REIMPRIMIR TICKET DE VENTA =====
+function renderReimprimirVenta() {
+    const contenedor = document.getElementById("contenidoReimprimirVenta");
+    if (!contenedor) return;
+
+    const folioFiltro = (document.getElementById("rvFolio")?.value || "").trim().toLowerCase();
+    const clienteFiltro = (document.getElementById("rvCliente")?.value || "").trim().toLowerCase();
+    const fechaDesde = document.getElementById("rvFechaDesde")?.value || "";
+    const fechaHasta = document.getElementById("rvFechaHasta")?.value || "";
+    const montoMin = parseFloat(document.getElementById("rvMontoMin")?.value) || 0;
+    const montoMax = parseFloat(document.getElementById("rvMontoMax")?.value) || Infinity;
+
+    const registros = StorageService.get("registroTickets", []);
+
+    if (registros.length === 0) {
+        contenedor.innerHTML = `<div style="background:#fef3c7; padding:30px; border-radius:10px; text-align:center; color:#92400e;">
+            <p style="font-size:16px;">⚠️ No hay tickets registrados aún. Los tickets se guardan automáticamente al realizar ventas.</p>
+        </div>`;
+        return;
+    }
+
+    let filtrados = registros.filter(t => {
+        const nombreCliente = (t.cliente?.nombre || "").toLowerCase();
+        const folio = (t.folio || "").toLowerCase();
+        const fecha = t.fechaEmision ? t.fechaEmision.substring(0, 10) : "";
+        const total = t.venta?.total || 0;
+
+        if (folioFiltro && !folio.includes(folioFiltro)) return false;
+        if (clienteFiltro && !nombreCliente.includes(clienteFiltro)) return false;
+        if (fechaDesde && fecha < fechaDesde) return false;
+        if (fechaHasta && fecha > fechaHasta) return false;
+        if (total < montoMin) return false;
+        if (isFinite(montoMax) && total > montoMax) return false;
+        return true;
+    }).sort((a, b) => new Date(b.fechaEmision) - new Date(a.fechaEmision));
+
+    if (filtrados.length === 0) {
+        contenedor.innerHTML = `<div style="background:#f3f4f6; padding:30px; border-radius:10px; text-align:center; color:#6b7280;">
+            <p style="font-size:16px;">🔍 Sin resultados para los filtros aplicados.</p>
+        </div>`;
+        return;
+    }
+
+    let html = `<div style="overflow-x:auto;"><table class="tabla-admin">
+        <thead><tr>
+            <th>Folio</th>
+            <th>Cliente</th>
+            <th>Fecha</th>
+            <th>Total</th>
+            <th>Método</th>
+            <th style="text-align:center;">Acciones</th>
+        </tr></thead>
+        <tbody>`;
+
+    filtrados.forEach(t => {
+        const fecha = t.fechaEmision ? new Date(t.fechaEmision).toLocaleDateString('es-MX') : '—';
+        const total = t.venta?.total || 0;
+        const metodo = t.venta?.metodoPago || '—';
+        const folioEsc = (t.folio || '').replace(/'/g, "\\'");
+        html += `<tr>
+            <td><strong style="color:#1d4ed8;">${t.folio || '—'}</strong></td>
+            <td>${t.cliente?.nombre || '—'}</td>
+            <td>${fecha}</td>
+            <td><strong>${dinero(total)}</strong></td>
+            <td>${metodo}</td>
+            <td style="text-align:center;">
+                <button onclick="reimprimirTicketVenta('${folioEsc}')"
+                        style="padding:6px 12px; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+                    🖨️ Reimprimir
+                </button>
+            </td>
+        </tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+    contenedor.innerHTML = html;
+}
+
+function reimprimirTicketVenta(folio) {
+    const registros = StorageService.get("registroTickets", []);
+    const ticket = registros.find(t => t.folio === folio);
+
+    if (!ticket) {
+        alert(`⚠️ No se encontró el ticket con folio: ${folio}`);
+        return;
+    }
+
+    const datosVenta = {
+        folio: ticket.folio,
+        fecha: ticket.fechaEmision
+            ? new Date(ticket.fechaEmision).toLocaleDateString('es-MX')
+            : new Date().toLocaleDateString('es-MX'),
+        fechaIso: ticket.fechaEmision,
+        cliente: ticket.cliente || {},
+        metodo: ticket.venta?.metodoPago || 'contado',
+        total: ticket.venta?.total || 0,
+        enganche: ticket.venta?.enganche || 0,
+        saldoPendiente: ticket.venta?.saldoPendiente || 0,
+        plan: ticket.venta?.plan || null,
+        articulos: ticket.venta?.articulos || []
+    };
+
+    generarTicketMediaHoja(datosVenta);
+}
+
+window.renderReimprimirVenta = renderReimprimirVenta;
+window.reimprimirTicketVenta = reimprimirTicketVenta;

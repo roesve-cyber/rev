@@ -402,6 +402,7 @@ function navA(vistaId) {
         if (idLimpio === 'cobranzaesperada') renderCobranzaEsperada();
         if (idLimpio === 'logistica') renderLogistica();
         if (idLimpio === 'listaprecios') renderListaPrecios();
+        if (idLimpio === 'reimprimir-venta') renderReimprimirVenta();
     }
 
     const sb = document.getElementById("sidebar");
