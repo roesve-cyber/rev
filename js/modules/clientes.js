@@ -730,7 +730,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     // Detect partial coverage: remaining money covers part of the next pagaré
     let _pagareParcial = null;
-    if (_montoRestante > 0.005) {
+    if (_montoRestante > 0.01) {
         const _nextPagare = _pagaresDelFolio.find(p => !_pagaresCubiertos.find(pc => pc.id === p.id));
         if (_nextPagare) {
             _pagareParcial = { ..._nextPagare, montoAplicado: _montoRestante };
@@ -1157,18 +1157,25 @@ function generarTicketAbonoTermico(datosAbono) {
             </tbody>
         </table>` : '';
 
+    const _formatPagareCubierto = (p, i) => {
+        const montoCell = p.parcial
+            ? `${dinero(p.montoAplicado)}<br><small style="color:#888;">/ ${dinero(p.monto)}</small>`
+            : dinero(p.monto);
+        const estadoCell = p.parcial ? '⚠️ PARCIAL' : '✅ PAG.';
+        return `<tr class="pagare-cubierto">
+                    <td>${i + 1}</td>
+                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX'))}</td>
+                    <td style="text-align:right;">${montoCell}</td>
+                    <td>${estadoCell}</td>
+                </tr>`;
+    };
+
     const pagaresCubiertosHTML = pagaresCubiertos.length > 0 ? `
         <div class="seccion-titulo">PAGARÉS CUBIERTOS</div>
         <table>
             <thead><tr><th>#</th><th>Vencía</th><th style="text-align:right;">Monto</th><th>Est.</th></tr></thead>
             <tbody>
-                ${pagaresCubiertos.map((p, i) => `
-                <tr class="pagare-cubierto">
-                    <td>${i + 1}</td>
-                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX'))}</td>
-                    <td style="text-align:right;">${p.parcial ? (dinero(p.montoAplicado) + '<br><small style="color:#888;">/ ' + dinero(p.monto) + '</small>') : dinero(p.monto)}</td>
-                    <td>${p.parcial ? '⚠️ PARCIAL' : '✅ PAG.'}</td>
-                </tr>`).join('')}
+                ${pagaresCubiertos.map(_formatPagareCubierto).join('')}
             </tbody>
         </table>` : '';
 
