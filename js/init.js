@@ -52,9 +52,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Migración de datos antiguos
         migrarStorageCuentasPorCobrar();
         
-        // Navegar a inicio
-        navA('inicio');
+        // Navegar a dashboard y verificar alertas
+        navA('dashboard');
         actualizarContadorCarrito();
+        verificarAlertasPagares();
         
         console.log("✅ Sistema cargado correctamente.");
         console.log("📊 Estado actual:");

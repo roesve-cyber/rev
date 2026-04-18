@@ -43,6 +43,7 @@ function navA(vistaId) {
         if (idLimpio === 'entregas') renderEntregas();
         if (idLimpio === 'cuentas-bancarias') renderCuentasBancarias();
         if (idLimpio === 'reimprimir-venta') renderReimprimirVenta();
+        if (idLimpio === 'dashboard') renderDashboard();
     }
 
     const sb = document.getElementById("sidebar");
