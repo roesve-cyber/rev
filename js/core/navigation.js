@@ -29,6 +29,7 @@ function navA(vistaId) {
         if (idLimpio === 'tienda') mostrarProductos();
         if (idLimpio === 'bancos') renderBancosConfig();
         if (idLimpio === 'flujo-msi') { renderDashboardMSI(); renderCuentasMSI(); }
+        if (idLimpio === 'flujocaja') renderFlujoCaja();
         if (idLimpio === 'compras') prepararVistaCompras();
         if (idLimpio === 'carrito') renderCarrito();
         if (idLimpio === 'cuentasxcobrar') renderCuentasXCobrar();

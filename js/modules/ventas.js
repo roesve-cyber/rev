@@ -155,9 +155,17 @@ function renderCarrito() {
                 <div class="campo">
                     <label>Forma de Pago:</label>
                     <select id="selMetodoPago" onchange="aplicarMetodoStockDefaults(); actualizarInterfazPago();" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
-                        <option value="contado">💰 Efectivo / Contado</option>
+                        <option value="contado">💵 Contado Efectivo</option>
+                        <option value="transferencia">🏦 Transferencia / Depósito</option>
                         <option value="apartado">📦 Sistema de Apartado</option>
                         <option value="credito">💳 Crédito / Pagos Semanales</option>
+                    </select>
+                </div>
+
+                <div id="divCuentaReceptora" class="campo oculto" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
+                    <label>🏦 Cuenta que recibe el pago:</label>
+                    <select id="selCuentaReceptora" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
+                        <option value="efectivo">💵 Efectivo</option>
                     </select>
                 </div>
 
@@ -245,6 +253,28 @@ if (metodo === "credito") {
     divPeriodicidad?.classList.add("oculto");
 }
 
+    // Mostrar selector de cuenta receptora cuando hay cobro inmediato
+    const divCuenta = document.getElementById("divCuentaReceptora");
+    if (divCuenta) {
+        const hayCobroInmediato = (metodo === "contado" || metodo === "transferencia" || metodo === "apartado");
+        if (hayCobroInmediato) {
+            divCuenta.classList.remove("oculto");
+            const cuentasDebito = tarjetasConfig.filter(t => t.tipo === "debito");
+            let optsHTML = "";
+            if (metodo === "transferencia") {
+                optsHTML = '<option value="">-- Seleccione cuenta --</option>';
+            } else {
+                optsHTML = '<option value="efectivo">💵 Efectivo</option>';
+            }
+            cuentasDebito.forEach(c => {
+                optsHTML += `<option value="${c.banco}">${c.banco}</option>`;
+            });
+            document.getElementById("selCuentaReceptora").innerHTML = optsHTML;
+        } else {
+            divCuenta.classList.add("oculto");
+        }
+    }
+
     let saldo = totalContado - enganche;
     if (saldo < 0) saldo = 0;
 
@@ -254,7 +284,7 @@ if (metodo === "credito") {
 
     let html = "";
 
-    if (metodo === "contado") {
+    if (metodo === "contado" || metodo === "transferencia") {
         html = `<p><strong>Total a pagar:</strong> ${dinero(totalContado)}</p>`;
     }
 
@@ -383,6 +413,8 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
 
     if (metodoPago === "contado") {
         detalleMetodo = `<p style="color:#27ae60;"><strong>💰 CONTADO</strong></p>`;
+    } else if (metodoPago === "transferencia") {
+        detalleMetodo = `<p style="color:#2b6cb0;"><strong>🏦 TRANSFERENCIA / DEPÓSITO</strong></p>`;
     } else if (metodoPago === "apartado") {
         detalleMetodo = `
             <p><strong>📦 APARTADO</strong></p>
@@ -731,15 +763,18 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     });
 
     // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
-    if (metodoPago === "contado") {
+    const cuentaReceptora = document.getElementById("selCuentaReceptora")?.value || "efectivo";
+
+    if (metodoPago === "contado" || metodoPago === "transferencia") {
         movimientosCaja.push({
             id: Date.now(),
             folio: folioVenta,
             fecha: fechaHoy,
             tipo: "ingreso",
             monto: totalContado,
-            concepto: `Venta Contado - ${clienteSeleccionado.nombre}`,
-            referencia: "Contado"
+            concepto: `Venta ${metodoPago === "transferencia" ? "Transferencia" : "Contado"} - ${clienteSeleccionado.nombre}`,
+            referencia: metodoPago === "transferencia" ? "Transferencia" : "Contado",
+            cuenta: cuentaReceptora
         });
     } else if (enganche > 0) {
         movimientosCaja.push({
@@ -749,7 +784,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             tipo: "ingreso",
             monto: enganche,
             concepto: `Enganche ${metodoPago} - ${clienteSeleccionado.nombre}`,
-            referencia: "Enganche"
+            referencia: "Enganche",
+            cuenta: cuentaReceptora
         });
     }
 
