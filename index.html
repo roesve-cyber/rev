@@ -75,8 +75,10 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-bancos')">🏦 BANCOS <span>▾</span></button>
             <div id="sub-bancos" class="submenu oculto-submenu">
+                <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
                 <button onclick="navA('flujo-msi')">💳 MSI (Flujo)</button>
                 <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
+                <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
             </div>
         </div>
 
@@ -343,10 +345,19 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
     <!-- BANCOS -->
     <div id="bancos" class="vista oculto">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
-            <h2>⚙️ Gestión de Tarjetas</h2>
-            <button onclick="abrirModalBanco()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Agregar Banco</button>
+            <h2>⚙️ Gestión de Cuentas y Tarjetas</h2>
+            <button onclick="abrirModalBanco()" style="padding:10px 20px; background:#6b21a8; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Agregar Tarjeta Crédito</button>
         </div>
         <div id="tablaBancosConfig"></div>
+    </div>
+
+    <!-- CUENTAS BANCARIAS -->
+    <div id="cuentas-bancarias" class="vista oculto">
+        <div class="vista-header">
+            <h2>🏦 Mis Cuentas</h2>
+            <p>Saldo actual por cuenta calculado de movimientos registrados.</p>
+        </div>
+        <div id="tablaCuentasBancarias"></div>
     </div>
 
     <!-- FLUJO MSI -->
@@ -548,6 +559,15 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- CUENTAS BANCARIAS -->
+    <div id="cuentas-bancarias" class="vista oculto">
+        <div class="vista-header">
+            <h2>🏦 Mis Cuentas</h2>
+            <p>Saldo actual por cuenta basado en movimientos registrados.</p>
+        </div>
+        <div id="tablaCuentasBancarias"></div>
     </div>
 </main>
 

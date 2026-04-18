@@ -30,6 +30,7 @@ function navA(vistaId) {
         if (idLimpio === 'bancos') renderBancosConfig();
         if (idLimpio === 'flujo-msi') { renderDashboardMSI(); renderCuentasMSI(); }
         if (idLimpio === 'flujocaja') renderFlujoCaja();
+        if (idLimpio === 'cuentas-bancarias') renderCuentasBancarias();
         if (idLimpio === 'compras') prepararVistaCompras();
         if (idLimpio === 'carrito') renderCarrito();
         if (idLimpio === 'cuentasxcobrar') renderCuentasXCobrar();
@@ -40,6 +41,7 @@ function navA(vistaId) {
         if (idLimpio === 'reporte-compras') renderReporteCompras();
         if (idLimpio === 'reporte-flujo') renderReporteFlujo();
         if (idLimpio === 'entregas') renderEntregas();
+        if (idLimpio === 'cuentas-bancarias') renderCuentasBancarias();
     }
 
     const sb = document.getElementById("sidebar");
