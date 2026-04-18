@@ -80,15 +80,19 @@ function renderReporteVentas() {
         `<div style="flex:1; text-align:center; font-size:9px; color:#718096;">${m}</div>`).join('');
 
     // Tabla
-    const filas = todas.map(v => [
-        v.folio || '-',
-        v.nombre || '-',
-        new Date(v.fechaVenta).toLocaleDateString('es-MX'),
-        dinero(v.totalContadoOriginal || 0),
-        v.metodo || '-',
-        v.estado || '-',
-        dinero(v.saldoActual || 0)
-    ]);
+    const filas = todas.map(v => {
+        const fecha = v.fechaVenta ? new Date(v.fechaVenta) : null;
+        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX') : (v.fechaVenta || '-');
+        return [
+            v.folio || '-',
+            v.nombre || '-',
+            fechaStr,
+            dinero(v.totalContadoOriginal || 0),
+            v.metodo || '-',
+            v.estado || '-',
+            dinero(v.saldoActual || 0)
+        ];
+    });
     document.getElementById('rvTabla').innerHTML = _tablaHTML(
         ['Folio', 'Cliente', 'Fecha', 'Total', 'Método', 'Estado', 'Saldo'],
         filas.length ? filas : [['Sin registros', '', '', '', '', '', '']]
@@ -162,14 +166,18 @@ function renderReporteFlujo() {
         _kpiCard('Egresos', dinero(egresos), '#e74c3c', '⬇️') +
         _kpiCard('Saldo', dinero(saldo), saldo >= 0 ? '#27ae60' : '#e74c3c', '💵');
 
-    const filas = lista.map(m => [
-        m.folio || '-',
-        m.fecha ? new Date(m.fecha).toLocaleDateString('es-MX') : '-',
-        m.tipo === 'ingreso' ? '⬆️ Ingreso' : '⬇️ Egreso',
-        dinero(m.monto || 0),
-        m.concepto || '-',
-        m.referencia || '-'
-    ]);
+    const filas = lista.map(m => {
+        const fecha = m.fecha ? new Date(m.fecha) : null;
+        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX') : '-';
+        return [
+            m.folio || '-',
+            fechaStr,
+            m.tipo === 'ingreso' ? '⬆️ Ingreso' : '⬇️ Egreso',
+            dinero(m.monto || 0),
+            m.concepto || '-',
+            m.referencia || '-'
+        ];
+    });
     document.getElementById('rfTabla').innerHTML = _tablaHTML(
         ['Folio', 'Fecha', 'Tipo', 'Monto', 'Concepto', 'Referencia'],
         filas.length ? filas : [['Sin registros', '', '', '', '', '']]
