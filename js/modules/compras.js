@@ -518,7 +518,7 @@ function confirmarAbonoProveedor(idCuenta) {
 
     let movimientos = StorageService.get("movimientosCaja", []);
     movimientos.push({
-        fecha: new Date().toLocaleDateString(),
+        fecha: new Date().toLocaleDateString('es-MX'),
         monto: montoAbono,
         tipo: "Egreso",
         concepto: `Abono a proveedor ${cuenta.proveedor}`,
