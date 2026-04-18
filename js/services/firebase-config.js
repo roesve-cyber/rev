@@ -18,6 +18,7 @@ if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "TU_API_KEY") {
             firebase.initializeApp(firebaseConfig);
         }
         window._db = firebase.firestore();
+        window._auth = firebase.auth();
         window._firebaseActivo = true;
         console.log('✅ Firebase inicializado correctamente');
     } catch (e) {
