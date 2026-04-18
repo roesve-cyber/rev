@@ -1002,6 +1002,8 @@ function generarTicketAbonoTermico(datosAbono) {
     const { folio, cliente, montoAbono, nuevoSaldo, fecha, metodoCobro, cuentaDestino,
         pagaresCubiertos, pagaresRestantes, articulos, totalVenta, enganche } = datosAbono;
 
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
     const hoy = new Date();
     const vencidos = pagaresRestantes.filter(p => new Date(p.fechaVencimiento) < hoy);
     const montoVencido = vencidos.reduce((s, p) => s + p.monto, 0);
@@ -1009,7 +1011,7 @@ function generarTicketAbonoTermico(datosAbono) {
     let mensajeEstado = '';
     let mensajeClase = 'mensaje-ok';
     if (nuevoSaldo === 0) {
-        mensajeEstado = `🎉 ¡Cuenta liquidada! Gracias por su compromiso, ${cliente.nombre}. ¡Hasta pronto!`;
+        mensajeEstado = `🎉 ¡Cuenta liquidada! Gracias por su compromiso, ${esc(cliente.nombre)}. ¡Hasta pronto!`;
         mensajeClase = 'mensaje-ok';
     } else if (vencidos.length > 0) {
         mensajeEstado = `Le recordamos amablemente que tiene ${vencidos.length} pago(s) con fecha vencida por un total de ${dinero(montoVencido)}. Le agradecemos su pronta atención. 🙏`;
@@ -1026,8 +1028,8 @@ function generarTicketAbonoTermico(datosAbono) {
             <tbody>
                 ${articulos.map(a => `
                 <tr>
-                    <td>${a.nombre || '-'}</td>
-                    <td style="text-align:right;">${a.cantidad || 1}</td>
+                    <td>${esc(a.nombre || '-')}</td>
+                    <td style="text-align:right;">${esc(String(a.cantidad || 1))}</td>
                     <td style="text-align:right;">${dinero((a.precioContado || 0) * (a.cantidad || 1))}</td>
                 </tr>`).join('')}
             </tbody>
@@ -1041,7 +1043,7 @@ function generarTicketAbonoTermico(datosAbono) {
                 ${pagaresCubiertos.map((p, i) => `
                 <tr class="pagare-cubierto">
                     <td>${i + 1}</td>
-                    <td>${new Date(p.fechaVencimiento).toLocaleDateString('es-MX')}</td>
+                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX'))}</td>
                     <td style="text-align:right;">${dinero(p.monto)}</td>
                     <td>✅ PAG.</td>
                 </tr>`).join('')}
@@ -1052,7 +1054,7 @@ function generarTicketAbonoTermico(datosAbono) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Recibo de Abono - ${folio}</title>
+    <title>Recibo de Abono - ${esc(folio)}</title>
     <style>
         @page { size: 80mm auto; margin: 3mm; }
         * { box-sizing: border-box; }
@@ -1109,17 +1111,17 @@ function generarTicketAbonoTermico(datosAbono) {
 
         <div class="centrado negrita" style="font-size:14px; letter-spacing:1px;">RECIBO DE ABONO</div>
         <div class="fila">
-            <span>Folio: <strong>${folio}</strong></span>
-            <span>Fecha: <strong>${fecha}</strong></span>
+            <span>Folio: <strong>${esc(folio)}</strong></span>
+            <span>Fecha: <strong>${esc(fecha)}</strong></span>
         </div>
 
         <hr class="separador">
 
         <div class="seccion-titulo">DATOS DEL CLIENTE</div>
         <div style="font-size:10px;">
-            <div><span class="negrita">Nombre:</span> ${cliente.nombre}</div>
-            ${cliente.telefono ? `<div><span class="negrita">Tel:</span> ${cliente.telefono}</div>` : ''}
-            ${cliente.direccion ? `<div><span class="negrita">Dir:</span> ${cliente.direccion}</div>` : ''}
+            <div><span class="negrita">Nombre:</span> ${esc(cliente.nombre)}</div>
+            ${cliente.telefono ? `<div><span class="negrita">Tel:</span> ${esc(cliente.telefono)}</div>` : ''}
+            ${cliente.direccion ? `<div><span class="negrita">Dir:</span> ${esc(cliente.direccion)}</div>` : ''}
         </div>
 
         ${articulosHTML}
@@ -1127,7 +1129,7 @@ function generarTicketAbonoTermico(datosAbono) {
         <div class="monto-abono-box">
             <div class="monto-abono-label">ABONO RECIBIDO</div>
             <div class="monto-abono-valor">${dinero(montoAbono)}</div>
-            <div class="monto-abono-label">Vía: ${metodoCobro}</div>
+            <div class="monto-abono-label">Vía: ${esc(metodoCobro)}</div>
         </div>
 
         <div class="seccion-titulo">RESUMEN DE CUENTA</div>
@@ -1169,7 +1171,7 @@ function generarTicketAbonoTermico(datosAbono) {
         if (typeof html2canvas === 'undefined') { alert('Cargando...'); return; }
         html2canvas(ticket, { scale: 3, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => {
             const link = document.createElement('a');
-            link.download = 'recibo-abono-${folio}.png';
+            link.download = 'recibo-abono-' + ${JSON.stringify(esc(folio))} + '.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
         }).catch(err => { console.error(err); alert('Error al generar imagen'); });
