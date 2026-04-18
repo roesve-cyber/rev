@@ -44,6 +44,7 @@ function navA(vistaId) {
         if (idLimpio === 'cuentas-bancarias') renderCuentasBancarias();
         if (idLimpio === 'reimprimir-venta') renderReimprimirVenta();
         if (idLimpio === 'dashboard') renderDashboard();
+        if (idLimpio === 'configuracion-nube') _actualizarEstadoFirebaseUI();
     }
 
     const sb = document.getElementById("sidebar");

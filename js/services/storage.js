@@ -4,34 +4,77 @@
 
 // ===== STORAGESERVICE COMPLETO Y FUNCIONAL =====
 
+// Claves del sistema reconocidas para sincronización y respaldo
+const CLAVES_SISTEMA = [
+    'productos', 'clientes', 'proveedores', 'ventasRegistradas', 'cuentasPorCobrar',
+    'pagaresSistema', 'compras', 'cuentasPorPagar', 'movimientosCaja', 'tarjetasConfig',
+    'gastosOperativos', 'cotizaciones', 'vendedores', 'comisionesRegistradas',
+    'puntosPorCliente', 'programaPuntos', 'descuentosActivos', 'usuariosConfig',
+    'categoriasGasto', 'registroTickets', 'deudasMSI', 'recepciones'
+];
+
 const StorageService = {
     /**
      * Obtiene un valor del localStorage
+     * Inicia sincronización en background desde Firestore si está disponible.
      * @param {string} clave - Clave a obtener
      * @param {*} defaultValue - Valor por defecto si no existe
      * @returns {*} - Valor guardado o default
      */
     get(clave, defaultValue = []) {
+        let valorLocal;
         try {
-            const valor = localStorage.getItem(clave);
-            if (!valor) return defaultValue;
-            return JSON.parse(valor) || defaultValue;
+            const raw = localStorage.getItem(clave);
+            if (!raw) {
+                valorLocal = defaultValue;
+            } else {
+                valorLocal = JSON.parse(raw) || defaultValue;
+            }
         } catch (e) {
             console.error(`❌ Error leyendo '${clave}':`, e.message);
-            return defaultValue;
+            valorLocal = defaultValue;
         }
+
+        // Sincronización en background desde Firestore
+        if (window._firebaseActivo && window._db) {
+            window._db.collection('posData').doc(clave).get().then(doc => {
+                if (!doc.exists) return;
+                const remoto = doc.data();
+                if (!remoto || !remoto._updatedAt) return;
+                try {
+                    const tsRemoto = remoto._updatedAt;
+                    const rawLocal = localStorage.getItem(clave);
+                    let tsLocal = 0;
+                    if (rawLocal) {
+                        const parsed = JSON.parse(rawLocal);
+                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed._updatedAt) {
+                            tsLocal = parsed._updatedAt;
+                        }
+                    }
+                    if (tsRemoto > tsLocal) {
+                        const { _updatedAt, ...datos } = remoto;
+                        // Para arrays almacenados en Firestore bajo clave "data"
+                        const valorFinal = datos.data !== undefined ? datos.data : datos;
+                        localStorage.setItem(clave, JSON.stringify(valorFinal));
+                    }
+                } catch (_) { /* No bloquear por error de sync */ }
+            }).catch(() => { /* Firebase no disponible, ignorar */ });
+        }
+
+        return valorLocal;
     },
 
     /**
-     * Guarda un valor en localStorage
+     * Guarda un valor en localStorage y en Firestore si está disponible (write-through).
      * @param {string} clave - Clave a guardar
      * @param {*} valor - Valor a guardar (se convierte a JSON)
-     * @returns {boolean} - True si se guardó exitosamente
+     * @returns {boolean} - True si se guardó en localStorage exitosamente
      */
     set(clave, valor) {
+        let ok = false;
         try {
             localStorage.setItem(clave, JSON.stringify(valor));
-            return true;
+            ok = true;
         } catch (e) {
             if (e.name === 'QuotaExceededError') {
                 console.error(`❌ Error: localStorage lleno para '${clave}'`);
@@ -40,6 +83,23 @@ const StorageService = {
             }
             return false;
         }
+
+        // Escritura en Firestore en background
+        if (ok && window._firebaseActivo && window._db) {
+            const ts = Date.now();
+            let docData;
+            if (Array.isArray(valor)) {
+                docData = { data: valor, _updatedAt: ts };
+            } else if (valor && typeof valor === 'object') {
+                docData = { ...valor, _updatedAt: ts };
+            } else {
+                docData = { data: valor, _updatedAt: ts };
+            }
+            window._db.collection('posData').doc(clave).set(docData)
+                .catch(e => console.warn(`⚠️ Error sincronizando '${clave}' con Firebase:`, e.message));
+        }
+
+        return ok;
     },
 
     /**
@@ -177,5 +237,73 @@ const StorageService = {
             totalKB: (totalBytes / 1024).toFixed(2),
             count: Object.keys(summary).length
         };
+    },
+
+    /**
+     * Descarga todos los documentos de posData en Firestore y actualiza localStorage
+     * con los valores más recientes (por _updatedAt).
+     * @returns {Promise<void>}
+     */
+    syncAll() {
+        if (!window._firebaseActivo || !window._db) {
+            return Promise.resolve();
+        }
+        return window._db.collection('posData').get().then(snapshot => {
+            snapshot.forEach(doc => {
+                const clave = doc.id;
+                const remoto = doc.data();
+                if (!remoto) return;
+                const tsRemoto = remoto._updatedAt || 0;
+                try {
+                    const rawLocal = localStorage.getItem(clave);
+                    let tsLocal = 0;
+                    if (rawLocal) {
+                        const parsed = JSON.parse(rawLocal);
+                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed._updatedAt) {
+                            tsLocal = parsed._updatedAt;
+                        }
+                    }
+                    if (tsRemoto >= tsLocal) {
+                        const { _updatedAt, ...datos } = remoto;
+                        const valorFinal = datos.data !== undefined ? datos.data : datos;
+                        localStorage.setItem(clave, JSON.stringify(valorFinal));
+                    }
+                } catch (_) { /* ignorar errores de claves individuales */ }
+            });
+            console.log('✅ syncAll: datos sincronizados desde Firebase');
+        });
+    },
+
+    /**
+     * Sube todas las claves conocidas del sistema desde localStorage a Firestore.
+     * Útil para la primera migración de datos.
+     * @returns {Promise<void>}
+     */
+    uploadAll() {
+        if (!window._firebaseActivo || !window._db) {
+            return Promise.resolve();
+        }
+        const batch = window._db.batch();
+        const ts = Date.now();
+        CLAVES_SISTEMA.forEach(clave => {
+            const raw = localStorage.getItem(clave);
+            if (!raw) return;
+            try {
+                const valor = JSON.parse(raw);
+                let docData;
+                if (Array.isArray(valor)) {
+                    docData = { data: valor, _updatedAt: ts };
+                } else if (valor && typeof valor === 'object') {
+                    docData = { ...valor, _updatedAt: ts };
+                } else {
+                    docData = { data: valor, _updatedAt: ts };
+                }
+                const ref = window._db.collection('posData').doc(clave);
+                batch.set(ref, docData);
+            } catch (_) { /* ignorar claves con JSON inválido */ }
+        });
+        return batch.commit().then(() => {
+            console.log('✅ uploadAll: todos los datos subidos a Firebase');
+        });
     }
 };

@@ -9,6 +9,13 @@
         @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-10px)}40%{transform:translateX(10px)}60%{transform:translateX(-8px)}80%{transform:translateX(8px)}}
         .shake{animation:shake 0.4s ease;}
     </style>
+    <!-- Firebase SDK (compat) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <!-- MSAL.js para autenticación OneDrive -->
+    <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
+    <!-- Configuración Firebase -->
+    <script src="js/services/firebase-config.js"></script>
 </head>
 <body>
 
@@ -136,6 +143,7 @@
             <div id="sub-config-ext" class="submenu oculto-submenu">
                 <button onclick="navA('vendedores');renderGestionVendedores();">👤 Vendedores</button>
                 <button onclick="navA('descuentos');renderGestionDescuentos();">🎯 Descuentos y Promos</button>
+                <button onclick="navA('configuracion-nube');">☁️ Nube y Respaldos</button>
                 <li id="menuItemUsuarios" style="display:none;list-style:none;" onclick="navA('usuarios');renderGestionUsuarios();">👤 Usuarios del sistema</li>
             </div>
         </div>
@@ -803,6 +811,71 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
 
     <!-- USUARIOS -->
     <div id="usuarios" class="vista oculto"><div style="padding:20px;"><h2>👤 Gestión de Usuarios</h2><div id="contenidoUsuarios"></div></div></div>
+
+    <!-- NUBE Y RESPALDOS -->
+    <div id="configuracion-nube" class="vista oculto">
+        <div class="vista-header">
+            <h2>☁️ Nube y Respaldos</h2>
+            <p>Sincronización con Firebase, respaldos en OneDrive y exportación manual de datos.</p>
+        </div>
+
+        <div id="backup-panel" style="max-width:700px;">
+
+            <!-- Firebase -->
+            <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
+                <h3 style="margin:0 0 8px; color:#374151;">🔥 Firebase (base de datos en la nube)</h3>
+                <p id="estadoFirebase" style="color:#6b7280; font-size:13px; margin:0 0 14px;">Verificando estado...</p>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button onclick="StorageService.syncAll().then(()=>alert('✅ Sincronizado con Firebase')).catch(e=>alert('❌ '+e.message))"
+                        style="padding:10px 16px; background:#f97316; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        ⬇️ Sincronizar desde nube
+                    </button>
+                    <button onclick="StorageService.uploadAll().then(()=>alert('✅ Datos subidos a Firebase')).catch(e=>alert('❌ '+e.message))"
+                        style="padding:10px 16px; background:#dc2626; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        ⬆️ Subir todo a nube
+                    </button>
+                </div>
+            </div>
+
+            <!-- OneDrive -->
+            <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
+                <h3 style="margin:0 0 8px; color:#374151;">💾 OneDrive (respaldos físicos)</h3>
+                <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Conecta tu cuenta de Microsoft para subir y restaurar respaldos automáticamente.</p>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                    <button onclick="conectarOneDrive()"
+                        style="padding:10px 16px; background:#0078d4; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        🔗 Conectar OneDrive
+                    </button>
+                    <button onclick="subirBackupOneDrive().then(r=>r&&alert('✅ Respaldo guardado en OneDrive'))"
+                        style="padding:10px 16px; background:#106ebe; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        📤 Crear respaldo ahora
+                    </button>
+                    <button onclick="mostrarListaBackups()"
+                        style="padding:10px 16px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        📂 Ver respaldos
+                    </button>
+                </div>
+                <div id="listaBackupsOneDrive"></div>
+            </div>
+
+            <!-- Backup local JSON -->
+            <div style="background:white; padding:20px; border-radius:10px; border:1px solid #e5e7eb;">
+                <h3 style="margin:0 0 8px; color:#374151;">📁 Backup local (JSON)</h3>
+                <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Exporta o importa todos los datos del sistema en un archivo JSON.</p>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                    <button onclick="exportarBackupJSON()"
+                        style="padding:10px 16px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        ⬇️ Exportar todos los datos
+                    </button>
+                    <label style="padding:10px 16px; background:#8b5cf6; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+                        📥 Importar backup
+                        <input type="file" accept=".json" onchange="importarBackupJSON(event)" style="display:none;">
+                    </label>
+                </div>
+            </div>
+
+        </div>
+    </div>
 </main>
 
 <!-- ===== MODALES ===== -->
@@ -863,6 +936,7 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
 <script src="js/services/storage.js"></script>
 <script src="js/services/validator.js"></script>
 <script src="js/services/calculator.js"></script>
+<script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 <script src="js/core/navigation.js"></script>
 <script src="js/modules/auth.js"></script>

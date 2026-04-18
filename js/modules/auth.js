@@ -154,6 +154,26 @@ function iniciarSesion() {
     sessionStorage.setItem('sesionActiva', JSON.stringify({ usuario: match.usuario, rol: match.rol, id: match.id }));
     document.getElementById('loginOverlay')?.remove();
     aplicarRolUI();
+
+    // Sincronizar con Firebase al iniciar sesión
+    if (window._firebaseActivo) {
+        StorageService.syncAll()
+            .then(() => console.log('✅ Sync con Firebase completado'))
+            .catch(() => {});
+    }
+
+    // Respaldo automático diario a OneDrive (solo admin y si está conectado)
+    if (match.rol === 'admin') {
+        const hoy = new Date().toISOString().split('T')[0];
+        const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoOneDrive');
+        if (ultimoRespaldo !== hoy && localStorage.getItem('_onedriveConectado') === 'true') {
+            if (typeof subirBackupOneDrive === 'function') {
+                subirBackupOneDrive().then(() => {
+                    localStorage.setItem('_ultimoRespaldoOneDrive', hoy);
+                }).catch(() => {});
+            }
+        }
+    }
 }
 
 function cerrarSesion() {
