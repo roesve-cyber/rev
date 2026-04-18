@@ -820,8 +820,15 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             monto: montoAbono,
             cuentaId,
             medioPago,
-            etiquetaCuenta: etiqueta
+            etiquetaCuenta: etiqueta,
+            vendedorId: cuenta.vendedorId || null
         });
+        // Registrar comisión por abono si el vendedor usa ese tipo
+        if (cuenta.vendedorId) {
+            if (typeof registrarComisionAbono === 'function') {
+                registrarComisionAbono(folio, montoAbono, cuenta.vendedorId);
+            }
+        }
         // Recalcular saldo desde pagarés pendientes restantes (incluyendo parciales)
         const _pagaresActualizados = StorageService.get("pagaresSistema", []);
         cuenta.saldoActual = _pagaresActualizados
