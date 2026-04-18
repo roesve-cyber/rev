@@ -202,7 +202,7 @@ function verificarAlertasPagares() {
 
     const vencidos = pagaresSistema.filter(p => {
         if (p.estado === "Pagado" || p.estado === "Cancelado") return false;
-        return (p.fechaVencimiento || '') < hoyStr;
+        return new Date(p.fechaVencimiento) < hoy;
     });
 
     // Actualizar badge en menú
