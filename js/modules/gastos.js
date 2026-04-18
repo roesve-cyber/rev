@@ -73,7 +73,8 @@ function guardarGasto() {
     const periodicidad = document.getElementById('gastoPeriodicidad')?.value || 'mensual';
     if (!descripcion) return alert('⚠️ La descripción es obligatoria.');
     if (monto <= 0) return alert('⚠️ El monto debe ser mayor a 0.');
-    const gasto = { id: Date.now(), categoria, descripcion, monto, fecha, cuentaDebito, recurrente, periodicidad };
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const gasto = { id: Date.now(), categoria, descripcion, monto, fecha, cuentaDebito, recurrente, periodicidad, ultimaVez: recurrente ? hoyStr : null };
     const gastos = StorageService.get('gastosOperativos', []);
     gastos.push(gasto);
     StorageService.set('gastosOperativos', gastos);
@@ -88,7 +89,6 @@ function guardarGasto() {
         cuenta: cuentaDebito,
         referencia: `GASTO-${gasto.id}`
     });
-    movimientosCaja = movs;
     StorageService.set('movimientosCaja', movs);
     document.querySelector('[data-modal="registrar-gasto"]')?.remove();
     alert(`✅ Gasto registrado: ${dinero(monto)}`);
@@ -202,7 +202,8 @@ function verificarGastosRecurrentes() {
         const diasDif = Math.floor((hoy - ultima) / (1000 * 60 * 60 * 24));
         const umbral = g.periodicidad === 'semanal' ? 7 : 30;
         if (diasDif >= umbral) {
-            const nuevo = { ...g, id: Date.now() + Math.random(), fecha: hoyStr, ultimaVez: hoyStr };
+            const nuevoId = Date.now() + Math.floor(Math.random() * 1000);
+            const nuevo = { ...g, id: nuevoId, fecha: hoyStr, ultimaVez: hoyStr };
             gastos.push(nuevo);
             const movs = StorageService.get('movimientosCaja', []);
             movs.push({

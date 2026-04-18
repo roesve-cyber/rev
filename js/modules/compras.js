@@ -735,7 +735,6 @@ function recibirOrdenCompra(id) {
             prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidad;
         }
     });
-    productos = prods;
     StorageService.set('productos', prods);
     // Crear compra
     const nuevaCompra = {
@@ -752,7 +751,6 @@ function recibirOrdenCompra(id) {
     };
     const comprasList = StorageService.get('compras', []);
     comprasList.push(nuevaCompra);
-    compras = comprasList;
     StorageService.set('compras', comprasList);
     lista[idx].estado = 'Recibida';
     StorageService.set('ordenesCompra', lista);

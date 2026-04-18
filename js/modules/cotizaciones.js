@@ -295,8 +295,7 @@ function convertirCotizacionAVenta(id) {
             });
         }
     });
-    carrito = carritoActual;
-    StorageService.set('carrito', carrito);
+    StorageService.set('carrito', carritoActual);
     lista[idx].estado = 'Convertida';
     StorageService.set('cotizaciones', lista);
     actualizarContadorCarrito();

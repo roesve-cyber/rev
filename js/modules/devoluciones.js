@@ -22,16 +22,23 @@ function buscarVentaDevolucion() {
     const ventas = StorageService.get('ventasRegistradas', []);
     const venta = ventas.find(v => (v.folio || '').toUpperCase() === folio);
     if (!venta) {
-        cont.innerHTML = `<p style="color:#dc2626;text-align:center;padding:16px;">❌ No se encontró la venta <strong>${folio}</strong></p>`;
+        cont.textContent = '';
+        const p = document.createElement('p');
+        p.style.cssText = 'color:#dc2626;text-align:center;padding:16px;';
+        p.textContent = `❌ No se encontró la venta ${folio}`;
+        cont.appendChild(p);
         return;
     }
     const arts = (venta.articulos || venta.carrito || []);
     const opcionesArts = arts.map((a, i) =>
-        `<option value="${i}">${a.nombre} (x${a.cantidad || 1})</option>`).join('');
+        `<option value="${i}">${a.nombre.replace(/</g,'&lt;').replace(/>/g,'&gt;')} (x${a.cantidad || 1})</option>`).join('');
+    const clienteNombre = (venta.clienteNombre || venta.nombre || 'Cliente').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const folioSafe = (venta.folio || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const fechaStr = new Date(venta.fecha || venta.fechaVenta).toLocaleDateString('es-MX');
     cont.innerHTML = `
       <div style="background:#f9fafb;padding:16px;border-radius:8px;margin-bottom:16px;">
-        <strong>${venta.folio}</strong> — ${venta.clienteNombre || venta.nombre || 'Cliente'}<br>
-        <small style="color:#6b7280;">${new Date(venta.fecha || venta.fechaVenta).toLocaleDateString('es-MX')} — ${dinero(venta.total || venta.totalVenta || 0)}</small>
+        <strong>${folioSafe}</strong> — ${clienteNombre}<br>
+        <small style="color:#6b7280;">${fechaStr} — ${dinero(venta.total || venta.totalVenta || 0)}</small>
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div>
@@ -63,9 +70,12 @@ function buscarVentaDevolucion() {
         </label>
       </div>
       <div style="display:flex;gap:10px;margin-top:20px;">
-        <button onclick="procesarDevolucion('${folio}')" style="flex:1;padding:12px;background:#d97706;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Procesar Devolución</button>
+        <button id="btnProcesarDev" style="flex:1;padding:12px;background:#d97706;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Procesar Devolución</button>
         <button onclick="document.querySelector('[data-modal=devolucion]')?.remove()" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
       </div>`;
+    // Use addEventListener to avoid folio injection via onclick attribute
+    const btn = document.getElementById('btnProcesarDev');
+    if (btn) btn.addEventListener('click', function() { procesarDevolucion(folio); });
 }
 
 function procesarDevolucion(folio) {
@@ -104,7 +114,6 @@ function procesarDevolucion(folio) {
         const pidx = prods.findIndex(p => String(p.id) === String(art.id || art.productoId));
         if (pidx !== -1) {
             prods[pidx].stock = (prods[pidx].stock || 0) + cantidad;
-            productos = prods;
             StorageService.set('productos', prods);
         }
     }

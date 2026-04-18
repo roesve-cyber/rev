@@ -97,9 +97,12 @@ function abrirPanelNotificaciones() {
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
+let _notifIntervalId = null;
+
 function inicializarNotificaciones() {
     renderBadgeNotificaciones();
-    setInterval(renderBadgeNotificaciones, 5 * 60 * 1000);
+    if (_notifIntervalId) clearInterval(_notifIntervalId);
+    _notifIntervalId = setInterval(renderBadgeNotificaciones, 5 * 60 * 1000);
 }
 
 window.recopilarNotificaciones = recopilarNotificaciones;

@@ -20,7 +20,9 @@ function renderProyeccionFlujo() {
         const fv = new Date(p.fechaVencimiento);
         const key = `${fv.getFullYear()}-${String(fv.getMonth() + 1).padStart(2, '0')}`;
         const m = meses.find(x => x.key === key);
-        if (m) m.ingresos += p.monto || 0;
+        // For partial pagares, use remaining balance (monto - montoAbonado); fallback to full monto
+        const saldo = p.estado === 'Parcial' ? ((p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0);
+        if (m) m.ingresos += Math.max(0, saldo);
     });
 
     // Gastos: gastos recurrentes proyectados

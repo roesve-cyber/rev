@@ -191,6 +191,7 @@ function pagarComision(id) {
     comisiones[idx].estado = 'Pagada';
     StorageService.set('comisionesRegistradas', comisiones);
     renderGestionVendedores();
+    renderReporteComisiones();
 }
 
 window.renderGestionVendedores = renderGestionVendedores;
