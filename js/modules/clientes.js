@@ -1529,9 +1529,9 @@ function guardarImagenEstadoCuenta(elementId) {
             link.download = 'estado-cuenta-' + elementId + '.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
-        }).catch(err => { console.error(err); alert('Error al generar imagen'); });
+        }).catch(err => { console.error(err); alert('No se pudo generar la imagen. Usa el botón 🖨️ Imprimir para guardar el documento como PDF desde tu navegador.'); });
     };
-    script.onerror = function() { alert('No se pudo cargar html2canvas. Intenta imprimir en su lugar.'); };
+    script.onerror = function() { alert('No se pudo cargar la herramienta de imagen. Verifica tu conexión a internet o usa el botón 🖨️ Imprimir para guardar el estado de cuenta como PDF.'); };
     document.head.appendChild(script);
 }
 
