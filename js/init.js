@@ -1,6 +1,7 @@
 // ===== INICIALIZACIÓN =====
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (typeof verificarSesionInicial === 'function') verificarSesionInicial();
     console.log("🚀 Iniciando sistema POS Mueblería Mi Pueblito...");
     try {
         // ✅ Inicializar todos los datos con valores por defecto si están vacíos

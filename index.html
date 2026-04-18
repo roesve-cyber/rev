@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS Mueblería - Mi Pueblito</title>
     <link rel="stylesheet" href="estilos.css">
+    <style>
+        @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-10px)}40%{transform:translateX(10px)}60%{transform:translateX(-8px)}80%{transform:translateX(8px)}}
+        .shake{animation:shake 0.4s ease;}
+    </style>
 </head>
 <body>
 
@@ -15,6 +19,7 @@
         <h1>MUEBLERÍA MI PUEBLITO</h1>
     </div>
     <div style="display:flex; align-items:center; gap:8px;">
+        <div id="infoUsuarioActivo" onclick="abrirMenuUsuario()" style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(255,255,255,0.15);border-radius:20px;color:white;font-size:13px;cursor:pointer;"><span>👤</span><span id="nombreUsuarioActivo">-</span><span style="font-size:10px;">▼</span></div>
         <button onclick="abrirPanelNotificaciones()" style="background:none; border:none; font-size:22px; cursor:pointer; position:relative; padding:4px 8px;">
           🔔
           <span id="badgeNotif" style="display:none; position:absolute; top:0; right:0; background:#e74c3c; color:white; border-radius:50%; width:18px; height:18px; font-size:10px; font-weight:bold; align-items:center; justify-content:center;">0</span>
@@ -131,6 +136,7 @@
             <div id="sub-config-ext" class="submenu oculto-submenu">
                 <button onclick="navA('vendedores');renderGestionVendedores();">👤 Vendedores</button>
                 <button onclick="navA('descuentos');renderGestionDescuentos();">🎯 Descuentos y Promos</button>
+                <li id="menuItemUsuarios" style="display:none;list-style:none;" onclick="navA('usuarios');renderGestionUsuarios();">👤 Usuarios del sistema</li>
             </div>
         </div>
 
@@ -794,6 +800,9 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
         </div>
         <div id="contenidoAgenda"></div>
     </div>
+
+    <!-- USUARIOS -->
+    <div id="usuarios" class="vista oculto"><div style="padding:20px;"><h2>👤 Gestión de Usuarios</h2><div id="contenidoUsuarios"></div></div></div>
 </main>
 
 <!-- ===== MODALES ===== -->
@@ -856,6 +865,7 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
 <script src="js/services/calculator.js"></script>
 <script src="js/core/data.js"></script>
 <script src="js/core/navigation.js"></script>
+<script src="js/modules/auth.js"></script>
 <script src="js/modules/inventario.js"></script>
 <script src="js/modules/tienda.js"></script>
 <script src="js/modules/ventas.js"></script>
