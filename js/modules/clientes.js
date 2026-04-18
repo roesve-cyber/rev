@@ -704,6 +704,58 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     
     if (idxCuenta !== -1) {
         const cuenta = cuentas[idxCuenta];
+
+        // REGLA 1: Liquidación en el primer mes (precio de contado)
+        const diasDesdeVenta = cuenta.fechaVenta
+            ? (Date.now() - new Date(cuenta.fechaVenta)) / 86400000
+            : Infinity;
+        const totalAbonadoHistorico = (cuenta.abonos || []).reduce((s, a) => s + (a.monto || 0), 0);
+        const totalRecibido = (cuenta.engancheRecibido || 0) + totalAbonadoHistorico + montoAbono;
+
+        if (cuenta.metodo === "credito" && diasDesdeVenta <= 30 && totalRecibido >= cuenta.totalContadoOriginal && nuevoSaldo > 0) {
+            if (confirm(`✅ LIQUIDACIÓN ANTICIPADA\n\nEl cliente cubre el precio de contado (${dinero(cuenta.totalContadoOriginal)}) dentro del primer mes.\n\n¿Aplicar política y saldar la cuenta condonando el interés?`)) {
+                nuevoSaldo = 0;
+                const todosLosPagares = StorageService.get("pagaresSistema", []);
+                const actualizados = todosLosPagares.map(p =>
+                    p.folio === folio && p.estado === "Pendiente"
+                        ? { ...p, estado: "Cancelado", motivoCancelacion: "Política: liquidación en primer mes (precio contado)" }
+                        : p
+                );
+                StorageService.set("pagaresSistema", actualizados);
+            }
+        }
+
+        // REGLA 2: Equivalencia de plazo menor
+        if (cuenta.metodo === "credito" && cuenta.plan && nuevoSaldo > 0) {
+            const periodicidad = cuenta.periodicidad || "semanal";
+            const saldoFinanciado = (cuenta.totalContadoOriginal || 0) - (cuenta.engancheRecibido || 0);
+            const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoFinanciado, periodicidad);
+            const totalPagadoAcumulado = (cuenta.saldoOriginal || 0) - nuevoSaldo;
+
+            const planBeneficioso = planes
+                .filter(p => p.meses < cuenta.plan.meses && totalPagadoAcumulado >= p.total)
+                .sort((a, b) => a.meses - b.meses)[0];
+
+            if (planBeneficioso) {
+                if (confirm(
+                    `🎉 POLÍTICA DE EQUIVALENCIA DE PLAZO\n\n` +
+                    `El cliente ha pagado ${dinero(totalPagadoAcumulado)}, equivalente al plan de ${planBeneficioso.meses} meses.\n\n` +
+                    `Plazo original: ${cuenta.plan.meses} meses\n` +
+                    `Plazo alcanzado: ${planBeneficioso.meses} meses\n\n` +
+                    `¿Aplicar política y saldar la cuenta?`
+                )) {
+                    nuevoSaldo = 0;
+                    const todosLosPagares = StorageService.get("pagaresSistema", []);
+                    const actualizados = todosLosPagares.map(p =>
+                        p.folio === folio && p.estado === "Pendiente"
+                            ? { ...p, estado: "Cancelado", motivoCancelacion: `Política: equivalencia plazo ${planBeneficioso.meses} meses` }
+                            : p
+                    );
+                    StorageService.set("pagaresSistema", actualizados);
+                }
+            }
+        }
+
         cuenta.abonos = cuenta.abonos || [];
         cuenta.abonos.push({
             fecha: new Date().toLocaleDateString(),

@@ -818,7 +818,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             estado: "Pendiente",
             abonos: [],
             articulos: JSON.parse(JSON.stringify(carrito)),
-            totalMercancia: totalContado
+            totalMercancia: totalContado,
+            periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal"
         };
 
         cuentasPorCobrar.push(cuentaNueva);
@@ -983,7 +984,8 @@ function generarTicketMediaHoja(datosVenta) {
     }
 
     // Tabla de resumen de planes
-    const planesDisponibles = CalculatorService.calcularCredito(datosVenta.total);
+    const saldoParaPlanes = datosVenta.total - (datosVenta.enganche || 0);
+    const planesDisponibles = CalculatorService.calcularCredito(saldoParaPlanes > 0 ? saldoParaPlanes : datosVenta.total);
     let tablaPlanes = '';
     planesDisponibles.forEach(plan => {
         const textoMeses = plan.meses === 1 ? `${plan.meses} MES (Contado)` : `${plan.meses} MESES`;
