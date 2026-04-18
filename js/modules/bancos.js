@@ -3,112 +3,115 @@ function renderBancosConfig() {
     const contenedor = document.getElementById("tablaBancosConfig");
     if (!contenedor) return;
 
-    const debito = tarjetasConfig.filter(t => t.tipo === "debito");
-    const credito = tarjetasConfig.filter(t => !t.tipo || t.tipo === "credito");
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const debito = tarjetas.filter(t => t.tipo === "debito");
+    const credito = tarjetas.filter(t => !t.tipo || t.tipo === "credito");
 
-    // ── Sección de cuentas débito ──
-    let htmlDebito = `
-        <div style="margin-bottom:30px;">
-            <h3 style="color:#2b6cb0; margin-top:0; margin-bottom:15px;">🏦 Cuentas de Débito</h3>
-            <div style="background:#eff6ff; padding:15px; border-radius:8px; margin-bottom:15px; border:1px solid #bfdbfe;">
-                <div style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:10px; align-items:end;">
-                    <div>
-                        <label style="font-size:13px; color:#1e40af; display:block; margin-bottom:4px;">Banco / Nombre</label>
-                        <input type="text" id="inputDebitoBanco" placeholder="Ej: BBVA"
-                               style="width:100%; padding:8px; border:1px solid #93c5fd; border-radius:5px; box-sizing:border-box;">
-                    </div>
-                    <div>
-                        <label style="font-size:13px; color:#1e40af; display:block; margin-bottom:4px;">Últimos 4 dígitos</label>
-                        <input type="text" id="inputDebitoCuenta" placeholder="Ej: 1234" maxlength="4"
-                               style="width:100%; padding:8px; border:1px solid #93c5fd; border-radius:5px; box-sizing:border-box;">
-                    </div>
-                    <div>
-                        <label style="font-size:13px; color:#1e40af; display:block; margin-bottom:4px;">Saldo Inicial ($)</label>
-                        <input type="number" id="inputDebitoSaldo" placeholder="0.00" min="0"
-                               style="width:100%; padding:8px; border:1px solid #93c5fd; border-radius:5px; box-sizing:border-box;">
-                    </div>
-                    <button onclick="guardarCuentaDebito()"
-                            style="padding:9px 16px; background:#2b6cb0; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; white-space:nowrap; height:37px;">
-                        + Agregar
-                    </button>
+    // Form to add debit account
+    let html = `
+        <div style="background:#eef6ff; padding:20px; border-radius:10px; margin-bottom:25px; border:1px solid #bfdbfe;">
+            <h3 style="margin-top:0; color:#1e40af;">🏦 Agregar Cuenta de Débito</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:10px; align-items:end;">
+                <div>
+                    <label style="font-size:13px; color:#374151;">Banco</label>
+                    <input type="text" id="debitoNombre" placeholder="BBVA, Banamex..." 
+                           style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:5px; margin-top:4px;">
                 </div>
-            </div>`;
+                <div>
+                    <label style="font-size:13px; color:#374151;">Últimos 4 dígitos</label>
+                    <input type="text" id="debitoDigitos" placeholder="1234" maxlength="4"
+                           style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:5px; margin-top:4px;">
+                </div>
+                <div>
+                    <label style="font-size:13px; color:#374151;">Saldo Inicial ($)</label>
+                    <input type="number" id="debitoSaldo" placeholder="0.00" min="0"
+                           style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:5px; margin-top:4px;">
+                </div>
+                <button onclick="agregarCuentaDebito()" 
+                        style="padding:8px 16px; background:#2563eb; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; height:36px;">
+                    + Agregar
+                </button>
+            </div>
+        </div>
+
+        <h3 style="color:#1e40af; margin-bottom:10px;">🏦 Cuentas de Débito</h3>`;
 
     if (debito.length === 0) {
-        htmlDebito += `<p style="text-align:center; color:#6b7280; padding:15px;">Sin cuentas de débito registradas.</p>`;
+        html += `<p style="color:#9ca3af; margin-bottom:20px;">No hay cuentas de débito registradas.</p>`;
     } else {
-        htmlDebito += `
-            <table class="tabla-admin">
-                <thead><tr>
-                    <th>Cuenta</th>
-                    <th>Últimos 4</th>
-                    <th>Saldo Inicial</th>
-                    <th>Acciones</th>
-                </tr></thead>
-                <tbody>`;
-        debito.forEach(t => {
-            const globalIndex = tarjetasConfig.indexOf(t);
-            htmlDebito += `
-                <tr>
-                    <td><strong>🏦 ${t.banco} Débito</strong></td>
-                    <td>${t.cuenta ? `****${t.cuenta}` : '—'}</td>
-                    <td>${dinero(t.saldoInicial || 0)}</td>
-                    <td>
-                        <button onclick="eliminarBanco(${globalIndex})" style="background:#e74c3c; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Eliminar</button>
-                    </td>
-                </tr>`;
+        html += `<table class="tabla-admin" style="margin-bottom:25px;">
+            <thead><tr>
+                <th>Banco</th>
+                <th>Últimos 4</th>
+                <th>Saldo Inicial</th>
+                <th>Acciones</th>
+            </tr></thead>
+            <tbody>`;
+        tarjetas.forEach((t, index) => {
+            if (t.tipo !== "debito") return;
+            html += `<tr>
+                <td><strong>${t.banco}</strong></td>
+                <td>${t.ultimos4 ? '••••' + t.ultimos4 : '—'}</td>
+                <td>${t.saldoInicial != null ? dinero(t.saldoInicial) : '—'}</td>
+                <td>
+                    <button onclick="prepararEdicionBanco(${index})" style="background:#3182ce; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:5px;">Modificar</button>
+                    <button onclick="eliminarBanco(${index})" style="background:#e74c3c; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Eliminar</button>
+                </td>
+            </tr>`;
         });
-        htmlDebito += `</tbody></table>`;
+        html += `</tbody></table>`;
     }
-    htmlDebito += `</div>`;
 
-    // ── Sección de tarjetas crédito ──
-    let htmlCredito = `
-        <div>
-            <h3 style="color:#6b21a8; margin-top:0; margin-bottom:15px;">💳 Tarjetas de Crédito (MSI)</h3>`;
+    html += `<h3 style="color:#6b21a8; margin-bottom:10px;">💳 Tarjetas de Crédito MSI</h3>`;
 
     if (credito.length === 0) {
-        htmlCredito += `<p style="text-align:center; color:#6b7280; padding:15px;">Sin tarjetas de crédito registradas.</p>`;
+        html += `<p style="color:#9ca3af;">No hay tarjetas de crédito registradas.</p>`;
     } else {
-        htmlCredito += `
-            <table class="tabla-admin">
-                <thead><tr>
-                    <th>Banco</th>
-                    <th>Día de Corte</th>
-                    <th>Día Límite de Pago</th>
-                    <th>Acciones</th>
-                </tr></thead>
-                <tbody>`;
-        credito.forEach(t => {
-            const globalIndex = tarjetasConfig.indexOf(t);
+        html += `<table class="tabla-admin">
+            <thead><tr>
+                <th>Banco</th>
+                <th>Tipo</th>
+                <th>Día de Corte</th>
+                <th>Día Límite de Pago</th>
+                <th>Acciones</th>
+            </tr></thead>
+            <tbody>`;
+        tarjetas.forEach((t, index) => {
+            if (t.tipo === "debito") return;
             const notaMes = (parseInt(t.diaCorte) > parseInt(t.diaLimite))
                 ? '<br><small style="color:orange;">(Mes siguiente)</small>' : '';
-            htmlCredito += `
-                <tr>
-                    <td><strong>💳 ${t.banco} Crédito</strong></td>
-                    <td>Día ${t.diaCorte}</td>
-                    <td>Día ${t.diaLimite} ${notaMes}</td>
-                    <td>
-                        <button onclick="prepararEdicionBanco(${globalIndex})" style="background:#3182ce; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:5px;">Modificar</button>
-                        <button onclick="eliminarBanco(${globalIndex})" style="background:#e74c3c; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Eliminar</button>
-                    </td>
-                </tr>`;
+            html += `<tr>
+                <td><strong>${t.banco}</strong></td>
+                <td><span style="color:#6b21a8; font-weight:bold;">💳 Crédito MSI</span></td>
+                <td>Día ${t.diaCorte}</td>
+                <td>Día ${t.diaLimite} ${notaMes}</td>
+                <td>
+                    <button onclick="prepararEdicionBanco(${index})" style="background:#3182ce; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; margin-right:5px;">Modificar</button>
+                    <button onclick="eliminarBanco(${index})" style="background:#e74c3c; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Eliminar</button>
+                </td>
+            </tr>`;
         });
-        htmlCredito += `</tbody></table>`;
+        html += `</tbody></table>`;
     }
-    htmlCredito += `</div>`;
 
-    contenedor.innerHTML = htmlDebito + htmlCredito;
+    contenedor.innerHTML = html;
 }
 
-function guardarCuentaDebito() {
-    const banco = document.getElementById("inputDebitoBanco")?.value.trim().toUpperCase();
-    const cuenta = document.getElementById("inputDebitoCuenta")?.value.trim();
-    const saldoInicial = parseFloat(document.getElementById("inputDebitoSaldo")?.value) || 0;
-    if (!banco) { alert("Ingresa el nombre del banco."); return; }
-    tarjetasConfig.push({ banco, cuenta, saldoInicial, tipo: "debito" });
+function agregarCuentaDebito() {
+    const nombre = document.getElementById("debitoNombre")?.value.trim().toUpperCase();
+    const ultimos4 = document.getElementById("debitoDigitos")?.value.trim();
+    const saldoInicial = parseFloat(document.getElementById("debitoSaldo")?.value) || 0;
+
+    if (!nombre) { alert("⚠️ Ingresa el nombre del banco."); return; }
+
+    tarjetasConfig.push({ banco: nombre, tipo: "debito", ultimos4, saldoInicial, diaCorte: 0, diaLimite: 0 });
     actualizarYRefrescarBancos();
+
+    document.getElementById("debitoNombre").value = "";
+    document.getElementById("debitoDigitos").value = "";
+    document.getElementById("debitoSaldo").value = "";
 }
+window.agregarCuentaDebito = agregarCuentaDebito;
 
 function abrirModalBanco() {
     const nombre = prompt("Nombre del Banco / Tarjeta de Crédito:");
@@ -488,87 +491,123 @@ function renderFlujoCaja() {
     const elEgresos = document.getElementById("totalEgresosProveedores");
     if (elEgresos) elEgresos.textContent = dinero(totalEgresos);
 }
-// ===== CUENTAS BANCARIAS: SALDOS =====
+
+// ===== CUENTAS BANCARIAS DASHBOARD =====
 function renderCuentasBancarias() {
     const contenedor = document.getElementById("tablaCuentasBancarias");
     if (!contenedor) return;
 
-    const movimientos = StorageService.get("movimientosCaja", []);
     const tarjetas = StorageService.get("tarjetasConfig", []);
+    const movimientos = StorageService.get("movimientosCaja", []);
     const cuentasMSI = StorageService.get("cuentasMSI", []);
 
-    const debito = tarjetas.filter(t => t.tipo === "debito");
-    const creditoTarjetas = tarjetas.filter(t => !t.tipo || t.tipo === "credito");
-
-    // Saldo efectivo
-    let saldoEfectivo = 0;
+    // Calculate cash balance
+    let saldoCaja = 0;
     movimientos.forEach(m => {
-        const c = m.cuenta || "efectivo";
-        if (c === "efectivo" || c === "caja") {
-            const monto = parseFloat(m.monto) || 0;
-            saldoEfectivo += (m.tipo === "ingreso" || m.tipo === "Ingreso") ? monto : -monto;
+        const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
+        const cuenta = (m.cuenta || "").toLowerCase();
+        if (cuenta === "caja" || cuenta === "efectivo" || m.medioPago === "efectivo") {
+            saldoCaja += esIngreso ? (parseFloat(m.monto) || 0) : -(parseFloat(m.monto) || 0);
         }
     });
 
-    let html = '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:20px; padding:4px 0;">';
+    // Calculate debit account balances
+    const cuentasDebito = tarjetas.filter(t => t.tipo === "debito");
+    const saldosDebito = {};
+    cuentasDebito.forEach(t => {
+        saldosDebito[t.banco] = parseFloat(t.saldoInicial) || 0;
+    });
+    movimientos.forEach(m => {
+        const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
+        const cuenta = m.cuenta || "";
+        if (saldosDebito[cuenta] !== undefined) {
+            saldosDebito[cuenta] += esIngreso ? (parseFloat(m.monto) || 0) : -(parseFloat(m.monto) || 0);
+        }
+    });
 
-    // Efectivo
-    const colorE = saldoEfectivo >= 0 ? '#059669' : '#dc2626';
-    const bgE = saldoEfectivo >= 0 ? '#f0fdf4' : '#fef2f2';
-    html += `
-        <div style="background:${bgE}; border-radius:12px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,0.08); border-left:4px solid ${colorE};">
-            <div style="font-size:26px; margin-bottom:6px;">💵</div>
-            <div style="font-weight:bold; color:#374151; font-size:16px;">Caja Efectivo</div>
-            <div style="font-size:26px; font-weight:bold; color:${colorE}; margin-top:8px;">${dinero(saldoEfectivo)}</div>
-            <small style="color:#6b7280;">Balance de movimientos registrados</small>
+    // Calculate credit card pending MSI
+    const cuentasCredito = tarjetas.filter(t => !t.tipo || t.tipo === "credito");
+    const deudaMSIPorBanco = {};
+    cuentasMSI.forEach(c => {
+        const totalVal = parseFloat(String(c.total || 0).replace(/[$,]/g, ''));
+        const cuotaVal = parseFloat(String(c.cuotaMensual || 0).replace(/[$,]/g, ''));
+        const pagos = parseInt(c.pagosRealizados || 0);
+        const restante = Math.max(0, totalVal - (pagos * cuotaVal));
+        deudaMSIPorBanco[c.banco] = (deudaMSIPorBanco[c.banco] || 0) + restante;
+    });
+
+    // Build dashboard cards
+    let cardsHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:15px; margin-bottom:30px;">`;
+
+    // Cash card
+    cardsHTML += `
+        <div style="background:#f0fdf4; border:1px solid #86efac; border-radius:12px; padding:20px; text-align:center;">
+            <div style="font-size:28px; margin-bottom:8px;">💵</div>
+            <div style="font-size:13px; color:#166534; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">Efectivo</div>
+            <div style="font-size:22px; font-weight:bold; color:${saldoCaja >= 0 ? '#15803d' : '#dc2626'};">${dinero(saldoCaja)}</div>
         </div>`;
 
-    // Cuentas débito
-    debito.forEach(t => {
-        const saldoInicial = parseFloat(t.saldoInicial) || 0;
-        let saldo = saldoInicial;
-        movimientos.forEach(m => {
-            if (m.cuenta === t.banco) {
-                const monto = parseFloat(m.monto) || 0;
-                saldo += (m.tipo === "ingreso" || m.tipo === "Ingreso") ? monto : -monto;
-            }
-        });
-        const colorD = saldo >= 0 ? '#2b6cb0' : '#dc2626';
-        const bgD = saldo >= 0 ? '#eff6ff' : '#fef2f2';
-        html += `
-            <div style="background:${bgD}; border-radius:12px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,0.08); border-left:4px solid ${colorD};">
-                <div style="font-size:26px; margin-bottom:6px;">🏦</div>
-                <div style="font-weight:bold; color:#374151; font-size:16px;">🏦 ${t.banco} Débito</div>
-                ${t.cuenta ? `<div style="color:#6b7280; font-size:13px;">****${t.cuenta}</div>` : ''}
-                <div style="font-size:26px; font-weight:bold; color:${colorD}; margin-top:8px;">${dinero(saldo)}</div>
-                <div style="font-size:12px; color:#6b7280; margin-top:4px;">Saldo inicial: ${dinero(saldoInicial)}</div>
+    // Debit account cards
+    cuentasDebito.forEach(t => {
+        const saldo = saldosDebito[t.banco] || 0;
+        cardsHTML += `
+            <div style="background:#eff6ff; border:1px solid #93c5fd; border-radius:12px; padding:20px; text-align:center;">
+                <div style="font-size:28px; margin-bottom:8px;">🏦</div>
+                <div style="font-size:13px; color:#1e40af; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">${t.banco} Débito${t.ultimos4 ? '<br><small>••••' + t.ultimos4 + '</small>' : ''}</div>
+                <div style="font-size:22px; font-weight:bold; color:${saldo >= 0 ? '#1d4ed8' : '#dc2626'};">${dinero(saldo)}</div>
             </div>`;
     });
 
-    // Tarjetas crédito (deuda MSI)
-    creditoTarjetas.forEach(t => {
-        const deudas = cuentasMSI.filter(d => d.banco === t.banco);
-        let deudaTotal = 0;
-        deudas.forEach(d => {
-            const total = parseFloat(String(d.total || 0).replace(/[$,]/g, ''));
-            const cuota = parseFloat(String(d.cuotaMensual || 0).replace(/[$,]/g, ''));
-            const pagos = parseInt(d.pagosRealizados || 0);
-            deudaTotal += Math.max(0, total - pagos * cuota);
-        });
-        const colorC = deudaTotal > 0 ? '#7c3aed' : '#059669';
-        const bgC = deudaTotal > 0 ? '#faf5ff' : '#f0fdf4';
-        html += `
-            <div style="background:${bgC}; border-radius:12px; padding:22px; box-shadow:0 2px 8px rgba(0,0,0,0.08); border-left:4px solid ${colorC};">
-                <div style="font-size:26px; margin-bottom:6px;">💳</div>
-                <div style="font-weight:bold; color:#374151; font-size:16px;">💳 ${t.banco} Crédito</div>
-                <div style="font-size:26px; font-weight:bold; color:${colorC}; margin-top:8px;">${dinero(deudaTotal)}</div>
-                <small style="color:#6b7280;">Deuda MSI pendiente</small>
+    // Credit card cards
+    cuentasCredito.forEach(t => {
+        const deuda = deudaMSIPorBanco[t.banco] || 0;
+        cardsHTML += `
+            <div style="background:#faf5ff; border:1px solid #c4b5fd; border-radius:12px; padding:20px; text-align:center;">
+                <div style="font-size:28px; margin-bottom:8px;">💳</div>
+                <div style="font-size:13px; color:#6b21a8; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">${t.banco} Crédito</div>
+                <div style="font-size:13px; color:#7c3aed; margin-bottom:4px;">Deuda MSI pendiente</div>
+                <div style="font-size:22px; font-weight:bold; color:#7c3aed;">${dinero(deuda)}</div>
             </div>`;
     });
 
-    html += '</div>';
-    contenedor.innerHTML = html;
+    cardsHTML += `</div>`;
+
+    // Recent movements table (last 20)
+    const ultimos20 = movimientos.slice(-20).reverse();
+    let tablaHTML = `
+        <h3 style="color:#374151; margin-bottom:12px;">📋 Últimos movimientos</h3>
+        <div style="overflow-x:auto;">
+        <table class="tabla-admin" style="width:100%;">
+            <thead><tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Concepto</th>
+                <th>Cuenta</th>
+                <th style="text-align:right;">Monto</th>
+            </tr></thead>
+            <tbody>`;
+
+    if (ultimos20.length === 0) {
+        tablaHTML += `<tr><td colspan="5" style="text-align:center; padding:20px; color:#999;">Sin movimientos registrados.</td></tr>`;
+    } else {
+        ultimos20.forEach(m => {
+            const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
+            const color = esIngreso ? "#059669" : "#dc2626";
+            const label = esIngreso ? "⬆️ Ingreso" : "⬇️ Egreso";
+            const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
+            tablaHTML += `
+                <tr>
+                    <td>${m.fecha || ""}</td>
+                    <td style="color:${color}; font-weight:bold;">${label}</td>
+                    <td>${m.concepto || ""}</td>
+                    <td><strong>${cuentaLabel}</strong></td>
+                    <td style="text-align:right; font-weight:bold; color:${color};">${dinero(m.monto)}</td>
+                </tr>`;
+        });
+    }
+
+    tablaHTML += `</tbody></table></div>`;
+
+    contenedor.innerHTML = cardsHTML + tablaHTML;
 }
-
-window.guardarCuentaDebito = guardarCuentaDebito;
 window.renderCuentasBancarias = renderCuentasBancarias;

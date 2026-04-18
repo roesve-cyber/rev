@@ -1,3 +1,58 @@
+// ===== HELPERS DE CUENTA / MEDIO DE PAGO =====
+function _buildCuentaOrigen(idSufijo) {
+    return `
+        <div style="margin-bottom:8px;">
+            <label style="font-size:14px; color:#4b5563;">Medio de pago:</label>
+            <select id="medioPago_${idSufijo}" onchange="_actualizarCuentaEspecifica('${idSufijo}')"
+                    style="width:100%; padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; margin-top:4px;">
+                <option value="efectivo">💵 Efectivo</option>
+                <option value="transferencia">🏦 Transferencia bancaria</option>
+                <option value="tarjeta_credito">💳 Tarjeta de crédito</option>
+            </select>
+        </div>
+        <div id="divCuentaEspecifica_${idSufijo}" style="display:none; margin-top:8px;">
+            <label style="font-size:14px; color:#4b5563;">Cuenta específica:</label>
+            <select id="cuentaEspecifica_${idSufijo}"
+                    style="width:100%; padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; margin-top:4px;">
+            </select>
+        </div>`;
+}
+
+function _actualizarCuentaEspecifica(idSufijo) {
+    const medio = document.getElementById('medioPago_' + idSufijo)?.value;
+    const div = document.getElementById('divCuentaEspecifica_' + idSufijo);
+    const sel = document.getElementById('cuentaEspecifica_' + idSufijo);
+    if (!div || !sel) return;
+    if (medio === 'efectivo') { div.style.display = 'none'; return; }
+    div.style.display = 'block';
+    const tarjetas = StorageService.get('tarjetasConfig', []);
+    if (medio === 'transferencia') {
+        const debito = tarjetas.filter(t => t.tipo === 'debito');
+        sel.innerHTML = debito.length === 0
+            ? '<option value="">-- No hay cuentas débito registradas --</option>'
+            : debito.map(t => `<option value="${t.banco}">🏦 ${t.banco} Débito</option>`).join('');
+    } else {
+        const credito = tarjetas.filter(t => !t.tipo || t.tipo === 'credito');
+        sel.innerHTML = credito.length === 0
+            ? '<option value="">-- No hay tarjetas registradas --</option>'
+            : credito.map(t => `<option value="${t.banco}">💳 ${t.banco} Crédito</option>`).join('');
+    }
+}
+
+function _getCuentaSeleccionada(idSufijo) {
+    const medio = document.getElementById('medioPago_' + idSufijo)?.value || 'efectivo';
+    const especifica = document.getElementById('cuentaEspecifica_' + idSufijo)?.value || '';
+    let cuentaId = 'caja';
+    let etiqueta = '💵 Efectivo';
+    if (medio === 'transferencia' && especifica) { cuentaId = especifica; etiqueta = `🏦 ${especifica} Débito`; }
+    if (medio === 'tarjeta_credito' && especifica) { cuentaId = especifica; etiqueta = `💳 ${especifica} Crédito`; }
+    return { medioPago: medio, cuentaId, etiqueta };
+}
+
+window._buildCuentaOrigen = _buildCuentaOrigen;
+window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
+window._getCuentaSeleccionada = _getCuentaSeleccionada;
+
 // ===== CLIENTES =====
 function guardarCliente() {
     const nombreInput   = document.getElementById("clienteNombre");
@@ -534,7 +589,7 @@ function abrirModalAbonoAvanzado(folio) {
         </div>` : '';
 
     let modalHTML = `
-        <div data-modal="abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+        <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto;">
                 <h2 style="margin-top:0;">💰 Registrar Abono - ${cuenta.nombre}</h2>
                 
@@ -577,7 +632,7 @@ function abrirModalAbonoAvanzado(folio) {
                             style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
                         ✅ Registrar Abono
                     </button>
-                    <button onclick="document.querySelector('[data-modal=&quot;abono&quot;]')?.remove();" 
+                    <button onclick="document.querySelector('[data-modal=&quot;abono-avanzado&quot;]')?.remove();" 
                             style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
                         ✕ Cancelar
                     </button>
@@ -638,11 +693,14 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         }
 
         let movimientos = StorageService.get("movimientosCaja", []);
+        const folioCaja = folio;
         movimientos.push({
+            id: Date.now(),
+            folio: folioCaja,
             fecha: new Date().toLocaleDateString(),
             monto: montoAbono,
             tipo: "ingreso",
-            concepto: `Abono de ${cuenta.nombre} - ${folio}`,
+            concepto: `Abono a ${cuenta.nombre} - ${folio}`,
             referencia: "Abono",
             cuenta: cuentaId,
             medioPago: medioPago,
@@ -654,7 +712,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     }
 
     alert("✅ Abono registrado exitosamente.");
-    document.querySelector('[data-modal="abono"]')?.remove();
+    document.querySelector('[data-modal="abono-avanzado"]')?.remove();
     renderCuentasXCobrar();
 }
 
