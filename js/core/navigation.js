@@ -36,6 +36,9 @@ function navA(vistaId) {
         if (idLimpio === 'cobranzaesperada') renderCobranzaEsperada();
         if (idLimpio === 'logistica') renderLogistica();
         if (idLimpio === 'listaprecios') renderListaPrecios();
+        if (idLimpio === 'reporte-ventas') renderReporteVentas();
+        if (idLimpio === 'reporte-compras') renderReporteCompras();
+        if (idLimpio === 'reporte-flujo') renderReporteFlujo();
     }
 
     const sb = document.getElementById("sidebar");
