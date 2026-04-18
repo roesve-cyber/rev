@@ -716,27 +716,43 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     let _montoRestante = montoAbono;
     const _pagaresCubiertos = [];
     for (const pag of _pagaresDelFolio) {
-        if (_montoRestante >= pag.monto - 0.01) {
+        // For previously partially-paid pagarés, only require the remaining balance
+        const _montoNecesario = pag.estado === 'Parcial'
+            ? Math.max(0, pag.monto - (pag.montoAbonado || 0))
+            : pag.monto;
+        if (_montoRestante >= _montoNecesario - 0.01) {
             _pagaresCubiertos.push({ ...pag });
-            _montoRestante -= pag.monto;
+            _montoRestante -= _montoNecesario;
         } else {
             break;
         }
     }
 
-    // Marcar pagarés cubiertos como Pagado
-    if (_pagaresCubiertos.length > 0) {
+    // Detect partial coverage: remaining money covers part of the next pagaré
+    let _pagareParcial = null;
+    if (_montoRestante > 0.005) {
+        const _nextPagare = _pagaresDelFolio.find(p => !_pagaresCubiertos.find(pc => pc.id === p.id));
+        if (_nextPagare) {
+            _pagareParcial = { ..._nextPagare, montoAplicado: _montoRestante };
+        }
+    }
+
+    // Marcar pagarés cubiertos como Pagado y el parcial si aplica
+    if (_pagaresCubiertos.length > 0 || _pagareParcial) {
         const fechaAbono = new Date().toLocaleDateString("es-MX");
         const _todosActualizados = _todosLosPagares.map(p => {
             if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
                 return { ...p, estado: "Pagado", fechaAbono, montoAbonado: p.monto };
+            }
+            if (_pagareParcial && p.id === _pagareParcial.id) {
+                return { ...p, estado: "Parcial", fechaAbono, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
             }
             return p;
         });
         StorageService.set("pagaresSistema", _todosActualizados);
     }
 
-    // Pagarés restantes después del abono
+    // Pagarés restantes después del abono (partial pagaré is still outstanding)
     const _pagaresRestantes = _pagaresDelFolio.filter(p => !_pagaresCubiertos.find(pc => pc.id === p.id));
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -805,11 +821,14 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             medioPago,
             etiquetaCuenta: etiqueta
         });
-        // Recalcular saldo desde pagarés pendientes restantes
+        // Recalcular saldo desde pagarés pendientes restantes (incluyendo parciales)
         const _pagaresActualizados = StorageService.get("pagaresSistema", []);
         cuenta.saldoActual = _pagaresActualizados
-            .filter(p => p.folio === folio && p.estado === 'Pendiente')
-            .reduce((s, p) => s + (p.monto || 0), 0);
+            .filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
+            .reduce((s, p) => {
+                if (p.estado === 'Parcial') return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+                return s + (p.monto || 0);
+            }, 0);
         nuevoSaldoReal = cuenta.saldoActual;
         
         if (nuevoSaldoReal === 0) {
@@ -843,6 +862,11 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     // ─── GENERAR TICKET DE ABONO ───
     const _cuentaData = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    // Include partial pagaré in cubiertos list (with parcial flag for ticket rendering)
+    const _pagaresCubiertosTicket = [..._pagaresCubiertos];
+    if (_pagareParcial) {
+        _pagaresCubiertosTicket.push({ ..._pagareParcial, parcial: true });
+    }
     generarTicketAbonoTermico({
         folio,
         cliente: {
@@ -855,7 +879,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         fecha: new Date().toLocaleDateString("es-MX"),
         metodoCobro: document.getElementById("metodoCobroAbono")?.value || medioPago || "efectivo",
         cuentaDestino: document.getElementById("cuentaDestinoAbono")?.value || etiqueta || "efectivo",
-        pagaresCubiertos: _pagaresCubiertos,
+        pagaresCubiertos: _pagaresCubiertosTicket,
         pagaresRestantes: _pagaresRestantes,
         articulos: _cuentaData?.articulos || [],
         totalVenta: _cuentaData?.totalContadoOriginal || 0,
@@ -929,8 +953,8 @@ function generarTicketAbono(datosAbono) {
 <body>
 <div id="ticket-contenido">
     <div class="centro">
-        <img src="img/logo.png" style="max-width:50px; max-height:50px; object-fit:contain;" 
-             onerror="this.style.display='none';">
+        <img src="img/logo.png" style="width:60px; height:60px; object-fit:contain;"
+             onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
         <div class="negrita" style="font-size:14px; margin-top:4px;">${esc(empresa.nombre)}</div>
         <div>${esc(empresa.direccion)}</div>
         <div>Tel. ${esc(empresa.telefono)}</div>
@@ -1142,8 +1166,8 @@ function generarTicketAbonoTermico(datosAbono) {
                 <tr class="pagare-cubierto">
                     <td>${i + 1}</td>
                     <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX'))}</td>
-                    <td style="text-align:right;">${dinero(p.monto)}</td>
-                    <td>✅ PAG.</td>
+                    <td style="text-align:right;">${p.parcial ? (dinero(p.montoAplicado) + '<br><small style="color:#888;">/ ' + dinero(p.monto) + '</small>') : dinero(p.monto)}</td>
+                    <td>${p.parcial ? '⚠️ PARCIAL' : '✅ PAG.'}</td>
                 </tr>`).join('')}
             </tbody>
         </table>` : '';
