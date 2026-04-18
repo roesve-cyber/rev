@@ -14,9 +14,15 @@
         <button class="menu-toggle" onclick="toggleMenu()">☰</button>
         <h1>MUEBLERÍA MI PUEBLITO</h1>
     </div>
-    <div class="carrito-header" onclick="navA('carrito')">
-        <span class="icono-carrito">🛒</span>
-        <span id="contadorCarrito" class="contador-badge" style="display:none;">0</span>
+    <div style="display:flex; align-items:center; gap:8px;">
+        <button onclick="abrirPanelNotificaciones()" style="background:none; border:none; font-size:22px; cursor:pointer; position:relative; padding:4px 8px;">
+          🔔
+          <span id="badgeNotif" style="display:none; position:absolute; top:0; right:0; background:#e74c3c; color:white; border-radius:50%; width:18px; height:18px; font-size:10px; font-weight:bold; align-items:center; justify-content:center;">0</span>
+        </button>
+        <div class="carrito-header" onclick="navA('carrito')">
+            <span class="icono-carrito">🛒</span>
+            <span id="contadorCarrito" class="contador-badge" style="display:none;">0</span>
+        </div>
     </div>
 </div>
 
@@ -93,6 +99,53 @@
                 <button onclick="navA('reporte-ventas')">💰 Ventas</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
                 <button onclick="navA('reporte-flujo')">💵 Flujo de Efectivo</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas-ext')">📄 VENTAS+ <span>▾</span></button>
+            <div id="sub-ventas-ext" class="submenu oculto-submenu">
+                <button onclick="navA('cotizaciones');abrirListaCotizaciones();">📄 Cotizaciones</button>
+                <button onclick="navA('devoluciones');renderHistorialDevoluciones();">↩️ Devoluciones</button>
+                <button onclick="navA('garantias');renderControlGarantias();">🛡️ Garantías</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-clientes-ext')">👥 CLIENTES+ <span>▾</span></button>
+            <div id="sub-clientes-ext" class="submenu oculto-submenu">
+                <button onclick="navA('clientesmorosos');renderClientesMorosos();">🔴 Clientes Morosos</button>
+                <button onclick="navA('puntos');renderPanelPuntos();">⭐ Puntos y Fidelidad</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-compras-ext')">🛒 COMPRAS+ <span>▾</span></button>
+            <div id="sub-compras-ext" class="submenu oculto-submenu">
+                <button onclick="navA('ordenescompra');renderListaOrdenesCompra();">📋 Órdenes de Compra</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-config-ext')">⚙️ CONFIGURACIÓN <span>▾</span></button>
+            <div id="sub-config-ext" class="submenu oculto-submenu">
+                <button onclick="navA('vendedores');renderGestionVendedores();">👤 Vendedores</button>
+                <button onclick="navA('descuentos');renderGestionDescuentos();">🎯 Descuentos y Promos</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-finanzas')">💰 FINANZAS <span>▾</span></button>
+            <div id="sub-finanzas" class="submenu oculto-submenu">
+                <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
+                <button onclick="navA('proyeccion');renderProyeccionFlujo();">📈 Proyección de Flujo</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-agenda')">📅 AGENDA <span>▾</span></button>
+            <div id="sub-agenda" class="submenu oculto-submenu">
+                <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
             </div>
         </div>
 
@@ -642,6 +695,105 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
         <!-- Resultados -->
         <div id="contenidoReimprimirVenta"></div>
     </div>
+
+    <!-- COTIZACIONES -->
+    <div id="cotizaciones" class="vista oculto">
+        <div class="vista-header">
+            <h2>📄 Cotizaciones</h2>
+            <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
+        </div>
+        <div id="listaCotizaciones"></div>
+    </div>
+
+    <!-- PUNTOS Y FIDELIDAD -->
+    <div id="puntos" class="vista oculto">
+        <div class="vista-header">
+            <h2>⭐ Puntos y Fidelidad</h2>
+            <p>Programa de puntos por compra y canje en descuentos.</p>
+        </div>
+        <div id="contenidoPuntos"></div>
+    </div>
+
+    <!-- DESCUENTOS Y PROMOCIONES -->
+    <div id="descuentos" class="vista oculto">
+        <div class="vista-header">
+            <h2>🎯 Descuentos y Promociones</h2>
+            <p>Gestiona descuentos por temporada, categoría o monto fijo.</p>
+        </div>
+        <div id="contenidoDescuentos"></div>
+    </div>
+
+    <!-- VENDEDORES -->
+    <div id="vendedores" class="vista oculto">
+        <div class="vista-header">
+            <h2>👤 Vendedores y Comisiones</h2>
+            <p>Gestiona vendedores y calcula comisiones automáticamente.</p>
+        </div>
+        <div id="contenidoVendedores"></div>
+    </div>
+
+    <!-- GASTOS OPERATIVOS -->
+    <div id="gastos" class="vista oculto">
+        <div class="vista-header">
+            <h2>💸 Gastos Operativos</h2>
+            <p>Registra renta, luz, nómina, transporte y más.</p>
+        </div>
+        <div id="contenidoGastos"></div>
+    </div>
+
+    <!-- PROYECCIÓN DE FLUJO -->
+    <div id="proyeccion" class="vista oculto">
+        <div class="vista-header">
+            <h2>📈 Proyección de Flujo</h2>
+            <p>Ingresos esperados vs gastos programados a futuro.</p>
+        </div>
+        <div id="contenidoProyeccion"></div>
+    </div>
+
+    <!-- CLIENTES MOROSOS -->
+    <div id="clientesmorosos" class="vista oculto">
+        <div class="vista-header">
+            <h2>🔴 Clientes Morosos</h2>
+            <p>Ranking de clientes con mayor deuda y días de atraso.</p>
+        </div>
+        <div id="contenidoMorosos"></div>
+    </div>
+
+    <!-- DEVOLUCIONES -->
+    <div id="devoluciones" class="vista oculto">
+        <div class="vista-header">
+            <h2>↩️ Devoluciones</h2>
+            <p>Registra devoluciones y reingresa productos al inventario.</p>
+        </div>
+        <div id="contenidoDevoluciones"></div>
+    </div>
+
+    <!-- GARANTÍAS -->
+    <div id="garantias" class="vista oculto">
+        <div class="vista-header">
+            <h2>🛡️ Control de Garantías</h2>
+            <p>Vigencia, fechas de vencimiento y estado de garantías.</p>
+        </div>
+        <div id="contenidoGarantias"></div>
+    </div>
+
+    <!-- ÓRDENES DE COMPRA -->
+    <div id="ordenescompra" class="vista oculto">
+        <div class="vista-header">
+            <h2>📋 Órdenes de Compra</h2>
+            <p>Genera OC a proveedores y da seguimiento a su estado.</p>
+        </div>
+        <div id="contenidoOrdenesCompra"></div>
+    </div>
+
+    <!-- AGENDA DE COBROS -->
+    <div id="agendacobros" class="vista oculto">
+        <div class="vista-header">
+            <h2>📅 Agenda de Cobros</h2>
+            <p>Calendario visual con pagarés que vencen cada día.</p>
+        </div>
+        <div id="contenidoAgenda"></div>
+    </div>
 </main>
 
 <!-- ===== MODALES ===== -->
@@ -713,6 +865,15 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
 <script src="js/modules/logistica.js"></script>
 <script src="js/modules/reportes.js"></script>
 <script src="js/modules/dashboard.js"></script>
+<script src="js/modules/cotizaciones.js"></script>
+<script src="js/modules/puntos.js"></script>
+<script src="js/modules/descuentos.js"></script>
+<script src="js/modules/vendedores.js"></script>
+<script src="js/modules/gastos.js"></script>
+<script src="js/modules/proyeccion.js"></script>
+<script src="js/modules/devoluciones.js"></script>
+<script src="js/modules/agenda.js"></script>
+<script src="js/modules/notificaciones.js"></script>
 <script src="js/init.js"></script>
 </body>
 </html>
