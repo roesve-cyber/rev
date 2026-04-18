@@ -3499,7 +3499,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         
         productosSinStock.forEach(x => {
             const idProd = x.prod.id;
-            decisiones[idProd] = { entregar: false }; // Auto pendiente
+            decisionesInventario[idProd] = { entregar: false }; // Auto pendiente
             
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
