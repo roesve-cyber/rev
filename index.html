@@ -75,6 +75,7 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-bancos')">🏦 BANCOS <span>▾</span></button>
             <div id="sub-bancos" class="submenu oculto-submenu">
+                <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
                 <button onclick="navA('flujo-msi')">💳 MSI (Flujo)</button>
                 <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
             </div>
@@ -548,6 +549,15 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- CUENTAS BANCARIAS -->
+    <div id="cuentas-bancarias" class="vista oculto">
+        <div class="vista-header">
+            <h2>🏦 Mis Cuentas</h2>
+            <p>Saldo actual por cuenta basado en movimientos registrados.</p>
+        </div>
+        <div id="tablaCuentasBancarias"></div>
     </div>
 </main>
 
