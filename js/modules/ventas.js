@@ -755,7 +755,9 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     // PASO 4: CREAR CUENTAS POR COBRAR
     if (metodoPago === "credito" || metodoPago === "apartado") {
-        const saldoPendiente = metodoPago === "credito" ? planElegido.total : saldoAFinanciar;
+        const saldoPendiente = metodoPago === "credito"
+            ? planElegido.total   // planElegido.total ya es calculado sobre saldoAFinanciar (precio - enganche)
+            : saldoAFinanciar;    // apartado: precio - enganche
 
         const cuentaNueva = {
             folio: folioVenta,
@@ -872,6 +874,13 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     generarTicketMediaHoja(datosVenta);
 
+    // Cerrar y eliminar todos los modales dinámicos
+    document.querySelectorAll('[data-modal]').forEach(m => m.remove());
+    document.querySelectorAll('.modal').forEach(m => {
+        m.classList.add('oculto');
+        m.style.display = 'none';
+    });
+
     // LIMPIAR
     carrito = [];
     clienteSeleccionado = null;
@@ -954,207 +963,209 @@ function generarTicketMediaHoja(datosVenta) {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>TICKET DE VENTA - ${folio}</title>
             <style>
-                * { 
-                    margin: 0; 
-                    padding: 0; 
-                    box-sizing: border-box; 
+                @page {
+                    size: Letter portrait;
+                    margin: 8mm;
                 }
+
                 body {
-                    font-family: 'Arial', sans-serif;
-                    background: white;
-                    padding: 20px;
-                    line-height: 1.4;
+                    font-family: Arial, sans-serif;
+                    font-size: 10px;
+                    padding: 5mm;
+                    color: #000;
                 }
+
                 .ticket {
                     width: 100%;
-                    max-width: 900px;
+                    max-width: 190mm;
                     margin: 0 auto;
-                    background: white;
-                    border: 3px solid #1a3a70;
-                    padding: 20px;
+                    border: 2px solid #1a3a70;
+                    padding: 10px;
                 }
+
                 .encabezado {
                     display: grid;
-                    grid-template-columns: 100px 1fr 150px;
-                    gap: 20px;
-                    align-items: center;
-                    border-bottom: 3px solid #333;
-                    padding-bottom: 15px;
-                    margin-bottom: 15px;
+                    grid-template-columns: 70px 1fr 120px;
+                    gap: 10px;
+                    border-bottom: 2px solid #333;
+                    padding-bottom: 8px;
+                    margin-bottom: 8px;
                 }
+
                 .logo {
-                    width: 100px;
-                    height: 100px;
-                    background: radial-gradient(circle at 30% 30%, #87ceeb, #4a90e2);
+                    width: 70px;
+                    height: 70px;
+                    font-size: 40px;
                     border-radius: 50%;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    font-size: 60px;
-                    border: 3px solid #1a3a70;
+                    background: radial-gradient(circle at 30% 30%, #87ceeb, #4a90e2);
+                    border: 2px solid #1a3a70;
                 }
-                .titulo {
+
+                .titulo h1 {
+                    font-size: 16px;
+                    color: #1a3a70;
+                    margin: 0;
                     text-align: center;
                 }
-                .titulo h1 {
-                    color: #1a3a70;
-                    font-size: 28px;
-                    margin: 0;
-                }
+
                 .titulo p {
-                    color: #333;
-                    font-size: 12px;
-                    margin: 5px 0 0 0;
+                    font-size: 9px;
+                    text-align: center;
+                    margin: 2px 0;
                 }
+
                 .folio-box {
                     border: 2px solid #333;
-                    padding: 10px;
+                    padding: 6px;
                     text-align: center;
                     font-weight: bold;
+                    font-size: 9px;
                 }
+
                 .folio-number {
                     color: #dc2626;
-                    font-size: 24px;
+                    font-size: 16px;
                 }
+
                 .subtitulo {
                     text-align: center;
-                    font-size: 18px;
+                    font-size: 13px;
                     font-weight: bold;
-                    margin: 15px 0;
+                    margin: 6px 0 2px 0;
                     color: #1a3a70;
                 }
+
                 .fecha {
                     text-align: right;
                     font-weight: bold;
-                    margin-bottom: 15px;
+                    margin-bottom: 6px;
+                    font-size: 10px;
                 }
+
                 .seccion-titulo {
                     background: #1a3a70;
                     color: white;
-                    padding: 10px 15px;
+                    padding: 5px 10px;
                     font-weight: bold;
-                    margin: 15px 0 10px 0;
-                    border-radius: 4px;
+                    margin: 6px 0 4px 0;
+                    border-radius: 3px;
+                    font-size: 10px;
                 }
+
                 .datos-cliente {
-                    border: 2px solid #333;
-                    padding: 15px;
-                    margin-bottom: 15px;
+                    border: 1px solid #333;
+                    padding: 6px 10px;
+                    margin-bottom: 6px;
+                    font-size: 10px;
                 }
-                .datos-cliente p {
-                    margin: 8px 0;
-                    font-size: 13px;
-                }
+
+                .datos-cliente p { margin: 3px 0; }
+
                 table {
                     width: 100%;
                     border-collapse: collapse;
-                    margin-bottom: 15px;
+                    margin-bottom: 6px;
+                    font-size: 9px;
                 }
+
                 th {
                     background: #e8f0fe;
                     border: 1px solid #333;
-                    padding: 10px;
+                    padding: 5px 6px;
                     text-align: left;
                     font-weight: bold;
                     color: #1a3a70;
                 }
+
                 td {
                     border: 1px solid #333;
-                    padding: 8px;
+                    padding: 4px 6px;
                 }
+
                 .total-row {
                     background: #f0f0f0;
                     font-weight: bold;
                 }
+
                 .enganche-box {
                     background: #fffbeb;
-                    border: 2px solid #f59e0b;
-                    padding: 15px;
-                    margin: 15px 0;
+                    border: 1px solid #f59e0b;
+                    padding: 6px 10px;
+                    margin: 6px 0;
                     display: grid;
-                    grid-template-columns: 1fr 200px;
-                    gap: 20px;
+                    grid-template-columns: 1fr 120px;
+                    gap: 10px;
+                    font-size: 9px;
                 }
-                .enganche-texto {
-                    font-size: 14px;
-                    color: #92400e;
-                }
+
                 .enganche-monto {
                     background: white;
-                    border: 2px solid #f59e0b;
-                    padding: 10px;
+                    border: 1px solid #f59e0b;
+                    padding: 6px;
                     text-align: center;
-                    font-size: 18px;
+                    font-size: 13px;
                     font-weight: bold;
                     color: #f59e0b;
                 }
-                .tabla-pagares {
-                    margin-top: 20px;
-                }
+
                 .tabla-pagares-titulo {
                     background: #1a3a70;
                     color: white;
-                    padding: 10px;
+                    padding: 5px;
                     text-align: center;
                     font-weight: bold;
-                    border-radius: 4px;
-                    margin-bottom: 10px;
+                    border-radius: 3px;
+                    margin-bottom: 5px;
+                    font-size: 10px;
                 }
+
                 .planes-resumen {
                     background: #1a3a70;
                     color: white;
-                    padding: 15px;
-                    margin: 20px 0;
-                    border-radius: 4px;
+                    padding: 8px;
+                    margin: 8px 0;
+                    border-radius: 3px;
                     text-align: center;
+                    font-size: 9px;
                 }
+
                 .planes-titulo {
                     font-weight: bold;
-                    margin-bottom: 15px;
-                    font-size: 14px;
+                    margin-bottom: 6px;
+                    font-size: 9px;
                 }
-                .planes-grid {
-                    display: grid;
-                    grid-template-columns: repeat(6, 1fr);
-                    gap: 10px;
-                }
-                .plan-item {
-                    background: #0f2847;
-                    padding: 10px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    text-align: center;
-                }
+
                 .firma-section {
                     display: grid;
                     grid-template-columns: 1fr 1fr;
-                    gap: 40px;
-                    margin-top: 30px;
+                    gap: 30px;
+                    margin-top: 15px;
                     text-align: center;
                 }
+
                 .linea-firma {
-                    border-top: 2px solid #333;
-                    padding-top: 10px;
+                    border-top: 1px solid #333;
+                    padding-top: 5px;
                     font-weight: bold;
-                    font-size: 12px;
+                    font-size: 9px;
                 }
+
                 .notas-legales {
                     background: #f0f0f0;
-                    padding: 15px;
-                    margin-top: 20px;
-                    font-size: 10px;
-                    line-height: 1.6;
+                    padding: 6px 10px;
+                    margin-top: 8px;
+                    font-size: 8px;
+                    line-height: 1.4;
                     border: 1px solid #333;
                     text-align: justify;
                 }
+
                 @media print {
-                    body { 
-                        padding: 0; 
-                    }
-                    .ticket { 
-                        border: none; 
-                        max-width: 100%; 
-                    }
+                    body { padding: 0; }
+                    .ticket { border: none; max-width: 100%; }
                 }
             </style>
         </head>

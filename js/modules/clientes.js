@@ -249,13 +249,14 @@ function renderCuentasXCobrar() {
         if (cuenta.estado === "Saldado") return;
 
         const saldo = Number(cuenta.saldoActual ?? 0);
+        const enganche = Number(cuenta.engancheRecibido ?? 0);
         const color = saldo > 0 ? "#27ae60" : "#999";
         const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString();
 
         html += `<tr>
             <td><strong>${cuenta.nombre}</strong><br><small style="color:#718096;">${cuenta.folio}</small></td>
             <td>${fechaVenta}</td>
-            <td>${dinero(cuenta.totalContadoOriginal ?? 0)}</td>
+            <td>${dinero(cuenta.totalContadoOriginal ?? 0)}${enganche > 0 ? `<br><small style="color:#27ae60;">✅ Enganche: ${dinero(enganche)}</small>` : ''}</td>
             <td style="font-weight:bold; color:${color};">${dinero(saldo)}</td>
             <td>${cuenta.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</td>
             <td>
