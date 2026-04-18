@@ -114,23 +114,15 @@ function agregarCuentaDebito() {
 window.agregarCuentaDebito = agregarCuentaDebito;
 
 function abrirModalBanco() {
-    const nombre = prompt("Nombre del Banco / Cuenta:");
+    const nombre = prompt("Nombre del Banco / Tarjeta de Crédito:");
     if (!nombre) return;
-    const tipoOpc = prompt("Tipo de cuenta:\n1 = Débito\n2 = Crédito (MSI)");
-    const tipo = tipoOpc === "1" ? "debito" : "credito";
-
-    if (tipo === "debito") {
-        tarjetasConfig.push({ banco: nombre.toUpperCase(), tipo: "debito", diaCorte: 0, diaLimite: 0 });
+    const corte  = parseInt(prompt("Día de corte (1-31):"));
+    const limite = parseInt(prompt("Día límite de pago (1-31):"));
+    if (!isNaN(corte) && !isNaN(limite)) {
+        tarjetasConfig.push({ banco: nombre.toUpperCase(), tipo: "credito", diaCorte: corte, diaLimite: limite });
         actualizarYRefrescarBancos();
     } else {
-        const corte  = parseInt(prompt("Día de corte (1-31):"));
-        const limite = parseInt(prompt("Día límite de pago (1-31):"));
-        if (!isNaN(corte) && !isNaN(limite)) {
-            tarjetasConfig.push({ banco: nombre.toUpperCase(), tipo: "credito", diaCorte: corte, diaLimite: limite });
-            actualizarYRefrescarBancos();
-        } else {
-            alert("Por favor ingresa números válidos.");
-        }
+        alert("Por favor ingresa números válidos.");
     }
 }
 
@@ -411,6 +403,15 @@ function renderCuentasMSI() {
 }
 
 // ===== FLUJO DE CAJA =====
+function _etiquetaCuenta(m) {
+    if (m.etiquetaCuenta) return m.etiquetaCuenta;
+    const c = m.cuenta || "efectivo";
+    if (c === "efectivo" || c === "caja") return "💵 Efectivo";
+    const t = (tarjetasConfig || []).find(x => x.banco === c);
+    if (t) return t.tipo === "debito" ? `🏦 ${t.banco} Débito` : `💳 ${t.banco} Crédito`;
+    return "💵 Efectivo";
+}
+
 function renderFlujoCaja() {
     const contenedor = document.getElementById("tablasFlujoCaja");
     if (!contenedor) return;
@@ -420,7 +421,34 @@ function renderFlujoCaja() {
     let totalIngresos = 0;
     let totalEgresos = 0;
 
-    let html = `
+    // Per-account balances
+    const saldosPorCuenta = {};
+    movimientos.forEach(m => {
+        const etq = _etiquetaCuenta(m);
+        if (!saldosPorCuenta[etq]) saldosPorCuenta[etq] = 0;
+        const monto = parseFloat(m.monto) || 0;
+        const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
+        saldosPorCuenta[etq] += esIngreso ? monto : -monto;
+        if (esIngreso) totalIngresos += monto;
+        else totalEgresos += monto;
+    });
+
+    // Mini-tarjetas por cuenta
+    let miniCards = '';
+    if (Object.keys(saldosPorCuenta).length > 0) {
+        miniCards = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">`;
+        Object.entries(saldosPorCuenta).forEach(([etq, saldo]) => {
+            const color = saldo >= 0 ? '#059669' : '#dc2626';
+            const bg = saldo >= 0 ? '#f0fdf4' : '#fef2f2';
+            miniCards += `<div style="background:${bg}; padding:12px 18px; border-radius:8px; border-left:3px solid ${color}; min-width:160px;">
+                <div style="font-size:13px; color:#6b7280;">${etq}</div>
+                <div style="font-size:18px; font-weight:bold; color:${color};">${dinero(saldo)}</div>
+            </div>`;
+        });
+        miniCards += `</div>`;
+    }
+
+    let html = miniCards + `
         <div style="overflow-x:auto;">
         <table class="tabla-admin" style="width:100%;">
             <thead><tr>
@@ -439,18 +467,16 @@ function renderFlujoCaja() {
     } else {
         [...movimientos].reverse().forEach(m => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
-            if (esIngreso) totalIngresos += parseFloat(m.monto) || 0;
-            else totalEgresos += parseFloat(m.monto) || 0;
             const colorTipo = esIngreso ? "#059669" : "#dc2626";
             const labelTipo = esIngreso ? "⬆️ Ingreso" : "⬇️ Egreso";
-            const cuenta = m.cuenta || "efectivo";
+            const etq = _etiquetaCuenta(m);
             html += `
                 <tr>
                     <td>${m.fecha || ""}</td>
                     <td>${m.folio || "—"}</td>
                     <td>${m.concepto || ""}</td>
                     <td>${m.referencia || "—"}</td>
-                    <td><strong>${cuenta}</strong></td>
+                    <td><strong>${etq}</strong></td>
                     <td style="color:${colorTipo}; font-weight:bold;">${labelTipo}</td>
                     <td style="text-align:right; font-weight:bold; color:${colorTipo};">${dinero(m.monto)}</td>
                 </tr>`;

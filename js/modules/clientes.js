@@ -464,6 +464,76 @@ function exportarCobranzaEsperada() {
     link.click();
 }
 
+// ===== HELPERS: COMBOS DE CUENTA ORIGEN/DESTINO =====
+function _buildCuentaOrigen(idSufijo) {
+    return `
+        <div class="campo" style="margin-bottom:10px;">
+            <label style="font-weight:bold; color:#374151;">💳 Medio de pago:</label>
+            <select id="medioPago_${idSufijo}" onchange="_actualizarCuentaEspecifica('${idSufijo}')"
+                    style="padding:10px; font-size:15px; border:2px solid #27ae60; border-radius:6px; width:100%; margin-top:4px;">
+                <option value="efectivo">💵 Efectivo</option>
+                <option value="transferencia">🏦 Transferencia bancaria</option>
+                <option value="tarjeta_credito">💳 Tarjeta de crédito</option>
+            </select>
+        </div>
+        <div id="divCuentaEspecifica_${idSufijo}" style="display:none; margin-bottom:10px;">
+            <label style="font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Cuenta específica:</label>
+            <select id="cuentaEspecifica_${idSufijo}"
+                    style="padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; width:100%;">
+            </select>
+        </div>`;
+}
+
+function _actualizarCuentaEspecifica(idSufijo) {
+    const medio = document.getElementById('medioPago_' + idSufijo)?.value;
+    const divCuenta = document.getElementById('divCuentaEspecifica_' + idSufijo);
+    const selCuenta = document.getElementById('cuentaEspecifica_' + idSufijo);
+    if (!divCuenta || !selCuenta) return;
+    const tarjetas = tarjetasConfig || [];
+    if (medio === 'efectivo') {
+        divCuenta.style.display = 'none';
+        selCuenta.innerHTML = '<option value="caja">💵 Caja / Efectivo</option>';
+    } else if (medio === 'transferencia') {
+        const cuentasDebito = tarjetas.filter(t => t.tipo === 'debito');
+        if (cuentasDebito.length === 0) {
+            divCuenta.style.display = 'none';
+            selCuenta.innerHTML = '<option value="caja">Sin cuentas débito registradas</option>';
+        } else {
+            divCuenta.style.display = 'block';
+            selCuenta.innerHTML = cuentasDebito.map(b => `<option value="${b.banco}">🏦 ${b.banco} Débito</option>`).join('');
+        }
+    } else if (medio === 'tarjeta_credito') {
+        const tarjetasCredito = tarjetas.filter(t => !t.tipo || t.tipo === 'credito');
+        if (tarjetasCredito.length === 0) {
+            divCuenta.style.display = 'none';
+            selCuenta.innerHTML = '<option value="">Sin tarjetas crédito registradas</option>';
+        } else {
+            divCuenta.style.display = 'block';
+            selCuenta.innerHTML = tarjetasCredito.map(b => `<option value="${b.banco}">💳 ${b.banco} Crédito</option>`).join('');
+        }
+    }
+}
+
+function _getCuentaSeleccionada(idSufijo) {
+    const medioPago = document.getElementById('medioPago_' + idSufijo)?.value || 'efectivo';
+    const cuentaEspecifica = document.getElementById('cuentaEspecifica_' + idSufijo)?.value || '';
+    let cuentaId, etiqueta;
+    if (medioPago === 'efectivo') {
+        cuentaId = 'caja';
+        etiqueta = '💵 Efectivo';
+    } else if (medioPago === 'transferencia') {
+        cuentaId = cuentaEspecifica || 'caja';
+        etiqueta = cuentaEspecifica ? `🏦 ${cuentaEspecifica} Débito` : '💵 Efectivo';
+    } else if (medioPago === 'tarjeta_credito') {
+        cuentaId = cuentaEspecifica || '';
+        etiqueta = cuentaEspecifica ? `💳 ${cuentaEspecifica} Crédito` : '💳 Tarjeta';
+    } else {
+        cuentaId = 'caja';
+        etiqueta = '💵 Efectivo';
+    }
+    return { medioPago, cuentaId, etiqueta };
+}
+
 function abrirModalAbonoAvanzado(folio) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const pagares = StorageService.get("pagaresSistema", []);
@@ -533,8 +603,8 @@ function abrirModalAbonoAvanzado(folio) {
                 ${articulosHTML}
                 ${pagaresHTML}
 
-                <div style="margin-bottom:20px;">
-                    <label style="font-weight:bold; display:block; margin-bottom:8px;">💳 ¿Cómo se recibe el pago?</label>
+                <div style="background:#f8fafc; padding:15px; border-radius:8px; margin-bottom:15px; border:1px solid #e2e8f0;">
+                    <strong style="color:#374151; display:block; margin-bottom:10px;">💳 ¿Cómo se recibe el pago?</strong>
                     ${_buildCuentaOrigen('abono')}
                 </div>
 
@@ -722,3 +792,8 @@ function guardarClienteDesdeModal() {
     document.querySelector('[data-modal="nuevo-cliente"]')?.remove();
     cargarClientesSelect();
 }
+
+// expose helpers for inline HTML event handlers
+window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
+window._getCuentaSeleccionada = _getCuentaSeleccionada;
+window._buildCuentaOrigen = _buildCuentaOrigen;

@@ -163,7 +163,7 @@ function renderCarrito() {
                 </div>
 
                 <div id="divCuentaReceptora" class="campo oculto" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
-                    <label>🏦 Cuenta que recibe el pago:</label>
+                    <label>💳 ¿Dónde entra el dinero?</label>
                     <select id="selCuentaReceptora" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
                         <option value="efectivo">💵 Efectivo</option>
                     </select>
@@ -256,19 +256,25 @@ if (metodo === "credito") {
     // Mostrar selector de cuenta receptora cuando hay cobro inmediato
     const divCuenta = document.getElementById("divCuentaReceptora");
     if (divCuenta) {
-        const hayCobroInmediato = (metodo === "contado" || metodo === "transferencia" || metodo === "apartado");
+        const engancheVal = parseFloat(document.getElementById("numEnganche")?.value) || 0;
+        const hayCobroInmediato = (metodo === "contado" || metodo === "transferencia" ||
+            ((metodo === "apartado" || metodo === "credito") && engancheVal > 0));
         if (hayCobroInmediato) {
             divCuenta.classList.remove("oculto");
             const cuentasDebito = tarjetasConfig.filter(t => t.tipo === "debito");
             let optsHTML = "";
             if (metodo === "transferencia") {
-                optsHTML = '<option value="">-- Seleccione cuenta --</option>';
+                // Solo cuentas débito para transferencia
+                optsHTML = cuentasDebito.length > 0
+                    ? cuentasDebito.map(c => `<option value="${c.banco}">🏦 ${c.banco} Débito</option>`).join('')
+                    : '<option value="">-- Sin cuentas débito --</option>';
             } else {
+                // Efectivo + cuentas débito para contado / enganche
                 optsHTML = '<option value="efectivo">💵 Efectivo</option>';
+                cuentasDebito.forEach(c => {
+                    optsHTML += `<option value="${c.banco}">🏦 ${c.banco} Débito</option>`;
+                });
             }
-            cuentasDebito.forEach(c => {
-                optsHTML += `<option value="${c.banco}">${c.banco}</option>`;
-            });
             document.getElementById("selCuentaReceptora").innerHTML = optsHTML;
         } else {
             divCuenta.classList.add("oculto");
