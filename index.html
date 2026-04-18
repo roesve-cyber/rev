@@ -58,6 +58,7 @@
                 <button onclick="navA('carrito')">🛒 Carrito</button>
                 <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
                 <button onclick="navA('seleccionarcliente')">✅ Finalizar Venta</button>
+                <button onclick="navA('entregas')">🚚 Entregas</button>
             </div>
         </div>
 
@@ -74,16 +75,8 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-bancos')">🏦 BANCOS <span>▾</span></button>
             <div id="sub-bancos" class="submenu oculto-submenu">
-                <button onclick="navA('flujocaja')">💰 Flujo de Efectivo</button>
                 <button onclick="navA('flujo-msi')">💳 MSI (Flujo)</button>
                 <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
-            </div>
-        </div>
-
-        <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-logistica')">📦 LOGÍSTICA <span>▾</span></button>
-            <div id="sub-logistica" class="submenu oculto-submenu">
-                <button onclick="navA('logistica')">📋 Salidas / Requisiciones</button>
             </div>
         </div>
 
@@ -283,7 +276,7 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
 
     <!-- TIENDA / CATÁLOGO -->
     <div id="tienda" class="vista oculto">
-        <h2 style="margin-bottom:20px;">🖼️ Catálogo de Productos</h2>
+        <span style="font-size:14px; font-weight:bold; color:#2c3e50; margin:0 0 10px 0; padding:6px 12px; background:#f1f5f9; border-radius:20px; display:inline-block;">🖼️ Catálogo de Productos</span>
         <div id="gridProductos"></div>
     </div>
 
@@ -409,7 +402,17 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
     <!-- CARRITO -->
     <div id="carrito" class="vista oculto"></div>
 
-    <!-- LOGÍSTICA -->
+    <!-- ENTREGAS -->
+    <div id="entregas" class="vista oculto">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+            <h2 style="margin:0;">🚚 Entrega de Mercancía</h2>
+            <button type="button" onclick="renderEntregas()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
+        </div>
+        <p style="color:#4a5568; margin-bottom:20px;">Ventas con salida de almacén pendiente.</p>
+        <div id="panel-entregas-pendientes"></div>
+    </div>
+
+    <!-- LOGÍSTICA (legacy, sin link en menú) -->
     <div id="logistica" class="vista oculto">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
             <h2 style="margin:0;">📋 Logística de ventas</h2>

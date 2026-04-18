@@ -393,11 +393,11 @@ function verDetalleCompra(idCuenta) {
     if (!c) return;
 
     const modalHTML = `
-        <div data-modal="true" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+        <div data-modal="detalle-compra" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <h2 style="margin:0;">📦 Detalle de Compra</h2>
-                    <button onclick="this.closest('[data-modal]').remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
                 </div>
                 <div style="display:grid; gap:12px;">
                     <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
@@ -437,7 +437,7 @@ function verDetalleCompra(idCuenta) {
                     </div>
                 </div>
                 <div style="margin-top:20px; text-align:right;">
-                    <button onclick="this.closest('[data-modal]').remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
                 </div>
             </div>
         </div>`;
@@ -458,7 +458,7 @@ function registrarAbonoProveedor(idCuenta) {
     ].join('') || '<option value="efectivo">💵 Caja / Efectivo</option>';
 
     const modalHTML = `
-        <div data-modal="true" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
+        <div data-modal="abono-proveedor" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:500px;">
                 <h2 style="margin-top:0;">💵 Registrar Abono a Proveedor</h2>
                 <div style="background:#f0f4ff; padding:15px; border-radius:8px; margin-bottom:20px;">
@@ -466,6 +466,14 @@ function registrarAbonoProveedor(idCuenta) {
                         <div><small style="color:#4b5563;">Proveedor</small><br><strong>${cuenta.proveedor}</strong></div>
                         <div><small style="color:#4b5563;">Saldo Pendiente</small><br><strong style="color:#e74c3c;">${dinero(cuenta.saldoPendiente)}</strong></div>
                     </div>
+                </div>
+                <div class="campo" style="margin-bottom:15px;">
+                    <label>¿De dónde sale el dinero?</label>
+                    <select id="origenDineroProveedor" style="padding:10px; font-size:15px; border:2px solid #27ae60; border-radius:6px; width:100%;">
+                        <option value="efectivo">💵 Caja (efectivo)</option>
+                        <option value="transferencia">🏦 Transferencia bancaria</option>
+                        <option value="cheque">📝 Cheque</option>
+                    </select>
                 </div>
                 <div class="campo" style="margin-bottom:15px;">
                     <label>Cuenta de Origen:</label>
@@ -483,7 +491,7 @@ function registrarAbonoProveedor(idCuenta) {
                             style="flex:1; padding:12px; background:#2c3e50; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
                         ✅ Confirmar Abono
                     </button>
-                    <button onclick="this.closest('[data-modal]').remove();" 
+                    <button onclick="document.querySelector('[data-modal=&quot;abono-proveedor&quot;]')?.remove();" 
                             style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
                         ✕ Cancelar
                     </button>
@@ -497,6 +505,7 @@ function registrarAbonoProveedor(idCuenta) {
 function confirmarAbonoProveedor(idCuenta) {
     const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor").value);
     const cuentaOrigen = document.getElementById("cuentaOrigenAbono")?.value || "efectivo";
+    const origenDinero = document.getElementById("origenDineroProveedor")?.value || "efectivo";
 
     let cuentas = StorageService.get("cuentasPorPagar", []);
     const index = cuentas.findIndex(c => c.id === idCuenta);
@@ -522,13 +531,14 @@ function confirmarAbonoProveedor(idCuenta) {
         monto: montoAbono,
         tipo: "Egreso",
         concepto: `Abono a proveedor ${cuenta.proveedor}`,
-        cuenta: cuentaOrigen
+        cuenta: cuentaOrigen,
+        origenDinero
     });
     if (!StorageService.set("movimientosCaja", movimientos)) {
         console.error("❌ Error guardando movimiento de caja");
     }
 
-    document.querySelector('[data-modal]').remove();
+    document.querySelector('[data-modal="abono-proveedor"]')?.remove();
     alert("✅ Abono registrado correctamente.");
     renderCuentasPorPagar();
 }
