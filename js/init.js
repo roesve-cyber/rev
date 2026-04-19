@@ -1,6 +1,10 @@
 // ===== INICIALIZACIÓN =====
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (window.location.pathname.includes("catalogo.html")) {
+        console.log("🛍️ Modo catálogo público");
+        return;
+    }
     if (typeof verificarSesionInicial === 'function') verificarSesionInicial();
     console.log("🚀 Iniciando sistema POS Mueblería Mi Pueblito...");
     try {
