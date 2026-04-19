@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS Mueblería - Mi Pueblito</title>
     <link rel="stylesheet" href="estilos.css">
+	<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0d6efd">
     <style>
         @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-10px)}40%{transform:translateX(10px)}60%{transform:translateX(-8px)}80%{transform:translateX(8px)}}
         .shake{animation:shake 0.4s ease;}
@@ -960,5 +962,13 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
 <script src="js/modules/agenda.js"></script>
 <script src="js/modules/notificaciones.js"></script>
 <script src="js/init.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js")
+    .then(() => console.log("SW registrado"))
+    .catch(err => console.log("Error SW:", err));
+}
+</script>
+
 </body>
 </html>
