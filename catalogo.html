@@ -1,79 +1,37 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Catálogo</title>
-
-  <link rel="stylesheet" href="/estilos.css">
-
-  <style>
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 15px;
-      padding: 15px;
+const ValidatorService = {
+  validarProducto(producto) {
+    const errores = [];
+    if (!producto.nombre || producto.nombre.trim().length === 0) {
+      errores.push('El nombre del producto es obligatorio');
     }
-
-    .producto {
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      padding: 10px;
-      background: #fff;
-      text-align: center;
+    if (isNaN(producto.costo) || producto.costo < 0) {
+      errores.push('El costo debe ser un número válido');
     }
-
-    .producto h3 {
-      margin: 5px 0;
-      font-size: 16px;
+    if (isNaN(producto.precio) || producto.precio < 0) {
+      errores.push('El precio debe ser un número válido');
     }
-
-    .precio {
-      font-weight: bold;
-      color: green;
-      font-size: 18px;
+    if (producto.precio < producto.costo) {
+      errores.push('El precio debe ser mayor o igual al costo');
     }
-  </style>
-</head>
-<body>
-
-<h1 style="text-align:center;">🛍️ Catálogo de Productos</h1>
-
-<div id="productos" class="grid"></div>
-
-<script>
-// 📦 Obtener productos reales del sistema
-const productos = JSON.parse(localStorage.getItem("productos")) || [];
-
-const contenedor = document.getElementById("productos");
-
-// 👉 CONFIGURA AQUÍ LAS CATEGORÍAS QUE QUIERES MOSTRAR
-const categoriasPermitidas = ["Salas", "Recámaras","Comedores", "Antecomedores", "Roperos", "Comoda", "Comodas", "Roperos", "Camas", "Roperos"];
-
-// 🔍 Filtrar productos
-const filtrados = productos.filter(p => 
-  p.Activo !== 0 &&
-  categoriasPermitidas.includes(p.Categoria)
-);
-
-// 🧠 Si no hay productos
-if (filtrados.length === 0) {
-  contenedor.innerHTML = "<p style='text-align:center;'>No hay productos disponibles</p>";
-}
-
-// 🎯 Mostrar productos
-filtrados.forEach(p => {
-
-  const div = document.createElement("div");
-  div.className = "producto";
-
-  div.innerHTML = `
-    <h3>${p.Nombre}</h3>
-    <p class="precio">$${p.Precio_Contado}</p>
-  `;
-
-  contenedor.appendChild(div);
-});
-</script>
-
-</body>
-</html>
+    return { valid: errores.length === 0, errores };
+  },
+  validarCliente(cliente) {
+    const errores = [];
+    if (!cliente.nombre || cliente.nombre.trim().length === 0) {
+      errores.push('El nombre del cliente es obligatorio');
+    }
+    if (cliente.telefono && !/^\d{7,15}$/.test(cliente.telefono.replace(/[-\s]/g, ''))) {
+      errores.push('El teléfono debe contener 7-15 dígitos');
+    }
+    return { valid: errores.length === 0, errores };
+  },
+  validarMonto(monto, saldoMaximo = Infinity) {
+    if (isNaN(monto) || monto <= 0) {
+      return { valid: false, error: 'El monto debe ser un número positivo' };
+    }
+    if (monto > saldoMaximo) {
+      return { valid: false, error: `El monto no puede exceder ${dinero(saldoMaximo)}` };
+    }
+    return { valid: true, error: '' };
+  }
+};
