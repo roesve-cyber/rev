@@ -68,6 +68,9 @@ function renderCarrito() {
     const vistaCarrito = document.getElementById("carrito");
     if (!vistaCarrito) return;
 
+    // 👉 Detectar admin
+    const esAdmin = usuarioActual && usuarioActual.rol === "admin";
+
     if (carrito.length === 0) {
         vistaCarrito.innerHTML = `
             <div class="header-seccion"><h2>🛒 Carrito de Ventas</h2></div>
@@ -86,11 +89,12 @@ function renderCarrito() {
         }
         return true;
     });
-    if (!StorageService.set("carrito", carrito)) {
-        console.error("❌ Error guardando carrito");
-    }
 
-    let totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    StorageService.set("carrito", carrito);
+
+    let totalContado = carrito.reduce((sum, p) => 
+        sum + (p.precioContado || 0) * (p.cantidad || 1), 0
+    );
 
     let html = `
         <div class="header-seccion" style="margin-bottom: 20px;">
@@ -99,8 +103,8 @@ function renderCarrito() {
         
         <div style="display:grid; grid-template-columns: 1.8fr 1.2fr; gap: 20px; align-items: start;">
             
-            <div style="background:white; padding:20px; border-radius:10px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
-                <h3 style="margin:0 0 15px 0; color:#2c3e50;">Productos seleccionados</h3>
+            <div style="background:white; padding:20px; border-radius:10px;">
+                <h3 style="margin:0 0 15px 0;">Productos seleccionados</h3>
                 <table class="tabla-admin">
                     <thead>
                         <tr>
@@ -115,28 +119,49 @@ function renderCarrito() {
     `;
 
     carrito.forEach((p, index) => {
-        let precio = p.precioContado || 0;
         let cantidad = p.cantidad || 1;
         const prod = productos.find(prod => prod.id === p.id);
         const stock = prod ? (prod.stock || 0) : 0;
         const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
         const textoStock = stock > 0 ? stock : "Sin stock";
-        
+
         html += `
             <tr>
                 <td><strong>${p.nombre}</strong></td>
-                <td style="text-align:center; font-weight:bold; color:${colorStock};">${textoStock}</td>
+
+                <td style="text-align:center; font-weight:bold; color:${colorStock};">
+                    ${textoStock}
+                </td>
+
                 <td style="text-align:center;">
                     <input type="number" min="1" max="99" value="${cantidad}" 
-                           onchange="actualizarCantidadCarrito(${index}, this.value)"
-                           style="width:50px; padding:6px; text-align:center; border:1px solid #ddd; border-radius:4px;">
+                        onchange="actualizarCantidadCarrito(${index}, this.value)"
+                        style="width:50px; padding:6px; text-align:center; border:1px solid #ddd; border-radius:4px;">
                 </td>
-                <td style="text-align:right; font-weight:bold; color:#27ae60;">${dinero(precio * cantidad)}</td>
+
+                <!-- 🔥 PRECIO EDITABLE SOLO ADMIN -->
+                <td style="text-align:right; font-weight:bold; color:#27ae60;">
+                    ${
+                        esAdmin
+                        ? `
+                        <input type="number" value="${p.precioContado || 0}" 
+                            onchange="cambiarPrecioCarrito(${index}, this.value)"
+                            style="width:80px; padding:5px; text-align:right; border:1px solid #ddd; border-radius:4px;">
+                        <br>
+                        <small>${dinero((p.precioContado || 0) * cantidad)}</small>
+                        `
+                        : dinero((p.precioContado || 0) * cantidad)
+                    }
+                </td>
+
                 <td style="text-align:center;">
                     <button onclick="eliminarDelCarrito(${index}); renderCarrito();" 
-                            style="background:#fed7d7; color:#c53030; border:none; padding:8px; border-radius:5px; cursor:pointer;">🗑️</button>
+                        style="background:#fed7d7; color:#c53030; border:none; padding:8px; border-radius:5px; cursor:pointer;">
+                        🗑️
+                    </button>
                 </td>
-            </tr>`;
+            </tr>
+        `;
     });
 
     html += `
@@ -144,58 +169,17 @@ function renderCarrito() {
                 </table>
             </div>
 
-            <div style="background:white; padding:20px; border-radius:10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); position: sticky; top: 80px;">
-                <h3 style="margin:0 0 10px 0; border-bottom:2px solid #f7fafc; padding-bottom:10px;">Resumen de Venta</h3>
-                
-                <div style="text-align:center; margin-bottom:20px;">
-                    <span style="color:#718096; font-size:14px;">TOTAL CONTADO</span><br>
-                    <strong style="font-size:32px; color:#2d3748;">${dinero(totalContado)}</strong>
-                </div>
+            <div style="background:white; padding:20px; border-radius:10px;">
+                <h3>Resumen</h3>
 
-                <div class="campo">
-                    <label>Forma de Pago:</label>
-                    <select id="selMetodoPago" onchange="aplicarMetodoStockDefaults(); actualizarInterfazPago();" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
-                        <option value="contado">💵 Contado Efectivo</option>
-                        <option value="transferencia">🏦 Transferencia / Depósito</option>
-                        <option value="apartado">📦 Sistema de Apartado</option>
-                        <option value="credito">💳 Crédito / Pagos Semanales</option>
-                    </select>
-                </div>
-
-                <div id="divCuentaReceptora" class="campo oculto" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
-                    <label>💳 ¿Dónde entra el dinero?</label>
-                    <select id="selCuentaReceptora" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
-                        <option value="efectivo">💵 Efectivo</option>
-                    </select>
-                </div>
-
-                <div id="divPeriodicidad" class="campo oculto" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
-                    <label>📅 Periodicidad de Pago:</label>
-                    <select id="selPeriodicidad" onchange="actualizarInterfazPago();" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
-                        <option value="semanal">📆 Semanal (4 pagos/mes)</option>
-                        <option value="quincenal">📅 Quincenal (2 pagos/mes)</option>
-                        <option value="mensual">📋 Mensual (1 pago/mes)</option>
-                    </select>
-                </div>
-
-                <div id="divEnganche" class="campo oculto" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
-                    <label>Enganche Recibido ($):</label>
-                    <input type="number" id="numEnganche" value="0" min="0" oninput="actualizarInterfazPago()" 
-                           style="width:100%; padding:12px; border:1px solid #3182ce; border-radius:6px; font-size:18px; font-weight:bold; color:#2b6cb0;">
-                </div>
-
-                <div id="resultadosPago" style="margin-top:20px; background:#f8fafc; padding:15px; border-radius:8px;"></div>
-
-                <div class="campo" style="margin-top:15px; padding-top:15px; border-top:1px dashed #e2e8f0;">
-                    <label>👤 Vendedor:</label>
-                    <select id="selVendedor" style="width:100%; padding:12px; border:1px solid #cbd5e0; border-radius:6px; font-weight:bold;">
-                        <option value="">-- Sin vendedor --</option>
-                        ${StorageService.get('vendedores', []).filter(v => v.activo).map(v => `<option value="${v.id}">${v.nombre}</option>`).join('')}
-                    </select>
+                <div style="text-align:center;">
+                    <strong style="font-size:28px;">
+                        ${dinero(totalContado)}
+                    </strong>
                 </div>
 
                 <button onclick="irASeleccionCliente()"
-                    style="width:100%; padding:15px; background:#27ae60; color:white; border:none; border-radius:8px; font-size:18px; font-weight:bold; margin-top:20px; cursor:pointer;">
+                    style="width:100%; padding:15px; background:#27ae60; color:white; border:none; border-radius:8px; margin-top:20px;">
                      ✅ Seleccionar cliente
                 </button>
             </div>
@@ -203,9 +187,25 @@ function renderCarrito() {
     `;
 
     vistaCarrito.innerHTML = html;
-    actualizarInterfazPago();
-    aplicarMetodoStockDefaults();
 }
+function cambiarPrecioCarrito(index, nuevoPrecio) {
+
+    if (!usuarioActual || usuarioActual.rol !== "admin") {
+        alert("No autorizado");
+        return;
+    }
+
+    nuevoPrecio = parseFloat(nuevoPrecio);
+
+    if (isNaN(nuevoPrecio) || nuevoPrecio <= 0) return;
+
+    carrito[index].precioContado = nuevoPrecio;
+
+    StorageService.set("carrito", carrito);
+
+    renderCarrito();
+}
+
 
 function actualizarCantidadCarrito(index, nuevaCantidad) {
     const cantidad = parseInt(nuevaCantidad);
