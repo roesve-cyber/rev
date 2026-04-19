@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Datos del POS — solo usuarios autenticados
+    match /posData/{document} {
+      allow read, write: if request.auth != null;
+    }
+    // Perfiles de usuarios — solo autenticados
+    match /usuarios/{uid} {
+      allow read: if request.auth != null;
+      // El propio usuario puede escribir su perfil; los admins pueden escribir cualquier perfil
+      allow write: if request.auth != null && (
+        request.auth.uid == uid ||
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin'
+      );
+    }
+  }
+}
