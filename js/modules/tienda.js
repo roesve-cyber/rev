@@ -273,10 +273,15 @@ function verProducto(id) {
 
                 <!-- BOTONES (PEGADOS AL FONDO) -->
                 <div style="display: flex; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #f0f0f0; position: sticky; bottom: 0; background: white;">
-                    <button onclick="agregarAlCarritoDesdeModal()" 
-                            style="flex: 1; padding: 14px; background: linear-gradient(135deg, #27ae60 0%, #229954 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(39, 174, 96, 0.2);">
-                        🛒 Agregar al Carrito
-                    </button>
+                    ${
+                        // ✅ Solo mostrar botón de carrito si NO estamos en catálogo independiente
+                        !window.CATALOGO_STANDALONE
+                        ? `<button onclick="agregarAlCarritoDesdeModal()" 
+                                style="flex: 1; padding: 14px; background: linear-gradient(135deg, #27ae60 0%, #229954 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(39, 174, 96, 0.2);">
+                            🛒 Agregar al Carrito
+                           </button>`
+                        : ''
+                    }
                     <button onclick="cerrarProducto()" 
                             style="flex: 1; padding: 14px; background: #e2e8f0; color: #2c3e50; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px; transition: all 0.2s;">
                         ✕ Cerrar

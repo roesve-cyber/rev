@@ -28,6 +28,7 @@ function agregarAlCarritoDesdeModal() {
             id: p.id,
             nombre: p.nombre,
             precioContado: parseFloat(p.precio) || 0,
+            precioOriginal: parseFloat(p.precio) || 0,  // 💾 Guardamos el original para detectar cambios
             plazo: plan.meses,
             totalCredito: plan.total,
             abonoSemanal: plan.abono,
@@ -144,13 +145,24 @@ function renderCarrito() {
                     ${
                         esAdmin
                         ? `
-                        <input type="number" value="${p.precioContado || 0}" 
-                            onchange="cambiarPrecioCarrito(${index}, this.value)"
-                            style="width:80px; padding:5px; text-align:right; border:1px solid #ddd; border-radius:4px;">
-                        <br>
-                        <small>${dinero((p.precioContado || 0) * cantidad)}</small>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+                            <div style="display:flex; align-items:center; gap:4px;">
+                                <span style="font-size:11px; color:#718096;">$</span>
+                                <input type="number" value="${p.precioContado || 0}" 
+                                    onchange="cambiarPrecioCarrito(${index}, this.value)"
+                                    style="width:90px; padding:5px 6px; text-align:right; border:2px solid ${(p.precioOriginal && p.precioContado !== p.precioOriginal) ? '#f59e0b' : '#ddd'}; border-radius:4px; font-weight:bold; color:#2c3e50; font-size:14px;"
+                                    title="Editar precio">
+                            </div>
+                            ${p.precioOriginal && p.precioContado !== p.precioOriginal
+                                ? `<small style="color:#f59e0b; font-size:10px;">Orig: ${dinero(p.precioOriginal)}</small>`
+                                : `<small style="color:#a0aec0; font-size:10px;">✏️ editable</small>`
+                            }
+                            <small style="color:#27ae60; font-size:11px; font-weight:bold;">${dinero((p.precioContado || 0) * cantidad)}</small>
+                        </div>
                         `
-                        : dinero((p.precioContado || 0) * cantidad)
+                        : `<div>
+                            ${dinero((p.precioContado || 0) * cantidad)}
+                          </div>`
                     }
                 </td>
 
@@ -198,6 +210,11 @@ function cambiarPrecioCarrito(index, nuevoPrecio) {
     nuevoPrecio = parseFloat(nuevoPrecio);
 
     if (isNaN(nuevoPrecio) || nuevoPrecio <= 0) return;
+
+    // 💾 Guardar precio original la primera vez que se edita
+    if (!carrito[index].precioOriginal) {
+        carrito[index].precioOriginal = carrito[index].precioContado;
+    }
 
     carrito[index].precioContado = nuevoPrecio;
 
