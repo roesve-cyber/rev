@@ -60,7 +60,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof verificarGastosRecurrentes === 'function') verificarGastosRecurrentes();
         
         // Navegar a dashboard y verificar alertas
-        navA('dashboard');
+        if (!window.location.pathname.includes("catalogo.html")) {
+    navA('dashboard');
+    actualizarContadorCarrito();
+    verificarAlertasPagares();
+}
         actualizarContadorCarrito();
         verificarAlertasPagares();
         
