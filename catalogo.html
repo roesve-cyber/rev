@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Catálogo</title>
+
+  <!-- Usa tus mismos estilos -->
+  <link rel="stylesheet" href="/estilos.css">
+</head>
+<body>
+
+<h1>🛍️ Catálogo de Productos</h1>
+
+<div id="productos"></div>
+
+<script>
+// ⚠️ PRUEBA SIMPLE (luego conectamos tu sistema real)
+
+const productos = [
+  { nombre: "Sofá", precio: 5000 },
+  { nombre: "Mesa", precio: 2500 },
+  { nombre: "Silla", precio: 800 }
+];
+
+const contenedor = document.getElementById("productos");
+
+productos.forEach(p => {
+  const div = document.createElement("div");
+  div.innerHTML = `
+    <h3>${p.nombre}</h3>
+    <p>$${p.precio}</p>
+    <hr>
+  `;
+  contenedor.appendChild(div);
+});
+</script>
+
+</body>
+</html>
