@@ -2,8 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Catálogo Profesional - Mi Pueblito</title>
-  <link rel="stylesheet" href="/estilos.css">
+  <title>Catálogo Oficial - Mi Pueblito</title>
   <style>
     body { font-family: 'Segoe UI', sans-serif; background-color: #f4f7f6; margin: 0; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 25px; padding: 30px; }
@@ -12,72 +11,71 @@
     .producto { 
       border: none; border-radius: 15px; padding: 20px; background: #fff; 
       text-align: center; transition: 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-      display: flex; flex-direction: column; overflow: hidden; cursor: pointer;
+      display: flex; flex-direction: column; cursor: pointer;
     }
-    .img-container { 
-      height: 200px; overflow: hidden; display: flex; align-items: center; justify-content: center; 
-      border-radius: 10px; margin-bottom: 15px; background: #fff;
-    }
-    .img-container img { 
-      max-width: 100%; max-height: 100%; object-fit: contain; 
-      transition: transform 0.5s ease; 
-    }
-    .producto:hover .img-container img { transform: scale(1.1); } /* Zoom suave en tarjeta */
-    .producto:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.15); }
+    .img-container { height: 180px; overflow: hidden; display: flex; align-items: center; justify-content: center; margin-bottom: 15px; }
+    .img-container img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
-    .producto h3 { font-size: 16px; color: #333; margin: 10px 0; height: 45px; overflow: hidden; }
-    .precio-contado { font-weight: bold; color: #27ae60; font-size: 22px; margin-bottom: 15px; }
-
-    /* --- MODAL AVANZADO --- */
+    /* --- MODAL REDISEÑADO --- */
     .modal {
-      display: none; position: fixed; z-index: 3000; left: 0; top: 0;
+      display: none; position: fixed; z-index: 9999; left: 0; top: 0;
       width: 100%; height: 100%; background: rgba(0,0,0,0.9);
-      align-items: center; justify-content: center; backdrop-filter: blur(5px);
+      align-items: center; justify-content: center;
     }
     .modal-contenido {
-      background: white; border-radius: 20px; width: 95%; max-width: 1000px;
-      display: flex; flex-wrap: wrap; height: 90vh; /* Altura fija para el modal */
+      background: white; border-radius: 20px; width: 95%; max-width: 1100px;
+      height: 85vh; /* Altura controlada */
+      display: flex; /* Layout de dos columnas */
+      flex-direction: row; 
       overflow: hidden; position: relative;
     }
-    
-    /* Contenedor Izquierdo: IMAGEN FIJA CON ZOOM INTERACTIVO */
+
+    /* COLUMNA IZQUIERDA: IMAGEN (FIJA Y CENTRADA) */
     .modal-izq { 
-      flex: 1; min-width: 400px; background: #fff; padding: 20px; 
+      flex: 1; 
+      height: 100%;
+      background: #fff; 
       display: flex; align-items: center; justify-content: center; 
-      overflow: hidden; position: relative; cursor: crosshair; /* Cursor de precisión */
+      overflow: hidden; position: relative;
+      border-right: 1px solid #eee;
     }
     .modal-izq img { 
-        max-width: 100%; max-height: 100%; object-fit: contain; 
-        transition: transform 0.1s ease-out; /* Zoom rápido y reactivo */
-        transform-origin: center center;
+      max-width: 90%; max-height: 90%; object-fit: contain; 
+      transition: transform 0.1s ease-out;
+      transform-origin: center center;
+      cursor: crosshair;
     }
 
-    /* Contenedor Derecho: INFO CON SCROLL INDEPENDIENTE */
+    /* COLUMNA DERECHA: INFO (CON SCROLL PROPIO) */
     .modal-der { 
-        flex: 1.3; min-width: 350px; padding: 40px; 
-        overflow-y: auto; /* ESTO ACTIVA EL SCROLL SOLO AQUÍ */
-        text-align: left; background: #fff; 
-        border-left: 1px solid #f0f0f0;
+      flex: 1; 
+      height: 100%;
+      padding: 30px; 
+      overflow-y: auto; /* AQUÍ OCURRE EL SCROLL */
+      text-align: left;
+      box-sizing: border-box;
     }
 
-    /* --- Tabla y Características --- */
-    .tabla-credito { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
-    .tabla-credito th { background: #f8f9fa; padding: 12px; border-bottom: 2px solid #eee; text-align: center; color: #666; }
-    .tabla-credito td { padding: 12px; border-bottom: 1px solid #f1f1f1; text-align: center; }
+    /* Estilos de texto */
+    .precio-banner { background: #e8f5e9; padding: 15px; border-radius: 12px; margin: 20px 0; border: 1px solid #c3e6cb; }
+    .tabla-credito { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .tabla-credito th { background: #f8f9fa; padding: 10px; border-bottom: 2px solid #eee; font-size: 13px; }
+    .tabla-credito td { padding: 10px; border-bottom: 1px solid #f1f1f1; text-align: center; font-size: 14px; }
     
-    #modalLista { 
-        margin-top: 15px; padding-left: 20px; color: #444; 
-        font-size: 14px; line-height: 1.7;
-    }
-    #modalLista li { margin-bottom: 8px; list-style-type: disc; }
+    #modalLista { padding-left: 20px; margin-top: 10px; }
+    #modalLista li { margin-bottom: 8px; color: #444; font-size: 14px; line-height: 1.5; }
 
-    .cerrar { position: absolute; right: 20px; top: 15px; font-size: 35px; cursor: pointer; color: #ccc; z-index: 100; transition: 0.2s; }
-    .cerrar:hover { color: #333; }
+    .cerrar { position: absolute; right: 20px; top: 15px; font-size: 40px; cursor: pointer; color: #ccc; z-index: 100; }
+    
+    /* Responsive móvil */
+    @media (max-width: 768px) {
+      .modal-contenido { flex-direction: column; height: 95vh; }
+      .modal-izq { flex: none; height: 40%; border-right: none; border-bottom: 1px solid #eee; }
+      .modal-der { flex: 1; }
+    }
   </style>
 </head>
 <body>
-
-<h1 style="text-align:center; margin-top:30px; color: #2c3e50;">Catálogo de Productos</h1>
 
 <div id="productos" class="grid"></div>
 
@@ -90,39 +88,31 @@
     </div>
 
     <div class="modal-der">
-      <h2 id="modalNombre" style="margin:0 0 5px 0; color: #2c3e50; font-size: 26px;"></h2>
-      <p id="modalMeta" style="color: #888; font-size: 12px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;"></p>
+      <h2 id="modalNombre" style="margin-top:0; color: #2c3e50;"></h2>
+      <p id="modalMeta" style="color: #888; font-size: 12px;"></p>
       
-      <div style="background: #f1f8e9; padding: 20px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #c3e6cb;">
+      <div class="precio-banner">
           <small style="color: #2e7d32; font-weight: bold;">PRECIO DE CONTADO</small>
-          <div id="modalPrecio" style="font-size: 36px; color: #1b5e20; font-weight: 800;"></div>
+          <div id="modalPrecio" style="font-size: 32px; color: #1b5e20; font-weight: 800;"></div>
       </div>
 
-      <h4 style="margin-bottom: 10px; color: #34495e; font-size: 16px;">Planes de Pago Semanales (Crédito)</h4>
+      <h4>Planes de Pago</h4>
       <table class="tabla-credito">
           <thead>
-              <tr>
-                  <th>Semanas</th>
-                  <th>Abono</th>
-                  <th>Total a Pagar</th>
-              </tr>
+              <tr><th>Semanas</th><th>Abono</th><th>Total</th></tr>
           </thead>
           <tbody id="tablaCuerpo"></tbody>
       </table>
 
-      <div style="margin-top: 35px; padding-top: 20px; border-top: 1px solid #eee;">
-          <h4 style="color: #34495e; font-size: 16px; margin-bottom: 5px;">
-              Descripción y Características
-          </h4>
+      <div style="margin-top: 30px;">
+          <h4 style="border-bottom: 2px solid #3498db; padding-bottom: 5px;">Características</h4>
           <ul id="modalLista"></ul>
-          <div style="height: 30px;"></div>
       </div>
     </div>
   </div>
 </div>
 
 <script>
-// --- TU LÓGICA DE NEGOCIO ORIGINAL ---
 const CalculatorService = {
   calcularCredito(precio) {
     let resultados = [];
@@ -131,39 +121,27 @@ const CalculatorService = {
       let tasa = (m <= 3) ? 0.02 : 0.025;
       let totalBase = precio * (1 + (tasa * m));
       let semanas = m * 4;
-      let pagoSemanal = totalBase / semanas;
-      pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+      let pagoSemanal = Math.ceil((totalBase / semanas) / 10) * 10;
       let totalFinal = pagoSemanal * semanas;
       let intentos = 0;
-      while (totalFinal <= totalAnterior && intentos++ < 100) {
-        pagoSemanal += 5;
-        totalFinal = pagoSemanal * semanas;
-      }
-      if (intentos >= 100) continue;
+      while (totalFinal <= totalAnterior && intentos++ < 100) { pagoSemanal += 5; totalFinal = pagoSemanal * semanas; }
       totalAnterior = totalFinal;
-      resultados.push({ meses: m, semanas, abono: pagoSemanal, total: totalFinal });
+      resultados.push({ semanas, abono: pagoSemanal, total: totalFinal });
     }
     return resultados;
   }
 };
 
-// --- LÓGICA DEL CATÁLOGO ---
 const productos = JSON.parse(localStorage.getItem("productos")) || [];
 const contenedor = document.getElementById("productos");
 
 function render() {
-    const filtrados = productos.filter(p => 
-        ["muebles", "colchones"].includes((p.categoria || "").toLowerCase()) && p.Activo !== 0
-    );
-
+    const filtrados = productos.filter(p => ["muebles", "colchones"].includes((p.categoria || "").toLowerCase()) && p.Activo !== 0);
     contenedor.innerHTML = filtrados.map(p => `
         <div class="producto" onclick="verDetalle('${p.id}')">
-            <div class="img-container">
-                <img src="${p.imagen || ''}" alt="${p.nombre}">
-            </div>
+            <div class="img-container"><img src="${p.imagen}"></div>
             <h3>${p.nombre}</h3>
-            <p class="precio-contado">$${parseFloat(p.precio || 0).toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
-            <button class="btn-detalle">VER DETALLE</button>
+            <p style="color:green; font-weight:bold;">$${parseFloat(p.precio).toLocaleString('es-MX')}</p>
         </div>
     `).join('');
 }
@@ -173,75 +151,60 @@ function verDetalle(id) {
     if (!p) return;
 
     const precio = parseFloat(p.precio || 0);
-    const imgModal = document.getElementById("modalImagen");
-    
-    // 1. Llenar Modal
-    imgModal.src = p.imagen;
-    // Resetear zoom al abrir
-    imgModal.style.transform = "scale(1)";
-    imgModal.style.transformOrigin = "center center";
-
+    document.getElementById("modalImagen").src = p.imagen;
     document.getElementById("modalNombre").innerText = p.nombre;
-    document.getElementById("modalMeta").innerText = `${p.categoria} | Marca: ${p.marca || 'N/A'}`;
+    document.getElementById("modalMeta").innerText = `Categoría: ${p.categoria} | Marca: ${p.marca || 'N/A'}`;
     document.getElementById("modalPrecio").innerText = `$${precio.toLocaleString('es-MX', {minimumFractionDigits: 2})}`;
 
-    // 2. Tabla de crédito (con tu lógica)
+    // Tabla
     const planes = CalculatorService.calcularCredito(precio);
     document.getElementById("tablaCuerpo").innerHTML = planes.map(plan => `
         <tr>
-            <td style="color:#0d6efd; font-weight:bold; font-size:15px;">${plan.semanas} semanas</td>
-            <td style="color:#d32f2f; font-weight:bold; font-size:15px;">$${plan.abono.toLocaleString('es-MX')}</td>
-            <td style="color:#555;">$${plan.total.toLocaleString('es-MX')}</td>
+            <td style="color:#0d6efd; font-weight:bold;">${plan.semanas} sem</td>
+            <td style="color:#d32f2f; font-weight:bold;">$${plan.abono.toLocaleString()}</td>
+            <td>$${plan.total.toLocaleString()}</td>
         </tr>
     `).join('');
 
-    // 3. Características (Procesadas como lista)
+    // CARACTERÍSTICAS (Solución definitiva)
     const lista = document.getElementById("modalLista");
-    lista.innerHTML = ""; 
-    const textoCaract = p.caracteristicas || "";
+    lista.innerHTML = "";
     
-    if (textoCaract.trim() !== "") {
-        // Dividir por saltos de línea (\n)
-        const lineas = textoCaract.split('\n').filter(l => l.trim() !== "");
+    // Intentamos leer de p.caracteristicas o p.característica (por si varía el nombre)
+    const rawCaract = p.caracteristicas || p.caracteristica || "";
+    
+    if (rawCaract) {
+        // Limpiamos el texto y dividimos por cualquier tipo de salto de línea
+        const lineas = rawCaract.toString().split(/\r?\n/).filter(linea => linea.trim() !== "");
         lineas.forEach(linea => {
             const li = document.createElement("li");
             li.innerText = linea.trim();
             lista.appendChild(li);
         });
     } else {
-        lista.innerHTML = "<li>No hay especificaciones disponibles para este modelo.</li>";
+        lista.innerHTML = "<li>Sin descripción detallada.</li>";
     }
 
-    // 4. Mostrar Modal
     document.getElementById("miModal").style.display = "flex";
 }
 
 function cerrarModal() { document.getElementById("miModal").style.display = "none"; }
-window.onclick = (e) => { if (e.target.className === "modal") cerrarModal(); }
 
-// --- LÓGICA DE ZOOM INTERACTIVO QUE SIGUE AL RATÓN ---
+// ZOOM LUPA
 const contenedorImg = document.getElementById('contenedorImagenModal');
 const imgZoom = document.getElementById('modalImagen');
 
 contenedorImg.addEventListener('mousemove', function(e) {
     const rect = contenedorImg.getBoundingClientRect();
-    
-    // Calcular posición del ratón dentro del contenedor (en %)
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const xPercent = (x / rect.width) * 100;
-    const yPercent = (y / rect.height) * 100;
-    
-    // Mover el origen del zoom y aplicar escala grande
-    imgZoom.style.transformOrigin = `${xPercent}% ${yPercent}%`;
-    imgZoom.style.transform = "scale(2.5)"; // ZOOM GRANDE (2.5x)
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    imgZoom.style.transformOrigin = `${x}% ${y}%`;
+    imgZoom.style.transform = "scale(2.5)";
 });
 
-contenedorImg.addEventListener('mouseleave', function() {
-    // Resetear al salir el ratón
-    imgZoom.style.transformOrigin = "center center";
+contenedorImg.addEventListener('mouseleave', () => {
     imgZoom.style.transform = "scale(1)";
+    imgZoom.style.transformOrigin = "center center";
 });
 
 render();
