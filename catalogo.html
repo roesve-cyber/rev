@@ -62,15 +62,27 @@ if (filtrados.length === 0) {
 
 // 🎯 Mostrar productos
 filtrados.forEach(p => {
-
   const div = document.createElement("div");
   div.className = "producto";
+  
+  // Usar imagen del producto o una por defecto si no tiene
+  const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
+  
+  // Convertir los saltos de línea para que se vean bien en el catálogo
+  const textoCaracteristicas = p.caracteristicas 
+        ? p.caracteristicas.replace(/\n/g, '<br>') 
+        : '<em>Sin detalles adicionales</em>';
 
   div.innerHTML = `
-    <h3>${p.Nombre}</h3>
-    <p class="precio">$${p.Precio_Contado}</p>
+    <div style="height:150px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <img src="${foto}" style="max-width:100%; max-height:100%; border-radius:5px;">
+    </div>
+    <h3>${p.nombre || p.Nombre}</h3>
+    <div style="font-size:12px; color:#666; margin:10px 0; text-align:left; border-top:1px solid #eee; pt:5px;">
+        ${textoCaracteristicas}
+    </div>
+    <p class="precio">$${parseFloat(p.precio || p.Precio_Contado || 0).toLocaleString()}</p>
   `;
-
   contenedor.appendChild(div);
 });
 </script>
