@@ -41,23 +41,25 @@
 <div id="productos" class="grid"></div>
 
 <script>
-// 📦 Obtener productos reales del sistema
+// 📦 Obtener productos reales del sistema (Aquí ocurre la conexión)
 const productos = JSON.parse(localStorage.getItem("productos")) || [];
 
 const contenedor = document.getElementById("productos");
 
 // 👉 CONFIGURA AQUÍ LAS CATEGORÍAS QUE QUIERES MOSTRAR
-const categoriasPermitidas = ["Salas", "Recámaras","Comedores", "Antecomedores", "Roperos", "Comoda", "Comodas", "Roperos", "Camas", "Roperos"];
+const categoriasPermitidas = ["Salas", "Recámaras", "Comedores", "Antecomedores", "Roperos", "Comoda", "Comodas", "Camas"];
 
-// 🔍 Filtrar productos
-const filtrados = productos.filter(p => 
-  p.Activo !== 0 &&
-  categoriasPermitidas.includes(p.Categoria)
-);
+// 🔍 Filtrar productos (CORREGIDO)
+const filtrados = productos.filter(p => {
+  // Tomamos la categoría, ya sea que se haya guardado con minúscula o mayúscula
+  const catProducto = p.categoria || p.Categoria || "";
+  
+  return p.Activo !== 0 && categoriasPermitidas.includes(catProducto);
+});
 
 // 🧠 Si no hay productos
 if (filtrados.length === 0) {
-  contenedor.innerHTML = "<p style='text-align:center;'>No hay productos disponibles</p>";
+  contenedor.innerHTML = "<p style='text-align:center;'>No hay productos disponibles en estas categorías.</p>";
 }
 
 // 🎯 Mostrar productos
@@ -75,13 +77,13 @@ filtrados.forEach(p => {
 
   div.innerHTML = `
     <div style="height:150px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;">
-        <img src="${foto}" style="max-width:100%; max-height:100%; border-radius:5px;">
+        <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:5px;">
     </div>
     <h3>${p.nombre || p.Nombre}</h3>
-    <div style="font-size:12px; color:#666; margin:10px 0; text-align:left; border-top:1px solid #eee; pt:5px;">
+    <div style="font-size:12px; color:#666; margin:10px 0; text-align:left; border-top:1px solid #eee; padding-top:5px;">
         ${textoCaracteristicas}
     </div>
-    <p class="precio">$${parseFloat(p.precio || p.Precio_Contado || 0).toLocaleString()}</p>
+    <p class="precio">$${parseFloat(p.precio || p.Precio_Contado || 0).toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
   `;
   contenedor.appendChild(div);
 });
