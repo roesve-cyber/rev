@@ -711,6 +711,64 @@ function procesarImportacion() {
 
     procesarDatosImportacion(texto);
 }
+function insertarProductoSistema(p) {
+    const validacion = ValidatorService.validarProducto({
+        nombre: p.nombre,
+        costo: p.costo,
+        precio: p.precio
+    });
+
+    if (!validacion.valid) {
+        return { ok: false, error: validacion.errores.join(", ") };
+    }
+
+    // Buscar categoría real
+    let categoriaPadre = "";
+    let subValida = false;
+
+    categoriasData.forEach(cat => {
+        const sub = cat.subcategorias.find(s => s.nombre === p.subcategoria);
+        if (sub) {
+            categoriaPadre = cat.nombre;
+            subValida = true;
+        }
+    });
+
+    if (!subValida) {
+        return { ok: false, error: "Subcategoría no existe" };
+    }
+
+    // Evitar duplicados reales
+    const duplicado = productos.some(prod =>
+        prod.nombre.toUpperCase() === p.nombre.toUpperCase() &&
+        prod.modelo === p.modelo &&
+        prod.color === p.color
+    );
+
+    if (duplicado) {
+        return { ok: false, error: "Producto duplicado" };
+    }
+
+    const margenCalculado = CalculatorService.calcularMargen(p.precio, p.costo);
+
+    productos.push({
+        id: Math.round(Date.now() * 1000 + Math.random() * 1000),
+        nombre: p.nombre,
+        costo: p.costo,
+        precio: p.precio,
+        margen: margenCalculado,
+        imagen: p.imagen || "",
+        color: p.color || "",
+        marca: p.marca || "",
+        modelo: p.modelo || "",
+        categoria: categoriaPadre,
+        subcategoria: p.subcategoria,
+        stock: p.stock || 0
+    });
+
+    return { ok: true };
+}
+
 
 function procesarDatosImportacion(texto) {
     let productosAImportar = [];
@@ -807,13 +865,27 @@ function procesarDatosImportacion(texto) {
         id: Math.round((Date.now() + idx) * 1000 + Math.random() * 1000)
     }));
 
-    productos = [...productos, ...productosAImportar];
+    let insertados = 0;
+let errores = [];
+
+productosAImportar.forEach((p, i) => {
+    const resultado = insertarProductoSistema(p);
+
+    if (resultado.ok) {
+        insertados++;
+    } else {
+        errores.push(`Fila ${i + 1}: ${resultado.error}`);
+    }
+});
+
     if (!StorageService.set("productos", productos)) {
         alert("❌ Error importando productos");
         return;
     }
 
-    alert(`✅ ${productosAImportar.length} productos importados exitosamente.`);
+    alert(`✅ ${insertados} productos importados\n❌ ${errores.length} errores`);
+console.log("Errores importación:", errores);
+
     cerrarImportador();
     renderInventario();
     mostrarProductos();
