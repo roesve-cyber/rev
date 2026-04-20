@@ -2,109 +2,161 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Catálogo</title>
+  <title>Catálogo - Vista Detallada</title>
   <link rel="stylesheet" href="/estilos.css">
   <style>
-    /* --- Estilos del Grid --- */
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; padding: 20px; }
-    
+    /* --- Estilos Generales --- */
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; padding: 25px; }
+
+    /* --- Tarjeta del Producto --- */
     .producto { 
-      border: 1px solid #eee; border-radius: 12px; padding: 15px; background: #fff; 
-      text-align: center; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-      display: flex; flex-direction: column; justify-content: space-between;
+      border: none; border-radius: 15px; padding: 15px; background: #fff; 
+      text-align: center; transition: 0.3s; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      display: flex; flex-direction: column;
     }
+    .producto:hover { transform: translateY(-8px); box-shadow: 0 8px 16px rgba(0,0,0,0.12); }
+    .producto h3 { font-size: 16px; color: #2c3e50; margin: 12px 0; height: 45px; overflow: hidden; }
+    .precio-card { font-weight: bold; color: #27ae60; font-size: 22px; margin-bottom: 15px; }
 
-    .producto h3 { font-size: 15px; color: #333; margin: 10px 0; height: 40px; overflow: hidden; }
-    .precio { font-weight: bold; color: #27ae60; font-size: 20px; margin: 10px 0; }
-
-    /* --- El Botón --- */
+    /* --- Botón Ver Detalle --- */
     .btn-detalle {
-      background-color: #0d6efd; color: white; border: none; padding: 10px;
-      border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;
+      background-color: #2c3e50; color: white; border: none; padding: 12px;
+      border-radius: 8px; cursor: pointer; font-weight: 600; width: 100%; transition: 0.2s;
     }
-    .btn-detalle:hover { background-color: #0a58ca; }
+    .btn-detalle:hover { background-color: #1a252f; }
 
-    /* --- Estilos del Modal (Ventana Emergente) --- */
+    /* --- MODAL ESTILO TIENDA --- */
     .modal {
-      display: none; position: fixed; z-index: 1000; left: 0; top: 0;
-      width: 100%; height: 100%; background-color: rgba(0,0,0,0.7);
-      align-items: center; justify-content: center;
+      display: none; position: fixed; z-index: 2000; left: 0; top: 0;
+      width: 100%; height: 100%; background-color: rgba(0,0,0,0.8);
+      align-items: center; justify-content: center; backdrop-filter: blur(4px);
     }
     .modal-contenido {
-      background: white; padding: 25px; border-radius: 15px; width: 90%; max-width: 500px;
-      position: relative; text-align: center; max-height: 90vh; overflow-y: auto;
+      background: white; border-radius: 20px; width: 95%; max-width: 800px;
+      position: relative; overflow: hidden; animation: fadeIn 0.3s;
+      display: flex; flex-wrap: wrap; max-height: 90vh;
     }
-    .cerrar { position: absolute; right: 15px; top: 10px; font-size: 25px; cursor: pointer; color: #888; }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+
+    /* Columnas del Modal */
+    .modal-izq { flex: 1; min-width: 300px; background: #f9f9f9; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal-der { flex: 1.2; min-width: 300px; padding: 30px; overflow-y: auto; text-align: left; }
+
+    .cerrar { position: absolute; right: 20px; top: 15px; font-size: 30px; cursor: pointer; color: #aaa; z-index: 10; }
+    .cerrar:hover { color: #333; }
+
+    /* Tipografía Detalle */
+    .modal-der h2 { margin-top: 0; color: #2c3e50; font-size: 24px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    .modal-precio { font-size: 28px; color: #27ae60; font-weight: 700; margin: 15px 0; }
+    .meta-info { font-size: 13px; color: #7f8c8d; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px; }
+    
+    .lista-caract { padding: 0; list-style: none; }
+    .lista-caract li { 
+      padding: 8px 0; border-bottom: 1px inset #f1f1f1; 
+      font-size: 14px; color: #444; display: flex; align-items: flex-start;
+    }
+    .lista-caract li::before { content: "•"; color: #3498db; font-weight: bold; width: 20px; flex-shrink: 0; }
   </style>
 </head>
 <body>
 
-<h1 style="text-align:center; font-family: sans-serif;">🛍️ Catálogo Mi Pueblito</h1>
+<h1 style="text-align:center; padding-top: 20px; color: #2c3e50;">Catálogo Mi Pueblito</h1>
 
 <div id="productos" class="grid"></div>
 
 <div id="miModal" class="modal">
   <div class="modal-contenido">
     <span class="cerrar" onclick="cerrarModal()">&times;</span>
-    <img id="modalImagen" src="" style="width: 100%; max-height: 250px; object-fit: contain; border-radius: 10px;">
-    <h2 id="modalNombre" style="margin: 15px 0;"></h2>
-    <p id="modalPrecio" style="font-size: 24px; color: #27ae60; font-weight: bold;"></p>
-    <div id="modalDesc" style="text-align: left; color: #555; background: #f9f9f9; padding: 15px; border-radius: 8px;"></div>
+    
+    <div class="modal-izq">
+      <img id="modalImagen" src="" style="max-width: 100%; max-height: 400px; object-fit: contain;">
+    </div>
+
+    <div class="modal-der">
+      <div id="modalMeta" class="meta-info"></div>
+      <h2 id="modalNombre"></h2>
+      <div id="modalPrecio" class="modal-precio"></div>
+      
+      <div style="margin-top: 20px;">
+        <h4 style="margin-bottom: 10px; color: #34495e; border-left: 4px solid #3498db; padding-left: 10px;">
+          Características Destacadas
+        </h4>
+        <ul id="modalLista" class="lista-caract"></ul>
+      </div>
+
+      <p id="modalDesc" style="font-size: 14px; color: #7f8c8d; line-height: 1.6; margin-top: 20px;"></p>
+    </div>
   </div>
 </div>
 
 <script>
-// 1. Datos
+// 1. Cargar Datos
 const productos = JSON.parse(localStorage.getItem("productos")) || [];
 const contenedor = document.getElementById("productos");
 
 const categoriasABuscar = ["Muebles", "Colchones"];
 const permitidasMin = categoriasABuscar.map(c => c.toLowerCase());
 
-// 2. Filtrar
+// 2. Renderizado Inicial
 const filtrados = productos.filter(p => {
     const catDoc = (p.categoria || "").trim().toLowerCase();
     return permitidasMin.includes(catDoc) && p.Activo !== 0;
 });
 
-// 3. Renderizar Tarjetas
 if (filtrados.length === 0) {
-    contenedor.innerHTML = "<h3>No hay productos disponibles.</h3>";
+    contenedor.innerHTML = "<h3 style='grid-column: 1/-1; text-align:center;'>No hay productos cargados.</h3>";
 } else {
     contenedor.innerHTML = filtrados.map(p => {
         const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
-        const precioNum = parseFloat(p.precio || 0);
-        
+        const precio = parseFloat(p.precio || 0).toLocaleString('es-MX', {minimumFractionDigits: 2});
         return `
             <div class="producto">
-                <div style="height:150px; display:flex; align-items:center; justify-content:center;">
+                <div style="height:180px; display:flex; align-items:center; justify-content:center;">
                     <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain;">
                 </div>
-                <h3>${p.nombre || "Sin nombre"}</h3>
-                <p class="precio">$${precioNum.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
-                <button class="btn-detalle" onclick="verDetalle('${p.id}')">Ver Detalles</button>
+                <h3>${p.nombre || "Producto"}</h3>
+                <p class="precio-card">$${precio}</p>
+                <button class="btn-detalle" onclick="verDetalle('${p.id}')">VER DETALLE</button>
             </div>
         `;
     }).join('');
 }
 
-// 4. Lógica del Modal
+// 3. Función Ver Detalle (Igual a la tienda pero sin carrito)
 function verDetalle(id) {
     const p = productos.find(item => item.id == id);
     if (!p) return;
 
+    // Llenar datos básicos
     document.getElementById("modalImagen").src = p.imagen || "https://via.placeholder.com/200";
     document.getElementById("modalNombre").innerText = p.nombre;
     document.getElementById("modalPrecio").innerText = "$" + parseFloat(p.precio || 0).toLocaleString('es-MX', {minimumFractionDigits: 2});
     
-    // Convertir saltos de línea para la descripción
-    const textoHtml = p.caracteristicas ? p.caracteristicas.replace(/\n/g, '<br>') : "Sin detalles.";
-    document.getElementById("modalDesc").innerHTML = `
-        <strong>Categoría:</strong> ${p.categoria}<br>
-        <strong>Subcategoría:</strong> ${p.subcategoria || 'N/A'}<br><br>
-        ${textoHtml}
-    `;
+    // Meta Info (Marca, Modelo, Categoría)
+    const marca = p.marca ? ` | Marca: ${p.marca}` : "";
+    document.getElementById("modalMeta").innerText = `${p.categoria}${marca}`;
 
+    // Procesar Características como Lista (Igual que en Tienda)
+    const lista = document.getElementById("modalLista");
+    lista.innerHTML = "";
+    
+    if (p.caracteristicas) {
+        // Dividimos por saltos de línea y limpiamos espacios vacíos
+        const lineas = p.caracteristicas.split('\n').filter(l => l.trim() !== "");
+        lineas.forEach(linea => {
+            const li = document.createElement("li");
+            li.innerText = linea.trim();
+            lista.appendChild(li);
+        });
+    } else {
+        lista.innerHTML = "<li>Consultar especificaciones con un vendedor.</li>";
+    }
+
+    // Descripción extra
+    document.getElementById("modalDesc").innerText = p.descripcion || "";
+
+    // Mostrar Modal
     document.getElementById("miModal").style.display = "flex";
 }
 
@@ -112,11 +164,9 @@ function cerrarModal() {
     document.getElementById("miModal").style.display = "none";
 }
 
-// Cerrar si hacen clic fuera del cuadro blanco
+// Cerrar al hacer clic fuera
 window.onclick = function(event) {
-  if (event.target == document.getElementById("miModal")) {
-    cerrarModal();
-  }
+    if (event.target == document.getElementById("miModal")) cerrarModal();
 }
 </script>
 
