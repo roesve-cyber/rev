@@ -130,6 +130,12 @@ function renderProductosCatalogo(listaProductos) {
     const contenedor = document.getElementById("gridProductos");
     if (!contenedor) return;
 
+    // Limpiar contenido previo (importante si usas innerHTML +=)
+    // Nota: Es mejor limpiar al inicio de la función si vas a re-renderizar
+    const encabezado = contenedor.querySelector('div[style*="grid-column: 1/-1"]');
+    contenedor.innerHTML = '';
+    if(encabezado) contenedor.appendChild(encabezado);
+
     if (listaProductos.length === 0) {
         contenedor.innerHTML += `
             <div style="grid-column: 1/-1; text-align: center; padding: 60px 20px; color: #718096;">
@@ -145,6 +151,11 @@ function renderProductosCatalogo(listaProductos) {
         const plan6  = planes[5] || planes[0];
         const abono  = plan6 ? plan6.abono : 0;
 
+        // --- PROCESAR CARACTERÍSTICAS PARA LA TARJETA ---
+        const descBreve = p.caracteristicas 
+            ? p.caracteristicas.split('|')[0].substring(0, 60) + '...' 
+            : 'Ver detalles';
+
         const cardHTML = `
             <div class="card-producto">
                 <div class="card-producto-imagen">
@@ -152,6 +163,11 @@ function renderProductosCatalogo(listaProductos) {
                 </div>
                 <div class="card-producto-contenido">
                     <h3 class="card-producto-nombre">${p.nombre}</h3>
+                    
+                    <p style="font-size: 12px; color: #718096; margin: 5px 0 10px 0; min-height: 3em;">
+                        ${descBreve}
+                    </p>
+
                     <div class="card-producto-precio">
                         <small class="precio-contado">Precio contado</small>
                         <p class="precio-valor">${dinero(precio)}</p>
@@ -213,6 +229,14 @@ function verProducto(id) {
                         ${p.color ? `<div><small style="color: #718096; text-transform: uppercase; font-weight: 600;">Color</small><br><strong style="color: #2c3e50;">${p.color}</strong></div>` : ''}
                         ${p.marca ? `<div><small style="color: #718096; text-transform: uppercase; font-weight: 600;">Marca</small><br><strong style="color: #2c3e50;">${p.marca}</strong></div>` : ''}
                         ${p.modelo ? `<div><small style="color: #718096; text-transform: uppercase; font-weight: 600;">Modelo</small><br><strong style="color: #2c3e50;">${p.modelo}</strong></div>` : ''}
+                    </div>
+                ` : ''}
+                ${p.caracteristicas ? `
+                    <div style="margin-bottom: 25px;">
+                        <h4 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 16px; border-left: 4px solid #3498db; padding-left: 10px;">
+                            Descripción y Características
+                        </h4>
+                        <div style="background: #f8fafc; padding: 15px; border-radius: 8px; color: #4a5568; line-height: 1.6; font-size: 14px; white-space: pre-wrap;">${p.caracteristicas}</div>
                     </div>
                 ` : ''}
 
