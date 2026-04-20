@@ -42,59 +42,60 @@
 
 <script>
 <script>
-// 1. Obtener productos
-const productos = JSON.parse(localStorage.getItem("productos")) || [];
-const contenedor = document.getElementById("productos");
+// 1. Tus categorías tal como las piensas (puedes poner mayúsculas aquí)
+const categoriasABuscar = ["Muebles", "Colchones"];
 
-// 2. Imprimir en consola para diagnóstico oculto
-console.log("📦 Total de productos en la base de datos:", productos.length);
+// 2. Pasamos TODA esa lista a minúsculas automáticamente para no fallar
+const permitidasMin = categoriasABuscar.map(c => c.toLowerCase());
 
-// 3. Categorías permitidas (las pasamos todas a minúsculas para comparar fácil)
-const categoriasPermitidas = ["Muebles", "Colchones"];
-
-// 4. Filtrar productos (A PRUEBA DE BALAS)
+// 3. Filtrar
 const filtrados = productos.filter(p => {
-  // Tomamos la categoría, le quitamos espacios a los lados y la hacemos minúscula
-  //const catProducto = (p.categoria || p.Categoria || "").trim().toLowerCase();
-  
-  // Revisamos si esa categoría está en nuestra lista permitida
-  const esCategoriaValida = categoriasPermitidas.includes(catProducto);
-  const estaActivo = p.Activo !== 0;
+    // Obtenemos la categoría del producto (venga como p.categoria o p.Categoria)
+    // y la pasamos a minúsculas también
+    const catProducto = (p.categoria || p.Categoria || "").trim().toLowerCase();
+    
+    const esValida = permitidasMin.includes(catProducto);
+    const estaActivo = p.Activo !== 0;
 
-  return esCategoriaValida && estaActivo;
+    return esValida && estaActivo;
 });
 
-console.log("✅ Productos que pasaron el filtro:", filtrados.length);
-if (filtrados.length === 0 && productos.length > 0) {
-    console.log("⚠️ Ningún producto pasó el filtro. Revisa las categorías de estos productos:", productos.map(p => p.categoria || p.Categoria));
-}
+console.log("Categorías encontradas en tu base:", productos.map(p => p.categoria || p.Categoria));
+console.log("Productos tras el filtro:", filtrados.length);
 
-// 5. Si no hay productos
+// 4. Si no hay productos, mostrar mensaje
 if (filtrados.length === 0) {
-  contenedor.innerHTML = "<p style='text-align:center;'>No hay productos disponibles en estas categorías.</p>";
+    contenedor.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 50px;">
+            <p style="color: #666; font-size: 18px;">No hay productos disponibles en las categorías: <b>${categoriasPermitidas.join(", ")}</b></p>
+            <small style="color: #999;">Asegúrate de que los productos en tu inventario tengan estas categorías asignadas exactamente.</small>
+        </div>`;
 }
 
-// 6. Mostrar productos
+// 5. Renderizar productos
 filtrados.forEach(p => {
-  const div = document.createElement("div");
-  div.className = "producto";
-  
-  const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
-  const textoCaracteristicas = p.caracteristicas 
+    const div = document.createElement("div");
+    div.className = "producto";
+    
+    const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
+    const nombre = p.nombre || p.Nombre || "Producto sin nombre";
+    const precio = parseFloat(p.precio || p.Precio_Contado || 0);
+    
+    const textoCaracteristicas = p.caracteristicas 
         ? p.caracteristicas.replace(/\n/g, '<br>') 
         : '<em>Sin detalles adicionales</em>';
 
-  div.innerHTML = `
-    <div style="height:150px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;">
-        <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:5px;">
-    </div>
-    <h3>${p.nombre || p.Nombre}</h3>
-    <div style="font-size:12px; color:#666; margin:10px 0; text-align:left; border-top:1px solid #eee; padding-top:5px;">
-        ${textoCaracteristicas}
-    </div>
-    <p class="precio">$${parseFloat(p.precio || p.Precio_Contado || 0).toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
-  `;
-  contenedor.appendChild(div);
+    div.innerHTML = `
+        <div style="height:180px; display:flex; align-items:center; justify-content:center; margin-bottom:10px; background:#f9f9f9; border-radius:8px;">
+            <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain;">
+        </div>
+        <h3 style="height: 40px; overflow: hidden; font-size: 14px;">${nombre}</h3>
+        <div style="font-size:11px; color:#888; margin:10px 0; text-align:left; border-top:1px solid #eee; padding-top:8px; height: 60px; overflow-y: auto;">
+            ${textoCaracteristicas}
+        </div>
+        <p class="precio">$${precio.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
+    `;
+    contenedor.appendChild(div);
 });
 </script>
 
