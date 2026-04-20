@@ -1,3 +1,13 @@
+function _esAdmin() {
+    try {
+        const sesion = sessionStorage.getItem('sesionActiva');
+        const usuario = sesion ? JSON.parse(sesion) : null;
+        return usuario && usuario.rol === 'admin';
+    } catch {
+        return false;
+    }
+}
+
 function agregarAlCarritoDesdeModal() {
     if (!productoActualId) return;
     const p = productos.find(prod => prod.id === productoActualId);
@@ -69,7 +79,7 @@ function renderCarrito() {
     if (!vistaCarrito) return;
 
     // 👉 Detectar admin
-    const esAdmin = usuarioActual && usuarioActual.rol === "admin";
+    const esAdmin = _esAdmin();
 
     if (carrito.length === 0) {
         vistaCarrito.innerHTML = `

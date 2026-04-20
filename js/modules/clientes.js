@@ -1,4 +1,13 @@
 // ===== HELPERS DE CUENTA / MEDIO DE PAGO =====
+function _escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 function _buildCuentaOrigen(idSufijo) {
     return `
         <div style="margin-bottom:8px;">
@@ -126,10 +135,10 @@ function renderClientes() {
     clientes.forEach(c => {
         html += `
             <tr>
-                <td><b>${c.nombre}</b></td>
-                <td>${c.direccion || '-'}</td>
-                <td>${c.telefono || '-'}</td>
-                <td><small>${c.referencia || '-'}</small></td>
+                <td><b>${_escapeHtml(c.nombre)}</b></td>
+		<td><b>${_escapeHtml(c.direccion)}</b></td>
+		<td><b>${_escapeHtml(c.telefono)}</b></td>
+		<td><b>${_escapeHtml(c.referencia)}</b></td>
                 <td style="text-align:center;">
                     <button onclick="prepararEdicionCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px; margin-right:10px;">✏️</button>
                     <button onclick="eliminarCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px; margin-right:10px;">🗑️</button>
