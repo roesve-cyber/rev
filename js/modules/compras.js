@@ -189,6 +189,17 @@ function registrarCompra() {
             meses: parseInt(document.getElementById("compraMeses")?.value) || 1,
             fecha: nuevaCompra.fecha,
             vencimiento: fechaPagoMensaje
+	 const movs = StorageService.get('movimientosCaja', []);
+    	    movs.push({
+            id: Date.now(),
+            tipo: 'egreso',
+            concepto: 'Compra de contado a proveedor',
+            monto: total,
+            fecha: new Date().toISOString(),
+            cuenta: cuentaPago || 'Caja',
+            referencia: `COMPRA-${compra.id}`
+    	});
+    StorageService.set('movimientosCaja', movs);
         };
 
         if (metodo === "credito_proveedor") {

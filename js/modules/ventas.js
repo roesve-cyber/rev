@@ -28,7 +28,6 @@ function agregarAlCarritoDesdeModal() {
             id: p.id,
             nombre: p.nombre,
             precioContado: parseFloat(p.precio) || 0,
-            precioOriginal: parseFloat(p.precio) || 0,  // 💾 Guardamos el original para detectar cambios
             plazo: plan.meses,
             totalCredito: plan.total,
             abonoSemanal: plan.abono,
@@ -145,24 +144,13 @@ function renderCarrito() {
                     ${
                         esAdmin
                         ? `
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
-                            <div style="display:flex; align-items:center; gap:4px;">
-                                <span style="font-size:11px; color:#718096;">$</span>
-                                <input type="number" value="${p.precioContado || 0}" 
-                                    onchange="cambiarPrecioCarrito(${index}, this.value)"
-                                    style="width:90px; padding:5px 6px; text-align:right; border:2px solid ${(p.precioOriginal && p.precioContado !== p.precioOriginal) ? '#f59e0b' : '#ddd'}; border-radius:4px; font-weight:bold; color:#2c3e50; font-size:14px;"
-                                    title="Editar precio">
-                            </div>
-                            ${p.precioOriginal && p.precioContado !== p.precioOriginal
-                                ? `<small style="color:#f59e0b; font-size:10px;">Orig: ${dinero(p.precioOriginal)}</small>`
-                                : `<small style="color:#a0aec0; font-size:10px;">✏️ editable</small>`
-                            }
-                            <small style="color:#27ae60; font-size:11px; font-weight:bold;">${dinero((p.precioContado || 0) * cantidad)}</small>
-                        </div>
+                        <input type="number" value="${p.precioContado || 0}" 
+                            onchange="cambiarPrecioCarrito(${index}, this.value)"
+                            style="width:80px; padding:5px; text-align:right; border:1px solid #ddd; border-radius:4px;">
+                        <br>
+                        <small>${dinero((p.precioContado || 0) * cantidad)}</small>
                         `
-                        : `<div>
-                            ${dinero((p.precioContado || 0) * cantidad)}
-                          </div>`
+                        : dinero((p.precioContado || 0) * cantidad)
                     }
                 </td>
 
@@ -210,11 +198,6 @@ function cambiarPrecioCarrito(index, nuevoPrecio) {
     nuevoPrecio = parseFloat(nuevoPrecio);
 
     if (isNaN(nuevoPrecio) || nuevoPrecio <= 0) return;
-
-    // 💾 Guardar precio original la primera vez que se edita
-    if (!carrito[index].precioOriginal) {
-        carrito[index].precioOriginal = carrito[index].precioContado;
-    }
 
     carrito[index].precioContado = nuevoPrecio;
 
@@ -380,12 +363,12 @@ function eliminarDelCarrito(index) {
  */
 function confirmarVentaFinal() {
     console.log("🔍 Iniciando confirmarVentaFinal()...");
-    
+
     if (!clienteSeleccionado) {
         alert("⚠️ Por favor selecciona un cliente antes de continuar.");
         return;
     }
-    
+
     if (carrito.length === 0) {
         alert("⚠️ El carrito está vacío.");
         return;
@@ -393,44 +376,53 @@ function confirmarVentaFinal() {
 
     const metodoPago = document.getElementById("selMetodoPago")?.value;
     console.log("Método de pago:", metodoPago);
-    
+
     if (!metodoPago) {
         alert("⚠️ Regresa al carrito y selecciona un método de pago.");
         return;
     }
 
+    // ==== FIX AUDITORIA: Aplicar descuentos antes del cálculo de totales ====
+    let descuentoAplicado = 0;
+    if (typeof aplicarDescuentosAlCarrito === "function") {
+        descuentoAplicado = aplicarDescuentosAlCarrito(carrito, clienteSeleccionado.id) || 0;
+    }
+    // ========================================================================
+
     const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
-    console.log("Total contado:", totalContado);
-    
+    const totalConDescuento = totalContado - descuentoAplicado; // actualizado
+
+    console.log("Total contado:", totalContado, "| Descuento aplicado:", descuentoAplicado, "| Total con descuento:", totalConDescuento);
+
     let enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
     if (enganche < 0) enganche = 0;
-    
-    if (enganche > totalContado) {
+
+    if (enganche > totalConDescuento) {
         alert("⚠️ El enganche no puede ser mayor al total.");
         return;
     }
 
-    const saldoAFinanciar = totalContado - enganche;
+    const saldoAFinanciar = totalConDescuento - enganche;
     let planElegido = null;
 
     if (metodoPago === "credito") {
         const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
         console.log("Periodicidad:", periodicidad);
-        
+
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
         console.log("Plazo seleccionado:", plazoSeleccionado);
-        
+
         if (plazoSeleccionado === null || plazoSeleccionado === undefined || plazoSeleccionado < 0 || plazoSeleccionado >= planes.length) {
             alert("⚠️ Selecciona un plazo de crédito en el carrito antes de continuar.");
             return;
         }
-        
+
         planElegido = planes[plazoSeleccionado];
         if (!planElegido) {
             alert("⚠️ Plazo de crédito inválido.");
             return;
         }
-        
+
         console.log("Plan elegido:", planElegido);
     }
 
@@ -443,10 +435,13 @@ function confirmarVentaFinal() {
     } else {
         _vendedorSeleccionado = null;
     }
-    mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido);
+
+    // ==== FIX AUDITORIA: Pasa descuento aplicado al resumen ====
+    mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, descuentoAplicado, totalConDescuento);
 }
 
-function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido) {
+// Cambia la firma para recibir y mostrar descuento
+function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, descuentoAplicado = 0, totalConDescuento = null) {
     const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
     let detalleMetodo = "";
 
@@ -488,62 +483,72 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     }).join('');
 
     _planElegidoPendiente = planElegido;
-
-    // Eliminar modal anterior si existe
     document.querySelector('[data-modal="resumen-venta"]')?.remove();
+
+    // ==== FIX AUDITORIA: Mostrar el descuento si fue aplicado ====
+    const resumenFinanciero = `
+        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
+            <p style="margin:8px 0; display:flex; justify-content:space-between;">
+                <span>Subtotal:</span>
+                <strong>${dinero(totalContado)}</strong>
+            </p>
+            ${descuentoAplicado > 0 ? `
+            <p style="margin:8px 0; display:flex; justify-content:space-between;">
+                <span style="color:#16a34a;">Descuento aplicado:</span>
+                <strong style="color:#16a34a;">- ${dinero(descuentoAplicado)}</strong>
+            </p>
+            <p style="margin:8px 0; display:flex; justify-content:space-between;">
+                <span><strong>Total (con descuento):</strong></span>
+                <strong>${dinero(totalConDescuento)}</strong>
+            </p>
+            ` : ''}
+        </div>
+    `;
 
     const modalHTML = `
     <div class="modal" data-modal="resumen-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center; overflow-y:auto;">
-            <div style="background:white; padding:30px; border-radius:15px; width:95%; max-width:700px; margin:20px auto;">
-                
-                <h2 style="margin-top:0; color:#2c3e50;">📋 Resumen de Transacción</h2>
-                
-                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
-                    <h4 style="margin:0 0 10px 0; color:#166534;">👤 Cliente</h4>
-                    <p style="margin:5px 0;"><strong>${clienteSeleccionado.nombre}</strong></p>
-                    ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">📞 ${clienteSeleccionado.telefono}</p>` : ''}
-                    ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">📍 ${clienteSeleccionado.direccion}</p>` : ''}
-                </div>
-
-                <div style="margin-bottom:20px;">
-                    <h4 style="color:#2c3e50; margin:0 0 10px 0;">🛍️ Productos</h4>
-                    <table class="tabla-admin" style="width:100%; font-size:14px;">
-                        <thead>
-                            <tr>
-                                <th>Producto</th>
-                                <th style="text-align:center;">Cant.</th>
-                                <th style="text-align:right;">Precio Unit.</th>
-                                <th style="text-align:right;">Subtotal</th>
-                            </tr>
-                        </thead>
-                        <tbody>${resumenProductos}</tbody>
-                    </table>
-                </div>
-
-                <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
-                    <p style="margin:8px 0; display:flex; justify-content:space-between;">
-                        <span>Subtotal:</span>
-                        <strong>${dinero(totalContado)}</strong>
-                    </p>
-                </div>
-
-                <div style="margin-bottom:20px;">
-                    <h4 style="color:#2c3e50; margin:0 0 10px 0;">💳 Forma de Pago</h4>
-                    ${detalleMetodo}
-                </div>
-
-                <div style="display:flex; gap:10px;">
-                    <button onclick="procesarVentaConInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar})" 
-                            style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
-                        ✅ Confirmar Venta
-                    </button>
-                    <button onclick="cancelarYVolverAlCarrito()" 
-        style="padding: 12px 24px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
-    ✕ Cancelar
-</button>
-                </div>
+        <div style="background:white; padding:30px; border-radius:15px; width:95%; max-width:700px; margin:20px auto;">
+            <h2 style="margin-top:0; color:#2c3e50;">📋 Resumen de Transacción</h2>
+            <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
+                <h4 style="margin:0 0 10px 0; color:#166534;">👤 Cliente</h4>
+                <p style="margin:5px 0;"><strong>${clienteSeleccionado.nombre}</strong></p>
+                ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">📞 ${clienteSeleccionado.telefono}</p>` : ''}
+                ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">📍 ${clienteSeleccionado.direccion}</p>` : ''}
             </div>
-        </div>`;
+            <div style="margin-bottom:20px;">
+                <h4 style="color:#2c3e50; margin:0 0 10px 0;">🛍️ Productos</h4>
+                <table class="tabla-admin" style="width:100%; font-size:14px;">
+                    <thead>
+                        <tr>
+                            <th>Producto</th>
+                            <th style="text-align:center;">Cant.</th>
+                            <th style="text-align:right;">Precio Unit.</th>
+                            <th style="text-align:right;">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>${resumenProductos}</tbody>
+                </table>
+            </div>
+
+            ${resumenFinanciero}
+
+            <div style="margin-bottom:20px;">
+                <h4 style="color:#2c3e50; margin:0 0 10px 0;">💳 Forma de Pago</h4>
+                ${detalleMetodo}
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="procesarVentaConInventario('${metodoPago}', ${totalConDescuento ?? totalContado}, ${enganche}, ${saldoAFinanciar})"
+                    style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
+                    ✅ Confirmar Venta
+                </button>
+                <button onclick="cancelarYVolverAlCarrito()"
+                    style="padding: 12px 24px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
+                    ✕ Cancelar
+                </button>
+            </div>
+        </div>
+    </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
@@ -564,6 +569,9 @@ function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFi
     console.log("🔄 Procesando venta con inventario...");
     console.log("Plan elegido final:", _planElegidoPendiente);
     mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, _planElegidoPendiente);
+if (typeof acumularPuntosCliente === "function") {
+        acumularPuntosCliente(clienteSeleccionado.id, total, /* folioVenta aquí si lo tienes disponible */);
+    }
 }
 
 /**

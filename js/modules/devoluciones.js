@@ -19,7 +19,7 @@ function buscarVentaDevolucion() {
     const folio = document.getElementById('devFolio')?.value.trim().toUpperCase();
     const cont = document.getElementById('devResultado');
     if (!folio || !cont) return;
-    const ventas = StorageService.get('ventasRegistradas', []);
+    const ventas = StorageService.get('registroTickets', []);
     const venta = ventas.find(v => (v.folio || '').toUpperCase() === folio);
     if (!venta) {
         cont.textContent = '';
@@ -84,9 +84,13 @@ function procesarDevolucion(folio) {
     const motivo = document.getElementById('devMotivo')?.value || 'Otro';
     const notas = document.getElementById('devNotas')?.value.trim();
     const reingresarStock = document.getElementById('devReingresarStock')?.checked ?? true;
-    const ventas = StorageService.get('ventasRegistradas', []);
+    const ventas = StorageService.get('registroTickets', []);
     const venta = ventas.find(v => (v.folio || '').toUpperCase() === folio.toUpperCase());
     if (!venta) return;
+
+    // Detectar si la venta fue a crédito
+    const fueCredito = venta.metodo === "credito" || venta.metodoDePago === "credito" || (venta.plan && venta.plan.tipo === "credito");
+
     const arts = venta.articulos || venta.carrito || [];
     const art = arts[idxArt];
     if (!art) return;
@@ -118,11 +122,33 @@ function procesarDevolucion(folio) {
         }
     }
 
+    // ===== //FIX AUDITORIA: Si venta a crédito, ajusta saldo y registra reembolso =====
+    if(fueCredito && devolucion.monto > 0) {
+        const cuentas = StorageService.get('cuentasPorCobrar', []);
+        const cuenta = cuentas.find(c => (c.folioVenta || c.folio) === folio);
+        if(cuenta) {
+            cuenta.saldo -= devolucion.monto;
+            if(cuenta.saldo < 0) cuenta.saldo = 0;
+            StorageService.set('cuentasPorCobrar', cuentas);
+        }
+
+        const movs = StorageService.get('movimientosCaja', []);
+        movs.push({
+            id: Date.now() + 1,
+            tipo: "egreso",
+            concepto: `Reembolso por devolución (${devolucion.folio})`,
+            monto: devolucion.monto,
+            fecha: new Date().toISOString(),
+            referencia: devolucion.folio
+        });
+        StorageService.set('movimientosCaja', movs);
+    }
+    // ===== FIN FIX AUDITORIA =====
+
     document.querySelector('[data-modal="devolucion"]')?.remove();
     alert(`✅ Devolución registrada. Folio: ${devolucion.folio}`);
     if (document.getElementById('contenidoDevoluciones')) renderHistorialDevoluciones();
 }
-
 function renderHistorialDevoluciones() {
     const cont = document.getElementById('contenidoDevoluciones');
     if (!cont) return;
@@ -166,7 +192,7 @@ function renderHistorialDevoluciones() {
 
 // ===== GARANTÍAS =====
 function registrarGarantia({ folio, productoId, clienteId, mesesGarantia }) {
-    const ventas = StorageService.get('ventasRegistradas', []);
+    const ventas = StorageService.get('registroTickets', []);
     const venta = ventas.find(v => (v.folio || '') === folio);
     const fecha = venta ? (venta.fecha || venta.fechaVenta || new Date().toISOString()) : new Date().toISOString();
     const fechaVenc = new Date(fecha);
