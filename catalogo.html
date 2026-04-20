@@ -41,36 +41,45 @@
 <div id="productos" class="grid"></div>
 
 <script>
-// 📦 Obtener productos reales del sistema (Aquí ocurre la conexión)
+<script>
+// 1. Obtener productos
 const productos = JSON.parse(localStorage.getItem("productos")) || [];
-
 const contenedor = document.getElementById("productos");
 
-// 👉 CONFIGURA AQUÍ LAS CATEGORÍAS QUE QUIERES MOSTRAR
-const categoriasPermitidas = ["Salas", "Recámaras", "Comedores", "Antecomedores", "Roperos", "Comoda", "Comodas", "Camas"];
+// 2. Imprimir en consola para diagnóstico oculto
+console.log("📦 Total de productos en la base de datos:", productos.length);
 
-// 🔍 Filtrar productos (CORREGIDO)
+// 3. Categorías permitidas (las pasamos todas a minúsculas para comparar fácil)
+const categoriasPermitidas = ["salas", "recámaras", "comedores", "antecomedores", "roperos", "comoda", "comodas", "camas"];
+
+// 4. Filtrar productos (A PRUEBA DE BALAS)
 const filtrados = productos.filter(p => {
-  // Tomamos la categoría, ya sea que se haya guardado con minúscula o mayúscula
-  const catProducto = p.categoria || p.Categoria || "";
+  // Tomamos la categoría, le quitamos espacios a los lados y la hacemos minúscula
+  const catProducto = (p.categoria || p.Categoria || "").trim().toLowerCase();
   
-  return p.Activo !== 0 && categoriasPermitidas.includes(catProducto);
+  // Revisamos si esa categoría está en nuestra lista permitida
+  const esCategoriaValida = categoriasPermitidas.includes(catProducto);
+  const estaActivo = p.Activo !== 0;
+
+  return esCategoriaValida && estaActivo;
 });
 
-// 🧠 Si no hay productos
+console.log("✅ Productos que pasaron el filtro:", filtrados.length);
+if (filtrados.length === 0 && productos.length > 0) {
+    console.log("⚠️ Ningún producto pasó el filtro. Revisa las categorías de estos productos:", productos.map(p => p.categoria || p.Categoria));
+}
+
+// 5. Si no hay productos
 if (filtrados.length === 0) {
   contenedor.innerHTML = "<p style='text-align:center;'>No hay productos disponibles en estas categorías.</p>";
 }
 
-// 🎯 Mostrar productos
+// 6. Mostrar productos
 filtrados.forEach(p => {
   const div = document.createElement("div");
   div.className = "producto";
   
-  // Usar imagen del producto o una por defecto si no tiene
   const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
-  
-  // Convertir los saltos de línea para que se vean bien en el catálogo
   const textoCaracteristicas = p.caracteristicas 
         ? p.caracteristicas.replace(/\n/g, '<br>') 
         : '<em>Sin detalles adicionales</em>';
