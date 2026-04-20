@@ -571,6 +571,10 @@ function mostrarDetalleProductoMaestro(id) {
                     <div class="campo"><label style="color:#e74c3c;">Costo de Compra ($)</label><input type="number" id="editCosto" value="${p.costo || 0}" oninput="recalcularRentabilidad()"></div>
                     <div class="campo"><label style="color:#27ae60;">Precio de Venta ($)</label><input type="number" id="editPrecio" value="${p.precio || 0}" oninput="recalcularRentabilidad()"></div>
                     <div class="campo" style="grid-column: span 2;"><label>Descripción</label><textarea id="editDescripcion" rows="2">${p.descripcion || ''}</textarea></div>
+                    <div class="campo" style="grid-column: span 2;">
+                        <label>Características (Usa Enter para saltar de línea)</label>
+                        <textarea id="editCaracteristicas" rows="4" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; font-family:inherit;">${p.caracteristicas || ''}</textarea>
+                    </div>
                 </div>
     <div class="campo" style="grid-column: span 2;">
         <label>Características</label>
@@ -654,6 +658,7 @@ function guardarCambiosVisor(id) {
     p.costo        = parseFloat(document.getElementById("editCosto")?.value) || p.costo;
     p.precio       = parseFloat(document.getElementById("editPrecio")?.value) || p.precio;
     p.descripcion  = document.getElementById("editDescripcion")?.value || '';
+    p.caracteristicas = document.getElementById("editCaracteristicas").value;
 
     if (!StorageService.set("productos", productos)) {
         alert("❌ Error guardando cambios");
@@ -821,6 +826,7 @@ function procesarDatosImportacion(texto) {
         const idxMarca = encabezado.indexOf('marca');
         const idxModelo = encabezado.indexOf('modelo');
         const idxStock = encabezado.indexOf('stock');
+        const idxCaracteristicas = encabezado.indexOf('caracteristicas');
 
         if (idxNombre === -1 || idxCosto === -1 || idxPrecio === -1) {
             alert("CSV debe contener al menos: Nombre, Costo, Precio");
@@ -841,6 +847,7 @@ function procesarDatosImportacion(texto) {
             const marca = valores[idxMarca] || "";
             const modelo = valores[idxModelo] || "";
             const stock = parseInt(valores[idxStock]) || 0;
+            const caracteristicasStr = idxCaracteristicas !== -1 && valores[idxCaracteristicas] ? valores[idxCaracteristicas].replace(/\|/g, '\n') : "";
 
             if (nombre && costo > 0 && precio > 0) {
                 const margenCalculado = ((precio - costo) / precio * 100);
@@ -856,7 +863,8 @@ function procesarDatosImportacion(texto) {
                     modelo,
                     categoria,
                     subcategoria,
-                    stock
+                    stock,
+                    caracteristicas: caracteristicasStr
                 });
             }
         }
