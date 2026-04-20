@@ -50,12 +50,12 @@ const contenedor = document.getElementById("productos");
 console.log("📦 Total de productos en la base de datos:", productos.length);
 
 // 3. Categorías permitidas (las pasamos todas a minúsculas para comparar fácil)
-const categoriasPermitidas = ["Muebles", "Colchones", "comedores", "antecomedores", "roperos", "comoda", "comodas", "camas"];
+const categoriasPermitidas = ["Muebles", "Colchones"];
 
 // 4. Filtrar productos (A PRUEBA DE BALAS)
 const filtrados = productos.filter(p => {
   // Tomamos la categoría, le quitamos espacios a los lados y la hacemos minúscula
-  const catProducto = (p.categoria || p.Categoria || "").trim().toLowerCase();
+  //const catProducto = (p.categoria || p.Categoria || "").trim().toLowerCase();
   
   // Revisamos si esa categoría está en nuestra lista permitida
   const esCategoriaValida = categoriasPermitidas.includes(catProducto);
