@@ -98,6 +98,7 @@ function renderInventario(listaAMostrar = productos) {
                     <td>
                         <b>${p.nombre}</b><br>
                         <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
+			${p.caracteristicas ? `<div style="font-size:12px;color:#444;">${p.caracteristicas}</div>` : ""}
                     </td>
                     <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
                     <td style="text-align:right;">${dinero(p.precio)}</td>
@@ -236,6 +237,7 @@ function guardarProductoDB() {
     const modelo      = document.getElementById("pModelo").value.trim();
     const imagen      = document.getElementById("pImagen").value.trim();
     const subcatNombre = document.getElementById("pSubcategoria").value;
+    const caracteristicas = document.getElementById("pCaracteristicas")?.value.trim() || "";  // <-- Agregado
 
     const validacion = ValidatorService.validarProducto({
         nombre, costo, precio: precioManual
@@ -273,7 +275,8 @@ function guardarProductoDB() {
                 color, marca, modelo,
                 imagen,
                 categoria: categoriaPadre,
-                subcategoria: subcatNombre
+                subcategoria: subcatNombre,
+                caracteristicas // <-- AGREGADO
             };
         }
     } else {
@@ -288,6 +291,7 @@ function guardarProductoDB() {
             imagen,
             categoria: categoriaPadre,
             subcategoria: subcatNombre,
+            caracteristicas, // <-- AGREGADO
             stock: 0
         });
     }
@@ -301,7 +305,6 @@ function guardarProductoDB() {
     renderInventario();
     mostrarProductos();
 }
-
 function cerrarProductoForm() {
     const modal = document.getElementById("modalProductoForm");
     if (modal) {
@@ -569,6 +572,12 @@ function mostrarDetalleProductoMaestro(id) {
                     <div class="campo"><label style="color:#27ae60;">Precio de Venta ($)</label><input type="number" id="editPrecio" value="${p.precio || 0}" oninput="recalcularRentabilidad()"></div>
                     <div class="campo" style="grid-column: span 2;"><label>Descripción</label><textarea id="editDescripcion" rows="2">${p.descripcion || ''}</textarea></div>
                 </div>
+    <div class="campo" style="grid-column: span 2;">
+        <label>Características</label>
+        <div style="background:#f9fafb;padding:8px 10px;border-radius:6px;min-height:38px;font-size:14px; color:#555;">
+            ${p.caracteristicas ? p.caracteristicas : '<em style="color:#bbb;">(Sin características)</em>'}
+        </div>
+    </div>
 
                 <div style="background: #2c3e50; color: white; padding: 20px; border-radius: 10px; display: flex; flex-direction: column; justify-content: center; text-align: center;">
                     <p style="margin:0; font-size: 12px; opacity: 0.8;">RENTABILIDAD BRUTA</p>
@@ -764,6 +773,7 @@ function insertarProductoSistema(p) {
         categoria: categoriaPadre,
         subcategoria: p.subcategoria,
         stock: p.stock || 0
+	
     });
 
     return { ok: true };
