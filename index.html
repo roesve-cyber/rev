@@ -321,7 +321,7 @@
             <div style="margin-bottom:20px;">
                 <h3>Formato CSV Requerido:</h3>
                 <code style="background:#f5f5f5; padding:10px; border-radius:5px; display:block; margin:10px 0; overflow-x:auto; font-size:11px;">
-nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
+nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracteristicas
                 </code>
             </div>
             <div style="margin-bottom:20px;">
@@ -928,6 +928,10 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen
                 <label>URL de Imagen (opcional)</label>
                 <input type="text" id="pImagen" placeholder="https://...">
             </div>
+	   <div class="campo">
+    		<label>Características</label>
+   		<textarea id="pCaracteristicas" placeholder="Ej: Estructura acero, tela antimanchas, patas desmontables"></textarea>
+	   </div>
         </div>
         <div style="display:flex; gap:10px; margin-top:20px;">
             <button onclick="guardarProductoDB()" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Guardar</button>
