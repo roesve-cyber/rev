@@ -5,86 +5,118 @@
   <title>Catálogo</title>
   <link rel="stylesheet" href="/estilos.css">
   <style>
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 20px;
-      padding: 20px;
+    /* --- Estilos del Grid --- */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; padding: 20px; }
+    
+    .producto { 
+      border: 1px solid #eee; border-radius: 12px; padding: 15px; background: #fff; 
+      text-align: center; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      display: flex; flex-direction: column; justify-content: space-between;
     }
-    .producto {
-      border: 1px solid #eee;
-      border-radius: 12px;
-      padding: 15px;
-      background: #fff;
-      text-align: center;
-      transition: transform 0.2s;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }
-    .producto:hover { transform: translateY(-5px); }
-    .producto h3 { margin: 10px 0; font-size: 15px; color: #333; height: 40px; overflow: hidden; }
+
+    .producto h3 { font-size: 15px; color: #333; margin: 10px 0; height: 40px; overflow: hidden; }
     .precio { font-weight: bold; color: #27ae60; font-size: 20px; margin: 10px 0; }
-    .caract { font-size: 11px; color: #777; text-align: left; height: 50px; overflow: hidden; border-top: 1px solid #f9f9f9; padding-top: 8px; }
+
+    /* --- El Botón --- */
+    .btn-detalle {
+      background-color: #0d6efd; color: white; border: none; padding: 10px;
+      border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;
+    }
+    .btn-detalle:hover { background-color: #0a58ca; }
+
+    /* --- Estilos del Modal (Ventana Emergente) --- */
+    .modal {
+      display: none; position: fixed; z-index: 1000; left: 0; top: 0;
+      width: 100%; height: 100%; background-color: rgba(0,0,0,0.7);
+      align-items: center; justify-content: center;
+    }
+    .modal-contenido {
+      background: white; padding: 25px; border-radius: 15px; width: 90%; max-width: 500px;
+      position: relative; text-align: center; max-height: 90vh; overflow-y: auto;
+    }
+    .cerrar { position: absolute; right: 15px; top: 10px; font-size: 25px; cursor: pointer; color: #888; }
   </style>
 </head>
 <body>
 
-<h1 style="text-align:center; font-family: sans-serif; color: #2c3e50;">🛍️ Catálogo de Productos</h1>
+<h1 style="text-align:center; font-family: sans-serif;">🛍️ Catálogo Mi Pueblito</h1>
 
 <div id="productos" class="grid"></div>
 
+<div id="miModal" class="modal">
+  <div class="modal-contenido">
+    <span class="cerrar" onclick="cerrarModal()">&times;</span>
+    <img id="modalImagen" src="" style="width: 100%; max-height: 250px; object-fit: contain; border-radius: 10px;">
+    <h2 id="modalNombre" style="margin: 15px 0;"></h2>
+    <p id="modalPrecio" style="font-size: 24px; color: #27ae60; font-weight: bold;"></p>
+    <div id="modalDesc" style="text-align: left; color: #555; background: #f9f9f9; padding: 15px; border-radius: 8px;"></div>
+  </div>
+</div>
+
 <script>
-// 1. Obtener productos de la base local
-const productosRaw = localStorage.getItem("productos");
-const productos = JSON.parse(productosRaw) || [];
+// 1. Datos
+const productos = JSON.parse(localStorage.getItem("productos")) || [];
 const contenedor = document.getElementById("productos");
 
-console.log("📦 Datos en LocalStorage:", productos.length, "ítems");
-
-// 2. Configuración de categorías (Tal cual aparecen en tu consola)
 const categoriasABuscar = ["Muebles", "Colchones"];
 const permitidasMin = categoriasABuscar.map(c => c.toLowerCase());
 
-// 3. Filtrar
+// 2. Filtrar
 const filtrados = productos.filter(p => {
-    // Forzamos minúsculas para evitar errores de dedo
     const catDoc = (p.categoria || "").trim().toLowerCase();
-    const esValida = permitidasMin.includes(catDoc);
-    
-    // Si la propiedad 'Activo' no existe, lo mostramos por defecto
-    const estaActivo = p.Activo !== 0; 
-
-    return esValida && estaActivo;
+    return permitidasMin.includes(catDoc) && p.Activo !== 0;
 });
 
-console.log("✅ Productos que pasaron el filtro:", filtrados.length);
-
-// 4. Mostrar en pantalla
+// 3. Renderizar Tarjetas
 if (filtrados.length === 0) {
-    contenedor.innerHTML = `
-        <div style="grid-column: 1/-1; text-align:center; padding: 50px; color: #95a5a6;">
-            <h3>No hay productos para mostrar</h3>
-            <p>Categorías buscadas: ${categoriasABuscar.join(", ")}</p>
-            <small>Verifica que los productos tengan estas categorías en el inventario.</small>
-        </div>`;
+    contenedor.innerHTML = "<h3>No hay productos disponibles.</h3>";
 } else {
     contenedor.innerHTML = filtrados.map(p => {
         const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
         const precioNum = parseFloat(p.precio || 0);
-        const caracteristicasCorta = p.caracteristicas 
-            ? p.caracteristicas.substring(0, 70).replace(/\n/g, ' ') + '...'
-            : 'Sin descripción disponible';
-
+        
         return `
             <div class="producto">
-                <div style="height:160px; display:flex; align-items:center; justify-content:center;">
+                <div style="height:150px; display:flex; align-items:center; justify-content:center;">
                     <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain;">
                 </div>
-                <h3>${p.nombre || "Producto sin nombre"}</h3>
-                <div class="caract">${caracteristicasCorta}</div>
+                <h3>${p.nombre || "Sin nombre"}</h3>
                 <p class="precio">$${precioNum.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
+                <button class="btn-detalle" onclick="verDetalle('${p.id}')">Ver Detalles</button>
             </div>
         `;
     }).join('');
+}
+
+// 4. Lógica del Modal
+function verDetalle(id) {
+    const p = productos.find(item => item.id == id);
+    if (!p) return;
+
+    document.getElementById("modalImagen").src = p.imagen || "https://via.placeholder.com/200";
+    document.getElementById("modalNombre").innerText = p.nombre;
+    document.getElementById("modalPrecio").innerText = "$" + parseFloat(p.precio || 0).toLocaleString('es-MX', {minimumFractionDigits: 2});
+    
+    // Convertir saltos de línea para la descripción
+    const textoHtml = p.caracteristicas ? p.caracteristicas.replace(/\n/g, '<br>') : "Sin detalles.";
+    document.getElementById("modalDesc").innerHTML = `
+        <strong>Categoría:</strong> ${p.categoria}<br>
+        <strong>Subcategoría:</strong> ${p.subcategoria || 'N/A'}<br><br>
+        ${textoHtml}
+    `;
+
+    document.getElementById("miModal").style.display = "flex";
+}
+
+function cerrarModal() {
+    document.getElementById("miModal").style.display = "none";
+}
+
+// Cerrar si hacen clic fuera del cuadro blanco
+window.onclick = function(event) {
+  if (event.target == document.getElementById("miModal")) {
+    cerrarModal();
+  }
 }
 </script>
 
