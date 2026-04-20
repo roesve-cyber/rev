@@ -42,61 +42,61 @@
 
 <script>
 <script>
-// 1. Tus categorías tal como las piensas (puedes poner mayúsculas aquí)
-const categoriasABuscar = ["Muebles", "Colchones"];
+// 1. Obtener productos
+const productos = JSON.parse(localStorage.getItem("productos")) || [];
+const contenedor = document.getElementById("productos");
 
-// 2. Pasamos TODA esa lista a minúsculas automáticamente para no fallar
+// 2. Categorías que queremos mostrar (No importa si escribes Mayúsculas aquí)
+const categoriasABuscar = ["Muebles", "Colchones"];
+// Las convertimos a minúsculas para comparar sin errores
 const permitidasMin = categoriasABuscar.map(c => c.toLowerCase());
 
-// 3. Filtrar
+// 3. Filtrar productos
 const filtrados = productos.filter(p => {
-    // Obtenemos la categoría del producto (venga como p.categoria o p.Categoria)
-    // y la pasamos a minúsculas también
-    const catProducto = (p.categoria || p.Categoria || "").trim().toLowerCase();
+    // Según tu consola, la propiedad se llama "categoria"
+    const catProducto = (p.categoria || "").trim().toLowerCase();
     
-    const esValida = permitidasMin.includes(catProducto);
+    // Verificamos si la categoría está en nuestra lista
+    const esCategoriaValida = permitidasMin.includes(catProducto);
+    
+    // Verificamos si está activo (o si no tiene la propiedad, lo mostramos)
     const estaActivo = p.Activo !== 0;
 
-    return esValida && estaActivo;
+    return esCategoriaValida && estaActivo;
 });
 
-console.log("Categorías encontradas en tu base:", productos.map(p => p.categoria || p.Categoria));
-console.log("Productos tras el filtro:", filtrados.length);
+// 4. Limpiar contenedor y mostrar resultados
+contenedor.innerHTML = "";
 
-// 4. Si no hay productos, mostrar mensaje
 if (filtrados.length === 0) {
-    contenedor.innerHTML = `
-        <div style="grid-column: 1 / -1; text-align: center; padding: 50px;">
-            <p style="color: #666; font-size: 18px;">No hay productos disponibles en las categorías: <b>${categoriasPermitidas.join(", ")}</b></p>
-            <small style="color: #999;">Asegúrate de que los productos en tu inventario tengan estas categorías asignadas exactamente.</small>
-        </div>`;
+    contenedor.innerHTML = `<p style="text-align:center; grid-column: 1/-1;">No se encontraron productos en: ${categoriasABuscar.join(", ")}</p>`;
 }
 
-// 5. Renderizar productos
+// 5. Renderizar cada producto usando tus nombres de columna exactos
 filtrados.forEach(p => {
     const div = document.createElement("div");
     div.className = "producto";
     
+    // Usamos p.imagen, p.nombre y p.precio tal como salen en tu consola
     const foto = p.imagen || "https://via.placeholder.com/200?text=Sin+Foto";
-    const nombre = p.nombre || p.Nombre || "Producto sin nombre";
-    const precio = parseFloat(p.precio || p.Precio_Contado || 0);
-    
-    const textoCaracteristicas = p.caracteristicas 
-        ? p.caracteristicas.replace(/\n/g, '<br>') 
-        : '<em>Sin detalles adicionales</em>';
+    const nombre = p.nombre || "Sin nombre";
+    const costo = parseFloat(p.precio || 0);
+    const desc = p.caracteristicas ? p.caracteristicas.substring(0, 80) + "..." : "";
 
     div.innerHTML = `
-        <div style="height:180px; display:flex; align-items:center; justify-content:center; margin-bottom:10px; background:#f9f9f9; border-radius:8px;">
-            <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain;">
+        <div style="height:150px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;">
+            <img src="${foto}" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:5px;">
         </div>
-        <h3 style="height: 40px; overflow: hidden; font-size: 14px;">${nombre}</h3>
-        <div style="font-size:11px; color:#888; margin:10px 0; text-align:left; border-top:1px solid #eee; padding-top:8px; height: 60px; overflow-y: auto;">
-            ${textoCaracteristicas}
-        </div>
-        <p class="precio">$${precio.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
+        <h3 style="font-size:14px; height:35px; overflow:hidden;">${nombre}</h3>
+        <p style="font-size:11px; color:#666; text-align:left; height:40px; overflow:hidden;">
+            ${desc}
+        </p>
+        <p class="precio">$${costo.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
     `;
     contenedor.appendChild(div);
 });
+
+console.log("Filtro finalizado. Mostrando:", filtrados.length, "productos.");
 </script>
 
 </body>
