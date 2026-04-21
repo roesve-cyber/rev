@@ -405,96 +405,118 @@ function imprimirCotizacion(id) {
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     
-    // 1. Filas de productos
+    // Filas de productos con fuente ajustada
     const rows = c.articulos.map(a => `
         <tr>
-            <td style="padding:4px; border-bottom:1px solid #eee; font-size:11px;">${a.nombre}</td>
-            <td style="padding:4px; border-bottom:1px solid #eee; text-align:center; font-size:11px;">${a.cantidad}</td>
-            <td style="padding:4px; border-bottom:1px solid #eee; text-align:right; font-size:11px;">${fmtMXN(a.precio)}</td>
+            <td style="padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px;">${a.nombre}</td>
+            <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:center; font-size:10px;">${a.cantidad}</td>
+            <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
         </tr>`).join('');
 
-    // 2. FILTRADO: Solo generar planes semanales
+    // Planes semanales filtrados
     let planeRows = '';
     if (c.saldoFinanciar > 0) {
-        // Ejecutamos el cálculo solo para 'semanal'
         const planesSemanales = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, 'semanal');
-        
         planeRows = planesSemanales.map(plan => `
             <tr>
-                <td style="padding:4px; border-bottom:1px solid #eee; font-size:10px;">${plan.meses} meses (${plan.pagos} sem)</td>
-                <td style="padding:4px; border-bottom:1px solid #eee; text-align:right; font-size:10px; font-weight:bold;">${fmtMXN(plan.abono)}</td>
-                <td style="padding:4px; border-bottom:1px solid #eee; text-align:right; font-size:10px;">${fmtMXN(plan.total)}</td>
+                <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos}s)</td>
+                <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)}</td>
+                <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
             </tr>`).join('');
     }
 
-    const w = window.open('', '_blank', 'width=500,height=700');
+    const w = window.open('', '_blank', 'width=400,height=600');
     w.document.write(`
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Cotización ${c.folio}</title>
+        <title>COT-${c.folio}</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <style>
-            @page { size: 108mm 140mm; margin: 0; }
-            body { font-family: Arial, sans-serif; margin: 0; padding: 10mm; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
-            #area-impresion { width: 88mm; min-height: 120mm; padding: 5mm; background: white; position: relative; }
-            .controles { margin-bottom: 10px; }
-            h2 { margin: 0; font-size: 14px; text-align: center; color: #1e40af; }
-            .folio-box { display: flex; justify-content: space-between; font-size: 11px; margin: 8px 0; border-bottom: 1px solid #333; }
-            table { width: 100%; border-collapse: collapse; margin-top: 5px; }
-            th { font-size: 9px; background: #f3f4f6; padding: 4px; }
-            .totales { text-align: right; margin-top: 8px; font-size: 12px; font-weight: bold; }
-            .footer { font-size: 8px; text-align: center; margin-top: 15px; color: #999; }
-            @media print { .controles { display: none !important; } body { background: white; padding: 0; } }
+            /* AJUSTE DE HOJA ANGOSTA (80mm) */
+            @page { size: 80mm auto; margin: 0; }
+            body { 
+                font-family: 'Courier New', Courier, monospace; 
+                margin: 0; padding: 0; 
+                background: #f0f0f0; 
+                display: flex; flex-direction: column; align-items: center; 
+            }
+            #area-impresion { 
+                width: 72mm; /* Aprovecha el ancho de 80mm dejando margen mínimo */
+                padding: 4mm; 
+                background: white; 
+                box-sizing: border-box;
+            }
+            .controles { margin: 10px 0; display: flex; gap: 5px; }
+            h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
+            .separator { border-top: 1px double #000; margin: 5px 0; }
+            .info-box { font-size: 9px; text-align: center; line-height: 1.2; }
+            .folio-line { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin: 5px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th { font-size: 9px; text-align: left; border-bottom: 1px solid #000; padding: 2px 0; }
+            .totales { text-align: right; margin-top: 5px; font-size: 11px; font-weight: bold; }
+            .seccion-titulo { font-size: 9px; font-weight: bold; margin-top: 8px; text-align: center; background: #eee; }
+            .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
+            
+            @media print { 
+                .controles { display: none !important; } 
+                body { background: white; }
+                #area-impresion { width: 100%; padding: 2mm; }
+            }
         </style>
     </head>
     <body>
         <div class="controles">
-            <button onclick="window.print()">🖨️ Imprimir</button>
-            <button onclick="guardarComoImagen('${c.folio}')">🖼️ Guardar Imagen</button>
+            <button onclick="window.print()">Imprimir</button>
+            <button onclick="guardarComoImagen('${c.folio}')">Imagen</button>
         </div>
 
         <div id="area-impresion">
             <h2>${empresa}</h2>
-            <div style="text-align:center; font-size:10px;">${cfg.direccion || ''}</div>
+            <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
             
-            <div class="folio-box">
-                <span>COTIZACIÓN</span>
-                <span>${c.folio}</span>
+            <div class="separator"></div>
+            <div class="folio-line">
+                <span>FOLIO: ${c.folio}</span>
             </div>
-
-            <div style="font-size: 10px;"><strong>Cliente:</strong> ${c.clienteNombre}</div>
+            <div style="font-size: 9px;">
+                FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX')}<br>
+                CLIENTE: ${c.clienteNombre.toUpperCase()}
+            </div>
+            <div class="separator"></div>
 
             <table>
-                <thead><tr><th>Art.</th><th>Cant</th><th style="text-align:right;">Precio</th></tr></thead>
+                <thead>
+                    <tr><th>ART</th><th style="text-align:center;">CT</th><th style="text-align:right;">PREC</th></tr>
+                </thead>
                 <tbody>${rows}</tbody>
             </table>
 
-            <div class="totales">SUBTOTAL: ${fmtMXN(c.total)}</div>
+            <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
 
-            <div style="margin-top:10px;">
-                <div style="font-size:11px; font-weight:bold; border-bottom:1px solid #eee;">OPCIONES DE PAGO SEMANAL</div>
+            ${planeRows ? `
+                <div class="seccion-titulo">PAGOS SEMANALES</div>
                 <table>
                     <thead>
-                        <tr>
-                            <th style="text-align:left;">Plazo</th>
-                            <th style="text-align:right;">Pago Semanal</th>
-                            <th style="text-align:right;">Total a Crédito</th>
-                        </tr>
+                        <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
                     </thead>
                     <tbody>${planeRows}</tbody>
                 </table>
-            </div>
+            ` : ''}
 
-            <div class="footer">Vigencia: ${c.vigenciaDias} días.</div>
+            <div class="footer">
+                Válido por ${c.vigenciaDias} días.<br>
+                *** GRACIAS POR SU PREFERENCIA ***
+            </div>
         </div>
 
         <script>
             function guardarComoImagen(folio) {
-                html2canvas(document.getElementById('area-impresion'), { scale: 2 }).then(canvas => {
+                const node = document.getElementById('area-impresion');
+                html2canvas(node, { scale: 3 }).then(canvas => {
                     const link = document.createElement('a');
-                    link.download = 'Cot-' + folio + '.png';
+                    link.download = 'Cotizacion-' + folio + '.png';
                     link.href = canvas.toDataURL();
                     link.click();
                 });
