@@ -3,319 +3,339 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Catálogo — Mueblería Mi Pueblito</title>
+<title>MUEBLERIA MI PUEBLITO — Catálogo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --cream:#faf7f2;--white:#ffffff;
-  --primary:#36504C;--primary-light:#eef1f1;
-  --accent:#b8842a;--text:#1a1a1a;--muted:#64748b;
-  --border:#e2e8f0;
-  --font-main:'Inter', sans-serif;
-  --font-title:'Montserrat', sans-serif;
-  --radius-sm:8px;--radius-md:12px;--radius-lg:20px;
+:root {
+  --primary: #2c3e3a; /* Verde oscuro elegante */
+  --accent: #b8842a;
+  --text-dark: #1a1a1a;
+  --text-light: #64748b;
+  --bg-cream: #faf7f2;
+  --white: #ffffff;
+  --font-main: 'Inter', sans-serif;
+  --font-title: 'Montserrat', sans-serif;
 }
 
-body{font-family:var(--font-main);background:var(--cream);color:var(--text);line-height:1.5}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* HEADER */
-.site-header{
-  background:var(--white);height:64px;display:flex;align-items:center;justify-content:space-between;
-  padding:0 24px;position:sticky;top:0;z-index:100;border-bottom:1px solid var(--border);
-}
-.header-brand{display:flex;align-items:center;gap:10px}
-.header-logo{height:32px;width:auto}
-.brand-name{font-weight:700;font-size:14px;letter-spacing:0.5px;color:var(--primary);text-transform:uppercase}
-
-/* HERO SLIM (Menos intrusivo) */
-.hero-slim{
-  padding:40px 24px;background:var(--white);border-bottom:1px solid var(--border);
-  text-align:center;
-}
-.hero-slim h1{font-family:var(--font-title);font-size:32px;margin-bottom:8px;color:var(--primary)}
-.hero-slim p{color:var(--muted);font-size:15px;max-width:500px;margin:0 auto}
-
-/* SISTEMA DE FILTROS JERÁRQUICO */
-.filter-section{padding:20px 24px;max-width:1400px;margin:0 auto}
-.category-tabs{display:flex;justify-content:center;gap:10px;margin-bottom:15px}
-.tab-btn{
-  padding:10px 24px;border:1px solid var(--border);background:var(--white);
-  border-radius:50px;cursor:pointer;font-weight:600;font-size:14px;transition:all 0.2s;
-}
-.tab-btn.active{background:var(--primary);color:var(--white);border-color:var(--primary)}
-
-.subcategory-nav{
-  display:flex;justify-content:center;gap:8px;flex-wrap:wrap;
-  opacity:0;transform:translateY(-10px);transition:all 0.3s;height:0;overflow:hidden;
-}
-.subcategory-nav.visible{opacity:1;transform:translateY(0);height:auto;margin-top:10px}
-.sub-pill{
-  padding:6px 16px;background:var(--primary-light);border-radius:50px;
-  font-size:12px;font-weight:500;cursor:pointer;border:1px solid transparent;
-}
-.sub-pill.active{border-color:var(--primary);color:var(--primary);background:var(--white)}
-
-/* BUSCADOR */
-.search-container{max-width:600px;margin:20px auto;position:relative;padding:0 24px}
-.search-container input{
-  width:100%;padding:12px 20px 12px 45px;border-radius:50px;
-  border:1px solid var(--border);outline:none;font-family:inherit;
-}
-.search-icon{position:absolute;left:40px;top:50%;transform:translateY(-50%);color:var(--muted)}
-
-/* GRID */
-.main-content{max-width:1400px;margin:0 auto;padding:0 24px 60px}
-.grid-title{font-family:var(--font-title);font-size:20px;margin:30px 0 20px;display:flex;align-items:center;gap:10px}
-.grid-title::after{content:'';flex:1;height:1px;background:var(--border)}
-.products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:25px}
-
-/* TARJETA */
-.card{
-  background:var(--white);border-radius:var(--radius-md);border:1px solid var(--border);
-  overflow:hidden;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;
-}
-.card:hover{transform:translateY(-5px);box-shadow:0 10px 20px rgba(0,0,0,0.05)}
-.card-img{height:220px;padding:20px;display:flex;align-items:center;justify-content:center;background:#fcfcfc}
-.card-img img{max-width:100%;max-height:100%;object-fit:contain}
-.card-info{padding:20px}
-.card-name{font-weight:700;font-size:16px;margin-bottom:5px;height:48px;overflow:hidden}
-.card-price{font-size:20px;font-weight:800;color:var(--primary);margin-bottom:15px}
-
-.card-stats{background:var(--primary-light);border-radius:var(--radius-sm);padding:12px;margin-bottom:15px}
-.stat-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px}
-.stat-row strong{color:var(--primary)}
-
-.card-btn{
-  width:100%;padding:10px;background:var(--primary);color:white;border:none;
-  border-radius:var(--radius-sm);font-weight:600;cursor:pointer;
+body {
+  font-family: var(--font-main);
+  background-color: var(--bg-cream);
+  color: var(--text-dark);
 }
 
-/* BENEFICIOS (Sin entrega rápida) */
-.benefits{background:var(--white);padding:40px 24px;border-top:1px solid var(--border)}
-.benefits-grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.benefit-item{text-align:center}
-.benefit-item h4{font-size:14px;margin-bottom:5px}
-.benefit-item p{font-size:12px;color:var(--muted)}
+/* --- HEADER --- */
+.site-header {
+  background: var(--white);
+  padding: 15px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
 
-/* MODAL & WHATSAPP (Mantenidos) */
-.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;padding:20px}
-.modal-overlay.open{display:flex}
-.modal-box{background:white;width:100%;max-width:900px;border-radius:var(--radius-lg);display:flex;overflow:hidden;position:relative}
-.modal-close{position:absolute;top:15px;right:15px;background:white;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;box-shadow:0 2px 5px rgba(0,0,0,0.2)}
-.modal-left{flex:1;background:var(--primary-light);display:flex;align-items:center;justify-content:center;padding:40px}
-.modal-left img{max-width:100%;max-height:400px}
-.modal-right{flex:1;padding:40px;overflow-y:auto;max-height:80vh}
-.btn-wa{display:block;text-align:center;background:#25d366;color:white;padding:15px;border-radius:var(--radius-md);text-decoration:none;font-weight:700;margin-top:20px}
+.brand h1 {
+  font-family: var(--font-title);
+  font-size: 20px;
+  color: var(--primary);
+  letter-spacing: 1px;
+}
 
-@media(max-width:768px){
-  .modal-box{flex-direction:column}
-  .benefits-grid{grid-template-columns:1fr}
-  .hero-slim h1{font-size:24px}
-  .products-grid{grid-template-columns:repeat(2,1fr);gap:15px}
-  .card-img{height:160px}
+.top-benefits {
+  display: flex;
+  gap: 30px;
+}
+
+.benefit-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.benefit-pill span {
+  font-size: 18px;
+}
+
+/* --- HERO DARK --- */
+.hero {
+  position: relative;
+  height: 350px;
+  background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), 
+              url('https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&q=80&w=1500');
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: var(--white);
+}
+
+.hero h2 {
+  font-family: var(--font-title);
+  font-size: 48px;
+  margin-bottom: 10px;
+}
+
+.hero p {
+  font-size: 18px;
+  max-width: 600px;
+  font-weight: 300;
+  opacity: 0.9;
+}
+
+/* --- FILTROS --- */
+.filter-bar {
+  padding: 30px 40px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.cat-container {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  justify-content: center;
+}
+
+.cat-btn {
+  padding: 10px 20px;
+  border-radius: 50px;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  transition: 0.3s;
+}
+
+.cat-btn.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+/* --- GRID PRODUCTOS --- */
+.catalog-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 40px 60px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 30px;
+}
+
+.card {
+  background: white;
+  border-radius: 15px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  transition: transform 0.3s;
+}
+
+.card:hover { transform: translateY(-5px); }
+
+.card-img {
+  height: 220px;
+  padding: 20px;
+  background: #f9f9f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-img img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.card-body { padding: 20px; }
+
+.card-body h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+  height: 40px;
+  overflow: hidden;
+}
+
+.price-cash {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--primary);
+  margin-bottom: 15px;
+}
+
+.installments-box {
+  background: #f1f5f4;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.inst-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.inst-row strong { color: #1a1a1a; }
+
+.badge-months {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+  .site-header { flex-direction: column; gap: 15px; padding: 20px; }
+  .top-benefits { gap: 15px; flex-wrap: wrap; justify-content: center; }
+  .hero h2 { font-size: 32px; }
+  .grid { grid-template-columns: 1fr 1fr; gap: 15px; }
+  .catalog-container { padding: 0 15px 40px; }
 }
 </style>
 </head>
 <body>
 
 <header class="site-header">
-  <div class="header-brand">
-    <img src="img/Logo.png" alt="" class="header-logo">
-    <div class="brand-name">Mi Pueblito</div>
+  <div class="brand">
+    <h1>MUEBLERIA MI PUEBLITO</h1>
+  </div>
+  <div class="top-benefits">
+    <div class="benefit-pill"><span>🛡️</span> Calidad Garantizada</div>
+    <div class="benefit-pill"><span>🗓️</span> Pagos Semanales</div>
+    <div class="benefit-pill"><span>🤝</span> Atención Personal</div>
   </div>
 </header>
 
-<section class="hero-slim">
-  <h1>Tu hogar, tu estilo.</h1>
+<section class="hero">
+  <h2>Tu hogar, tu estilo.</h2>
   <p>Muebles y colchones de alta calidad con planes de pago semanales diseñados para ti.</p>
 </section>
 
-<div class="filter-section">
-  <div class="category-tabs">
-    <button class="tab-btn active" onclick="setCategoria('todos', this)">Todos</button>
-    <button class="tab-btn" onclick="setCategoria('muebles', this)">Muebles</button>
-    <button class="tab-btn" onclick="setCategoria('colchones', this)">Colchones</button>
-  </div>
-
-  <div id="subnav" class="subcategory-nav"></div>
-
-  <div class="search-container">
-    <span class="search-icon">🔍</span>
-    <input id="searchInput" type="search" placeholder="¿Qué estás buscando hoy?" oninput="filtrar()">
+<div class="filter-bar">
+  <div id="categoriasNav" class="cat-container">
+    <button class="cat-btn active" onclick="filtrarPorCat('todos', this)">Todos los productos</button>
   </div>
 </div>
 
-<main class="main-content">
-  <div id="catalogoRoot">
-    <div style="text-align:center;padding:100px;color:var(--muted)">Preparando catálogo...</div>
-  </div>
+<main class="catalog-container">
+  <div id="gridProductos" class="grid"></div>
 </main>
 
-<section class="benefits">
-  <div class="benefits-grid">
-    <div class="benefit-item">
-      <h4>Calidad Garantizada</h4>
-      <p>Materiales seleccionados para durar.</p>
-    </div>
-    <div class="benefit-item">
-      <h4>Pagos Accesibles</h4>
-      <p>Planes semanales a tu medida.</p>
-    </div>
-    <div class="benefit-item">
-      <h4>Atención Personalizada</h4>
-      <p>Te asesoramos en cada paso.</p>
-    </div>
-  </div>
-</section>
-
-<div class="modal-overlay" id="modal" onclick="cerrarModal(event)">
-  <div class="modal-box">
-    <button class="modal-close" onclick="cerrarModal(null,true)">✕</button>
-    <div class="modal-left"><img id="modalImg" src=""></div>
-    <div class="modal-right">
-      <h2 id="mName" style="font-family:var(--font-title);margin-bottom:10px"></h2>
-      <div id="mPrecio" style="font-size:28px;font-weight:800;color:var(--primary);margin-bottom:20px"></div>
-      <div id="plazosSection">
-        <h4 style="margin-bottom:10px;font-size:12px;text-transform:uppercase;color:var(--muted)">Planes Disponibles</h4>
-        <div id="plazosGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px"></div>
-      </div>
-      <a id="btnWA" class="btn-wa" href="#" target="_blank">Consultar por WhatsApp</a>
-    </div>
-  </div>
-</div>
-
 <script>
-const firebaseConfig = {
-  apiKey:"AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
-  authDomain:"mmpueblito-8fb29.firebaseapp.com",
-  projectId:"mmpueblito-8fb29",
-  storageBucket:"mmpueblito-8fb29.firebasestorage.app",
-  messagingSenderId:"32950655624",
-  appId:"1:32950655624:web:42a8657431319f9a25dd3d"
-};
+let todosLosProductos = [];
+let catActual = 'todos';
 
-let todos = [];
-let catActiva = 'todos';
-let subActiva = 'todos';
-let busqueda = '';
+const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-const fmt = n => parseFloat(n||0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
+// LA FÓRMULA DEL NEGOCIO
+function calcularPlazos(precio) {
+  if (precio <= 1) return null; // Regla de precio 1
 
-function calcularCredito(precio) {
-  const res = [];
-  [4, 12, 24].forEach(sem => { // Ejemplos comunes: 1, 3 y 6 meses
-    const tasa = sem <= 12 ? 0.08 : 0.15;
-    const total = precio * (1 + tasa);
-    const abono = Math.ceil((total / sem) / 5) * 5;
-    res.push({ sem, abono, total: abono * sem });
+  const plazos = [
+    { sem: 4, meses: 1 },
+    { sem: 12, meses: 3 },
+    { sem: 24, meses: 6 }
+  ];
+
+  return plazos.map(p => {
+    const tasa = p.sem <= 12 ? 0.08 : 0.15;
+    const totalConInteres = precio * (1 + tasa);
+    // Redondeo al múltiplo de 5 superior (Importante para cobranza)
+    const abonoSemanal = Math.ceil((totalConInteres / p.sem) / 5) * 5;
+    
+    return {
+      cuota: abonoSemanal,
+      meses: p.meses
+    };
   });
-  return res;
 }
 
-async function cargarProductos() {
-  try {
-    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const doc = await db.collection('posData').doc('productos').get();
-    todos = doc.data().data || [];
-  } catch(e) {
-    todos = JSON.parse(localStorage.getItem('productos') || '[]');
-  }
-  renderCatalogo();
-}
-
-function setCategoria(cat, btn) {
-  catActiva = cat;
-  subActiva = 'todos';
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+async function inicializar() {
+  const data = JSON.parse(localStorage.getItem("productos")) || [];
+  // Limpiar y normalizar datos
+  todosLosProductos = data.filter(p => p.Activo !== 0);
   
-  const subnav = document.getElementById('subnav');
-  if(cat === 'todos') {
-    subnav.classList.remove('visible');
-  } else {
-    const subs = [...new Set(todos.filter(p => p.categoria.toLowerCase() === cat).map(p => p.subcategoria))];
-    subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver todo</div>` + 
-      subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
-    subnav.classList.add('visible');
-  }
-  renderCatalogo();
+  generarCategorias();
+  render();
 }
 
-function setSub(sub, pill) {
-  subActiva = sub;
-  document.querySelectorAll('.sub-pill').forEach(p => p.classList.remove('active'));
-  pill.classList.add('active');
-  renderCatalogo();
+function generarCategorias() {
+  const nav = document.getElementById('categoriasNav');
+  const categoriasUnicas = [...new Set(todosLosProductos.map(p => (p.categoria || p.Categoria || "Otros").trim()))];
+  
+  categoriasUnicas.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.className = 'cat-btn';
+    btn.textContent = cat;
+    btn.onclick = () => filtrarPorCat(cat, btn);
+    nav.appendChild(btn);
+  });
 }
 
-function filtrar() {
-  busqueda = document.getElementById('searchInput').value.toLowerCase();
-  renderCatalogo();
+function filtrarPorCat(cat, btn) {
+  catActual = cat;
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
 }
 
-function renderCatalogo() {
-  const root = document.getElementById('catalogoRoot');
-  const visibles = todos.filter(p => {
-    const matchCat = catActiva === 'todos' || p.categoria.toLowerCase() === catActiva;
-    const matchSub = subActiva === 'todos' || p.subcategoria === subActiva;
-    const matchBus = p.nombre.toLowerCase().includes(busqueda);
-    return matchCat && matchSub && matchBus && p.Activo !== 0;
+function render() {
+  const grid = document.getElementById('gridProductos');
+  const filtrados = todosLosProductos.filter(p => {
+    const pCat = (p.categoria || p.Categoria || "Otros").trim();
+    return catActual === 'todos' || pCat === catActual;
   });
 
-  if(visibles.length === 0) {
-    root.innerHTML = '<div style="text-align:center;padding:50px">No encontramos lo que buscas.</div>';
-    return;
-  }
-
-  root.innerHTML = `<div class="products-grid">` + visibles.map(p => {
-    const precio = parseFloat(p.precio);
-    const plan = calcularCredito(precio)[2]; // Mostramos el plan de 24 sem por defecto
+  grid.innerHTML = filtrados.map(p => {
+    const precio = parseFloat(p.precio || p.Precio_Contado || 0);
+    const plazos = calcularPlazos(precio);
+    
     return `
-      <div class="card" onclick="abrirModal('${p.id}')">
-        <div class="card-img"><img src="${p.imagen}"></div>
-        <div class="card-info">
-          <div class="card-name">${p.nombre}</div>
-          <div class="card-price">${fmt(precio)}</div>
-          <div class="card-stats">
-            <div class="stat-row"><span>Pago semanal:</span><strong>${fmt(plan.abono)}</strong></div>
-            <div class="stat-row"><span>Plazo:</span><strong>${plan.sem} semanas</strong></div>
-          </div>
-          <button class="card-btn">Ver Detalles</button>
+      <div class="card">
+        <div class="card-img">
+          <img src="${p.imagen || 'https://via.placeholder.com/300?text=Sin+Imagen'}" alt="${p.nombre}">
+        </div>
+        <div class="card-body">
+          <h3>${p.nombre || p.Nombre}</h3>
+          <div class="price-cash">${fmt(precio)} <small style="font-size:10px; color:#999; font-weight:400">CONTADO</small></div>
+          
+          ${plazos ? `
+            <div class="installments-box">
+              <p style="font-size:11px; font-weight:700; color:#666; margin-bottom:8px">PLANES SEMANALES</p>
+              ${plazos.map(pl => `
+                <div class="inst-row">
+                  <strong>${fmt(pl.cuota)} <span style="font-weight:400; font-size:11px">semanal</span></strong>
+                  <span class="badge-months">a ${pl.meses} ${pl.meses === 1 ? 'mes' : 'meses'}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : '<p style="color:#999; font-size:12px; font-style:italic">Venta solo de contado</p>'}
         </div>
       </div>
     `;
-  }).join('') + `</div>`;
+  }).join('');
 }
 
-function abrirModal(id) {
-  const p = todos.find(x => x.id == id);
-  const precio = parseFloat(p.precio);
-  document.getElementById('modalImg').src = p.imagen;
-  document.getElementById('mName').textContent = p.nombre;
-  document.getElementById('mPrecio').textContent = fmt(precio);
-  
-  document.getElementById('plazosGrid').innerHTML = calcularCredito(precio).map(pl => `
-    <div style="background:var(--primary-light);padding:10px;border-radius:8px;text-align:center">
-      <div style="font-size:10px;font-weight:700">${pl.sem} SEMANAS</div>
-      <div style="font-size:16px;font-weight:800">${fmt(pl.abono)}</div>
-    </div>
-  `).join('');
-
-  const msg = encodeURIComponent(`¡Hola! Me interesa: ${p.nombre} (${fmt(precio)})`);
-  document.getElementById('btnWA').href = `https://wa.me/522411081657?text=${msg}`;
-  document.getElementById('modal').classList.add('open');
-}
-
-function cerrarModal(e, force) {
-  if(force || e.target.id === 'modal') document.getElementById('modal').classList.remove('open');
-}
-
-cargarProductos();
+window.onload = inicializar;
 </script>
+
 </body>
 </html>
