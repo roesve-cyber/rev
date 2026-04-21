@@ -5,351 +5,118 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Catálogo — Mueblería Mi Pueblito</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --cream:#faf7f2;--warm-white: #ffffff;
-  --primary-color: #36504C; /* Verde oscuro del diseño */
-  --primary-color-hover: #293D3A;
-  --warm-gray: #f8f9f9; /* Fondo de info de tarjeta */
-  --muted-gray: #b9c1c1; /* bordes y textos muted */
-  --espresso:#1a1008;--bark:#3d2b1a;--gold:#b8842a;--gold-lt:#e8c97a;--rust:#8b5e3c;
-  --text:#2d1e0f;--muted:#7a6555;--white:#ffffff;
-  --radius:18px;--ease:cubic-bezier(.4,0,.2,1);
-  --font-d:'Playfair Display',serif;--font-b:'DM Sans',sans-serif;
+  --cream:#faf7f2;--white:#ffffff;
+  --primary:#36504C;--primary-light:#eef1f1;
+  --accent:#b8842a;--text:#1a1a1a;--muted:#64748b;
+  --border:#e2e8f0;
+  --font-main:'Inter', sans-serif;
+  --font-title:'Montserrat', sans-serif;
+  --radius-sm:8px;--radius-md:12px;--radius-lg:20px;
 }
-html{scroll-behavior:smooth}
-body{font-family:var(--font-b);background:var(--cream);color:var(--text);min-height:100vh;overflow-x:hidden}
 
-/* HEADER - Adaptado a la imagen */
+body{font-family:var(--font-main);background:var(--cream);color:var(--text);line-height:1.5}
+
+/* HEADER */
 .site-header{
-  background:var(--warm-white);padding:0 24px;
-  position:sticky;top:0;z-index:100;
-  display:flex;align-items:center;justify-content:space-between;
-  height:72px;box-shadow:0 1px 10px rgba(0,0,0,.05);gap:16px;
-  border-bottom: 1px solid var(--muted-gray);
+  background:var(--white);height:64px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;position:sticky;top:0;z-index:100;border-bottom:1px solid var(--border);
 }
-.header-brand{display:flex;align-items:center;gap:12px;flex-shrink:0}
-.header-logo{height:42px;width:auto;object-fit:contain}
-/* Fallback eliminado, el diseño requiere el logo */
-.brand-name{font-family:var(--font-b);font-size:16px;color:var(--primary-color);font-weight:700;text-transform:uppercase}
-.brand-name span{display:block;font-size:10px;font-weight:400;color:var(--secondary-color);letter-spacing:1px;text-transform:lowercase;opacity:0.8}
+.header-brand{display:flex;align-items:center;gap:10px}
+.header-logo{height:32px;width:auto}
+.brand-name{font-weight:700;font-size:14px;letter-spacing:0.5px;color:var(--primary);text-transform:uppercase}
 
-.site-nav { display: flex; gap: 32px; list-style: none; margin-right: 40px; }
-.site-nav a { text-decoration: none; color: var(--primary-color); font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
-.site-nav a.active { color: var(--primary-color); font-weight: 700; border-bottom: 2px solid var(--primary-color); padding-bottom: 3px; margin-bottom: -3px; }
-.nav-icon { width: 16px; height: 16px; opacity: 0.7; }
-
-/* HERO - Adaptado a la imagen */
-.hero{
-  background:linear-gradient(135deg,#5a382000 0%,#3d2b1a00 55%,#5a382000 100%);
-  padding: 0; position:relative; overflow:hidden;
-  display: flex; height: 480px; align-items: center;
+/* HERO SLIM (Menos intrusivo) */
+.hero-slim{
+  padding:40px 24px;background:var(--white);border-bottom:1px solid var(--border);
+  text-align:center;
 }
-.hero::before{
-  content:'';position:absolute;inset:0;
-  background:radial-gradient(ellipse at 70% 50%,rgba(184,132,42,0) 0%,transparent 65%);
-  pointer-events:none;
+.hero-slim h1{font-family:var(--font-title);font-size:32px;margin-bottom:8px;color:var(--primary)}
+.hero-slim p{color:var(--muted);font-size:15px;max-width:500px;margin:0 auto}
+
+/* SISTEMA DE FILTROS JERÁRQUICO */
+.filter-section{padding:20px 24px;max-width:1400px;margin:0 auto}
+.category-tabs{display:flex;justify-content:center;gap:10px;margin-bottom:15px}
+.tab-btn{
+  padding:10px 24px;border:1px solid var(--border);background:var(--white);
+  border-radius:50px;cursor:pointer;font-weight:600;font-size:14px;transition:all 0.2s;
 }
-.hero-left { flex: 1; padding: 0 5%; max-width: 600px; }
-.hero h1{font-family:var(--font-d);font-size:62px;color:var(--espresso);line-height:1.05;margin-bottom:18px;font-weight:700}
-.hero-desc { color: var(--bark); font-size: 15px; line-height: 1.6; margin-bottom: 36px; max-width: 380px; }
-.hero-btn { 
-  background: var(--primary-color); color: white; border: none; padding: 13px 32px; border-radius: 6px; 
-  font-family: var(--font-b); font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
-  display: inline-flex; align-items: center; gap: 10px; transition: background 0.2s;
+.tab-btn.active{background:var(--primary);color:var(--white);border-color:var(--primary)}
+
+.subcategory-nav{
+  display:flex;justify-content:center;gap:8px;flex-wrap:wrap;
+  opacity:0;transform:translateY(-10px);transition:all 0.3s;height:0;overflow:hidden;
 }
-.hero-btn:hover { background: var(--primary-color-hover); }
-.hero-btn svg { width: 14px; height: 14px; transform: scaleX(-1); } /* Arrow icon */
-
-.hero-right { flex: 1.2; height: 100%; position: relative; background-size: cover; background-position: center; }
-/* Reemplaza la URL con tu imagen hero de fondo o pon un img tag */
-.hero-right-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-.hero-overlay { position: absolute; inset: 0; background: linear-gradient(90deg, var(--cream) 0%, rgba(250, 247, 242, 0) 40%); }
-
-/* FILTROS (Grid de Iconos) - Adaptado a la imagen */
-.filters-bar-container { background: var(--warm-white); border-bottom: 1px solid var(--warm); padding: 16px 24px; }
-.filters-bar { max-width: 1440px; margin: 0 auto; display: flex; justify-content: space-around; gap: 10px; overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none; }
-.filters-bar::-webkit-scrollbar{display:none}
-
-.filter-item { text-align: center; cursor: pointer; flex-shrink: 0; width: 85px; padding: 12px 0; }
-.filter-icon-box { 
-  width: 64px; height: 64px; background: var(--white); border: 1.5px solid var(--warm); border-radius: 14px;
-  display: flex; align-items: center; justify-content: center; margin: 0 auto 8px;
-  transition: all .2s var(--ease); color: var(--muted);
+.subcategory-nav.visible{opacity:1;transform:translateY(0);height:auto;margin-top:10px}
+.sub-pill{
+  padding:6px 16px;background:var(--primary-light);border-radius:50px;
+  font-size:12px;font-weight:500;cursor:pointer;border:1px solid transparent;
 }
-.filter-item span { font-family: var(--font-b); font-size: 11px; color: var(--muted); font-weight: 500; display: block; transition: color .2s; }
+.sub-pill.active{border-color:var(--primary);color:var(--primary);background:var(--white)}
 
-.filter-item:hover .filter-icon-box { border-color: var(--gold); color: var(--gold); }
-.filter-item:hover span { color: var(--gold); }
-
-.filter-item.active .filter-icon-box { background: var(--primary-color); border-color: var(--primary-color); color: var(--gold-lt); }
-.filter-item.active span { font-weight: 700; color: var(--primary-color); }
-.filter-icon-box svg { width: 32px; height: 32px; fill: currentColor; }
-
-/* BÚSQUEDA */
-.main-search-row { max-width: 1440px; margin: 24px auto 0; padding: 0 24px; }
-.header-search{ max-width: 100%; position:relative; }
-.header-search input{
-  width:100%; background:var(--white); border: 1.5px solid var(--warm);
-  border-radius:50px; padding: 14px 24px 14px 52px; color:var(--bark);
-  font-family:var(--font-b); font-size:14px; outline:none;
-  transition:border-color .2s;
+/* BUSCADOR */
+.search-container{max-width:600px;margin:20px auto;position:relative;padding:0 24px}
+.search-container input{
+  width:100%;padding:12px 20px 12px 45px;border-radius:50px;
+  border:1px solid var(--border);outline:none;font-family:inherit;
 }
-.header-search input::placeholder{color:var(--muted); opacity: 0.6;}
-.header-search input:focus{ border-color: var(--primary-color); }
-.search-ico{position:absolute; left:20px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; width: 18px; height: 18px; opacity: 0.8; }
+.search-icon{position:absolute;left:40px;top:50%;transform:translateY(-50%);color:var(--muted)}
 
-/* MAIN */
-.main-layout{max-width:1440px;margin:0 auto;padding: 32px 24px 80px}
+/* GRID */
+.main-content{max-width:1400px;margin:0 auto;padding:0 24px 60px}
+.grid-title{font-family:var(--font-title);font-size:20px;margin:30px 0 20px;display:flex;align-items:center;gap:10px}
+.grid-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:25px}
 
-/* Título Sección */
-.section-header-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 24px; margin-top: 32px; }
-.section-label{ font-family:var(--font-d); font-size: 28px; color:var(--primary-color); margin: 0; font-weight: 700; }
-.ver-todos-link { text-decoration: none; color: var(--gold); font-size: 12px; font-weight: 600; font-family: var(--font-b); display: flex; align-items: center; gap: 6px; }
-.ver-todos-link:hover { color: var(--text); }
-.ver-todos-link svg { width: 12px; height: 12px; transform: scaleX(-1); }
-
-/* GRID - Adaptado a la imagen */
-.products-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:28px}
-
-/* CARD - Rediseñado completamente */
+/* TARJETA */
 .card{
-  background:var(--white); border-radius: 12px; overflow:hidden;
-  cursor:pointer; border: 1px solid rgba(0,0,0,.04);
-  display:flex; flex-direction:column;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-  transition: transform .35s var(--ease), box-shadow .35s var(--ease);
-  animation:fadeUp .5s var(--ease) both;
+  background:var(--white);border-radius:var(--radius-md);border:1px solid var(--border);
+  overflow:hidden;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;
 }
-.card:hover{ transform:translateY(-4px); box-shadow:0 12px 24px rgba(26,16,8,.08)}
-@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.card:hover{transform:translateY(-5px);box-shadow:0 10px 20px rgba(0,0,0,0.05)}
+.card-img{height:220px;padding:20px;display:flex;align-items:center;justify-content:center;background:#fcfcfc}
+.card-img img{max-width:100%;max-height:100%;object-fit:contain}
+.card-info{padding:20px}
+.card-name{font-weight:700;font-size:16px;margin-bottom:5px;height:48px;overflow:hidden}
+.card-price{font-size:20px;font-weight:800;color:var(--primary);margin-bottom:15px}
 
-.card-img-wrap{
-  background:white; height: 230px;
-  display:flex; align-items:center; justify-content:center;
-  overflow:hidden; padding: 12px; position:relative;
-}
-.card-img-wrap img{max-width:100%; max-height:100%; object-fit:contain; transition:transform .4s var(--ease)}
-/* Efecto zoom eliminado de tarjeta principal */
-.card-badge{
-  position:absolute; top: 12px; left: 12px;
-  background:var(--primary-color); color:var(--gold-lt);
-  font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform:lowercase;
-  padding: 4px 10px; border-radius: 6px;
-}
-.card-body{ padding: 16px 20px 20px; flex:1; display:flex; flex-direction:column; gap: 8px; }
-/* .card-brand eliminado, se integra en texto */
-.card-name{ font-family:var(--font-b); font-size: 15px; font-weight: 700; line-height:1.4; color:var(--espresso); margin: 0; display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden }
-.card-desc-brief { font-size: 11px; color: var(--muted); margin-bottom: 8px; display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden; line-height: 1.5; }
-.card-price{ font-family:var(--font-b); font-size: 18px; font-weight: 700; color:var(--espresso); margin-bottom: 12px; }
+.card-stats{background:var(--primary-light);border-radius:var(--radius-sm);padding:12px;margin-bottom:15px}
+.stat-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px}
+.stat-row strong{color:var(--primary)}
 
-/* Bloque detalles tarjeta */
-.card-details-box { background: var(--warm-gray); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; border: 1px solid #eef1f1; }
-.card-detail-item { display: flex; justify-content: space-between; font-size: 11px; color: var(--text); }
-.card-detail-item strong { color: #1a1008; font-weight: 700; }
-.card-detail-item span:first-child { color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.card-detail-item .icon { width: 14px; height: 14px; opacity: 0.6; }
-
-.card-cta-btn {
-  background: var(--primary-color); color: white; border: none; padding: 11px 0; border-radius: 6px;
-  width: 100%; text-align: center; font-family: var(--font-b); font-size: 12px; font-weight: 600;
-  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;
-  transition: background 0.2s;
+.card-btn{
+  width:100%;padding:10px;background:var(--primary);color:white;border:none;
+  border-radius:var(--radius-sm);font-weight:600;cursor:pointer;
 }
-.card:hover .card-cta-btn { background: var(--primary-color-hover); }
-.card-cta-btn svg { width: 12px; height: 12px; transform: scaleX(-1); } /* Arrow icon */
 
-/* EMPTY / LOADING */
-.empty{grid-column:1/-1;text-align:center;padding:80px 20px;color:var(--muted)}
-.empty-ico{font-size:48px;margin-bottom:16px}
-.empty h3{font-family:var(--font-d);font-size:22px;margin-bottom:8px;color:var(--espresso)}
-.loading-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:16px}
-.loader{width:44px;height:44px;border:3px solid var(--warm);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.loading-text{font-size:14px;color:var(--muted);animation:pulse 1.5s ease-in-out infinite}
-@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+/* BENEFICIOS (Sin entrega rápida) */
+.benefits{background:var(--white);padding:40px 24px;border-top:1px solid var(--border)}
+.benefits-grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.benefit-item{text-align:center}
+.benefit-item h4{font-size:14px;margin-bottom:5px}
+.benefit-item p{font-size:12px;color:var(--muted)}
 
-/* SECCIÓN BENEFICIOS - Nuevo */
-.benefits-section { background: var(--white); border-top: 1px solid var(--warm); padding: 48px 24px; }
-.benefits-grid { max-width: 1440px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 32px; }
-.benefit-card { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.benefit-icon-box { width: 56px; height: 56px; background: #eef1f1; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-.benefit-icon-box svg { width: 28px; height: 28px; color: var(--primary-color); }
-.benefit-title { font-size: 13px; font-weight: 700; color: var(--primary-color); margin: 0; }
-.benefit-desc { font-size: 11px; color: var(--muted); max-width: 180px; line-height: 1.6; }
-
-/* SECCIÓN CTA FINAL - Nuevo */
-.final-cta-section { background: var(--primary-color); padding: 48px 24px; color: white; }
-.final-cta-content { 
-  max-width: 1440px; margin: 0 auto; 
-  display: flex; align-items: center; justify-content: space-between; gap: 32px; 
-}
-.cta-left { display: flex; align-items: center; gap: 18px; }
-.cta-icon-box { width: 64px; height: 64px; background: rgba(255,255,255,0.1); border-radius: 14px; display: flex; align-items: center; justify-content: center; }
-.cta-icon-box svg { width: 32px; height: 32px; color: var(--gold-lt); }
-.cta-left h3 { font-family: var(--font-d); font-size: 24px; color: var(--gold-lt); margin: 0; }
-.cta-left h3 em { color: white; font-style: normal; display: block; font-family: var(--font-b); font-size: 13px; color: rgba(255,255,255,0.8); margin-top: 2px; font-weight: 400;}
-
-.cta-right { display: flex; align-items: center; gap: 24px; text-align: right; }
-.cta-right p { font-size: 12px; color: rgba(255,255,255,0.7); max-width: 280px; line-height: 1.6; margin: 0; }
-
-/* MODAL - Adaptado a la imagen (solo colores, estructura intacta) */
-.modal-overlay{
-  display:none;position:fixed;inset:0;z-index:200;
-  background:rgba(26,16,8,.85);backdrop-filter:blur(10px);
-  align-items:center;justify-content:center;padding:16px;
-}
-.modal-overlay.open{display:flex;animation:fadeIn .2s var(--ease)}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.modal-box{
-  background:var(--white);border-radius:28px;width:100%;max-width:1060px;
-  max-height:92vh;display:flex;overflow:hidden;position:relative;
-  box-shadow:0 40px 80px rgba(0,0,0,.45);
-  animation:slideUp .3s var(--ease);
-}
-@keyframes slideUp{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
-
-/* Modal imagen */
-.modal-img-side{
-  flex:1.1;background:var(--cream);
-  display:flex;align-items:center;justify-content:center;
-  overflow:hidden;padding:40px;position:relative;min-height:400px;
-}
-.modal-img-side img{max-width:100%;max-height:420px;object-fit:contain;cursor:crosshair;transition:transform .08s linear;transform-origin:center}
-.zoom-hint{
-  position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
-  background:rgba(26,16,8,.65);color:rgba(255,255,255,.8);
-  font-size:11px;padding:5px 14px;border-radius:50px;pointer-events:none;
-  opacity:0;transition:opacity .3s;white-space:nowrap;
-}
-.modal-img-side:hover .zoom-hint{opacity:1}
-
-/* Modal info */
-.modal-info-side{
-  flex:1;overflow-y:auto;padding:48px 36px 36px;
-  border-left:1px solid var(--warm);display:flex;flex-direction:column;gap:0;
-}
-.modal-info-side::-webkit-scrollbar{width:4px}
-.modal-info-side::-webkit-scrollbar-thumb{background:var(--warm);border-radius:2px}
-.modal-brand{font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:10px}
-.modal-name{font-family:var(--font-d);font-size:26px;line-height:1.2;color:var(--primary-color);margin-bottom:6px}
-.modal-meta{font-size:12px;color:var(--muted);margin-bottom:26px}
-
-/* Precio block */
-.precio-block{
-  background:linear-gradient(135deg,var(--primary-color) 0%,#293D3A 100%);
-  border-radius:16px;padding:22px 26px;margin-bottom:26px;
-  display:flex;align-items:center;justify-content:space-between;
-}
-.precio-label{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold-lt);margin-bottom:5px}
-.precio-value{font-family:var(--font-d);font-size:36px;font-weight:700;color:var(--white)}
-.precio-icon{width:50px;height:50px;background:rgba(255,255,255,.1);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px}
-
-/* Plazos */
-.plazos-section{margin-bottom:26px}
-.sec-title{
-  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;
-  color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px;
-}
-.sec-title::after{content:'';flex:1;height:1px;background:var(--warm)}
-.plazos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.plazo-card{
-  background:var(--cream);border:1.5px solid var(--warm);border-radius:12px;
-  padding:12px 8px;text-align:center;transition:border-color .2s,background .2s;
-}
-.plazo-card:hover{border-color:var(--primary-color);background:#eef1f1}
-.plazo-sem{font-size:10px;font-weight:700;color:var(--primary-color);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px}
-.plazo-abono{font-family:var(--font-d);font-size:17px;font-weight:700;color:var(--espresso);margin-bottom:2px}
-.plazo-total{font-size:10px;color:var(--muted)}
-
-/* Características */
-.caract-section{margin-bottom:26px}
-.caract-list{list-style:none;display:flex;flex-direction:column;gap:8px}
-.caract-item{
-  display:flex;align-items:flex-start;gap:10px;
-  font-size:14px;color:var(--primary-color);
-  background:var(--cream);padding:10px 14px;border-radius:10px;line-height:1.4;
-}
-.caract-item::before{content:'✓';color:var(--gold);font-weight:700;font-size:12px;margin-top:1px;flex-shrink:0}
-
-/* WhatsApp */
-.btn-wa{
-  display:flex;align-items:center;justify-content:center;gap:10px;
-  background:#25d366;color:var(--white);border:none;border-radius:12px;
-  padding:14px 20px;font-family:var(--font-b);font-size:14px;font-weight:600;
-  cursor:pointer;width:100%;transition:background .2s,transform .15s;text-decoration:none;
-}
-.btn-wa:hover{background:#1ebe5d;transform:translateY(-1px)}
-
-/* Cerrar */
-.modal-close{
-  position:absolute;top:18px;right:18px;z-index:10;
-  width:38px;height:38px;border-radius:50%;
-  background:var(--espresso);color:var(--white);
-  border:none;font-size:20px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:background .2s,transform .2s;
-}
-.modal-close:hover{background:var(--primary-color);transform:rotate(90deg)}
-
-/* RESPONSIVE */
-@media(max-width:1024px){
-  .hero h1{font-size:52px}
-  .benefits-grid{grid-template-columns: repeat(2, 1fr); gap: 24px;}
-}
+/* MODAL & WHATSAPP (Mantenidos) */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal-box{background:white;width:100%;max-width:900px;border-radius:var(--radius-lg);display:flex;overflow:hidden;position:relative}
+.modal-close{position:absolute;top:15px;right:15px;background:white;border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;box-shadow:0 2px 5px rgba(0,0,0,0.2)}
+.modal-left{flex:1;background:var(--primary-light);display:flex;align-items:center;justify-content:center;padding:40px}
+.modal-left img{max-width:100%;max-height:400px}
+.modal-right{flex:1;padding:40px;overflow-y:auto;max-height:80vh}
+.btn-wa{display:block;text-align:center;background:#25d366;color:white;padding:15px;border-radius:var(--radius-md);text-decoration:none;font-weight:700;margin-top:20px}
 
 @media(max-width:768px){
-  .site-header{height:auto;padding:12px 16px; justify-content: space-between;}
-  .site-nav { display: none; } /* Ocultar nav en móvil para simplificar, la imagen no muestra nav móvil */
-  .main-search-row { padding: 0 16px; }
-  
-  .hero{padding:44px 16px 54px; height: auto; flex-direction: column-reverse; text-align: center;}
-  .hero-left { padding: 32px 16px; max-width: 100%; }
-  .hero h1{font-size:42px}
-  .hero p { max-width: 100%; }
-  .hero-right { display: none; } /* Ocultar imagen de hero en móvil */
-  
-  .filters-bar{padding:12px 16px;justify-content:flex-start}
-  .filter-item { width: 75px; }
-  .filter-icon-box { width: 52px; height: 52px; margin-bottom: 6px;}
-  .filter-icon-box svg { width: 26px; height: 26px; }
-  
-  .main-layout{padding:24px 16px 60px}
-  .section-label{font-size:22px}
-  .products-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:14px}
-  .card-img-wrap{height:160px;padding:12px}
-  .card-body{padding:12px 14px 14px}
-  .card-name{font-size:14px}
-  .card-price{font-size:16px; margin-bottom: 8px;}
-  .card-cta-btn { font-size: 11px; padding: 10px 0;}
-  .card-cta-btn svg { display: none; } /* Ocultar arrow en móvil */
-  
-  .benefits-grid { gap: 16px; }
-  .final-cta-content { flex-direction: column; text-align: center; gap: 24px;}
-  .cta-right { text-align: center; flex-direction: column-reverse; gap: 16px;}
-  .cta-right p { max-width: 100%; }
-  
-  .modal-box{
-    flex-direction:column;max-height:96vh;
-    position:fixed;bottom:0;left:0;right:0;
-    max-width:100%;border-radius:24px 24px 0 0;
-    animation:slideModal .3s var(--ease);
-  }
-  @keyframes slideModal{from{transform:translateY(100%)}to{transform:translateY(0)}}
-  .modal-img-side{height:230px;min-height:unset;flex:none;padding:20px}
-  .modal-img-side img{max-height:190px}
-  .modal-info-side{padding:22px 20px 28px;border-left:none;border-top:1px solid var(--warm)}
-  .modal-name{font-size:22px}
-  .precio-value{font-size:28px}
-  .plazos-grid{grid-template-columns:repeat(2,1fr)}
-  .zoom-hint{display:none}
-}
-@media(max-width:480px){
-  .products-grid{grid-template-columns:repeat(2,1fr);gap:12px}
+  .modal-box{flex-direction:column}
+  .benefits-grid{grid-template-columns:1fr}
+  .hero-slim h1{font-size:24px}
+  .products-grid{grid-template-columns:repeat(2,1fr);gap:15px}
+  .card-img{height:160px}
 }
 </style>
 </head>
@@ -357,106 +124,50 @@ body{font-family:var(--font-b);background:var(--cream);color:var(--text);min-hei
 
 <header class="site-header">
   <div class="header-brand">
-    <img class="header-logo" src="img/Logo.png" alt="Logo Mueblería">
-    <div class="brand-name">Mueblería<span>DISEÑO QUE TRANSFORMA TU HOGAR</span></div>
+    <img src="img/Logo.png" alt="" class="header-logo">
+    <div class="brand-name">Mi Pueblito</div>
   </div>
-  
-  <ul class="site-nav">
-    <li><a href="#" class="active"><img class="nav-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2336504C'%3E%3Cpath d='M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z'/%3E%3C/svg%3E" alt="Inicio">Inicio</a></li>
-    <li><a href="#"><img class="nav-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2336504C'%3E%3Cpath d='M20 12c-1.1 0-2 .9-2 2v2H6v-2c0-1.1-.9-2-2-2v-2c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v2zm2-2V8c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h2c0 1.1.9 2 2 2v2h1v1c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2v-1h1v-2c1.1 0 2-.9 2-2h2c1.1 0 2-.9 2-2z'/%3E%3C/svg%3E" alt="Productos">Productos</a></li>
-    <li><a href="#"><img class="nav-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2336504C'%3E%3Cpath d='M12 2a10 10 0 100 20 10 10 0 000-20zm-1 14.5v-9L17 12l-6 4.5z'/%3E%3C/svg%3E" alt="Cómo funciona">Cómo funciona</a></li>
-    <li><a href="#"><img class="nav-icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2336504C'%3E%3Cpath d='M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z'/%3E%3C/svg%3E" alt="Contacto">Contacto</a></li>
-  </ul>
 </header>
 
-<section class="hero">
-  <div class="hero-left">
-    <h1>Tu hogar,<br>tu estilo.</h1>
-    <p class="hero-desc">Muebles modernos, cómodos y de calidad para cada espacio de tu hogar.</p>
-    <a href="#catalogoRoot" class="hero-btn">
-      Ver productos
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
-    </a>
-  </div>
-  <div class="hero-right">
-    <div style="width:100%;height:100%; background: #e0e6e6;"></div>
-    <div class="hero-overlay"></div>
-  </div>
+<section class="hero-slim">
+  <h1>Tu hogar, tu estilo.</h1>
+  <p>Muebles y colchones de alta calidad con planes de pago semanales diseñados para ti.</p>
 </section>
 
-<div class="filters-bar-container">
-  <div class="filters-bar" id="filtersBar">
-    <div class="filter-item active" onclick="setFiltro('todos',this)">
-      <div class="filter-icon-box">
-        <svg viewBox="0 0 24 24"><path d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z"/></svg>
-      </div>
-      <span>Todos</span>
-    </div>
-    </div>
-</div>
+<div class="filter-section">
+  <div class="category-tabs">
+    <button class="tab-btn active" onclick="setCategoria('todos', this)">Todos</button>
+    <button class="tab-btn" onclick="setCategoria('muebles', this)">Muebles</button>
+    <button class="tab-btn" onclick="setCategoria('colchones', this)">Colchones</button>
+  </div>
 
-<div class="main-search-row">
-  <div class="header-search">
-    <svg class="search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-    </svg>
-    <input id="searchInput" type="search" placeholder="Buscar muebles, colchones, salas…" oninput="filtrar()">
+  <div id="subnav" class="subcategory-nav"></div>
+
+  <div class="search-container">
+    <span class="search-icon">🔍</span>
+    <input id="searchInput" type="search" placeholder="¿Qué estás buscando hoy?" oninput="filtrar()">
   </div>
 </div>
 
-<main class="main-layout">
+<main class="main-content">
   <div id="catalogoRoot">
-    <div class="loading-wrap">
-      <div class="loader"></div>
-      <p class="loading-text">Cargando catálogo…</p>
-    </div>
+    <div style="text-align:center;padding:100px;color:var(--muted)">Preparando catálogo...</div>
   </div>
 </main>
 
-<section class="benefits-section">
+<section class="benefits">
   <div class="benefits-grid">
-    <div class="benefit-card">
-      <div class="benefit-icon-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      </div>
-      <p class="benefit-title">Calidad garantizada</p>
-      <p class="benefit-desc">Muebles resistentes y duraderos para tu hogar.</p>
+    <div class="benefit-item">
+      <h4>Calidad Garantizada</h4>
+      <p>Materiales seleccionados para durar.</p>
     </div>
-    <div class="benefit-card">
-      <div class="benefit-icon-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-      </div>
-      <p class="benefit-title">Pagos accesibles</p>
-      <p class="benefit-desc">Planes semanales que se adaptan a tu presupuesto.</p>
+    <div class="benefit-item">
+      <h4>Pagos Accesibles</h4>
+      <p>Planes semanales a tu medida.</p>
     </div>
-    <div class="benefit-card">
-      <div class="benefit-icon-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1zm0 0h5l4-4v-4m-9 8v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2m13-6v-1a1 1 0 00-1-1H4a1 1 0 00-1 1v1"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-      </div>
-      <p class="benefit-title">Entrega rápida</p>
-      <p class="benefit-desc">Recibe tus muebles en la puerta de tu hogar.</p>
-    </div>
-    <div class="benefit-card">
-      <div class="benefit-icon-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
-      </div>
-      <p class="benefit-title">Atención personalizada</p>
-      <p class="benefit-desc">Estamos aquí para ayudarte en lo que necesites.</p>
-    </div>
-  </div>
-</section>
-
-<section class="final-cta-section">
-  <div class="final-cta-content">
-    <div class="cta-left">
-      <div class="cta-icon-box">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12c-1.1 0-2 .9-2 2v2H6v-2c0-1.1-.9-2-2-2v-2c0-1.1-.9-2-2-2h12c1.1 0 2 .9 2 2v2zm2-2V8c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h2c0 1.1.9 2 2 2v2h1v1c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2v-1h1v-2c1.1 0 2-.9 2-2h2c1.1 0 2-.9 2-2z" fill="currentColor"/></svg>
-      </div>
-      <h3>Renueva tus espacios<br><em>de forma fácil y segura</em></h3>
-    </div>
-    <div class="cta-right">
-      <p>Explora nuestro catálogo y encuentra los muebles perfectos para ti.</p>
-      <a href="#filtersBar" class="hero-btn">Ver productos <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg></a>
+    <div class="benefit-item">
+      <h4>Atención Personalizada</h4>
+      <p>Te asesoramos en cada paso.</p>
     </div>
   </div>
 </section>
@@ -464,47 +175,20 @@ body{font-family:var(--font-b);background:var(--cream);color:var(--text);min-hei
 <div class="modal-overlay" id="modal" onclick="cerrarModal(event)">
   <div class="modal-box">
     <button class="modal-close" onclick="cerrarModal(null,true)">✕</button>
-
-    <div class="modal-img-side" id="imgSide">
-      <img id="modalImg" src="" alt="">
-      <div class="zoom-hint">🔍 Pasa el cursor para ampliar</div>
-    </div>
-
-    <div class="modal-info-side">
-      <div class="modal-brand" id="mBrand"></div>
-      <h2 class="modal-name"  id="mName"></h2>
-      <p  class="modal-meta"  id="mMeta"></p>
-
-      <div class="precio-block">
-        <div>
-          <div class="precio-label">Precio de contado</div>
-          <div class="precio-value" id="mPrecio"></div>
-        </div>
-        <div class="precio-icon">🛋️</div>
+    <div class="modal-left"><img id="modalImg" src=""></div>
+    <div class="modal-right">
+      <h2 id="mName" style="font-family:var(--font-title);margin-bottom:10px"></h2>
+      <div id="mPrecio" style="font-size:28px;font-weight:800;color:var(--primary);margin-bottom:20px"></div>
+      <div id="plazosSection">
+        <h4 style="margin-bottom:10px;font-size:12px;text-transform:uppercase;color:var(--muted)">Planes Disponibles</h4>
+        <div id="plazosGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px"></div>
       </div>
-
-      <div class="plazos-section" id="plazosSection">
-        <div class="sec-title">Planes de financiamiento</div>
-        <div class="plazos-grid" id="plazosGrid"></div>
-      </div>
-
-      <div class="caract-section" id="caractSection" style="display:none">
-        <div class="sec-title">Especificaciones</div>
-        <ul class="caract-list" id="caractList"></ul>
-      </div>
-
-      <a class="btn-wa" id="btnWA" href="#" target="_blank" rel="noopener">
-        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/>
-        </svg>
-        Preguntar por WhatsApp
-      </a>
+      <a id="btnWA" class="btn-wa" href="#" target="_blank">Consultar por WhatsApp</a>
     </div>
   </div>
 </div>
 
 <script>
-/* CONFIG */
 const firebaseConfig = {
   apiKey:"AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
   authDomain:"mmpueblito-8fb29.firebaseapp.com",
@@ -515,90 +199,57 @@ const firebaseConfig = {
 };
 
 let todos = [];
-let filtroActivo = 'todos';
+let catActiva = 'todos';
+let subActiva = 'todos';
 let busqueda = '';
 
-const fmt = n => parseFloat(n||0).toLocaleString('es-MX',{minimumFractionDigits:2});
+const fmt = n => parseFloat(n||0).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
 
 function calcularCredito(precio) {
-  const res = []; let prevTotal = 0;
-  for (let m = 1; m <= 6; m++) {
-    const tasa = m <= 3 ? 0.02 : 0.025;
-    const base = precio * (1 + tasa * m);
-    const sem  = m * 4;
-    let abono  = Math.ceil((base / sem) / 10) * 10;
-    let total  = abono * sem;
-    let t = 0;
-    while (total <= prevTotal && t++ < 100) { abono += 5; total = abono * sem; }
-    prevTotal = total;
-    res.push({ sem, abono, total });
-  }
+  const res = [];
+  [4, 12, 24].forEach(sem => { // Ejemplos comunes: 1, 3 y 6 meses
+    const tasa = sem <= 12 ? 0.08 : 0.15;
+    const total = precio * (1 + tasa);
+    const abono = Math.ceil((total / sem) / 5) * 5;
+    res.push({ sem, abono, total: abono * sem });
+  });
   return res;
 }
 
 async function cargarProductos() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const db  = firebase.firestore();
-    // Intenta Firestore
+    const db = firebase.firestore();
     const doc = await db.collection('posData').doc('productos').get();
-    if (!doc.exists) throw new Error('no doc');
-    const d = doc.data();
-    todos = Array.isArray(d.data) ? d.data : (Array.isArray(d) ? d : []);
-  } catch {
-    // Fallback local
+    todos = doc.data().data || [];
+  } catch(e) {
     todos = JSON.parse(localStorage.getItem('productos') || '[]');
   }
-  construirFiltros();
   renderCatalogo();
 }
 
-/* Iconos de categoría predefinidos */
-const categoryIcons = {
-  'salas': '<svg viewBox="0 0 24 24"><path d="M22 13h-4v-2c0-.55-.45-1-1-1h-6c-.55 0-1 .45-1 1v2H6v-2c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v7h20v-7zm-18 6h-1v-4h1v4zm17 0h-1v-4h1v4zm-13-1h8v-3c0-.55-.45-1-1-1h-6c-.55 0-1 .45-1 1v3zM12 3C7.58 3 4 5.51 4 8.6c0 1.25.59 2.39 1.6 3.25L4.4 15.65C4.26 15.91 4.41 16.2 4.7 16.2h2.51l1.55-3.32C10.15 13.06 11.06 13.2 12 13.2c4.42 0 8-2.51 8-5.6C20 5.51 16.42 3 12 3zm0 8c-3.31 0-6-1.79-6-4s2.69-4 6-4 6 1.79 6 4-2.69 4-6 4z" /></svg>',
-  'recámaras': '<svg viewBox="0 0 24 24"><path d="M20,10V7A2,2,0,0,0,18,5H6A2,2,0,0,0,4,7v3H2v10H4V18H20v2h2V10ZM6,7H18v3H16V9a1,1,0,0,0-1-1H9a1,1,0,0,0-1,1v1H6ZM4,16H20v1H4Z" /></svg>',
-  'comedores': '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-9 9 9 9 0 0 0 9 9 9 9 0 0 0 9-9 9 9 0 0 0-9-9zm1.06 12.33-1.06-.51v.51H11v-.51l-1.06.51L9 14.8l1.06-.51-.12-.22-.94.46V13.8l.94-.46L9.82 13.1l-.94.46V12.82l.94-.46-1.06-.51 1.06.51v-.51H11v.51l1.06-.51L13 11.2l-1.06.51.12.22.94-.46V12.2l-.94.46.12.24.94-.46V13.18l-.94.46 1.06.51-1.06-.51v.51H11v-.51l-1.06.51.12.22z" /></svg>',
-  'oficina': '<svg viewBox="0 0 24 24"><path d="M19 19c-.55 0-1-.45-1-1v-1c0-1.1-.9-2-2-2h-3v-1.1c1.1-.4 1.9-1.4 1.9-2.7V10c0-1.7-1.3-3-3-3s-3 1.3-3 3v1.2c0 1.3.8 2.3 1.9 2.7V15H7c-1.1 0-2 .9-2 2v1c0 .55-.45 1-1 1h-1v2h2v-1h13v1h2v-2h-2zm-8-7.8c0-.6.5-1.1 1.1-1.1s1.1.5 1.1 1.1v.6c0 .6-.5 1.1-1.1 1.1s-1.1-.5-1.1-1.1v-.6z" /></svg>',
-  'almacenaje': '<svg viewBox="0 0 24 24"><path d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z"/></svg>',
-  'decoración': '<svg viewBox="0 0 24 24"><path d="M11 12.18c-.37-.09-.75-.18-1.11-.3-.92-.32-1.76-.8-2.48-1.43-.63-.56-1.16-1.21-1.56-1.92-.36-.63-.61-1.33-.76-2.07-.15-.74-.18-1.51-.11-2.28h3c-.05.5.01.99.13 1.45.08.31.22.61.4.88.16.23.36.43.6.61.35.26.75.46 1.19.58-.29-.53-.51-1.1-.68-1.72l-.12-.41L7.1 5.3C6.72 6.07 6.4 6.88 6.13 7.74l-.27.86L4.3 8.3c.09.28.2.55.33.82.16.32.35.63.57.92.21.28.45.54.71.79l1.11 1.05.5 1.11 1.05 1.11.79.71a4.93 4.93 0 002.34 1.41l1.19.3.3-1.19c.17-.66.45-1.28.81-1.85z" /></svg>',
-  'accesorios': '<svg viewBox="0 0 24 24"><path d="M12 2a1 1 0 011 1v1h1c2.21 0 4 1.79 4 4v7h1v2h-1c0 2.21-1.79 4-4 4h-4a4 4 0 01-4-4H4v-2h1v-7c0-2.21 1.79-4 4-4h1V3a1 1 0 011-1z" /></svg>',
-  'default': '<svg viewBox="0 0 24 24"><path d="M21 21H3a1 1 0 01-1-1v-2c0-1.1.9-2 2-2h1c1.1 0 2 .9 2 2v1h10v-1c0-1.1.9-2 2-2h1c1.1 0 2 .9 2 2v2a1 1 0 01-1 1zm-3-8a3 3 0 11-6 0 3 3 0 016 0zm-5 5h4v-1a1 1 0 00-1-1h-2a1 1 0 00-1 1v1zM6 18H3v-1h3v1z" /></svg>'
-};
-
-function construirFiltros() {
-  const subs = new Set();
-  // Solo Muebles y Colchones
-  todos.filter(p => ['muebles','colchones'].includes((p.categoria||'').toLowerCase()) && p.Activo !== 0)
-       .forEach(p => { if (p.subcategoria) subs.add(p.subcategoria); });
-  const bar = document.getElementById('filtersBar');
+function setCategoria(cat, btn) {
+  catActiva = cat;
+  subActiva = 'todos';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
   
-  // Reset bar, keep default 'Todos'
-  bar.innerHTML = `
-    <div class="filter-item active" onclick="setFiltro('todos',this)">
-      <div class="filter-icon-box">
-        <svg viewBox="0 0 24 24"><path d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z"/></svg>
-      </div>
-      <span>Todos</span>
-    </div>`;
-
-  [...subs].sort().forEach(s => {
-    const sLower = s.toLowerCase();
-    const icon = categoryIcons[sLower] || categoryIcons['default'];
-    const item = document.createElement('div');
-    item.className = 'filter-item';
-    item.onclick = function(){ setFiltro(s,this); };
-    item.innerHTML = `
-      <div class="filter-icon-box">${icon}</div>
-      <span>${s}</span>
-    `;
-    bar.appendChild(item);
-  });
+  const subnav = document.getElementById('subnav');
+  if(cat === 'todos') {
+    subnav.classList.remove('visible');
+  } else {
+    const subs = [...new Set(todos.filter(p => p.categoria.toLowerCase() === cat).map(p => p.subcategoria))];
+    subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver todo</div>` + 
+      subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
+    subnav.classList.add('visible');
+  }
+  renderCatalogo();
 }
 
-function setFiltro(cat, btn) {
-  filtroActivo = cat;
-  document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+function setSub(sub, pill) {
+  subActiva = sub;
+  document.querySelectorAll('.sub-pill').forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
   renderCatalogo();
 }
 
@@ -610,151 +261,60 @@ function filtrar() {
 function renderCatalogo() {
   const root = document.getElementById('catalogoRoot');
   const visibles = todos.filter(p => {
-    // Categorías permitidas
-    if (!['muebles','colchones'].includes((p.categoria||'').toLowerCase())) return false;
-    // Estado activo
-    if (p.Activo === 0) return false;
-    // Filtro subcategoría
-    if (filtroActivo !== 'todos' && p.subcategoria !== filtroActivo) return false;
-    // Búsqueda
-    if (busqueda && !(p.nombre||'').toLowerCase().includes(busqueda) && 
-                    !(p.marca||'').toLowerCase().includes(busqueda)) return false;
-    return true;
+    const matchCat = catActiva === 'todos' || p.categoria.toLowerCase() === catActiva;
+    const matchSub = subActiva === 'todos' || p.subcategoria === subActiva;
+    const matchBus = p.nombre.toLowerCase().includes(busqueda);
+    return matchCat && matchSub && matchBus && p.Activo !== 0;
   });
 
-  if (visibles.length === 0) {
-    root.innerHTML = `<div class="empty">
-      <div class="empty-ico">🤷</div>
-      <h3>Sin resultados</h3><p>Intenta con otra búsqueda o categoría</p>
-    </div>`;
+  if(visibles.length === 0) {
+    root.innerHTML = '<div style="text-align:center;padding:50px">No encontramos lo que buscas.</div>';
     return;
   }
 
-  // Agrupar por subcategoría para renderizar secciones
-  const grupos = {};
-  visibles.forEach(p => {
-    const s = p.subcategoria || 'Otros Modelos';
-    if (!grupos[s]) grupos[s] = [];
-    grupos[s].push(p);
-  });
-
-  let html = '';
-  // Ordenar subcategorías alfabéticamente
-  Object.keys(grupos).sort().forEach(sub => {
-    html += `
-      <div class="section-header-row">
-        <h2 class="section-label">${sub}</h2>
-        <a href="#filtersBar" class="ver-todos-link">Ver todos <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg></a>
+  root.innerHTML = `<div class="products-grid">` + visibles.map(p => {
+    const precio = parseFloat(p.precio);
+    const plan = calcularCredito(precio)[2]; // Mostramos el plan de 24 sem por defecto
+    return `
+      <div class="card" onclick="abrirModal('${p.id}')">
+        <div class="card-img"><img src="${p.imagen}"></div>
+        <div class="card-info">
+          <div class="card-name">${p.nombre}</div>
+          <div class="card-price">${fmt(precio)}</div>
+          <div class="card-stats">
+            <div class="stat-row"><span>Pago semanal:</span><strong>${fmt(plan.abono)}</strong></div>
+            <div class="stat-row"><span>Plazo:</span><strong>${plan.sem} semanas</strong></div>
+          </div>
+          <button class="card-btn">Ver Detalles</button>
+        </div>
       </div>
-      <div class="products-grid">`;
-    
-    // Renderizar tarjetas individuales
-    grupos[sub].forEach(p => {
-      const precio = parseFloat(p.precio || 0);
-      const planes = calcularCredito(precio);
-      const planMasBarato = planes[planes.length - 1]; // El de 6 meses (24 semanas) suele ser el más barato por abono
-      
-      html += `
-        <div class="card" onclick="abrirModal('${p.id}')">
-          <div class="card-img-wrap">
-            ${p.marca === 'Más Vendido' ? '<div class="card-badge">Más vendido</div>' : ''}
-            <img src="${p.imagen}" loading="lazy" alt="${p.nombre}"
-                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23f0e8dc%22 width=%22100%22 height=%22100%22/%3E%3Ctext y=%2260%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2234%22%3E🛋️%3C/text%3E%3C/svg%3E'">
-          </div>
-          <div class="card-body">
-            <h3 class="card-name">${p.nombre}</h3>
-            <p class="card-desc-brief">Descripción breve del producto para el catálogo.</p>
-            <p class="card-price">$${fmt(precio)}</p>
-            
-            <div class="card-details-box">
-              <div class="card-detail-item">
-                <span><img class="icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237a6555'%3E%3Cpath d='M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H5V5h14v14zM7 10h2v7H7v-7zm4-3h2v10h-2V7zm4 6h2v4h-2v-4z'/%3E%3C/svg%3E" alt="Plazo">Plazo</span>
-                <strong>${planMasBarato.semanas} meses</strong>
-              </div>
-              <div class="card-detail-item">
-                <span><img class="icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237a6555'%3E%3Cpath d='M3 4c-1.11 0-2 .89-2 2v12a2 2 0 002 2h18a2 2 0 002-2V6a2 2 0 00-2-2H3zm0 2h18v1.5a.5.5 0 01-.5.5c-1.1 0-2 .9-2 2s.9 2 2 2a.5.5 0 01.5.5V11h-18V6zm0 7h18v5H3v-5z'/%3E%3C/svg%3E" alt="Pago Semanal">Pago semanal</span>
-                <strong>$${planMasBarato.abono.toLocaleString()}</strong>
-              </div>
-              <div class="card-detail-item">
-                <span><img class="icon" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237a6555'%3E%3Cpath d='M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 1.21-1.04 2.01-2.9 2.01-1.96 0-2.72-1.09-2.8-2.3H6.3c.09 2 1.5 3.19 3.5 3.63V21h3v-2.15c2-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z'/%3E%3C/svg%3E" alt="Total">Total a pagar</span>
-                <strong>$${planMasBarato.total.toLocaleString()}</strong>
-              </div>
-            </div>
-            
-            <button class="card-cta-btn">Ver detalles <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg></button>
-          </div>
-        </div>`;
-    });
-    html += '</div>'; // Cerrar products-grid
-  });
-  root.innerHTML = html;
+    `;
+  }).join('') + `</div>`;
 }
 
 function abrirModal(id) {
-  const p = todos.find(x => String(x.id) === String(id));
-  if (!p) return;
-  const precio = parseFloat(p.precio || 0);
+  const p = todos.find(x => x.id == id);
+  const precio = parseFloat(p.precio);
+  document.getElementById('modalImg').src = p.imagen;
+  document.getElementById('mName').textContent = p.nombre;
+  document.getElementById('mPrecio').textContent = fmt(precio);
+  
+  document.getElementById('plazosGrid').innerHTML = calcularCredito(precio).map(pl => `
+    <div style="background:var(--primary-light);padding:10px;border-radius:8px;text-align:center">
+      <div style="font-size:10px;font-weight:700">${pl.sem} SEMANAS</div>
+      <div style="font-size:16px;font-weight:800">${fmt(pl.abono)}</div>
+    </div>
+  `).join('');
 
-  document.getElementById('modalImg').src = p.imagen || '';
-  document.getElementById('mBrand').textContent = p.marca || 'Original';
-  document.getElementById('mName').textContent  = p.nombre;
-  document.getElementById('mMeta').textContent  = [p.categoria, p.subcategoria].filter(Boolean).join(' / ');
-  document.getElementById('mPrecio').textContent = `$${fmt(precio)}`;
-
-  // ✅ Plazos ocultos si precio === 1 (según tu lógica funcional)
-  const ps = document.getElementById('plazosSection');
-  if (precio === 1) {
-    ps.style.display = 'none';
-  } else {
-    ps.style.display = '';
-    document.getElementById('plazosGrid').innerHTML = calcularCredito(precio).map(pl => `
-      <div class="plazo-card">
-        <div class="plazo-sem">${pl.sem} sem</div>
-        <div class="plazo-abono">$${pl.abono.toLocaleString()}</div>
-        <div class="plazo-total">Total $${pl.total.toLocaleString()}</div>
-      </div>`).join('');
-  }
-
-  const lineas = (p.caracteristicas || '').split('\n').filter(l => l.trim());
-  const cs = document.getElementById('caractSection');
-  if (lineas.length > 0) {
-    document.getElementById('caractList').innerHTML = lineas.map(l => `<li class="caract-item">${l.trim()}</li>`).join('');
-    cs.style.display = '';
-  } else {
-    cs.style.display = 'none';
-  }
-
-  // ✅ Actualizar enlace de WhatsApp con el número solicitado
-  const msg = encodeURIComponent(`Hola Mueblería Mi Pueblito! Me interesa el producto: *${p.nombre}* — $${fmt(precio)} 🛋️`);
+  const msg = encodeURIComponent(`¡Hola! Me interesa: ${p.nombre} (${fmt(precio)})`);
   document.getElementById('btnWA').href = `https://wa.me/522411081657?text=${msg}`;
-
   document.getElementById('modal').classList.add('open');
-  document.body.style.overflow = 'hidden';
 }
 
-function cerrarModal(e, forzar = false) {
-  if (!forzar && e && e.target !== document.getElementById('modal')) return;
-  document.getElementById('modal').classList.remove('open');
-  document.body.style.overflow = '';
-  document.getElementById('modalImg').style.transform = 'scale(1)';
+function cerrarModal(e, force) {
+  if(force || e.target.id === 'modal') document.getElementById('modal').classList.remove('open');
 }
 
-// Cerrar con Escape
-document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarModal(null, true); });
-
-/* Zoom effect on Modal Image */
-const imgSide = document.getElementById('imgSide');
-const imgEl   = document.getElementById('modalImg');
-imgSide.addEventListener('mousemove', e => {
-  const r = imgSide.getBoundingClientRect();
-  const x = ((e.clientX - r.left) / r.width) * 100;
-  const y = ((e.clientY - r.top) / r.height) * 100;
-  imgEl.style.transformOrigin = `${x}% ${y}%`;
-  imgEl.style.transform = 'scale(2.2)';
-});
-imgSide.addEventListener('mouseleave', () => { imgEl.style.transform = 'scale(1)'; });
-
-// ARRANCAR
 cargarProductos();
 </script>
 </body>
