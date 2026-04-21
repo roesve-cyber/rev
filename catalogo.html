@@ -6,9 +6,11 @@
 <title>MUEBLERIA MI PUEBLITO — Catálogo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 :root {
-  --primary: #2c3e3a; /* Verde oscuro elegante */
+  --primary: #2c3e3a; 
   --accent: #b8842a;
   --text-dark: #1a1a1a;
   --text-light: #64748b;
@@ -19,12 +21,7 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: var(--font-main);
-  background-color: var(--bg-cream);
-  color: var(--text-dark);
-}
+body { font-family: var(--font-main); background-color: var(--bg-cream); color: var(--text-dark); }
 
 /* --- HEADER --- */
 .site-header {
@@ -38,38 +35,16 @@ body {
   top: 0;
   z-index: 1000;
 }
-
-.brand h1 {
-  font-family: var(--font-title);
-  font-size: 20px;
-  color: var(--primary);
-  letter-spacing: 1px;
-}
-
-.top-benefits {
-  display: flex;
-  gap: 30px;
-}
-
-.benefit-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--primary);
-}
-
-.benefit-pill span {
-  font-size: 18px;
-}
+.brand h1 { font-family: var(--font-title); font-size: 20px; color: var(--primary); letter-spacing: 1px; }
+.top-benefits { display: flex; gap: 30px; }
+.benefit-pill { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--primary); }
 
 /* --- HERO DARK --- */
 .hero {
   position: relative;
-  height: 350px;
-  background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), 
-              url('https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&q=80&w=1500');
+  height: 300px;
+  background: linear-gradient(rgba(0,0,0,0.75), rgba(0,0,0,0.75)), 
+              url('https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=1500');
   background-size: cover;
   background-position: center;
   display: flex;
@@ -78,136 +53,43 @@ body {
   align-items: center;
   text-align: center;
   color: var(--white);
+  padding: 20px;
 }
-
-.hero h2 {
-  font-family: var(--font-title);
-  font-size: 48px;
-  margin-bottom: 10px;
-}
-
-.hero p {
-  font-size: 18px;
-  max-width: 600px;
-  font-weight: 300;
-  opacity: 0.9;
-}
+.hero h2 { font-family: var(--font-title); font-size: clamp(24px, 5vw, 42px); margin-bottom: 10px; }
+.hero p { font-size: 16px; max-width: 600px; font-weight: 300; opacity: 0.9; }
 
 /* --- FILTROS --- */
-.filter-bar {
-  padding: 30px 40px;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.cat-container {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 10px;
-  justify-content: center;
-}
-
+.filter-bar { padding: 30px 40px 10px; max-width: 1400px; margin: 0 auto; }
+.cat-container { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 15px; justify-content: center; }
 .cat-btn {
-  padding: 10px 20px;
-  border-radius: 50px;
-  border: 1px solid #ddd;
-  background: white;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 14px;
-  white-space: nowrap;
-  transition: 0.3s;
+  padding: 8px 18px; border-radius: 50px; border: 1px solid #ddd;
+  background: white; cursor: pointer; font-weight: 600; font-size: 13px;
+  white-space: nowrap; transition: 0.3s;
 }
-
-.cat-btn.active {
-  background: var(--primary);
-  color: white;
-  border-color: var(--primary);
-}
+.cat-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
 
 /* --- GRID PRODUCTOS --- */
-.catalog-container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 40px 60px;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 30px;
-}
-
-.card {
-  background: white;
-  border-radius: 15px;
-  overflow: hidden;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-  transition: transform 0.3s;
-}
-
-.card:hover { transform: translateY(-5px); }
-
-.card-img {
-  height: 220px;
-  padding: 20px;
-  background: #f9f9f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.card-img img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.card-body { padding: 20px; }
-
-.card-body h3 {
-  font-size: 16px;
-  margin-bottom: 8px;
-  height: 40px;
-  overflow: hidden;
-}
-
-.price-cash {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--primary);
-  margin-bottom: 15px;
-}
-
-.installments-box {
-  background: #f1f5f4;
-  padding: 12px;
-  border-radius: 10px;
-}
-
-.inst-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  margin-bottom: 5px;
-}
-
-.inst-row strong { color: #1a1a1a; }
-
-.badge-months {
-  font-size: 11px;
-  color: var(--accent);
-  font-weight: 700;
-  text-transform: uppercase;
-}
+.catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 40px 60px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 30px; }
+.card { background: white; border-radius: 15px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: 0.3s; border: 1px solid #eee; }
+.card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+.card-img { height: 220px; padding: 20px; background: #fff; display: flex; align-items: center; justify-content: center; }
+.card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.card-body { padding: 20px; border-top: 1px solid #f5f5f5; }
+.card-body h3 { font-size: 15px; margin-bottom: 8px; height: 38px; overflow: hidden; line-height: 1.3; }
+.price-cash { font-size: 22px; font-weight: 800; color: var(--primary); margin-bottom: 15px; }
+.installments-box { background: #f8faf9; padding: 12px; border-radius: 10px; border: 1px solid #edf2f1; }
+.inst-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; align-items: center; }
+.inst-row:last-child { margin-bottom: 0; }
+.badge-months { font-size: 10px; color: var(--accent); font-weight: 700; background: #fff; padding: 2px 6px; border-radius: 4px; border: 1px solid #e8c97a; }
 
 @media (max-width: 768px) {
-  .site-header { flex-direction: column; gap: 15px; padding: 20px; }
-  .top-benefits { gap: 15px; flex-wrap: wrap; justify-content: center; }
-  .hero h2 { font-size: 32px; }
-  .grid { grid-template-columns: 1fr 1fr; gap: 15px; }
+  .site-header { padding: 15px 20px; flex-direction: column; gap: 10px; }
+  .top-benefits { gap: 10px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 15px; }
   .catalog-container { padding: 0 15px 40px; }
+  .card-img { height: 150px; }
+  .price-cash { font-size: 18px; }
 }
 </style>
 </head>
@@ -218,9 +100,9 @@ body {
     <h1>MUEBLERIA MI PUEBLITO</h1>
   </div>
   <div class="top-benefits">
-    <div class="benefit-pill"><span>🛡️</span> Calidad Garantizada</div>
-    <div class="benefit-pill"><span>🗓️</span> Pagos Semanales</div>
-    <div class="benefit-pill"><span>🤝</span> Atención Personal</div>
+    <div class="benefit-pill">🛡️ Calidad</div>
+    <div class="benefit-pill">🗓️ Pagos Semanales</div>
+    <div class="benefit-pill">🤝 Atención</div>
   </div>
 </header>
 
@@ -236,18 +118,30 @@ body {
 </div>
 
 <main class="catalog-container">
-  <div id="gridProductos" class="grid"></div>
+  <div id="gridProductos" class="grid">
+    <p style="text-align:center; grid-column: 1/-1; padding: 50px; color: #999;">Cargando productos...</p>
+  </div>
 </main>
 
 <script>
+// CONFIGURACIÓN DE FIREBASE (Restaurada)
+const firebaseConfig = {
+  apiKey: "AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
+  authDomain: "mmpueblito-8fb29.firebaseapp.com",
+  projectId: "mmpueblito-8fb29",
+  storageBucket: "mmpueblito-8fb29.firebasestorage.app",
+  messagingSenderId: "32950655624",
+  appId: "1:32950655624:web:42a8657431319f9a25dd3d"
+};
+
 let todosLosProductos = [];
 let catActual = 'todos';
 
 const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-// LA FÓRMULA DEL NEGOCIO
+// FÓRMULA ORIGINAL DEL NEGOCIO
 function calcularPlazos(precio) {
-  if (precio <= 1) return null; // Regla de precio 1
+  if (precio <= 1) return null; // Regla de precio 1: No mostrar plazos
 
   const plazos = [
     { sem: 4, meses: 1 },
@@ -256,9 +150,10 @@ function calcularPlazos(precio) {
   ];
 
   return plazos.map(p => {
+    // Tasa: 8% hasta 12 semanas, 15% para 24 semanas
     const tasa = p.sem <= 12 ? 0.08 : 0.15;
     const totalConInteres = precio * (1 + tasa);
-    // Redondeo al múltiplo de 5 superior (Importante para cobranza)
+    // Redondeo al múltiplo de 5 superior
     const abonoSemanal = Math.ceil((totalConInteres / p.sem) / 5) * 5;
     
     return {
@@ -269,19 +164,36 @@ function calcularPlazos(precio) {
 }
 
 async function inicializar() {
-  const data = JSON.parse(localStorage.getItem("productos")) || [];
-  // Limpiar y normalizar datos
-  todosLosProductos = data.filter(p => p.Activo !== 0);
-  
-  generarCategorias();
-  render();
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    // Intentar cargar desde Firebase
+    const doc = await db.collection('posData').doc('productos').get();
+    
+    if (doc.exists) {
+      todosLosProductos = doc.data().data || [];
+    } else {
+      // Fallback a localStorage si falla Firebase
+      todosLosProductos = JSON.parse(localStorage.getItem("productos")) || [];
+    }
+
+    // Filtrar solo activos
+    todosLosProductos = todosLosProductos.filter(p => p.Activo !== 0 && p.Activo !== "0");
+
+    generarCategorias();
+    render();
+  } catch (error) {
+    console.error("Error cargando productos:", error);
+    document.getElementById('gridProductos').innerHTML = "<p style='text-align:center; grid-column:1/-1;'>Error al conectar con la base de datos.</p>";
+  }
 }
 
 function generarCategorias() {
   const nav = document.getElementById('categoriasNav');
   const categoriasUnicas = [...new Set(todosLosProductos.map(p => (p.categoria || p.Categoria || "Otros").trim()))];
   
-  categoriasUnicas.forEach(cat => {
+  categoriasUnicas.sort().forEach(cat => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = cat;
@@ -304,22 +216,28 @@ function render() {
     return catActual === 'todos' || pCat === catActual;
   });
 
+  if (filtrados.length === 0) {
+    grid.innerHTML = "<p style='text-align:center; grid-column:1/-1; padding:50px;'>No hay productos en esta categoría.</p>";
+    return;
+  }
+
   grid.innerHTML = filtrados.map(p => {
+    const nombre = p.nombre || p.Nombre || "Producto sin nombre";
     const precio = parseFloat(p.precio || p.Precio_Contado || 0);
+    const imagen = p.imagen || p.Imagen || 'https://via.placeholder.com/300?text=Sin+Imagen';
     const plazos = calcularPlazos(precio);
     
     return `
       <div class="card">
         <div class="card-img">
-          <img src="${p.imagen || 'https://via.placeholder.com/300?text=Sin+Imagen'}" alt="${p.nombre}">
+          <img src="${imagen}" alt="${nombre}" loading="lazy">
         </div>
         <div class="card-body">
-          <h3>${p.nombre || p.Nombre}</h3>
-          <div class="price-cash">${fmt(precio)} <small style="font-size:10px; color:#999; font-weight:400">CONTADO</small></div>
+          <h3>${nombre}</h3>
+          <div class="price-cash">${fmt(precio)} <small style="font-size:10px; color:#999; font-weight:400; display:block">PRECIO DE CONTADO</small></div>
           
           ${plazos ? `
             <div class="installments-box">
-              <p style="font-size:11px; font-weight:700; color:#666; margin-bottom:8px">PLANES SEMANALES</p>
               ${plazos.map(pl => `
                 <div class="inst-row">
                   <strong>${fmt(pl.cuota)} <span style="font-weight:400; font-size:11px">semanal</span></strong>
