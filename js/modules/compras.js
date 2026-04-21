@@ -824,9 +824,13 @@ function cancelarOrdenCompra(id) {
     renderListaOrdenesCompra();
 }
 
+console.log('ASIGNANDO FUNCIONES A WINDOW');
 window.renderProveedores = renderProveedores;
 window.guardarProveedor = guardarProveedor;
 window.eliminarProveedor = eliminarProveedor;
+console.log('window.renderProveedores', typeof window.renderProveedores);
+console.log('window.guardarProveedor', typeof window.guardarProveedor);
+console.log('window.eliminarProveedor', typeof window.eliminarProveedor);
 
 window.abrirNuevaOrdenCompra = abrirNuevaOrdenCompra;
 window.agregarArticuloOC = agregarArticuloOC;
