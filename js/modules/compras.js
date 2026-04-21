@@ -824,11 +824,10 @@ function cancelarOrdenCompra(id) {
     renderListaOrdenesCompra();
 }
 
-console.log("Antes de exponer funciones globales", typeof renderProveedores);
 window.renderProveedores = renderProveedores;
 window.guardarProveedor = guardarProveedor;
 window.eliminarProveedor = eliminarProveedor;
-console.log("Después de exponer funciones globales", typeof window.renderProveedores);
+
 window.abrirNuevaOrdenCompra = abrirNuevaOrdenCompra;
 window.agregarArticuloOC = agregarArticuloOC;
 window._renderTablaArticulosOC = _renderTablaArticulosOC;
