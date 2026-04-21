@@ -789,14 +789,14 @@ function insertarProductoSistema(p) {
         modelo: p.modelo || "",
         categoria: categoriaPadre,
         subcategoria: p.subcategoria,
-        stock: p.stock || 0
-	
+        stock: p.stock || 0,
+        // === LA LÍNEA QUE FALTABA ES ESTA ===
+        caracteristicas: p.caracteristicas || "" 
+        // ===================================
     });
 
     return { ok: true };
 }
-
-
 function procesarDatosImportacion(texto) {
     let productosAImportar = [];
 
