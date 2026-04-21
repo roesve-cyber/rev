@@ -824,6 +824,7 @@ function cancelarOrdenCompra(id) {
     renderListaOrdenesCompra();
 }
 
+window.renderProveedores = renderProveedores;
 window.abrirNuevaOrdenCompra = abrirNuevaOrdenCompra;
 window.agregarArticuloOC = agregarArticuloOC;
 window._renderTablaArticulosOC = _renderTablaArticulosOC;
