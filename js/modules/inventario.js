@@ -546,7 +546,7 @@ function mostrarDetalleProductoMaestro(id) {
             <div style="display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px;">
 
                 <div style="text-align: center; border-right: 1px solid #eee; padding-right: 20px;">
-                    <img src="${p.imagen || ''}" style="width: 100%; height: 200px; object-fit: contain; margin-bottom: 15px;" onerror="this.style.display='none'">
+                    <img id="imgVisorPrevia" src="${p.imagen || ''}" style="width: 100%; height: 200px; object-fit: contain; margin-bottom: 15px;" onerror="this.style.display='none'">
                     <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
                         <span style="font-size: 12px; color: #7f8c8d;">STOCK TOTAL</span>
                         <h2 style="margin: 5px 0; color: ${(p.stock || 0) > 0 ? '#27ae60' : '#e74c3c'};">${p.stock || 0} pzs</h2>
@@ -570,18 +570,24 @@ function mostrarDetalleProductoMaestro(id) {
                     </div>
                     <div class="campo"><label style="color:#e74c3c;">Costo de Compra ($)</label><input type="number" id="editCosto" value="${p.costo || 0}" oninput="recalcularRentabilidad()"></div>
                     <div class="campo"><label style="color:#27ae60;">Precio de Venta ($)</label><input type="number" id="editPrecio" value="${p.precio || 0}" oninput="recalcularRentabilidad()"></div>
+                    
+                    <div class="campo" style="grid-column: span 2;">
+                        <label>URL de la Imagen</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="editImagen" value="${p.imagen || ''}" placeholder="https://ejemplo.com/imagen.jpg" style="flex: 1;">
+                            <button onclick="document.getElementById('imgVisorPrevia').src = document.getElementById('editImagen').value; document.getElementById('imgVisorPrevia').style.display='block';" 
+                                    style="padding: 0 12px; background: #34495e; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                🔄 Probar
+                            </button>
+                        </div>
+                    </div>
+
                     <div class="campo" style="grid-column: span 2;"><label>Descripción</label><textarea id="editDescripcion" rows="2">${p.descripcion || ''}</textarea></div>
                     <div class="campo" style="grid-column: span 2;">
                         <label>Características (Usa Enter para saltar de línea)</label>
                         <textarea id="editCaracteristicas" rows="4" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; font-family:inherit;">${p.caracteristicas || ''}</textarea>
                     </div>
                 </div>
-    <div class="campo" style="grid-column: span 2;">
-        <label>Características</label>
-        <div style="background:#f9fafb;padding:8px 10px;border-radius:6px;min-height:38px;font-size:14px; color:#555;">
-            ${p.caracteristicas ? p.caracteristicas : '<em style="color:#bbb;">(Sin características)</em>'}
-        </div>
-    </div>
 
                 <div style="background: #2c3e50; color: white; padding: 20px; border-radius: 10px; display: flex; flex-direction: column; justify-content: center; text-align: center;">
                     <p style="margin:0; font-size: 12px; opacity: 0.8;">RENTABILIDAD BRUTA</p>
@@ -655,16 +661,22 @@ function guardarCambiosVisor(id) {
     p.modelo       = document.getElementById("editModelo")?.value || '';
     p.categoria    = document.getElementById("editCategoria")?.value || p.categoria;
     p.subcategoria = document.getElementById("editSubcategoria")?.value || p.subcategoria;
+    
+    // === LÍNEA AGREGADA PARA LA IMAGEN ===
+    p.imagen       = document.getElementById("editImagen")?.value || ''; 
+    // =====================================
+
     p.costo        = parseFloat(document.getElementById("editCosto")?.value) || p.costo;
     p.precio       = parseFloat(document.getElementById("editPrecio")?.value) || p.precio;
     p.descripcion  = document.getElementById("editDescripcion")?.value || '';
-    p.caracteristicas = document.getElementById("editCaracteristicas").value;
+    p.caracteristicas = document.getElementById("editCaracteristicas")?.value || '';
 
     if (!StorageService.set("productos", productos)) {
         alert("❌ Error guardando cambios");
         return;
     }
-    renderInventario();
+    
+    renderInventario(); // Refresca la tabla de productos para mostrar la nueva imagen
     alert("✅ Cambios guardados correctamente.");
 }
 
