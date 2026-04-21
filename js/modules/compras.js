@@ -77,7 +77,17 @@ function prepararVistaCompras() {
               proveedores.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
     }
     actualizarSelectBancos();
+    _poblarCuentasOrigen();
     gestionarCamposPago();
+}
+
+function _poblarCuentasOrigen() {
+    const sel = document.getElementById("compraCuentaOrigen");
+    if (!sel) return;
+    const efectivo = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo" }]);
+    const bancarias = StorageService.get("cuentas-bancarias", []);
+    const todas = [...efectivo, ...bancarias];
+    sel.innerHTML = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
 }
 
 function actualizarSelectBancos() {
@@ -88,13 +98,16 @@ function actualizarSelectBancos() {
 }
 
 function gestionarCamposPago() {
-    const metodo  = document.getElementById("compraMetodoPago")?.value;
-    const divBanco = document.getElementById("divSeleccionBanco");
-    const divMeses = document.getElementById("divMeses");
+    const metodo   = document.getElementById("compraMetodoPago")?.value;
+    const divBanco  = document.getElementById("divSeleccionBanco");
+    const divMeses  = document.getElementById("divMeses");
+    const divCuenta = document.getElementById("divCuentaOrigen");
     if (!metodo) return;
 
-    if (divBanco) divBanco.style.display = (metodo === 'tarjeta_msi') ? 'block' : 'none';
-    if (divMeses) divMeses.style.display  = (metodo === 'tarjeta_msi') ? 'block' : 'none';
+    // Cuenta origen solo aplica para pago de contado (sale dinero inmediatamente)
+    if (divCuenta) divCuenta.style.display = (metodo === 'contado') ? 'block' : 'none';
+    if (divBanco)  divBanco.style.display  = (metodo === 'tarjeta_msi') ? 'block' : 'none';
+    if (divMeses)  divMeses.style.display  = (metodo === 'tarjeta_msi') ? 'block' : 'none';
 
     actualizarSelectBancos();
 }
@@ -119,6 +132,8 @@ function registrarCompra() {
     if (!prov || !producto) return alert("⚠️ Proveedor o producto no encontrado.");
 
     const bancoSel = document.getElementById("compraBancoSeleccionado")?.value || "";
+    const cuentaOrigenId = document.getElementById("compraCuentaOrigen")?.value || "efectivo";
+    const cuentaOrigenNombre = document.getElementById("compraCuentaOrigen")?.options[document.getElementById("compraCuentaOrigen")?.selectedIndex]?.text || "Efectivo";
     const fechaHoyStr = new Date().toLocaleDateString();
     const fechaPagoMensaje = (metodo === "contado") ? "Hoy (Contado)" : calcularFechaPago(fechaHoyStr, bancoSel);
 
@@ -190,17 +205,6 @@ function registrarCompra() {
             meses: parseInt(document.getElementById("compraMeses")?.value) || 1,
             fecha: nuevaCompra.fecha,
             vencimiento: fechaPagoMensaje
-	 const movs = StorageService.get('movimientosCaja', []);
-    	    movs.push({
-            id: Date.now(),
-            tipo: 'egreso',
-            concepto: 'Compra de contado a proveedor',
-            monto: total,
-            fecha: new Date().toISOString(),
-            cuenta: cuentaPago || 'Caja',
-            referencia: `COMPRA-${compra.id}`
-    	});
-    StorageService.set('movimientosCaja', movs);
         };
 
         if (metodo === "credito_proveedor") {
@@ -240,6 +244,25 @@ function registrarCompra() {
     }
     if (!StorageService.set("recepciones", recepciones)) {
         console.error("❌ Error guardando recepciones");
+    }
+
+    // Afectar caja solo si el pago es de contado (sale dinero inmediatamente)
+    if (metodo === "contado") {
+        const movs = StorageService.get("movimientosCaja", []);
+        movs.push({
+            id: Date.now() + 10,
+            tipo: "egreso",
+            concepto: `Compra de contado — ${producto.nombre} a ${prov.nombre}`,
+            monto: totalCompra,
+            fecha: new Date().toISOString(),
+            cuenta: cuentaOrigenId,
+            etiquetaCuenta: cuentaOrigenNombre,
+            medioPago: "contado",
+            referencia: `COMPRA-${nuevaCompra.id}`
+        });
+        if (!StorageService.set("movimientosCaja", movs)) {
+            console.error("❌ Error guardando movimiento de caja");
+        }
     }
 
     alert(`✅ Registro Exitoso\nProveedor: ${prov.nombre}${avisoActualizacion}`);
