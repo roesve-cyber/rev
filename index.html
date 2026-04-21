@@ -354,6 +354,7 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
                 <div><label>Costo Unitario:</label><input type="number" id="compraCosto" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div><label>Proveedor:</label><select id="compraProveedor" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div><label>Método de Pago:</label><select id="compraMetodoPago" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;" onchange="gestionarCamposPago()"><option value="contado">Contado</option><option value="credito_proveedor">Crédito</option><option value="tarjeta_msi">MSI</option></select></div>
+                <div id="divCuentaOrigen" style="display:block;"><label>💳 Pagar desde:</label><select id="compraCuentaOrigen" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div id="divSeleccionBanco" style="display:none;"><label>Banco:</label><select id="compraBancoSeleccionado" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div id="divMeses" style="display:none;"><label>Meses:</label><input type="number" id="compraMeses" value="12" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div style="grid-column: span 2;"><label><input type="checkbox" id="compraIngresoInmediato" checked> Ingresa producto ahora</label></div>
