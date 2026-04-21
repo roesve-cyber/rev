@@ -167,8 +167,14 @@ function calcularFechaPago(fechaCompraStr, bancoNombre) {
     const infoBanco = tarjetasConfig.find(t => t.banco === bancoNombre);
     if (!infoBanco) return fechaCompraStr;
 
-    let partes = fechaCompraStr.split('/');
-    let fecha = new Date(partes[2], partes[1] - 1, partes[0]);
+    // Manejo seguro del string de fecha (DD/MM/YYYY o YYYY-MM-DD)
+    let fecha;
+    if (fechaCompraStr.includes('/')) {
+        let partes = fechaCompraStr.split('/');
+        fecha = new Date(partes[2], partes[1] - 1, partes[0]);
+    } else {
+        fecha = new Date(fechaCompraStr);
+    }
     if (isNaN(fecha.getTime())) fecha = new Date();
 
     const diaCompra = fecha.getDate();
@@ -178,20 +184,45 @@ function calcularFechaPago(fechaCompraStr, bancoNombre) {
     let mes  = fecha.getMonth();
     let anio = fecha.getFullYear();
 
+    // REGLAS DE CORTE BANCARIO
     if (diaCompra > diaCorte) mes += 1;
-    if (diaLimite < diaCorte)  mes += 1;
+    if (diaLimite < diaCorte) mes += 1;
 
-    return new Date(anio, mes, diaLimite).toLocaleDateString();
+    // El objeto Date ajusta automáticamente si el mes pasa de 11 (Diciembre) al año siguiente
+    return new Date(anio, mes, diaLimite).toLocaleDateString('es-MX');
 }
 
 function calcularCalendarioMSI(fechaRef, meses, nombreBanco) {
-    const config = tarjetasConfig.find(t => t.banco === nombreBanco) || { diaCorte: 15, diaLimite: 5 };
+    const config = tarjetasConfig.find(t => t.banco === nombreBanco);
+    if (!config) return [];
+
     let cronograma = [];
     let d = new Date(fechaRef);
-    let saltoMes = (d.getDate() > config.diaCorte) ? 2 : 1;
+    
+    const diaCompra = d.getDate();
+    const diaCorte  = parseInt(config.diaCorte);
+    const diaLimite = parseInt(config.diaLimite);
+    
+    let mesBase = d.getMonth();
+    let anioBase = d.getFullYear();
+
+    // REGLAS DE CORTE BANCARIO (Sincronizadas con calcularFechaPago)
+    if (diaCompra > diaCorte) mesBase += 1;
+    if (diaLimite < diaCorte) mesBase += 1;
+
     for (let i = 0; i < meses; i++) {
-        let fPago = new Date(d.getFullYear(), d.getMonth() + i + saltoMes, config.diaLimite);
-        cronograma.push({ n: i + 1, fecha: fPago.toISOString().split('T')[0] });
+        // Sumamos 'i' para generar los meses subsecuentes
+        let fPago = new Date(anioBase, mesBase + i, diaLimite);
+        
+        // Formatear a YYYY-MM-DD conservando la zona horaria local
+        let yyyy = fPago.getFullYear();
+        let mm = String(fPago.getMonth() + 1).padStart(2, '0');
+        let dd = String(fPago.getDate()).padStart(2, '0');
+        
+        cronograma.push({ 
+            n: i + 1, 
+            fecha: `${yyyy}-${mm}-${dd}` 
+        });
     }
     return cronograma;
 }
