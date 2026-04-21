@@ -1,4 +1,5 @@
 // ===== PROVEEDORES =====
+alert("COMPRAS.JS INICIA!");
 function guardarProveedor() {
     const nombreInput   = document.getElementById("provNombre");
     const contactoInput = document.getElementById("provContacto");
@@ -823,7 +824,7 @@ function cancelarOrdenCompra(id) {
     StorageService.set('ordenesCompra', lista);
     renderListaOrdenesCompra();
 }
-
+alert("COMPRAS.JS FINAL window exposure");
 console.log('ASIGNANDO FUNCIONES A WINDOW');
 window.renderProveedores = renderProveedores;
 window.guardarProveedor = guardarProveedor;
