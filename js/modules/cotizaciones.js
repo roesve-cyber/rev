@@ -5,12 +5,23 @@ function _foliosCot() {
     const ymd = hoy.getFullYear().toString() +
         String(hoy.getMonth() + 1).padStart(2, '0') +
         String(hoy.getDate()).padStart(2, '0');
+    
     const lista = StorageService.get('cotizaciones', []);
-    const seq = String(lista.length + 1).padStart(4, '0');
+    const foliosHoy = lista.filter(c => c.folio.startsWith('COT-' + ymd));
+    const ultimoNum = foliosHoy.reduce((max, c) => {
+        const num = parseInt(c.folio.split('-')[2]);
+        return num > max ? num : max;
+    }, 0);
+    
+    const seq = String(ultimoNum + 1).padStart(4, '0');
     return 'COT-' + ymd + '-' + seq;
 }
-
+const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN'
+}).format(n);
 function abrirCotizador() {
+    document.querySelector('[data-modal="cotizador"]')?.remove();
     const clientesLista = StorageService.get('clientes', []);
     const productosLista = StorageService.get('productos', []);
     const selClientes = clientesLista.map(c =>
@@ -390,96 +401,107 @@ function imprimirCotizacion(id) {
     const lista = StorageService.get('cotizaciones', []);
     const c = lista.find(x => x.id === id);
     if (!c) return alert('Cotización no encontrada.');
+    
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
-    const dir = cfg.direccion || '';
-    const tel = cfg.telefono || '';
-    const rows = c.articulos.map(a =>
-        `<tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;">${a.nombre}${a.esLibre ? ' <em style="color:#7c3aed;font-size:11px;">(libre)</em>' : ''}</td>
-         <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center;">${a.cantidad}</td>
-         <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">$${Number(a.precio).toFixed(2)}</td>
-         <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">$${Number(a.subtotal).toFixed(2)}</td></tr>`
-    ).join('');
+    
+    // 1. Filas de productos
+    const rows = c.articulos.map(a => `
+        <tr>
+            <td style="padding:4px; border-bottom:1px solid #eee; font-size:11px;">${a.nombre}</td>
+            <td style="padding:4px; border-bottom:1px solid #eee; text-align:center; font-size:11px;">${a.cantidad}</td>
+            <td style="padding:4px; border-bottom:1px solid #eee; text-align:right; font-size:11px;">${fmtMXN(a.precio)}</td>
+        </tr>`).join('');
 
-    const enganche = c.enganche || 0;
-    const saldoFinanciar = c.saldoFinanciar != null ? c.saldoFinanciar : c.total;
-
-    // Build credit plans table
-    let planesHtml = '';
-    if (saldoFinanciar > 0) {
-        const periodicidades = [
-            { key: 'semanal', label: 'Semanal' },
-            { key: 'quincenal', label: 'Quincenal' },
-            { key: 'mensual', label: 'Mensual' }
-        ];
-        let planeRows = '';
-        periodicidades.forEach(per => {
-            const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoFinanciar, per.key);
-            planes.forEach(plan => {
-                planeRows += `<tr>
-                  <td style="padding:6px;border-bottom:1px solid #e5e7eb;">${plan.meses} meses (${plan.pagos} ${per.key === 'semanal' ? 'sem' : per.key === 'quincenal' ? 'quin' : 'meses'})</td>
-                  <td style="padding:6px;border-bottom:1px solid #e5e7eb;text-align:center;">${per.label}</td>
-                  <td style="padding:6px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:bold;">$${Number(plan.abono).toFixed(2)}</td>
-                  <td style="padding:6px;border-bottom:1px solid #e5e7eb;text-align:right;">$${Number(plan.total).toFixed(2)}</td>
-                </tr>`;
-            });
-        });
-        planesHtml = `
-        <div style="margin-top:20px;">
-          <h4 style="margin:0 0 8px;color:#374151;">📅 Opciones de Crédito</h4>
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#f3f4f6;">
-              <th style="padding:6px;text-align:left;">Plazo</th>
-              <th style="padding:6px;text-align:center;">Periodicidad</th>
-              <th style="padding:6px;text-align:right;">Pago / Período</th>
-              <th style="padding:6px;text-align:right;">Total</th>
-            </tr></thead>
-            <tbody>${planeRows}</tbody>
-          </table>
-        </div>`;
+    // 2. FILTRADO: Solo generar planes semanales
+    let planeRows = '';
+    if (c.saldoFinanciar > 0) {
+        // Ejecutamos el cálculo solo para 'semanal'
+        const planesSemanales = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, 'semanal');
+        
+        planeRows = planesSemanales.map(plan => `
+            <tr>
+                <td style="padding:4px; border-bottom:1px solid #eee; font-size:10px;">${plan.meses} meses (${plan.pagos} sem)</td>
+                <td style="padding:4px; border-bottom:1px solid #eee; text-align:right; font-size:10px; font-weight:bold;">${fmtMXN(plan.abono)}</td>
+                <td style="padding:4px; border-bottom:1px solid #eee; text-align:right; font-size:10px;">${fmtMXN(plan.total)}</td>
+            </tr>`).join('');
     }
 
-    const w = window.open('', '_blank', 'width=750,height=900');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Cotización ${c.folio}</title>
-    <style>body{font-family:Arial,sans-serif;padding:32px;color:#111;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:8px;text-align:left;}@media print{button{display:none!important;}}</style>
-    </head><body>
-    <div style="text-align:center;margin-bottom:24px;">
-      <img src="img/logo.png" style="height:70px;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
-      <h2 style="margin:8px 0;">${empresa}</h2>
-      ${dir ? `<p style="margin:2px;font-size:13px;">${dir}</p>` : ''}
-      ${tel ? `<p style="margin:2px;font-size:13px;">Tel: ${tel}</p>` : ''}
-    </div>
-    <hr>
-    <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
-      <div><strong>COTIZACIÓN</strong><br><span style="font-size:20px;color:#1e40af;">${c.folio}</span></div>
-      <div style="text-align:right;">
-        <div>Fecha: ${new Date(c.fecha).toLocaleDateString('es-MX')}</div>
-        <div>Vence: ${new Date(c.fechaVencimiento).toLocaleDateString('es-MX')}</div>
-        <div>Vigencia: ${c.vigenciaDias} días</div>
-      </div>
-    </div>
-    <div style="margin-bottom:16px;"><strong>Cliente:</strong> ${c.clienteNombre}</div>
-    <table>
-      <thead><tr><th>Artículo</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Precio Unit.</th><th style="text-align:right;">Subtotal</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div style="text-align:right;margin-top:12px;font-size:18px;font-weight:bold;">SUBTOTAL: $${Number(c.total).toFixed(2)}</div>
-    ${enganche > 0 ? `
-    <div style="text-align:right;margin-top:4px;color:#374151;">
-      <span>Enganche: <strong>$${Number(enganche).toFixed(2)}</strong></span><br>
-      <span>Saldo a financiar: <strong style="color:#1e40af;">$${Number(saldoFinanciar).toFixed(2)}</strong></span>
-    </div>` : ''}
-    ${planesHtml}
-    ${c.notas ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:6px;"><strong>Notas:</strong> ${c.notas}</div>` : ''}
-    <div style="margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px;text-align:center;">
-      <div><div style="border-top:1px solid #374151;padding-top:8px;margin-top:40px;">Firma del Cliente</div></div>
-      <div><div style="border-top:1px solid #374151;padding-top:8px;margin-top:40px;">Autorizado por</div></div>
-    </div>
-    <div style="text-align:center;margin-top:24px;color:#9ca3af;font-size:12px;">Esta cotización tiene una vigencia de ${c.vigenciaDias} días a partir de la fecha de emisión.</div>
-    <div style="text-align:center;margin-top:12px;">
-      <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-size:15px;">🖨️ Imprimir</button>
-    </div>
-    </body></html>`);
+    const w = window.open('', '_blank', 'width=500,height=700');
+    w.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Cotización ${c.folio}</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+        <style>
+            @page { size: 108mm 140mm; margin: 0; }
+            body { font-family: Arial, sans-serif; margin: 0; padding: 10mm; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
+            #area-impresion { width: 88mm; min-height: 120mm; padding: 5mm; background: white; position: relative; }
+            .controles { margin-bottom: 10px; }
+            h2 { margin: 0; font-size: 14px; text-align: center; color: #1e40af; }
+            .folio-box { display: flex; justify-content: space-between; font-size: 11px; margin: 8px 0; border-bottom: 1px solid #333; }
+            table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+            th { font-size: 9px; background: #f3f4f6; padding: 4px; }
+            .totales { text-align: right; margin-top: 8px; font-size: 12px; font-weight: bold; }
+            .footer { font-size: 8px; text-align: center; margin-top: 15px; color: #999; }
+            @media print { .controles { display: none !important; } body { background: white; padding: 0; } }
+        </style>
+    </head>
+    <body>
+        <div class="controles">
+            <button onclick="window.print()">🖨️ Imprimir</button>
+            <button onclick="guardarComoImagen('${c.folio}')">🖼️ Guardar Imagen</button>
+        </div>
+
+        <div id="area-impresion">
+            <h2>${empresa}</h2>
+            <div style="text-align:center; font-size:10px;">${cfg.direccion || ''}</div>
+            
+            <div class="folio-box">
+                <span>COTIZACIÓN</span>
+                <span>${c.folio}</span>
+            </div>
+
+            <div style="font-size: 10px;"><strong>Cliente:</strong> ${c.clienteNombre}</div>
+
+            <table>
+                <thead><tr><th>Art.</th><th>Cant</th><th style="text-align:right;">Precio</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+
+            <div class="totales">SUBTOTAL: ${fmtMXN(c.total)}</div>
+
+            <div style="margin-top:10px;">
+                <div style="font-size:11px; font-weight:bold; border-bottom:1px solid #eee;">OPCIONES DE PAGO SEMANAL</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="text-align:left;">Plazo</th>
+                            <th style="text-align:right;">Pago Semanal</th>
+                            <th style="text-align:right;">Total a Crédito</th>
+                        </tr>
+                    </thead>
+                    <tbody>${planeRows}</tbody>
+                </table>
+            </div>
+
+            <div class="footer">Vigencia: ${c.vigenciaDias} días.</div>
+        </div>
+
+        <script>
+            function guardarComoImagen(folio) {
+                html2canvas(document.getElementById('area-impresion'), { scale: 2 }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = 'Cot-' + folio + '.png';
+                    link.href = canvas.toDataURL();
+                    link.click();
+                });
+            }
+        </script>
+    </body>
+    </html>`);
     w.document.close();
 }
 
@@ -488,31 +510,52 @@ function convertirCotizacionAVenta(id) {
     const lista = StorageService.get('cotizaciones', []);
     const idx = lista.findIndex(c => c.id === id);
     if (idx === -1) return;
+    
     const cot = lista[idx];
     if (cot.estado !== 'Vigente') return alert('⚠️ Solo se pueden convertir cotizaciones vigentes.');
-    const productosLista = StorageService.get('productos', []);
+    
     let carritoActual = StorageService.get('carrito', []);
+    const productosLista = StorageService.get('productos', []);
+
     cot.articulos.forEach(art => {
-        const prod = productosLista.find(p => String(p.id) === String(art.productoId));
-        if (!prod) return;
-        const existe = carritoActual.findIndex(ci => String(ci.id) === String(prod.id));
-        if (existe !== -1) {
-            carritoActual[existe].cantidad = (carritoActual[existe].cantidad || 1) + art.cantidad;
-        } else {
-            const planes = CalculatorService.calcularCredito(prod.precio);
+        if (art.esLibre) {
+            // Manejo de producto manual
+            const planes = CalculatorService.calcularCredito(art.precio);
             const plan = planes[5] || planes[0];
             carritoActual.push({
-                id: prod.id, nombre: prod.nombre, precioContado: parseFloat(prod.precio) || 0,
-                plazo: plan.meses, totalCredito: plan.total, abonoSemanal: plan.abono,
-                imagen: prod.imagen, cantidad: art.cantidad
+                id: 'LIBRE-' + Date.now() + Math.random(), 
+                nombre: art.nombre,
+                precioContado: art.precio,
+                plazo: plan.meses,
+                totalCredito: plan.total,
+                abonoSemanal: plan.abono,
+                cantidad: art.cantidad,
+                esLibre: true
             });
+        } else {
+            const prod = productosLista.find(p => String(p.id) === String(art.productoId));
+            if (!prod) return;
+            const existe = carritoActual.findIndex(ci => String(ci.id) === String(prod.id));
+            if (existe !== -1) {
+                carritoActual[existe].cantidad += art.cantidad;
+            } else {
+                const planes = CalculatorService.calcularCredito(prod.precio);
+                const plan = planes[5] || planes[0];
+                carritoActual.push({
+                    id: prod.id, nombre: prod.nombre, precioContado: parseFloat(prod.precio),
+                    plazo: plan.meses, totalCredito: plan.total, abonoSemanal: plan.abono,
+                    imagen: prod.imagen, cantidad: art.cantidad
+                });
+            }
         }
     });
+
     StorageService.set('carrito', carritoActual);
     lista[idx].estado = 'Convertida';
     StorageService.set('cotizaciones', lista);
-    actualizarContadorCarrito();
-    alert('✅ Artículos agregados al carrito. Folio referencia: ' + cot.folio);
+    
+    if (window.actualizarContadorCarrito) actualizarContadorCarrito();
+    alert('✅ Convertido con éxito. Folio: ' + cot.folio);
     navA('carrito');
 }
 
