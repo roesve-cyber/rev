@@ -174,38 +174,60 @@ let prodSeleccionado = null;
 const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
 const LogicaCredito = {
-  calcularCredito(precio) {
-    let resultados = [];
-    let totalAnterior = 0;
-    for (let m = 1; m <= 6; m++) {
-      let tasa = (m <= 3) ? 0.02 : 0.025;
-      let totalBase = precio * (1 + (tasa * m));
-      let semanas = m * 4;
-      let pagoSemanal = totalBase / semanas;
-      pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
-      let totalFinal = pagoSemanal * semanas;
-      let intentos = 0;
-      while (totalFinal <= totalAnterior && intentos++ < 100) {
-        pagoSemanal += 5;
-        totalFinal = pagoSemanal * semanas;
-      }
-      if (intentos >= 100) continue;
-      totalAnterior = totalFinal;
-      resultados.push({ meses: m, semanas, abono: pagoSemanal, total: totalFinal });
+    calcularCredito(precioContado) {
+        // Cálculo del Enganche: 10% redondeado al siguiente 10
+        // Ejemplo: $1,543 -> 10% = 154.3 -> Redondeo a $160
+        const engancheBase = precioContado * 0.10;
+        const engancheRedondeado = Math.ceil(engancheBase / 10) * 10;
+        
+        // La base del crédito es la diferencia
+        const saldoAFinanciar = precioContado - engancheRedondeado;
+        
+        let resultados = [];
+        let totalAnterior = 0;
+
+        for (let m = 1; m <= 6; m++) {
+            let tasa = (m <= 3) ? 0.02 : 0.025;
+            let totalBase = saldoAFinanciar * (1 + (tasa * m));
+            let semanas = m * 4;
+            
+            let pagoSemanal = totalBase / semanas;
+            pagoSemanal = Math.ceil(pagoSemanal / 10) * 10; // Redondeo de abono
+            
+            let totalFinal = (pagoSemanal * semanas) + engancheRedondeado;
+            
+            // Asegurar que el total a crédito sea progresivo por mes
+            let intentos = 0;
+            while (totalFinal <= totalAnterior && intentos++ < 100) {
+                pagoSemanal += 5;
+                totalFinal = (pagoSemanal * semanas) + engancheRedondeado;
+            }
+            
+            totalAnterior = totalFinal;
+            resultados.push({ 
+                meses: m, 
+                semanas, 
+                abono: pagoSemanal, 
+                total: totalFinal,
+                enganche: engancheRedondeado 
+            });
+        }
+        return resultados;
+    },
+
+    calcularConPeriodicidad(precio, periodicidad = 'semanal') {
+        const planesSemanales = this.calcularCredito(precio);
+        let mult = 1;
+        if (periodicidad === 'quincenal') mult = 2;
+        if (periodicidad === 'mensual') mult = 4;
+
+        return planesSemanales.map(plan => ({
+            meses: plan.meses,
+            pagos: Math.round(plan.semanas / mult),
+            abono: plan.abono * mult,
+            enganche: plan.enganche // Pasamos el enganche al resultado
+        }));
     }
-    return resultados;
-  },
-  calcularConPeriodicidad(precio, periodicidad = 'semanal') {
-    const planesSemanales = this.calcularCredito(precio);
-    let mult = 1;
-    if (periodicidad === 'quincenal') mult = 2;
-    if (periodicidad === 'mensual') mult = 4;
-    return planesSemanales.map(plan => ({
-      meses: plan.meses,
-      pagos: Math.round(plan.semanas / mult),
-      abono: plan.abono * mult
-    }));
-  }
 };
 
 async function inicializar() {
@@ -305,15 +327,29 @@ function abrirModal(id) {
 }
 
 function actualizarPlazos() {
-  const periodicidad = document.getElementById('periodoSelect').value;
-  const plazos = LogicaCredito.calcularConPeriodicidad(parseFloat(prodSeleccionado.precio), periodicidad);
-  
-  document.getElementById('plazosLista').innerHTML = plazos.map(pl => `
-    <div class="plazo-row">
-      <span><strong>${pl.pagos}</strong> pagos de <strong>${fmt(pl.abono)}</strong></span>
-      <span style="font-size:11px; color:var(--accent); font-weight:700;">${pl.meses} MESES</span>
-    </div>
-  `).join('');
+    const periodicidad = document.getElementById('periodoSelect').value;
+    const precio = parseFloat(prodSeleccionado.precio);
+    const plazos = LogicaCredito.calcularConPeriodicidad(precio, periodicidad);
+    
+    // Obtenemos el enganche del primer plan (es el mismo para todos)
+    const enganche = plazos[0].enganche;
+
+    // Renderizado: Enganche arriba, luego la lista de abonos
+    document.getElementById('plazosLista').innerHTML = `
+        <div style="background: #fff9e6; padding: 12px; border-radius: 8px; border: 1px dashed var(--accent); margin-bottom: 15px; text-align: center;">
+            <span style="font-size: 12px; color: #666; display: block; text-transform: uppercase; font-weight: 700;">Pago Inicial (Enganche)</span>
+            <span style="font-size: 24px; font-weight: 800; color: var(--primary);">${fmt(enganche)}</span>
+        </div>
+        
+        <label style="font-size:11px; font-weight:700; color:#666; display:block; margin-bottom:8px;">PLANES DISPONIBLES:</label>
+        
+        ${plazos.map(pl => `
+            <div class="plazo-row">
+                <span><strong>${pl.pagos}</strong> pagos de <strong>${fmt(pl.abono)}</strong></span>
+                <span style="font-size:11px; color:var(--accent); font-weight:700;">${pl.meses} MESES</span>
+            </div>
+        `).join('')}
+    `;
 }
 
 function cerrarModal() { 
