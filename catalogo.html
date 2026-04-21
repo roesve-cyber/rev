@@ -3,114 +3,98 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MUEBLERIA MI PUEBLITO — Catálogo</title>
+<title>MUEBLERIA MI PUEBLITO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 :root {
-  --primary: #1a2a27; 
-  --accent: #b8842a;
-  --bg-cream: #faf7f2;
-  --white: #ffffff;
-  --font-main: 'Inter', sans-serif;
-  --font-title: 'Montserrat', sans-serif;
+  --primary: #1a2a27; --accent: #b8842a; --bg-cream: #faf7f2; --white: #ffffff;
+  --font-main: 'Inter', sans-serif; --font-title: 'Montserrat', sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--font-main); background-color: var(--bg-cream); color: #1a1a1a; overflow-x: hidden; }
+body { font-family: var(--font-main); background-color: var(--bg-cream); color: #1a1a1a; }
 
-/* --- HEADER --- */
+/* HEADER & HERO */
 .site-header {
-  background: var(--white);
-  padding: 15px 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid #eee;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
+  background: var(--white); padding: 12px 40px; display: flex;
+  justify-content: space-between; align-items: center; border-bottom: 1px solid #eee;
+  position: sticky; top: 0; z-index: 1000;
 }
 .brand h1 { font-family: var(--font-title); font-size: 18px; color: var(--primary); }
 .top-benefits { display: flex; gap: 20px; }
-.benefit-pill { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; }
+.benefit-pill { font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; }
 
-/* --- HERO DARK --- */
-.hero {
-  height: 280px;
-  background: linear-gradient(rgba(0,0,0,0.8), rgba(0,0,0,0.8)), 
-              url('https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=1500');
+.hero-slim {
+  padding: 30px 20px; background: #111; color: white; text-align: center;
+  background-image: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url('https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=1500');
   background-size: cover; background-position: center;
-  display: flex; flex-direction: column; justify-content: center; align-items: center;
-  text-align: center; color: var(--white); padding: 20px;
 }
-.hero h2 { font-family: var(--font-title); font-size: 36px; margin-bottom: 10px; }
-.hero p { font-size: 16px; opacity: 0.8; font-weight: 300; }
+.hero-slim h2 { font-family: var(--font-title); font-size: 28px; margin-bottom: 5px; }
+.hero-slim p { font-size: 15px; opacity: 0.9; }
 
-/* --- FILTROS --- */
-.filter-bar { padding: 25px 40px; max-width: 1400px; margin: 0 auto; text-align: center; }
+/* FILTROS */
+.filter-section { padding: 20px 40px; max-width: 1400px; margin: 0 auto; text-align: center; }
 .cat-btn {
   padding: 8px 20px; border-radius: 50px; border: 1px solid #ddd;
-  background: white; cursor: pointer; font-weight: 600; font-size: 13px;
-  margin: 5px; transition: 0.3s;
+  background: white; cursor: pointer; font-weight: 600; margin: 5px; transition: 0.3s;
 }
 .cat-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
 
-/* --- GRID --- */
-.catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 40px 60px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 25px; }
-.card { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); text-align: center; border: 1px solid #eee; }
-.card-img { height: 200px; padding: 15px; display: flex; align-items: center; justify-content: center; }
-.card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.card-btn { 
-  width: 100%; padding: 12px; border: none; background: #f8f9fa; 
-  color: var(--primary); font-weight: 700; cursor: pointer; border-top: 1px solid #eee;
-  transition: 0.2s;
+.subnav { 
+  display: none; justify-content: center; flex-wrap: wrap; gap: 8px; 
+  margin-top: 15px; padding: 10px; border-top: 1px solid #eee;
 }
-.card-btn:hover { background: var(--primary); color: white; }
+.subnav.visible { display: flex; }
+.sub-pill {
+  padding: 5px 15px; background: #eee; border-radius: 20px; font-size: 12px;
+  cursor: pointer; font-weight: 500;
+}
+.sub-pill.active { background: var(--accent); color: white; }
 
-/* --- MODAL & ZOOM --- */
+/* CATALOGO */
+.catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 40px 60px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 25px; }
+.card { background: white; border-radius: 12px; overflow: hidden; border: 1px solid #eee; transition: 0.3s; cursor: pointer; }
+.card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+.card-img { height: 220px; padding: 20px; display: flex; align-items: center; justify-content: center; }
+.card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.card-body { padding: 15px; border-top: 1px solid #f9f9f9; }
+.card-body h3 { font-size: 14px; color: #444; margin-bottom: 5px; height: 34px; overflow: hidden; }
+.card-price { font-size: 18px; font-weight: 800; color: var(--primary); }
+
+/* MODAL */
 .modal {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); 
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); 
   z-index: 2000; align-items: center; justify-content: center; padding: 20px;
 }
 .modal.open { display: flex; }
 .modal-content {
-  background: white; width: 100%; max-width: 1000px; border-radius: 20px; 
+  background: white; width: 100%; max-width: 950px; border-radius: 15px; 
   display: flex; overflow: hidden; position: relative; max-height: 90vh;
 }
-.close-modal { 
-  position: absolute; top: 15px; right: 15px; background: white; border: none; 
-  width: 35px; height: 35px; border-radius: 50%; cursor: pointer; z-index: 10;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-weight: bold;
-}
-.modal-left { flex: 1.2; background: #fff; overflow: hidden; position: relative; cursor: zoom-in; display: flex; align-items: center; justify-content: center; }
-.modal-left img { width: 100%; transition: transform 0.1s ease-out; pointer-events: none; }
-.modal-right { flex: 1; padding: 40px; overflow-y: auto; background: #fcfcfc; }
+.modal-left { flex: 1.2; background: #fff; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: zoom-in; }
+.modal-left img { width: 100%; transition: transform 0.1s ease; }
+.modal-right { flex: 1; padding: 30px; overflow-y: auto; }
 
-.price-tag { font-size: 28px; font-weight: 800; color: var(--primary); margin: 15px 0; }
-.plazos-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 20px; }
-.plazo-item { 
-  display: flex; justify-content: space-between; align-items: center; 
-  padding: 12px 15px; background: white; border: 1px solid #eee; border-radius: 8px;
+.periodicidad-select {
+  width: 100%; padding: 10px; margin: 15px 0; border-radius: 8px; border: 1px solid #ddd;
 }
-.plazo-item strong { font-size: 16px; color: var(--primary); }
-.plazo-label { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; }
-
-.btn-whatsapp {
-  display: block; width: 100%; background: #25d366; color: white; 
-  text-align: center; padding: 15px; border-radius: 10px; text-decoration: none;
-  font-weight: 700; margin-top: 25px; transition: 0.3s;
+.plazo-row {
+  display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee;
 }
-.btn-whatsapp:hover { background: #128c7e; transform: scale(1.02); }
 
-@media (max-width: 850px) {
+.btn-wa {
+  display: block; width: 100%; background: #25d366; color: white; text-align: center;
+  padding: 15px; border-radius: 10px; text-decoration: none; font-weight: 700; margin-top: 20px;
+}
+
+@media (max-width: 768px) {
   .modal-content { flex-direction: column; overflow-y: auto; }
-  .modal-left { height: 300px; }
-  .site-header { flex-direction: column; gap: 10px; }
-  .grid { grid-template-columns: 1fr 1fr; gap: 15px; padding: 0 15px; }
+  .modal-left { height: 250px; }
+  .grid { grid-template-columns: 1fr 1fr; gap: 15px; padding: 0 10px; }
 }
 </style>
 </head>
@@ -120,38 +104,45 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
   <div class="brand"><h1>MUEBLERIA MI PUEBLITO</h1></div>
   <div class="top-benefits">
     <div class="benefit-pill">🛡️ Calidad</div>
-    <div class="benefit-pill">🗓️ Pagos Semanales</div>
-    <div class="benefit-pill">🤝 Atención</div>
+    <div class="benefit-pill">🗓️ Abonos</div>
   </div>
 </header>
 
-<section class="hero">
+<section class="hero-slim">
   <h2>Tu hogar, tu estilo.</h2>
-  <p>Encuentra los mejores muebles con abonos que sí puedes pagar.</p>
+  <p>Encuentra los mejores muebles con abonos que sí puedes.</p>
 </section>
 
-<div class="filter-bar">
+<div class="filter-section">
   <div id="categoriasNav">
-    <button class="cat-btn active" onclick="filtrar('todos', this)">Todos</button>
+    <button class="cat-btn active" onclick="setCategoria('todos', this)">Todos</button>
   </div>
+  <div id="subnav" class="subnav"></div>
 </div>
 
 <main class="catalog-container">
   <div id="grid" class="grid"></div>
 </main>
 
-<div class="modal" id="modal" onclick="if(event.target == this) cerrarModal()">
+<div class="modal" id="modal" onclick="if(event.target==this) cerrarModal()">
   <div class="modal-content">
-    <button class="close-modal" onclick="cerrarModal()">✕</button>
-    <div class="modal-left" id="zoomContainer" onmousemove="zoom(event)" onmouseleave="resetZoom()">
-      <img id="mImg" src="" alt="">
+    <button onclick="cerrarModal()" style="position:absolute; top:15px; right:15px; border:none; background:white; width:30px; height:30px; border-radius:50%; cursor:pointer; z-index:10; font-weight:bold;">✕</button>
+    <div class="modal-left" id="zoomC" onmousemove="zoom(event)" onmouseleave="resetZoom()">
+      <img id="mImg" src="">
     </div>
     <div class="modal-right">
-      <h2 id="mTitle" style="font-family:var(--font-title); font-size: 20px;"></h2>
-      <div id="mPrice" class="price-tag"></div>
-      <p style="font-size: 12px; color: #666; font-weight: 600;">PLANES DISPONIBLES:</p>
-      <div id="mPlazos" class="plazos-grid"></div>
-      <a id="btnWA" href="#" target="_blank" class="btn-whatsapp">Cotizar por WhatsApp</a>
+      <h2 id="mTitle" style="font-family:var(--font-title);"></h2>
+      <div id="mPrice" style="font-size:24px; font-weight:800; color:var(--primary); margin:10px 0;"></div>
+      
+      <label style="font-size:11px; font-weight:700;">FORMA DE PAGO:</label>
+      <select id="periodoSelect" class="periodicidad-select" onchange="actualizarPlazos()">
+        <option value="semanal">Semanal</option>
+        <option value="quincenal">Quincenal</option>
+        <option value="mensual">Mensual</option>
+      </select>
+
+      <div id="plazosLista"></div>
+      <a id="btnWA" href="#" target="_blank" class="btn-wa">Cotizar por WhatsApp</a>
     </div>
   </div>
 </div>
@@ -168,122 +159,144 @@ const firebaseConfig = {
 
 let productos = [];
 let catActiva = 'todos';
+let subActiva = 'todos';
+let prodSeleccionado = null;
 
 const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-// --- LÓGICA DE CÁLCULO ORIGINAL ---
-function calcularTablaPlazos(precio) {
-  if (precio <= 1) return null;
-  
-  let resultados = [];
-  const configuracion = [
-    { meses: 1, semanas: 4 },
-    { meses: 2, semanas: 8 },
-    { meses: 3, semanas: 12 },
-    { meses: 4, semanas: 16 },
-    { meses: 5, semanas: 20 },
-    { meses: 6, semanas: 24 }
-  ];
-
-  configuracion.forEach((config, index) => {
-    let tasa = config.meses <= 3 ? 0.08 : 0.15;
-    let totalConInteres = precio * (1 + tasa);
-    let abono = Math.ceil((totalConInteres / config.semanas) / 5) * 5;
-
-    // Regla de incremento: El total debe ser mayor al del mes anterior
-    if (index > 0) {
-      let totalAnterior = resultados[index - 1].abono * resultados[index - 1].semanas;
-      while ((abono * config.semanas) <= totalAnterior) {
-        abono += 5;
+// --- LÓGICA DE CÁLCULO SOLICITADA ---
+const LogicaCredito = {
+  calcularCredito(precio) {
+    let resultados = [];
+    let totalAnterior = 0;
+    for (let m = 1; m <= 6; m++) {
+      let tasa = (m <= 3) ? 0.02 : 0.025;
+      let totalBase = precio * (1 + (tasa * m));
+      let semanas = m * 4;
+      let pagoSemanal = totalBase / semanas;
+      pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+      let totalFinal = pagoSemanal * semanas;
+      let intentos = 0;
+      while (totalFinal <= totalAnterior && intentos++ < 100) {
+        pagoSemanal += 5;
+        totalFinal = pagoSemanal * semanas;
       }
+      if (intentos >= 100) continue;
+      totalAnterior = totalFinal;
+      resultados.push({ meses: m, semanas, abono: pagoSemanal, total: totalFinal });
     }
+    return resultados;
+  },
+  calcularConPeriodicidad(precio, periodicidad = 'semanal') {
+    const planesSemanales = this.calcularCredito(precio);
+    let mult = 1;
+    if (periodicidad === 'quincenal') mult = 2;
+    if (periodicidad === 'mensual') mult = 4;
+    return planesSemanales.map(plan => ({
+      meses: plan.meses,
+      pagos: Math.round(plan.semanas / mult),
+      abono: plan.abono * mult
+    }));
+  }
+};
 
-    resultados.push({ ...config, abono });
-  });
-  return resultados;
-}
-
-async function cargar() {
+async function inicializar() {
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const doc = await firebase.firestore().collection('posData').doc('productos').get();
   productos = (doc.data().data || []).filter(p => p.Activo != 0);
   
-  const cats = [...new Set(productos.map(p => p.categoria || "Otros"))];
+  const cats = [...new Set(productos.map(p => p.categoria || "Varios"))];
   cats.forEach(c => {
-    const b = document.createElement('button');
-    b.className = 'cat-btn';
-    b.textContent = c;
-    b.onclick = () => filtrar(c, b);
-    document.getElementById('categoriasNav').appendChild(b);
+    const btn = document.createElement('button');
+    btn.className = 'cat-btn';
+    btn.textContent = c;
+    btn.onclick = () => setCategoria(c, btn);
+    document.getElementById('categoriasNav').appendChild(btn);
   });
   render();
 }
 
-function filtrar(c, b) {
+function setCategoria(c, btn) {
   catActiva = c;
-  document.querySelectorAll('.cat-btn').forEach(btn => btn.classList.remove('active'));
-  b.classList.add('active');
+  subActiva = 'todos';
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  
+  const subnav = document.getElementById('subnav');
+  if (c === 'todos') {
+    subnav.classList.remove('visible');
+  } else {
+    const subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
+    subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
+      subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
+    subnav.classList.add('visible');
+  }
+  render();
+}
+
+function setSub(s, pill) {
+  subActiva = s;
+  document.querySelectorAll('.sub-pill').forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
   render();
 }
 
 function render() {
-  const container = document.getElementById('grid');
-  const filtrados = productos.filter(p => catActiva === 'todos' || p.categoria === catActiva);
+  const grid = document.getElementById('grid');
+  const filtrados = productos.filter(p => {
+    const matchCat = catActiva === 'todos' || p.categoria === catActiva;
+    const matchSub = subActiva === 'todos' || p.subcategoria === subActiva;
+    return matchCat && matchSub;
+  });
   
-  container.innerHTML = filtrados.map(p => `
-    <div class="card">
+  grid.innerHTML = filtrados.map(p => `
+    <div class="card" onclick="abrirModal('${p.id}')">
       <div class="card-img"><img src="${p.imagen}" loading="lazy"></div>
-      <button class="card-btn" onclick="abrirDetalle('${p.id}')">Ver Detalle</button>
+      <div class="card-body">
+        <h3>${p.nombre}</h3>
+        <div class="card-price">${fmt(p.precio)}</div>
+      </div>
     </div>
   `).join('');
 }
 
-function abrirDetalle(id) {
-  const p = productos.find(x => x.id == id);
-  const precio = parseFloat(p.precio);
-  const plazos = calcularTablaPlazos(precio);
-
-  document.getElementById('mImg').src = p.imagen;
-  document.getElementById('mTitle').textContent = p.nombre;
-  document.getElementById('mPrice').textContent = fmt(precio);
+function abrirModal(id) {
+  prodSeleccionado = productos.find(x => x.id == id);
+  document.getElementById('mImg').src = prodSeleccionado.imagen;
+  document.getElementById('mTitle').textContent = prodSeleccionado.nombre;
+  document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio) + " de contado";
+  document.getElementById('periodoSelect').value = 'semanal';
+  actualizarPlazos();
   
-  const pGrid = document.getElementById('mPlazos');
-  if (plazos) {
-    pGrid.innerHTML = plazos.map(pl => `
-      <div class="plazo-item">
-        <strong>${fmt(pl.abono)} <span style="font-weight:400; font-size:12px;">Semanales</span></strong>
-        <span class="plazo-label">A ${pl.meses} ${pl.meses == 1 ? 'Mes' : 'Meses'}</span>
-      </div>
-    `).join('');
-  } else {
-    pGrid.innerHTML = '<p style="color:#999; font-style:italic;">Solo venta de contado</p>';
-  }
-
-  const msg = encodeURIComponent(`¡Hola! Me interesa este producto: ${p.nombre} (${fmt(precio)})`);
+  const msg = encodeURIComponent(`Hola! Me interesa: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
   document.getElementById('btnWA').href = `https://wa.me/522411081657?text=${msg}`;
   document.getElementById('modal').classList.add('open');
 }
 
+function actualizarPlazos() {
+  const periodicidad = document.getElementById('periodoSelect').value;
+  const plazos = LogicaCredito.calcularConPeriodicidad(parseFloat(prodSeleccionado.precio), periodicidad);
+  
+  document.getElementById('plazosLista').innerHTML = plazos.map(pl => `
+    <div class="plazo-row">
+      <span><strong>${pl.pagos}</strong> pagos de <strong>${fmt(pl.abono)}</strong></span>
+      <span style="font-size:11px; color:var(--accent); font-weight:700;">A ${pl.meses} MESES</span>
+    </div>
+  `).join('');
+}
+
 function cerrarModal() { document.getElementById('modal').classList.remove('open'); }
 
-// --- FUNCIONES DE ZOOM ---
 function zoom(e) {
-  const img = document.querySelector('#modal-left img') || document.getElementById('mImg');
-  const container = document.getElementById('zoomContainer');
+  const container = document.getElementById('zoomC');
+  const img = document.getElementById('mImg');
   const rect = container.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  
-  img.style.transformOrigin = `${(x / rect.width) * 100}% ${(y / rect.height) * 100}%`;
+  img.style.transformOrigin = `${((e.clientX - rect.left)/rect.width)*100}% ${((e.clientY - rect.top)/rect.height)*100}%`;
   img.style.transform = "scale(2)";
 }
+function resetZoom() { document.getElementById('mImg').style.transform = "scale(1)"; }
 
-function resetZoom() {
-  const img = document.getElementById('mImg');
-  img.style.transform = "scale(1)";
-}
-
-cargar();
+inicializar();
 </script>
 </body>
 </html>
