@@ -15,86 +15,105 @@
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--font-main); background-color: var(--bg-cream); color: #1a1a1a; }
+body { font-family: var(--font-main); background-color: var(--bg-cream); color: #1a1a1a; -webkit-tap-highlight-color: transparent; }
 
-/* HEADER & HERO */
+/* HEADER & HERO COMPACTO */
 .site-header {
-  background: var(--white); padding: 12px 40px; display: flex;
+  background: var(--white); padding: 12px 20px; display: flex;
   justify-content: space-between; align-items: center; border-bottom: 1px solid #eee;
   position: sticky; top: 0; z-index: 1000;
 }
-.brand h1 { font-family: var(--font-title); font-size: 18px; color: var(--primary); }
-.top-benefits { display: flex; gap: 20px; }
-.benefit-pill { font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; }
+.brand h1 { font-family: var(--font-title); font-size: 16px; color: var(--primary); }
+.top-benefits { display: flex; gap: 10px; }
+.benefit-pill { font-size: 10px; font-weight: 700; color: var(--primary); text-transform: uppercase; }
 
 .hero-slim {
-  padding: 30px 20px; background: #111; color: white; text-align: center;
+  padding: 25px 15px; background: #111; color: white; text-align: center;
   background-image: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url('https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=1500');
   background-size: cover; background-position: center;
 }
-.hero-slim h2 { font-family: var(--font-title); font-size: 28px; margin-bottom: 5px; }
-.hero-slim p { font-size: 15px; opacity: 0.9; }
+.hero-slim h2 { font-family: var(--font-title); font-size: 22px; margin-bottom: 5px; }
+.hero-slim p { font-size: 14px; opacity: 0.9; }
 
-/* FILTROS */
-.filter-section { padding: 20px 40px; max-width: 1400px; margin: 0 auto; text-align: center; }
+/* FILTROS CON SCROLL FLUIDO */
+.filter-section { padding: 15px 10px; max-width: 1400px; margin: 0 auto; text-align: center; }
+.cat-container { display: flex; gap: 8px; overflow-x: auto; padding: 5px 0 15px; scrollbar-width: none; }
+.cat-container::-webkit-scrollbar { display: none; }
+
 .cat-btn {
-  padding: 8px 20px; border-radius: 50px; border: 1px solid #ddd;
-  background: white; cursor: pointer; font-weight: 600; margin: 5px; transition: 0.3s;
+  padding: 8px 18px; border-radius: 50px; border: 1px solid #ddd;
+  background: white; cursor: pointer; font-weight: 600; font-size: 13px;
+  white-space: nowrap; transition: 0.3s; flex-shrink: 0;
 }
 .cat-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
 
 .subnav { 
-  display: none; justify-content: center; flex-wrap: wrap; gap: 8px; 
-  margin-top: 15px; padding: 10px; border-top: 1px solid #eee;
+  display: none; justify-content: flex-start; overflow-x: auto; gap: 8px; 
+  margin-top: 5px; padding: 10px 0; border-top: 1px solid #eee;
 }
 .subnav.visible { display: flex; }
 .sub-pill {
-  padding: 5px 15px; background: #eee; border-radius: 20px; font-size: 12px;
-  cursor: pointer; font-weight: 500;
+  padding: 6px 14px; background: #eee; border-radius: 20px; font-size: 11px;
+  cursor: pointer; font-weight: 500; white-space: nowrap; flex-shrink: 0;
 }
 .sub-pill.active { background: var(--accent); color: white; }
 
-/* CATALOGO */
-.catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 40px 60px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 25px; }
-.card { background: white; border-radius: 12px; overflow: hidden; border: 1px solid #eee; transition: 0.3s; cursor: pointer; }
-.card:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
-.card-img { height: 220px; padding: 20px; display: flex; align-items: center; justify-content: center; }
+/* CATALOGO OPTIMIZADO PARA MÓVIL */
+.catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 15px 60px; }
+.grid { 
+  display: grid; 
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
+  gap: 20px; 
+}
+
+.card { background: white; border-radius: 15px; overflow: hidden; border: 1px solid #eee; transition: 0.3s; cursor: pointer; display: flex; flex-direction: column; }
+.card-img { width: 100%; height: 260px; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fff; }
 .card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.card-body { padding: 15px; border-top: 1px solid #f9f9f9; }
-.card-body h3 { font-size: 14px; color: #444; margin-bottom: 5px; height: 34px; overflow: hidden; }
+.card-body { padding: 15px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between; border-top: 1px solid #f5f5f5; }
+.card-body h3 { font-size: 15px; color: #333; margin-bottom: 8px; line-height: 1.4; font-weight: 600; }
 .card-price { font-size: 18px; font-weight: 800; color: var(--primary); }
 
-/* MODAL */
+/* MODAL FULL SCREEN MOBILE */
 .modal {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); 
-  z-index: 2000; align-items: center; justify-content: center; padding: 20px;
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); 
+  z-index: 2000; align-items: center; justify-content: center;
 }
 .modal.open { display: flex; }
 .modal-content {
-  background: white; width: 100%; max-width: 950px; border-radius: 15px; 
-  display: flex; overflow: hidden; position: relative; max-height: 90vh;
+  background: white; width: 100%; max-width: 950px; border-radius: 0; 
+  display: flex; flex-direction: column; overflow-y: auto; position: relative; height: 100%;
 }
-.modal-left { flex: 1.2; background: #fff; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: zoom-in; }
-.modal-left img { width: 100%; transition: transform 0.1s ease; }
-.modal-right { flex: 1; padding: 30px; overflow-y: auto; }
+.modal-left { width: 100%; background: #fff; height: 350px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.modal-left img { max-width: 90%; max-height: 90%; transition: transform 0.1s ease; }
+.modal-right { padding: 25px; }
 
 .periodicidad-select {
-  width: 100%; padding: 10px; margin: 15px 0; border-radius: 8px; border: 1px solid #ddd;
+  width: 100%; padding: 12px; margin: 15px 0; border-radius: 8px; border: 1px solid #ddd; font-size: 16px;
 }
 .plazo-row {
-  display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee;
+  display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee;
 }
 
 .btn-wa {
   display: block; width: 100%; background: #25d366; color: white; text-align: center;
-  padding: 15px; border-radius: 10px; text-decoration: none; font-weight: 700; margin-top: 20px;
+  padding: 16px; border-radius: 12px; text-decoration: none; font-weight: 700; margin-top: 20px; font-size: 16px;
 }
 
-@media (max-width: 768px) {
-  .modal-content { flex-direction: column; overflow-y: auto; }
-  .modal-left { height: 250px; }
-  .grid { grid-template-columns: 1fr 1fr; gap: 15px; padding: 0 10px; }
+/* --- RESPONSIVE ESPECÍFICO PARA CELULARES --- */
+@media (max-width: 600px) {
+  .grid { grid-template-columns: 1fr; } /* Un solo producto por fila para máximo detalle */
+  .card-img { height: 300px; } /* Imagen más grande en móvil */
+  .brand h1 { font-size: 14px; }
+  .top-benefits { display: none; } /* Ocultamos beneficios en móvil para ganar espacio */
+  
+  .modal-content { height: 100%; max-height: 100%; border-radius: 0; }
+  .modal-left { height: 300px; }
+}
+
+@media (min-width: 900px) {
+  .modal-content { flex-direction: row; height: auto; max-height: 90vh; border-radius: 20px; }
+  .modal-left { width: 55%; height: auto; min-height: 500px; }
+  .modal-right { width: 45%; }
 }
 </style>
 </head>
@@ -114,8 +133,8 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
 </section>
 
 <div class="filter-section">
-  <div id="categoriasNav">
-    <button class="cat-btn active" onclick="setCategoria('todos', this)">Todos</button>
+  <div id="categoriasNav" class="cat-container">
+    <button class="cat-btn active" onclick="setCategoria('todos', this)">Todos los productos</button>
   </div>
   <div id="subnav" class="subnav"></div>
 </div>
@@ -126,23 +145,23 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
 
 <div class="modal" id="modal" onclick="if(event.target==this) cerrarModal()">
   <div class="modal-content">
-    <button onclick="cerrarModal()" style="position:absolute; top:15px; right:15px; border:none; background:white; width:30px; height:30px; border-radius:50%; cursor:pointer; z-index:10; font-weight:bold;">✕</button>
-    <div class="modal-left" id="zoomC" onmousemove="zoom(event)" onmouseleave="resetZoom()">
+    <button onclick="cerrarModal()" style="position:absolute; top:15px; right:15px; border:none; background:rgba(0,0,0,0.1); width:36px; height:36px; border-radius:50%; cursor:pointer; z-index:10; font-weight:bold; font-size:18px;">✕</button>
+    <div class="modal-left" id="zoomC" onmousemove="zoom(event)" onmouseleave="resetZoom()" ontouchmove="zoom(event)">
       <img id="mImg" src="">
     </div>
     <div class="modal-right">
-      <h2 id="mTitle" style="font-family:var(--font-title);"></h2>
-      <div id="mPrice" style="font-size:24px; font-weight:800; color:var(--primary); margin:10px 0;"></div>
+      <h2 id="mTitle" style="font-family:var(--font-title); font-size: 20px; line-height: 1.2;"></h2>
+      <div id="mPrice" style="font-size:22px; font-weight:800; color:var(--primary); margin:10px 0;"></div>
       
-      <label style="font-size:11px; font-weight:700;">FORMA DE PAGO:</label>
+      <label style="font-size:11px; font-weight:700; color:#666;">ELIGE TU FORMA DE PAGO:</label>
       <select id="periodoSelect" class="periodicidad-select" onchange="actualizarPlazos()">
-        <option value="semanal">Semanal</option>
-        <option value="quincenal">Quincenal</option>
-        <option value="mensual">Mensual</option>
+        <option value="semanal">Abono Semanal</option>
+        <option value="quincenal">Abono Quincenal</option>
+        <option value="mensual">Abono Mensual</option>
       </select>
 
       <div id="plazosLista"></div>
-      <a id="btnWA" href="#" target="_blank" class="btn-wa">Cotizar por WhatsApp</a>
+      <a id="btnWA" href="#" target="_blank" class="btn-wa">Consultar por WhatsApp</a>
     </div>
   </div>
 </div>
@@ -164,7 +183,7 @@ let prodSeleccionado = null;
 
 const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-// --- LÓGICA DE CÁLCULO SOLICITADA ---
+// --- LÓGICA DE CÁLCULO ORIGINAL ---
 const LogicaCredito = {
   calcularCredito(precio) {
     let resultados = [];
@@ -202,11 +221,12 @@ const LogicaCredito = {
 
 async function inicializar() {
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-  const doc = await firebase.firestore().collection('posData').doc('productos').get();
+  const db = firebase.firestore();
+  const doc = await db.collection('posData').doc('productos').get();
   productos = (doc.data().data || []).filter(p => p.Activo != 0);
   
   const cats = [...new Set(productos.map(p => p.categoria || "Varios"))];
-  cats.forEach(c => {
+  cats.sort().forEach(c => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = c;
@@ -227,9 +247,13 @@ function setCategoria(c, btn) {
     subnav.classList.remove('visible');
   } else {
     const subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
-    subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
-      subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
-    subnav.classList.add('visible');
+    if(subs.length > 0) {
+      subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
+        subs.sort().map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
+      subnav.classList.add('visible');
+    } else {
+      subnav.classList.remove('visible');
+    }
   }
   render();
 }
@@ -254,7 +278,7 @@ function render() {
       <div class="card-img"><img src="${p.imagen}" loading="lazy"></div>
       <div class="card-body">
         <h3>${p.nombre}</h3>
-        <div class="card-price">${fmt(p.precio)}</div>
+        <div class="card-price">${fmt(p.precio)} <span style="font-size:10px; color:#999; font-weight:400;">CONTADO</span></div>
       </div>
     </div>
   `).join('');
@@ -264,13 +288,14 @@ function abrirModal(id) {
   prodSeleccionado = productos.find(x => x.id == id);
   document.getElementById('mImg').src = prodSeleccionado.imagen;
   document.getElementById('mTitle').textContent = prodSeleccionado.nombre;
-  document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio) + " de contado";
+  document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio);
   document.getElementById('periodoSelect').value = 'semanal';
   actualizarPlazos();
   
-  const msg = encodeURIComponent(`Hola! Me interesa: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
+  const msg = encodeURIComponent(`¡Hola! Me interesa este producto de su catálogo: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
   document.getElementById('btnWA').href = `https://wa.me/522411081657?text=${msg}`;
   document.getElementById('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 
 function actualizarPlazos() {
@@ -280,18 +305,24 @@ function actualizarPlazos() {
   document.getElementById('plazosLista').innerHTML = plazos.map(pl => `
     <div class="plazo-row">
       <span><strong>${pl.pagos}</strong> pagos de <strong>${fmt(pl.abono)}</strong></span>
-      <span style="font-size:11px; color:var(--accent); font-weight:700;">A ${pl.meses} MESES</span>
+      <span style="font-size:11px; color:var(--accent); font-weight:700;">${pl.meses} MESES</span>
     </div>
   `).join('');
 }
 
-function cerrarModal() { document.getElementById('modal').classList.remove('open'); }
+function cerrarModal() { 
+  document.getElementById('modal').classList.remove('open'); 
+  document.body.style.overflow = 'auto';
+}
 
 function zoom(e) {
   const container = document.getElementById('zoomC');
   const img = document.getElementById('mImg');
   const rect = container.getBoundingClientRect();
-  img.style.transformOrigin = `${((e.clientX - rect.left)/rect.width)*100}% ${((e.clientY - rect.top)/rect.height)*100}%`;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  
+  img.style.transformOrigin = `${((clientX - rect.left)/rect.width)*100}% ${((clientY - rect.top)/rect.height)*100}%`;
   img.style.transform = "scale(2)";
 }
 function resetZoom() { document.getElementById('mImg').style.transform = "scale(1)"; }
