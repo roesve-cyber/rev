@@ -17,15 +17,13 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: var(--font-main); background-color: var(--bg-cream); color: #1a1a1a; -webkit-tap-highlight-color: transparent; }
 
-/* HEADER & HERO COMPACTO */
+/* HEADER & HERO */
 .site-header {
   background: var(--white); padding: 12px 20px; display: flex;
   justify-content: space-between; align-items: center; border-bottom: 1px solid #eee;
   position: sticky; top: 0; z-index: 1000;
 }
 .brand h1 { font-family: var(--font-title); font-size: 16px; color: var(--primary); }
-.top-benefits { display: flex; gap: 10px; }
-.benefit-pill { font-size: 10px; font-weight: 700; color: var(--primary); text-transform: uppercase; }
 
 .hero-slim {
   padding: 25px 15px; background: #111; color: white; text-align: center;
@@ -35,7 +33,7 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
 .hero-slim h2 { font-family: var(--font-title); font-size: 22px; margin-bottom: 5px; }
 .hero-slim p { font-size: 14px; opacity: 0.9; }
 
-/* FILTROS CON SCROLL FLUIDO */
+/* FILTROS */
 .filter-section { padding: 15px 10px; max-width: 1400px; margin: 0 auto; text-align: center; }
 .cat-container { display: flex; gap: 8px; overflow-x: auto; padding: 5px 0 15px; scrollbar-width: none; }
 .cat-container::-webkit-scrollbar { display: none; }
@@ -58,7 +56,7 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
 }
 .sub-pill.active { background: var(--accent); color: white; }
 
-/* CATALOGO OPTIMIZADO PARA MÓVIL */
+/* CATALOGO */
 .catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 15px 60px; }
 .grid { 
   display: grid; 
@@ -69,11 +67,11 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
 .card { background: white; border-radius: 15px; overflow: hidden; border: 1px solid #eee; transition: 0.3s; cursor: pointer; display: flex; flex-direction: column; }
 .card-img { width: 100%; height: 260px; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fff; }
 .card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.card-body { padding: 15px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between; border-top: 1px solid #f5f5f5; }
-.card-body h3 { font-size: 15px; color: #333; margin-bottom: 8px; line-height: 1.4; font-weight: 600; }
+.card-body { padding: 15px; flex-grow: 1; border-top: 1px solid #f5f5f5; }
+.card-body h3 { font-size: 15px; color: #333; margin-bottom: 8px; line-height: 1.4; font-weight: 600; word-wrap: break-word; }
 .card-price { font-size: 18px; font-weight: 800; color: var(--primary); }
 
-/* MODAL FULL SCREEN MOBILE */
+/* MODAL */
 .modal {
   display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); 
   z-index: 2000; align-items: center; justify-content: center;
@@ -99,15 +97,10 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
   padding: 16px; border-radius: 12px; text-decoration: none; font-weight: 700; margin-top: 20px; font-size: 16px;
 }
 
-/* --- RESPONSIVE ESPECÍFICO PARA CELULARES --- */
 @media (max-width: 600px) {
-  .grid { grid-template-columns: 1fr; } /* Un solo producto por fila para máximo detalle */
-  .card-img { height: 300px; } /* Imagen más grande en móvil */
-  .brand h1 { font-size: 14px; }
-  .top-benefits { display: none; } /* Ocultamos beneficios en móvil para ganar espacio */
-  
+  .grid { grid-template-columns: 1fr; }
+  .card-img { height: 320px; }
   .modal-content { height: 100%; max-height: 100%; border-radius: 0; }
-  .modal-left { height: 300px; }
 }
 
 @media (min-width: 900px) {
@@ -121,10 +114,6 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
 
 <header class="site-header">
   <div class="brand"><h1>MUEBLERIA MI PUEBLITO</h1></div>
-  <div class="top-benefits">
-    <div class="benefit-pill">🛡️ Calidad</div>
-    <div class="benefit-pill">🗓️ Abonos</div>
-  </div>
 </header>
 
 <section class="hero-slim">
@@ -181,9 +170,9 @@ let catActiva = 'todos';
 let subActiva = 'todos';
 let prodSeleccionado = null;
 
+// FORMATEO FORZADO A PESOS MEXICANOS
 const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-// --- LÓGICA DE CÁLCULO ORIGINAL ---
 const LogicaCredito = {
   calcularCredito(precio) {
     let resultados = [];
@@ -221,19 +210,36 @@ const LogicaCredito = {
 
 async function inicializar() {
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-  const db = firebase.firestore();
-  const doc = await db.collection('posData').doc('productos').get();
+  const doc = await firebase.firestore().collection('posData').doc('productos').get();
   productos = (doc.data().data || []).filter(p => p.Activo != 0);
   
-  const cats = [...new Set(productos.map(p => p.categoria || "Varios"))];
-  cats.sort().forEach(c => {
+  generarMenuCategorias();
+  render();
+}
+
+function generarMenuCategorias() {
+  const nav = document.getElementById('categoriasNav');
+  const catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
+  
+  // ORDEN ESPECÍFICO SOLICITADO
+  const ordenDeseado = ["muebles", "colchones", "linea blanca", "electronica"];
+  
+  catsEnData.sort((a, b) => {
+    let ia = ordenDeseado.indexOf(a.toLowerCase());
+    let ib = ordenDeseado.indexOf(b.toLowerCase());
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  catsEnData.forEach(c => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = c;
     btn.onclick = () => setCategoria(c, btn);
-    document.getElementById('categoriasNav').appendChild(btn);
+    nav.appendChild(btn);
   });
-  render();
 }
 
 function setCategoria(c, btn) {
@@ -278,7 +284,7 @@ function render() {
       <div class="card-img"><img src="${p.imagen}" loading="lazy"></div>
       <div class="card-body">
         <h3>${p.nombre}</h3>
-        <div class="card-price">${fmt(p.precio)} <span style="font-size:10px; color:#999; font-weight:400;">CONTADO</span></div>
+        <div class="card-price">${fmt(p.precio)} <span style="font-size:10px; color:#999; font-weight:400;">MXN CONTADO</span></div>
       </div>
     </div>
   `).join('');
@@ -288,11 +294,11 @@ function abrirModal(id) {
   prodSeleccionado = productos.find(x => x.id == id);
   document.getElementById('mImg').src = prodSeleccionado.imagen;
   document.getElementById('mTitle').textContent = prodSeleccionado.nombre;
-  document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio);
+  document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio) + " de contado";
   document.getElementById('periodoSelect').value = 'semanal';
   actualizarPlazos();
   
-  const msg = encodeURIComponent(`¡Hola! Me interesa este producto de su catálogo: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
+  const msg = encodeURIComponent(`Hola! Me interesa: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
   document.getElementById('btnWA').href = `https://wa.me/522411081657?text=${msg}`;
   document.getElementById('modal').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -321,7 +327,6 @@ function zoom(e) {
   const rect = container.getBoundingClientRect();
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  
   img.style.transformOrigin = `${((clientX - rect.left)/rect.width)*100}% ${((clientY - rect.top)/rect.height)*100}%`;
   img.style.transform = "scale(2)";
 }
