@@ -94,64 +94,70 @@ function renderInventario(listaAMostrar = productos) {
         listaAMostrar.forEach(p => {
             const stock = p.stock || 0;
             const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
-            const editandoId = window._editandoIdProducto === p.id;
             html += `
                 <tr>
                     <td style="max-width:120px;overflow-x:auto;">
-                        ${editandoId
-                            ? `<input type=\"text\" id=\"inputEditarId${p.id}\" value=\"${p.id}\" style=\"width:80px;text-align:center;\">`
-                            : `<span style=\"display:inline-block;min-width:60px;max-width:110px;overflow-x:auto;\">${p.id}</span>`
-                        }
+                        <span style="display:inline-block;min-width:60px;max-width:110px;overflow-x:auto;">${p.id}</span>
                     </td>
                     <td>
                         <b>${p.nombre}</b><br>
-                        <small style=\"color:#666;\">${p.categoria || ''} > ${p.subcategoria || ''}</small>
-                        ${p.caracteristicas ? `<div style=\\\"font-size:12px;color:#444;\\\">${p.caracteristicas}</div>` : ""}
+                        <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
                     </td>
-                    <td style=\"text-align:center; font-weight:bold; color:${colorStock};\">${stock}</td>
-                    <td style=\"text-align:right;\">${dinero(p.precio)}</td>
-                    <td style=\"text-align:center; display:flex; gap:5px; justify-content:center;\">
-                        <button onclick=\"abrirProductoForm(${p.id})\" 
-                                style=\"padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;\">
+                    <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
+                    <td style="text-align:right;">${dinero(p.precio)}</td>
+                    <td style="text-align:center; display:flex; gap:5px; justify-content:center;">
+                        <button onclick="abrirProductoForm(${p.id})" 
+                                style="padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;">
                             ✏️ Editar
                         </button>
-                        <button onclick=\"abrirVisorMaestro(${p.id})\" 
-                                style=\"padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;\">
+                        <button onclick="abrirVisorMaestro(${p.id})" 
+                                style="padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;">
                             🔍 Visor
                         </button>
-                        <button onclick=\"confirmarEliminarProducto(${p.id})\" 
-                                style=\"padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;\">
+                        <button onclick="confirmarEliminarProducto(${p.id})" 
+                                style="padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;">
                             🗑️ Eliminar
                         </button>
-                        ${editandoId
-                            ? `<button onclick=\"guardarNuevoId(${p.id})\" style=\"padding:6px 10px;background:#16a34a;color:white;border:none;border-radius:4px;font-weight:bold;\">Guardar</button>`
-                              + `<button onclick=\"cancelarEditarId()\" style=\"padding:6px 10px;background:#aaa;color:white;border:none;border-radius:4px;font-weight:bold;\">Cancelar</button>`
-                            : `<button onclick=\"editarIdProducto(${p.id})\" style=\"padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;\">Editar ID</button>`
-                        }
+                        <button onclick="abrirModalEditarId(${p.id})" style="padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;">Editar ID</button>
                     </td>
                 </tr>`;
         });
     }
 
-// Estado para saber qué producto está en edición de ID
-window._editandoIdProducto = null;
 
-window.editarIdProducto = function(id) {
-    window._editandoIdProducto = id;
-    renderInventario();
-    setTimeout(() => {
-        const input = document.getElementById('inputEditarId' + id);
-        if (input) input.focus();
-    }, 100);
+// Modal para editar ID
+window.abrirModalEditarId = function(id) {
+    const p = productos.find(prod => prod.id === id);
+    if (!p) return;
+    // Contar cuántas veces aparece ese ID en la base local
+    const repeticiones = productos.filter(prod => String(prod.id) === String(id)).length;
+    // Modal básico
+    let modal = document.getElementById('modalEditarId');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'modalEditarId';
+    modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.35);z-index:100000;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:white;padding:32px 28px;border-radius:12px;min-width:320px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);text-align:center;">
+        <h2 style=\"margin-bottom:18px;color:#1e40af;font-size:20px;\">Editar ID de producto</h2>
+        <div style=\"margin-bottom:12px;\"><b>Producto:</b> ${p.nombre}</div>
+        <div style=\"margin-bottom:12px;\"><b>ID actual:</b> <span style=\"color:#1e40af;font-weight:bold;\">${p.id}</span></div>
+        <div style=\"margin-bottom:12px;\"><b>Veces que aparece este ID:</b> <span style=\"color:#e67e22;font-weight:bold;\">${repeticiones}</span></div>
+        <input type=\"text\" id=\"inputNuevoId\" value=\"${p.id}\" style=\"width:120px;text-align:center;font-size:18px;padding:7px 10px;margin-bottom:18px;border:2px solid #e5e7eb;border-radius:7px;\"><br>
+        <button onclick=\"guardarNuevoIdModal(${p.id})\" style=\"padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;\">Guardar</button>
+        <button onclick=\"cerrarModalEditarId()\" style=\"padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;\">Cancelar</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    setTimeout(() => { document.getElementById('inputNuevoId')?.focus(); }, 100);
 }
 
-window.cancelarEditarId = function() {
-    window._editandoIdProducto = null;
-    renderInventario();
+window.cerrarModalEditarId = function() {
+    document.getElementById('modalEditarId')?.remove();
 }
 
-window.guardarNuevoId = async function(idActual) {
-    const input = document.getElementById('inputEditarId' + idActual);
+window.guardarNuevoIdModal = async function(idActual) {
+    const input = document.getElementById('inputNuevoId');
     if (!input) return;
     const nuevoId = String(input.value).trim();
     if (!nuevoId) {
@@ -179,7 +185,7 @@ window.guardarNuevoId = async function(idActual) {
                 alert('Error actualizando ID en Firestore: ' + (e.message || e));
             }
         }
-        window._editandoIdProducto = null;
+        cerrarModalEditarId();
         renderInventario();
     }
 }
