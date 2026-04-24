@@ -28,8 +28,9 @@ document.addEventListener('DOMContentLoaded', () => {
             StorageService.set("tarjetasConfig", tarjetasConfig);
         }
         
-        // Productos
-        productos = StorageService.get("productos", []);
+
+        // Productos (global)
+        window.productos = StorageService.get("productos", []);
         
         // Clientes
         clientes = StorageService.get("clientes", []);
