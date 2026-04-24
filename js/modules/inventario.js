@@ -878,9 +878,9 @@ function insertarProductoSistema(p) {
 
     // Evitar duplicados reales
     const duplicado = window.productos.some(prod =>
-        prod.nombre.toUpperCase() === p.nombre.toUpperCase() &&
-        prod.modelo === p.modelo &&
-        prod.color === p.color
+           prod.nombre.toUpperCase() === p.nombre.toUpperCase() &&
+           prod.modelo === p.modelo &&
+           prod.color === p.color
     );
 
     if (duplicado) {
