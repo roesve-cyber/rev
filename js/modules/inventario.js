@@ -169,10 +169,10 @@ function renderInventario(listaAMostrar = window.productos) {
 
 // Modal para editar ID
 window.abrirModalEditarId = function(id) {
-    const p = productos.find(prod => prod.id === id);
+    const p = window.productos.find(prod => prod.id === id);
     if (!p) return;
     // Contar cuántas veces aparece ese ID en la base local
-    const repeticiones = productos.filter(prod => String(prod.id) === String(id)).length;
+    const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
     // Modal básico
     let modal = document.getElementById('modalEditarId');
     if (modal) modal.remove();
@@ -206,14 +206,14 @@ window.guardarNuevoIdModal = async function(idActual) {
         alert('El ID no puede estar vacío.');
         return;
     }
-    if (productos.some(p => String(p.id) === nuevoId && String(p.id) !== String(idActual))) {
+    if (window.productos.some(p => String(p.id) === nuevoId && String(p.id) !== String(idActual))) {
         alert('Ya existe un producto con ese ID.');
         return;
     }
-    const idx = productos.findIndex(p => String(p.id) === String(idActual));
+    const idx = window.productos.findIndex(p => String(p.id) === String(idActual));
     if (idx !== -1) {
-        productos[idx].id = nuevoId;
-        if (typeof StorageService?.set === 'function') StorageService.set('productos', productos);
+        window.productos[idx].id = nuevoId;
+        if (typeof StorageService?.set === 'function') StorageService.set('productos', window.productos);
         if (window._firebaseActivo && window._db) {
             try {
                 const docRef = window._db.collection('productos').doc(String(idActual));
@@ -237,7 +237,7 @@ window.guardarNuevoIdModal = async function(idActual) {
 }
 
 function confirmarEliminarProducto(id) {
-    const producto = productos.find(p => p.id === id);
+    const producto = window.productos.find(p => p.id === id);
     if (!producto) {
         alert("Producto no encontrado.");
         return;
@@ -251,11 +251,11 @@ function confirmarEliminarProducto(id) {
 }
 
 function actualizarStock(id, cant, concepto) {
-    const idx = productos.findIndex(p => p.id === id);
+    const idx = window.productos.findIndex(p => p.id === id);
     if (idx !== -1) {
-        productos[idx].stock = (productos[idx].stock || 0) + cant;
+        window.productos[idx].stock = (window.productos[idx].stock || 0) + cant;
         registrarMovimiento(id, concepto, cant, "entrada");
-        if (!StorageService.set("productos", productos)) {
+        if (!StorageService.set("productos", window.productos)) {
             console.error("❌ Error guardando productos");
         }
     }
@@ -277,8 +277,8 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
 }
 
 function eliminarProducto(id) {
-    productos = productos.filter(p => p.id !== id);
-    if (!StorageService.set("productos", productos)) {
+    window.productos = window.productos.filter(p => p.id !== id);
+    if (!StorageService.set("productos", window.productos)) {
         console.error("❌ Error eliminando producto");
         return;
     }
@@ -314,7 +314,7 @@ function abrirProductoForm(id = null) {
 
     if (id) {
         productoEditando = id;
-        const p = productos.find(prod => prod.id === id);
+        const p = window.productos.find(prod => prod.id === id);
         if (!p) return;
         document.getElementById("tituloModalProducto").innerText = "✏️ Editar Producto";
         inputNombre.value = p.nombre;
@@ -376,7 +376,7 @@ function guardarProductoDB() {
     });
 
     if (productoEditando) {
-        const index = productos.findIndex(p => p.id === productoEditando);
+        const index = window.productos.findIndex(p => p.id === productoEditando);
         const margenCalculado = CalculatorService.calcularMargen(precioVenta, costo);
         if (index !== -1) {
             productos[index] = {
