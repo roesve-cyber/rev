@@ -1,3 +1,16 @@
+// ===== ESTADO DE PAGO — persiste entre vistas =====
+// Se guarda aquí para no depender del DOM del carrito cuando
+// confirmarVentaFinal() se llama desde la vista seleccionarcliente
+window._estadoPago = window._estadoPago || {
+    metodo: "contado",
+    enganche: 0,
+    periodicidad: "semanal",
+    modoEnganche: "efectivo",
+    cuentaReceptora: "efectivo",
+    planIndex: null,
+    plan: null          // objeto completo del plan elegido
+};
+
 function _esAdmin() {
     try {
         const sesion = sessionStorage.getItem('sesionActiva');
@@ -180,27 +193,124 @@ function renderCarrito() {
             </div>
 
             <div style="background:white; padding:20px; border-radius:10px;">
-                <h3>Resumen</h3>
+                <h3 style="margin:0 0 15px 0;">Resumen</h3>
 
-                <div style="text-align:center;">
-                    <strong style="font-size:28px;">
-                        ${dinero(totalContado)}
-                    </strong>
+                <div style="text-align:center; margin-bottom:20px;">
+                    <div style="font-size:11px; color:#718096; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Total mercancía</div>
+                    <strong style="font-size:26px; color:#2d3748;">${dinero(totalContado)}</strong>
+                </div>
+
+                <!-- VENDEDOR -->
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">👤 Vendedor</label>
+                    <select id="selVendedor" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                        <option value="">-- Sin vendedor asignado --</option>
+                        ${StorageService.get("vendedores", []).map(v => `<option value="${v.id}">${v.nombre}</option>`).join('')}
+                    </select>
+                </div>
+
+                <!-- MÉTODO DE PAGO -->
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">💳 Método de pago</label>
+                    <select id="selMetodoPago"
+                            onchange="actualizarInterfazPago();"
+                            style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold;">
+                        <option value="contado">💵 Contado</option>
+                        <option value="transferencia">🏦 Transferencia / Depósito</option>
+                        <option value="credito">💳 Crédito</option>
+                        <option value="apartado">📦 Apartado</option>
+                    </select>
+                </div>
+
+                <!-- ENGANCHE (visible para crédito y apartado) -->
+                <div id="divEnganche" class="oculto" style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">💵 Enganche inicial</label>
+                    <input type="number" id="numEnganche" min="0" step="50" value="0"
+                           onchange="actualizarInterfazPago()"
+                           oninput="actualizarInterfazPago()"
+                           placeholder="0.00"
+                           style="width:100%; padding:9px; border:2px solid #f59e0b; border-radius:6px; font-size:16px; font-weight:bold; color:#92400e; box-sizing:border-box; text-align:right;">
+                    <div style="font-size:11px; color:#92400e; margin-top:3px;">Monto que paga el cliente hoy</div>
+                </div>
+
+                <!-- PERIODICIDAD (solo crédito) -->
+                <div id="divPeriodicidad" class="oculto" style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">📅 Periodicidad de abonos</label>
+                    <select id="selPeriodicidad"
+                            onchange="actualizarInterfazPago()"
+                            style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                        <option value="semanal">Semanal</option>
+                        <option value="quincenal">Quincenal</option>
+                        <option value="mensual">Mensual</option>
+                    </select>
+                </div>
+
+                <!-- CUENTA RECEPTORA (transferencia o enganche con transferencia) -->
+                <div id="divCuentaReceptora" class="oculto" style="margin-bottom:12px;">
+                    <label id="lblCuentaReceptora" style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">🏦 Cuenta receptora</label>
+                    <select id="selCuentaReceptora" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"></select>
+                </div>
+
+                <!-- MODO ENGANCHE: efectivo vs transferencia (crédito/apartado con enganche) -->
+                <div id="divModoEnganche" class="oculto" style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:6px;">💰 ¿Cómo se recibe el enganche?</label>
+                    <div style="display:flex; gap:8px;">
+                        <label style="flex:1; cursor:pointer;">
+                            <input type="radio" name="modoEnganche" value="efectivo" checked onchange="actualizarInterfazPago()">
+                            <div id="btnModoEfectivo" style="margin-top:4px; padding:8px; border:2px solid #27ae60; border-radius:6px; text-align:center; font-size:13px; font-weight:bold; color:#166534; background:#dcfce7;">
+                                💵 Efectivo
+                            </div>
+                        </label>
+                        <label style="flex:1; cursor:pointer;">
+                            <input type="radio" name="modoEnganche" value="transferencia" onchange="actualizarInterfazPago()">
+                            <div id="btnModoTransferencia" style="margin-top:4px; padding:8px; border:2px solid #d1d5db; border-radius:6px; text-align:center; font-size:13px; font-weight:bold; color:#4a5568; background:#f9fafb;">
+                                🏦 Transferencia
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- RESULTADOS DEL PLAN -->
+                <div id="resultadosPago" style="margin-bottom:12px;"></div>
+
+                <!-- NOTA DE INVENTARIO AUTOMÁTICO -->
+                <div style="background:#eff6ff; padding:10px; border-radius:6px; margin-bottom:16px; font-size:12px; border:1px solid #bfdbfe; color:#1e40af;">
+                    ℹ️ <strong>Inventario automático:</strong> Si hay stock se preguntará si se entrega; si no hay stock se genera requisición de compra automáticamente.
+                </div>
+
+                <!-- FECHA DE VENTA -->
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">📅 Fecha de venta</label>
+                    <input type="date" id="inputFechaVenta"
+                           style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold; box-sizing:border-box;"
+                           value="${new Date().toISOString().substring(0,10)}">
                 </div>
 
                 <button onclick="irASeleccionCliente()"
-                    style="width:100%; padding:15px; background:#27ae60; color:white; border:none; border-radius:8px; margin-top:20px;">
-                     ✅ Seleccionar cliente
+                    style="width:100%; padding:14px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:15px; letter-spacing:0.5px;">
+                    👤 Seleccionar cliente →
                 </button>
             </div>
         </div>
     `;
 
     vistaCarrito.innerHTML = html;
+    // Resetear estado de pago al renderizar el carrito
+    window._estadoPago = {
+        metodo: "contado",
+        enganche: 0,
+        periodicidad: "semanal",
+        modoEnganche: "efectivo",
+        cuentaReceptora: "efectivo",
+        planIndex: null,
+        plan: null
+    };
+    plazoSeleccionado = null;
+    setTimeout(() => actualizarInterfazPago(), 30);
 }
 function cambiarPrecioCarrito(index, nuevoPrecio) {
 
-    if (!usuarioActual || usuarioActual.rol !== "admin") {
+    if (!_esAdmin()) {
         alert("No autorizado");
         return;
     }
@@ -246,6 +356,19 @@ function aplicarMetodoStockDefaults() {
         chkR.checked = true;
     }
 }
+// Esta es la "libreta" donde anotamos los datos
+function capturarDatosCredito() {
+    // En tu código, el ID del enganche es "numEnganche"
+    const inputEnganche = document.getElementById("numEnganche");
+    const selPeriodicidad = document.getElementById("selPeriodicidad");
+
+    if (inputEnganche) {
+        window._estadoPago.enganche = parseFloat(inputEnganche.value) || 0;
+    }
+    if (selPeriodicidad) {
+        window._estadoPago.periodicidad = selPeriodicidad.value;
+    }
+}
 
 function actualizarInterfazPago() {
     const metodo = document.getElementById("selMetodoPago")?.value;
@@ -271,31 +394,61 @@ if (metodo === "credito") {
     divPeriodicidad?.classList.add("oculto");
 }
 
-    // Mostrar selector de cuenta receptora cuando hay cobro inmediato
+    // ── CUENTA RECEPTORA / MODO DE COBRO ─────────────────────────────────────────
     const divCuenta = document.getElementById("divCuentaReceptora");
-    if (divCuenta) {
-        const engancheVal = parseFloat(document.getElementById("numEnganche")?.value) || 0;
-        const hayCobroInmediato = (metodo === "contado" || metodo === "transferencia" ||
-            ((metodo === "apartado" || metodo === "credito") && engancheVal > 0));
-        if (hayCobroInmediato) {
+    const divModoEnganche = document.getElementById("divModoEnganche");
+    const engancheVal = parseFloat(document.getElementById("numEnganche")?.value) || 0;
+    const cuentasDebito = tarjetasConfig.filter(t => t.tipo === "debito");
+
+    // Ocultar todo por defecto y limpiar
+    if (divCuenta) divCuenta.classList.add("oculto");
+    if (divModoEnganche) divModoEnganche.classList.add("oculto");
+
+    if (metodo === "contado") {
+        // Contado siempre va a caja/efectivo, no se pregunta
+        // (nada que mostrar)
+
+    } else if (metodo === "transferencia") {
+        // Transferencia: preguntar a qué cuenta débito entra el dinero
+        if (divCuenta) {
             divCuenta.classList.remove("oculto");
-            const cuentasDebito = tarjetasConfig.filter(t => t.tipo === "debito");
-            let optsHTML = "";
-            if (metodo === "transferencia") {
-                // Solo cuentas débito para transferencia
-                optsHTML = cuentasDebito.length > 0
-                    ? cuentasDebito.map(c => `<option value="${c.banco}">🏦 ${c.banco} Débito</option>`).join('')
-                    : '<option value="">-- Sin cuentas débito --</option>';
-            } else {
-                // Efectivo + cuentas débito para contado / enganche
-                optsHTML = '<option value="efectivo">💵 Efectivo</option>';
-                cuentasDebito.forEach(c => {
-                    optsHTML += `<option value="${c.banco}">🏦 ${c.banco} Débito</option>`;
-                });
-            }
+            const lbl = document.getElementById("lblCuentaReceptora");
+            if (lbl) lbl.textContent = "🏦 ¿A qué cuenta ingresa la transferencia?";
+            const optsHTML = cuentasDebito.length > 0
+                ? cuentasDebito.map(c => `<option value="${c.banco}">🏦 ${c.banco}</option>`).join('')
+                : '<option value="cuenta_debito">-- Registra cuentas en Bancos --</option>';
             document.getElementById("selCuentaReceptora").innerHTML = optsHTML;
-        } else {
-            divCuenta.classList.add("oculto");
+        }
+
+    } else if ((metodo === "credito" || metodo === "apartado") && engancheVal > 0) {
+        // Crédito/Apartado con enganche: preguntar si el enganche entra en efectivo o transferencia
+        if (divModoEnganche) divModoEnganche.classList.remove("oculto");
+
+        // Sincronizar estilos de botones de modo según radio seleccionado
+        const modoSeleccionado = document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo";
+        const btnEfec = document.getElementById("btnModoEfectivo");
+        const btnTrans = document.getElementById("btnModoTransferencia");
+        if (btnEfec && btnTrans) {
+            if (modoSeleccionado === "efectivo") {
+                btnEfec.style.borderColor = "#27ae60"; btnEfec.style.background = "#dcfce7"; btnEfec.style.color = "#166534";
+                btnTrans.style.borderColor = "#d1d5db"; btnTrans.style.background = "#f9fafb"; btnTrans.style.color = "#4a5568";
+            } else {
+                btnEfec.style.borderColor = "#d1d5db"; btnEfec.style.background = "#f9fafb"; btnEfec.style.color = "#4a5568";
+                btnTrans.style.borderColor = "#3b82f6"; btnTrans.style.background = "#dbeafe"; btnTrans.style.color = "#1e40af";
+            }
+        }
+
+        if (modoSeleccionado === "transferencia") {
+            // Mostrar selector de cuenta débito
+            if (divCuenta) {
+                divCuenta.classList.remove("oculto");
+                const lbl = document.getElementById("lblCuentaReceptora");
+                if (lbl) lbl.textContent = "🏦 ¿A qué cuenta ingresa el enganche?";
+                const optsHTML = cuentasDebito.length > 0
+                    ? cuentasDebito.map(c => `<option value="${c.banco}">🏦 ${c.banco}</option>`).join('')
+                    : '<option value="cuenta_debito">-- Registra cuentas en Bancos --</option>';
+                document.getElementById("selCuentaReceptora").innerHTML = optsHTML;
+            }
         }
     }
 
@@ -350,10 +503,54 @@ if (metodo === "credito") {
     }
 
     resultados.innerHTML = html;
+    capturarDatosCredito();
+
+    // ── GUARDAR ESTADO DE PAGO para no depender del DOM después ──────────────────
+    window._estadoPago.metodo      = metodo;
+    window._estadoPago.enganche    = enganche;
+    window._estadoPago.periodicidad = metodo === "credito"
+        ? (document.getElementById("selPeriodicidad")?.value || "semanal")
+        : "semanal";
+    window._estadoPago.modoEnganche = metodo === "contado"
+        ? "efectivo"
+        : (document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo");
+    window._estadoPago.cuentaReceptora = metodo === "contado"
+        ? "efectivo"
+        : (document.getElementById("selCuentaReceptora")?.value || "efectivo");
+    // plan se guarda en seleccionarPlan()
+    window._estadoPago.fechaVenta = document.getElementById("inputFechaVenta")?.value || new Date().toISOString().substring(0,10);
 }
 
 function seleccionarPlan(index) {
     plazoSeleccionado = index;
+    window._estadoPago.planIndex = index;
+
+    try {
+        // 1. Calculamos el total real del carrito ahora mismo
+        const totalCarrito = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+        
+        // 2. Obtenemos el enganche y la periodicidad de la pantalla
+        const enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
+        const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
+        
+        // 3. Calculamos el saldo (Lo que realmente se va a pagar a crédito)
+        const saldo = totalCarrito - enganche;
+
+        // 4. Generamos los planes con el CalculatorService
+        // IMPORTANTE: Usamos el saldo real. Si el saldo es 0 o menor, usamos el total.
+        const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo > 0 ? saldo : totalCarrito, periodicidad);
+        
+        // 5. Guardamos el plan elegido en la libreta
+        if (planes && planes[index]) {
+            window._estadoPago.plan = planes[index];
+            console.log("✅ Plan guardado con éxito:", window._estadoPago.plan);
+        }
+    } catch(e) {
+        console.error("❌ Error al guardar el plan:", e);
+    }
+
+    // Refrescamos la pantalla para que se vea el botón seleccionado
+    actualizarInterfazPago();
 }
 
 function eliminarDelCarrito(index) {
@@ -384,8 +581,10 @@ function confirmarVentaFinal() {
         return;
     }
 
-    const metodoPago = document.getElementById("selMetodoPago")?.value;
-    console.log("Método de pago:", metodoPago);
+    // Leer desde _estadoPago (más confiable que el DOM del carrito oculto)
+    const metodoPago = window._estadoPago?.metodo
+        || document.getElementById("selMetodoPago")?.value;
+    console.log("Método de pago:", metodoPago, "| Estado guardado:", window._estadoPago);
 
     if (!metodoPago) {
         alert("⚠️ Regresa al carrito y selecciona un método de pago.");
@@ -404,7 +603,8 @@ function confirmarVentaFinal() {
 
     console.log("Total contado:", totalContado, "| Descuento aplicado:", descuentoAplicado, "| Total con descuento:", totalConDescuento);
 
-    let enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
+    let enganche = window._estadoPago?.enganche
+        ?? parseFloat(document.getElementById("numEnganche")?.value) ?? 0;
     if (enganche < 0) enganche = 0;
 
     if (enganche > totalConDescuento) {
@@ -416,23 +616,32 @@ function confirmarVentaFinal() {
     let planElegido = null;
 
     if (metodoPago === "credito") {
-        const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
+        const periodicidad = window._estadoPago?.periodicidad
+            || document.getElementById("selPeriodicidad")?.value || "semanal";
         console.log("Periodicidad:", periodicidad);
 
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
-        console.log("Plazo seleccionado:", plazoSeleccionado);
+        // Usar planIndex guardado en estado, luego plazoSeleccionado global, luego 0
+        const planIdx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
+        console.log("Plan index:", planIdx, "| plazoSeleccionado global:", plazoSeleccionado);
 
-        if (plazoSeleccionado === null || plazoSeleccionado === undefined || plazoSeleccionado < 0 || plazoSeleccionado >= planes.length) {
+        if (planIdx === null || planIdx === undefined || planIdx < 0 || planIdx >= planes.length) {
             alert("⚠️ Selecciona un plazo de crédito en el carrito antes de continuar.");
             return;
         }
 
-        planElegido = planes[plazoSeleccionado];
-        if (!planElegido) {
-            alert("⚠️ Plazo de crédito inválido.");
+        planElegido = planes[planIdx];
+        // Sincronizar el índice global
+        plazoSeleccionado = planIdx;
+
+        if (!planElegido || planElegido.abono === 0) {
+            alert("⚠️ Plan de crédito inválido. Regresa al carrito y vuelve a seleccionar el plazo.");
             return;
         }
 
+        // Guardar el plan en estado
+        window._estadoPago.plan = planElegido;
+        window._estadoPago.periodicidad = periodicidad;
         console.log("Plan elegido:", planElegido);
     }
 
@@ -468,17 +677,50 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
             </div>
         `;
     } else if (metodoPago === "credito") {
-        const textoPeriodicidad = periodicidad === "semanal" ? "Semanales" : periodicidad === "quincenal" ? "Quincenales" : "Mensuales";
+        // === RECÁLCULO BLINDADO (Ignora datos corruptos o ceros de otras funciones) ===
+        
+        // 1. Obtenemos el total y el enganche reales
+        const totalCarrito = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+        const engancheReal = window._estadoPago?.enganche || enganche || 0;
+        const periodicidadResumen = window._estadoPago?.periodicidad || "semanal";
+        
+        // 2. Calculamos el saldo. 
+        // IMPORTANTE: Si el saldo da 0 o negativo, usamos el total base para que los pagarés no salgan en $0.00
+        let saldo = totalCarrito - engancheReal;
+        let saldoBase = saldo > 0 ? saldo : totalCarrito;
+
+        // 3. Generamos los planes matemáticos frescos aquí mismo
+        const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidadResumen);
+        
+        // 4. Recuperamos exactamente el botón (índice) que el usuario presionó
+        let idx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
+        if (idx < 0 || idx >= planes.length) idx = 0;
+        
+        let plan = planes[idx];
+
+        // Seguro anti-ceros final
+        if (!plan || !plan.abono || plan.abono === 0) {
+            plan = planes.find(p => p.abono > 0) || planes[0];
+        }
+
+        const textoFreq = periodicidadResumen === "semanal" ? "Semanales" : periodicidadResumen === "quincenal" ? "Quincenales" : "Mensuales";
+        
         detalleMetodo = `
-            <p><strong>💳 CRÉDITO</strong></p>
-            <div style="background:#dbeafe; padding:10px; border-radius:5px;">
-                <p style="margin:5px 0;">💵 Enganche: <strong>${dinero(enganche)}</strong></p>
-                <p style="margin:5px 0;">📊 Plazo: <strong>${planElegido.meses} meses</strong></p>
-                <p style="margin:5px 0;">📅 Períodos: <strong>${textoPeriodicidad} (${planElegido.pagos} pagos)</strong></p>
-                <p style="margin:5px 0;">🔢 Abono: <strong>${dinero(planElegido.abono)}</strong></p>
-                <p style="margin:5px 0;">💰 Total a pagar: <strong>${dinero(planElegido.total)}</strong></p>
+            <p style="color:#2b6cb0; margin-bottom:5px;"><strong>💳 CRÉDITO CONFIGURADO</strong></p>
+            <div style="background:#ebf8ff; padding:12px; border-radius:8px; border: 1px solid #bee3f8;">
+                <p style="margin:3px 0;">💰 Enganche inicial: <strong>${dinero(engancheReal)}</strong></p>
+                <p style="margin:3px 0;">📅 Plazo: <strong>${plan.meses} meses</strong></p>
+                <p style="margin:3px 0;">🔄 ${plan.pagos} pagos <strong>${textoFreq}</strong></p>
+                <p style="margin:3px 0;">💵 Importe de cada pagaré: <strong>${dinero(plan.abono)}</strong></p>
+                <p style="margin:8px 0 0 0; border-top:1px solid #bee3f8; padding-top:8px; font-size:1.1em; color: #2c5282;">
+                    <strong>Suma total de pagos: ${dinero(plan.total)}</strong>
+                </p>
             </div>
         `;
+        
+        // Lo dejamos listo para la base de datos
+        _planElegidoPendiente = plan;
+        planElegido = plan;
     }
 
     const resumenProductos = carrito.map(p => {
@@ -492,6 +734,8 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
         </tr>`;
     }).join('');
 
+    // Para métodos no-crédito usar planElegido (null); para crédito
+    // se sobreescribirá abajo con el plan recalculado.
     _planElegidoPendiente = planElegido;
     document.querySelector('[data-modal="resumen-venta"]')?.remove();
 
@@ -579,8 +823,8 @@ function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFi
     console.log("🔄 Procesando venta con inventario...");
     console.log("Plan elegido final:", _planElegidoPendiente);
     mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, _planElegidoPendiente);
-if (typeof acumularPuntosCliente === "function") {
-        acumularPuntosCliente(clienteSeleccionado.id, total, /* folioVenta aquí si lo tienes disponible */);
+    if (typeof acumularPuntosCliente === "function" && clienteSeleccionado) {
+        acumularPuntosCliente(clienteSeleccionado.id, totalContado);
     }
 }
 
@@ -722,36 +966,68 @@ function setDecisionInventario(productoId, entregar) {
  * Confirma todas las decisiones y procesa la venta
  */
 function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
-    const planElegido = _planElegidoPendiente;
+    // 1. Lógica del plan (ya la tienes)
+    let planElegido = _planElegidoPendiente;
+    if (metodoPago === "credito") {
+        if (!planElegido || !planElegido.abono || planElegido.abono === 0) {
+            const periodicidad = window._estadoPago?.periodicidad
+                || document.getElementById("selPeriodicidad")?.value || "semanal";
+            const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
+            const planIdx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
+            const safeIdx = (planIdx >= 0 && planIdx < planes.length) ? planIdx : 0;
+            planElegido = planes[safeIdx];
+            if (!planElegido || !planElegido.abono || planElegido.abono === 0) {
+                planElegido = planes.find(p => p.abono > 0) || planes[0];
+            }
+        }
+    }
+
+    // --- NUEVO: CÁLCULO DEL IMPORTE DE VENTA CORRECTO ---
+    // Si es crédito, sumamos Enganche + Total de Pagarés (con intereses). 
+    // Si no, usamos el precio de contado normal.
+    let montoVentaFinal = totalContado;
+    if (metodoPago === "credito" && planElegido) {
+        montoVentaFinal = enganche + (planElegido.total || 0);
+    }
+    // ---------------------------------------------------
 
     const folioVenta = "V-" + Date.now().toString().slice(-6);
-    const fechaHoy = new Date().toLocaleDateString("es-MX");
-    const fechaVentaIso = new Date().toISOString();
+
+    // Lógica de fechas (ya la tienes)
+    const inputFechaEl = document.getElementById("inputFechaVenta");
+    const fechaGuardada = window._estadoPago?.fechaVenta;
+    let fechaVentaDate;
+    if (inputFechaEl && inputFechaEl.value) {
+        const [anio, mes, dia] = inputFechaEl.value.split("-").map(Number);
+        fechaVentaDate = new Date(anio, mes - 1, dia, 12, 0, 0);
+    } else if (fechaGuardada) {
+        const [anio, mes, dia] = fechaGuardada.split("-").map(Number);
+        fechaVentaDate = new Date(anio, mes - 1, dia, 12, 0, 0);
+    } else {
+        fechaVentaDate = new Date();
+    }
+    const fechaHoy = fechaVentaDate.toLocaleDateString("es-MX");
+    const fechaVentaIso = fechaVentaDate.toISOString();
 
     let productosAEntregar = [];
     let productosAPendiente = [];
 
-    // Procesar decisiones
     carrito.forEach(item => {
         const prod = productos.find(p => p.id === item.id);
         if (!prod) return;
-
         const decision = decisionesInventario[item.id];
         const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
-
         if (tieneStock && decision && decision.entregar) {
-            // ENTREGAR AHORA
             productosAEntregar.push({ item, prod });
         } else {
-            // DEJAR PENDIENTE O SIN STOCK
             productosAPendiente.push({ item, prod });
         }
     });
 
-    // Procesar venta final
+    // IMPORTANTE: Ahora pasamos "montoVentaFinal" en lugar de "totalContado"
     procesarVentaFinal(
         metodoPago, 
-        totalContado, 
+        montoVentaFinal, // <--- Cambio aquí
         enganche, 
         saldoAFinanciar, 
         planElegido,
@@ -765,7 +1041,13 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
 
 function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock) {
-    
+
+    // ── GUARD: recalcular totalContado desde el carrito si llega 0 / NaN ────
+    if (!totalContado || isNaN(totalContado) || totalContado <= 0) {
+        totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     requisicionesCompra = StorageService.get("requisicionesCompra", []);
     movimientosCaja = StorageService.get("movimientosCaja", []);
     cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
@@ -820,7 +1102,19 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     });
 
     // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
-    const cuentaReceptora = document.getElementById("selCuentaReceptora")?.value || "efectivo";
+    // Determinar cuenta receptora según método de pago
+    let cuentaReceptora;
+    if (metodoPago === "contado") {
+        cuentaReceptora = "efectivo"; // Contado siempre va a caja
+    } else if (metodoPago === "transferencia") {
+        cuentaReceptora = document.getElementById("selCuentaReceptora")?.value || "cuenta_debito";
+    } else {
+        // Crédito/Apartado con enganche: verificar si fue efectivo o transferencia
+        const modoEnganche = document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo";
+        cuentaReceptora = modoEnganche === "transferencia"
+            ? (document.getElementById("selCuentaReceptora")?.value || "cuenta_debito")
+            : "efectivo";
+    }
 
     if (metodoPago === "contado" || metodoPago === "transferencia") {
         movimientosCaja.push({
@@ -870,7 +1164,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             abonos: [],
             articulos: JSON.parse(JSON.stringify(carrito)),
             totalMercancia: totalContado,
-            periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
+            periodicidad: window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal",
             vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
             vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
         };
@@ -879,7 +1173,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
         // PASO 5: CREAR PAGARÉS
         if (metodoPago === "credito" && planElegido) {
-            const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
+            const periodicidad = window._estadoPago?.periodicidad
+                || document.getElementById("selPeriodicidad")?.value || "semanal";
             let diasIntervalo = 7;
             
             if (periodicidad === "quincenal") diasIntervalo = 14;
@@ -995,7 +1290,17 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     alert(`✅ VENTA REGISTRADA\n\nFolio: ${folioVenta}\nCliente: ${datosVenta.cliente.nombre}\nTotal: ${dinero(datosVenta.total)}`);
     navA('tienda');
 }
+function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
+    const cliente = datosVenta.cliente.nombre || "________________";
+    const fecha = datosVenta.fecha;
+    const lugar = "Xalapa, Veracruz";
 
+    if (esCompacta) {
+        return `PAGARÉ: Yo ${cliente} me obligo a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)} conforme al calendario de pagos; incumplimiento genera interés moratorio del 2% mensual; firmado  en Santiago Cuaula Tlaxcala el ${fecha}.`;
+    }
+
+    return `PAGARÉ: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crédito otorgado, misma que cubriré en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarán intereses moratorios del 2% mensual sobre saldos insolutos; este pagaré se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligándome a cumplir en el domicilio del acreedor y sometiéndome para su interpretación y cumplimiento a la jurisdicción de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.`;
+}
 
 // ===== GENERADOR DE TICKETS (COMPLETO) =====
 function generarTicketMediaHoja(datosVenta) {
@@ -1034,380 +1339,309 @@ function generarTicketMediaHoja(datosVenta) {
                     <td style="border: 1px solid #333; padding: 6px; text-align: center; font-weight: bold;">${index + 1}</td>
                     <td style="border: 1px solid #333; padding: 6px; text-align: center;">${fechaFormato}</td>
                     <td style="border: 1px solid #333; padding: 6px; text-align: right; font-weight: bold;">${dinero(pagar.monto)}</td>
-                    <td style="border: 1px solid #333; padding: 6px; text-align: center;">__________</td>
-                    <td style="border: 1px solid #333; padding: 6px; text-align: center;">__________</td>
-                    <td style="border: 1px solid #333; padding: 6px; text-align: center;">__________</td>
+                    <td class="celda-llenar" style="padding: 6px;"></td>
+                    <td class="celda-llenar" style="padding: 6px;"></td>
+                    <td class="celda-llenar" style="padding: 6px;"></td>
                 </tr>
             `;
         });
     }
 
     // Tabla de resumen de planes
-    const saldoParaPlanes = datosVenta.total - (datosVenta.enganche || 0);
-    const planesDisponibles = CalculatorService.calcularCredito(saldoParaPlanes > 0 ? saldoParaPlanes : datosVenta.total);
+    // Calcular saldo base de forma robusta:
+    // 1) Si ya tenemos pagarés guardados, derivamos el saldo de plan.abono × plan.pagos
+    // 2) Si no, usamos datosVenta.total - enganche
+    let saldoParaPlanes = datosVenta.total - (datosVenta.enganche || 0);
+    if ((saldoParaPlanes <= 0 || !datosVenta.total) && datosVenta.plan && datosVenta.plan.abono > 0) {
+        // Reconstruir desde el plan guardado
+        saldoParaPlanes = datosVenta.plan.abono * (datosVenta.plan.pagos || datosVenta.plan.semanas || 1);
+    }
+    if (saldoParaPlanes <= 0) {
+        // Último recurso: recalcular desde carrito si está disponible
+        saldoParaPlanes = (datosVenta.articulos || []).reduce(
+            (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
+        ) - (datosVenta.enganche || 0);
+    }
+    if (saldoParaPlanes <= 0) saldoParaPlanes = datosVenta.total || 0;
+    // Usar la periodicidad real de la venta, no siempre semanal
+    const periodicidadTicket = datosVenta.periodicidad || window._estadoPago?.periodicidad || "semanal";
+    const planesDisponibles = CalculatorService.calcularCreditoConPeriodicidad
+        ? CalculatorService.calcularCreditoConPeriodicidad(saldoParaPlanes, periodicidadTicket)
+        : CalculatorService.calcularCredito(saldoParaPlanes);
+    const textoPeriodo = periodicidadTicket === "quincenal" ? "/quin" : periodicidadTicket === "mensual" ? "/mes" : "/sem";
     let tablaPlanes = '';
     planesDisponibles.forEach(plan => {
         const textoMeses = plan.meses === 1 ? `${plan.meses} MES (Contado)` : `${plan.meses} MESES`;
-        const textoInteres = plan.meses === 1 ? '(Sin interés)' : '(Total)';
+        const textoInteres = plan.meses === 1 ? '(Sin interés)' : `(${plan.pagos} pagos${textoPeriodo})`;
         tablaPlanes += `
             <td style="border: 1px solid #333; padding: 8px; text-align: center;">
                 <strong>${textoMeses}</strong><br>
-                ${dinero(plan.total)}<br>
+                ${dinero(plan.abono)}${textoPeriodo}<br>
+                <small style="color:#555;">Total: ${dinero(plan.total)}</small><br>
                 <small>${textoInteres}</small>
             </td>
         `;
     });
 
-    const ticketHTML = `
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>TICKET DE VENTA - ${folio}</title>
-            <style>
-                @page {
-                    size: Letter portrait;
-                    margin: 8mm;
-                }
+    const filasPagares = tablaPagares.split('</tr>').filter(f => f.trim());
+const esDobleColumna = datosVenta.metodo === "credito" && datosVenta.plan && filasPagares.length > 12;
 
-                body {
-                    font-family: Arial, sans-serif;
-                    font-size: 10px;
-                    padding: 5mm;
-                    color: #000;
-                }
+function construirTablaPagares(filas) {
+    return `
+    <table class="tabla-pagares">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>VENCIMIENTO</th>
+                <th>IMPORTE</th>
+                <th>FECHA PAGO</th>
+                <th>PAGO</th>
+                <th>SALDO</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${filas.join('</tr>')}
+        </tbody>
+    </table>`;
+}
 
-                .ticket {
-                    width: 100%;
-                    max-width: 190mm;
-                    margin: 0 auto;
-                    border: 2px solid #1a3a70;
-                    padding: 10px;
-                }
+let pagaresHTML = '';
 
-                .encabezado {
-                    display: grid;
-                    grid-template-columns: 70px 1fr 120px;
-                    gap: 10px;
-                    border-bottom: 2px solid #333;
-                    padding-bottom: 8px;
-                    margin-bottom: 8px;
-                }
+if (esDobleColumna) {
+    const mitad = Math.ceil(filasPagares.length / 2);
 
-                .logo {
-                    width: 70px;
-                    height: 70px;
-                    font-size: 40px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    background: radial-gradient(circle at 30% 30%, #87ceeb, #4a90e2);
-                    border: 2px solid #1a3a70;
-                }
+    const col1 = filasPagares.slice(0, mitad);
+    const col2 = filasPagares.slice(mitad);
 
-                .titulo h1 {
-                    font-size: 16px;
-                    color: #1a3a70;
-                    margin: 0;
-                    text-align: center;
-                }
+    pagaresHTML = `
+    <div class="pagares-doble">
+        ${construirTablaPagares(col1)}
+        ${construirTablaPagares(col2)}
+    </div>`;
+} else {
+    pagaresHTML = construirTablaPagares(filasPagares);
+}
 
-                .titulo p {
-                    font-size: 9px;
-                    text-align: center;
-                    margin: 2px 0;
-                }
 
-                .folio-box {
-                    border: 2px solid #333;
-                    padding: 6px;
-                    text-align: center;
-                    font-weight: bold;
-                    font-size: 9px;
-                }
+const ticketHTML = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
 
-                .folio-number {
-                    color: #dc2626;
-                    font-size: 16px;
-                }
+<style>
+@page { size: Letter landscape; margin: 10mm; }
 
-                .subtitulo {
-                    text-align: center;
-                    font-size: 13px;
-                    font-weight: bold;
-                    margin: 6px 0 2px 0;
-                    color: #1a3a70;
-                }
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    margin: 0;
+    color: #1f2937;
+}
 
-                .fecha {
-                    text-align: right;
-                    font-weight: bold;
-                    margin-bottom: 6px;
-                    font-size: 10px;
-                }
+.ticket {
+    display: flex;
+    gap: 15px;
+}
 
-                .seccion-titulo {
-                    background: #1a3a70;
-                    color: white;
-                    padding: 5px 10px;
-                    font-weight: bold;
-                    margin: 6px 0 4px 0;
-                    border-radius: 3px;
-                    font-size: 10px;
-                }
+/* IZQUIERDA */
+.izq {
+    width: 30%;
+    border-right: 2px dashed #d1d5db;
+    padding-right: 10px;
+    display: flex;
+    flex-direction: column;
+}
 
-                .datos-cliente {
-                    border: 1px solid #333;
-                    padding: 6px 10px;
-                    margin-bottom: 6px;
-                    font-size: 10px;
-                }
+.logo {
+    text-align: center;
+    margin-bottom: 10px;
+}
 
-                .datos-cliente p { margin: 3px 0; }
+.logo img {
+    width: 70px;
+    height: 70px;
+    object-fit: contain;
+}
 
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-bottom: 6px;
-                    font-size: 9px;
-                }
+.titulo {
+    text-align: center;
+    font-weight: bold;
+    color: #1e3a8a;
+}
 
-                th {
-                    background: #e8f0fe;
-                    border: 1px solid #333;
-                    padding: 5px 6px;
-                    text-align: left;
-                    font-weight: bold;
-                    color: #1a3a70;
-                }
+.box {
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    padding: 8px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 11px;
+}
 
-                td {
-                    border: 1px solid #333;
-                    padding: 4px 6px;
-                }
+.total {
+    border: 2px solid #16a34a;
+    text-align: center;
+    padding: 10px;
+    border-radius: 6px;
+    margin-top: auto;
+}
 
-                .total-row {
-                    background: #f0f0f0;
-                    font-weight: bold;
-                }
+.total strong {
+    font-size: 24px;
+    color: #16a34a;
+}
 
-                .enganche-box {
-                    background: #fffbeb;
-                    border: 1px solid #f59e0b;
-                    padding: 6px 10px;
-                    margin: 6px 0;
-                    display: grid;
-                    grid-template-columns: 1fr 120px;
-                    gap: 10px;
-                    font-size: 9px;
-                }
+.firma {
+    margin-top: 20px;
+    text-align: center;
+    font-size: 10px;
+}
 
-                .enganche-monto {
-                    background: white;
-                    border: 1px solid #f59e0b;
-                    padding: 6px;
-                    text-align: center;
-                    font-size: 13px;
-                    font-weight: bold;
-                    color: #f59e0b;
-                }
+/* DERECHA */
+.der {
+    width: 70%;
+}
 
-                .tabla-pagares-titulo {
-                    background: #1a3a70;
-                    color: white;
-                    padding: 5px;
-                    text-align: center;
-                    font-weight: bold;
-                    border-radius: 3px;
-                    margin-bottom: 5px;
-                    font-size: 10px;
-                }
+h3 {
+    font-size: 13px;
+    margin: 8px 0;
+    color: #1e3a8a;
+}
 
-                .planes-resumen {
-                    background: #1a3a70;
-                    color: white;
-                    padding: 8px;
-                    margin: 8px 0;
-                    border-radius: 3px;
-                    text-align: center;
-                    font-size: 9px;
-                }
+/* TABLAS */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+}
 
-                .planes-titulo {
-                    font-weight: bold;
-                    margin-bottom: 6px;
-                    font-size: 9px;
-                }
+th {
+    background: #1e3a8a;
+    color: white;
+    padding: 6px;
+}
 
-                .firma-section {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 30px;
-                    margin-top: 15px;
-                    text-align: center;
-                }
+td {
+    padding: 5px;
+    border-bottom: 1px solid #e5e7eb;
+}
 
-                .linea-firma {
-                    border-top: 1px solid #333;
-                    padding-top: 5px;
-                    font-weight: bold;
-                    font-size: 9px;
-                }
+/* PAGARES DOBLE */
+.pagares-doble {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
 
-                .notas-legales {
-                    background: #f0f0f0;
-                    padding: 6px 10px;
-                    margin-top: 8px;
-                    font-size: 8px;
-                    line-height: 1.4;
-                    border: 1px solid #333;
-                    text-align: justify;
-                }
+/* CELDAS VACIAS PARA LLENAR */
+td.celda-llenar {
+    border-bottom: 1px solid #000;
+}
 
-                @media print {
-                    body { padding: 0; }
-                    .ticket { border: none; max-width: 100%; }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="ticket">
-                <!-- ENCABEZADO -->
-                <div class="encabezado">
-                    <div class="logo" style="overflow:hidden; display:flex; align-items:center; justify-content:center;">
-                        <img src="img/logo.png" style="width:66px; height:66px; object-fit:contain;"
-                             onerror="this.outerHTML='<span style=&quot;font-size:36px;&quot;>🏛️</span>'">
-                    </div>
-                    <div class="titulo">
-                        <h1>MUEBLERÍA<br>MI PUEBLITO</h1>
-                        <p>"Calidad, Estilo y Precio que te hacen sentir en casa"</p>
-                        <p style="margin-top: 8px;">Santiago Cuaula, Tlaxcala • Tel. 228 123 4567</p>
-                    </div>
-                    <div class="folio-box">
-                        FOLIO:<br>
-                        <div class="folio-number">${folio}</div>
-                    </div>
-                </div>
+/* PLANES */
+.planes td {
+    border: 1px solid #e5e7eb;
+    text-align: center;
+    padding: 6px;
+}
 
-                <!-- TÍTULO Y FECHA -->
-                <div style="text-align: center; margin-bottom: 10px;">
-                    <div class="subtitulo">TICKET DE VENTA</div>
-                    <div class="fecha">FECHA: ${fechaActual}</div>
-                </div>
+/* LEGAL */
+.legal {
+    font-size: 8px;
+    margin-top: 10px;
+    line-height: 1.4;
+    border-top: 1px solid #ddd;
+    padding-top: 6px;
+}
+</style>
+</head>
 
-                <!-- DATOS DEL CLIENTE -->
-                <div class="seccion-titulo">DATOS DEL CLIENTE</div>
-                <div class="datos-cliente">
-                    <p><strong>NOMBRE:</strong> ${datosVenta.cliente.nombre}</p>
-                    <p><strong>TELÉFONO:</strong> ${datosVenta.cliente.telefono || '_______________________'}</p>
-                    <p><strong>DOMICILIO:</strong> ${datosVenta.cliente.direccion || '_______________________'}</p>
-                </div>
+<body>
 
-                <!-- TABLA DE PRODUCTOS -->
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width: 60px; text-align: center;">CANT.</th>
-                            <th>DESCRIPCIÓN DEL PRODUCTO</th>
-                            <th style="width: 120px; text-align: right;">PRECIO UNIT.</th>
-                            <th style="width: 120px; text-align: right;">IMPORTE</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tablaProductos}
-                        <tr class="total-row">
-                            <td colspan="3" style="text-align: right;">TOTAL DE LA VENTA:</td>
-                            <td style="text-align: right; color: #dc2626; font-size: 16px;">${dinero(datosVenta.total)}</td>
-                        </tr>
-                    </tbody>
-                </table>
+<div class="ticket">
 
-                <!-- ENGANCHE -->
-                ${datosVenta.enganche > 0 ? `
-                    <div class="enganche-box">
-                        <div class="enganche-texto">
-                            <strong>ENGANCHE RECIBIDO:</strong><br>
-                            Se descuenta del total y el saldo restante se financia.
-                        </div>
-                        <div class="enganche-monto">
-                            ${dinero(datosVenta.enganche)}
-                        </div>
-                    </div>
-                ` : ''}
+<!-- IZQUIERDA -->
+<div class="izq">
 
-                <!-- TABLA DE PAGARÉS (Solo si es crédito) -->
-                ${datosVenta.metodo === "credito" && datosVenta.plan ? `
-                    <div class="tabla-pagares">
-                        <div class="tabla-pagares-titulo">PAGARÉS (TABLA DE AMORTIZACIONES)</div>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style="width: 50px;">No.</th>
-                                    <th>FECHA DE ABONO (PAGARÉ)</th>
-                                    <th style="width: 120px;">IMPORTE DE ABONO</th>
-                                    <th>FECHA REAL DE ABONO (LLENAR)</th>
-                                    <th>SALDO (LLENAR)</th>
-                                    <th>FIRMA</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${tablaPagares}
-                                <tr class="total-row">
-                                    <td colspan="2" style="text-align: right;">TOTAL A PAGAR:</td>
-                                    <td style="text-align: right; color: #dc2626; font-size: 14px;">${dinero(totalAPagar)}</td>
-                                    <td colspan="3"></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                ` : ''}
+<div class="logo">
+    <img src="img/logo.png" onerror="this.style.display='none'">
+</div>
 
-                <!-- RESUMEN DE PLANES -->
-                <div class="planes-resumen">
-                    <div class="planes-titulo">RESUMEN DE SU PLAN DE PAGOS (SEGÚN SU COTIZACIÓN)</div>
-                    <table style="background: transparent; margin: 0; border: none;">
-                        <tr>
-                            ${tablaPlanes}
-                        </tr>
-                    </table>
-                </div>
+<div class="titulo">
+MUEBLERÍA MI PUEBLITO<br>
+<small>Folio: ${folio}</small><br>
+<small>${fechaActual}</small>
+</div>
 
-                <!-- NOTAS Y TÉRMINOS -->
-                <div class="notas-legales">
-                    <strong>TÉRMINOS Y CONDICIONES:</strong>
-                    <br><br>
-                    Al firmar este ticket, acepto los términos de pago y me comprometo a cubrir cada pagaré en la fecha indicada.
-                    <br><br>
-                    <strong>Este pagaré se otorga en los términos del Art. 170 de la Ley General de Títulos y Operaciones de Crédito.</strong> El suscriptor se obliga incondicionalmente a pagar esta cantidad en la fecha indicada. El incumplimiento en el pago, ya sea total o parcial, causará intereses moratorios a razón de la tasa establecida (2% mensual). En caso de juicio, el deudor será responsable de los gastos de cobro que se generen.
-                    <br><br>
-                    Por lo relativo a la interpretación, cumplimiento y ejecución de este pagaré, las partes se someten a la jurisdicción de los tribunales del domicilio del acreedor (Santiago Cuaula, Tlaxcala), renunciando a cualquier otro fuero que pudiera corresponderle.
-                </div>
+<div class="box">
+<strong>CLIENTE</strong><br>
+${datosVenta.cliente.nombre}<br>
+${datosVenta.cliente.telefono || ''}<br>
+${datosVenta.cliente.direccion || ''}
+</div>
 
-                <!-- FIRMAS -->
-                <div class="firma-section">
-                    <div>
-                        <div style="margin-bottom: 40px;"></div>
-                        <div class="linea-firma">FIRMA DEL CLIENTE</div>
-                    </div>
-                    <div>
-                        <div style="margin-bottom: 40px;"></div>
-                        <div class="linea-firma">VENDEDOR / EMPRESA</div>
-                    </div>
-                </div>
+<div class="box">
+<strong>RESUMEN</strong><br>
+Método: ${datosVenta.metodo}<br>
+Enganche: ${dinero(datosVenta.enganche || 0)}<br>
+Saldo: ${dinero(datosVenta.total - (datosVenta.enganche || 0))}
+</div>
 
-                <!-- PIE -->
-                <div style="text-align: center; margin-top: 20px; color: #666; font-size: 11px;">
-                    <p><strong>Mueblería Mi Pueblito</strong></p>
-                    <p>Roberto Escobedo Vega</p>
-                    <p>Santiago Cuaula, Tlaxcala • Tel. 228 123 4567</p>
-                    <p style="margin-top: 10px; color: #999;">Documento emitido: ${new Date().toLocaleString('es-MX')}</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
+<div class="total">
+TOTAL<br>
+<strong>${dinero(datosVenta.total)}</strong>
+</div>
+
+<div class="firma">
+_________________________<br>
+FIRMA CLIENTE
+</div>
+
+</div>
+
+<!-- DERECHA -->
+<div class="der">
+
+<h3>PRODUCTOS</h3>
+<table>
+<thead>
+<tr>
+<th>CANT</th>
+<th>DESCRIPCIÓN</th>
+<th>P. UNIT</th>
+<th>SUBTOTAL</th>
+</tr>
+</thead>
+<tbody>
+${tablaProductos}
+</tbody>
+</table>
+
+${datosVenta.metodo === "credito" ? `
+<h3>CALENDARIO DE PAGARÉS</h3>
+
+${pagaresHTML}
+
+` : ''}
+
+<h3>PLANES DISPONIBLES</h3>
+<table class="planes">
+<tr>
+${tablaPlanes}
+</tr>
+</table>
+
+<div class="legal">
+${generarLeyendaPagare(datosVenta, totalAPagar, filasPagares.length > 18)}
+
+</div>
+
+</div>
+
+</body>
+</html>
+`;
+
 
     // Crear e imprimir
     const ventanaImpresion = window.open('', '_blank');

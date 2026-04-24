@@ -174,7 +174,7 @@ function renderProductosCatalogo(listaProductos) {
                         <small class="precio-semanal">Desde ${dinero(abono)}/semana (${plan6.meses} meses)</small>
                     </div>
                     <div class="card-producto-acciones">
-                        <button onclick="verProducto('${p.id}')">👁️ Detalles</button>
+                        <button onclick="verProducto(${p.id})">👁️ Detalles</button>
                     </div>
                 </div>
             </div>
@@ -185,7 +185,7 @@ function renderProductosCatalogo(listaProductos) {
 }
 // ===== MODAL DE PRODUCTO DETALLADO (CON SIMULADOR DE ENGANCHE) =====
 function verProducto(id) {
-    const p = productos.find(x => String(x.id) === String(id));
+    const p = productos.find(x => x.id == id);
     if (!p) return;
     productoActualId = id;
 

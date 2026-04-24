@@ -84,9 +84,20 @@ function prepararVistaCompras() {
 function _poblarCuentasOrigen() {
     const sel = document.getElementById("compraCuentaOrigen");
     if (!sel) return;
-    const efectivo = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo" }]);
+    
+    // 1. Obtenemos el efectivo
+    const efectivo = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
+    
+    // 2. Obtenemos las tarjetas bancarias
     const bancarias = StorageService.get("cuentas-bancarias", []);
-    const todas = [...efectivo, ...bancarias];
+    
+    // 3. Filtramos para que solo aparezcan las de "debito"
+    const debito = bancarias.filter(c => 
+        c.tipo && c.tipo.toLowerCase().includes("debito")
+    );
+    
+    // 4. Unimos ambos y llenamos el selector
+    const todas = [...efectivo, ...debito];
     sel.innerHTML = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
 }
 
@@ -235,6 +246,44 @@ function registrarCompra() {
             }
         }
     }
+    if (metodo === "contado") {
+        const cuentaOrigenId = document.getElementById("compraCuentaOrigen").value;
+        const selector = document.getElementById("compraCuentaOrigen");
+        const cuentaOrigenNombre = selector.options[selector.selectedIndex].text;
+
+        // 1. Descontar el saldo de la cuenta seleccionada (Efectivo o Débito)
+        if (cuentaOrigenId === "efectivo") {
+            // Caso: Salida de Caja Chica
+            let cuentasEf = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
+            let c = cuentasEf.find(x => x.id === "efectivo");
+            if (c) {
+                c.saldo = (Number(c.saldo) || 0) - totalCompra;
+                StorageService.set("cuentasEfectivo", cuentasEf);
+            }
+        } else {
+            // Caso: Salida de una Tarjeta de Débito
+            let cuentasBan = StorageService.get("cuentas-bancarias", []);
+            let c = cuentasBan.find(x => String(x.id) === String(cuentaOrigenId));
+            if (c) {
+                c.saldo = (Number(c.saldo) || 0) - totalCompra;
+                StorageService.set("cuentas-bancarias", cuentasBan);
+            }
+        }
+
+        // 2. Registrar el movimiento en el historial de Caja (Flujo de efectivo)
+        const movs = StorageService.get("movimientosCaja", []);
+        movs.push({
+            id: Date.now() + 10,
+            tipo: "egreso",
+            concepto: `Compra de contado: ${producto.nombre}`,
+            monto: totalCompra,
+            fecha: new Date().toISOString(),
+            cuenta: cuentaOrigenId,
+            etiquetaCuenta: cuentaOrigenNombre,
+            referencia: `COMPRA-${nuevaCompra.id}`
+        });
+        StorageService.set("movimientosCaja", movs);
+    }
 
     if (!StorageService.set("productos", productos)) {
         console.error("❌ Error guardando productos");
@@ -246,8 +295,28 @@ function registrarCompra() {
         console.error("❌ Error guardando recepciones");
     }
 
-    // Afectar caja solo si el pago es de contado (sale dinero inmediatamente)
+    // Afectar el saldo real solo si el pago es de contado (sale dinero inmediatamente)
     if (metodo === "contado") {
+        // --- A. DESCONTAR DEL SALDO REAL ---
+        if (cuentaOrigenId === "efectivo") {
+            // Buscamos tu lista de cuentas de efectivo
+            let cuentasEf = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
+            let c = cuentasEf.find(x => x.id === "efectivo");
+            if (c) {
+                c.saldo = (Number(c.saldo) || 0) - totalCompra; // Restamos el dinero
+                StorageService.set("cuentasEfectivo", cuentasEf);
+            }
+        } else {
+            // Buscamos en tus tarjetas bancarias
+            let cuentasBan = StorageService.get("cuentas-bancarias", []);
+            let c = cuentasBan.find(x => String(x.id) === String(cuentaOrigenId));
+            if (c) {
+                c.saldo = (Number(c.saldo) || 0) - totalCompra; // Restamos el dinero
+                StorageService.set("cuentas-bancarias", cuentasBan);
+            }
+        }
+
+        // --- B. REGISTRAR EL MOVIMIENTO (Para tu historial) ---
         const movs = StorageService.get("movimientosCaja", []);
         movs.push({
             id: Date.now() + 10,
@@ -260,9 +329,7 @@ function registrarCompra() {
             medioPago: "contado",
             referencia: `COMPRA-${nuevaCompra.id}`
         });
-        if (!StorageService.set("movimientosCaja", movs)) {
-            console.error("❌ Error guardando movimiento de caja");
-        }
+        StorageService.set("movimientosCaja", movs);
     }
 
     alert(`✅ Registro Exitoso\nProveedor: ${prov.nombre}${avisoActualizacion}`);
@@ -581,9 +648,32 @@ function abrirNuevaOrdenCompra() {
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">PROVEEDOR</label>
             <select id="ocProveedor" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-              <option value="">-- Selecciona proveedor --</option>
-              ${selProvs}
+    <option value="">-- Selecciona proveedor --</option>
+    ${selProvs}
+</select>
+
+<div style="margin-top:15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label style="font-size:13px; font-weight:bold;">Método de Pago:</label>
+        <select id="ocMetodoPago" onchange="document.getElementById('divMsiOC').style.display=(this.value==='msi'?'block':'none'); document.getElementById('divCuentaOC').style.display=(this.value==='contado'?'block':'none');" 
+                style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <option value="contado">Contado</option>
+            <option value="credito">Crédito Proveedor</option>
+            <option value="msi">Meses sin Intereses (MSI)</option>
+        </select>
+    </div>
+
+    <div id="divCuentaOC">
+        <label style="font-size:13px; font-weight:bold;">Pagar desde:</label>
+        <select id="compraCuentaOrigen" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
             </select>
+    </div>
+</div>
+
+<div id="divMsiOC" style="display:none; margin-top:10px;">
+    <label style="font-size:13px; font-weight:bold;">Número de meses:</label>
+    <input type="number" id="ocMeses" value="12" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+</div>
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA ENTREGA ESTIMADA</label>
@@ -618,6 +708,7 @@ function abrirNuevaOrdenCompra() {
     document.body.insertAdjacentHTML('beforeend', html);
     window._articulosOC = [];
     _renderTablaArticulosOC();
+    _poblarCuentasOrigen();
 }
 
 function agregarArticuloOC() {
@@ -846,6 +937,19 @@ function cancelarOrdenCompra(id) {
     lista[idx].estado = 'Cancelada';
     StorageService.set('ordenesCompra', lista);
     renderListaOrdenesCompra();
+}
+// Función auxiliar para listar tus cuentas de débito
+function _generarOpcionesCuentasDebito() {
+    const cuentas = StorageService.get("cuentasBancarias", []);
+    let opciones = `<option value="efectivo">💵 Efectivo (Caja Chica)</option>`;
+    
+    cuentas.forEach(c => {
+        // Buscamos las que tengan la palabra "debito" en su tipo
+        if (c.tipo && c.tipo.toLowerCase().includes("debito")) {
+            opciones += `<option value="${c.nombre}">💳 Débito: ${c.nombre}</option>`;
+        }
+    });
+    return opciones;
 }
 
 window.renderProveedores = renderProveedores;

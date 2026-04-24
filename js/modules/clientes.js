@@ -248,44 +248,91 @@ function renderResumenVentaCliente() {
     if (!cont) return;
 
     let totalContado = carrito.reduce((sum, p) => sum + ((p.precioContado || 0) * (p.cantidad || 1)), 0);
+
+    // Leer estado del carrito (los elementos están en el div oculto del carrito)
+    const metodo = document.getElementById("selMetodoPago")?.value || "contado";
     let enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
+    if (enganche < 0) enganche = 0;
+    if (enganche > totalContado) enganche = totalContado;
     let saldo = totalContado - enganche;
+    const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
+    const modoEnganche = document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo";
+    const cuentaSeleccionada = document.getElementById("selCuentaReceptora")?.value || "";
+
+    const etiquetasMetodo = {
+        contado: "💵 Contado",
+        transferencia: "🏦 Transferencia / Depósito",
+        credito: "💳 Crédito",
+        apartado: "📦 Apartado"
+    };
+    const colorMetodo = { contado:"#166534", transferencia:"#1e40af", credito:"#7c3aed", apartado:"#92400e" };
+    const bgMetodo = { contado:"#dcfce7", transferencia:"#dbeafe", credito:"#ede9fe", apartado:"#fef3c7" };
 
     let detalleProductos = carrito.map(p => {
         const cantidad = p.cantidad || 1;
         const subtotal = (p.precioContado || 0) * cantidad;
-        return `
-            <div style="display:flex; justify-content:space-between; margin-bottom:8px; padding:8px; background:#f8f9fa; border-radius:5px;">
-                <span>${p.nombre} ×${cantidad}</span>
+        return `<div style="display:flex; justify-content:space-between; margin-bottom:7px; padding:8px 10px; background:#f8f9fa; border-radius:5px; font-size:13px;">
+                <span>${p.nombre} <span style="color:#718096;">×${cantidad}</span></span>
                 <strong style="color:#27ae60;">${dinero(subtotal)}</strong>
-            </div>
-        `;
+            </div>`;
     }).join("");
 
-    cont.innerHTML = `
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+    // Detalle financiero según método
+    let detalleFinanciero = `<div style="display:flex; justify-content:space-between; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #e2e8f0;">
+            <span style="color:#4a5568;">Subtotal:</span><strong>${dinero(totalContado)}</strong>
+        </div>`;
+
+    if (metodo === "contado") {
+        detalleFinanciero += `<div style="display:flex; justify-content:space-between; font-size:15px;">
+            <span style="font-weight:bold;">💵 Pago en efectivo:</span>
+            <strong style="color:#27ae60; font-size:17px;">${dinero(totalContado)}</strong></div>
+            <div style="font-size:11px; color:#6b7280; margin-top:4px;">→ Ingresa a caja (efectivo)</div>`;
+    } else if (metodo === "transferencia") {
+        detalleFinanciero += `<div style="display:flex; justify-content:space-between; font-size:15px;">
+            <span style="font-weight:bold;">🏦 Total por transferencia:</span>
+            <strong style="color:#1e40af; font-size:17px;">${dinero(totalContado)}</strong></div>
+            ${cuentaSeleccionada ? `<div style="font-size:11px; color:#6b7280; margin-top:4px;">→ Cuenta: ${cuentaSeleccionada}</div>` : ''}`;
+    } else if (metodo === "apartado") {
+        const modoLabel = modoEnganche === "transferencia" ? `🏦 Transferencia${cuentaSeleccionada ? ' ('+cuentaSeleccionada+')' : ''}` : "💵 Efectivo (caja)";
+        detalleFinanciero += `<div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <span style="color:#92400e;">💵 Enganche hoy:</span>
+                <strong style="color:#92400e;">${dinero(enganche)}</strong></div>
+            <div style="font-size:11px; color:#6b7280; margin-bottom:8px;">→ ${modoLabel}</div>
+            <div style="display:flex; justify-content:space-between; font-size:15px;">
+                <span style="font-weight:bold; color:#4a5568;">📦 Pendiente:</span>
+                <strong style="color:#dc2626; font-size:17px;">${dinero(saldo)}</strong></div>`;
+    } else if (metodo === "credito") {
+        const textoPerio = periodicidad === "semanal" ? "Semanal" : periodicidad === "quincenal" ? "Quincenal" : "Mensual";
+        const modoLabel = modoEnganche === "transferencia" ? `🏦 Transferencia${cuentaSeleccionada ? ' ('+cuentaSeleccionada+')' : ''}` : "💵 Efectivo (caja)";
+        let planInfo = "";
+        if (typeof CalculatorService !== "undefined") {
+            try {
+                const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo > 0 ? saldo : totalContado, periodicidad);
+                const idx = (typeof plazoSeleccionado === "number" && plazoSeleccionado >= 0 && plazoSeleccionado < planes.length) ? plazoSeleccionado : 0;
+                const plan = planes[idx];
+                if (plan) planInfo = `<div style="background:#ede9fe; padding:8px; border-radius:5px; margin-top:8px; font-size:12px;">
+                        📅 ${plan.meses} meses • ${textoPerio} • ${dinero(plan.abono)}/período<br>
+                        <strong>Total a pagar: ${dinero(plan.total)}</strong></div>`;
+            } catch(e) {}
+        }
+        detalleFinanciero += `<div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <span style="color:#92400e;">💵 Enganche:</span>
+                <strong style="color:#92400e;">${dinero(enganche)}</strong></div>
+            <div style="font-size:11px; color:#6b7280; margin-bottom:8px;">→ ${modoLabel}</div>
+            <div style="display:flex; justify-content:space-between;">
+                <span style="color:#7c3aed; font-weight:bold;">💳 A financiar:</span>
+                <strong style="color:#7c3aed; font-size:16px;">${dinero(saldo)}</strong></div>${planInfo}`;
+    }
+
+    cont.innerHTML = `<div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
             <h3 style="margin:0 0 15px 0; color:#2c3e50;">🧾 Resumen de Compra</h3>
-
-            <div style="background:#f0f4f8; padding:15px; border-radius:8px; margin-bottom:15px;">
-                ${detalleProductos}
+            <div style="background:${bgMetodo[metodo]||'#f3f4f6'}; border-radius:8px; padding:10px 14px; margin-bottom:15px; text-align:center;">
+                <span style="font-weight:bold; font-size:14px; color:${colorMetodo[metodo]||'#374151'};">${etiquetasMetodo[metodo]||metodo}</span>
             </div>
-
-            <div style="background:#f8f9fa; padding:15px; border-radius:8px; border-left:4px solid #3498db;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #e2e8f0;">
-                    <span>Subtotal:</span>
-                    <strong>${dinero(totalContado)}</strong>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #e2e8f0;">
-                    <span>Enganche:</span>
-                    <strong style="color:#f59e0b;">-${dinero(enganche)}</strong>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:16px;">
-                    <span style="font-weight:bold;">Saldo:</span>
-                    <strong style="color:#27ae60; font-size:18px;">${dinero(saldo)}</strong>
-                </div>
-            </div>
-        </div>
-    `;
+            <div style="background:#f0f4f8; padding:12px; border-radius:8px; margin-bottom:15px;">${detalleProductos}</div>
+            <div style="background:#f8f9fa; padding:14px; border-radius:8px; border-left:4px solid #3498db;">${detalleFinanciero}</div>
+            <p style="font-size:12px; color:#9ca3af; margin:12px 0 0 0; text-align:center;">Selecciona un cliente y confirma la venta →</p>
+        </div>`;
 }
 
 function renderCuentasXCobrar() {
@@ -320,9 +367,15 @@ function renderCuentasXCobrar() {
         const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString();
 
         const pagaresDelFolio = pagaresSistema.filter(p => p.folio === cuenta.folio);
-        const pagaresPendientes = pagaresDelFolio.filter(p => p.estado === "Pendiente");
-        // Saldo real = suma de pagarés pendientes
-        const saldo = pagaresPendientes.reduce((s, p) => s + (p.monto || 0), 0);
+        // CORRECCIÓN: Filtramos tanto Pendientes como Parciales
+        const pagaresPendientes = pagaresDelFolio.filter(p => p.estado === "Pendiente" || p.estado === "Parcial");
+        
+        // CORRECCIÓN: Sumar el saldo real restando lo que ya se abonó en los parciales
+        const saldo = pagaresPendientes.reduce((s, p) => {
+            if (p.estado === "Parcial") return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+            return s + (p.monto || 0);
+        }, 0);
+
         const color = saldo > 0 ? "#27ae60" : "#999";
         const pagaresVencidos = pagaresPendientes.filter(p => new Date(p.fechaVencimiento) < hoy);
         const pagaresTexto = pagaresPendientes.length > 0
@@ -351,11 +404,15 @@ function renderCuentasXCobrar() {
     contenedor.innerHTML = html;
 }
 
+// ==========================================
+// 1. REEMPLAZA renderCobranzaEsperada
+// ==========================================
 function renderCobranzaEsperada() {
     const contenedor = document.getElementById("escaleraCobranza");
     if (!contenedor) return;
 
     const pagares = StorageService.get("pagaresSistema", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
     const hoy = new Date();
 
     let posMeses = {};
@@ -365,23 +422,64 @@ function renderCobranzaEsperada() {
         posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [] };
     }
 
+    // A. CALCULAR LO ESPERADO (Solo lo que realmente falta por cobrar)
     pagares.forEach(p => {
-        const fechaPago = new Date(p.fechaVencimiento);
-        const clave = fechaPago.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
-        if (posMeses[clave]) {
-            posMeses[clave].esperado += p.monto;
-            posMeses[clave].total += p.monto;
-            if (p.estado === "Pagado") posMeses[clave].recaudado += p.monto;
-            if (new Date(p.fechaVencimiento) < hoy && p.estado !== "Pagado") posMeses[clave].vencidos += p.monto;
-            posMeses[clave].pagaresDetalle.push(p);
+        if (p.estado === "Pendiente" || p.estado === "Parcial") {
+            const fechaPago = new Date(p.fechaVencimiento);
+            const clave = fechaPago.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+            
+            if (!posMeses[clave]) {
+                posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [] };
+            }
+
+            // Calculamos lo que falta (ej. si era de 1000 y pagó 400, solo esperamos 600)
+            const montoRestante = (p.monto || 0) - (p.montoAbonado || 0);
+
+            if (montoRestante > 0) {
+                posMeses[clave].esperado += montoRestante;
+                posMeses[clave].total += montoRestante;
+                posMeses[clave].pagaresDetalle.push(p);
+                
+                if (fechaPago < hoy) {
+                    posMeses[clave].vencidos += montoRestante;
+                }
+            }
         }
     });
 
+    // B. CALCULAR RECAUDACIÓN REAL (El dinero que realmente entró en ese mes)
+    cuentas.forEach(cuenta => {
+        if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
+            cuenta.abonos.forEach(abono => {
+                // Parsear la fecha del abono para saber en qué mes cayó el dinero
+                const partes = abono.fecha.split('/');
+                let fechaEfectiva = hoy;
+                if (partes.length === 3) {
+                    fechaEfectiva = new Date(partes[2], partes[1] - 1, partes[0]);
+                }
+
+                const clave = fechaEfectiva.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+
+                if (!posMeses[clave]) {
+                    posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [] };
+                }
+
+                posMeses[clave].recaudado += abono.monto;
+                posMeses[clave].total += abono.monto;
+            });
+        }
+    });
+
+    // C. DIBUJAR LAS TARJETAS (Tu mismo diseño)
     let html = `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap:20px;">`;
 
     Object.entries(posMeses).forEach(([mes, datos]) => {
-        if (datos.total === 0) return;
-        const porcentajeRecaudo = datos.esperado > 0 ? (datos.recaudado / datos.esperado * 100).toFixed(1) : 0;
+        if (datos.total === 0) return; // Si no hay nada esperado ni recaudado, se oculta
+
+        // Calcular porcentaje visual
+        const baseCalculo = datos.esperado + datos.recaudado;
+        const porcentajeRecaudo = baseCalculo > 0 ? (datos.recaudado / baseCalculo * 100).toFixed(1) : 0;
+        
         const colorMes = datos.vencidos > 0 ? "#fee2e2" : "#f0fdf4";
         const iconoMes = datos.vencidos > 0 ? "🔴" : "✅";
         const mesEncoded = encodeURIComponent(mes);
@@ -389,13 +487,13 @@ function renderCobranzaEsperada() {
         html += `<div style="background:${colorMes}; padding:20px; border-radius:10px; border-left:5px solid ${datos.vencidos > 0 ? '#dc2626' : '#27ae60'}; cursor:pointer;" onclick="abrirDetalleCobranza('${mesEncoded}')">
             <h4 style="margin:0 0 15px 0; color:#2c3e50;">${iconoMes} ${mes}</h4>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
-                <div><small style="color:#718096;">Esperado</small><br><strong style="font-size:18px; color:#2c3e50;">${dinero(datos.esperado)}</strong></div>
-                <div><small style="color:#718096;">Recaudado</small><br><strong style="font-size:18px; color:#27ae60;">${dinero(datos.recaudado)}</strong></div>
+                <div><small style="color:#718096;">Falta por Cobrar</small><br><strong style="font-size:18px; color:#2c3e50;">${dinero(datos.esperado)}</strong></div>
+                <div><small style="color:#718096;">Real Recaudado</small><br><strong style="font-size:18px; color:#27ae60;">${dinero(datos.recaudado)}</strong></div>
             </div>
             <div style="background:white; border-radius:8px; overflow:hidden; height:8px; margin-bottom:10px;">
-                <div style="background:#27ae60; height:100%; width:${porcentajeRecaudo}%;"></div>
+                <div style="background:#27ae60; height:100%; width:${porcentajeRecaudo > 100 ? 100 : porcentajeRecaudo}%;"></div>
             </div>
-            <small style="color:#718096;">${porcentajeRecaudo}% recaudado</small>
+            <small style="color:#718096;">${porcentajeRecaudo}% del flujo captado</small>
             ${datos.vencidos > 0 ? `<p style="color:#dc2626; font-weight:bold; margin:10px 0 0 0;">⚠️ ${dinero(datos.vencidos)} VENCIDO</p>` : ''}
             <p style="color:#718096; font-size:12px; margin:8px 0 0 0;">👆 Clic para ver detalle</p>
         </div>`;
@@ -405,6 +503,9 @@ function renderCobranzaEsperada() {
     contenedor.innerHTML = html;
 }
 
+// ==========================================
+// 2. REEMPLAZA abrirDetalleCobranza
+// ==========================================
 function abrirDetalleCobranza(mesKeyEncoded) {
     const mes = decodeURIComponent(mesKeyEncoded);
     const pagares = StorageService.get("pagaresSistema", []);
@@ -424,12 +525,17 @@ function abrirDetalleCobranza(mesKeyEncoded) {
 
     let filasHtml = pagaresMes.map(p => {
         const venc = new Date(p.fechaVencimiento);
-        const diasAtraso = p.estado !== "Pagado" && venc < hoy
-            ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24))
-            : 0;
-        const atrasoHtml = diasAtraso > 0
-            ? `<span style="color:#dc2626; font-weight:bold; font-size:12px;">⚠️ ${diasAtraso} días</span>`
-            : `<span style="color:#27ae60; font-size:12px;">Al corriente</span>`;
+        const diasAtraso = p.estado !== "Pagado" && venc < hoy ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24)) : 0;
+        
+        // Etiqueta visual clara del estado
+        let atrasoHtml = '';
+        if (p.estado === "Pagado") {
+            atrasoHtml = `<span style="color:#27ae60; font-weight:bold; font-size:12px;">✅ Pagado</span>`;
+        } else if (diasAtraso > 0) {
+            atrasoHtml = `<span style="color:#dc2626; font-weight:bold; font-size:12px;">⚠️ Vencido (${diasAtraso}d)</span>`;
+        } else {
+            atrasoHtml = `<span style="color:#92400e; font-weight:bold; font-size:12px;">⏳ Pendiente</span>`;
+        }
 
         const cuenta = cuentas.find(c => c.folio === p.folio);
         const clienteNombre = cuenta ? cuenta.nombre : (p.clienteNombre || p.folio || '-');
@@ -462,7 +568,7 @@ function abrirDetalleCobranza(mesKeyEncoded) {
                             <th style="padding:8px; text-align:left;">Cliente</th>
                             <th style="padding:8px; text-align:left;">Vencimiento</th>
                             <th style="padding:8px; text-align:right;">Monto</th>
-                            <th style="padding:8px; text-align:center;">Atraso</th>
+                            <th style="padding:8px; text-align:center;">Estado</th>
                             <th style="padding:8px; text-align:left;">Productos</th>
                         </tr></thead>
                         <tbody>${filasHtml}</tbody>
@@ -568,18 +674,22 @@ function abrirModalAbonoAvanzado(folio) {
     
     if (!cuenta) return alert("Cuenta no encontrada.");
 
-    // Todos los pagarés del folio (pagados + pendientes), ordenados por vencimiento
     const todosPagares = pagares
         .filter(p => p.folio === folio)
         .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
-    // Saldo real = suma de pagarés con estado Pendiente
-    const pagaresCliente = todosPagares.filter(p => p.estado === 'Pendiente');
-    const saldo = pagaresCliente.reduce((s, p) => s + (p.monto || 0), 0);
+    
+    // CORRECCIÓN: Filtrar y calcular sumando Parciales
+    const pagaresCliente = todosPagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial');
+    const saldo = pagaresCliente.reduce((s, p) => {
+        if (p.estado === "Parcial") return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+        return s + (p.monto || 0);
+    }, 0);
+    
     const original = cuenta.totalContadoOriginal ?? 0;
     const fechaVenta = new Date(cuenta.fechaVenta);
     const hoy = new Date();
     const diasDesdeVenta = Math.floor((hoy - fechaVenta) / (1000 * 60 * 60 * 24));
-    const aplicaPoliticaContado = diasDesdeVenta < 30;
+    const aplicaPoliticaContado = diasDesdeVenta <= 30; // Primeros 30 días
 
     const articulos = cuenta.articulos || [];
     const articulosHTML = articulos.length > 0 ? `
@@ -606,32 +716,39 @@ function abrirModalAbonoAvanzado(folio) {
                 <thead><tr style="background:#fef3c7;">
                     <th style="padding:5px 7px; text-align:left; border-bottom:1px solid #e5e7eb;">#</th>
                     <th style="padding:5px 7px; text-align:left; border-bottom:1px solid #e5e7eb;">Fecha Vencimiento</th>
-                    <th style="padding:5px 7px; text-align:right; border-bottom:1px solid #e5e7eb;">Monto</th>
+                    <th style="padding:5px 7px; text-align:right; border-bottom:1px solid #e5e7eb;">Monto Restante</th>
                     <th style="padding:5px 7px; text-align:center; border-bottom:1px solid #e5e7eb;">Estado</th>
                     <th style="padding:5px 7px; text-align:center; border-bottom:1px solid #e5e7eb;">Días Atraso</th>
                 </tr></thead>
                 <tbody>
                     ${todosPagares.map((p, i) => {
-                        const monto = p.monto || p.abono || 0;
+                        const esPagado = p.estado === 'Pagado' || p.estado === 'Cancelado' || p.estado.includes('Liquidado');
+                        
+                        // CORRECCIÓN: Cálculo de vista del pagaré
+                        let montoDisplay = p.monto || p.abono || 0;
+                        if (esPagado) {
+                            montoDisplay = 0;
+                        } else if (p.estado === 'Parcial') {
+                            montoDisplay = Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+                        }
+
                         const fechaVenc = new Date(p.fechaVencimiento);
-                        const esPagado = p.estado === 'Pagado' || p.estado === 'Cancelado';
-                        const diasAtraso = !esPagado && fechaVenc < hoy
-                            ? Math.floor((hoy - fechaVenc) / (1000 * 60 * 60 * 24))
-                            : 0;
+                        const diasAtraso = !esPagado && fechaVenc < hoy ? Math.floor((hoy - fechaVenc) / (1000 * 60 * 60 * 24)) : 0;
                         const esVencido = !esPagado && diasAtraso > 0;
-                        const montoStyle = esPagado ? 'text-decoration:line-through; color:#27ae60;' : '';
-                        const rowStyle = esPagado ? 'background:#f0fdf4;' : (esVencido ? 'background:#fff1f2;' : '');
-                        const estadoBadge = esPagado
-                            ? `<span style="background:#d1fae5; color:#065f46; padding:2px 7px; border-radius:9999px; font-size:11px;">${p.estado}</span>`
-                            : (esVencido
-                                ? `<span style="background:#fee2e2; color:#dc2626; padding:2px 7px; border-radius:9999px; font-size:11px;">Vencido</span>`
-                                : `<span style="background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:9999px; font-size:11px;">Al corriente</span>`);
+                        const rowStyle = esPagado ? 'background:#f0fdf4; color:#6b7280;' : (esVencido ? 'background:#fff1f2;' : '');
+                        
+                        let estadoBadge = '';
+                        if (esPagado) estadoBadge = `<span style="background:#d1fae5; color:#065f46; padding:2px 7px; border-radius:9999px; font-size:11px;">Pagado</span>`;
+                        else if (p.estado === 'Parcial') estadoBadge = `<span style="background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:9999px; font-size:11px;">Parcial</span>`;
+                        else if (esVencido) estadoBadge = `<span style="background:#fee2e2; color:#dc2626; padding:2px 7px; border-radius:9999px; font-size:11px;">Vencido</span>`;
+                        else estadoBadge = `<span style="background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:9999px; font-size:11px;">Pendiente</span>`;
+
                         return `<tr style="${rowStyle}">
                             <td style="padding:5px 7px; border-bottom:1px solid #f3f4f6;">${i + 1}</td>
                             <td style="padding:5px 7px; border-bottom:1px solid #f3f4f6;">${p.fechaVencimiento || p.vencimiento || '-'}</td>
-                            <td style="padding:5px 7px; text-align:right; border-bottom:1px solid #f3f4f6; ${montoStyle}">${dinero(monto)}</td>
+                            <td style="padding:5px 7px; text-align:right; border-bottom:1px solid #f3f4f6;">${dinero(montoDisplay)}</td>
                             <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6;">${estadoBadge}</td>
-                            <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6; color:${esVencido ? '#dc2626' : '#6b7280'}; font-weight:${esVencido ? 'bold' : 'normal'};">${esVencido ? diasAtraso + ' días' : '-'}</td>
+                            <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6; color:${esVencido ? '#dc2626' : 'inherit'}; font-weight:${esVencido ? 'bold' : 'normal'};">${esVencido ? diasAtraso + ' días' : '-'}</td>
                         </tr>`;
                     }).join('')}
                 </tbody>
@@ -646,7 +763,7 @@ function abrirModalAbonoAvanzado(folio) {
                 <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                         <div><small style="color:#4b5563;">Saldo Actual</small><br><strong style="font-size:20px; color:#27ae60;">${dinero(saldo)}</strong></div>
-                        <div><small style="color:#4b5563;">Pagarés Pendientes</small><br><strong style="font-size:20px; color:#e74c3c;">${pagaresCliente.length}</strong></div>
+                        <div><small style="color:#4b5563;">Pagarés Activos</small><br><strong style="font-size:20px; color:#e74c3c;">${pagaresCliente.length}</strong></div>
                     </div>
                 </div>
 
@@ -666,21 +783,17 @@ function abrirModalAbonoAvanzado(folio) {
 
                 ${aplicaPoliticaContado ? `
                     <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
-                        <strong style="color:#92400e;">💡 Política de Liquidación Anticipada</strong>
+                        <strong style="color:#92400e;">💡 Precio de Contado Disponible (Primeros 30 días)</strong>
                         <p style="margin:10px 0 0 0; font-size:14px; color:#78350f;">
-                            Si liquida en los primeros 30 días, se respeta: <strong>${dinero(original)}</strong>
+                            Total original pactado de contado: <strong>${dinero(original)}</strong>
                         </p>
-                        <label style="margin-top:10px; display:flex; align-items:center; gap:8px; cursor:pointer;">
-                            <input type="checkbox" id="chkLiquidarContado" style="width:18px; height:18px;">
-                            <span>✅ Aplicar política de liquidación</span>
-                        </label>
                     </div>
                 ` : ''}
 
                 <div style="display:flex; gap:10px;">
                     <button onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado})" 
                             style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
-                        ✅ Registrar Abono
+                        ✅ Procesar Abono
                     </button>
                     <button onclick="document.querySelector('[data-modal=&quot;abono-avanzado&quot;]')?.remove();" 
                             style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
@@ -693,197 +806,276 @@ function abrirModalAbonoAvanzado(folio) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica) {
-    const montoAbono = parseFloat(document.getElementById("montoAbono").value);
-    const usarPolitica = document.getElementById("chkLiquidarContado")?.checked && aplicaPolitica;
-    const { medioPago, cuentaId, etiqueta } = _getCuentaSeleccionada('abono');
+function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
-    if (isNaN(montoAbono) || montoAbono <= 0) {
-        alert("Ingresa un monto válido.");
-        return;
-    }
+    const pagares = StorageService.get("pagaresSistema", []);
+    const pagaresFolio = pagares.filter(p => p.folio === folio);
 
-    if (montoAbono > saldoActual) {
-        alert("El abono no puede ser mayor al saldo.");
-        return;
-    }
+    if (!pagaresFolio.length) return null;
 
-    let nuevoSaldo = saldoActual - montoAbono;
+    // saldo actual real
+    const pendientes = pagaresFolio.filter(p => p.estado !== "Pagado");
+    const saldoActual = pendientes.reduce((s, p) => s + p.monto, 0);
 
-    if (usarPolitica && Math.abs(montoAbono - saldoActual) < 0.01) {
-        if (!confirm(`⚠️ APLICAR POLÍTICA DE CONTADO\n\nMonto a pagar: ${dinero(montoAbono)}\nRespetado al valor: ${dinero(montoOriginal)}\n\n¿Confirmar?`)) {
-            return;
-        }
-        nuevoSaldo = 0;
-    }
+    // total ya pagado
+    const pagados = pagaresFolio.filter(p => p.estado === "Pagado");
+    const totalPagado = pagados.reduce((s, p) => s + p.monto, 0);
 
-    // ─── CALCULAR PAGARÉS CUBIERTOS ───
-    const _todosLosPagares = StorageService.get("pagaresSistema", []);
-    const _pagaresDelFolio = _todosLosPagares
-        .filter(p => p.folio === folio && p.estado !== "Pagado")
-        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    const totalConAbono = totalPagado + montoAbono;
 
-    let _montoRestante = montoAbono;
-    const _pagaresCubiertos = [];
-    for (const pag of _pagaresDelFolio) {
-        // For previously partially-paid pagarés, only require the remaining balance
-        const _montoNecesario = pag.estado === 'Parcial'
-            ? Math.max(0, pag.monto - (pag.montoAbonado || 0))
-            : pag.monto;
-        if (_montoRestante >= _montoNecesario - 0.01) {
-            _pagaresCubiertos.push({ ...pag });
-            _montoRestante -= _montoNecesario;
-        } else {
+    // reconstruir saldo base (como ya haces en ticket)
+    const saldoBase = saldoActual + totalPagado;
+
+    // usar TU lógica de planes
+    const planes = CalculatorService.calcularCreditoConPeriodicidad
+        ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, "semanal")
+        : CalculatorService.calcularCredito(saldoBase);
+
+    // buscar plan alcanzado
+    let planAplicable = null;
+
+    for (let plan of planes) {
+        if (totalConAbono >= plan.total) {
+            planAplicable = plan;
             break;
         }
     }
 
-    // Detect partial coverage: remaining money covers part of the next pagaré
-    let _pagareParcial = null;
-    if (_montoRestante > 0.01) {
-        const _nextPagare = _pagaresDelFolio.find(p => !_pagaresCubiertos.find(pc => pc.id === p.id));
-        if (_nextPagare) {
-            _pagareParcial = { ..._nextPagare, montoAplicado: _montoRestante };
+    if (!planAplicable) return null;
+
+    const montoCorrecto = planAplicable.total - totalPagado;
+
+    return {
+        aplica: true,
+        montoCorrecto,
+        ahorro: saldoActual - montoCorrecto,
+        plan: planAplicable
+    };
+}
+function confirmarPoliticaAntesDeGuardar(folio, monto, continuar) {
+
+    const evalPol = evaluarPoliticaLiquidacion(folio, monto);
+
+    // No aplica → sigue normal
+    if (!evalPol || !evalPol.aplica) {
+        continuar(false);
+        return;
+    }
+
+    // CASO 1: el monto ya coincide EXACTO → aplicar automático
+    if (Math.abs(monto - evalPol.montoCorrecto) < 0.01) {
+        continuar(true, evalPol);
+        return;
+    }
+
+    // CASO 2: el cliente puede pagar menos → sugerir ajuste
+    if (monto > evalPol.montoCorrecto) {
+
+        if (!confirm(
+            `💡 LIQUIDACIÓN INTELIGENTE\n\n` +
+            `El cliente puede liquidar con:\n${dinero(evalPol.montoCorrecto)}\n\n` +
+            `Ahorro: ${dinero(evalPol.ahorro)}\n\n` +
+            `¿Deseas ajustar el monto automáticamente?`
+        )) {
+            continuar(false);
+            return;
+        }
+
+        continuar(true, evalPol);
+        return;
+    }
+
+    // CASO 3: le falta para liquidar → solo sugerencia visual (no bloquear)
+    continuar(false);
+}
+
+function aplicarPoliticaLiquidacion(folio) {
+
+    let pagares = StorageService.get("pagaresSistema", []);
+
+    pagares = pagares.map(p => {
+        if (p.folio === folio && p.estado !== "Pagado") {
+            return {
+                ...p,
+                estado: "Liquidado por política"
+            };
+        }
+        return p;
+    });
+
+    StorageService.set("pagaresSistema", pagares);
+}
+
+
+function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado) {
+    const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
+    const { medioPago, cuentaId, etiqueta } = _getCuentaSeleccionada('abono');
+
+    if (isNaN(montoAbonoInput) || montoAbonoInput <= 0) {
+        alert("Ingresa un monto válido.");
+        return;
+    }
+
+    if (montoAbonoInput > saldoActual) {
+        alert("El abono no puede ser mayor al saldo.");
+        return;
+    }
+
+    let montoFinal = montoAbonoInput;
+    let liquidacionPorPolitica = false;
+    
+    // Obtenemos historial de pagos para saber cuánto le falta en realidad
+    const pagares = StorageService.get("pagaresSistema", []);
+    const pagaresFolio = pagares.filter(p => p.folio === folio);
+    const pagados = pagaresFolio.filter(p => p.estado === "Pagado" || p.estado === "Cancelado");
+    const totalYaPagado = pagados.reduce((s, p) => s + (p.montoAbonado || p.monto), 0);
+    
+    // CORRECCIÓN: Diálogo para Política de 30 Días (Precio de Contado)
+    if (aplicaPoliticaContado) {
+        const restanteContado = montoOriginal - totalYaPagado;
+        if (restanteContado > 0 && montoAbonoInput >= restanteContado) {
+            if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\n\nPuede liquidar la cuenta completa por el precio de contado pagando solo: ${dinero(restanteContado)}\n\n¿Deseas aplicar esta política, cobrar ${dinero(restanteContado)} y condonar los intereses restantes?`)) {
+                montoFinal = restanteContado;
+                liquidacionPorPolitica = true;
+            }
         }
     }
 
-    // Marcar pagarés cubiertos como Pagado y el parcial si aplica
-    if (_pagaresCubiertos.length > 0 || _pagareParcial) {
-        const fechaAbono = new Date().toLocaleDateString("es-MX");
-        const _todosActualizados = _todosLosPagares.map(p => {
-            if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
-                return { ...p, estado: "Pagado", fechaAbono, montoAbonado: p.monto };
+    // CORRECCIÓN: Diálogo para Política de Liquidación Inteligente (Más de 30 días)
+    if (!liquidacionPorPolitica) {
+        const evalPol = evaluarPoliticaLiquidacion(folio, montoAbonoInput);
+        if (evalPol && evalPol.aplica) {
+            if (confirm(`💡 LIQUIDACIÓN INTELIGENTE (SALTO DE PLAN)\n\nEl abono alcanza para cubrir un plan más corto. El cliente puede liquidar su cuenta con: ${dinero(evalPol.montoCorrecto)}\n(Se le ahorrarán ${dinero(evalPol.ahorro)}).\n\n¿Deseas aplicar el descuento y dar por liquidada la cuenta?`)) {
+                montoFinal = evalPol.montoCorrecto;
+                liquidacionPorPolitica = true;
             }
-            if (_pagareParcial && p.id === _pagareParcial.id) {
-                return { ...p, estado: "Parcial", fechaAbono, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
+        }
+    }
+
+    // ============================================
+    // APLICAR ABONO (CASCADA NORMAL)
+    // ============================================
+    const _todosLosPagares = StorageService.get("pagaresSistema", []);
+    let _pagaresDelFolio = _todosLosPagares
+        .filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"))
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    let _montoRestante = montoFinal;
+    const _pagaresCubiertos = [];
+    let _pagareParcial = null;
+
+    for (const pag of _pagaresDelFolio) {
+        const _montoNecesario = (pag.estado === 'Parcial') 
+            ? Math.max(0, pag.monto - (pag.montoAbonado || 0))
+            : pag.monto;
+
+        if (_montoRestante >= _montoNecesario - 0.01) {
+            _pagaresCubiertos.push({ ...pag });
+            _montoRestante -= _montoNecesario;
+        } else {
+            if (_montoRestante > 0.01) {
+                _pagareParcial = { ...pag, montoAplicado: _montoRestante };
+                _montoRestante = 0;
+            }
+            break;
+        }
+    }
+
+    // Actualizamos Estados en Memoria
+    const fechaAbono = new Date().toLocaleDateString("es-MX");
+    let _todosActualizados = _todosLosPagares.map(p => {
+        if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
+            return { ...p, estado: "Pagado", fechaAbono, montoAbonado: p.monto };
+        }
+        if (_pagareParcial && p.id === _pagareParcial.id) {
+            return { ...p, estado: "Parcial", fechaAbono, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
+        }
+        return p;
+    });
+
+    // ============================================
+    // CERRAR PAGARÉS SOBRANTES SI APLICÓ POLÍTICA
+    // ============================================
+    if (liquidacionPorPolitica) {
+        _todosActualizados = _todosActualizados.map(p => {
+            // Cancelamos los pagarés que quedaron pendientes tras cubrir el montoFinal
+            if (p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")) {
+                return { ...p, estado: "Cancelado", nota: "Liquidado por política" };
             }
             return p;
         });
-        StorageService.set("pagaresSistema", _todosActualizados);
     }
 
-    // Pagarés restantes después del abono (partial pagaré is still outstanding)
-    const _pagaresRestantes = _pagaresDelFolio.filter(p => !_pagaresCubiertos.find(pc => pc.id === p.id));
+    StorageService.set("pagaresSistema", _todosActualizados);
 
+    // ============================================
+    // ACTUALIZAR CUENTA Y CAJA
+    // ============================================
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const idxCuenta = cuentas.findIndex(c => c.folio === folio);
     let nuevoSaldoReal = 0;
-    
+
     if (idxCuenta !== -1) {
         const cuenta = cuentas[idxCuenta];
-
-        // REGLA 1: Liquidación en el primer mes (precio de contado)
-        const diasDesdeVenta = cuenta.fechaVenta
-            ? (Date.now() - new Date(cuenta.fechaVenta)) / 86400000
-            : Infinity;
-        const totalAbonadoHistorico = (cuenta.abonos || []).reduce((s, a) => s + (a.monto || 0), 0);
-        const totalRecibido = (cuenta.engancheRecibido || 0) + totalAbonadoHistorico + montoAbono;
-
-        if (cuenta.metodo === "credito" && diasDesdeVenta <= 30 && totalRecibido >= cuenta.totalContadoOriginal && nuevoSaldo > 0) {
-            if (confirm(`✅ LIQUIDACIÓN ANTICIPADA\n\nEl cliente cubre el precio de contado (${dinero(cuenta.totalContadoOriginal)}) dentro del primer mes.\n\n¿Aplicar política y saldar la cuenta condonando el interés?`)) {
-                nuevoSaldo = 0;
-                const todosLosPagares = StorageService.get("pagaresSistema", []);
-                const actualizados = todosLosPagares.map(p =>
-                    p.folio === folio && p.estado === "Pendiente"
-                        ? { ...p, estado: "Cancelado", motivoCancelacion: "Política: liquidación en primer mes (precio contado)" }
-                        : p
-                );
-                StorageService.set("pagaresSistema", actualizados);
-            }
-        }
-
-        // REGLA 2: Equivalencia de plazo menor
-        if (cuenta.metodo === "credito" && cuenta.plan && nuevoSaldo > 0) {
-            const periodicidad = cuenta.periodicidad || "semanal";
-            const saldoFinanciado = (cuenta.totalContadoOriginal || 0) - (cuenta.engancheRecibido || 0);
-            const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoFinanciado, periodicidad);
-            const totalPagadoAcumulado = (cuenta.saldoOriginal || 0) - nuevoSaldo;
-
-            const planBeneficioso = planes
-                .filter(p => p.meses < cuenta.plan.meses && totalPagadoAcumulado >= p.total)
-                .sort((a, b) => a.meses - b.meses)[0];
-
-            if (planBeneficioso) {
-                if (confirm(
-                    `🎉 POLÍTICA DE EQUIVALENCIA DE PLAZO\n\n` +
-                    `El cliente ha pagado ${dinero(totalPagadoAcumulado)}, equivalente al plan de ${planBeneficioso.meses} meses.\n\n` +
-                    `Plazo original: ${cuenta.plan.meses} meses\n` +
-                    `Plazo alcanzado: ${planBeneficioso.meses} meses\n\n` +
-                    `¿Aplicar política y saldar la cuenta?`
-                )) {
-                    nuevoSaldo = 0;
-                    const todosLosPagares = StorageService.get("pagaresSistema", []);
-                    const actualizados = todosLosPagares.map(p =>
-                        p.folio === folio && p.estado === "Pendiente"
-                            ? { ...p, estado: "Cancelado", motivoCancelacion: `Política: equivalencia plazo ${planBeneficioso.meses} meses` }
-                            : p
-                    );
-                    StorageService.set("pagaresSistema", actualizados);
-                }
-            }
-        }
-
         cuenta.abonos = cuenta.abonos || [];
         cuenta.abonos.push({
             fecha: new Date().toLocaleDateString(),
-            monto: montoAbono,
+            monto: montoFinal,
             cuentaId,
             medioPago,
             etiquetaCuenta: etiqueta,
             vendedorId: cuenta.vendedorId || null
         });
-        // Registrar comisión por abono si el vendedor usa ese tipo
-        if (cuenta.vendedorId) {
-            if (typeof registrarComisionAbono === 'function') {
-                registrarComisionAbono(folio, montoAbono, cuenta.vendedorId);
-            }
-        }
-        // Recalcular saldo desde pagarés pendientes restantes (incluyendo parciales)
-        const _pagaresActualizados = StorageService.get("pagaresSistema", []);
-        cuenta.saldoActual = _pagaresActualizados
+
+        // Recalcular saldo exacto de Cuentas por Cobrar
+        const _pagaresAct = StorageService.get("pagaresSistema", []);
+        nuevoSaldoReal = _pagaresAct
             .filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
             .reduce((s, p) => {
                 if (p.estado === 'Parcial') return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
                 return s + (p.monto || 0);
             }, 0);
-        nuevoSaldoReal = cuenta.saldoActual;
+
+        cuenta.saldoActual = nuevoSaldoReal;
         
-        if (nuevoSaldoReal === 0) {
+        // Liquidamos la cuenta si el saldo llegó a 0
+        if (nuevoSaldoReal <= 0.01) { 
             cuenta.estado = "Saldado";
+            cuenta.saldoActual = 0;
+            nuevoSaldoReal = 0;
         }
 
         cuentas[idxCuenta] = cuenta;
-        if (!StorageService.set("cuentasPorCobrar", cuentas)) {
-            console.error("❌ Error guardando abono");
-            return;
-        }
+        StorageService.set("cuentasPorCobrar", cuentas);
 
+        // Ingreso a Caja
         let movimientos = StorageService.get("movimientosCaja", []);
-        const folioCaja = folio;
         movimientos.push({
             id: Date.now(),
-            folio: folioCaja,
+            folio,
             fecha: new Date().toLocaleDateString(),
-            monto: montoAbono,
+            monto: montoFinal,
             tipo: "ingreso",
             concepto: `Abono a ${cuenta.nombre} - ${folio}`,
             referencia: "Abono",
             cuenta: cuentaId,
-            medioPago: medioPago,
+            medioPago,
             etiquetaCuenta: etiqueta
         });
-        if (!StorageService.set("movimientosCaja", movimientos)) {
-            console.error("❌ Error guardando movimiento de caja");
-        }
+        StorageService.set("movimientosCaja", movimientos);
     }
 
-    // ─── GENERAR TICKET DE ABONO ───
+    // ============================================
+    // GENERAR TICKET Y CERRAR MODAL
+    // ============================================
     const _cuentaData = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
-    // Include partial pagaré in cubiertos list (with parcial flag for ticket rendering)
+    const _pagaresRestantes = _todosActualizados.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"));
+    
     const _pagaresCubiertosTicket = [..._pagaresCubiertos];
     if (_pagareParcial) {
         _pagaresCubiertosTicket.push({ ..._pagareParcial, parcial: true });
     }
+
     generarTicketAbonoTermico({
         folio,
         cliente: {
@@ -891,11 +1083,11 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             telefono: _cuentaData?.telefono || '',
             direccion: _cuentaData?.direccion || ''
         },
-        montoAbono,
+        montoAbono: montoFinal,
         nuevoSaldo: nuevoSaldoReal,
         fecha: new Date().toLocaleDateString("es-MX"),
-        metodoCobro: document.getElementById("metodoCobroAbono")?.value || medioPago || "efectivo",
-        cuentaDestino: document.getElementById("cuentaDestinoAbono")?.value || etiqueta || "efectivo",
+        metodoCobro: medioPago || "efectivo",
+        cuentaDestino: etiqueta || "efectivo",
         pagaresCubiertos: _pagaresCubiertosTicket,
         pagaresRestantes: _pagaresRestantes,
         articulos: _cuentaData?.articulos || [],
@@ -903,7 +1095,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         enganche: _cuentaData?.engancheRecibido || 0
     });
 
-    alert("✅ Abono registrado exitosamente.");
+    alert(`✅ Abono registrado exitosamente por ${dinero(montoFinal)}.`);
     document.querySelector('[data-modal="abono-avanzado"]')?.remove();
     renderCuentasXCobrar();
 }

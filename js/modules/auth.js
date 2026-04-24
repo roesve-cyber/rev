@@ -189,8 +189,8 @@ function _crearPantallaLogin() {
         <p style="color:#6b7280;font-size:13px;margin:0 0 28px;">Sistema de Punto de Venta</p>
         <form onsubmit="event.preventDefault(); iniciarSesion();">
           <div style="text-align:left;margin-bottom:14px;">
-            <label style="font-size:12px;font-weight:bold;color:#374151;display:block;margin-bottom:5px;">CORREO ELECTRÓNICO</label>
-            <input type="email" id="loginEmail" placeholder="usuario@ejemplo.com" autocomplete="email"
+            <label style="font-size:12px;font-weight:bold;color:#374151;display:block;margin-bottom:5px;">USUARIO</label>
+            <input type="text" id="loginEmail" placeholder="usuario o email" autocomplete="username"
               style="width:100%;padding:11px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;outline:none;transition:border 0.2s;"
               onfocus="this.style.borderColor='#1e40af'" onblur="this.style.borderColor='#e5e7eb'">
           </div>
@@ -205,9 +205,6 @@ function _crearPantallaLogin() {
             style="width:100%;padding:13px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;letter-spacing:1px;">
             🔐 Entrar
           </button>
-          <div style="margin-top:12px;">
-            <a href="#" onclick="event.preventDefault(); recuperarContrasena();" style="color:#6b7280;font-size:12px;text-decoration:underline;">¿Olvidaste tu contraseña?</a>
-          </div>
         </form>
         <p style="color:#9ca3af;font-size:11px;margin:20px 0 0;">v1.0 — Acceso restringido</p>
       </div>
