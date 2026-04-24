@@ -77,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("📊 Estado actual:");
         console.log(`   • Categorías: ${categoriasData.length}`);
         console.log(`   • Bancos: ${tarjetasConfig.length}`);
-        console.log(`   • Productos: ${productos.length}`);
+        console.log(`   • Productos: ${window.productos.length}`);
         console.log(`   • Clientes: ${clientes.length}`);
         
     } catch (e) {
