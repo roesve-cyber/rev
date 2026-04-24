@@ -94,71 +94,92 @@ function renderInventario(listaAMostrar = productos) {
         listaAMostrar.forEach(p => {
             const stock = p.stock || 0;
             const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
+            const editandoId = window._editandoIdProducto === p.id;
             html += `
                 <tr>
-                    <td>
-                        <input type="text" value="${p.id}" style="width:60px;text-align:center;" onchange="actualizarIdProducto(${p.id}, this.value)">
+                    <td style="max-width:120px;overflow-x:auto;">
+                        ${editandoId
+                            ? `<input type=\"text\" id=\"inputEditarId${p.id}\" value=\"${p.id}\" style=\"width:80px;text-align:center;\">`
+                            : `<span style=\"display:inline-block;min-width:60px;max-width:110px;overflow-x:auto;\">${p.id}</span>`
+                        }
                     </td>
                     <td>
                         <b>${p.nombre}</b><br>
-                        <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
-                        ${p.caracteristicas ? `<div style=\"font-size:12px;color:#444;\">${p.caracteristicas}</div>` : ""}
+                        <small style=\"color:#666;\">${p.categoria || ''} > ${p.subcategoria || ''}</small>
+                        ${p.caracteristicas ? `<div style=\\\"font-size:12px;color:#444;\\\">${p.caracteristicas}</div>` : ""}
                     </td>
-                    <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
-                    <td style="text-align:right;">${dinero(p.precio)}</td>
-                    <td style="text-align:center; display:flex; gap:5px; justify-content:center;">
-                        <button onclick="abrirProductoForm(${p.id})" 
-                                style="padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;">
+                    <td style=\"text-align:center; font-weight:bold; color:${colorStock};\">${stock}</td>
+                    <td style=\"text-align:right;\">${dinero(p.precio)}</td>
+                    <td style=\"text-align:center; display:flex; gap:5px; justify-content:center;\">
+                        <button onclick=\"abrirProductoForm(${p.id})\" 
+                                style=\"padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;\">
                             ✏️ Editar
                         </button>
-                        <button onclick="abrirVisorMaestro(${p.id})" 
-                                style="padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;">
+                        <button onclick=\"abrirVisorMaestro(${p.id})\" 
+                                style=\"padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;\">
                             🔍 Visor
                         </button>
-                        <button onclick="confirmarEliminarProducto(${p.id})" 
-                                style="padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;">
+                        <button onclick=\"confirmarEliminarProducto(${p.id})\" 
+                                style=\"padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;\">
                             🗑️ Eliminar
                         </button>
+                        ${editandoId
+                            ? `<button onclick=\"guardarNuevoId(${p.id})\" style=\"padding:6px 10px;background:#16a34a;color:white;border:none;border-radius:4px;font-weight:bold;\">Guardar</button>`
+                              + `<button onclick=\"cancelarEditarId()\" style=\"padding:6px 10px;background:#aaa;color:white;border:none;border-radius:4px;font-weight:bold;\">Cancelar</button>`
+                            : `<button onclick=\"editarIdProducto(${p.id})\" style=\"padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;\">Editar ID</button>`
+                        }
                     </td>
                 </tr>`;
         });
     }
-// Permite editar el ID del producto desde la tabla
-async function actualizarIdProducto(idActual, nuevoId) {
-    nuevoId = String(nuevoId).trim();
+
+// Estado para saber qué producto está en edición de ID
+window._editandoIdProducto = null;
+
+function editarIdProducto(id) {
+    window._editandoIdProducto = id;
+    renderInventario();
+    setTimeout(() => {
+        const input = document.getElementById('inputEditarId' + id);
+        if (input) input.focus();
+    }, 100);
+}
+
+function cancelarEditarId() {
+    window._editandoIdProducto = null;
+    renderInventario();
+}
+
+async function guardarNuevoId(idActual) {
+    const input = document.getElementById('inputEditarId' + idActual);
+    if (!input) return;
+    const nuevoId = String(input.value).trim();
     if (!nuevoId) {
         alert('El ID no puede estar vacío.');
-        renderInventario();
         return;
     }
     if (productos.some(p => String(p.id) === nuevoId && String(p.id) !== String(idActual))) {
         alert('Ya existe un producto con ese ID.');
-        renderInventario();
         return;
     }
     const idx = productos.findIndex(p => String(p.id) === String(idActual));
     if (idx !== -1) {
-        // Actualiza local
         productos[idx].id = nuevoId;
         if (typeof StorageService?.set === 'function') StorageService.set('productos', productos);
-
-        // Actualiza en Firestore si está activo
         if (window._firebaseActivo && window._db) {
             try {
-                // 1. Obtener datos del producto actual
                 const docRef = window._db.collection('productos').doc(String(idActual));
                 const docSnap = await docRef.get();
                 if (docSnap.exists) {
                     const data = docSnap.data();
-                    // 2. Crear nuevo doc con nuevo ID
                     await window._db.collection('productos').doc(String(nuevoId)).set(data);
-                    // 3. Borrar doc anterior
                     await docRef.delete();
                 }
             } catch (e) {
                 alert('Error actualizando ID en Firestore: ' + (e.message || e));
             }
         }
+        window._editandoIdProducto = null;
         renderInventario();
     }
 }
