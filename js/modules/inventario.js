@@ -1,3 +1,45 @@
+// Detecta y corrige IDs de productos duplicados
+window.detectarYCorregirIdsDuplicados = function() {
+    const ids = {};
+    const cambios = [];
+    productos.forEach(p => {
+        if (!p.id) return;
+        const idStr = String(p.id);
+        if (ids[idStr]) {
+            // Duplicado encontrado
+            const nuevoId = idStr + '-' + Math.floor(Math.random() * 10000);
+            cambios.push(`ID duplicado: ${idStr} → ${nuevoId}`);
+            p.id = nuevoId;
+        }
+        ids[p.id] = true;
+    });
+    if (cambios.length > 0) {
+        if (typeof StorageService?.set === 'function') StorageService.set('productos', productos);
+        if (window._firebaseActivo && window._db) {
+            // Opcional: sincronizar cambios en Firestore
+            cambios.forEach(async cambio => {
+                const partes = cambio.match(/^ID duplicado: (.+) → (.+)$/);
+                if (partes) {
+                    const idViejo = partes[1];
+                    const idNuevo = partes[2];
+                    try {
+                        const docRef = window._db.collection('productos').doc(idViejo);
+                        const docSnap = await docRef.get();
+                        if (docSnap.exists) {
+                            const data = docSnap.data();
+                            await window._db.collection('productos').doc(idNuevo).set(data);
+                            await docRef.delete();
+                        }
+                    } catch (e) {}
+                }
+            });
+        }
+        alert('Se corrigieron los siguientes IDs duplicados:\n' + cambios.join('\n'));
+        renderInventario();
+    } else {
+        alert('No se encontraron IDs duplicados.');
+    }
+}
 // FILTROS DE INVENTARIO
 function aplicarFiltros() {
     const catFiltro = document.getElementById("filtroCategoria").value;
