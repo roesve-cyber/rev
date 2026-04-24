@@ -379,8 +379,8 @@ function guardarProductoDB() {
         const index = window.productos.findIndex(p => p.id === productoEditando);
         const margenCalculado = CalculatorService.calcularMargen(precioVenta, costo);
         if (index !== -1) {
-            productos[index] = {
-                ...productos[index],
+            window.productos[index] = {
+                ...window.productos[index],
                 nombre, costo,
                 margen: margenCalculado,
                 precio: precioVenta,
@@ -393,7 +393,7 @@ function guardarProductoDB() {
         }
     } else {
         const margenCalculado = CalculatorService.calcularMargen(precioVenta, costo);
-        productos.push({
+        window.productos.push({
             id: Date.now(),
             nombre,
             costo,
@@ -408,7 +408,7 @@ function guardarProductoDB() {
         });
     }
 
-    if (!StorageService.set("productos", productos)) {
+    if (!StorageService.set("productos", window.productos)) {
         alert("❌ Error guardando producto");
         return;
     }
@@ -644,7 +644,7 @@ function abrirVisorMaestro(id) {
 }
 
 function mostrarDetalleProductoMaestro(id) {
-    const p = productos.find(prod => prod.id == id);
+    const p = window.productos.find(prod => prod.id == id);
     if (!p) return;
 
     const cont = document.getElementById("detalle-producto-maestro");
@@ -763,7 +763,7 @@ function actualizarSubcategoriasVisor(valorSeleccionado = "") {
 }
 
 function guardarCambiosVisor(id) {
-    const p = productos.find(prod => prod.id == id);
+    const p = window.productos.find(prod => prod.id == id);
     if (!p) return;
     if (!confirm(`¿Guardar cambios para "${p.nombre}"?`)) return;
 
@@ -783,7 +783,7 @@ function guardarCambiosVisor(id) {
     p.descripcion  = document.getElementById("editDescripcion")?.value || '';
     p.caracteristicas = document.getElementById("editCaracteristicas")?.value || '';
 
-    if (!StorageService.set("productos", productos)) {
+    if (!StorageService.set("productos", window.productos)) {
         alert("❌ Error guardando cambios");
         return;
     }
@@ -877,7 +877,7 @@ function insertarProductoSistema(p) {
     }
 
     // Evitar duplicados reales
-    const duplicado = productos.some(prod =>
+    const duplicado = window.productos.some(prod =>
         prod.nombre.toUpperCase() === p.nombre.toUpperCase() &&
         prod.modelo === p.modelo &&
         prod.color === p.color
@@ -889,7 +889,7 @@ function insertarProductoSistema(p) {
 
     const margenCalculado = CalculatorService.calcularMargen(p.precio, p.costo);
 
-    productos.push({
+    window.productos.push({
         id: Math.round(Date.now() * 1000 + Math.random() * 1000),
         nombre: p.nombre,
         costo: p.costo,
@@ -1020,7 +1020,7 @@ productosAImportar.forEach((p, i) => {
     }
 });
 
-    if (!StorageService.set("productos", productos)) {
+    if (!StorageService.set("productos", window.productos)) {
         alert("❌ Error importando productos");
         return;
     }
