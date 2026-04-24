@@ -169,10 +169,10 @@ function renderInventario(listaAMostrar = window.productos) {
 
 // Modal para editar ID
 window.abrirModalEditarId = function(id) {
-    const p = window.productos.find(prod => prod.id === id);
+        const p = window.productos.find(prod => String(prod.id) === String(id));
     if (!p) return;
     // Contar cuántas veces aparece ese ID en la base local
-    const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
+        const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
     // Modal básico
     let modal = document.getElementById('modalEditarId');
     if (modal) modal.remove();
@@ -237,7 +237,7 @@ window.guardarNuevoIdModal = async function(idActual) {
 }
 
 function confirmarEliminarProducto(id) {
-    const producto = window.productos.find(p => p.id === id);
+    const producto = window.productos.find(p => String(p.id) === String(id));
     if (!producto) {
         alert("Producto no encontrado.");
         return;
@@ -251,7 +251,7 @@ function confirmarEliminarProducto(id) {
 }
 
 function actualizarStock(id, cant, concepto) {
-    const idx = window.productos.findIndex(p => p.id === id);
+    const idx = window.productos.findIndex(p => String(p.id) === String(id));
     if (idx !== -1) {
         window.productos[idx].stock = (window.productos[idx].stock || 0) + cant;
         registrarMovimiento(id, concepto, cant, "entrada");
@@ -277,7 +277,7 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
 }
 
 function eliminarProducto(id) {
-    window.productos = window.productos.filter(p => p.id !== id);
+    window.productos = window.productos.filter(p => String(p.id) !== String(id));
     if (!StorageService.set("productos", window.productos)) {
         console.error("❌ Error eliminando producto");
         return;
