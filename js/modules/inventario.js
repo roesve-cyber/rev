@@ -79,6 +79,7 @@ function renderInventario(listaAMostrar = productos) {
         <table class="tabla-admin">
             <thead>
                 <tr>
+                    <th>ID</th>
                     <th>Producto</th>
                     <th style="text-align:center;">Stock</th>
                     <th style="text-align:right;">Precio</th>
@@ -88,7 +89,7 @@ function renderInventario(listaAMostrar = productos) {
             <tbody>`;
 
     if (listaAMostrar.length === 0) {
-        html += `<tr><td colspan="4" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
+        html += `<tr><td colspan="5" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
     } else {
         listaAMostrar.forEach(p => {
             const stock = p.stock || 0;
@@ -96,9 +97,12 @@ function renderInventario(listaAMostrar = productos) {
             html += `
                 <tr>
                     <td>
+                        <input type="text" value="${p.id}" style="width:60px;text-align:center;" onchange="actualizarIdProducto(${p.id}, this.value)">
+                    </td>
+                    <td>
                         <b>${p.nombre}</b><br>
                         <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
-			${p.caracteristicas ? `<div style="font-size:12px;color:#444;">${p.caracteristicas}</div>` : ""}
+                        ${p.caracteristicas ? `<div style=\"font-size:12px;color:#444;\">${p.caracteristicas}</div>` : ""}
                     </td>
                     <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
                     <td style="text-align:right;">${dinero(p.precio)}</td>
@@ -119,6 +123,45 @@ function renderInventario(listaAMostrar = productos) {
                 </tr>`;
         });
     }
+// Permite editar el ID del producto desde la tabla
+async function actualizarIdProducto(idActual, nuevoId) {
+    nuevoId = String(nuevoId).trim();
+    if (!nuevoId) {
+        alert('El ID no puede estar vacío.');
+        renderInventario();
+        return;
+    }
+    if (productos.some(p => String(p.id) === nuevoId && String(p.id) !== String(idActual))) {
+        alert('Ya existe un producto con ese ID.');
+        renderInventario();
+        return;
+    }
+    const idx = productos.findIndex(p => String(p.id) === String(idActual));
+    if (idx !== -1) {
+        // Actualiza local
+        productos[idx].id = nuevoId;
+        if (typeof StorageService?.set === 'function') StorageService.set('productos', productos);
+
+        // Actualiza en Firestore si está activo
+        if (window._firebaseActivo && window._db) {
+            try {
+                // 1. Obtener datos del producto actual
+                const docRef = window._db.collection('productos').doc(String(idActual));
+                const docSnap = await docRef.get();
+                if (docSnap.exists) {
+                    const data = docSnap.data();
+                    // 2. Crear nuevo doc con nuevo ID
+                    await window._db.collection('productos').doc(String(nuevoId)).set(data);
+                    // 3. Borrar doc anterior
+                    await docRef.delete();
+                }
+            } catch (e) {
+                alert('Error actualizando ID en Firestore: ' + (e.message || e));
+            }
+        }
+        renderInventario();
+    }
+}
 
     html += `</tbody></table>`;
     cont.innerHTML = html;
