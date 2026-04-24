@@ -34,33 +34,7 @@ const StorageService = {
             console.error(`❌ Error leyendo '${clave}':`, e.message);
             valorLocal = defaultValue;
         }
-
-        // Sincronización en background desde Firestore
-        if (window._firebaseActivo && window._db) {
-            window._db.collection('posData').doc(clave).get().then(doc => {
-                if (!doc.exists) return;
-                const remoto = doc.data();
-                if (!remoto || !remoto._updatedAt) return;
-                try {
-                    const tsRemoto = remoto._updatedAt;
-                    const rawLocal = localStorage.getItem(clave);
-                    let tsLocal = 0;
-                    if (rawLocal) {
-                        const parsed = JSON.parse(rawLocal);
-                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed._updatedAt) {
-                            tsLocal = parsed._updatedAt;
-                        }
-                    }
-                    if (tsRemoto > tsLocal) {
-                        const { _updatedAt, ...datos } = remoto;
-                        // Para arrays almacenados en Firestore bajo clave "data"
-                        const valorFinal = datos.data !== undefined ? datos.data : datos;
-                        localStorage.setItem(clave, JSON.stringify(valorFinal));
-                    }
-                } catch (_) { /* No bloquear por error de sync */ }
-            }).catch(() => { /* Firebase no disponible, ignorar */ });
-        }
-
+        // MODO OFFLINE: NO sincronizar con Firestore
         return valorLocal;
     },
 

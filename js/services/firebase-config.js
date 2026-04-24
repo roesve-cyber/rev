@@ -11,27 +11,18 @@ const firebaseConfig = {
   appId: "1:32950655624:web:42a8657431319f9a25dd3d"
 };
 
-// Inicializar Firebase (solo si el SDK está disponible y las credenciales fueron configuradas)
-if (typeof firebase !== 'undefined' && firebaseConfig.apiKey !== "TU_API_KEY") {
-    try {
-        if (!firebase.apps || !firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
-        window._db = firebase.firestore();
-        window._auth = firebase.auth();
-        window._firebaseActivo = true;
-        console.log('✅ Firebase inicializado correctamente');
-    } catch (e) {
-        window._firebaseActivo = false;
-        console.warn('⚠️ Error iniciando Firebase:', e.message);
-    }
-} else {
+// Inicializar Firebase solo en producción (Vercel), desactivado en local (Live Server)
+if (
+    location.hostname === 'localhost' ||
+    location.hostname === '127.0.0.1' ||
+    location.hostname.startsWith('192.168.') ||
+    location.hostname === '' // Live Server usa hostname vacío
+) {
     window._firebaseActivo = false;
-    if (typeof firebase === 'undefined') {
-        console.warn('⚠️ Firebase SDK no disponible — usando localStorage');
-    } else {
-        console.warn('⚠️ Credenciales Firebase no configuradas — usando localStorage');
-    }
+    console.warn('⚠️ Firebase desactivado — solo localStorage (entorno local)');
+} else {
+    window._firebaseActivo = true;
+    console.log('✅ Firebase activo — entorno producción/nube');
 }
 
 // Actualiza el indicador de estado de Firebase en el panel de nube
