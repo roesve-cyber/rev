@@ -30,7 +30,19 @@ document.addEventListener('DOMContentLoaded', () => {
         
 
         // Productos (global)
-        window.productos = StorageService.get("productos", []);
+        if (window._firebaseActivo && window._db) {
+            // Cargar productos directamente desde Firestore
+            window._db.collection('posData').doc('productos').get().then(doc => {
+                window.productos = (doc.data()?.data || []);
+                console.log('🟢 Productos cargados desde Firestore:', window.productos.length);
+                if (typeof renderInventario === 'function') renderInventario();
+            }).catch(e => {
+                console.error('❌ Error cargando productos desde Firestore:', e);
+                window.productos = [];
+            });
+        } else {
+            window.productos = StorageService.get("productos", []);
+        }
         
         // Clientes
         clientes = StorageService.get("clientes", []);
