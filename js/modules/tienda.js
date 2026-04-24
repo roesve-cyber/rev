@@ -174,7 +174,7 @@ function renderProductosCatalogo(listaProductos) {
                         <small class="precio-semanal">Desde ${dinero(abono)}/semana (${plan6.meses} meses)</small>
                     </div>
                     <div class="card-producto-acciones">
-                        <button onclick="verProducto(${p.id})">👁️ Detalles</button>
+                        <button onclick="verProducto('${p.id}')">👁️ Detalles</button>
                     </div>
                 </div>
             </div>
