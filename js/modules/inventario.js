@@ -148,19 +148,19 @@ function renderInventario(listaAMostrar = window.productos) {
                     <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
                     <td style="text-align:right;">${dinero(p.precio)}</td>
                     <td style="text-align:center; display:flex; gap:5px; justify-content:center;">
-                        <button onclick="abrirProductoForm(${p.id})" 
+                        <button onclick="abrirProductoForm('${String(p.id)}')" 
                                 style="padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;">
                             ✏️ Editar
                         </button>
-                        <button onclick="abrirVisorMaestro(${p.id})" 
+                        <button onclick="abrirVisorMaestro('${String(p.id)}')" 
                                 style="padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;">
                             🔍 Visor
                         </button>
-                        <button onclick="confirmarEliminarProducto(${p.id})" 
+                        <button onclick="confirmarEliminarProducto('${String(p.id)}')" 
                                 style="padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;">
                             🗑️ Eliminar
                         </button>
-                        <button onclick="abrirModalEditarId(${p.id})" style="padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;">Editar ID</button>
+                        <button onclick="abrirModalEditarId('${String(p.id)}')" style="padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;">Editar ID</button>
                     </td>
                 </tr>`;
         });
@@ -314,7 +314,7 @@ function abrirProductoForm(id = null) {
 
     if (id) {
         productoEditando = id;
-        const p = window.productos.find(prod => prod.id === id);
+        const p = window.productos.find(prod => String(prod.id) === String(id));
         if (!p) return;
         document.getElementById("tituloModalProducto").innerText = "✏️ Editar Producto";
         inputNombre.value = p.nombre;
