@@ -136,7 +136,7 @@ function renderInventario(listaAMostrar = productos) {
 // Estado para saber qué producto está en edición de ID
 window._editandoIdProducto = null;
 
-function editarIdProducto(id) {
+window.editarIdProducto = function(id) {
     window._editandoIdProducto = id;
     renderInventario();
     setTimeout(() => {
@@ -145,12 +145,12 @@ function editarIdProducto(id) {
     }, 100);
 }
 
-function cancelarEditarId() {
+window.cancelarEditarId = function() {
     window._editandoIdProducto = null;
     renderInventario();
 }
 
-async function guardarNuevoId(idActual) {
+window.guardarNuevoId = async function(idActual) {
     const input = document.getElementById('inputEditarId' + idActual);
     if (!input) return;
     const nuevoId = String(input.value).trim();
