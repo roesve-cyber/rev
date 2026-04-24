@@ -23,6 +23,14 @@ if (
 } else {
     window._firebaseActivo = true;
     console.log('✅ Firebase activo — entorno producción/nube');
+    // Inicializar Firebase SDK
+    if (typeof firebase !== 'undefined') {
+        firebase.initializeApp(firebaseConfig);
+        window._auth = firebase.auth();
+        window._db = firebase.firestore();
+    } else {
+        console.error('❌ Firebase SDK no cargado');
+    }
 }
 
 // Actualiza el indicador de estado de Firebase en el panel de nube
