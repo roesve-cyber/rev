@@ -640,11 +640,11 @@ function actualizarMargen(indexCat, indexSub, nuevoValor) {
 // ===== VISOR MAESTRO =====
 function abrirVisorMaestro(id) {
     navA('productos-visor');
-    mostrarDetalleProductoMaestro(id);
+    mostrarDetalleProductoMaestro(String(id));
 }
 
 function mostrarDetalleProductoMaestro(id) {
-    const p = window.productos.find(prod => prod.id == id);
+    const p = window.productos.find(prod => String(prod.id) === String(id));
     if (!p) return;
 
     const cont = document.getElementById("detalle-producto-maestro");
@@ -727,12 +727,13 @@ function mostrarDetalleProductoMaestro(id) {
             </div>
         </div>
     `;
+
     cont.innerHTML = html;
     actualizarSubcategoriasVisor(p.subcategoria);
 }
 
 function renderFilasKardex(id, tipoFiltro) {
-    const movimientos = movimientosInventario.filter(m => m.productoId == id && m.tipo === tipoFiltro);
+    const movimientos = movimientosInventario.filter(m => String(m.productoId) === String(id) && m.tipo === tipoFiltro);
     if (movimientos.length === 0) {
         return `<tr><td colspan="3" style="text-align: center; padding: 20px; color: #ccc;">Sin registros de ${tipoFiltro}</td></tr>`;
     }
@@ -762,8 +763,9 @@ function actualizarSubcategoriasVisor(valorSeleccionado = "") {
     subSelect.innerHTML = html;
 }
 
+
 function guardarCambiosVisor(id) {
-    const p = window.productos.find(prod => prod.id == id);
+    const p = window.productos.find(prod => String(prod.id) === String(id));
     if (!p) return;
     if (!confirm(`¿Guardar cambios para "${p.nombre}"?`)) return;
 
@@ -773,11 +775,7 @@ function guardarCambiosVisor(id) {
     p.modelo       = document.getElementById("editModelo")?.value || '';
     p.categoria    = document.getElementById("editCategoria")?.value || p.categoria;
     p.subcategoria = document.getElementById("editSubcategoria")?.value || p.subcategoria;
-    
-    // === LÍNEA AGREGADA PARA LA IMAGEN ===
-    p.imagen       = document.getElementById("editImagen")?.value || ''; 
-    // =====================================
-
+    p.imagen       = document.getElementById("editImagen")?.value || '';
     p.costo        = parseFloat(document.getElementById("editCosto")?.value) || p.costo;
     p.precio       = parseFloat(document.getElementById("editPrecio")?.value) || p.precio;
     p.descripcion  = document.getElementById("editDescripcion")?.value || '';
@@ -787,7 +785,6 @@ function guardarCambiosVisor(id) {
         alert("❌ Error guardando cambios");
         return;
     }
-    
     renderInventario(); // Refresca la tabla de productos para mostrar la nueva imagen
     alert("✅ Cambios guardados correctamente.");
 }
