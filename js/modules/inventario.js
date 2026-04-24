@@ -2,7 +2,7 @@
 window.detectarYCorregirIdsDuplicados = function() {
     const ids = {};
     const cambios = [];
-    productos.forEach(p => {
+    window.productos.forEach(p => {
         if (!p.id) return;
         const idStr = String(p.id);
         if (ids[idStr]) {
@@ -14,7 +14,7 @@ window.detectarYCorregirIdsDuplicados = function() {
         ids[p.id] = true;
     });
     if (cambios.length > 0) {
-        if (typeof StorageService?.set === 'function') StorageService.set('productos', productos);
+        if (typeof StorageService?.set === 'function') StorageService.set('productos', window.productos);
         if (window._firebaseActivo && window._db) {
             // Opcional: sincronizar cambios en Firestore
             cambios.forEach(async cambio => {
@@ -46,7 +46,7 @@ function aplicarFiltros() {
     const subFiltro = document.getElementById("filtroSubcategoria").value;
     const busqueda = document.getElementById("busquedaProducto").value.toLowerCase();
 
-    const filtrados = productos.filter(p => {
+    const filtrados = window.productos.filter(p => {
         const coincideCat = (catFiltro === "todos" || p.categoria === catFiltro);
         const coincideSub = (subFiltro === "todos" || p.subcategoria === subFiltro);
         const coincideNombre = p.nombre.toLowerCase().includes(busqueda);
@@ -77,7 +77,7 @@ function limpiarFiltros() {
     document.getElementById("filtroCategoria").value = "todos";
     document.getElementById("filtroSubcategoria").innerHTML = '<option value="todos">-- Todas --</option>';
     document.getElementById("busquedaProducto").value = "";
-    renderInventario(productos);
+    renderInventario(window.productos);
 }
 
 function actualizarCombosFiltros() {
@@ -111,7 +111,7 @@ function actualizarCombosFiltros() {
 }
 
 // ===== INVENTARIO =====
-function renderInventario(listaAMostrar = productos) {
+function renderInventario(listaAMostrar = window.productos) {
     const cont = document.getElementById("listaInventario");
     if (!cont) return;
 
