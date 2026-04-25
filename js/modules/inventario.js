@@ -1,3 +1,24 @@
+// Solo cuenta cuántos productos tienen IDs duplicados (sin corregir)
+window.contarIdsDuplicados = function() {
+    const ids = {};
+    const duplicados = {};
+    window.productos.forEach(p => {
+        if (!p.id) return;
+        const idStr = String(p.id);
+        if (ids[idStr]) {
+            duplicados[idStr] = (duplicados[idStr] || 1) + 1;
+        } else {
+            ids[idStr] = true;
+        }
+    });
+    const totalDuplicados = Object.values(duplicados).reduce((a, b) => a + b, 0);
+    if (totalDuplicados > 0) {
+        let detalle = Object.entries(duplicados).map(([id, count]) => `ID: ${id} (repetido ${count} veces)`).join('\n');
+        alert(`Se encontraron ${Object.keys(duplicados).length} IDs duplicados, total de productos duplicados: ${totalDuplicados}.\n\nDetalle:\n` + detalle);
+    } else {
+        alert('No se encontraron IDs duplicados.');
+    }
+}
 // Detecta y corrige IDs de productos duplicados
 window.detectarYCorregirIdsDuplicados = function() {
     const ids = {};
