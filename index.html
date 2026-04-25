@@ -118,21 +118,12 @@
             </div>
         </div>
 
-        <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
-            <div id="sub-auditoria" class="submenu oculto-submenu">
-                <button onclick="navA('auditoria-productos')">📦 Productos</button>
-            </div>
-        </div>
-    <!-- AUDITORÍA PRODUCTOS (ventana principal) -->
-    <div id="vista-auditoria-productos" class="vista oculto" style="padding:40px 0; max-width:600px; margin:0 auto;">
-        <h2 style="color:#1e40af; margin-bottom:24px;">🕵️ Auditoría de Productos</h2>
-        <div style="display:flex; gap:18px; flex-wrap:wrap;">
-            <button onclick="contarIdsDuplicados()" style="padding:18px 28px; background:#f59e42; color:white; border:none; border-radius:8px; font-size:17px; font-weight:bold; box-shadow:0 2px 8px rgba(0,0,0,0.07); cursor:pointer;">🔍 Ver Duplicados</button>
-            <button onclick="detectarYCorregirIdsDuplicados()" style="padding:18px 28px; background:#16a34a; color:white; border:none; border-radius:8px; font-size:17px; font-weight:bold; box-shadow:0 2px 8px rgba(0,0,0,0.07); cursor:pointer;">🛠️ Corregir Duplicados</button>
-        </div>
-        <div style="margin-top:32px; color:#666; font-size:15px;">Utiliza estos botones para auditar y corregir productos con IDs duplicados en tu inventario.</div>
+<div class="menu-item">
+    <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
+    <div id="sub-auditoria" class="submenu oculto-submenu">
+        <button onclick="navA('auditoria-productos')">📦 Productos</button>
     </div>
+</div>
 
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-config-ext')">⚙️ CONFIGURACIÓN <span>▾</span></button>
@@ -175,6 +166,29 @@
 
 <!-- ===== CONTENIDO PRINCIPAL ===== -->
 <main id="app-container">
+<div id="auditoria-productos" class="vista oculto" style="display: none;">
+    <div style="padding: 30px; max-width: 900px; margin: 0 auto;">
+        <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center;">
+            <h2 style="color: #1e40af; margin-bottom: 10px;">🕵️ Auditoría de Base de Datos</h2>
+            <p style="color: #64748b; margin-bottom: 35px;">Seleccione una acción para corregir la integridad de los productos.</p>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <button onclick="contarIdsDuplicados()" style="padding: 20px; background: #f59e42; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
+                    🔍 Analizar Duplicados
+                </button>
+                <button onclick="detectarYCorregirIdsDuplicados()" style="padding: 20px; background: #10b981; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
+                    🛠️ Reparar IDs Automáticamente
+                </button>
+            </div>
+            
+            <div style="margin-top: 30px; padding: 15px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; text-align: left;">
+                <small style="color: #475569;">
+                    <strong>Nota:</strong> La reparación analiza cada producto y, si detecta un ID repetido, genera uno nuevo único. Esto evita errores en el carrito y en el historial de ventas.
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
     <!-- INICIO -->
     <div id="inicio" class="vista">
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; text-align: center;">
