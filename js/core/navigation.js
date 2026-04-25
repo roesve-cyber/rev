@@ -45,6 +45,8 @@ function navA(vistaId) {
         if (idLimpio === 'reimprimir-venta') renderReimprimirVenta();
         if (idLimpio === 'dashboard') renderDashboard();
         if (idLimpio === 'configuracion-nube') _actualizarEstadoFirebaseUI();
+        if (idLimpio === 'agendacobros') renderAgendaCobros();
+        if (idLimpio === 'ordenescompra') window.renderListaOrdenesCompra && window.renderListaOrdenesCompra();
     }
 
     const sb = document.getElementById("sidebar");
