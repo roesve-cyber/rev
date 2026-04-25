@@ -23,13 +23,13 @@ function _esAdmin() {
 
 function agregarAlCarritoDesdeModal() {
     if (!productoActualId) return;
-    const p = productos.find(prod => prod.id === productoActualId);
+    const p = productos.find(prod => String(prod.id) === String(productoActualId));
     if (!p) {
         alert("❌ Error: Producto no encontrado.");
         return;
     }
 
-    const indiceExistente = carrito.findIndex(item => item.id === productoActualId);
+    const indiceExistente = carrito.findIndex(item => String(item.id) === String(productoActualId));
     
     if (indiceExistente !== -1) {
         const mensaje = `⚠️ "${p.nombre}" ya está en el carrito.\n\n¿Aumentar la cantidad en 1?`;
@@ -71,7 +71,7 @@ function agregarAlCarritoDesdeModal() {
 }
 
 function agregarAlCarrito(id) {
-    const p = productos.find(x => x.id == id);
+    const p = productos.find(x => String(x.id) === String(id));
     if (!p) return;
     productoActualId = id;
     agregarAlCarritoDesdeModal();
@@ -105,7 +105,7 @@ function renderCarrito() {
     }
 
     carrito = carrito.filter(item => {
-        const prod = productos.find(p => p.id === item.id);
+        const prod = productos.find(p => String(p.id) === String(item.id));
         if (!prod) {
             console.warn("⚠️ Producto fantasma eliminado del carrito:", item.id);
             return false;
@@ -841,7 +841,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
 
     // Clasificar productos: solo "con stock" si hay suficiente para la cantidad solicitada
     carrito.forEach(item => {
-        const prod = productos.find(p => p.id === item.id);
+        const prod = productos.find(p => String(p.id) === String(item.id));
         if (prod) {
             if ((prod.stock || 0) >= (item.cantidad || 1)) {
                 productosConStock.push({ item, prod });
@@ -1013,7 +1013,7 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
     let productosAPendiente = [];
 
     carrito.forEach(item => {
-        const prod = productos.find(p => p.id === item.id);
+        const prod = productos.find(prod => String(prod.id) === String(p.id));
         if (!prod) return;
         const decision = decisionesInventario[item.id];
         const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
@@ -1146,6 +1146,16 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             ? planElegido.total   // planElegido.total ya es calculado sobre saldoAFinanciar (precio - enganche)
             : saldoAFinanciar;    // apartado: precio - enganche
 
+        // Calcular y guardar los saldos requeridos para cada plan posible
+        let saldosPorMes = [];
+        if (planElegido && (metodoPago === "credito")) {
+            const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
+            const saldoBase = (totalContado - enganche);
+            const planesPosibles = CalculatorService.calcularCreditoConPeriodicidad
+                ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidad)
+                : CalculatorService.calcularCredito(saldoBase);
+            saldosPorMes = planesPosibles.map(p => ({ meses: p.meses, total: p.total }));
+        }
         const cuentaNueva = {
             folio: folioVenta,
             nombre: clienteSeleccionado.nombre,
@@ -1166,7 +1176,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             totalMercancia: totalContado,
             periodicidad: window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal",
             vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
-            vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
+            vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null,
+            saldosPorMes
         };
 
         cuentasPorCobrar.push(cuentaNueva);
@@ -1348,21 +1359,11 @@ function generarTicketMediaHoja(datosVenta) {
     }
 
     // Tabla de resumen de planes
-    // Calcular saldo base de forma robusta:
-    // 1) Si ya tenemos pagarés guardados, derivamos el saldo de plan.abono × plan.pagos
-    // 2) Si no, usamos datosVenta.total - enganche
-    let saldoParaPlanes = datosVenta.total - (datosVenta.enganche || 0);
-    if ((saldoParaPlanes <= 0 || !datosVenta.total) && datosVenta.plan && datosVenta.plan.abono > 0) {
-        // Reconstruir desde el plan guardado
-        saldoParaPlanes = datosVenta.plan.abono * (datosVenta.plan.pagos || datosVenta.plan.semanas || 1);
-    }
-    if (saldoParaPlanes <= 0) {
-        // Último recurso: recalcular desde carrito si está disponible
-        saldoParaPlanes = (datosVenta.articulos || []).reduce(
-            (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
-        ) - (datosVenta.enganche || 0);
-    }
-    if (saldoParaPlanes <= 0) saldoParaPlanes = datosVenta.total || 0;
+    // SIEMPRE calcular saldoParaPlanes como suma de precios de contado de los productos menos el enganche
+    let saldoParaPlanes = (datosVenta.articulos || []).reduce(
+        (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
+    ) - (datosVenta.enganche || 0);
+    if (saldoParaPlanes < 0) saldoParaPlanes = 0;
     // Usar la periodicidad real de la venta, no siempre semanal
     const periodicidadTicket = datosVenta.periodicidad || window._estadoPago?.periodicidad || "semanal";
     const planesDisponibles = CalculatorService.calcularCreditoConPeriodicidad
@@ -1373,11 +1374,13 @@ function generarTicketMediaHoja(datosVenta) {
     planesDisponibles.forEach(plan => {
         const textoMeses = plan.meses === 1 ? `${plan.meses} MES (Contado)` : `${plan.meses} MESES`;
         const textoInteres = plan.meses === 1 ? '(Sin interés)' : `(${plan.pagos} pagos${textoPeriodo})`;
+        const montoMostrar = plan.meses === 1 ? dinero(saldoParaPlanes) : `${dinero(plan.abono)}${textoPeriodo}`;
+        const totalMostrar = plan.meses === 1 ? dinero(saldoParaPlanes) : dinero(plan.total);
         tablaPlanes += `
             <td style="border: 1px solid #333; padding: 8px; text-align: center;">
                 <strong>${textoMeses}</strong><br>
-                ${dinero(plan.abono)}${textoPeriodo}<br>
-                <small style="color:#555;">Total: ${dinero(plan.total)}</small><br>
+                ${montoMostrar}<br>
+                <small style="color:#555;">Total: ${totalMostrar}</small><br>
                 <small>${textoInteres}</small>
             </td>
         `;

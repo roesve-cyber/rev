@@ -21,44 +21,32 @@ window.contarIdsDuplicados = function() {
 }
 // Detecta y corrige IDs de productos duplicados
 window.detectarYCorregirIdsDuplicados = function() {
-    const ids = {};
-    const cambios = [];
+    const idsExistentes = new Set();
+    let correcciones = 0;
+
     window.productos.forEach(p => {
-        if (!p.id) return;
-        const idStr = String(p.id);
-        if (ids[idStr]) {
-            // Duplicado encontrado
-            const nuevoId = idStr + '-' + Math.floor(Math.random() * 10000);
-            cambios.push(`ID duplicado: ${idStr} → ${nuevoId}`);
-            p.id = nuevoId;
+        // Si el ID ya existe o no tiene, generamos uno numérico nuevo
+        if (!p.id || idsExistentes.has(Number(p.id))) {
+            const antiguoId = p.id;
+            // Generamos un ID numérico basado en el tiempo + aleatorio
+            p.id = Math.round(Date.now() + Math.random() * 1000000);
+            correcciones++;
+            console.log(`Corregido: Antiguo ID ${antiguoId} -> Nuevo ID ${p.id}`);
         }
-        ids[p.id] = true;
+        idsExistentes.add(Number(p.id));
     });
-    if (cambios.length > 0) {
-        if (typeof StorageService?.set === 'function') StorageService.set('productos', window.productos);
-        if (window._firebaseActivo && window._db) {
-            // Opcional: sincronizar cambios en Firestore
-            cambios.forEach(async cambio => {
-                const partes = cambio.match(/^ID duplicado: (.+) → (.+)$/);
-                if (partes) {
-                    const idViejo = partes[1];
-                    const idNuevo = partes[2];
-                    try {
-                        const docRef = window._db.collection('productos').doc(idViejo);
-                        const docSnap = await docRef.get();
-                        if (docSnap.exists) {
-                            const data = docSnap.data();
-                            await window._db.collection('productos').doc(idNuevo).set(data);
-                            await docRef.delete();
-                        }
-                    } catch (e) {}
-                }
-            });
+
+    if (correcciones > 0) {
+        // Guardar cambios en el almacenamiento local
+        if (StorageService.set("productos", window.productos)) {
+            alert(`✅ Se repararon ${correcciones} productos con IDs duplicados.\nAhora puedes ver sus detalles normalmente.`);
+            // Recargar la tabla para aplicar cambios
+            if (typeof renderizarTablaInventario === 'function') renderizarTablaInventario();
+        } else {
+            alert("❌ Error al guardar los cambios en Storage.");
         }
-        alert('Se corrigieron los siguientes IDs duplicados:\n' + cambios.join('\n'));
-        renderInventario();
     } else {
-        alert('No se encontraron IDs duplicados.');
+        alert('No se encontraron duplicados para corregir.');
     }
 }
 // FILTROS DE INVENTARIO
@@ -397,7 +385,7 @@ function guardarProductoDB() {
     });
 
     if (productoEditando) {
-        const index = window.productos.findIndex(p => p.id === productoEditando);
+        const index = window.productos.findIndex(p => String(p.id) === String(productoEditando));
         const margenCalculado = CalculatorService.calcularMargen(precioVenta, costo);
         if (index !== -1) {
             window.productos[index] = {

@@ -259,29 +259,28 @@ function renderDashboardMSI(bancoSeleccionado = 'Todos') {
     let mesAct  = hoy.getMonth() + 1;
     let anioAct = hoy.getFullYear();
 
+    // ── Cronograma real: usa el calendario guardado en cada deuda ──────────
+    // Antes iteraba desde el mes actual (mesAct + i), lo que ignoraba las
+    // reglas de corte bancario y siempre mostraba el primer pago en el mes
+    // en curso aunque realmente cayera el mes siguiente.
     let cronograma = {};
-    for (let i = 0; i < 12; i++) {
-        let m = mesAct + i;
-        let a = anioAct;
-        while (m > 12) { m -= 12; a++; }
-        cronograma[`${a}-${m.toString().padStart(2, '0')}`] = { total: 0, detalles: [] };
-    }
     deudas.forEach(deuda => {
         if (bancoSeleccionado !== 'Todos' && deuda.banco !== bancoSeleccionado) return;
-        const totalVal = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
         const cuotaVal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
         const pagos    = parseInt(deuda.pagosRealizados || 0);
-        const pendientes = cuotaVal > 0 ? Math.round(totalVal / cuotaVal) - pagos : 0;
-        for (let i = 0; i < pendientes; i++) {
-            let m = mesAct + i;
-            let a = anioAct;
-            while (m > 12) { m -= 12; a++; }
-            const clave = `${a}-${m.toString().padStart(2, '0')}`;
-            if (cronograma[clave]) {
-                cronograma[clave].total += cuotaVal;
-                cronograma[clave].detalles.push(`<b>${deuda.banco}</b>: ${deuda.producto || 'Compra'} (${dinero(cuotaVal)})`);
-            }
-        }
+        const calendario = deuda.calendario || [];
+
+        // Solo iteramos las cuotas aún no pagadas
+        const cuotasPendientes = calendario.slice(pagos);
+        cuotasPendientes.forEach(pago => {
+            // pago.fecha viene como "YYYY-MM-DD" → clave "YYYY-MM"
+            const clave = pago.fecha.substring(0, 7);
+            if (!cronograma[clave]) cronograma[clave] = { total: 0, detalles: [] };
+            cronograma[clave].total += cuotaVal;
+            cronograma[clave].detalles.push(
+                `<b>${deuda.banco}</b>: ${deuda.producto || 'Compra'} — Cuota ${pago.n} de ${deuda.meses} (${dinero(cuotaVal)}) | 📅 ${pago.fecha}`
+            );
+        });
     });
 
     const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -370,11 +369,45 @@ function renderDashboardMSI(bancoSeleccionado = 'Todos') {
             if (clave === claveActual) { bgColor = '#fee2e2'; borderColor = '#e74c3c'; }
             else if (clave === claveSiguiente) { bgColor = '#fef3c7'; borderColor = '#f59e0b'; }
 
-            const detallesHtml = data.detalles.map(det => `
-                <div class="fila-conciliacion" onclick="this.classList.toggle('conciliado')">
-                    <input type="checkbox" style="cursor:pointer">
-                    <span>${det}</span>
-                </div>`).join('');
+            const detallesHtml = data.detalles.map((det, idx) => {
+                // Extraer la fecha de la cuota del string "... | 📅 YYYY-MM-DD"
+                const fechaMatch = det.match(/📅 (\d{4}-\d{2}-\d{2})/);
+                const fechaCuota = fechaMatch ? new Date(fechaMatch[1] + 'T00:00:00') : null;
+                const estaVencida = fechaCuota && fechaCuota < hoy;
+                const estaHoy     = fechaCuota && fechaCuota.toDateString() === hoy.toDateString();
+                const claveDetalle = `conciliado_${clave}_${idx}`;
+                const yaConciliado = localStorage.getItem(claveDetalle) === '1';
+
+                // Texto limpio sin la parte de fecha (ya se muestra en el badge)
+                const detTexto = det.replace(/\s*\|\s*📅 \d{4}-\d{2}-\d{2}/, '');
+                const fechaLegible = fechaCuota
+                    ? fechaCuota.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '';
+
+                let bgDet = yaConciliado ? '#f0fdf4' : (estaVencida ? '#fef2f2' : (estaHoy ? '#fff7ed' : 'transparent'));
+                let colorDet = yaConciliado ? '#15803d' : (estaVencida ? '#dc2626' : (estaHoy ? '#d97706' : '#374151'));
+                let badgeDet = yaConciliado
+                    ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">✅ Conciliado</span>`
+                    : (estaVencida
+                        ? `<span style="background:#fee2e2;color:#dc2626;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">⚠️ Vencido</span>`
+                        : (estaHoy
+                            ? `<span style="background:#fef3c7;color:#d97706;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">🔔 Hoy</span>`
+                            : `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">📅 ${fechaLegible}</span>`));
+
+                return `<div class="fila-conciliacion" style="display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:6px;background:${bgDet};margin-bottom:4px;border:1px solid ${yaConciliado ? '#86efac' : (estaVencida ? '#fca5a5' : '#e2e8f0')};">
+                    <input type="checkbox" ${yaConciliado ? 'checked' : ''}
+                        onchange="
+                            if(this.checked){ localStorage.setItem('${claveDetalle}','1'); }
+                            else { localStorage.removeItem('${claveDetalle}'); }
+                            renderDashboardMSI('${bancoSeleccionado}');
+                        "
+                        style="cursor:pointer;width:16px;height:16px;margin-top:2px;flex-shrink:0;">
+                    <div style="flex:1;">
+                        <span style="color:${colorDet};font-size:13px;${yaConciliado ? 'text-decoration:line-through;' : ''}">${detTexto}</span>
+                        ${badgeDet}
+                    </div>
+                </div>`;
+            }).join('');
 
             htmlMeses += `
                 <div class="mes-msi-card" style="background:${bgColor}; border:1px solid ${borderColor}; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
@@ -402,35 +435,184 @@ function renderCuentasMSI() {
         return;
     }
 
-    let html = `
-        <table class="tabla-admin" style="width:100%;">
-            <thead><tr>
-                <th>Detalle</th>
-                <th>Total</th>
-                <th>Mensualidad</th>
-                <th>Progreso</th>
-            </tr></thead>
-            <tbody>`;
+    const hoy = new Date();
 
-    cuentasMSI.forEach(c => {
-        const porcentaje = ((c.pagosRealizados || 0) / c.meses) * 100;
+    let html = '';
+    cuentasMSI.forEach((c, cIdx) => {
+        const porcentaje = Math.min(100, ((c.pagosRealizados || 0) / c.meses) * 100).toFixed(0);
+        const pagosHechos = c.pagosRealizados || 0;
+        const calendario  = c.calendario || [];
+        const estaTerminado = pagosHechos >= c.meses;
+
+        // ── Encabezado de la compra ────────────────────────────────────────────
         html += `
-            <tr>
-                <td>
-                    <span style="font-weight:bold; color:#2c3e50;">${c.banco}</span><br>
-                    <small style="color:#666;">${c.producto || 'Compra'}</small>
-                </td>
-                <td>${dinero(c.total)}</td>
-                <td style="color:#27ae60; font-weight:bold;">${dinero(c.cuotaMensual)}</td>
-                <td>
-                    <div style="background:#eee; border-radius:10px; height:8px; width:100px; margin-bottom:4px;">
-                        <div style="background:#3498db; height:100%; border-radius:10px; width:${porcentaje}%"></div>
-                    </div>
-                    <small>${c.pagosRealizados || 0} de ${c.meses} meses</small>
-                </td>
-            </tr>`;
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; margin-bottom:20px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+            <div style="background:${estaTerminado ? '#f0fdf4' : '#eff6ff'}; padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <span style="font-size:18px; font-weight:bold; color:#1e40af;">🏦 ${c.banco}</span>
+                    <span style="margin-left:10px; font-size:14px; color:#4b5563;">${c.producto || 'Compra'}</span>
+                    ${estaTerminado ? '<span style="margin-left:8px; background:#d1fae5; color:#065f46; font-size:11px; padding:2px 8px; border-radius:9999px;">✅ Liquidado</span>' : ''}
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; color:#6b7280;">Total: <strong>${dinero(c.total)}</strong></div>
+                    <div style="font-size:13px; color:#27ae60;">Mensualidad: <strong>${dinero(c.cuotaMensual)}</strong></div>
+                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra || '—'}</div>
+                </div>
+            </div>
+
+            <!-- Barra de progreso -->
+            <div style="padding:12px 20px; border-bottom:1px solid #f3f4f6;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <small style="color:#6b7280;">Progreso de pagos</small>
+                    <small style="font-weight:bold; color:#1e40af;">${pagosHechos} de ${c.meses} meses (${porcentaje}%)</small>
+                </div>
+                <div style="background:#e2e8f0; border-radius:4px; height:8px; width:100%;">
+                    <div style="background:${estaTerminado ? '#16a34a' : '#3498db'}; height:100%; border-radius:4px; width:${porcentaje}%; transition:width 0.3s;"></div>
+                </div>
+            </div>
+
+            <!-- Calendario de cuotas -->
+            <div style="padding:16px 20px;">
+                <strong style="font-size:13px; color:#374151; display:block; margin-bottom:10px;">📋 Calendario de Cuotas</strong>
+                <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead><tr style="background:#f8fafc;">
+                        <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #e2e8f0;">#</th>
+                        <th style="padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0;">Fecha de Pago</th>
+                        <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #e2e8f0;">Importe</th>
+                        <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #e2e8f0;">Estado</th>
+                        <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #e2e8f0;">Acción</th>
+                    </tr></thead>
+                    <tbody>`;
+
+        if (calendario.length === 0) {
+            // Si por alguna razón no tiene calendario, mostramos filas básicas
+            for (let i = 0; i < c.meses; i++) {
+                const pagada = i < pagosHechos;
+                html += `<tr style="background:${pagada ? '#f0fdf4' : ''}">
+                    <td style="padding:8px 10px; text-align:center; color:#9ca3af;">${i + 1}</td>
+                    <td style="padding:8px 10px; color:#9ca3af;">Sin fecha calculada</td>
+                    <td style="padding:8px 10px; text-align:right;">${dinero(c.cuotaMensual)}</td>
+                    <td style="padding:8px 10px; text-align:center;">${pagada
+                        ? '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:9999px;">✅ Pagado</span>'
+                        : '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;">⏳ Pendiente</span>'}</td>
+                    <td style="padding:8px 10px;text-align:center;">—</td>
+                </tr>`;
+            }
+        } else {
+            calendario.forEach((pago, pIdx) => {
+                const pagada   = pIdx < pagosHechos;
+                const esSiguiente = pIdx === pagosHechos && !estaTerminado;
+                const fechaPago  = new Date(pago.fecha + 'T00:00:00');
+                const vencida    = !pagada && fechaPago < hoy;
+                const esHoyPago  = !pagada && fechaPago.toDateString() === hoy.toDateString();
+                const fechaLabel = fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' });
+
+                let rowBg     = pagada ? '#f0fdf4' : (vencida ? '#fef2f2' : (esSiguiente ? '#fefce8' : ''));
+                let estadoBadge = '';
+                if (pagada) {
+                    estadoBadge = '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:9999px;font-size:11px;">✅ Pagado</span>';
+                } else if (vencida) {
+                    const diasAtraso = Math.floor((hoy - fechaPago) / (1000 * 60 * 60 * 24));
+                    estadoBadge = `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:9999px;font-size:11px;">⚠️ Vencido ${diasAtraso}d</span>`;
+                } else if (esHoyPago) {
+                    estadoBadge = '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:9999px;font-size:11px;">🔔 Hoy</span>';
+                } else if (esSiguiente) {
+                    estadoBadge = '<span style="background:#fef9c3;color:#92400e;padding:2px 8px;border-radius:9999px;font-size:11px;">→ Próximo</span>';
+                } else {
+                    estadoBadge = '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;font-size:11px;">⏳ Pendiente</span>';
+                }
+
+                let accionBtn = '';
+                if (!pagada && (vencida || esSiguiente || esHoyPago)) {
+                    accionBtn = `<button onclick="marcarPagoMSI(${c.id}, ${pIdx + 1})"
+                        style="padding:4px 10px; background:#16a34a; color:white; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">
+                        💰 Marcar pagado
+                    </button>`;
+                } else if (pagada && pIdx === pagosHechos - 1) {
+                    // Último pago marcado: ofrecer deshacer
+                    accionBtn = `<button onclick="deshacerPagoMSI(${c.id})"
+                        style="padding:4px 10px; background:#9ca3af; color:white; border:none; border-radius:5px; cursor:pointer; font-size:11px;">
+                        ↩ Deshacer
+                    </button>`;
+                }
+
+                html += `<tr style="background:${rowBg}; border-bottom:1px solid #f3f4f6;">
+                    <td style="padding:8px 10px; text-align:center; font-weight:bold; color:${vencida ? '#dc2626' : '#374151'};">${pago.n}</td>
+                    <td style="padding:8px 10px; color:${vencida ? '#dc2626' : '#374151'}; font-weight:${(esSiguiente || vencida) ? 'bold' : 'normal'};">${fechaLabel}</td>
+                    <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(c.cuotaMensual)}</td>
+                    <td style="padding:8px 10px; text-align:center;">${estadoBadge}</td>
+                    <td style="padding:8px 10px; text-align:center;">${accionBtn}</td>
+                </tr>`;
+            });
+        }
+
+        html += `       </tbody>
+                </table>
+                </div>
+            </div>
+        </div>`;
     });
-    contenedor.innerHTML = html + "</tbody></table>";
+
+    contenedor.innerHTML = html;
+}
+
+// ── Marcar la siguiente cuota como pagada ─────────────────────────────────────
+function marcarPagoMSI(id, numeroCuota) {
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const idx = cuentasMSI.findIndex(c => c.id === id);
+    if (idx === -1) return;
+
+    const deuda = cuentasMSI[idx];
+    const pagosActuales = deuda.pagosRealizados || 0;
+
+    // Solo permitimos marcar la cuota que sigue (la inmediata pendiente)
+    if (numeroCuota !== pagosActuales + 1) {
+        alert(`⚠️ Solo puedes marcar la cuota ${pagosActuales + 1} como pagada. Las anteriores deben marcarse primero.`);
+        return;
+    }
+
+    // Registrar el movimiento de egreso en caja
+    const movs = StorageService.get("movimientosCaja", []);
+    movs.push({
+        id: Date.now(),
+        tipo: "egreso",
+        concepto: `Pago MSI — ${deuda.banco}: ${deuda.producto || 'Compra'} (cuota ${numeroCuota}/${deuda.meses})`,
+        monto: deuda.cuotaMensual,
+        fecha: new Date().toISOString(),
+        cuenta: deuda.banco,
+        etiquetaCuenta: `💳 ${deuda.banco} Crédito`,
+        medioPago: "tarjeta_msi",
+        referencia: `MSI-${deuda.compraId || id}-C${numeroCuota}`
+    });
+    StorageService.set("movimientosCaja", movs);
+
+    deuda.pagosRealizados = pagosActuales + 1;
+    cuentasMSI[idx] = deuda;
+    StorageService.set("cuentasMSI", cuentasMSI);
+
+    alert(`✅ Cuota ${numeroCuota} de ${deuda.meses} marcada como pagada.\nRestantes: ${deuda.meses - deuda.pagosRealizados}`);
+    renderCuentasMSI();
+    renderDashboardMSI();
+}
+
+// ── Deshacer el último pago marcado ──────────────────────────────────────────
+function deshacerPagoMSI(id) {
+    if (!confirm('¿Deshacer el último pago marcado? Esto revertirá el contador de cuotas.')) return;
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const idx = cuentasMSI.findIndex(c => c.id === id);
+    if (idx === -1) return;
+
+    const deuda = cuentasMSI[idx];
+    if ((deuda.pagosRealizados || 0) === 0) { alert('No hay pagos que deshacer.'); return; }
+
+    deuda.pagosRealizados = deuda.pagosRealizados - 1;
+    cuentasMSI[idx] = deuda;
+    StorageService.set("cuentasMSI", cuentasMSI);
+
+    alert('↩ Último pago deshecho.');
+    renderCuentasMSI();
+    renderDashboardMSI();
 }
 
 // ===== FLUJO DE CAJA =====
@@ -642,3 +824,6 @@ function renderCuentasBancarias() {
     contenedor.innerHTML = cardsHTML + tablaHTML;
 }
 window.renderCuentasBancarias = renderCuentasBancarias;
+window.renderCuentasMSI = renderCuentasMSI;
+window.marcarPagoMSI = marcarPagoMSI;
+window.deshacerPagoMSI = deshacerPagoMSI;

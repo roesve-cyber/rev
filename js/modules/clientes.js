@@ -1,4 +1,6 @@
 // ===== HELPERS DE CUENTA / MEDIO DE PAGO =====
+// Definir clientes globalmente para evitar ReferenceError
+clientes = StorageService.get("clientes", []);
 function _escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -8,59 +10,6 @@ function _escapeHtml(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
-function _buildCuentaOrigen(idSufijo) {
-    return `
-        <div style="margin-bottom:8px;">
-            <label style="font-size:14px; color:#4b5563;">Medio de pago:</label>
-            <select id="medioPago_${idSufijo}" onchange="_actualizarCuentaEspecifica('${idSufijo}')"
-                    style="width:100%; padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; margin-top:4px;">
-                <option value="efectivo">💵 Efectivo</option>
-                <option value="transferencia">🏦 Transferencia bancaria</option>
-                <option value="tarjeta_credito">💳 Tarjeta de crédito</option>
-            </select>
-        </div>
-        <div id="divCuentaEspecifica_${idSufijo}" style="display:none; margin-top:8px;">
-            <label style="font-size:14px; color:#4b5563;">Cuenta específica:</label>
-            <select id="cuentaEspecifica_${idSufijo}"
-                    style="width:100%; padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; margin-top:4px;">
-            </select>
-        </div>`;
-}
-
-function _actualizarCuentaEspecifica(idSufijo) {
-    const medio = document.getElementById('medioPago_' + idSufijo)?.value;
-    const div = document.getElementById('divCuentaEspecifica_' + idSufijo);
-    const sel = document.getElementById('cuentaEspecifica_' + idSufijo);
-    if (!div || !sel) return;
-    if (medio === 'efectivo') { div.style.display = 'none'; return; }
-    div.style.display = 'block';
-    const tarjetas = StorageService.get('tarjetasConfig', []);
-    if (medio === 'transferencia') {
-        const debito = tarjetas.filter(t => t.tipo === 'debito');
-        sel.innerHTML = debito.length === 0
-            ? '<option value="">-- No hay cuentas débito registradas --</option>'
-            : debito.map(t => `<option value="${t.banco}">🏦 ${t.banco} Débito</option>`).join('');
-    } else {
-        const credito = tarjetas.filter(t => !t.tipo || t.tipo === 'credito');
-        sel.innerHTML = credito.length === 0
-            ? '<option value="">-- No hay tarjetas registradas --</option>'
-            : credito.map(t => `<option value="${t.banco}">💳 ${t.banco} Crédito</option>`).join('');
-    }
-}
-
-function _getCuentaSeleccionada(idSufijo) {
-    const medio = document.getElementById('medioPago_' + idSufijo)?.value || 'efectivo';
-    const especifica = document.getElementById('cuentaEspecifica_' + idSufijo)?.value || '';
-    let cuentaId = 'caja';
-    let etiqueta = '💵 Efectivo';
-    if (medio === 'transferencia' && especifica) { cuentaId = especifica; etiqueta = `🏦 ${especifica} Débito`; }
-    if (medio === 'tarjeta_credito' && especifica) { cuentaId = especifica; etiqueta = `💳 ${especifica} Crédito`; }
-    return { medioPago: medio, cuentaId, etiqueta };
-}
-
-window._buildCuentaOrigen = _buildCuentaOrigen;
-window._actualizarCuentaEspecifica = _actualizarCuentaEspecifica;
-window._getCuentaSeleccionada = _getCuentaSeleccionada;
 
 // ===== CLIENTES =====
 function guardarCliente() {
@@ -136,9 +85,9 @@ function renderClientes() {
         html += `
             <tr>
                 <td><b>${_escapeHtml(c.nombre)}</b></td>
-		<td><b>${_escapeHtml(c.direccion)}</b></td>
-		<td><b>${_escapeHtml(c.telefono)}</b></td>
-		<td><b>${_escapeHtml(c.referencia)}</b></td>
+                <td><b>${_escapeHtml(c.direccion)}</b></td>
+                <td><b>${_escapeHtml(c.telefono)}</b></td>
+                <td><b>${_escapeHtml(c.referencia)}</b></td>
                 <td style="text-align:center;">
                     <button onclick="prepararEdicionCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px; margin-right:10px;">✏️</button>
                     <button onclick="eliminarCliente(${c.id})" style="background:none; border:none; cursor:pointer; font-size:16px; margin-right:10px;">🗑️</button>
@@ -206,7 +155,7 @@ function cargarClientesSelect(lista = clientes) {
     });
 
     select.onchange = () => {
-        clienteSeleccionado = clientes.find(c => c.id == select.value);
+        clienteSeleccionado = clientes.find(c => c.id === Number(select.value));
         mostrarInfoCliente();
     };
 }
@@ -224,12 +173,18 @@ function filtrarClientes() {
 
 function abrirModalCliente() {
     const nombre = prompt("Nombre del cliente:");
-    if (!nombre) return;
+    if (!nombre || !nombre.trim()) return;
 
-    const telefono = prompt("Teléfono:");
+    const telefono = prompt("Teléfono:") || '';
+    const validacion = ValidatorService.validarCliente({ nombre: nombre.trim(), telefono });
+    if (!validacion.valid) {
+        alert("⚠️ " + validacion.errores.join("\n"));
+        return;
+    }
+
     const nuevo = {
         id: Date.now(),
-        nombre,
+        nombre: nombre.trim(),
         telefono,
         fechaRegistro: new Date().toLocaleDateString()
     };
@@ -335,9 +290,12 @@ function renderResumenVentaCliente() {
         </div>`;
 }
 
-function renderCuentasXCobrar() {
+function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
     const contenedor = document.getElementById("tablaCuentasXCobrar");
     if (!contenedor) return;
+
+    filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
+    filtroEstado = filtroEstado || document.getElementById("filtroEstadoCobranza")?.value || "";
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const pagaresSistema = StorageService.get("pagaresSistema", []);
@@ -361,8 +319,6 @@ function renderCuentasXCobrar() {
         <tbody>`;
 
     cuentas.forEach(cuenta => {
-        if (cuenta.estado === "Saldado") return;
-
         const enganche = Number(cuenta.engancheRecibido ?? 0);
         const fechaVenta = new Date(cuenta.fechaVenta).toLocaleDateString();
 
@@ -376,8 +332,23 @@ function renderCuentasXCobrar() {
             return s + (p.monto || 0);
         }, 0);
 
+        const esSaldado = cuenta.estado === "Saldado";
+        if (esSaldado && filtroEstado && filtroEstado !== "Saldado") return;
+        if (!esSaldado && pagaresPendientes.length === 0) return;
+
         const color = saldo > 0 ? "#27ae60" : "#999";
         const pagaresVencidos = pagaresPendientes.filter(p => new Date(p.fechaVencimiento) < hoy);
+        const estadoActual = esSaldado
+            ? "Saldado"
+            : pagaresVencidos.length === 0
+                ? "Al corriente"
+                : pagaresVencidos.length <= 2
+                    ? "Atrasado"
+                    : "Crítico";
+
+        if (filtroCliente && !(`${cuenta.nombre || ''} ${cuenta.folio || ''}`.toLowerCase().includes(filtroCliente))) return;
+        if (filtroEstado && filtroEstado !== estadoActual) return;
+
         const pagaresTexto = pagaresPendientes.length > 0
             ? `<span style="color:#374151;">${pagaresPendientes.length} pendiente(s)</span>`
             : `<span style="color:#27ae60;">✅ Al corriente</span>`;
@@ -390,7 +361,7 @@ function renderCuentasXCobrar() {
             <td>${fechaVenta}</td>
             <td>${dinero(cuenta.totalContadoOriginal ?? 0)}${enganche > 0 ? `<br><small style="color:#27ae60;">✅ Enganche: ${dinero(enganche)}</small>` : ''}</td>
             <td style="font-weight:bold; color:${color};">${dinero(saldo)}</td>
-            <td>${pagaresTexto}${vencidosTexto}</td>
+            <td>${pagaresTexto}${vencidosTexto}<br><small style="color:#4b5563;">Estado: ${estadoActual}</small></td>
             <td>${cuenta.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</td>
             <td style="white-space:nowrap;">
                 <button onclick="abrirModalAbonoAvanzado('${cuenta.folio}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:4px;">💰 Abonar</button>
@@ -402,6 +373,10 @@ function renderCuentasXCobrar() {
 
     html += `</tbody></table></div>`;
     contenedor.innerHTML = html;
+}
+
+function filtrarCuentasCobranza() {
+    renderCuentasXCobrar();
 }
 
 // ==========================================
@@ -452,7 +427,7 @@ function renderCobranzaEsperada() {
         if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
             cuenta.abonos.forEach(abono => {
                 // Parsear la fecha del abono para saber en qué mes cayó el dinero
-                const partes = abono.fecha.split('/');
+                const partes = (abono.fecha || '').split('/');
                 let fechaEfectiva = hoy;
                 if (partes.length === 3) {
                     fechaEfectiva = new Date(partes[2], partes[1] - 1, partes[0]);
@@ -585,9 +560,15 @@ function abrirDetalleCobranza(mesKeyEncoded) {
 
 function exportarCobranzaEsperada() {
     const pagares = StorageService.get("pagaresSistema", []);
+    const hoy = new Date();
     let csv = "Folio,Fecha Vencimiento,Monto,Estado,Dias Atraso\n";
     pagares.forEach(p => {
-        csv += `${p.folio},${p.fechaVencimiento},${p.monto},${p.estado},${p.diasAtrasoActual}\n`;
+        const venc = new Date(p.fechaVencimiento);
+        const esPendiente = p.estado !== "Pagado" && p.estado !== "Cancelado";
+        const diasAtraso = esPendiente && venc < hoy
+            ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24))
+            : 0;
+        csv += `${p.folio},${p.fechaVencimiento},${p.monto},${p.estado},${diasAtraso}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
@@ -674,81 +655,86 @@ function abrirModalAbonoAvanzado(folio) {
     
     if (!cuenta) return alert("Cuenta no encontrada.");
 
+    const hoy = new Date(); // Necesario para calcular atrasos
     const todosPagares = pagares
         .filter(p => p.folio === folio)
         .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
     
-    // CORRECCIÓN: Filtrar y calcular sumando Parciales
     const pagaresCliente = todosPagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial');
     const saldo = pagaresCliente.reduce((s, p) => {
         if (p.estado === "Parcial") return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
         return s + (p.monto || 0);
     }, 0);
     
-    const original = cuenta.totalContadoOriginal ?? 0;
-    const fechaVenta = new Date(cuenta.fechaVenta);
-    const hoy = new Date();
-    const diasDesdeVenta = Math.floor((hoy - fechaVenta) / (1000 * 60 * 60 * 24));
-    const aplicaPoliticaContado = diasDesdeVenta <= 30; // Primeros 30 días
+    // --- MANTENEMOS LA CORRECCIÓN DEL PRECIO DE CONTADO ($6,800) ---
+    let precioContadoReal = 0;
+    if (cuenta.articulos && cuenta.articulos.length > 0) {
+        precioContadoReal = cuenta.articulos.reduce((sum, art) => {
+            return sum + (Number(art.precioContado || art.precio || 0) * Number(art.cantidad || 1));
+        }, 0);
+    }
+    let original = precioContadoReal > 0 ? precioContadoReal : (Number(cuenta.totalContadoOriginal || cuenta.totalMercancia || 0));
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    const montoAFinanciarContado = Math.max(0, original - enganche);
 
-    const articulos = cuenta.articulos || [];
-    const articulosHTML = articulos.length > 0 ? `
+    const totalAbonosRegistrados = todosPagares.reduce((s, p) => {
+        if (p.estado === 'Parcial') return s + (p.montoAbonado || 0);
+        if (p.estado === 'Pagado') return s + (p.montoAbonado || p.monto || 0);
+        return s;
+    }, 0);
+
+    const restanteContado = Math.max(0, montoAFinanciarContado - totalAbonosRegistrados);
+    const periodicidadCuenta = cuenta.periodicidad || "semanal";
+    const fechaVenta = new Date(cuenta.fecha || cuenta.fechaVenta);
+    const diasDesdeVenta = Math.floor((hoy - fechaVenta) / (1000 * 60 * 60 * 24));
+    const aplicaPoliticaContado = diasDesdeVenta <= 30; 
+
+    // Lógica de planes cercanos
+    let montoProximoMes = null;
+    let mesesPlanMasCercano = null;
+    if (!aplicaPoliticaContado && Array.isArray(cuenta.saldosPorMes)) {
+        let mejorPlan = cuenta.saldosPorMes.find(plan => (plan.total - totalAbonosRegistrados) > 0);
+        if (mejorPlan) {
+            montoProximoMes = Math.max(0, mejorPlan.total - totalAbonosRegistrados);
+            mesesPlanMasCercano = mejorPlan.meses;
+        }
+    }
+
+    const articulosHTML = (cuenta.articulos || []).length > 0 ? `
         <div style="margin-bottom:20px;">
-            <strong style="color:#374151;">🛒 Artículos de la Venta:</strong>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:14px;">
-                <thead><tr style="background:#f3f4f6;">
-                    <th style="padding:6px 8px; text-align:left; border-bottom:1px solid #e5e7eb;">Producto</th>
-                    <th style="padding:6px 8px; text-align:right; border-bottom:1px solid #e5e7eb;">Cant.</th>
-                </tr></thead>
-                <tbody>
-                    ${articulos.map(a => `<tr>
-                        <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${a.nombre || a.productoNombre || '-'}</td>
-                        <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${a.cantidad || 1}</td>
-                    </tr>`).join('')}
-                </tbody>
+            <strong style="color:#374151;">🛒 Artículos:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
+                ${cuenta.articulos.map(a => `<tr><td style="padding:4px; border-bottom:1px solid #eee;">${a.nombre}</td><td style="text-align:right; padding:4px; border-bottom:1px solid #eee;">x${a.cantidad}</td></tr>`).join('')}
             </table>
         </div>` : '';
 
+    // --- RESTAURACIÓN DE LÓGICA DE VENCIDOS ---
     const pagaresHTML = todosPagares.length > 0 ? `
         <div style="margin-bottom:20px;">
-            <strong style="color:#374151;">📋 Pagarés del Folio:</strong>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
-                <thead><tr style="background:#fef3c7;">
-                    <th style="padding:5px 7px; text-align:left; border-bottom:1px solid #e5e7eb;">#</th>
-                    <th style="padding:5px 7px; text-align:left; border-bottom:1px solid #e5e7eb;">Fecha Vencimiento</th>
-                    <th style="padding:5px 7px; text-align:right; border-bottom:1px solid #e5e7eb;">Monto Restante</th>
-                    <th style="padding:5px 7px; text-align:center; border-bottom:1px solid #e5e7eb;">Estado</th>
-                    <th style="padding:5px 7px; text-align:center; border-bottom:1px solid #e5e7eb;">Días Atraso</th>
-                </tr></thead>
+            <strong style="color:#374151;">📋 Pagarés:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:12px;">
+                <thead><tr style="background:#f8fafc;"><th style="padding:5px; text-align:left;">#</th><th>Vencimiento</th><th style="text-align:right;">Saldo</th><th style="text-align:center;">Estado</th></tr></thead>
                 <tbody>
                     ${todosPagares.map((p, i) => {
-                        const esPagado = p.estado === 'Pagado' || p.estado === 'Cancelado' || p.estado.includes('Liquidado');
-                        
-                        // CORRECCIÓN: Cálculo de vista del pagaré
-                        let montoDisplay = p.monto || p.abono || 0;
-                        if (esPagado) {
-                            montoDisplay = 0;
-                        } else if (p.estado === 'Parcial') {
-                            montoDisplay = Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
-                        }
-
+                        const esPagado = p.estado === 'Pagado' || p.estado === 'Cancelado';
                         const fechaVenc = new Date(p.fechaVencimiento);
                         const diasAtraso = !esPagado && fechaVenc < hoy ? Math.floor((hoy - fechaVenc) / (1000 * 60 * 60 * 24)) : 0;
                         const esVencido = !esPagado && diasAtraso > 0;
-                        const rowStyle = esPagado ? 'background:#f0fdf4; color:#6b7280;' : (esVencido ? 'background:#fff1f2;' : '');
                         
-                        let estadoBadge = '';
-                        if (esPagado) estadoBadge = `<span style="background:#d1fae5; color:#065f46; padding:2px 7px; border-radius:9999px; font-size:11px;">Pagado</span>`;
-                        else if (p.estado === 'Parcial') estadoBadge = `<span style="background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:9999px; font-size:11px;">Parcial</span>`;
-                        else if (esVencido) estadoBadge = `<span style="background:#fee2e2; color:#dc2626; padding:2px 7px; border-radius:9999px; font-size:11px;">Vencido</span>`;
-                        else estadoBadge = `<span style="background:#fef3c7; color:#92400e; padding:2px 7px; border-radius:9999px; font-size:11px;">Pendiente</span>`;
+                        let montoDisp = esPagado ? 0 : (p.estado === 'Parcial' ? (p.monto - p.montoAbonado) : p.monto);
+                        
+                        // Estilo de fila y badge
+                        const rowStyle = esPagado ? 'color:#9ca3af; background:#f9fafb;' : (esVencido ? 'background:#fff1f2;' : '');
+                        let badge = `<span style="padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold; ${
+                            esPagado ? 'background:#e5e7eb; color:#4b5563;' : 
+                            (esVencido ? 'background:#fee2e2; color:#b91c1c;' : 'background:#fef3c7; color:#92400e;')
+                        }">${esVencido ? 'VENCIDO' : p.estado.toUpperCase()}</span>`;
 
                         return `<tr style="${rowStyle}">
-                            <td style="padding:5px 7px; border-bottom:1px solid #f3f4f6;">${i + 1}</td>
-                            <td style="padding:5px 7px; border-bottom:1px solid #f3f4f6;">${p.fechaVencimiento || p.vencimiento || '-'}</td>
-                            <td style="padding:5px 7px; text-align:right; border-bottom:1px solid #f3f4f6;">${dinero(montoDisplay)}</td>
-                            <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6;">${estadoBadge}</td>
-                            <td style="padding:5px 7px; text-align:center; border-bottom:1px solid #f3f4f6; color:${esVencido ? '#dc2626' : 'inherit'}; font-weight:${esVencido ? 'bold' : 'normal'};">${esVencido ? diasAtraso + ' días' : '-'}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${i + 1}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${p.fechaVencimiento} ${esVencido ? `<br><small style="color:#dc2626;">(${diasAtraso} días)</small>` : ''}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9; text-align:right;">${dinero(montoDisp)}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9; text-align:center;">${badge}</td>
                         </tr>`;
                     }).join('')}
                 </tbody>
@@ -757,53 +743,106 @@ function abrirModalAbonoAvanzado(folio) {
 
     let modalHTML = `
         <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
-            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto;">
+            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto; font-family:sans-serif;">
                 <h2 style="margin-top:0;">💰 Registrar Abono - ${cuenta.nombre}</h2>
                 
-                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                        <div><small style="color:#4b5563;">Saldo Actual</small><br><strong style="font-size:20px; color:#27ae60;">${dinero(saldo)}</strong></div>
-                        <div><small style="color:#4b5563;">Pagarés Activos</small><br><strong style="font-size:20px; color:#e74c3c;">${pagaresCliente.length}</strong></div>
-                    </div>
+                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+                    <div><small style="color:#4b5563;">Saldo Crédito</small><br><strong style="font-size:20px; color:#16a34a;">${dinero(saldo)}</strong></div>
+                    <div style="text-align:right;"><small style="color:#4b5563;">Días Venta</small><br><strong style="font-size:20px; color:#2563eb;">${diasDesdeVenta}</strong></div>
                 </div>
 
                 ${articulosHTML}
                 ${pagaresHTML}
 
-                <div style="background:#f8fafc; padding:15px; border-radius:8px; margin-bottom:15px; border:1px solid #e2e8f0;">
-                    <strong style="color:#374151; display:block; margin-bottom:10px;">💳 ¿Cómo se recibe el pago?</strong>
-                    ${_buildCuentaOrigen('abono')}
+                <div style="margin-bottom:15px;">
+                    <label style="display:block; margin-bottom:5px; font-weight:bold;">Monto a abonar:</label>
+                    <input type="number" id="montoAbono" placeholder="0.00" 
+                        oninput="actualizarAvisoPoliticaAbono('${folio}', ${original}, ${enganche}, '${periodicidadCuenta}', ${aplicaPoliticaContado}, ${mesesPlanMasCercano || 'null'}, ${restanteContado}, ${montoProximoMes || 'null'})"
+                        style="padding:12px; font-size:18px; border:2px solid #3b82f6; border-radius:8px; width:100%; box-sizing:border-box;">
                 </div>
 
-                <div class="campo" style="margin-bottom:20px;">
-                    <label>Monto del Abono ($):</label>
-                    <input type="number" id="montoAbono" placeholder="0.00" min="0" max="${saldo}" 
-                           style="padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; width:100%;">
+                <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
+                    <strong style="color:#92400e;">💡 Política de pago anticipado</strong>
+                    <p style="margin:8px 0 0 0; font-size:14px; color:#78350f;">
+                        ${aplicaPoliticaContado 
+                            ? `Está dentro de los 30 días. Liquida con precio de contado: <strong>${dinero(restanteContado)}</strong>.`
+                            : (mesesPlanMasCercano 
+                                ? `Periodo de contado vencido. Puede liquidar a plan de ${mesesPlanMasCercano} meses con: <strong>${dinero(montoProximoMes)}</strong>.`
+                                : `Debe liquidar el saldo total de su crédito.`)}
+                    </p>
                 </div>
-
-                ${aplicaPoliticaContado ? `
-                    <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
-                        <strong style="color:#92400e;">💡 Precio de Contado Disponible (Primeros 30 días)</strong>
-                        <p style="margin:10px 0 0 0; font-size:14px; color:#78350f;">
-                            Total original pactado de contado: <strong>${dinero(original)}</strong>
-                        </p>
-                    </div>
-                ` : ''}
 
                 <div style="display:flex; gap:10px;">
                     <button onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado})" 
-                            style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                            style="flex:2; padding:15px; background:#22c55e; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
                         ✅ Procesar Abono
                     </button>
                     <button onclick="document.querySelector('[data-modal=&quot;abono-avanzado&quot;]')?.remove();" 
-                            style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">
-                        ✕ Cancelar
+                            style="flex:1; padding:15px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer;">
+                        Cancelar
                     </button>
                 </div>
             </div>
         </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function actualizarAvisoPoliticaAbono(cuenta) {
+    const avisoDiv = document.getElementById("avisoPoliticaAbono");
+    if (!avisoDiv) return;
+
+    // --- DATOS BASE ---
+    // Precio de la etiqueta (ej. 8800)
+    const precioContadoOriginal = Number(cuenta.totalContadoOriginal || 0);
+    // Lo que ya dejó en la tienda (ej. 2000)
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    // El saldo real que quedó de la mercancía (ej. 6800)
+    const saldoBaseSinInteres = precioContadoOriginal - enganche;
+
+    // --- CÁLCULO DE TIEMPO ---
+    const fechaVenta = new Date(cuenta.fecha);
+    const fechaHoy = new Date();
+    const diferenciaSms = fechaHoy - fechaVenta;
+    const dias = Math.floor(diferenciaSms / (1000 * 60 * 60 * 24));
+
+    // --- CONSULTA A LA CALCULADORA ---
+    // Obtenemos todos los posibles planes (1 a 6 meses) para ese saldo de 6800
+    const planes = CalculatorService.calcularCredito(saldoBaseSinInteres);
+
+    let montoParaLiquidar = 0;
+    let mensaje = "";
+
+    if (dias <= 30) {
+        // ESCENARIO 1: Menos de 30 días -> Precio Contado
+        montoParaLiquidar = saldoBaseSinInteres;
+        mensaje = `Política de pago anticipado: Dentro de los primeros 30 días, el cliente puede liquidar al precio sin interés con: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
+    } else if (dias <= 60) {
+        // ESCENARIO 2: 31 a 60 días -> Plan 2 Meses (Índice 1)
+        montoParaLiquidar = planes[1].total;
+        mensaje = `Han pasado ${dias} días. El periodo de contado venció. Puede liquidar con el costo a 2 meses de: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
+    } else if (dias <= 90) {
+        // ESCENARIO 3: 61 a 90 días -> Plan 3 Meses (Índice 2)
+        montoParaLiquidar = planes[2].total;
+        mensaje = `Venta con ${dias} días. Monto para liquidar según plan de 3 meses: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
+    } else {
+        // ESCENARIO 4: Más de 90 días -> Se cobra el total del contrato original
+        montoParaLiquidar = Number(cuenta.totalVenta || 0); 
+        mensaje = `Días transcurridos: ${dias}. Para liquidar debe cubrir el saldo total de su plan actual: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
+    }
+
+    // --- RESTAR ABONOS EXTRAS ---
+    // Si el cliente ya dio abonos después del enganche, se restan del monto calculado arriba
+    const totalAbonado = (cuenta.abonos || []).reduce((sum, ab) => sum + Number(ab.monto), 0);
+    const pagoFinal = montoParaLiquidar - totalAbonado;
+
+    avisoDiv.innerHTML = `
+        <div class="alert alert-info">
+            <i class="fas fa-clock"></i> ${mensaje}
+            ${totalAbonado > 0 ? `<br><small>(Menos $${totalAbonado} en abonos registrados)</small>` : ''}
+            <hr>
+            <strong>Total a cobrar hoy: $${pagoFinal.toLocaleString('en-US', {minimumFractionDigits:2})}</strong>
+        </div>`;
 }
 
 function evaluarPoliticaLiquidacion(folio, montoAbono) {
@@ -813,27 +852,26 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
     if (!pagaresFolio.length) return null;
 
-    // saldo actual real
-    const pendientes = pagaresFolio.filter(p => p.estado !== "Pagado");
-    const saldoActual = pendientes.reduce((s, p) => s + p.monto, 0);
+    const totalPagado = pagaresFolio.reduce((s, p) => s + (p.montoAbonado || (p.estado === "Pagado" ? p.monto || 0 : 0)), 0);
 
-    // total ya pagado
-    const pagados = pagaresFolio.filter(p => p.estado === "Pagado");
-    const totalPagado = pagados.reduce((s, p) => s + p.monto, 0);
+    const pendientes = pagaresFolio.filter(p => p.estado !== "Pagado" && p.estado !== "Cancelado");
+    const saldoActual = pendientes.reduce((s, p) => {
+        if (p.estado === "Parcial") return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+        return s + (p.monto || 0);
+    }, 0);
 
     const totalConAbono = totalPagado + montoAbono;
-
-    // reconstruir saldo base (como ya haces en ticket)
     const saldoBase = saldoActual + totalPagado;
 
-    // usar TU lógica de planes
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    const periodicidad = cuenta?.periodicidad || "semanal";
+
     const planes = CalculatorService.calcularCreditoConPeriodicidad
-        ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, "semanal")
+        ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidad)
         : CalculatorService.calcularCredito(saldoBase);
 
-    // buscar plan alcanzado
     let planAplicable = null;
-
     for (let plan of planes) {
         if (totalConAbono >= plan.total) {
             planAplicable = plan;
@@ -843,15 +881,15 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
     if (!planAplicable) return null;
 
-    const montoCorrecto = planAplicable.total - totalPagado;
+    const montoCorrecto = Math.max(0, planAplicable.total - totalPagado);
 
     return {
         aplica: true,
         montoCorrecto,
-        ahorro: saldoActual - montoCorrecto,
+        ahorro: Math.max(0, saldoActual - montoCorrecto),
         plan: planAplicable
     };
-}
+} 
 function confirmarPoliticaAntesDeGuardar(folio, monto, continuar) {
 
     const evalPol = evaluarPoliticaLiquidacion(folio, monto);
@@ -916,38 +954,64 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         return;
     }
 
-    if (montoAbonoInput > saldoActual) {
+    if (montoAbonoInput > (saldoActual + 0.01)) { // Margen pequeño por decimales
         alert("El abono no puede ser mayor al saldo.");
         return;
     }
 
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio) || {};
+
     let montoFinal = montoAbonoInput;
     let liquidacionPorPolitica = false;
-    
-    // Obtenemos historial de pagos para saber cuánto le falta en realidad
+
     const pagares = StorageService.get("pagaresSistema", []);
     const pagaresFolio = pagares.filter(p => p.folio === folio);
-    const pagados = pagaresFolio.filter(p => p.estado === "Pagado" || p.estado === "Cancelado");
-    const totalYaPagado = pagados.reduce((s, p) => s + (p.montoAbonado || p.monto), 0);
     
-    // CORRECCIÓN: Diálogo para Política de 30 Días (Precio de Contado)
-    if (aplicaPoliticaContado) {
-        const restanteContado = montoOriginal - totalYaPagado;
-        if (restanteContado > 0 && montoAbonoInput >= restanteContado) {
-            if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\n\nPuede liquidar la cuenta completa por el precio de contado pagando solo: ${dinero(restanteContado)}\n\n¿Deseas aplicar esta política, cobrar ${dinero(restanteContado)} y condonar los intereses restantes?`)) {
-                montoFinal = restanteContado;
-                liquidacionPorPolitica = true;
-            }
+    // ============================================
+    // CORRECCIÓN: CÁLCULO DE BASE DE CONTADO ($6,800)
+    // ============================================
+    let precioContadoReal = 0;
+    if (cuenta.articulos && cuenta.articulos.length > 0) {
+        precioContadoReal = cuenta.articulos.reduce((sum, art) => {
+            return sum + (Number(art.precioContado || art.precio || 0) * Number(art.cantidad || 1));
+        }, 0);
+    }
+    // Si no hay artículos cargados, usamos el montoOriginal que viene del modal
+    const baseContadoParaCalculo = precioContadoReal > 0 ? precioContadoReal : Number(montoOriginal);
+    
+    const totalAbonosPagados = pagaresFolio.reduce((s, p) => {
+        // Sumamos lo que ya se pagó realmente
+        if (p.estado === "Pagado") return s + (p.monto || 0);
+        if (p.estado === "Parcial") return s + (p.montoAbonado || 0);
+        return s;
+    }, 0);
+
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    // El saldo de contado es: (8800 - 2000) = 6800
+    const saldoContadoSinInteres = Math.max(0, baseContadoParaCalculo - enganche);
+    // Lo que falta para liquidar es: 6800 - lo ya abonado
+    const restanteContado = Math.max(0, saldoContadoSinInteres - totalAbonosPagados);
+
+    // Siempre preguntar antes de aplicar política de contado, aunque el monto coincida exactamente
+    if (aplicaPoliticaContado && restanteContado > 0 && montoAbonoInput >= (restanteContado - 0.01)) {
+        if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\n\nPuede liquidar al precio sin interés pagando sólo: ${dinero(restanteContado)}\n\n¿Deseas aplicar esta política y condonar los intereses restantes?`)) {
+            montoFinal = restanteContado;
+            liquidacionPorPolitica = true;
+        } else {
+            montoFinal = montoAbonoInput;
         }
     }
 
-    // CORRECCIÓN: Diálogo para Política de Liquidación Inteligente (Más de 30 días)
+    // Siempre preguntar antes de aplicar política de liquidación inteligente (salto de plan)
     if (!liquidacionPorPolitica) {
         const evalPol = evaluarPoliticaLiquidacion(folio, montoAbonoInput);
         if (evalPol && evalPol.aplica) {
             if (confirm(`💡 LIQUIDACIÓN INTELIGENTE (SALTO DE PLAN)\n\nEl abono alcanza para cubrir un plan más corto. El cliente puede liquidar su cuenta con: ${dinero(evalPol.montoCorrecto)}\n(Se le ahorrarán ${dinero(evalPol.ahorro)}).\n\n¿Deseas aplicar el descuento y dar por liquidada la cuenta?`)) {
                 montoFinal = evalPol.montoCorrecto;
                 liquidacionPorPolitica = true;
+            } else {
+                montoFinal = montoAbonoInput;
             }
         }
     }
@@ -981,7 +1045,6 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         }
     }
 
-    // Actualizamos Estados en Memoria
     const fechaAbono = new Date().toLocaleDateString("es-MX");
     let _todosActualizados = _todosLosPagares.map(p => {
         if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
@@ -993,12 +1056,8 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         return p;
     });
 
-    // ============================================
-    // CERRAR PAGARÉS SOBRANTES SI APLICÓ POLÍTICA
-    // ============================================
     if (liquidacionPorPolitica) {
         _todosActualizados = _todosActualizados.map(p => {
-            // Cancelamos los pagarés que quedaron pendientes tras cubrir el montoFinal
             if (p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")) {
                 return { ...p, estado: "Cancelado", nota: "Liquidado por política" };
             }
@@ -1008,26 +1067,22 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     StorageService.set("pagaresSistema", _todosActualizados);
 
-    // ============================================
-    // ACTUALIZAR CUENTA Y CAJA
-    // ============================================
-    const cuentas = StorageService.get("cuentasPorCobrar", []);
-    const idxCuenta = cuentas.findIndex(c => c.folio === folio);
+    const cuentasXCobrar = StorageService.get("cuentasPorCobrar", []);
+    const idxCuenta = cuentasXCobrar.findIndex(c => c.folio === folio);
     let nuevoSaldoReal = 0;
 
     if (idxCuenta !== -1) {
-        const cuenta = cuentas[idxCuenta];
-        cuenta.abonos = cuenta.abonos || [];
-        cuenta.abonos.push({
+        const cuentaAct = cuentasXCobrar[idxCuenta];
+        cuentaAct.abonos = cuentaAct.abonos || [];
+        cuentaAct.abonos.push({
             fecha: new Date().toLocaleDateString(),
             monto: montoFinal,
             cuentaId,
             medioPago,
             etiquetaCuenta: etiqueta,
-            vendedorId: cuenta.vendedorId || null
+            vendedorId: cuentaAct.vendedorId || null
         });
 
-        // Recalcular saldo exacto de Cuentas por Cobrar
         const _pagaresAct = StorageService.get("pagaresSistema", []);
         nuevoSaldoReal = _pagaresAct
             .filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
@@ -1036,19 +1091,17 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
                 return s + (p.monto || 0);
             }, 0);
 
-        cuenta.saldoActual = nuevoSaldoReal;
+        cuentaAct.saldoActual = nuevoSaldoReal;
         
-        // Liquidamos la cuenta si el saldo llegó a 0
         if (nuevoSaldoReal <= 0.01) { 
-            cuenta.estado = "Saldado";
-            cuenta.saldoActual = 0;
+            cuentaAct.estado = "Saldado";
+            cuentaAct.saldoActual = 0;
             nuevoSaldoReal = 0;
         }
 
-        cuentas[idxCuenta] = cuenta;
-        StorageService.set("cuentasPorCobrar", cuentas);
+        cuentasXCobrar[idxCuenta] = cuentaAct;
+        StorageService.set("cuentasPorCobrar", cuentasXCobrar);
 
-        // Ingreso a Caja
         let movimientos = StorageService.get("movimientosCaja", []);
         movimientos.push({
             id: Date.now(),
@@ -1056,7 +1109,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
             fecha: new Date().toLocaleDateString(),
             monto: montoFinal,
             tipo: "ingreso",
-            concepto: `Abono a ${cuenta.nombre} - ${folio}`,
+            concepto: `Abono a ${cuentaAct.nombre} - ${folio}`,
             referencia: "Abono",
             cuenta: cuentaId,
             medioPago,
@@ -1065,9 +1118,6 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         StorageService.set("movimientosCaja", movimientos);
     }
 
-    // ============================================
-    // GENERAR TICKET Y CERRAR MODAL
-    // ============================================
     const _cuentaData = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
     const _pagaresRestantes = _todosActualizados.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"));
     
@@ -1091,8 +1141,8 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         pagaresCubiertos: _pagaresCubiertosTicket,
         pagaresRestantes: _pagaresRestantes,
         articulos: _cuentaData?.articulos || [],
-        totalVenta: _cuentaData?.totalContadoOriginal || 0,
-        enganche: _cuentaData?.engancheRecibido || 0
+        totalVenta: baseContadoParaCalculo,
+        enganche: enganche
     });
 
     alert(`✅ Abono registrado exitosamente por ${dinero(montoFinal)}.`);
@@ -2274,7 +2324,16 @@ window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
 window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
 window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
 window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
-window.renderClientesMorosos = renderClientesMorosos;
-window.exportarMorososCSV = exportarMorososCSV;
+window.renderClientes = renderClientes;
+window.renderCuentasXCobrar = renderCuentasXCobrar;
+window.filtrarCuentasCobranza = filtrarCuentasCobranza;
+window.renderCobranzaEsperada = renderCobranzaEsperada;
+window.abrirModalNuevoCliente = abrirModalNuevoCliente;
+window.abrirModalAbonoAvanzado = abrirModalAbonoAvanzado;
+window.actualizarAvisoPoliticaAbono = actualizarAvisoPoliticaAbono;
+window.procesarAbonoAvanzado = procesarAbonoAvanzado;
+window.abrirDetalleCobranza = abrirDetalleCobranza;
 window.abrirHistorialAbonos = abrirHistorialAbonos;
 window.reimprimirTicketAbono = reimprimirTicketAbono;
+window.renderClientesMorosos = renderClientesMorosos;
+window.exportarMorososCSV = exportarMorososCSV;

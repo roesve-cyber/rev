@@ -192,7 +192,7 @@ function registrarCompra() {
     }
 
     const prov    = proveedores.find(p => p.id == proveedorId);
-    const producto = productos.find(p => p.id == productoId);
+    const producto = productos.find(p => String(p.id) === String(productoId));
     if (!prov || !producto) return alert("⚠️ Proveedor o producto no encontrado.");
 
     const bancoSel = document.getElementById("compraBancoSeleccionado")?.value || "";
@@ -232,7 +232,9 @@ function registrarCompra() {
     const nuevaCompra = {
         id: Date.now(),
         productoId,
+        productoNombre: producto.nombre,   // ← guardamos el nombre para que el historial no dependa del catálogo
         proveedor: prov.nombre,
+        proveedorId,
         total: totalCompra,
         fecha: fechaHoyStr
     };
@@ -298,44 +300,6 @@ function registrarCompra() {
                 console.error("❌ Error guardando cuentas MSI");
             }
         }
-    }
-    if (metodo === "contado") {
-        const cuentaOrigenId = document.getElementById("compraCuentaOrigen").value;
-        const selector = document.getElementById("compraCuentaOrigen");
-        const cuentaOrigenNombre = selector.options[selector.selectedIndex].text;
-
-        // 1. Descontar el saldo de la cuenta seleccionada (Efectivo o Débito)
-        if (cuentaOrigenId === "efectivo") {
-            // Caso: Salida de Caja Chica
-            let cuentasEf = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
-            let c = cuentasEf.find(x => x.id === "efectivo");
-            if (c) {
-                c.saldo = (Number(c.saldo) || 0) - totalCompra;
-                StorageService.set("cuentasEfectivo", cuentasEf);
-            }
-        } else {
-            // Caso: Salida de una Tarjeta de Débito
-            let cuentasBan = StorageService.get("cuentas-bancarias", []);
-            let c = cuentasBan.find(x => String(x.id) === String(cuentaOrigenId));
-            if (c) {
-                c.saldo = (Number(c.saldo) || 0) - totalCompra;
-                StorageService.set("cuentas-bancarias", cuentasBan);
-            }
-        }
-
-        // 2. Registrar el movimiento en el historial de Caja (Flujo de efectivo)
-        const movs = StorageService.get("movimientosCaja", []);
-        movs.push({
-            id: Date.now() + 10,
-            tipo: "egreso",
-            concepto: `Compra de contado: ${producto.nombre}`,
-            monto: totalCompra,
-            fecha: new Date().toISOString(),
-            cuenta: cuentaOrigenId,
-            etiquetaCuenta: cuentaOrigenNombre,
-            referencia: `COMPRA-${nuevaCompra.id}`
-        });
-        StorageService.set("movimientosCaja", movs);
     }
 
     if (!StorageService.set("productos", productos)) {
@@ -458,8 +422,8 @@ function procesarRecepcionFisica(idRecepcion) {
         alert("Cantidad no válida.");
         return;
     }
-
-    const prod = productos.find(p => Number(p.id) === Number(rec.productoId));
+const prod = productos.find(p => String(p.id) === String(rec.productoId));
+    
     
     if (prod) {
         prod.stock = (parseInt(prod.stock) || 0) + cantidad;
@@ -1635,7 +1599,7 @@ function cancelarOrdenCompra(id) {
 }
 // Función auxiliar para listar tus cuentas de débito
 function _generarOpcionesCuentasDebito() {
-    const cuentas = StorageService.get("cuentasBancarias", []);
+    const cuentas = StorageService.get("cuentas-bancarias", []);  // ← corregido: guión igual que el resto del sistema
     let opciones = `<option value="efectivo">💵 Efectivo (Caja Chica)</option>`;
     
     cuentas.forEach(c => {

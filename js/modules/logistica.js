@@ -77,7 +77,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
 
     (salida.items || []).forEach((it) => {
         const cant = it.cantidad || 1;
-        const pIdx = productos.findIndex((p) => p.id === it.productoId);
+        const pIdx = productos.findIndex((p) => String(p.id) === String(it.productoId));
         if (pIdx === -1) return;
         const stockActual = productos[pIdx].stock || 0;
         const cantADescontar = Math.min(cant, stockActual);

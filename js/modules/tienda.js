@@ -185,7 +185,7 @@ function renderProductosCatalogo(listaProductos) {
 }
 // ===== MODAL DE PRODUCTO DETALLADO (CON SIMULADOR DE ENGANCHE) =====
 function verProducto(id) {
-    const p = productos.find(x => x.id == id);
+    const p = productos.find(x => String(x.id) === String(id));
     if (!p) return;
     productoActualId = id;
 
