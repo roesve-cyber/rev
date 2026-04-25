@@ -46,6 +46,7 @@ function navA(vistaId) {
         if (idLimpio === 'dashboard') renderDashboard();
         if (idLimpio === 'configuracion-nube') _actualizarEstadoFirebaseUI();
         if (idLimpio === 'agendacobros') renderAgendaCobros();
+        if (idLimpio === 'auditoria-productos') console.log("Sección de auditoría activada");
         if (idLimpio === 'ordenescompra') window.renderListaOrdenesCompra && window.renderListaOrdenesCompra();
     }
 
