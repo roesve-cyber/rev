@@ -52,11 +52,7 @@
 
         <nav class="sidebar-nav">
 
-        <div class="menu-item">
-            <button onclick="navA('dashboard')" style="width:100%; text-align:left; padding:12px 20px; background:none; border:none; color:white; cursor:pointer; font-size:14px; font-weight:bold;">📊 DASHBOARD</button>
-        </div>
-
-        <div class="menu-item">
+                <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-prod')">📦 PRODUCTOS <span>▾</span></button>
             <div id="sub-prod" class="submenu oculto-submenu">
                 <button onclick="navA('inventario')">📋 Inventario</button>
@@ -72,6 +68,7 @@
                 <button onclick="navA('proveedores')">👥 Mis Proveedores</button>
                 <button onclick="navA('recepcion')">🚚 Recepción</button>
                 <button onclick="navA('cuentasporpagar')">💳 Cuentas por Pagar</button>
+                <button onclick="navA('ordenescompra')">📋 Órdenes de Compra</button>
             </div>
         </div>
 
@@ -84,6 +81,9 @@
                 <button onclick="navA('seleccionarcliente')">✅ Finalizar Venta</button>
                 <button onclick="navA('entregas')">🚚 Entregas</button>
                 <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
+                <button onclick="navA('cotizaciones')">📄 Cotizaciones</button>
+                <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
+                <button onclick="navA('garantias')">🛡️ Garantías</button>
             </div>
         </div>
 
@@ -94,6 +94,8 @@
                 <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
                 <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
                 <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
+                <button onclick="navA('clientesmorosos')">🔴 Clientes Morosos</button>
+                <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
             </div>
         </div>
 
@@ -117,28 +119,20 @@
         </div>
 
         <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas-ext')">📄 VENTAS+ <span>▾</span></button>
-            <div id="sub-ventas-ext" class="submenu oculto-submenu">
-                <button onclick="navA('cotizaciones');abrirListaCotizaciones();">📄 Cotizaciones</button>
-                <button onclick="navA('devoluciones');renderHistorialDevoluciones();">↩️ Devoluciones</button>
-                <button onclick="navA('garantias');renderControlGarantias();">🛡️ Garantías</button>
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
+            <div id="sub-auditoria" class="submenu oculto-submenu">
+                <button onclick="navA('auditoria-productos')">📦 Productos</button>
             </div>
         </div>
-
-        <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-clientes-ext')">👥 CLIENTES+ <span>▾</span></button>
-            <div id="sub-clientes-ext" class="submenu oculto-submenu">
-                <button onclick="navA('clientesmorosos');renderClientesMorosos();">🔴 Clientes Morosos</button>
-                <button onclick="navA('puntos');renderPanelPuntos();">⭐ Puntos y Fidelidad</button>
-            </div>
+    <!-- AUDITORÍA PRODUCTOS (ventana principal) -->
+    <div id="vista-auditoria-productos" class="vista oculto" style="padding:40px 0; max-width:600px; margin:0 auto;">
+        <h2 style="color:#1e40af; margin-bottom:24px;">🕵️ Auditoría de Productos</h2>
+        <div style="display:flex; gap:18px; flex-wrap:wrap;">
+            <button onclick="contarIdsDuplicados()" style="padding:18px 28px; background:#f59e42; color:white; border:none; border-radius:8px; font-size:17px; font-weight:bold; box-shadow:0 2px 8px rgba(0,0,0,0.07); cursor:pointer;">🔍 Ver Duplicados</button>
+            <button onclick="detectarYCorregirIdsDuplicados()" style="padding:18px 28px; background:#16a34a; color:white; border:none; border-radius:8px; font-size:17px; font-weight:bold; box-shadow:0 2px 8px rgba(0,0,0,0.07); cursor:pointer;">🛠️ Corregir Duplicados</button>
         </div>
-
-        <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-compras-ext')">🛒 COMPRAS+ <span>▾</span></button>
-            <div id="sub-compras-ext" class="submenu oculto-submenu">
-                <button onclick="navA('ordenescompra');renderListaOrdenesCompra();">📋 Órdenes de Compra</button>
-            </div>
-        </div>
+        <div style="margin-top:32px; color:#666; font-size:15px;">Utiliza estos botones para auditar y corregir productos con IDs duplicados en tu inventario.</div>
+    </div>
 
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-config-ext')">⚙️ CONFIGURACIÓN <span>▾</span></button>
@@ -155,13 +149,6 @@
             <div id="sub-finanzas" class="submenu oculto-submenu">
                 <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
                 <button onclick="navA('proyeccion');renderProyeccionFlujo();">📈 Proyección de Flujo</button>
-            </div>
-        </div>
-
-        <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-agenda')">📅 AGENDA <span>▾</span></button>
-            <div id="sub-agenda" class="submenu oculto-submenu">
-                <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
             </div>
         </div>
 
@@ -442,7 +429,7 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
     <div id="cuentas-bancarias" class="vista oculto">
         <div class="vista-header">
             <h2>🏦 Mis Cuentas</h2>
-            <p>Saldo actual por cuenta calculado de movimientos registrados.</p>
+            <p>Saldo actual por cuenta basado en movimientos registrados.</p>
         </div>
         <div id="tablaCuentasBancarias"></div>
     </div>
@@ -966,7 +953,8 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
 <script src="js/modules/agenda.js"></script>
 <script src="js/modules/notificaciones.js"></script>
 <script src="js/core/navigation.js"></script>
-<script src="js/init.js"></script>
+    <script src="js/init.js"></script>
+    <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js")
