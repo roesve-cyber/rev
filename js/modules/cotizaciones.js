@@ -320,20 +320,22 @@ function generarCotizacion() {
 
     const hoy = new Date();
     const fechaVenc = new Date(hoy.getTime() + vigDias * 24 * 3600 * 1000);
+    const periodicidad = document.getElementById('cotPeriodicidad')?.value || 'semanal';
     const cot = {
-        id: Date.now(),
-        folio: _foliosCot(),
-        fecha: hoy.toISOString(),
-        fechaVencimiento: fechaVenc.toISOString(),
-        clienteNombre,
-        clienteId: selCliente?.value || null,
-        articulos: arts,
-        total,
-        enganche,
-        saldoFinanciar,
-        vigenciaDias: vigDias,
-        notas,
-        estado: 'Vigente'
+      id: Date.now(),
+      folio: _foliosCot(),
+      fecha: hoy.toISOString(),
+      fechaVencimiento: fechaVenc.toISOString(),
+      clienteNombre,
+      clienteId: selCliente?.value || null,
+      articulos: arts,
+      total,
+      enganche,
+      saldoFinanciar,
+      periodicidad,
+      vigenciaDias: vigDias,
+      notas,
+      estado: 'Vigente'
     };
     const lista = StorageService.get('cotizaciones', []);
     lista.push(cot);
@@ -422,16 +424,17 @@ function imprimirCotizacion(id) {
             <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
         </tr>`).join('');
 
-    // Planes semanales filtrados
+    // Planes según periodicidad seleccionada
     let planeRows = '';
     if (c.saldoFinanciar > 0) {
-        const planesSemanales = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, 'semanal');
-        planeRows = planesSemanales.map(plan => `
-            <tr>
-                <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos}s)</td>
-                <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)}</td>
-                <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
-            </tr>`).join('');
+      const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+      const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
+      planeRows = planes.map(plan => `
+        <tr>
+          <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)</td>
+          <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
+          <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
+        </tr>`).join('');
     }
 
     const w = window.open('', '_blank', 'width=400,height=600');
@@ -505,13 +508,13 @@ function imprimirCotizacion(id) {
             <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
 
             ${planeRows ? `
-                <div class="seccion-titulo">PAGOS SEMANALES</div>
-                <table>
-                    <thead>
-                        <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
-                    </thead>
-                    <tbody>${planeRows}</tbody>
-                </table>
+              <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
+              <table>
+                <thead>
+                  <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
+                </thead>
+                <tbody>${planeRows}</tbody>
+              </table>
             ` : ''}
 
             <div class="footer">
