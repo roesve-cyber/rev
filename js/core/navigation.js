@@ -48,6 +48,7 @@ function navA(vistaId) {
         if (idLimpio === 'agendacobros') renderAgendaCobros();
         if (idLimpio === 'auditoria-productos') console.log("Sección de auditoría activada");
         if (idLimpio === 'ordenescompra') window.renderListaOrdenesCompra && window.renderListaOrdenesCompra();
+        if (idLimpio === 'cotizaciones' && typeof window.abrirListaCotizaciones === 'function') window.abrirListaCotizaciones();
     }
 
     const sb = document.getElementById("sidebar");
