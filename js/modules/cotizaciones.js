@@ -442,98 +442,102 @@ function imprimirCotizacion(id) {
     <!DOCTYPE html>
     <html>
     <head>
-        <meta charset="UTF-8">
-        <title>COT-${c.folio}</title>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-        <style>
-            /* AJUSTE DE HOJA ANGOSTA (80mm) */
-            @page { size: 80mm auto; margin: 0; }
-            body { 
-                font-family: 'Courier New', Courier, monospace; 
-                margin: 0; padding: 0; 
-                background: #f0f0f0; 
-                display: flex; flex-direction: column; align-items: center; 
-            }
-            #area-impresion { 
-                width: 72mm; /* Aprovecha el ancho de 80mm dejando margen mínimo */
-                padding: 4mm; 
-                background: white; 
-                box-sizing: border-box;
-            }
-            .controles { margin: 10px 0; display: flex; gap: 5px; }
-            h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
-            .separator { border-top: 1px double #000; margin: 5px 0; }
-            .info-box { font-size: 9px; text-align: center; line-height: 1.2; }
-            .folio-line { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin: 5px 0; }
-            table { width: 100%; border-collapse: collapse; }
-            th { font-size: 9px; text-align: left; border-bottom: 1px solid #000; padding: 2px 0; }
-            .totales { text-align: right; margin-top: 5px; font-size: 11px; font-weight: bold; }
-            .seccion-titulo { font-size: 9px; font-weight: bold; margin-top: 8px; text-align: center; background: #eee; }
-            .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
-            
-            @media print { 
-                .controles { display: none !important; } 
-                body { background: white; }
-                #area-impresion { width: 100%; padding: 2mm; }
-            }
-        </style>
+      <meta charset="UTF-8">
+      <title>COT-${c.folio}</title>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+      <style>
+        /* AJUSTE DE HOJA ANGOSTA (80mm) */
+        @page { size: 80mm auto; margin: 0; }
+        body { 
+          font-family: 'Courier New', Courier, monospace; 
+          margin: 0; padding: 0; 
+          background: #f0f0f0; 
+          display: flex; flex-direction: column; align-items: center; 
+        }
+        #area-impresion { 
+          width: 72mm; /* Aprovecha el ancho de 80mm dejando margen mínimo */
+          padding: 4mm; 
+          background: white; 
+          box-sizing: border-box;
+        }
+        .controles { margin: 10px 0; display: flex; gap: 5px; }
+        h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
+        .separator { border-top: 1px double #000; margin: 5px 0; }
+        .info-box { font-size: 9px; text-align: center; line-height: 1.2; }
+        .folio-line { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin: 5px 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th { font-size: 9px; text-align: left; border-bottom: 1px solid #000; padding: 2px 0; }
+        .totales { text-align: right; margin-top: 5px; font-size: 11px; font-weight: bold; }
+        .seccion-titulo { font-size: 9px; font-weight: bold; margin-top: 8px; text-align: center; background: #eee; }
+        .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
+        .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
+        .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
+        @media print { 
+          .controles { display: none !important; } 
+          body { background: white; }
+          #area-impresion { width: 100%; padding: 2mm; }
+        }
+      </style>
     </head>
     <body>
-        <div class="controles">
-            <button onclick="window.print()">Imprimir</button>
-            <button onclick="guardarComoImagen('${c.folio}')">Imagen</button>
-        </div>
+      <div class="controles">
+        <button onclick="window.print()">Imprimir</button>
+        <button onclick="guardarComoImagen('${c.folio}')">Imagen</button>
+      </div>
 
-        <div id="area-impresion">
-            <h2>${empresa}</h2>
-            <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
+      <div id="area-impresion">
+        <h2>${empresa}</h2>
+        <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
             
-            <div class="separator"></div>
-            <div class="folio-line">
-                <span>FOLIO: ${c.folio}</span>
-            </div>
-            <div style="font-size: 9px;">
-                FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX')}<br>
-                CLIENTE: ${c.clienteNombre.toUpperCase()}
-            </div>
-            <div class="separator"></div>
-
-            <table>
-                <thead>
-                    <tr><th>ART</th><th style="text-align:center;">CT</th><th style="text-align:right;">PREC</th></tr>
-                </thead>
-                <tbody>${rows}</tbody>
-            </table>
-
-            <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
-
-            ${planeRows ? `
-              <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
-              <table>
-                <thead>
-                  <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
-                </thead>
-                <tbody>${planeRows}</tbody>
-              </table>
-            ` : ''}
-
-            <div class="footer">
-                Válido por ${c.vigenciaDias} días.<br>
-                *** GRACIAS POR SU PREFERENCIA ***
-            </div>
+        <div class="separator"></div>
+        <div class="folio-line">
+          <span>FOLIO: ${c.folio}</span>
         </div>
+        <div style="font-size: 9px;">
+          FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX')}<br>
+          CLIENTE: ${c.clienteNombre.toUpperCase()}
+        </div>
+        <div class="separator"></div>
 
-        <script>
-            function guardarComoImagen(folio) {
-                const node = document.getElementById('area-impresion');
-                html2canvas(node, { scale: 3 }).then(canvas => {
-                    const link = document.createElement('a');
-                    link.download = 'Cotizacion-' + folio + '.png';
-                    link.href = canvas.toDataURL();
-                    link.click();
-                });
-            }
-        </script>
+        <table>
+          <thead>
+            <tr><th>ART</th><th style="text-align:center;">CT</th><th style="text-align:right;">PREC</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+
+        <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
+
+        ${typeof c.enganche === 'number' && c.enganche > 0 ? `<div class="enganche-box">Enganche: <strong>${fmtMXN(c.enganche)}</strong></div>` : ''}
+        ${c.notas && c.notas.length > 0 ? `<div class="notas-box">Observaciones: ${c.notas}</div>` : ''}
+
+        ${planeRows ? `
+          <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
+          <table>
+            <thead>
+              <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
+            </thead>
+            <tbody>${planeRows}</tbody>
+          </table>
+        ` : ''}
+
+        <div class="footer">
+          Válido por ${c.vigenciaDias} días.<br>
+          *** GRACIAS POR SU PREFERENCIA ***
+        </div>
+      </div>
+
+      <script>
+        function guardarComoImagen(folio) {
+          const node = document.getElementById('area-impresion');
+          html2canvas(node, { scale: 3 }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'Cotizacion-' + folio + '.png';
+            link.href = canvas.toDataURL();
+            link.click();
+          });
+        }
+      </script>
     </body>
     </html>`);
     w.document.close();
