@@ -33,7 +33,8 @@ function abrirCotizador() {
     <div data-modal="cotizador" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:760px;padding:28px;margin:auto;">
         <h2 style="margin:0 0 20px;color:#1e40af;">📄 Nueva Cotización</h2>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">CLIENTE</label>
             <select id="cotCliente" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
@@ -45,6 +46,14 @@ function abrirCotizador() {
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">VIGENCIA (días)</label>
             <input type="number" id="cotVigencia" value="15" min="1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">PERIODICIDAD DE PAGO</label>
+            <select id="cotPeriodicidad" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              <option value="semanal">Semanal</option>
+              <option value="quincenal">Quincenal</option>
+              <option value="mensual">Mensual</option>
+            </select>
           </div>
         </div>
 
@@ -174,12 +183,10 @@ function _actualizarPlanesCot() {
 
     planesDiv.style.display = 'block';
 
-    const periodicidades = [
-        { key: 'semanal', label: 'Semanal' },
-        { key: 'quincenal', label: 'Quincenal' },
-        { key: 'mensual', label: 'Mensual' }
-    ];
-
+    // Obtener periodicidad seleccionada
+    const periodicidadSel = document.getElementById('cotPeriodicidad')?.value || 'semanal';
+    const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+    const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, periodicidadSel);
     let tablaHtml = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="background:#f3f4f6;">
         <th style="padding:8px;text-align:center;">Plazo</th>
@@ -188,21 +195,23 @@ function _actualizarPlanesCot() {
         <th style="padding:8px;text-align:right;">Total a Pagar</th>
       </tr></thead>
       <tbody>`;
-
-    periodicidades.forEach(per => {
-        const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, per.key);
-        planes.forEach(plan => {
-            tablaHtml += `<tr>
-              <td style="padding:7px;text-align:center;">${plan.meses} meses (${plan.pagos} ${per.key === 'semanal' ? 'sem' : per.key === 'quincenal' ? 'quin' : 'meses'})</td>
-              <td style="padding:7px;text-align:center;">${per.label}</td>
-              <td style="padding:7px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(plan.abono)}</td>
-              <td style="padding:7px;text-align:right;">${dinero(plan.total)}</td>
-            </tr>`;
-        });
+    planes.forEach(plan => {
+        tablaHtml += `<tr>
+          <td style="padding:7px;text-align:center;">${plan.meses} meses (${plan.pagos} pagos)</td>
+          <td style="padding:7px;text-align:center;">${labelMap[periodicidadSel]}</td>
+          <td style="padding:7px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(plan.abono)}</td>
+          <td style="padding:7px;text-align:right;">${dinero(plan.total)}</td>
+        </tr>`;
     });
-
     tablaHtml += '</tbody></table>';
     container.innerHTML = tablaHtml;
+
+    // Actualizar tabla cuando cambie la periodicidad
+    const periodicidadCombo = document.getElementById('cotPeriodicidad');
+    if (periodicidadCombo && !periodicidadCombo._cotListener) {
+        periodicidadCombo.addEventListener('change', _actualizarPlanesCot);
+        periodicidadCombo._cotListener = true;
+    }
 }
 
 function agregarArticuloCotizacion() {
