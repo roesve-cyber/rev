@@ -1,3 +1,27 @@
+<!-- ===== CONSULTA DE INVENTARIO ===== -->
+<div id="consulta-inventario" class="vista oculto" style="display:none;">
+    <div style="padding: 30px; max-width: 1400px; margin: 0 auto;">
+        <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);">
+            <h2 style="color: #1e40af; margin-bottom: 10px;">📊 Consulta Dinámica de Inventarios</h2>
+            <div style="display:flex; gap:16px; margin-bottom:20px; align-items:center; flex-wrap:wrap;">
+                <select id="filtroCatInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
+                <select id="filtroSubInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
+                <select id="filtroStockInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:160px;">
+                    <option value="todos">Stock: Todos</option>
+                    <option value="con">Con stock</option>
+                    <option value="sin">Sin stock</option>
+                </select>
+                <select id="filtroPedidoInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:220px;">
+                    <option value="todos">Estado pedido: Todos</option>
+                    <option value="pendiente">Pendiente de recibir</option>
+                    <option value="baja">Pendiente de baja</option>
+                    <option value="ninguno">Sin pedido pendiente</option>
+                </select>
+            </div>
+            <div id="tablaConsultaInventario"></div>
+        </div>
+    </div>
+</div>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -58,6 +82,7 @@
                 <button onclick="navA('inventario')">📋 Inventario</button>
                 <button onclick="navA('configcategorias')">🏷️ Categorías</button>
                 <button onclick="abrirImportadorProductos()">📥 Importar Batch</button>
+                <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
             </div>
         </div>
 
@@ -172,13 +197,36 @@
             <h2 style="color: #1e40af; margin-bottom: 10px;">🕵️ Auditoría de Base de Datos</h2>
             <p style="color: #64748b; margin-bottom: 35px;">Seleccione una acción para corregir la integridad de los productos.</p>
             
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
                 <button onclick="contarIdsDuplicados()" style="padding: 20px; background: #f59e42; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
                     🔍 Analizar Duplicados
                 </button>
                 <button onclick="detectarYCorregirIdsDuplicados()" style="padding: 20px; background: #10b981; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
                     🛠️ Reparar IDs Automáticamente
                 </button>
+                <button onclick="abrirModalCargaInicialStock()" style="padding: 20px; background: #2563eb; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
+                    ➕ Carga inicial de stock
+                </button>
+            </div>
+
+            <!-- Modal carga inicial stock -->
+            <div id="modalCargaInicialStock" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.35); z-index:100001; align-items:center; justify-content:center;">
+                <div style="background:white; padding:32px 28px; border-radius:12px; min-width:320px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.18); text-align:center;">
+                    <h2 style='margin-bottom:18px;color:#1e40af;font-size:20px;'>Carga inicial de stock</h2>
+                    <div style='margin-bottom:12px;'>
+                        <select id="cargaStockProducto" style="width:100%;padding:10px;font-size:16px;">
+                            <option value="">-- Selecciona producto --</option>
+                        </select>
+                    </div>
+                    <div style='margin-bottom:12px;'>
+                        <input type="number" id="cargaStockCantidad" placeholder="Cantidad" min="1" style="width:120px;text-align:center;font-size:18px;padding:7px 10px;">
+                    </div>
+                    <div style='margin-bottom:18px;'>
+                        <input type="number" id="cargaStockCosto" placeholder="Costo unitario" min="0" step="0.01" style="width:120px;text-align:center;font-size:18px;padding:7px 10px;">
+                    </div>
+                    <button onclick="guardarCargaInicialStock()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;">Guardar</button>
+                    <button onclick="cerrarModalCargaInicialStock()" style="padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;">Cancelar</button>
+                </div>
             </div>
             
             <div style="margin-top: 30px; padding: 15px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; text-align: left;">
