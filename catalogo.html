@@ -141,6 +141,7 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
     <div class="modal-right">
       <h2 id="mTitle" style="font-family:var(--font-title); font-size: 20px; line-height: 1.2;"></h2>
       <div id="mPrice" style="font-size:22px; font-weight:800; color:var(--primary); margin:10px 0;"></div>
+      <div id="mCaracteristicas" style="margin: 15px 0; color: #555; font-size: 15px;"></div>
       
       <label style="font-size:11px; font-weight:700; color:#666;">ELIGE TU FORMA DE PAGO:</label>
       <select id="periodoSelect" class="periodicidad-select" onchange="actualizarPlazos()">
@@ -318,6 +319,8 @@ function abrirModal(id) {
   document.getElementById('mTitle').textContent = prodSeleccionado.nombre;
   document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio) + " de contado";
   document.getElementById('periodoSelect').value = 'semanal';
+  // Mostrar características si existen, con formato destacado
+  document.getElementById('mCaracteristicas').innerHTML = prodSeleccionado.caracteristicas ? `<div style='background:#f8fafc;padding:12px 15px;border-radius:8px;line-height:1.6;'>${prodSeleccionado.caracteristicas}</div>` : '';
   actualizarPlazos();
   
   const msg = encodeURIComponent(`Hola! Me interesa: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
@@ -336,7 +339,8 @@ function actualizarPlazos() {
 
     // Renderizado: Enganche arriba, luego la lista de abonos
     document.getElementById('plazosLista').innerHTML = `
-        <div style="background: #fff9e6; padding: 12px; border-radius: 8px; border: 1px dashed var(--accent); margin-bottom: 15px; text-align: center;">
+    <div id="mCaracteristicas" style="margin: 15px 0; color: #555; font-size: 15px;"></div>    
+    <div style="background: #fff9e6; padding: 12px; border-radius: 8px; border: 1px dashed var(--accent); margin-bottom: 15px; text-align: center;">
             <span style="font-size: 12px; color: #666; display: block; text-transform: uppercase; font-weight: 700;">Pago Inicial (Enganche)</span>
             <span style="font-size: 24px; font-weight: 800; color: var(--primary);">${fmt(enganche)}</span>
         </div>
