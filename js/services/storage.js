@@ -10,7 +10,8 @@ const CLAVES_SISTEMA = [
     'pagaresSistema', 'compras', 'cuentasPorPagar', 'movimientosCaja', 'tarjetasConfig',
     'gastosOperativos', 'cotizaciones', 'vendedores', 'comisionesRegistradas',
     'puntosPorCliente', 'programaPuntos', 'descuentosActivos', 'usuariosConfig',
-    'categoriasGasto', 'registroTickets', 'deudasMSI', 'recepciones'
+    'categoriasGasto', 'registroTickets', 'deudasMSI', 'recepciones',
+    'categoriasData'
 ];
 
 const StorageService = {
