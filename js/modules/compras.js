@@ -588,7 +588,7 @@ function registrarAbonoProveedor(idCuenta) {
             </div>
             <div style="margin-bottom:20px;">
                 <label style="font-weight:bold;display:block;margin-bottom:8px;">💳 ¿De dónde sale el dinero?</label>
-                ${_buildCuentaOrigen('proveedor')}
+                ${_buildSelectorCuentas('cuentaOrigen_proveedor', false)}
             </div>
             <div style="display:flex;gap:10px;">
                 <button onclick="confirmarAbonoProveedor(${idCuenta})"
@@ -1137,27 +1137,29 @@ function confirmarRecepcionOC(ocId) {
     }
 
     // ── 1. Actualizar inventario ───────────────────────────────
-    const prods = StorageService.get('productos', []);
-    itemsRecibidos.forEach(art => {
-        const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
-        if (pidx !== -1) prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
-    });
-    StorageService.set('productos', prods);
+const prods = StorageService.get('productos', []);
+itemsRecibidos.forEach(art => {
+    const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
+    if (pidx !== -1) prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
+});
+StorageService.set('productos', prods);
+productos = prods;          // ← ESTA línea sincroniza el global
+window.productos = prods;   // ← por si se referencia con window. en otro lado
 
     // Movimientos de inventario
-    if (typeof movimientosInventario !== 'undefined') {
-        itemsRecibidos.forEach(art => {
-            movimientosInventario.push({
-                id: Date.now() + Math.random(),
-                productoId: art.productoId,
-                tipo: 'entrada',
-                cantidad: art.cantidadRec,
-                concepto: `Recepción OC ${oc.folio} — ${oc.proveedorNombre}`,
-                fecha: fechaRec.toLocaleString('es-MX')
-            });
-        });
-        StorageService.set('movimientosInventario', movimientosInventario);
-    }
+    const kardex = StorageService.get('movimientosInventario', []);  // ← leer fresco
+itemsRecibidos.forEach(art => {
+    kardex.push({
+        id: Date.now() + Math.random(),
+        productoId: art.productoId,
+        tipo: 'entrada',
+        cantidad: art.cantidadRec,
+        concepto: `Recepción OC ${oc.folio} — ${oc.proveedorNombre}`,
+        fecha: fechaRec.toLocaleString('es-MX')
+    });
+});
+StorageService.set('movimientosInventario', kardex);
+movimientosInventario = kardex;   // ✅ sincronizar global
 
     // ── 2. Afectar flujo si hay pago ───────────────────────────
     if (metodoPago !== 'no' && montoPagado > 0) {

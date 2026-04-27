@@ -114,36 +114,52 @@ function procesarDevolucion(folio) {
     StorageService.set('historialDevoluciones', devoluciones);
 
     if (reingresarStock) {
-        const prods = StorageService.get('productos', []);
-        const pidx = prods.findIndex(p => String(p.id) === String(art.id || art.productoId));
-        if (pidx !== -1) {
-            prods[pidx].stock = (prods[pidx].stock || 0) + cantidad;
-            StorageService.set('productos', prods);
-        }
+    const prods = StorageService.get('productos', []);
+    const pidx = prods.findIndex(p => String(p.id) === String(art.id || art.productoId));
+    if (pidx !== -1) {
+        prods[pidx].stock = (prods[pidx].stock || 0) + cantidad;
+        StorageService.set('productos', prods);
+        // ✅ AGREGAR:
+        const movs = StorageService.get('movimientosInventario', []);
+        movs.push({
+            id: Date.now(),
+            productoId: art.id || art.productoId,
+            tipo: 'entrada',
+            cantidad,
+            concepto: `Devolución ${devolucion.folio} — ${motivo}`,
+            fecha: new Date().toLocaleString('es-MX')
+        });
+        StorageService.set('movimientosInventario', movs);
     }
+}
 
-    // ===== //FIX AUDITORIA: Si venta a crédito, ajusta saldo y registra reembolso =====
-    if(fueCredito && devolucion.monto > 0) {
-        const cuentas = StorageService.get('cuentasPorCobrar', []);
-        const cuenta = cuentas.find(c => (c.folioVenta || c.folio) === folio);
-        if(cuenta) {
-            cuenta.saldo -= devolucion.monto;
-            if(cuenta.saldo < 0) cuenta.saldo = 0;
-            StorageService.set('cuentasPorCobrar', cuentas);
-        }
-
+// ===== Ajuste de saldo y registro de reembolso en caja =====
+    if (devolucion.monto > 0) {
         const movs = StorageService.get('movimientosCaja', []);
         movs.push({
             id: Date.now() + 1,
+            folio: devolucion.folio,
             tipo: "egreso",
-            concepto: `Reembolso por devolución (${devolucion.folio})`,
+            concepto: `Reembolso devolución (${devolucion.folio}) — ${devolucion.productoNombre}`,
             monto: devolucion.monto,
             fecha: new Date().toISOString(),
-            referencia: devolucion.folio
+            cuenta: "efectivo",
+            referencia: devolucion.folioVenta
         });
         StorageService.set('movimientosCaja', movs);
+
+        // Si fue crédito, también reducir el saldo pendiente en CxC
+        if (fueCredito) {
+            const cuentas = StorageService.get('cuentasPorCobrar', []);
+            const cuenta = cuentas.find(c => (c.folioVenta || c.folio) === folio);
+            if (cuenta) {
+                // ✅ Campo correcto: saldoActual (no saldo)
+                cuenta.saldoActual = Math.max(0, (cuenta.saldoActual || 0) - devolucion.monto);
+                StorageService.set('cuentasPorCobrar', cuentas);
+            }
+        }
     }
-    // ===== FIN FIX AUDITORIA =====
+    // ===== FIN ajuste =====
 
     document.querySelector('[data-modal="devolucion"]')?.remove();
     alert(`✅ Devolución registrada. Folio: ${devolucion.folio}`);

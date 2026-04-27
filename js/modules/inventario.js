@@ -1,3 +1,214 @@
+// ===== CONSULTA DINÁMICA DE INVENTARIO PROFESIONAL =====
+// Devuelve la antigüedad del producto en días, meses o años según la fecha de alta o última entrada
+function calcularAntiguedadProducto(p) {
+    // Buscar la fecha más reciente de entrada en el kardex para este producto
+    let kardex = window.movimientosInventario || [];
+    let entradas = kardex.filter(m => m.productoId == p.id && m.tipo === 'entrada');
+    let fechaStr = null;
+    if (entradas.length > 0) {
+        // Tomar la última entrada
+        let ultima = entradas.reduce((a, b) => new Date(a.fecha) > new Date(b.fecha) ? a : b);
+        fechaStr = ultima.fecha;
+    } else if (p.fechaAlta) {
+        fechaStr = p.fechaAlta;
+    }
+    if (!fechaStr) return '-';
+    let fecha = new Date(fechaStr);
+    if (isNaN(fecha.getTime())) return '-';
+    let ahora = new Date();
+    let diffMs = ahora - fecha;
+    let diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDias < 31) return diffDias + ' días';
+    let diffMeses = Math.floor(diffDias / 30.44);
+    if (diffMeses < 12) return diffMeses + ' meses';
+    let diffAnios = Math.floor(diffMeses / 12);
+    return diffAnios + ' años';
+}
+window.renderConsultaInventario = function() {
+    const cont = document.getElementById('tablaConsultaInventario');
+    // Filtros
+    const catSel = document.getElementById('filtroCatInv');
+    const subSel = document.getElementById('filtroSubInv');
+    const stockSel = document.getElementById('filtroStockInv');
+    const pedidoSel = document.getElementById('filtroPedidoInv');
+    const cat = catSel?.value || 'todos';
+    const sub = subSel?.value || 'todos';
+    const stockFiltro = stockSel?.value || 'todos';
+    const pedidoFiltro = pedidoSel?.value || 'todos';
+    let productosFiltrados = (window.productos || []).filter(p =>
+        (cat === 'todos' || p.categoria === cat) &&
+        (sub === 'todos' || p.subcategoria === sub)
+    );
+
+    // Filtro de stock
+    if (stockFiltro === 'con') {
+        productosFiltrados = productosFiltrados.filter(p => (p.stock || 0) > 0);
+    } else if (stockFiltro === 'sin') {
+        productosFiltrados = productosFiltrados.filter(p => !p.stock || p.stock === 0);
+    }
+
+    // Filtro de estado de pedido
+    // Se asume que window.ordenesCompra está disponible y tiene estado y articulos
+    let ocs = window.ordenesCompra || [];
+    // Mapear productos con estado de pedido
+    const estadoPedidoPorProd = {};
+    ocs.forEach(oc => {
+        if (!oc.articulos) return;
+        oc.articulos.forEach(a => {
+            if (!a.productoId) return;
+            if (oc.estado === 'Borrador' || oc.estado === 'Pendiente' || oc.estado === 'Pendiente de recibir') {
+                estadoPedidoPorProd[a.productoId] = 'pendiente';
+            } else if (oc.estado === 'Pendiente de baja') {
+                estadoPedidoPorProd[a.productoId] = 'baja';
+            }
+        });
+    });
+    if (pedidoFiltro !== 'todos') {
+        productosFiltrados = productosFiltrados.filter(p => {
+            const estado = estadoPedidoPorProd[p.id] || 'ninguno';
+            return pedidoFiltro === estado;
+        });
+    }
+
+    // Ordenar por categoría, subcategoría, nombre
+    productosFiltrados.sort((a, b) => {
+        if (a.categoria !== b.categoria) return (a.categoria||'').localeCompare(b.categoria||'');
+        if (a.subcategoria !== b.subcategoria) return (a.subcategoria||'').localeCompare(b.subcategoria||'');
+        return a.nombre.localeCompare(b.nombre);
+    });
+
+    // Renderizar tabla profesional
+    let html = `<div style="overflow-x:auto;"><table class=\"tabla-admin tabla-inventario\" style=\"width:100%;font-size:15px;box-shadow:0 2px 8px #0001;border-radius:10px;overflow:hidden;\">
+        <thead><tr style=\"background:#f1f5f9;\">
+            <th>Categoría</th><th>Subcategoría</th><th>Producto</th><th>Unidades</th><th>Costo Promedio</th><th>Total $</th><th>Antigüedad</th><th>Stock</th><th>Pedido</th>
+        </tr></thead><tbody>`;
+    let totalUnidades = 0, totalPesos = 0;
+    productosFiltrados.forEach(p => {
+        const total = (p.stock || 0) * (p.costo || 0);
+        totalUnidades += p.stock || 0;
+        totalPesos += total;
+        // Estado de pedido
+        const estadoPedido = estadoPedidoPorProd[p.id] || 'ninguno';
+        let pedidoLabel = '';
+        if (estadoPedido === 'pendiente') pedidoLabel = '<span style="color:#f59e42;font-weight:bold;">Pendiente de recibir</span>';
+        else if (estadoPedido === 'baja') pedidoLabel = '<span style="color:#e11d48;font-weight:bold;">Pendiente de baja</span>';
+        else pedidoLabel = '<span style="color:#22c55e;font-weight:bold;">Sin pedido</span>';
+        // Stock label
+        let stockLabel = (p.stock || 0) > 0 ? '<span style="color:#22c55e;font-weight:bold;">✔</span>' : '<span style="color:#e11d48;font-weight:bold;">✖</span>';
+        html += `<tr>
+            <td>${p.categoria||''}</td>
+            <td>${p.subcategoria||''}</td>
+            <td><b>${p.nombre}</b></td>
+            <td style=\"text-align:right;\">${p.stock||0}</td>
+            <td style=\"text-align:right;\">${dinero(p.costo||0)}</td>
+            <td style=\"text-align:right;\">${dinero(total)}</td>
+            <td style=\"text-align:center;\">${calcularAntiguedadProducto(p)}</td>
+            <td style=\"text-align:center;\">${stockLabel}</td>
+            <td style=\"text-align:center;\">${pedidoLabel}</td>
+        </tr>`;
+    });
+    html += `</tbody><tfoot><tr style=\"background:#f8fafc;font-weight:bold;\">
+        <td colspan=\"3\" style=\"padding:10px;text-align:right;\">Totales:</td>
+        <td style=\"padding:10px;text-align:right;\">${totalUnidades}</td>
+        <td></td>
+        <td style=\"padding:10px;text-align:right;\">${dinero(totalPesos)}</td>
+        <td colspan=\"3\"></td>
+    </tr></tfoot></table></div>`;
+    cont.innerHTML = html;
+}
+
+window.initConsultaInventario = function() {
+    // Llenar combos de filtro
+    const catSel = document.getElementById('filtroCatInv');
+    const subSel = document.getElementById('filtroSubInv');
+    const stockSel = document.getElementById('filtroStockInv');
+    const pedidoSel = document.getElementById('filtroPedidoInv');
+    if (!catSel || !subSel || !stockSel || !pedidoSel) return;
+    let cats = [...new Set((window.productos||[]).map(p=>p.categoria).filter(Boolean))];
+    catSel.innerHTML = '<option value="todos">Todas las categorías</option>' + cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+    catSel.onchange = function() {
+        const cat = catSel.value;
+        let subs = (window.productos||[]).filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
+        subs = [...new Set(subs)];
+        subSel.innerHTML = '<option value="todos">Todas las subcategorías</option>' + subs.map(s=>`<option value="${s}">${s}</option>`).join('');
+        subSel.value = 'todos';
+        renderConsultaInventario();
+    };
+    subSel.onchange = renderConsultaInventario;
+    stockSel.onchange = renderConsultaInventario;
+    pedidoSel.onchange = renderConsultaInventario;
+    catSel.onchange();
+    renderConsultaInventario();
+}
+// === CARGA INICIAL DE STOCK ===
+window.abrirModalCargaInicialStock = function() {
+    const modal = document.getElementById('modalCargaInicialStock');
+    if (!modal) return;
+    // Llenar combo productos
+    const sel = document.getElementById('cargaStockProducto');
+    if (sel) {
+        sel.innerHTML = '<option value="">-- Selecciona producto --</option>' +
+            (window.productos || []).map(p => `<option value="${p.id}">${p.nombre} (${p.id})</option>`).join('');
+    }
+    document.getElementById('cargaStockCantidad').value = '';
+    document.getElementById('cargaStockCosto').value = '';
+    modal.style.display = 'flex';
+}
+
+window.cerrarModalCargaInicialStock = function() {
+    const modal = document.getElementById('modalCargaInicialStock');
+    if (modal) modal.style.display = 'none';
+}
+
+window.guardarCargaInicialStock = function() {
+    const prodId = document.getElementById('cargaStockProducto').value;
+    const cantidad = parseInt(document.getElementById('cargaStockCantidad').value);
+    const costo = parseFloat(document.getElementById('cargaStockCosto').value);
+    if (!prodId || !cantidad || cantidad <= 0 || isNaN(costo) || costo < 0) {
+        alert('Completa todos los campos correctamente.');
+        return;
+    }
+    const idx = window.productos.findIndex(p => String(p.id) === String(prodId));
+    if (idx === -1) return alert('Producto no encontrado.');
+    const p = window.productos[idx];
+    // Calcular nuevo costo promedio
+    const stockAnterior = p.stock || 0;
+    const costoAnterior = p.costo || 0;
+    const nuevoStock = stockAnterior + cantidad;
+    let nuevoCostoProm = costo;
+    if (stockAnterior > 0) {
+        nuevoCostoProm = ((stockAnterior * costoAnterior) + (cantidad * costo)) / nuevoStock;
+    }
+    p.stock = nuevoStock;
+    p.costo = parseFloat(nuevoCostoProm.toFixed(2));
+    window.productos[idx] = p;
+    if (!StorageService.set('productos', window.productos)) {
+        alert('Error guardando producto.');
+        return;
+    }
+    // Registrar en kardex
+    const mov = {
+        id: Date.now() + Math.random(),
+        productoId: p.id,
+        tipo: 'entrada',
+        cantidad: cantidad,
+        concepto: 'Carga inicial de stock',
+        fecha: new Date().toLocaleString('es-MX'),
+        costoUnitario: costo,
+        costoPromedio: p.costo
+    };
+    let kardex = StorageService.get('movimientosInventario', []);
+    kardex.push(mov);
+    StorageService.set('movimientosInventario', kardex);
+    window.movimientosInventario = kardex;
+    // También actualizar la variable global si existe fuera de window
+    if (typeof movimientosInventario !== 'undefined') {
+        movimientosInventario = kardex;
+    }
+    cerrarModalCargaInicialStock();
+    renderInventario();
+    alert('Stock cargado y valuado a costo promedio.');
+}
 // Solo cuenta cuántos productos tienen IDs duplicados (sin corregir)
 window.contarIdsDuplicados = function() {
     const ids = {};

@@ -1013,7 +1013,7 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
     let productosAPendiente = [];
 
     carrito.forEach(item => {
-        const prod = productos.find(prod => String(prod.id) === String(p.id));
+        const prod = productos.find(prod => String(prod.id) === String(item.id)); // ✅
         if (!prod) return;
         const decision = decisionesInventario[item.id];
         const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
@@ -1105,14 +1105,13 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     // Determinar cuenta receptora según método de pago
     let cuentaReceptora;
     if (metodoPago === "contado") {
-        cuentaReceptora = "efectivo"; // Contado siempre va a caja
+        cuentaReceptora = "efectivo";
     } else if (metodoPago === "transferencia") {
-        cuentaReceptora = document.getElementById("selCuentaReceptora")?.value || "cuenta_debito";
+        cuentaReceptora = window._estadoPago.cuentaReceptora || "cuenta_debito";
     } else {
-        // Crédito/Apartado con enganche: verificar si fue efectivo o transferencia
-        const modoEnganche = document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo";
-        cuentaReceptora = modoEnganche === "transferencia"
-            ? (document.getElementById("selCuentaReceptora")?.value || "cuenta_debito")
+        // Crédito/Apartado: el enganche puede ser efectivo o transferencia
+        cuentaReceptora = window._estadoPago.modoEnganche === "transferencia"
+            ? (window._estadoPago.cuentaReceptora || "cuenta_debito")
             : "efectivo";
     }
 
@@ -1127,6 +1126,16 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             referencia: metodoPago === "transferencia" ? "Transferencia" : "Contado",
             cuenta: cuentaReceptora
         });
+        // ✅ Actualizar saldo real de la cuenta
+        if (cuentaReceptora === "efectivo") {
+            let cef = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
+            const c = cef.find(x => x.id === "efectivo");
+            if (c) { c.saldo = (Number(c.saldo) || 0) + totalContado; StorageService.set("cuentasEfectivo", cef); }
+        } else {
+            let cban = StorageService.get("cuentas-bancarias", []);
+            const c = cban.find(x => String(x.id) === String(cuentaReceptora));
+            if (c) { c.saldo = (Number(c.saldo) || 0) + totalContado; StorageService.set("cuentas-bancarias", cban); }
+        }
     } else if (enganche > 0) {
         movimientosCaja.push({
             id: Date.now(),
@@ -1138,6 +1147,16 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             referencia: "Enganche",
             cuenta: cuentaReceptora
         });
+        // ✅ Actualizar saldo real de la cuenta con el enganche
+        if (cuentaReceptora === "efectivo") {
+            let cef = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
+            const c = cef.find(x => x.id === "efectivo");
+            if (c) { c.saldo = (Number(c.saldo) || 0) + enganche; StorageService.set("cuentasEfectivo", cef); }
+        } else {
+            let cban = StorageService.get("cuentas-bancarias", []);
+            const c = cban.find(x => String(x.id) === String(cuentaReceptora));
+            if (c) { c.saldo = (Number(c.saldo) || 0) + enganche; StorageService.set("cuentas-bancarias", cban); }
+        }
     }
 
     // PASO 4: CREAR CUENTAS POR COBRAR
