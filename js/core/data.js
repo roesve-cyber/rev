@@ -29,6 +29,10 @@ let compras = StorageService.get("compras", []);
 let cuentasPorPagar = StorageService.get("cuentasPorPagar", []);
 let deudasMSI = StorageService.get("deudasMSI", []);
 let cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+if (!Array.isArray(cuentasPorCobrar)) {
+    cuentasPorCobrar = [];
+    StorageService.set("cuentasPorCobrar", cuentasPorCobrar);
+}
 let movimientosCaja = StorageService.get("movimientosCaja", []);
 let requisicionesCompra = StorageService.get("requisicionesCompra", []);
 let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
