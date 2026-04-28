@@ -46,7 +46,9 @@ function navA(vistaId) {
         if (idLimpio === 'dashboard') renderDashboard();
         if (idLimpio === 'configuracion-nube') _actualizarEstadoFirebaseUI();
         if (idLimpio === 'agendacobros') renderAgendaCobros();
-        if (idLimpio === 'auditoria-productos') console.log("Sección de auditoría activada");
+        if (idLimpio === 'auditoria-productos') {
+            renderHistorialCostosAuditoria();
+        }
         if (idLimpio === 'ordenescompra') window.renderListaOrdenesCompra && window.renderListaOrdenesCompra();
         if (idLimpio === 'cotizaciones' && typeof window.abrirListaCotizaciones === 'function') window.abrirListaCotizaciones();
     }
