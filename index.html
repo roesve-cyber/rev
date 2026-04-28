@@ -76,6 +76,19 @@
 
         <nav class="sidebar-nav">
 
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-apartados')">📦 APARTADOS <span>▾</span></button>
+            <div id="sub-apartados" class="submenu oculto-submenu">
+                <button onclick="navA('apartados'); setTimeout(()=>{window.renderApartados && window.renderApartados();}, 100)">📋 Seguimiento de Apartados</button>
+            </div>
+        </div>
+<!-- ===== VISTA APARTADOS ===== -->
+<div id="apartados" class="vista oculto" style="display:none;">
+    <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">
+        <div id="contenidoApartados" style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);"></div>
+    </div>
+</div>
+
                 <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-prod')">📦 PRODUCTOS <span>▾</span></button>
             <div id="sub-prod" class="submenu oculto-submenu">
@@ -195,9 +208,8 @@
     <div style="padding: 30px; max-width: 900px; margin: 0 auto;">
         <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center;">
             <h2 style="color: #1e40af; margin-bottom: 10px;">🕵️ Auditoría de Base de Datos</h2>
-            <p style="color: #64748b; margin-bottom: 35px;">Seleccione una acción para corregir la integridad de los productos.</p>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
+            <p style="color: #64748b; margin-bottom: 35px;">Seleccione una acción para corregir la integridad de los productos o consultar historial de costos.</p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom:30px;">
                 <button onclick="contarIdsDuplicados()" style="padding: 20px; background: #f59e42; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
                     🔍 Analizar Duplicados
                 </button>
@@ -207,6 +219,11 @@
                 <button onclick="abrirModalCargaInicialStock()" style="padding: 20px; background: #2563eb; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
                     ➕ Carga inicial de stock
                 </button>
+            </div>
+
+            <div style="margin: 30px 0 0 0; padding: 20px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; text-align: left;">
+                <h3 style='color:#1e40af;margin-bottom:10px;'>Historial de Costos de Producto</h3>
+                <div id="contenedorHistorialCostosAuditoria"></div>
             </div>
 
             <!-- Modal carga inicial stock -->
@@ -403,7 +420,7 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
                 <div><label>Costo Unitario:</label><input type="number" id="compraCosto" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div><label>Proveedor:</label><select id="compraProveedor" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div><label>Método de Pago:</label><select id="compraMetodoPago" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;" onchange="gestionarCamposPago()"><option value="contado">Contado</option><option value="credito_proveedor">Crédito</option><option value="tarjeta_msi">MSI</option></select></div>
-                <div id="divCuentaOrigen" style="display:block;"><label>💳 Pagar desde:</label><select id="compraCuentaOrigen" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
+                <div id="divCuentaOrigen" style="display:block;"><label>💳 Cuenta para anticipo:</label><select id="compraCuentaOrigen" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div id="divSeleccionBanco" style="display:none;"><label>Banco:</label><select id="compraBancoSeleccionado" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div id="divMeses" style="display:none;"><label>Meses:</label><input type="number" id="compraMeses" value="12" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div style="grid-column: span 2;"><label><input type="checkbox" id="compraIngresoInmediato" checked> Ingresa producto ahora</label></div>
