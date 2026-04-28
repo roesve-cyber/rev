@@ -327,9 +327,13 @@ function registrarCompra() {
         proveedor: prov.nombre,
         proveedorId,
         total: totalCompra,
-        fecha: fechaHoyStr
+        fecha: fechaHoyStr,
+        caracteristicas // <-- nuevo campo
     };
     compras.push(nuevaCompra);
+    // Limpiar el input de características después de registrar
+    const caracteristicasInput = document.getElementById("compraCaracteristicas");
+    if (caracteristicasInput) caracteristicasInput.value = "";
 
     // Guardar historial de costos (compra directa)
     guardarHistorialCosto({
@@ -794,14 +798,15 @@ function abrirNuevaOrdenCompra() {
             <input type="date" id="ocFechaEntrega" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
-          <select id="ocProductoSel" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
-            <option value="">-- Selecciona producto --</option>
-            ${selProds}
-          </select>
-          <input type="number" id="ocCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
-          <button onclick="agregarArticuloOC()" style="padding:9px 16px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
-        </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
+                    <select id="ocProductoSel" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                        <option value="">-- Selecciona producto --</option>
+                        ${selProds}
+                    </select>
+                    <input type="text" id="ocCaracteristicas" placeholder="Características (tela, color, etc)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                    <input type="number" id="ocCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                    <button onclick="agregarArticuloOC()" style="padding:9px 16px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
+                </div>
         <div id="tablaArticulosOC" style="margin-bottom:16px;"></div>
         <div style="margin-bottom:12px;">
           <label style="font-size:12px;font-weight:bold;color:#374151;">NOTAS</label>
@@ -842,22 +847,25 @@ function abrirNuevaOrdenCompra() {
 function agregarArticuloOC() {
     const sel = document.getElementById('ocProductoSel');
     const cantInput = document.getElementById('ocCantidad');
+    const caracInput = document.getElementById('ocCaracteristicas');
     if (!sel.value) return;
     const prods = StorageService.get('productos', []);
     const prod = prods.find(p => String(p.id) === String(sel.value));
     if (!prod) return;
     const cant = parseInt(cantInput.value) || 1;
     const costo = parseFloat(prod.costo) || 0;
+    const caracteristicas = caracInput ? caracInput.value.trim() : '';
     if (!window._articulosOC) window._articulosOC = [];
-    const idx = window._articulosOC.findIndex(a => String(a.productoId) === String(prod.id));
+    const idx = window._articulosOC.findIndex(a => String(a.productoId) === String(prod.id) && a.caracteristicas === caracteristicas);
     if (idx !== -1) {
         window._articulosOC[idx].cantidad += cant;
         window._articulosOC[idx].subtotal = window._articulosOC[idx].cantidad * costo;
     } else {
-        window._articulosOC.push({ productoId: prod.id, nombre: prod.nombre, costo, cantidad: cant, subtotal: cant * costo });
+        window._articulosOC.push({ productoId: prod.id, nombre: prod.nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas });
     }
     cantInput.value = 1;
     sel.value = '';
+    if (caracInput) caracInput.value = '';
     _renderTablaArticulosOC();
 }
 
@@ -873,28 +881,30 @@ function _renderTablaArticulosOC() {
     }
     let total = 0;
     const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
-    const rows = arts.map((a, i) => {
-        total += a.subtotal;
-        return `<tr>
-            <td style="padding:8px;">${a.nombre}</td>
-            <td style="padding:8px;text-align:center;">
-                <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
-            </td>
-            <td style="padding:8px;text-align:center;">${a.cantidad}</td>
-            <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
-            <td style="padding:8px;text-align:center;"><button onclick="window._articulosOC.splice(${i},1);_renderTablaArticulosOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
-        </tr>`;
-    }).join('');
-    cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
-      <thead><tr style="background:#f3f4f6;">
-        <th style="padding:8px;text-align:left;">Artículo</th>
-        <th style="padding:8px;text-align:center;">Costo Unit.</th>
-        <th style="padding:8px;text-align:center;">Cant.</th>
-        <th style="padding:8px;text-align:right;">Subtotal</th>
-        <th></th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+        const rows = arts.map((a, i) => {
+                total += a.subtotal;
+                return `<tr>
+                        <td style="padding:8px;">${a.nombre}</td>
+                        <td style="padding:8px;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
+                        <td style="padding:8px;text-align:center;">
+                                <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
+                        </td>
+                        <td style="padding:8px;text-align:center;">${a.cantidad}</td>
+                        <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
+                        <td style="padding:8px;text-align:center;"><button onclick="window._articulosOC.splice(${i},1);_renderTablaArticulosOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
+                </tr>`;
+        }).join('');
+        cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
+            <thead><tr style="background:#f3f4f6;">
+                <th style="padding:8px;text-align:left;">Artículo</th>
+                <th style="padding:8px;">Características</th>
+                <th style="padding:8px;text-align:center;">Costo Unit.</th>
+                <th style="padding:8px;text-align:center;">Cant.</th>
+                <th style="padding:8px;text-align:right;">Subtotal</th>
+                <th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
     const totEl = document.getElementById('ocTotal');
     if (totEl) totEl.textContent = dinero(total);
 }
@@ -959,10 +969,13 @@ function imprimirOrdenCompra(id) {
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     const rows = oc.articulos.map(a =>
-        `<tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;">${a.nombre}</td>
-         <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center;">${a.cantidad}</td>
-         <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.costo)}</td>
-         <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.subtotal)}</td></tr>`
+        `<tr>
+            <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${a.nombre}</td>
+            <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
+            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center;">${a.cantidad}</td>
+            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.costo)}</td>
+            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.subtotal)}</td>
+        </tr>`
     ).join('');
     const w = window.open('', '_blank', 'width=750,height=900');
     w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>OC ${oc.folio}</title>
@@ -986,10 +999,10 @@ function imprimirOrdenCompra(id) {
             ${oc.condicionesComerciales?.metodoPago === 'msi' ? `Meses: <b>${oc.condicionesComerciales?.meses}</b><br>` : ''}
             ${oc.condicionesComerciales?.cuentaOrigen ? `Cuenta origen: <b>${oc.condicionesComerciales?.cuentaOrigen}</b><br>` : ''}
         </div>
-    <table>
-      <thead><tr><th>Artículo</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Costo Unit.</th><th style="text-align:right;">Subtotal</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+        <table>
+            <thead><tr><th>Artículo</th><th>Características</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Costo Unit.</th><th style="text-align:right;">Subtotal</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
     <div style="text-align:right;margin-top:16px;font-size:20px;font-weight:bold;">TOTAL: ${dinero(oc.total)}</div>
     ${oc.notas ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:6px;"><strong>Notas:</strong> ${oc.notas}</div>` : ''}
     <div style="margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px;text-align:center;">
