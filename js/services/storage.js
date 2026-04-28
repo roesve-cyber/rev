@@ -6,12 +6,22 @@
 
 // Claves del sistema reconocidas para sincronización y respaldo
 const CLAVES_SISTEMA = [
-    'productos', 'clientes', 'proveedores', 'ventasRegistradas', 'cuentasPorCobrar',
-    'pagaresSistema', 'compras', 'cuentasPorPagar', 'movimientosCaja', 'tarjetasConfig',
-    'gastosOperativos', 'cotizaciones', 'vendedores', 'comisionesRegistradas',
-    'puntosPorCliente', 'programaPuntos', 'descuentosActivos', 'usuariosConfig',
-    'categoriasGasto', 'registroTickets', 'deudasMSI', 'recepciones',
-    'categoriasData'
+    // Catálogo y configuración
+    'productos', 'clientes', 'proveedores', 'categoriasData', 'tarjetasConfig',
+    'usuariosConfig', 'categoriasGasto', 'descuentosActivos', 'programaPuntos',
+    // Ventas y cobros
+    'ventasRegistradas', 'registroTickets', 'carrito', 'cuentasPorCobrar',
+    'pagaresSistema', 'cotizaciones', 'apartados',
+    // Compras y proveedores
+    'compras', 'cuentasPorPagar', 'ordenesCompra', 'recepciones',
+    // Inventario y logística
+    'movimientosInventario', 'salidasPendientesVenta', 'requisicionesCompra',
+    'historialDevoluciones', 'garantiasProductos',
+    // Caja y bancos
+    'movimientosCaja', 'cuentasEfectivo', 'cuentas-bancarias', 'cuentasMSI', 'deudasMSI',
+    // Otros
+    'gastosOperativos', 'vendedores', 'comisionesRegistradas',
+    'puntosPorCliente', 'historialCostos'
 ];
 
 const StorageService = {
