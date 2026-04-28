@@ -83,6 +83,8 @@ function renderGestionVendedores() {
 }
 
 function abrirFormVendedor(id) {
+      // Valor por defecto: si no existe, usa el de crédito
+      const comisionApartado = v ? (v.porcentajeComisionApartado ?? v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0) : 0;
     const vendedores = StorageService.get('vendedores', []);
     const v = id ? vendedores.find(x => x.id === id) : null;
     const tipoActual = v ? (v.tipoComision || 'al_cierre') : 'al_cierre';
@@ -101,8 +103,16 @@ function abrirFormVendedor(id) {
             <input type="text" id="vndTelefono" value="${v ? (v.telefono || '') : ''}" placeholder="10 dígitos" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
           <div>
-            <label style="font-size:12px;font-weight:bold;color:#374151;">% DE COMISIÓN</label>
-            <input type="number" id="vndComision" value="${v ? (v.porcentajeComision || 0) : 0}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <label style="font-size:12px;font-weight:bold;color:#374151;">% Comisión contado</label>
+            <input type="number" id="vndComisionContado" value="${v ? (v.porcentajeComisionContado ?? v.porcentajeComision ?? 0) : 0}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">% Comisión crédito</label>
+            <input type="number" id="vndComisionCredito" value="${v ? (v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0) : 0}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">% Comisión apartado</label>
+            <input type="number" id="vndComisionApartado" value="${comisionApartado}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">TIPO DE COMISIÓN</label>
@@ -129,16 +139,38 @@ function guardarVendedor() {
     const id = document.getElementById('vndId')?.value;
     const nombre = document.getElementById('vndNombre')?.value.trim();
     const telefono = document.getElementById('vndTelefono')?.value.trim();
-    const porcentajeComision = parseFloat(document.getElementById('vndComision')?.value) || 0;
+    const porcentajeComisionContado = parseFloat(document.getElementById('vndComisionContado')?.value) || 0;
+    const porcentajeComisionCredito = parseFloat(document.getElementById('vndComisionCredito')?.value) || 0;
+    const porcentajeComisionApartado = parseFloat(document.getElementById('vndComisionApartado')?.value) || 0;
     const tipoComision = document.getElementById('vndTipoComision')?.value || 'al_cierre';
     const activo = document.getElementById('vndActivo')?.checked ?? true;
     if (!nombre) return alert('⚠️ El nombre es obligatorio.');
     const vendedores = StorageService.get('vendedores', []);
     if (id) {
-        const idx = vendedores.findIndex(v => String(v.id) === String(id));
-        if (idx !== -1) { vendedores[idx] = { ...vendedores[idx], nombre, telefono, porcentajeComision, tipoComision, activo }; }
+      const idx = vendedores.findIndex(v => String(v.id) === String(id));
+      if (idx !== -1) {
+        vendedores[idx] = {
+          ...vendedores[idx],
+          nombre,
+          telefono,
+          porcentajeComisionContado,
+          porcentajeComisionCredito,
+          porcentajeComisionApartado,
+          tipoComision,
+          activo
+        };
+      }
     } else {
-        vendedores.push({ id: Date.now(), nombre, telefono, porcentajeComision, tipoComision, activo });
+      vendedores.push({
+        id: Date.now(),
+        nombre,
+        telefono,
+        porcentajeComisionContado,
+        porcentajeComisionCredito,
+        porcentajeComisionApartado,
+        tipoComision,
+        activo
+      });
     }
     StorageService.set('vendedores', vendedores);
     document.querySelector('[data-modal="form-vendedor"]')?.remove();
@@ -160,9 +192,23 @@ function registrarComisionVenta(folio, total, vendedorId) {
     const v = vendedores.find(x => String(x.id) === String(vendedorId));
     if (!v) return;
     const tipoComision = v.tipoComision || 'al_cierre';
-    // For "por_abono" type, commissions are registered per abono, not at sale close
     if (tipoComision === 'por_abono') return;
-    const montoComision = total * (v.porcentajeComision / 100);
+    // Detectar tipo de venta: contado, transferencia, credito, apartado
+    let tipoVenta = 'contado';
+    if (window._ultimaVentaMetodo) tipoVenta = window._ultimaVentaMetodo;
+    // Si no está definido, buscar en la venta por folio
+    if (!tipoVenta && typeof buscarMetodoPorFolio === 'function') {
+      tipoVenta = buscarMetodoPorFolio(folio);
+    }
+    let porcentaje = 0;
+    if (tipoVenta === 'credito') {
+      porcentaje = v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0;
+    } else if (tipoVenta === 'apartado') {
+      porcentaje = v.porcentajeComisionApartado ?? v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0;
+    } else {
+      porcentaje = v.porcentajeComisionContado ?? v.porcentajeComision ?? 0;
+    }
+    const montoComision = total * (porcentaje / 100);
     if (montoComision <= 0) return;
     const comisiones = StorageService.get('comisionesRegistradas', []);
     comisiones.push({

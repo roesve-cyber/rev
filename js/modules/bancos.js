@@ -159,6 +159,18 @@ function actualizarYRefrescarBancos() {
         console.error("❌ Error guardando bancos");
         return;
     }
+    // Sincroniza cuentas de débito a cuentas-bancarias
+    const cuentasBancarias = tarjetasConfig
+        .filter(t => t.tipo === "debito")
+        .map((t, idx) => ({
+            id: `debito_${idx}_${t.banco}`,
+            nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`,
+            tipo: t.tipo,
+            banco: t.banco,
+            ultimos4: t.ultimos4,
+            saldoInicial: t.saldoInicial
+        }));
+    StorageService.set("cuentas-bancarias", cuentasBancarias);
     renderBancosConfig();
     actualizarSelectBancos();
 }

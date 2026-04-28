@@ -1,3 +1,100 @@
+// === AUDITORÍA: VISUALIZAR HISTORIAL DE COSTOS ===
+function renderHistorialCostosAuditoria() {
+    // Obtener productos
+    let productos = [];
+    try {
+        productos = StorageService.get('productos', []);
+    } catch (e) { productos = []; }
+    const cont = document.getElementById('contenedorHistorialCostosAuditoria');
+    if (!cont) return;
+    // Selector de producto
+    let html = `<div style="margin-bottom:18px;">
+        <label for='selectProductoHistorialCostos' style='font-weight:bold;'>Producto:</label>
+        <select id='selectProductoHistorialCostos' style='padding:7px 12px;font-size:15px;margin-left:10px;'>
+            <option value=''>-- Selecciona producto --</option>
+            ${productos.map(p => `<option value='${p.id}'>${p.nombre}</option>`).join('')}
+        </select>
+    </div>
+    <div id='tablaHistorialCostos'></div>`;
+    cont.innerHTML = html;
+    document.getElementById('selectProductoHistorialCostos').onchange = function() {
+        const id = this.value;
+        mostrarTablaHistorialCostos(id);
+    };
+}
+
+function mostrarTablaHistorialCostos(productoId) {
+    const tablaDiv = document.getElementById('tablaHistorialCostos');
+    if (!productoId) { tablaDiv.innerHTML = ''; return; }
+    const historial = obtenerHistorialCostosPorProducto(productoId);
+    if (!historial.length) {
+        tablaDiv.innerHTML = `<div style='color:#64748b;padding:12px;'>No hay historial de costos para este producto.</div>`;
+        return;
+    }
+    let html = `<table style='width:100%;border-collapse:collapse;margin-top:10px;'>
+        <thead><tr style='background:#f3f4f6;'>
+            <th style='padding:8px;text-align:left;'>Fecha</th>
+            <th style='padding:8px;text-align:right;'>Precio</th>
+            <th style='padding:8px;text-align:right;'>Cantidad</th>
+            <th style='padding:8px;text-align:left;'>Proveedor</th>
+            <th style='padding:8px;text-align:left;'>Origen</th>
+        </tr></thead><tbody>`;
+    historial.slice().reverse().forEach(item => {
+        html += `<tr>
+            <td style='padding:7px 8px;border-bottom:1px solid #e5e7eb;'>${item.fecha}</td>
+            <td style='padding:7px 8px;border-bottom:1px solid #e5e7eb;text-align:right;'>$${item.precioCompra}</td>
+            <td style='padding:7px 8px;border-bottom:1px solid #e5e7eb;text-align:right;'>${item.cantidad}</td>
+            <td style='padding:7px 8px;border-bottom:1px solid #e5e7eb;'>${item.proveedorNombre}</td>
+            <td style='padding:7px 8px;border-bottom:1px solid #e5e7eb;'>${item.origen}</td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    tablaDiv.innerHTML = html;
+}
+/**
+ * Obtiene el historial de costos de un producto por su ID.
+ * @param {number|string} productoId
+ * @returns {Array} Historial de costos del producto
+ */
+function obtenerHistorialCostosPorProducto(productoId) {
+    let historial = [];
+    try {
+        historial = JSON.parse(localStorage.getItem('historialCostos') || '[]');
+    } catch (e) { historial = []; }
+    return historial.filter(item => String(item.productoId) === String(productoId));
+}
+
+// Ejemplo de uso: mostrar historial en consola
+// Llama a esta función pasando el ID del producto que deseas consultar
+function mostrarHistorialCostosEnConsola(productoId) {
+    const historial = obtenerHistorialCostosPorProducto(productoId);
+    if (historial.length === 0) {
+        console.log('No hay historial de costos para este producto.');
+        return;
+    }
+    console.log('Historial de costos para producto', productoId);
+    historial.forEach(item => {
+        console.log(`Fecha: ${item.fecha} | Precio: $${item.precioCompra} | Cantidad: ${item.cantidad} | Proveedor: ${item.proveedorNombre} | Origen: ${item.origen}`);
+    });
+}
+// ===== CONTROL DE COSTOS =====
+/** Guarda el historial de costos de productos en localStorage. */
+function guardarHistorialCosto({ productoId, precioCompra, fecha, cantidad, proveedorId, proveedorNombre, origen }) {
+    let historial = [];
+    try {
+        historial = JSON.parse(localStorage.getItem('historialCostos') || '[]');
+    } catch (e) { historial = []; }
+    historial.push({
+        productoId,
+        precioCompra,
+        fecha,
+        cantidad,
+        proveedorId,
+        proveedorNombre,
+        origen
+    });
+    localStorage.setItem('historialCostos', JSON.stringify(historial));
+}
 // ===== PROVEEDORES =====
 
 function guardarProveedor() {
@@ -134,8 +231,8 @@ function prepararVistaCompras() {
     gestionarCamposPago();
 }
 
-function _poblarCuentasOrigen() {
-    const sel = document.getElementById("compraCuentaOrigen");
+function _poblarCuentasOrigen(targetId = "compraCuentaOrigen") {
+    const sel = document.getElementById(targetId);
     if (!sel) return;
     
     // 1. Obtenemos el efectivo
@@ -239,6 +336,17 @@ function registrarCompra() {
         fecha: fechaHoyStr
     };
     compras.push(nuevaCompra);
+
+    // Guardar historial de costos (compra directa)
+    guardarHistorialCosto({
+        productoId,
+        precioCompra: costoNuevo,
+        fecha: fechaHoyStr,
+        cantidad,
+        proveedorId,
+        proveedorNombre: prov.nombre,
+        origen: 'compra directa'
+    });
 
     const nuevaRecepcion = {
         id: Date.now() + 1,
@@ -673,9 +781,12 @@ function abrirNuevaOrdenCompra() {
     </div>
 
     <div id="divCuentaOC">
-        <label style="font-size:13px; font-weight:bold;">Pagar desde:</label>
-        <select id="compraCuentaOrigen" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-            </select>
+        <label style="font-size:13px; font-weight:bold;">Cuenta para anticipo:</label>
+        <select id="ocCuentaOrigen" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;"></select>
+        <div style="margin-top:10px;">
+            <label style="font-size:13px; font-weight:bold;">Monto de anticipo:</label>
+            <input type="number" id="ocAnticipo" min="0" value="0" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+        </div>
     </div>
 </div>
 
@@ -721,7 +832,17 @@ function abrirNuevaOrdenCompra() {
     if (ocFechaEl) ocFechaEl.value = fechaEnt.toISOString().substring(0, 10);
     window._articulosOC = [];
     _renderTablaArticulosOC();
-    _poblarCuentasOrigen();
+    // Llenar combo de cuenta para anticipo
+    _poblarCuentasOrigen('ocCuentaOrigen');
+    // Mostrar/ocultar combo según método de pago
+    const metodoPagoSel = document.getElementById('ocMetodoPago');
+    const divCuentaOC = document.getElementById('divCuentaOC');
+    if (metodoPagoSel && divCuentaOC) {
+        divCuentaOC.style.display = (metodoPagoSel.value === 'contado') ? 'block' : 'none';
+        metodoPagoSel.onchange = function() {
+            divCuentaOC.style.display = (this.value === 'contado') ? 'block' : 'none';
+        };
+    }
 }
 
 function agregarArticuloOC() {
@@ -757,18 +878,19 @@ function _renderTablaArticulosOC() {
         return;
     }
     let total = 0;
-        const rows = arts.map((a, i) => {
-                total += a.subtotal;
-                return `<tr>
-                    <td style="padding:8px;">${a.nombre}</td>
-                    <td style="padding:8px;text-align:center;">
-                        <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" onchange="(function(e){ window._articulosOC[${i}].costo = parseFloat(e.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC(); })(event)" />
-                    </td>
-                    <td style="padding:8px;text-align:center;">${a.cantidad}</td>
-                    <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
-                    <td style="padding:8px;text-align:center;"><button onclick="window._articulosOC.splice(${i},1);_renderTablaArticulosOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
-                </tr>`;
-        }).join('');
+    const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
+    const rows = arts.map((a, i) => {
+        total += a.subtotal;
+        return `<tr>
+            <td style="padding:8px;">${a.nombre}</td>
+            <td style="padding:8px;text-align:center;">
+                <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
+            </td>
+            <td style="padding:8px;text-align:center;">${a.cantidad}</td>
+            <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
+            <td style="padding:8px;text-align:center;"><button onclick="window._articulosOC.splice(${i},1);_renderTablaArticulosOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
+        </tr>`;
+    }).join('');
     cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
       <thead><tr style="background:#f3f4f6;">
         <th style="padding:8px;text-align:left;">Artículo</th>
@@ -791,7 +913,19 @@ function guardarOrdenCompra() {
     const notas = document.getElementById('ocNotas')?.value.trim() || '';
     const borrador = document.getElementById('ocBorrador')?.checked ?? true;
     const metodoPago = document.getElementById('ocMetodoPago')?.value || '';
-    const cuentaOrigen = document.getElementById('compraCuentaOrigen')?.value || '';
+    const cuentaOrigen = document.getElementById('ocCuentaOrigen')?.value || '';
+    // Si hay anticipo, afectar la cuenta seleccionada
+    const anticipo = parseFloat(document.getElementById('ocAnticipo')?.value || '0');
+    if (anticipo > 0 && cuentaOrigen) {
+        const etiqueta = document.getElementById('ocCuentaOrigen')?.options[document.getElementById('ocCuentaOrigen')?.selectedIndex]?.text || cuentaOrigen;
+        _egresarCuenta({
+            monto: anticipo,
+            cuentaId: cuentaOrigen,
+            etiqueta,
+            concepto: `Anticipo OC a ${provNombre}`,
+            referencia: `ANTICIPO-OC-${Date.now()}`
+        });
+    }
     const meses = document.getElementById('ocMeses')?.value || '';
     const provs = StorageService.get('proveedores', []);
     const prov = provs.find(p => String(p.id) === String(provId));
@@ -812,7 +946,8 @@ function guardarOrdenCompra() {
             metodoPago,
             cuentaOrigen,
             meses
-        }
+        },
+        anticipo_pagado: anticipo || 0
     };
     const lista = StorageService.get('ordenesCompra', []);
     lista.push(oc);
@@ -890,6 +1025,7 @@ function recibirOrdenCompra(id) {
     const yaHayPago  = condPago === 'contado'; // si era contado ya estaba acordado pagarlo
 
     // Filas de artículos con input de cantidad
+    const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
     const filasArts = oc.articulos.map((a, i) => `
         <tr style="border-bottom:1px solid #e5e7eb;">
             <td style="padding:10px;">${a.nombre}</td>
@@ -901,9 +1037,24 @@ function recibirOrdenCompra(id) {
                        style="width:70px;padding:6px;border:2px solid #3b82f6;border-radius:6px;text-align:center;font-size:14px;font-weight:bold;">
             </td>
             <td id="recP_${i}" style="padding:10px;text-align:center;color:#d97706;font-weight:bold;">0</td>
-            <td style="padding:10px;text-align:right;color:#374151;">${dinero(a.costo)}</td>
+            <td style="padding:10px;text-align:right;color:#374151;">
+                <input type="number" id="recCosto_${i}" value="${a.costo}" min="0" step="0.01" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._actualizarCostoOCArticulo(${i}, this.value, ${id});}" />
+            </td>
             <td id="recSub_${i}" style="padding:10px;text-align:right;font-weight:bold;">${dinero(a.cantidad * a.costo)}</td>
         </tr>`).join('');
+
+    // Función global para actualizar el costo en recepción OC
+    window._actualizarCostoOCArticulo = function(idx, nuevoCosto, ocId) {
+        const lista = StorageService.get('ordenesCompra', []);
+        const oc = lista.find(x => x.id === ocId);
+        if (!oc) return;
+        const art = oc.articulos[idx];
+        art.costo = parseFloat(nuevoCosto) || 0;
+        art.subtotal = art.cantidad * art.costo;
+        StorageService.set('ordenesCompra', lista);
+        // Actualizar la vista
+        recibirOrdenCompra(ocId);
+    };
 
     const selectorCuentas = _buildSelectorCuentas('recCuentaPago', false);
 
@@ -1100,11 +1251,52 @@ function confirmarRecepcionOC(ocId) {
     const itemsRecibidos = [];
     const itemsBackOrder  = [];
     let obsExtra = [];
+
     oc.articulos.forEach((a, i) => {
         const inputVal = parseInt(document.getElementById(`recQ_${i}`)?.value) || 0;
         const cantRec = Math.max(0, inputVal);
         const backOrd = a.cantidad - Math.min(inputVal, a.cantidad);
-        if (cantRec > 0) itemsRecibidos.push({ ...a, cantidadRec: cantRec, subtotal: cantRec * a.costo });
+        if (cantRec > 0) {
+            itemsRecibidos.push({ ...a, cantidadRec: cantRec, subtotal: cantRec * a.costo });
+            // Guardar historial de costos (recepción OC)
+            guardarHistorialCosto({
+                productoId: a.productoId,
+                precioCompra: a.costo,
+                fecha: fechaStr,
+                cantidad: cantRec,
+                proveedorId: oc.proveedorId,
+                proveedorNombre: oc.proveedorNombre,
+                origen: 'orden de compra'
+            });
+
+            // --- Ajuste automático de costo y precio si hay aumento ---
+            let productos = [];
+            try {
+                productos = StorageService.get('productos', []);
+            } catch (e) { productos = []; }
+            const idxProd = productos.findIndex(p => String(p.id) === String(a.productoId));
+            if (idxProd !== -1) {
+                const producto = productos[idxProd];
+                if (a.costo > producto.costo) {
+                    const costoAnterior = producto.costo;
+                    const precioAnterior = producto.precio;
+                    let margenAplicar = 30;
+                    if (typeof categoriasData !== 'undefined' && Array.isArray(categoriasData)) {
+                        categoriasData.forEach(cat => {
+                            const sub = cat.subcategorias.find(s => s.nombre === producto.subcategoria);
+                            if (sub) margenAplicar = sub.margen;
+                        });
+                    }
+                    const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(a.costo, margenAplicar);
+                    producto.costo = a.costo;
+                    producto.precio = nuevoPrecio;
+                    StorageService.set('productos', productos);
+                    // Aviso visual opcional
+                    alert(`📢 ¡ACTUALIZACIÓN DE PRECIOS!\n${producto.nombre}\nCosto: ${dinero(costoAnterior)} ➡️ ${dinero(a.costo)}\nPrecio: ${dinero(precioAnterior)} ➡️ ${dinero(nuevoPrecio)}\nMargen aplicado: ${margenAplicar}%`);
+                }
+            }
+            // --- Fin ajuste automático ---
+        }
         if (backOrd > 0) itemsBackOrder.push({ ...a, cantidad: backOrd, subtotal: backOrd * a.costo });
         if (inputVal > a.cantidad) {
             obsExtra.push(`Se reciben ${inputVal - a.cantidad} piezas de más de ${a.nombre}`);
@@ -1130,10 +1322,18 @@ function confirmarRecepcionOC(ocId) {
         const montoEl = document.getElementById('recMontoPago');
         const cuentaEl = document.getElementById('recCuentaPago');
         montoPagado = parseFloat(montoEl?.value) || 0;
-        if (montoPagado <= 0) return alert('⚠️ Ingresa el monto a pagar.');
+        // Validación: evitar pagos de $0
+        if (montoPagado <= 0) return alert('⚠️ Ingresa un monto mayor a $0 para el pago.');
+        // Validación: evitar pagos mayores al saldo pendiente
         if (montoPagado > saldoDisp + 0.01) return alert(`⚠️ El monto excede el saldo pendiente (${dinero(saldoDisp)}).`);
-        cuentaPagoId = cuentaEl?.value || 'efectivo';
-        cuentaPagoEtiqueta = cuentaEl?.options[cuentaEl?.selectedIndex]?.text || 'Efectivo';
+        // Validación: obligar cuenta seleccionada
+        if (!cuentaEl || !cuentaEl.value) return alert('⚠️ Selecciona la cuenta de pago.');
+        cuentaPagoId = cuentaEl.value;
+        cuentaPagoEtiqueta = cuentaEl.options[cuentaEl.selectedIndex]?.text || 'Efectivo';
+        // Validación: advertir si pago + anticipo supera el total
+        if ((montoPagado + anticipo) > totalOC + 0.01) {
+            if (!confirm(`⚠️ El pago (${dinero(montoPagado)}) más el anticipo (${dinero(anticipo)}) supera el total de la OC (${dinero(totalOC)}). ¿Deseas continuar?`)) return;
+        }
     }
 
     // ── 1. Actualizar inventario ───────────────────────────────

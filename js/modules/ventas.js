@@ -1297,7 +1297,10 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     // REGISTRAR COMISIÓN DEL VENDEDOR
     if (_vendedorSeleccionado) {
+        // Guardar el método de venta globalmente para que el módulo de vendedores lo detecte
+        window._ultimaVentaMetodo = metodoPago;
         registrarComisionVenta(folioVenta, totalContado, _vendedorSeleccionado.id);
+        setTimeout(() => { window._ultimaVentaMetodo = undefined; }, 1000);
     }
 
     // Cerrar y eliminar todos los modales dinámicos
