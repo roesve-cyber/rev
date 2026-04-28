@@ -23,6 +23,66 @@ function _esc(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/**
+ * Recarga todas las variables globales del sistema desde localStorage.
+ * Se llama después de syncAll() para que las vistas reflejen los datos
+ * recién traídos desde Firestore (especialmente en ventana privada/nueva).
+ */
+function _recargarVariablesGlobales() {
+    try {
+        window.productos       = StorageService.get('productos', []);
+        window.clientes        = StorageService.get('clientes', []);
+        window.proveedores     = StorageService.get('proveedores', []);
+        window.carrito         = StorageService.get('carrito', []);
+        window.cuentasPorCobrar    = StorageService.get('cuentasPorCobrar', []);
+        window.pagaresSistema      = StorageService.get('pagaresSistema', []);
+        window.compras             = StorageService.get('compras', []);
+        window.cuentasPorPagar     = StorageService.get('cuentasPorPagar', []);
+        window.movimientosCaja     = StorageService.get('movimientosCaja', []);
+        window.tarjetasConfig      = StorageService.get('tarjetasConfig', []);
+        window.gastosOperativos    = StorageService.get('gastosOperativos', []);
+        window.cotizaciones        = StorageService.get('cotizaciones', []);
+        window.vendedores          = StorageService.get('vendedores', []);
+        window.comisionesRegistradas = StorageService.get('comisionesRegistradas', []);
+        window.puntosPorCliente    = StorageService.get('puntosPorCliente', []);
+        window.programaPuntos      = StorageService.get('programaPuntos', {});
+        window.descuentosActivos   = StorageService.get('descuentosActivos', []);
+        window.usuariosConfig      = StorageService.get('usuariosConfig', []);
+        window.categoriasGasto     = StorageService.get('categoriasGasto', []);
+        window.registroTickets     = StorageService.get('registroTickets', []);
+        window.deudasMSI           = StorageService.get('deudasMSI', []);
+        window.recepciones         = StorageService.get('recepciones', []);
+        window.categoriasData      = StorageService.get('categoriasData', []);
+        window.movimientosInventario   = StorageService.get('movimientosInventario', []);
+        window.cuentasEfectivo         = StorageService.get('cuentasEfectivo', []);
+        window.ordenesCompra           = StorageService.get('ordenesCompra', []);
+        window.apartados               = StorageService.get('apartados', []);
+        window.historialDevoluciones   = StorageService.get('historialDevoluciones', []);
+        window.garantiasProductos      = StorageService.get('garantiasProductos', []);
+        window.salidasPendientesVenta  = StorageService.get('salidasPendientesVenta', []);
+        window.requisicionesCompra     = StorageService.get('requisicionesCompra', []);
+        // Asignar también en scope local (módulos que usan variables sin window.)
+        if (typeof clientes !== 'undefined')           clientes           = window.clientes;
+        if (typeof carrito !== 'undefined')            carrito            = window.carrito;
+        if (typeof cuentasPorCobrar !== 'undefined')   cuentasPorCobrar   = window.cuentasPorCobrar;
+        if (typeof pagaresSistema !== 'undefined')     pagaresSistema     = window.pagaresSistema;
+        if (typeof compras !== 'undefined')            compras            = window.compras;
+        if (typeof cuentasPorPagar !== 'undefined')    cuentasPorPagar    = window.cuentasPorPagar;
+        if (typeof movimientosCaja !== 'undefined')    movimientosCaja    = window.movimientosCaja;
+        if (typeof tarjetasConfig !== 'undefined')     tarjetasConfig     = window.tarjetasConfig;
+        if (typeof proveedores !== 'undefined')        proveedores        = window.proveedores;
+        if (typeof recepciones !== 'undefined')        recepciones        = window.recepciones;
+        if (typeof deudasMSI !== 'undefined')          deudasMSI          = window.deudasMSI;
+        if (typeof movimientosInventario !== 'undefined') movimientosInventario = window.movimientosInventario;
+        if (typeof salidasPendientesVenta !== 'undefined') salidasPendientesVenta = window.salidasPendientesVenta;
+        if (typeof requisicionesCompra !== 'undefined')    requisicionesCompra    = window.requisicionesCompra;
+        if (typeof categoriasData !== 'undefined')     categoriasData     = window.categoriasData;
+        console.log('✅ Variables globales recargadas desde localStorage (post-sync)');
+    } catch(e) {
+        console.warn('⚠️ Error recargando variables globales:', e.message);
+    }
+}
+
 // ── helpers de pantalla de login ──────────────────────────────────────────────
 function mostrarErrorLogin(msg) {
     const errEl = document.getElementById('loginError');
@@ -257,7 +317,13 @@ async function iniciarSesion() {
             sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
             ocultarLoginScreen();
             aplicarRolUI();
-            if (typeof StorageService?.syncAll === 'function') StorageService.syncAll();
+            // Sincronizar desde Firestore y recargar variables globales + vistas
+            if (typeof StorageService?.syncAll === 'function') {
+                StorageService.syncAll().then(() => {
+                    _recargarVariablesGlobales();
+                    if (typeof navA === 'function') navA('dashboard');
+                }).catch(e => console.warn('⚠️ syncAll error:', e));
+            }
             // Respaldo automático diario a OneDrive (solo admin)
             if (sesion.rol === 'admin') {
                 const hoy = new Date().toISOString().split('T')[0];
@@ -297,7 +363,11 @@ function _iniciarSesionLocalFallback(email, pass) {
     ocultarLoginScreen();
     aplicarRolUI();
     if (window._firebaseActivo) {
-        StorageService.syncAll().then(() => console.log('✅ Sync completado')).catch(() => {});
+        StorageService.syncAll().then(() => {
+            _recargarVariablesGlobales();
+            if (typeof navA === 'function') navA('dashboard');
+            console.log('✅ Sync completado y variables recargadas');
+        }).catch(e => console.warn('⚠️ syncAll error:', e));
     }
     if (match.rol === 'admin') {
         const hoy = new Date().toISOString().split('T')[0];

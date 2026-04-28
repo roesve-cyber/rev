@@ -1293,6 +1293,29 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         tasaMorosidad: 2
     };
 
+    // REGISTRAR EN ventasRegistradas (para el dashboard y reportes)
+    try {
+        const ventasRegistradas = StorageService.get('ventasRegistradas', []);
+        ventasRegistradas.push({
+            folio:      folioVenta,
+            fechaVenta: fechaVentaIso,
+            fecha:      fechaHoy,
+            clienteId:  clienteSeleccionado?.id || null,
+            clienteNombre: clienteSeleccionado?.nombre || 'Sin nombre',
+            total:      totalContado,
+            enganche:   enganche || 0,
+            saldoAFinanciar: saldoAFinanciar || 0,
+            metodoPago: metodoPago,
+            articulos:  carrito.map(p => ({ id: p.id, nombre: p.nombre, cantidad: p.cantidad || 1, precio: p.precioContado || 0 })),
+            vendedor:   _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
+        });
+        if (!StorageService.set('ventasRegistradas', ventasRegistradas)) {
+            console.error('❌ Error guardando ventasRegistradas');
+        }
+    } catch(e) {
+        console.warn('⚠️ Error registrando en ventasRegistradas:', e.message);
+    }
+
     generarTicketMediaHoja(datosVenta);
 
     // REGISTRAR COMISIÓN DEL VENDEDOR

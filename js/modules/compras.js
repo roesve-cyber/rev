@@ -57,10 +57,7 @@ function mostrarTablaHistorialCostos(productoId) {
  * @returns {Array} Historial de costos del producto
  */
 function obtenerHistorialCostosPorProducto(productoId) {
-    let historial = [];
-    try {
-        historial = JSON.parse(localStorage.getItem('historialCostos') || '[]');
-    } catch (e) { historial = []; }
+    const historial = StorageService.get('historialCostos', []);
     return historial.filter(item => String(item.productoId) === String(productoId));
 }
 
@@ -78,12 +75,9 @@ function mostrarHistorialCostosEnConsola(productoId) {
     });
 }
 // ===== CONTROL DE COSTOS =====
-/** Guarda el historial de costos de productos en localStorage. */
+/** Guarda el historial de costos de productos en localStorage y Firebase. */
 function guardarHistorialCosto({ productoId, precioCompra, fecha, cantidad, proveedorId, proveedorNombre, origen }) {
-    let historial = [];
-    try {
-        historial = JSON.parse(localStorage.getItem('historialCostos') || '[]');
-    } catch (e) { historial = []; }
+    let historial = StorageService.get('historialCostos', []);
     historial.push({
         productoId,
         precioCompra,
@@ -93,7 +87,7 @@ function guardarHistorialCosto({ productoId, precioCompra, fecha, cantidad, prov
         proveedorNombre,
         origen
     });
-    localStorage.setItem('historialCostos', JSON.stringify(historial));
+    StorageService.set('historialCostos', historial);
 }
 // ===== PROVEEDORES =====
 
