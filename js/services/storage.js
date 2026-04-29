@@ -49,12 +49,6 @@ const StorageService = {
         return valorLocal;
     },
 
-    /**
-     * Guarda un valor en localStorage y en Firestore si está disponible (write-through).
-     * @param {string} clave - Clave a guardar
-     * @param {*} valor - Valor a guardar (se convierte a JSON)
-     * @returns {boolean} - True si se guardó en localStorage exitosamente
-     */
     set(clave, valor) {
         let ok = false;
         try {
@@ -69,8 +63,13 @@ const StorageService = {
             return false;
         }
 
-        // Escritura en Firestore en background
-        if (ok && window._firebaseActivo && window._db) {
+        // 🟢 VALIDACIÓN DE SEGURIDAD: ¿Estamos en la web real o en pruebas locales?
+        const esRutaLocal = window.location.hostname === "localhost" || 
+                           window.location.hostname === "127.0.0.1" || 
+                           window.location.protocol === "file:";
+
+        // Escritura en Firestore en background (Solo si NO es local 🟢)
+        if (ok && window._firebaseActivo && window._db && !esRutaLocal) {
             const ts = Date.now();
             let docData;
             if (Array.isArray(valor)) {
@@ -81,6 +80,7 @@ const StorageService = {
                 docData = { data: valor, _updatedAt: ts };
             }
             window._db.collection('posData').doc(clave).set(docData)
+                .then(() => console.log(`☁️ Sincronizado en vivo: ${clave}`)) // 🟢 Para que sepas que funcionó
                 .catch(e => console.warn(`⚠️ Error sincronizando '${clave}' con Firebase:`, e.message));
         }
 
