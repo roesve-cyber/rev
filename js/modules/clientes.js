@@ -142,22 +142,43 @@ function mostrarInfoCliente() {
 }
 
 function cargarClientesSelect(lista = clientes) {
-    const select = document.getElementById("selectCliente");
-    if (!select) return;
+    // Renderiza tarjetas dinámicas en el contenedor del picker de clientes (vista seleccionarcliente)
+    const cont = document.getElementById("listaClientesCards");
+    if (!cont) return;
 
-    select.innerHTML = "<option value=''>-- Selecciona un cliente --</option>";
+    cont.innerHTML = "";
+
+    if (lista.length === 0) {
+        cont.innerHTML = "<p style='color:#9ca3af;text-align:center;padding:20px;'>Sin resultados.</p>";
+        return;
+    }
 
     lista.forEach(c => {
-        const option = document.createElement("option");
-        option.value = c.id;
-        option.textContent = `${c.nombre} - ${c.telefono || 'Sin teléfono'}`;
-        select.appendChild(option);
+        const div = document.createElement("div");
+        const isSelected = clienteSeleccionado && clienteSeleccionado.id === c.id;
+        div.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isSelected ? '#eff6ff' : 'white'};transition:background 0.15s;`;
+        div.onmouseover = () => { if (!isSelected) div.style.background = '#f9fafb'; };
+        div.onmouseout  = () => { if (!(clienteSeleccionado && clienteSeleccionado.id === c.id)) div.style.background = 'white'; };
+        div.onclick = () => {
+            clienteSeleccionado = clientes.find(cl => cl.id === c.id);
+            mostrarInfoCliente();
+            // Resaltar el seleccionado
+            cont.querySelectorAll('div').forEach(d => {
+                d.style.background = 'white';
+                d.style.fontWeight = 'normal';
+            });
+            div.style.background = '#eff6ff';
+        };
+        div.innerHTML = `
+            <div style="width:34px;height:34px;background:#dbeafe;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">👤</div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:${isSelected ? 'bold' : 'normal'};font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.nombre || '—'}</div>
+                ${c.telefono ? `<div style="font-size:12px;color:#6b7280;">📞 ${c.telefono}</div>` : ''}
+            </div>
+            ${isSelected ? '<span style="color:#2563eb;font-size:16px;">✓</span>' : ''}
+        `;
+        cont.appendChild(div);
     });
-
-    select.onchange = () => {
-        clienteSeleccionado = clientes.find(c => c.id === Number(select.value));
-        mostrarInfoCliente();
-    };
 }
 
 function filtrarClientes() {

@@ -7,20 +7,26 @@ function renderHistorialCostosAuditoria() {
     } catch (e) { productos = []; }
     const cont = document.getElementById('contenedorHistorialCostosAuditoria');
     if (!cont) return;
-    // Selector de producto
-    let html = `<div style="margin-bottom:18px;">
-        <label for='selectProductoHistorialCostos' style='font-weight:bold;'>Producto:</label>
-        <select id='selectProductoHistorialCostos' style='padding:7px 12px;font-size:15px;margin-left:10px;'>
-            <option value=''>-- Selecciona producto --</option>
-            ${productos.map(p => `<option value='${p.id}'>${p.nombre}</option>`).join('')}
-        </select>
+    // Selector de producto (picker dinámico)
+    let html = `<div style="margin-bottom:18px;display:flex;align-items:center;gap:10px;">
+        <label style='font-weight:bold;white-space:nowrap;'>Producto:</label>
+        <input type="hidden" id="selectProductoHistorialCostos" value="">
+        <span id="selectProductoHistorialCostos-display"
+              style="flex:1;padding:7px 12px;font-size:15px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;">Sin seleccionar</span>
+        <button type="button"
+                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                    document.getElementById('selectProductoHistorialCostos').value=p.id;
+                    var d=document.getElementById('selectProductoHistorialCostos-display');
+                    d.textContent=p.nombre; d.style.color='#111827';
+                    mostrarTablaHistorialCostos(p.id);
+                }})"
+                style="padding:7px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:14px;">
+            🔍 Buscar
+        </button>
     </div>
     <div id='tablaHistorialCostos'></div>`;
     cont.innerHTML = html;
-    document.getElementById('selectProductoHistorialCostos').onchange = function() {
-        const id = this.value;
-        mostrarTablaHistorialCostos(id);
-    };
+    // El picker llama directamente a mostrarTablaHistorialCostos al seleccionar
 }
 
 function mostrarTablaHistorialCostos(productoId) {
@@ -207,13 +213,15 @@ function _buildSelectorCuentas(idSelect, soloDebito) {
 
 // ===== COMPRAS =====
 function prepararVistaCompras() {
-    const selProd = document.getElementById("compraProducto");
-    const selProv = document.getElementById("compraProveedor");
-
-    if (selProd) {
-        selProd.innerHTML = '<option value="">-- Selecciona un producto --</option>' +
-            productos.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
+    // compraProducto es ahora un hidden input + picker dinámico (ver index.html)
+    const hidProd     = document.getElementById("compraProducto");
+    const displayProd = document.getElementById("compraProducto-display");
+    if (hidProd && displayProd && !hidProd.value) {
+        displayProd.textContent = 'Sin seleccionar';
+        displayProd.style.color = '#6b7280';
     }
+
+    const selProv = document.getElementById("compraProveedor");
     if (selProv) {
         selProv.innerHTML = proveedores.length === 0
             ? '<option value="">-- NO HAY PROVEEDORES --</option>'
@@ -463,11 +471,14 @@ function registrarCompra() {
 function limpiarFormularioCompra() {
     const ids = ["compraCantidad", "compraCosto"];
     ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
-    const selProd = document.getElementById("compraProducto");
-    const selProv = document.getElementById("compraProveedor");
-    const selPago = document.getElementById("compraMetodoPago");
+    // compraProducto es hidden input + display span (picker dinámico)
+    const hidProd     = document.getElementById("compraProducto");
+    const displayProd = document.getElementById("compraProducto-display");
+    if (hidProd)     { hidProd.value = ""; }
+    if (displayProd) { displayProd.textContent = 'Sin seleccionar'; displayProd.style.color = '#6b7280'; }
+    const selProv    = document.getElementById("compraProveedor");
+    const selPago    = document.getElementById("compraMetodoPago");
     const chkIngreso = document.getElementById("compraIngresoInmediato");
-    if (selProd) selProd.selectedIndex = 0;
     if (selProv) selProv.selectedIndex = 0;
     if (selPago) selPago.selectedIndex = 0;
     if (chkIngreso) chkIngreso.checked = true;
@@ -799,10 +810,25 @@ function abrirNuevaOrdenCompra() {
           </div>
         </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
-                    <select id="ocProductoSel" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
-                        <option value="">-- Selecciona producto --</option>
-                        ${selProds}
-                    </select>
+                    <div>
+                        <input type="hidden" id="ocProductoSel" value="">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span id="ocProductoSel-display"
+                                  style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                Sin seleccionar
+                            </span>
+                            <button type="button"
+                                    onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                                        document.getElementById('ocProductoSel').value=p.id;
+                                        var d=document.getElementById('ocProductoSel-display');
+                                        d.textContent=p.nombre+'  (Costo: '+dinero(p.costo||0)+')';
+                                        d.style.color='#111827';
+                                    }})"
+                                    style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+                                🔍 Buscar
+                            </button>
+                        </div>
+                    </div>
                     <input type="text" id="ocCaracteristicas" placeholder="Características (tela, color, etc)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                     <input type="number" id="ocCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                     <button onclick="agregarArticuloOC()" style="padding:9px 16px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
@@ -864,7 +890,10 @@ function agregarArticuloOC() {
         window._articulosOC.push({ productoId: prod.id, nombre: prod.nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas });
     }
     cantInput.value = 1;
+    // Resetear picker de producto OC
     sel.value = '';
+    const displayOC = document.getElementById('ocProductoSel-display');
+    if (displayOC) { displayOC.textContent = 'Sin seleccionar'; displayOC.style.color = '#6b7280'; }
     if (caracInput) caracInput.value = '';
     _renderTablaArticulosOC();
 }
@@ -1707,9 +1736,25 @@ function editarOrdenCompra(id) {
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
-          <select id="editOcProductoSel" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
-            <option value="">-- Agregar producto --</option>${selProds}
-          </select>
+          <div>
+            <input type="hidden" id="editOcProductoSel" value="">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span id="editOcProductoSel-display"
+                      style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    Sin seleccionar
+                </span>
+                <button type="button"
+                        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                            document.getElementById('editOcProductoSel').value=p.id;
+                            var d=document.getElementById('editOcProductoSel-display');
+                            d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';
+                            d.style.color='#111827';
+                        }})"
+                        style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+                    🔍 Buscar
+                </button>
+            </div>
+          </div>
           <input type="number" id="editOcCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
           <button onclick="agregarArticuloEditOC()" style="padding:9px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;">➕</button>
         </div>
@@ -1748,7 +1793,10 @@ function agregarArticuloEditOC() {
     } else {
         window._editArticulosOC.push({ productoId: prod.id, nombre: prod.nombre, costo: prod.costo || 0, cantidad: cant, subtotal: cant * (prod.costo || 0) });
     }
+    // Resetear picker de producto en editar OC
     sel.value = '';
+    const displayEditOC = document.getElementById('editOcProductoSel-display');
+    if (displayEditOC) { displayEditOC.textContent = 'Sin seleccionar'; displayEditOC.style.color = '#6b7280'; }
     document.getElementById('editOcCantidad').value = 1;
     _renderEditTablaOC();
 }

@@ -22,12 +22,7 @@ const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {
 }).format(n);
 function abrirCotizador() {
     document.querySelector('[data-modal="cotizador"]')?.remove();
-    const clientesLista = StorageService.get('clientes', []);
-    const productosLista = StorageService.get('productos', []);
-    const selClientes = clientesLista.map(c =>
-        `<option value="${c.id}">${c.nombre}</option>`).join('');
-    const selProductos = productosLista.map(p =>
-        `<option value="${p.id}" data-precio="${p.precio || 0}">${p.nombre} - ${dinero(p.precio || 0)}</option>`).join('');
+    // Los pickers de cliente y producto abren modales dinámicos (no se pre-generan opciones)
 
     const html = `
     <div data-modal="cotizador" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
@@ -37,10 +32,23 @@ function abrirCotizador() {
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">CLIENTE</label>
-            <select id="cotCliente" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-              <option value="">-- Selecciona cliente --</option>
-              ${selClientes}
-            </select>
+            <input type="hidden" id="cotCliente" value="">
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <span id="cotCliente-display"
+                    style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                Sin seleccionar
+              </span>
+              <button type="button"
+                      onclick="abrirSelectorCliente({titulo:'👤 Seleccionar Cliente',onSeleccion:function(c){
+                          document.getElementById('cotCliente').value=c.id;
+                          var d=document.getElementById('cotCliente-display');
+                          d.textContent=c.nombre; d.style.color='#111827';
+                          document.getElementById('cotClienteLibre').value='';
+                      }})"
+                      style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+                👤 Buscar
+              </button>
+            </div>
             <input type="text" id="cotClienteLibre" placeholder="O escribe nombre libre..." style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:6px;">
           </div>
           <div>
@@ -59,11 +67,32 @@ function abrirCotizador() {
 
         <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px;">
           <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;margin-bottom:10px;">
-            <select id="cotProductoSel" onchange="_onCotProductoChange()" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
-              <option value="">-- Selecciona producto --</option>
-              ${selProductos}
-              <option value="__libre__">✏️ Producto no registrado</option>
-            </select>
+            <div>
+              <input type="hidden" id="cotProductoSel" value="">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span id="cotProductoSel-display"
+                      style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  Sin seleccionar
+                </span>
+                <button type="button"
+                        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                            document.getElementById('cotProductoSel').value=p.id;
+                            var d=document.getElementById('cotProductoSel-display');
+                            d.textContent=p.nombre+' — '+dinero(p.precio||0);
+                            d.style.color='#111827';
+                            _onCotProductoChange();
+                        }})"
+                        style="padding:9px 12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+                  🔍 Buscar
+                </button>
+                <button type="button"
+                        onclick="document.getElementById('cotProductoSel').value='__libre__';var d=document.getElementById('cotProductoSel-display');d.textContent='✏️ Producto no registrado';d.style.color='#92400e';_onCotProductoChange();"
+                        style="padding:9px 10px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;"
+                        title="Producto no registrado en sistema">
+                  ✏️
+                </button>
+              </div>
+            </div>
             <input type="number" id="cotCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;" placeholder="Cant">
             <button onclick="agregarArticuloCotizacion()" style="padding:9px 16px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
           </div>
@@ -260,7 +289,10 @@ function agregarArticuloCotizacion() {
     }
 
     cantInput.value = 1;
+    // Resetear picker de producto en cotizador
     sel.value = '';
+    const displayCot = document.getElementById('cotProductoSel-display');
+    if (displayCot) { displayCot.textContent = 'Sin seleccionar'; displayCot.style.color = '#6b7280'; }
     _onCotProductoChange();
     _renderTablaArticulosCot();
 }

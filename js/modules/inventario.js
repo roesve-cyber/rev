@@ -144,12 +144,11 @@ window.initConsultaInventario = function() {
 window.abrirModalCargaInicialStock = function() {
     const modal = document.getElementById('modalCargaInicialStock');
     if (!modal) return;
-    // Llenar combo productos
-    const sel = document.getElementById('cargaStockProducto');
-    if (sel) {
-        sel.innerHTML = '<option value="">-- Selecciona producto --</option>' +
-            (window.productos || []).map(p => `<option value="${p.id}">${p.nombre} (${p.id})</option>`).join('');
-    }
+    // cargaStockProducto es ahora un hidden input + picker dinámico (ver index.html)
+    const hidProd     = document.getElementById('cargaStockProducto');
+    const displayProd = document.getElementById('cargaStockProducto-display');
+    if (hidProd)     { hidProd.value = ''; }
+    if (displayProd) { displayProd.textContent = 'Sin seleccionar'; displayProd.style.color = '#6b7280'; }
     document.getElementById('cargaStockCantidad').value = '';
     document.getElementById('cargaStockCosto').value = '';
     modal.style.display = 'flex';

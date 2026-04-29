@@ -11,8 +11,11 @@ window.abrirSelectorProducto = function(opciones) {
     const prods = StorageService.get("productos", []);
     const cats = StorageService.get("categoriasData", []);
 
+    // Guardar estado global para navegación interna (back buttons)
+    window._pickerState = { cats, prods, onSeleccion };
+
     const html = `
-    <div data-modal="universal-picker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);">
+    <div data-modal="universal-picker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:10002;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);">
         <div style="background:white;border-radius:15px;width:100%;max-width:500px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);">
             
             <div style="padding:20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
@@ -44,7 +47,7 @@ function renderCategorias(cats, prods, callback) {
 
 function renderSubcategorias(cat, prods, callback) {
     const cont = document.getElementById('picker-contenido');
-    cont.innerHTML = `<button onclick="location.reload()" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a categorías</button>
+    cont.innerHTML = `<button onclick="renderCategorias(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a categorías</button>
                       <p style="font-weight:bold;margin-bottom:10px;">${cat.nombre} > Selecciona subcategoría:</p>`;
     
     cat.subcategorias.forEach(sub => {
@@ -66,7 +69,9 @@ function renderProductosFinales(catNom, subNom, prods, callback) {
         return catOk && subProd === subNom;
     });
 
-    cont.innerHTML = `<p style="font-weight:bold;">${catNom} > ${subNom}</p>
+    const catObj = (window._pickerState?.cats || []).find(c => c.nombre === catNom);
+    cont.innerHTML = `<button onclick="catObj ? renderSubcategorias(window._pickerState.cats.find(c=>c.nombre==='${catNom}'), window._pickerState.prods, window._pickerState.onSeleccion) : renderCategorias(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a subcategorías</button>
+                      <p style="font-weight:bold;">${catNom} > ${subNom}</p>
                       <p style="color:#6b7280;font-size:12px;margin-bottom:10px;">Elige el producto:</p>`;
 
     if(filtrados.length === 0) {
