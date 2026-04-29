@@ -142,8 +142,8 @@ body { font-family: var(--font-main); background-color: var(--bg-cream); color: 
       <h2 id="mTitle" style="font-family:var(--font-title); font-size: 20px; line-height: 1.2;"></h2>
       <div id="mPrice" style="font-size:22px; font-weight:800; color:var(--primary); margin:10px 0;"></div>
       <div id="mCaracteristicas" style="margin: 15px 0; color: #555; font-size: 15px;"></div>
-      <button id="btnCaracteristicas" type="button" style="display:none;margin-bottom:15px;" onclick="mostrarBurbujaCaracteristicas()">Características</button>
-      <div id="burbujaCaracteristicas" style="display:none;position:fixed;z-index:3000;left:0;right:0;bottom:0;margin:auto;max-width:90vw;background:#fff9e6;padding:18px 16px 18px 16px;border-radius:18px 18px 0 0;box-shadow:0 -2px 16px #0002;font-size:16px;color:#444;line-height:1.7;"></div>
+      <button id="btnCaracteristicas" type="button" style="display:none;margin-bottom:15px;width:100%;padding:12px 0;background:var(--accent);color:#fff;font-weight:700;font-size:16px;border:none;border-radius:8px;" onclick="window.mostrarBurbujaCaracteristicas()">Características</button>
+      <div id="burbujaCaracteristicas" style="display:none;position:fixed;z-index:3000;left:0;right:0;bottom:0;margin:auto;max-width:95vw;background:#fff9e6;padding:18px 16px 18px 16px;border-radius:18px 18px 0 0;box-shadow:0 -2px 16px #0002;font-size:16px;color:#444;line-height:1.7;"></div>
       
       <label style="font-size:11px; font-weight:700; color:#666;">ELIGE TU FORMA DE PAGO:</label>
       <select id="periodoSelect" class="periodicidad-select" onchange="actualizarPlazos()">
@@ -324,9 +324,9 @@ function abrirModal(id) {
   if (prodSeleccionado.caracteristicas) {
     if (esMovil) {
       mCar.style.display = 'none';
-      btnCar.style.display = '';
+      btnCar.style.display = 'block';
       burbuja.style.display = 'none';
-      burbuja.innerHTML = `<b>Características:</b><br>${prodSeleccionado.caracteristicas}<br><button onclick='ocultarBurbujaCaracteristicas()' style='margin-top:18px;padding:8px 18px;border-radius:8px;border:none;background:var(--primary);color:#fff;font-weight:700;font-size:15px;'>Cerrar</button>`;
+      burbuja.innerHTML = `<b>Características:</b><br>${prodSeleccionado.caracteristicas}<br><button onclick='window.ocultarBurbujaCaracteristicas()' style='margin-top:18px;padding:8px 18px;border-radius:8px;border:none;background:var(--primary);color:#fff;font-weight:700;font-size:15px;'>Cerrar</button>`;
     } else {
       mCar.style.display = '';
       btnCar.style.display = 'none';
@@ -338,11 +338,10 @@ function abrirModal(id) {
     btnCar.style.display = 'none';
     burbuja.style.display = 'none';
   }
-  function mostrarBurbujaCaracteristicas() {
+  window.mostrarBurbujaCaracteristicas = function() {
     document.getElementById('burbujaCaracteristicas').style.display = '';
   }
-
-  function ocultarBurbujaCaracteristicas() {
+  window.ocultarBurbujaCaracteristicas = function() {
     document.getElementById('burbujaCaracteristicas').style.display = 'none';
   }
   actualizarPlazos();
