@@ -1,0 +1,1250 @@
+// ===== CONSULTA DINÁMICA DE INVENTARIO PROFESIONAL =====
+// Devuelve la antigüedad del producto en días, meses o años según la fecha de alta o última entrada
+function calcularAntiguedadProducto(p) {
+    // Buscar la fecha más reciente de entrada en el kardex para este producto
+    let kardex = window.movimientosInventario || [];
+    let entradas = kardex.filter(m => m.productoId == p.id && m.tipo === 'entrada');
+    let fechaStr = null;
+    if (entradas.length > 0) {
+        // Tomar la última entrada
+        let ultima = entradas.reduce((a, b) => new Date(a.fecha) > new Date(b.fecha) ? a : b);
+        fechaStr = ultima.fecha;
+    } else if (p.fechaAlta) {
+        fechaStr = p.fechaAlta;
+    }
+    if (!fechaStr) return '-';
+    let fecha = new Date(fechaStr);
+    if (isNaN(fecha.getTime())) return '-';
+    let ahora = new Date();
+    let diffMs = ahora - fecha;
+    let diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDias < 31) return diffDias + ' días';
+    let diffMeses = Math.floor(diffDias / 30.44);
+    if (diffMeses < 12) return diffMeses + ' meses';
+    let diffAnios = Math.floor(diffMeses / 12);
+    return diffAnios + ' años';
+}
+window.renderConsultaInventario = function() {
+    const cont = document.getElementById('tablaConsultaInventario');
+    // Filtros
+    const catSel = document.getElementById('filtroCatInv');
+    const subSel = document.getElementById('filtroSubInv');
+    const stockSel = document.getElementById('filtroStockInv');
+    const pedidoSel = document.getElementById('filtroPedidoInv');
+    const cat = catSel?.value || 'todos';
+    const sub = subSel?.value || 'todos';
+    const stockFiltro = stockSel?.value || 'todos';
+    const pedidoFiltro = pedidoSel?.value || 'todos';
+    let productosFiltrados = (window.productos || []).filter(p =>
+        (cat === 'todos' || p.categoria === cat) &&
+        (sub === 'todos' || p.subcategoria === sub)
+    );
+
+    // Filtro de stock
+    if (stockFiltro === 'con') {
+        productosFiltrados = productosFiltrados.filter(p => (p.stock || 0) > 0);
+    } else if (stockFiltro === 'sin') {
+        productosFiltrados = productosFiltrados.filter(p => !p.stock || p.stock === 0);
+    }
+
+    // Filtro de estado de pedido
+    // Se asume que window.ordenesCompra está disponible y tiene estado y articulos
+    let ocs = window.ordenesCompra || [];
+    // Mapear productos con estado de pedido
+    const estadoPedidoPorProd = {};
+    ocs.forEach(oc => {
+        if (!oc.articulos) return;
+        oc.articulos.forEach(a => {
+            if (!a.productoId) return;
+            if (oc.estado === 'Borrador' || oc.estado === 'Pendiente' || oc.estado === 'Pendiente de recibir') {
+                estadoPedidoPorProd[a.productoId] = 'pendiente';
+            } else if (oc.estado === 'Pendiente de baja') {
+                estadoPedidoPorProd[a.productoId] = 'baja';
+            }
+        });
+    });
+    if (pedidoFiltro !== 'todos') {
+        productosFiltrados = productosFiltrados.filter(p => {
+            const estado = estadoPedidoPorProd[p.id] || 'ninguno';
+            return pedidoFiltro === estado;
+        });
+    }
+
+    // Ordenar por categoría, subcategoría, nombre
+    productosFiltrados.sort((a, b) => {
+        if (a.categoria !== b.categoria) return (a.categoria||'').localeCompare(b.categoria||'');
+        if (a.subcategoria !== b.subcategoria) return (a.subcategoria||'').localeCompare(b.subcategoria||'');
+        return a.nombre.localeCompare(b.nombre);
+    });
+
+    // Renderizar tabla profesional
+    let html = `<div style="overflow-x:auto;"><table class=\"tabla-admin tabla-inventario\" style=\"width:100%;font-size:15px;box-shadow:0 2px 8px #0001;border-radius:10px;overflow:hidden;\">
+        <thead><tr style=\"background:#f1f5f9;\">
+            <th>Categoría</th><th>Subcategoría</th><th>Producto</th><th>Unidades</th><th>Costo Promedio</th><th>Total $</th><th>Antigüedad</th><th>Stock</th><th>Pedido</th>
+        </tr></thead><tbody>`;
+    let totalUnidades = 0, totalPesos = 0;
+    productosFiltrados.forEach(p => {
+        const total = (p.stock || 0) * (p.costo || 0);
+        totalUnidades += p.stock || 0;
+        totalPesos += total;
+        // Estado de pedido
+        const estadoPedido = estadoPedidoPorProd[p.id] || 'ninguno';
+        let pedidoLabel = '';
+        if (estadoPedido === 'pendiente') pedidoLabel = '<span style="color:#f59e42;font-weight:bold;">Pendiente de recibir</span>';
+        else if (estadoPedido === 'baja') pedidoLabel = '<span style="color:#e11d48;font-weight:bold;">Pendiente de baja</span>';
+        else pedidoLabel = '<span style="color:#22c55e;font-weight:bold;">Sin pedido</span>';
+        // Stock label
+        let stockLabel = (p.stock || 0) > 0 ? '<span style="color:#22c55e;font-weight:bold;">✔</span>' : '<span style="color:#e11d48;font-weight:bold;">✖</span>';
+        html += `<tr>
+            <td>${p.categoria||''}</td>
+            <td>${p.subcategoria||''}</td>
+            <td><b>${p.nombre}</b></td>
+            <td style=\"text-align:right;\">${p.stock||0}</td>
+            <td style=\"text-align:right;\">${dinero(p.costo||0)}</td>
+            <td style=\"text-align:right;\">${dinero(total)}</td>
+            <td style=\"text-align:center;\">${calcularAntiguedadProducto(p)}</td>
+            <td style=\"text-align:center;\">${stockLabel}</td>
+            <td style=\"text-align:center;\">${pedidoLabel}</td>
+        </tr>`;
+    });
+    html += `</tbody><tfoot><tr style=\"background:#f8fafc;font-weight:bold;\">
+        <td colspan=\"3\" style=\"padding:10px;text-align:right;\">Totales:</td>
+        <td style=\"padding:10px;text-align:right;\">${totalUnidades}</td>
+        <td></td>
+        <td style=\"padding:10px;text-align:right;\">${dinero(totalPesos)}</td>
+        <td colspan=\"3\"></td>
+    </tr></tfoot></table></div>`;
+    cont.innerHTML = html;
+}
+
+window.initConsultaInventario = function() {
+    // Llenar combos de filtro
+    const catSel = document.getElementById('filtroCatInv');
+    const subSel = document.getElementById('filtroSubInv');
+    const stockSel = document.getElementById('filtroStockInv');
+    const pedidoSel = document.getElementById('filtroPedidoInv');
+    if (!catSel || !subSel || !stockSel || !pedidoSel) return;
+    let cats = [...new Set((window.productos||[]).map(p=>p.categoria).filter(Boolean))];
+    catSel.innerHTML = '<option value="todos">Todas las categorías</option>' + cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+    catSel.onchange = function() {
+        const cat = catSel.value;
+        let subs = (window.productos||[]).filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
+        subs = [...new Set(subs)];
+        subSel.innerHTML = '<option value="todos">Todas las subcategorías</option>' + subs.map(s=>`<option value="${s}">${s}</option>`).join('');
+        subSel.value = 'todos';
+        renderConsultaInventario();
+    };
+    subSel.onchange = renderConsultaInventario;
+    stockSel.onchange = renderConsultaInventario;
+    pedidoSel.onchange = renderConsultaInventario;
+    catSel.onchange();
+    renderConsultaInventario();
+}
+// === CARGA INICIAL DE STOCK ===
+window.abrirModalCargaInicialStock = function() {
+    const modal = document.getElementById('modalCargaInicialStock');
+    if (!modal) return;
+    // cargaStockProducto es ahora un hidden input + picker dinámico (ver index.html)
+    const hidProd     = document.getElementById('cargaStockProducto');
+    const displayProd = document.getElementById('cargaStockProducto-display');
+    if (hidProd)     { hidProd.value = ''; }
+    if (displayProd) { displayProd.textContent = 'Sin seleccionar'; displayProd.style.color = '#6b7280'; }
+    document.getElementById('cargaStockCantidad').value = '';
+    document.getElementById('cargaStockCosto').value = '';
+    modal.style.display = 'flex';
+}
+
+window.cerrarModalCargaInicialStock = function() {
+    const modal = document.getElementById('modalCargaInicialStock');
+    if (modal) modal.style.display = 'none';
+}
+
+window.guardarCargaInicialStock = function() {
+    const prodId = document.getElementById('cargaStockProducto').value;
+    const cantidad = parseInt(document.getElementById('cargaStockCantidad').value);
+    const costo = parseFloat(document.getElementById('cargaStockCosto').value);
+    if (!prodId || !cantidad || cantidad <= 0 || isNaN(costo) || costo < 0) {
+        alert('Completa todos los campos correctamente.');
+        return;
+    }
+    const idx = window.productos.findIndex(p => String(p.id) === String(prodId));
+    if (idx === -1) return alert('Producto no encontrado.');
+    const p = window.productos[idx];
+    // Calcular nuevo costo promedio
+    const stockAnterior = p.stock || 0;
+    const costoAnterior = p.costo || 0;
+    const nuevoStock = stockAnterior + cantidad;
+    let nuevoCostoProm = costo;
+    if (stockAnterior > 0) {
+        nuevoCostoProm = ((stockAnterior * costoAnterior) + (cantidad * costo)) / nuevoStock;
+    }
+    p.stock = nuevoStock;
+    p.costo = parseFloat(nuevoCostoProm.toFixed(2));
+    window.productos[idx] = p;
+    if (!StorageService.set('productos', window.productos)) {
+        alert('Error guardando producto.');
+        return;
+    }
+    // Registrar en kardex
+    const mov = {
+        id: Date.now() + Math.random(),
+        productoId: p.id,
+        tipo: 'entrada',
+        cantidad: cantidad,
+        concepto: 'Carga inicial de stock',
+        fecha: new Date().toLocaleString('es-MX'),
+        costoUnitario: costo,
+        costoPromedio: p.costo
+    };
+    let kardex = StorageService.get('movimientosInventario', []);
+    kardex.push(mov);
+    StorageService.set('movimientosInventario', kardex);
+    window.movimientosInventario = kardex;
+    // También actualizar la variable global si existe fuera de window
+    if (typeof movimientosInventario !== 'undefined') {
+        movimientosInventario = kardex;
+    }
+    cerrarModalCargaInicialStock();
+    renderInventario();
+    alert('Stock cargado y valuado a costo promedio.');
+}
+// Solo cuenta cuántos productos tienen IDs duplicados (sin corregir)
+window.contarIdsDuplicados = function() {
+    const ids = {};
+    const duplicados = {};
+    window.productos.forEach(p => {
+        if (!p.id) return;
+        const idStr = String(p.id);
+        if (ids[idStr]) {
+            duplicados[idStr] = (duplicados[idStr] || 1) + 1;
+        } else {
+            ids[idStr] = true;
+        }
+    });
+    const totalDuplicados = Object.values(duplicados).reduce((a, b) => a + b, 0);
+    if (totalDuplicados > 0) {
+        let detalle = Object.entries(duplicados).map(([id, count]) => `ID: ${id} (repetido ${count} veces)`).join('\n');
+        alert(`Se encontraron ${Object.keys(duplicados).length} IDs duplicados, total de productos duplicados: ${totalDuplicados}.\n\nDetalle:\n` + detalle);
+    } else {
+        alert('No se encontraron IDs duplicados.');
+    }
+}
+// Detecta y corrige IDs de productos duplicados
+window.detectarYCorregirIdsDuplicados = function() {
+    const idsExistentes = new Set();
+    let correcciones = 0;
+
+    window.productos.forEach(p => {
+        // Si el ID ya existe o no tiene, generamos uno numérico nuevo
+        if (!p.id || idsExistentes.has(Number(p.id))) {
+            const antiguoId = p.id;
+            // Generamos un ID numérico basado en el tiempo + aleatorio
+            p.id = Math.round(Date.now() + Math.random() * 1000000);
+            correcciones++;
+            console.log(`Corregido: Antiguo ID ${antiguoId} -> Nuevo ID ${p.id}`);
+        }
+        idsExistentes.add(Number(p.id));
+    });
+
+    if (correcciones > 0) {
+        // Guardar cambios en el almacenamiento local
+        if (StorageService.set("productos", window.productos)) {
+            alert(`✅ Se repararon ${correcciones} productos con IDs duplicados.\nAhora puedes ver sus detalles normalmente.`);
+            // Recargar la tabla para aplicar cambios
+            if (typeof renderizarTablaInventario === 'function') renderizarTablaInventario();
+        } else {
+            alert("❌ Error al guardar los cambios en Storage.");
+        }
+    } else {
+        alert('No se encontraron duplicados para corregir.');
+    }
+}
+// FILTROS DE INVENTARIO
+function aplicarFiltros() {
+    const catFiltro = document.getElementById("filtroCategoria").value;
+    const subFiltro = document.getElementById("filtroSubcategoria").value;
+    const busqueda = document.getElementById("busquedaProducto").value.toLowerCase();
+
+    const filtrados = window.productos.filter(p => {
+        const coincideCat = (catFiltro === "todos" || p.categoria === catFiltro);
+        const coincideSub = (subFiltro === "todos" || p.subcategoria === subFiltro);
+        const coincideNombre = p.nombre.toLowerCase().includes(busqueda);
+        return coincideCat && coincideSub && coincideNombre;
+    });
+
+    renderInventario(filtrados);
+}
+
+function actualizarSubcategoriasFiltro(catId, subId) {
+    const catNombre = document.getElementById(catId).value;
+    const comboSub = document.getElementById(subId);
+    comboSub.innerHTML = '<option value="todos">-- Todas --</option>';
+
+    if (catNombre !== "todos") {
+        const categoriaDoc = categoriasData.find(c => c.nombre === catNombre);
+        if (categoriaDoc && categoriaDoc.subcategorias) {
+            categoriaDoc.subcategorias.forEach(sub => {
+                const nombreSub = typeof sub === 'string' ? sub : sub.nombre;
+                comboSub.innerHTML += `<option value="${nombreSub}">${nombreSub}</option>`;
+            });
+        }
+    }
+    aplicarFiltros();
+}
+
+function limpiarFiltros() {
+    document.getElementById("filtroCategoria").value = "todos";
+    document.getElementById("filtroSubcategoria").innerHTML = '<option value="todos">-- Todas --</option>';
+    document.getElementById("busquedaProducto").value = "";
+    renderInventario(window.productos);
+}
+
+function actualizarCombosFiltros() {
+    const filtroCat = document.getElementById("filtroCategoria");
+    const filtroSub = document.getElementById("filtroSubcategoria");
+    if (!filtroCat) return;
+
+    const catPrevia = filtroCat.value;
+    const subPrevia = filtroSub ? filtroSub.value : "todos";
+
+    let htmlCat = '<option value="todos">-- Todas las Categorías --</option>';
+    categoriasData.forEach(cat => {
+        htmlCat += `<option value="${cat.nombre}">${cat.nombre}</option>`;
+    });
+    filtroCat.innerHTML = htmlCat;
+    filtroCat.value = catPrevia || "todos";
+
+    if (filtroSub) {
+        let htmlSub = '<option value="todos">-- Todas las Subcategorías --</option>';
+        if (filtroCat.value !== "todos") {
+            const catInfo = categoriasData.find(c => c.nombre === filtroCat.value);
+            if (catInfo && catInfo.subcategorias) {
+                catInfo.subcategorias.forEach(sub => {
+                    htmlSub += `<option value="${sub.nombre}">${sub.nombre}</option>`;
+                });
+            }
+        }
+        filtroSub.innerHTML = htmlSub;
+        filtroSub.value = subPrevia || "todos";
+    }
+}
+
+// ===== INVENTARIO =====
+function renderInventario(listaAMostrar = window.productos) {
+    const cont = document.getElementById("listaInventario");
+    if (!cont) return;
+
+    actualizarCombosFiltros();
+
+    let html = `
+        <table class="tabla-admin">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Producto</th>
+                    <th style="text-align:center;">Stock</th>
+                    <th style="text-align:right;">Precio</th>
+                    <th style="text-align:center;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    if (listaAMostrar.length === 0) {
+        html += `<tr><td colspan="5" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
+    } else {
+        listaAMostrar.forEach(p => {
+            const stock = p.stock || 0;
+            const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
+            html += `
+                <tr>
+                    <td style="max-width:120px;overflow-x:auto;">
+                        <span style="display:inline-block;min-width:60px;max-width:110px;overflow-x:auto;">${p.id}</span>
+                    </td>
+                    <td>
+                        <b>${p.nombre}</b><br>
+                        <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
+                    </td>
+                    <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
+                    <td style="text-align:right;">${dinero(p.precio)}</td>
+                    <td style="text-align:center; display:flex; gap:5px; justify-content:center;">
+                        <button onclick="abrirProductoForm('${String(p.id)}')" 
+                                style="padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;">
+                            ✏️ Editar
+                        </button>
+                        <button onclick="abrirVisorMaestro('${String(p.id)}')" 
+                                style="padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;">
+                            🔍 Visor
+                        </button>
+                        <button onclick="confirmarEliminarProducto('${String(p.id)}')" 
+                                style="padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;">
+                            🗑️ Eliminar
+                        </button>
+                        <button onclick="abrirModalEditarId('${String(p.id)}')" style="padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;">Editar ID</button>
+                    </td>
+                </tr>`;
+        });
+    }
+
+
+// Modal para editar ID
+window.abrirModalEditarId = function(id) {
+        const p = window.productos.find(prod => String(prod.id) === String(id));
+    if (!p) return;
+    // Contar cuántas veces aparece ese ID en la base local
+        const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
+    // Modal básico
+    let modal = document.getElementById('modalEditarId');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'modalEditarId';
+    modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.35);z-index:100000;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:white;padding:32px 28px;border-radius:12px;min-width:320px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);text-align:center;">
+        <h2 style=\"margin-bottom:18px;color:#1e40af;font-size:20px;\">Editar ID de producto</h2>
+        <div style=\"margin-bottom:12px;\"><b>Producto:</b> ${p.nombre}</div>
+        <div style=\"margin-bottom:12px;\"><b>ID actual:</b> <span style=\"color:#1e40af;font-weight:bold;\">${p.id}</span></div>
+        <div style=\"margin-bottom:12px;\"><b>Veces que aparece este ID:</b> <span style=\"color:#e67e22;font-weight:bold;\">${repeticiones}</span></div>
+        <input type=\"text\" id=\"inputNuevoId\" value=\"${p.id}\" style=\"width:120px;text-align:center;font-size:18px;padding:7px 10px;margin-bottom:18px;border:2px solid #e5e7eb;border-radius:7px;\"><br>
+        <button onclick=\"guardarNuevoIdModal(${p.id})\" style=\"padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;\">Guardar</button>
+        <button onclick=\"cerrarModalEditarId()\" style=\"padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;\">Cancelar</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    setTimeout(() => { document.getElementById('inputNuevoId')?.focus(); }, 100);
+}
+
+window.cerrarModalEditarId = function() {
+    document.getElementById('modalEditarId')?.remove();
+}
+
+window.guardarNuevoIdModal = async function(idActual) {
+    const input = document.getElementById('inputNuevoId');
+    if (!input) return;
+    const nuevoId = String(input.value).trim();
+    if (!nuevoId) {
+        alert('El ID no puede estar vacío.');
+        return;
+    }
+    if (window.productos.some(p => String(p.id) === nuevoId && String(p.id) !== String(idActual))) {
+        alert('Ya existe un producto con ese ID.');
+        return;
+    }
+    const idx = window.productos.findIndex(p => String(p.id) === String(idActual));
+    if (idx !== -1) {
+        window.productos[idx].id = nuevoId;
+        if (typeof StorageService?.set === 'function') StorageService.set('productos', window.productos);
+        if (window._firebaseActivo && window._db) {
+            try {
+                const docRef = window._db.collection('productos').doc(String(idActual));
+                const docSnap = await docRef.get();
+                if (docSnap.exists) {
+                    const data = docSnap.data();
+                    await window._db.collection('productos').doc(String(nuevoId)).set(data);
+                    await docRef.delete();
+                }
+            } catch (e) {
+                alert('Error actualizando ID en Firestore: ' + (e.message || e));
+            }
+        }
+        cerrarModalEditarId();
+        renderInventario();
+    }
+}
+
+    html += `</tbody></table>`;
+    cont.innerHTML = html;
+}
+
+function confirmarEliminarProducto(id) {
+    const producto = window.productos.find(p => String(p.id) === String(id));
+    if (!producto) {
+        alert("Producto no encontrado.");
+        return;
+    }
+
+    const mensaje = `⚠️ ¿Eliminar producto: "${producto.nombre}"?\n\nEsta acción no se puede deshacer.`;
+    
+    if (confirm(mensaje)) {
+        eliminarProducto(id);
+    }
+}
+
+function actualizarStock(id, cant, concepto) {
+    const idx = window.productos.findIndex(p => String(p.id) === String(id));
+    if (idx !== -1) {
+        window.productos[idx].stock = (window.productos[idx].stock || 0) + cant;
+        registrarMovimiento(id, concepto, cant, "entrada");
+        if (!StorageService.set("productos", window.productos)) {
+            console.error("❌ Error guardando productos");
+        }
+    }
+}
+
+function registrarMovimiento(productoId, concepto, cantidad, tipo) {
+    const movimiento = {
+        id: Date.now(),
+        productoId: productoId,
+        fecha: new Date().toLocaleString(),
+        concepto: concepto,
+        cantidad: Math.abs(cantidad),
+        tipo: tipo
+    };
+    movimientosInventario.push(movimiento);
+    if (!StorageService.set("movimientosInventario", movimientosInventario)) {
+        console.error("❌ Error guardando movimientos");
+    }
+}
+
+function eliminarProducto(id) {
+    window.productos = window.productos.filter(p => String(p.id) !== String(id));
+    if (!StorageService.set("productos", window.productos)) {
+        console.error("❌ Error eliminando producto");
+        return;
+    }
+    renderInventario();
+}
+
+// ===== FORMULARIO DE PRODUCTOS =====
+function actualizarSelectorCategorias() {
+    const select = document.getElementById("pSubcategoria");
+    if (!select) return;
+    let options = "";
+    categoriasData.forEach(cat => {
+        cat.subcategorias.forEach(sub => {
+            options += `<option value="${sub.nombre}">${cat.nombre} - ${sub.nombre} (${sub.margen}%)</option>`;
+        });
+    });
+    select.innerHTML = options || "<option>Crea una categoría primero</option>";
+}
+
+function abrirProductoForm(id = null) {
+    actualizarSelectorCategorias();
+    const modal = document.getElementById("modalProductoForm");
+    if (!modal) return;
+
+    const inputNombre = document.getElementById("pNombre");
+    const inputCosto  = document.getElementById("pCosto");
+    const inputPrecio = document.getElementById("pPrecio");
+    const inputColor  = document.getElementById("pColor");
+    const inputMarca  = document.getElementById("pMarca");
+    const inputModelo = document.getElementById("pModelo");
+    const inputImagen = document.getElementById("pImagen");
+    const inputSub    = document.getElementById("pSubcategoria");
+
+    if (id) {
+        productoEditando = id;
+        const p = window.productos.find(prod => String(prod.id) === String(id));
+        if (!p) return;
+        document.getElementById("tituloModalProducto").innerText = "✏️ Editar Producto";
+        inputNombre.value = p.nombre;
+        inputCosto.value  = p.costo || 0;
+        if (inputPrecio) inputPrecio.value = p.precio != null ? p.precio : "";
+        inputColor.value = p.color || '';
+        inputMarca.value = p.marca || '';
+        inputModelo.value = p.modelo || '';
+        inputImagen.value = p.imagen || '';
+        inputSub.value    = p.subcategoria || '';
+    } else {
+        productoEditando = null;
+        document.getElementById("tituloModalProducto").innerText = "📦 Nuevo Producto";
+        inputNombre.value = "";
+        inputCosto.value  = "";
+        if (inputPrecio) inputPrecio.value = "";
+        inputColor.value = "";
+        inputMarca.value = "";
+        inputModelo.value = "";
+        inputImagen.value = "";
+    }
+    modal.classList.remove("oculto");
+    modal.style.display = 'flex';
+}
+
+function guardarProductoDB() {
+    const nombre      = document.getElementById("pNombre").value.trim();
+    const costo       = parseFloat(document.getElementById("pCosto").value);
+    const precioManual = parseFloat(document.getElementById("pPrecio").value);
+    const color       = document.getElementById("pColor").value.trim();
+    const marca       = document.getElementById("pMarca").value.trim();
+    const modelo      = document.getElementById("pModelo").value.trim();
+    const imagen      = document.getElementById("pImagen").value.trim();
+    const subcatNombre = document.getElementById("pSubcategoria").value;
+    const caracteristicas = document.getElementById("pCaracteristicas")?.value.trim() || "";  // <-- Agregado
+
+    const validacion = ValidatorService.validarProducto({
+        nombre, costo, precio: precioManual
+    });
+
+    if (!validacion.valid) {
+        alert("⚠️ " + validacion.errores.join("\n"));
+        return;
+    }
+
+    let margenFinal = 30;
+    categoriasData.forEach(cat => {
+        const sub = cat.subcategorias.find(s => s.nombre === subcatNombre);
+        if (sub) margenFinal = sub.margen;
+    });
+
+    const precioVenta = precioManual;
+
+    let categoriaPadre = '';
+    categoriasData.forEach(cat => {
+        if (cat.subcategorias.find(s => s.nombre === subcatNombre)) {
+            categoriaPadre = cat.nombre;
+        }
+    });
+
+    if (productoEditando) {
+        const index = window.productos.findIndex(p => String(p.id) === String(productoEditando));
+        const margenCalculado = CalculatorService.calcularMargen(precioVenta, costo);
+        if (index !== -1) {
+            window.productos[index] = {
+                ...window.productos[index],
+                nombre, costo,
+                margen: margenCalculado,
+                precio: precioVenta,
+                color, marca, modelo,
+                imagen,
+                categoria: categoriaPadre,
+                subcategoria: subcatNombre,
+                caracteristicas // <-- AGREGADO
+            };
+        }
+    } else {
+        const margenCalculado = CalculatorService.calcularMargen(precioVenta, costo);
+        window.productos.push({
+            id: Date.now(),
+            nombre,
+            costo,
+            margen: margenCalculado,
+            precio: precioVenta,
+            color, marca, modelo,
+            imagen,
+            categoria: categoriaPadre,
+            subcategoria: subcatNombre,
+            caracteristicas, // <-- AGREGADO
+            stock: 0
+        });
+    }
+
+    if (!StorageService.set("productos", window.productos)) {
+        alert("❌ Error guardando producto");
+        return;
+    }
+
+    cerrarProductoForm();
+    renderInventario();
+    mostrarProductos();
+}
+function cerrarProductoForm() {
+    const modal = document.getElementById("modalProductoForm");
+    if (modal) {
+        modal.classList.add("oculto");
+        modal.style.display = 'none';
+    }
+    productoEditando = null;
+}
+
+// ===== CÁLCULO AUTOMÁTICO EN FORMULARIO DE PRODUCTOS =====
+document.addEventListener('input', (e) => {
+    const modal = document.getElementById("modalProductoForm");
+    if (!modal || modal.style.display === 'none') {
+        return;
+    }
+
+    const idElemento = e.target.id;
+    
+    if (!['pCosto', 'pPrecio', 'pMargenManual', 'pSubcategoria'].includes(idElemento)) {
+        return;
+    }
+
+    const costo = parseFloat(document.getElementById("pCosto")?.value) || 0;
+    const precioActual = parseFloat(document.getElementById("pPrecio")?.value) || 0;
+    const margenActual = parseFloat(document.getElementById("pMargenManual")?.value) || 0;
+    const subcatNombre = document.getElementById("pSubcategoria")?.value || '';
+
+    let margenCategoria = 30;
+    categoriasData.forEach(cat => {
+        const sub = cat.subcategorias.find(s => s.nombre === subcatNombre);
+        if (sub) margenCategoria = sub.margen;
+    });
+
+    if (idElemento === "pCosto") {
+        if (costo === 0) return;
+        
+        const margenAUsar = margenActual > 0 ? margenActual : margenCategoria;
+        const precioCalculado = CalculatorService.calcularPrecioDesdeMargen(costo, margenAUsar);
+        
+        document.getElementById("pPrecio").value = precioCalculado;
+        document.getElementById("pMargenManual").value = margenAUsar;
+        
+        actualizarDisplayProducto(costo, precioCalculado, margenAUsar);
+        return;
+    }
+
+    if (idElemento === "pPrecio") {
+        if (costo === 0 || precioActual === 0) return;
+        
+        const margenCalculado = CalculatorService.calcularMargen(precioActual, costo);
+        
+        document.getElementById("pMargenManual").value = margenCalculado.toFixed(1);
+        
+        actualizarDisplayProducto(costo, precioActual, margenCalculado);
+        return;
+    }
+
+    if (idElemento === "pMargenManual") {
+        if (costo === 0 || margenActual === 0) return;
+        
+        const precioRecalculado = CalculatorService.calcularPrecioDesdeMargen(costo, margenActual);
+        
+        document.getElementById("pPrecio").value = precioRecalculado;
+        
+        actualizarDisplayProducto(costo, precioRecalculado, margenActual);
+        return;
+    }
+
+    if (idElemento === "pSubcategoria") {
+        if (costo === 0) return;
+        
+        if (margenActual === 0 || margenActual === "") {
+            let nuevoMargen = 30;
+            categoriasData.forEach(cat => {
+                const sub = cat.subcategorias.find(s => s.nombre === subcatNombre);
+                if (sub) nuevoMargen = sub.margen;
+            });
+            
+            const precioNuevo = CalculatorService.calcularPrecioDesdeMargen(costo, nuevoMargen);
+            
+            document.getElementById("pPrecio").value = precioNuevo;
+            document.getElementById("pMargenManual").value = nuevoMargen;
+            
+            actualizarDisplayProducto(costo, precioNuevo, nuevoMargen);
+        }
+        return;
+    }
+});
+
+function actualizarDisplayProducto(costo, precio, margen) {
+    const ganancia = precio - costo;
+    const margenPct = precio > 0 ? parseFloat(margen).toFixed(1) : 0;
+    
+    const lblMargen = document.getElementById("lblMargenAplicado");
+    const lblPrecio = document.getElementById("lblPrecioSugerido");
+    const lblGanancia = document.getElementById("lblGananciaPesos");
+    
+    if (lblMargen) {
+        lblMargen.innerText = margenPct;
+        if (margenPct < 20) {
+            lblMargen.style.color = "#e74c3c";
+        } else if (margenPct <= 35) {
+            lblMargen.style.color = "#f39c12";
+        } else {
+            lblMargen.style.color = "#27ae60";
+        }
+    }
+    
+    if (lblPrecio) {
+        lblPrecio.innerText = dinero(precio);
+    }
+    
+    if (lblGanancia) {
+        lblGanancia.innerText = dinero(ganancia > 0 ? ganancia : 0);
+        lblGanancia.style.color = ganancia > 0 ? "#27ae60" : "#e74c3c";
+    }
+}
+
+
+// ===== CATEGORÍAS =====
+function renderCategorias() {
+    const contenedor = document.getElementById("listaCategoriasCards");
+    if (!contenedor) return;
+    contenedor.innerHTML = "";
+
+    categoriasData.forEach((cat, indexCat) => {
+        let card = document.createElement("div");
+        card.style = "background: white; border-radius: 10px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #3498db;";
+
+        let html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin:0; color:#2c3e50;">${cat.nombre}</h3>
+                <button onclick="eliminarCategoria(${indexCat})" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:18px;">🗑️</button>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #eee; text-align: left; color: #7f8c8d;">
+                        <th style="padding: 5px;">Subcategoría</th>
+                        <th style="padding: 5px; text-align: center;">Margen %</th>
+                        <th style="padding: 5px;"></th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        cat.subcategorias.forEach((sub, indexSub) => {
+            html += `
+                <tr style="border-bottom: 1px solid #fafafa;">
+                    <td style="padding: 8px 5px;">${sub.nombre}</td>
+                    <td style="padding: 8px 5px; text-align: center;">
+                        <input type="number" value="${sub.margen}"
+                            onchange="actualizarMargen(${indexCat}, ${indexSub}, this.value)"
+                            style="width: 55px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 2px;">
+                    </td>
+                    <td style="text-align: right;">
+                        <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:none; border:none; cursor:pointer; color:#e74c3c;">✕</button>
+                    </td>
+                </tr>`;
+        });
+
+        html += `
+                </tbody>
+            </table>
+            <button onclick="agregarSubcategoria(${indexCat})" style="margin-top: 15px; width: 100%; padding: 8px; background: #f8f9fa; border: 1px dashed #cbd5e0; border-radius: 5px; cursor: pointer; font-size: 12px; color: #3498db;">+ Añadir Subcategoría</button>
+        `;
+
+        card.innerHTML = html;
+        contenedor.appendChild(card);
+    });
+}
+
+function guardarCategoriasConfig() {
+    if (!StorageService.set("categoriasData", categoriasData)) {
+        console.error("❌ Error guardando categorías");
+        return;
+    }
+    renderCategorias();
+    actualizarCombosFiltros();
+}
+
+function nuevaCategoria() {
+    const nombre = prompt("Nombre de la nueva categoría (Ej: Comedores, Oficinas):");
+    if (nombre && nombre.trim()) {
+        categoriasData.push({ nombre: nombre.trim(), subcategorias: [] });
+        guardarCategoriasConfig();
+    }
+}
+
+function agregarSubcategoria(indexCat) {
+    const nombre = prompt("Nombre de la subcategoría:");
+    const margen = prompt("¿Qué margen de ganancia (%) deseas?", "30");
+    if (nombre && margen) {
+        categoriasData[indexCat].subcategorias.push({
+            nombre: nombre.trim(),
+            margen: parseFloat(margen)
+        });
+        guardarCategoriasConfig();
+    }
+}
+
+function eliminarSubcategoria(indexCat, indexSub) {
+    if (confirm("¿Eliminar subcategoría?")) {
+        categoriasData[indexCat].subcategorias.splice(indexSub, 1);
+        guardarCategoriasConfig();
+    }
+}
+
+function eliminarCategoria(index) {
+    if (confirm("¿Seguro que quieres eliminar toda la categoría?")) {
+        categoriasData.splice(index, 1);
+        guardarCategoriasConfig();
+    }
+}
+
+function actualizarMargen(indexCat, indexSub, nuevoValor) {
+    categoriasData[indexCat].subcategorias[indexSub].margen = parseFloat(nuevoValor);
+    if (!StorageService.set("categoriasData", categoriasData)) {
+        console.error("❌ Error guardando categorías");
+    }
+}
+
+// ===== VISOR MAESTRO =====
+function abrirVisorMaestro(id) {
+    navA('productos-visor');
+    mostrarDetalleProductoMaestro(String(id));
+}
+
+function mostrarDetalleProductoMaestro(id) {
+    const p = window.productos.find(prod => String(prod.id) === String(id));
+    if (!p) return;
+
+    const cont = document.getElementById("detalle-producto-maestro");
+    if (!cont) return;
+
+    const ganancia = (p.precio || 0) - (p.costo || 0);
+    const margen = p.precio > 0 ? ((ganancia / p.precio) * 100).toFixed(1) : 0;
+
+    let html = `
+        <div style="width: 100%; max-width: 1400px; margin: 0 auto; padding: 10px;">
+            <div style="display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px;">
+
+                <div style="text-align: center; border-right: 1px solid #eee; padding-right: 20px;">
+                    <img id="imgVisorPrevia" src="${p.imagen || ''}" style="width: 100%; height: 200px; object-fit: contain; margin-bottom: 15px;" onerror="this.style.display='none'">
+                    <div style="padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                        <span style="font-size: 12px; color: #7f8c8d;">STOCK TOTAL</span>
+                        <h2 style="margin: 5px 0; color: ${(p.stock || 0) > 0 ? '#27ae60' : '#e74c3c'};">${p.stock || 0} pzs</h2>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; align-content: start;">
+                    <div class="campo"><label>Nombre del Producto</label><input type="text" id="editNombre" value="${p.nombre}"></div>
+                    <div class="campo"><label>Color</label><input type="text" id="editColor" value="${p.color || ''}"></div>
+                    <div class="campo"><label>Marca</label><input type="text" id="editMarca" value="${p.marca || ''}"></div>
+                    <div class="campo"><label>Modelo</label><input type="text" id="editModelo" value="${p.modelo || ''}"></div>
+                    <div class="campo">
+                        <label>Categoría</label>
+                        <select id="editCategoria" onchange="actualizarSubcategoriasVisor()">
+                            ${categoriasData.map(c => `<option value="${c.nombre}" ${p.categoria === c.nombre ? 'selected' : ''}>${c.nombre}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="campo">
+                        <label>Subcategoría</label>
+                        <select id="editSubcategoria"></select>
+                    </div>
+                    <div class="campo"><label style="color:#e74c3c;">Costo de Compra ($)</label><input type="number" id="editCosto" value="${p.costo || 0}" oninput="recalcularRentabilidad()"></div>
+                    <div class="campo"><label style="color:#27ae60;">Precio de Venta ($)</label><input type="number" id="editPrecio" value="${p.precio || 0}" oninput="recalcularRentabilidad()"></div>
+                    
+                    <div class="campo" style="grid-column: span 2;">
+                        <label>URL de la Imagen</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="editImagen" value="${p.imagen || ''}" placeholder="https://ejemplo.com/imagen.jpg" style="flex: 1;">
+                            <button onclick="document.getElementById('imgVisorPrevia').src = document.getElementById('editImagen').value; document.getElementById('imgVisorPrevia').style.display='block';" 
+                                    style="padding: 0 12px; background: #34495e; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                🔄 Probar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="campo" style="grid-column: span 2;"><label>Descripción</label><textarea id="editDescripcion" rows="2">${p.descripcion || ''}</textarea></div>
+                    <div class="campo" style="grid-column: span 2;">
+                        <label>Características (Usa Enter para saltar de línea)</label>
+                        <textarea id="editCaracteristicas" rows="4" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; font-family:inherit;">${p.caracteristicas || ''}</textarea>
+                    </div>
+                </div>
+
+                <div style="background: #2c3e50; color: white; padding: 20px; border-radius: 10px; display: flex; flex-direction: column; justify-content: center; text-align: center;">
+                    <p style="margin:0; font-size: 12px; opacity: 0.8;">RENTABILIDAD BRUTA</p>
+                    <h2 id="displayGanancia" style="margin: 10px 0; color: #2ecc71;">${dinero(ganancia)}</h2>
+                    <p id="displayMargen" style="margin:0; font-size: 18px; font-weight: bold;">${margen}%</p>
+                    <button onclick="guardarCambiosVisor(${p.id})" style="margin-top: 20px; padding: 12px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">💾 GUARDAR TODO</button>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                    <h3 style="color: #27ae60; border-bottom: 2px solid #27ae60; padding-bottom: 10px;">📥 Entradas</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                        <thead><tr style="text-align: left; font-size: 12px; color: #7f8c8d;"><th>Fecha</th><th>Concepto</th><th style="text-align:right;">Cant.</th></tr></thead>
+                        <tbody>${renderFilasKardex(id, 'entrada')}</tbody>
+                    </table>
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                    <h3 style="color: #e67e22; border-bottom: 2px solid #e67e22; padding-bottom: 10px;">📤 Salidas</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                        <thead><tr style="text-align: left; font-size: 12px; color: #7f8c8d;"><th>Fecha</th><th>Concepto</th><th style="text-align:right;">Cant.</th></tr></thead>
+                        <tbody>${renderFilasKardex(id, 'salida')}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    cont.innerHTML = html;
+    actualizarSubcategoriasVisor(p.subcategoria);
+}
+
+function renderFilasKardex(id, tipoFiltro) {
+    const movimientos = movimientosInventario.filter(m => String(m.productoId) === String(id) && m.tipo === tipoFiltro);
+    if (movimientos.length === 0) {
+        return `<tr><td colspan="3" style="text-align: center; padding: 20px; color: #ccc;">Sin registros de ${tipoFiltro}</td></tr>`;
+    }
+    return [...movimientos].reverse().map(m => `
+        <tr style="border-bottom: 1px solid #f1f1f1; font-size: 13px;">
+            <td style="padding: 8px 0;">${m.fecha}</td>
+            <td style="padding: 8px 0;">${m.concepto}</td>
+            <td style="padding: 8px 0; text-align: right; font-weight: bold;">${m.cantidad}</td>
+        </tr>
+    `).join('');
+}
+
+function actualizarSubcategoriasVisor(valorSeleccionado = "") {
+    const cat = document.getElementById("editCategoria")?.value;
+    const subSelect = document.getElementById("editSubcategoria");
+    if (!subSelect) return;
+
+    let html = '<option value="">-- Seleccionar --</option>';
+    if (cat) {
+        const catInfo = categoriasData.find(c => c.nombre === cat);
+        if (catInfo && catInfo.subcategorias) {
+            catInfo.subcategorias.forEach(s => {
+                html += `<option value="${s.nombre}" ${valorSeleccionado === s.nombre ? 'selected' : ''}>${s.nombre}</option>`;
+            });
+        }
+    }
+    subSelect.innerHTML = html;
+}
+
+
+function guardarCambiosVisor(id) {
+    const p = window.productos.find(prod => String(prod.id) === String(id));
+    if (!p) return;
+    if (!confirm(`¿Guardar cambios para "${p.nombre}"?`)) return;
+
+    p.nombre       = document.getElementById("editNombre")?.value || p.nombre;
+    p.color        = document.getElementById("editColor")?.value  || '';
+    p.marca        = document.getElementById("editMarca")?.value  || '';
+    p.modelo       = document.getElementById("editModelo")?.value || '';
+    p.categoria    = document.getElementById("editCategoria")?.value || p.categoria;
+    p.subcategoria = document.getElementById("editSubcategoria")?.value || p.subcategoria;
+    p.imagen       = document.getElementById("editImagen")?.value || '';
+    p.costo        = parseFloat(document.getElementById("editCosto")?.value) || p.costo;
+    p.precio       = parseFloat(document.getElementById("editPrecio")?.value) || p.precio;
+    p.descripcion  = document.getElementById("editDescripcion")?.value || '';
+    p.caracteristicas = document.getElementById("editCaracteristicas")?.value || '';
+
+    if (!StorageService.set("productos", window.productos)) {
+        alert("❌ Error guardando cambios");
+        return;
+    }
+    renderInventario(); // Refresca la tabla de productos para mostrar la nueva imagen
+    alert("✅ Cambios guardados correctamente.");
+}
+
+function recalcularRentabilidad() {
+    const costo  = parseFloat(document.getElementById("editCosto")?.value)  || 0;
+    const precio = parseFloat(document.getElementById("editPrecio")?.value) || 0;
+    const ganancia  = precio - costo;
+    const margenPct = CalculatorService.calcularMargen(precio, costo);
+
+    const dispGanancia = document.getElementById("displayGanancia");
+    const dispMargen   = document.getElementById("displayMargen");
+    if (dispGanancia) dispGanancia.innerText = dinero(ganancia);
+    if (dispMargen) {
+        dispMargen.innerText = margenPct.toFixed(1) + "%";
+        dispMargen.style.color = margenPct < 20 ? "#e74c3c" : margenPct <= 35 ? "#f39c12" : "#27ae60";
+    }
+}
+
+// ===== IMPORTADOR DE PRODUCTOS (BATCH) =====
+function abrirImportadorProductos() {
+    const modal = document.getElementById("modalImportador");
+    if (modal) {
+        modal.classList.remove("oculto");
+        modal.style.display = 'flex';
+        document.getElementById("textAreaImportador").value = "";
+    }
+}
+
+function cerrarImportador() {
+    const modal = document.getElementById("modalImportador");
+    if (modal) {
+        modal.classList.add("oculto");
+        modal.style.display = 'none';
+    }
+}
+
+function procesarImportacion() {
+    let texto = document.getElementById("textAreaImportador").value.trim();
+    
+    if (!texto) {
+        const fileInput = document.getElementById("fileInputProductos");
+        if (!fileInput.files || fileInput.files.length === 0) {
+            alert("Por favor selecciona un archivo o pega datos para importar.");
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = (e) => {
+            const contenido = e.target.result;
+            procesarDatosImportacion(contenido);
+        };
+        
+        reader.readAsText(file);
+        return;
+    }
+
+    procesarDatosImportacion(texto);
+}
+function insertarProductoSistema(p) {
+    const validacion = ValidatorService.validarProducto({
+        nombre: p.nombre,
+        costo: p.costo,
+        precio: p.precio
+    });
+
+    if (!validacion.valid) {
+        return { ok: false, error: validacion.errores.join(", ") };
+    }
+
+    // Buscar categoría real
+    let categoriaPadre = "";
+    let subValida = false;
+
+    categoriasData.forEach(cat => {
+        const sub = cat.subcategorias.find(s => s.nombre === p.subcategoria);
+        if (sub) {
+            categoriaPadre = cat.nombre;
+            subValida = true;
+        }
+    });
+
+    if (!subValida) {
+        return { ok: false, error: "Subcategoría no existe" };
+    }
+
+    // Evitar duplicados reales
+    const duplicado = window.productos.some(prod =>
+           prod.nombre.toUpperCase() === p.nombre.toUpperCase() &&
+           prod.modelo === p.modelo &&
+           prod.color === p.color
+    );
+
+    if (duplicado) {
+        return { ok: false, error: "Producto duplicado" };
+    }
+
+    const margenCalculado = CalculatorService.calcularMargen(p.precio, p.costo);
+
+    window.productos.push({
+        id: Math.round(Date.now() * 1000 + Math.random() * 1000),
+        nombre: p.nombre,
+        costo: p.costo,
+        precio: p.precio,
+        margen: margenCalculado,
+        imagen: p.imagen || "",
+        color: p.color || "",
+        marca: p.marca || "",
+        modelo: p.modelo || "",
+        categoria: categoriaPadre,
+        subcategoria: p.subcategoria,
+        stock: p.stock || 0,
+        // === LA LÍNEA QUE FALTABA ES ESTA ===
+        caracteristicas: p.caracteristicas || "" 
+        // ===================================
+    });
+
+    return { ok: true };
+}
+function procesarDatosImportacion(texto) {
+    let productosAImportar = [];
+
+    try {
+        const json = JSON.parse(texto);
+        if (Array.isArray(json)) {
+            productosAImportar = json.map((item, idx) => ({
+                id: Date.now() + idx,
+                nombre: item.nombre || `Producto ${idx}`,
+                costo: parseFloat(item.costo) || 0,
+                precio: parseFloat(item.precio) || 0,
+                margen: item.margen || ((parseFloat(item.precio) - parseFloat(item.costo)) / parseFloat(item.precio) * 100),
+                imagen: item.imagen || "",
+                color: item.color || "",
+                marca: item.marca || "",
+                modelo: item.modelo || "",
+                categoria: item.categoria || "Sin categoría",
+                subcategoria: item.subcategoria || "Sin subcategoría",
+                stock: parseInt(item.stock) || 0
+            }));
+        } else {
+            throw new Error("No es un array JSON");
+        }
+    } catch (e) {
+        const lineas = texto.split('\n').filter(l => l.trim());
+        if (lineas.length < 2) {
+            alert("El CSV debe tener encabezado + al menos 1 fila de datos.");
+            return;
+        }
+
+        const encabezado = lineas[0].split(',').map(h => h.trim().toLowerCase());
+        const idxNombre = encabezado.indexOf('nombre');
+        const idxCategoria = encabezado.indexOf('categoría') !== -1 ? encabezado.indexOf('categoría') : encabezado.indexOf('categoria');
+        const idxSubcategoria = encabezado.indexOf('subcategoría') !== -1 ? encabezado.indexOf('subcategoría') : encabezado.indexOf('subcategoria');
+        const idxCosto = encabezado.indexOf('costo');
+        const idxPrecio = encabezado.indexOf('precio');
+        const idxImagen = encabezado.indexOf('imagen');
+        const idxColor = encabezado.indexOf('color');
+        const idxMarca = encabezado.indexOf('marca');
+        const idxModelo = encabezado.indexOf('modelo');
+        const idxStock = encabezado.indexOf('stock');
+        const idxCaracteristicas = encabezado.indexOf('caracteristicas');
+
+        if (idxNombre === -1 || idxCosto === -1 || idxPrecio === -1) {
+            alert("CSV debe contener al menos: Nombre, Costo, Precio");
+            return;
+        }
+
+        for (let i = 1; i < lineas.length; i++) {
+            const valores = lineas[i].split(',').map(v => v.trim());
+            if (valores.length < 3) continue;
+
+            const nombre = valores[idxNombre] || `Producto ${i}`;
+            const categoria = valores[idxCategoria] || "Sin categoría";
+            const subcategoria = valores[idxSubcategoria] || "Sin subcategoría";
+            const costo = parseFloat(valores[idxCosto]) || 0;
+            const precio = parseFloat(valores[idxPrecio]) || 0;
+            const imagen = valores[idxImagen] || "";
+            const color = valores[idxColor] || "";
+            const marca = valores[idxMarca] || "";
+            const modelo = valores[idxModelo] || "";
+            const stock = parseInt(valores[idxStock]) || 0;
+            const caracteristicasStr = idxCaracteristicas !== -1 && valores[idxCaracteristicas] ? valores[idxCaracteristicas].replace(/\|/g, '\n') : "";
+
+            if (nombre && costo > 0 && precio > 0) {
+                const margenCalculado = ((precio - costo) / precio * 100);
+                productosAImportar.push({
+                    id: Date.now() + Math.random() * 100000,
+                    nombre,
+                    costo,
+                    precio,
+                    margen: margenCalculado,
+                    imagen,
+                    color,
+                    marca,
+                    modelo,
+                    categoria,
+                    subcategoria,
+                    stock,
+                    caracteristicas: caracteristicasStr
+                });
+            }
+        }
+    }
+
+    if (productosAImportar.length === 0) {
+        alert("No se encontraron productos válidos para importar.");
+        return;
+    }
+
+    const mensaje = `Se van a importar ${productosAImportar.length} productos.\n\n¿Continuar?`;
+    if (!confirm(mensaje)) return;
+
+    productosAImportar = productosAImportar.map((p, idx) => ({
+        ...p,
+        id: Math.round((Date.now() + idx) * 1000 + Math.random() * 1000)
+    }));
+
+    let insertados = 0;
+let errores = [];
+
+productosAImportar.forEach((p, i) => {
+    const resultado = insertarProductoSistema(p);
+
+    if (resultado.ok) {
+        insertados++;
+    } else {
+        errores.push(`Fila ${i + 1}: ${resultado.error}`);
+    }
+});
+
+    if (!StorageService.set("productos", window.productos)) {
+        alert("❌ Error importando productos");
+        return;
+    }
+
+    alert(`✅ ${insertados} productos importados\n❌ ${errores.length} errores`);
+console.log("Errores importación:", errores);
+
+    cerrarImportador();
+    renderInventario();
+    mostrarProductos();
+}
