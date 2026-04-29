@@ -231,9 +231,22 @@
                 <div style="background:white; padding:32px 28px; border-radius:12px; min-width:320px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.18); text-align:center;">
                     <h2 style='margin-bottom:18px;color:#1e40af;font-size:20px;'>Carga inicial de stock</h2>
                     <div style='margin-bottom:12px;'>
-                        <select id="cargaStockProducto" style="width:100%;padding:10px;font-size:16px;">
-                            <option value="">-- Selecciona producto --</option>
-                        </select>
+                        <input type="hidden" id="cargaStockProducto" value="">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span id="cargaStockProducto-display"
+                                  style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:15px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                Sin seleccionar
+                            </span>
+                            <button type="button"
+                                    onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                                        document.getElementById('cargaStockProducto').value=p.id;
+                                        var d=document.getElementById('cargaStockProducto-display');
+                                        d.textContent=p.nombre; d.style.color='#111827';
+                                    }})"
+                                    style="padding:10px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">
+                                🔍 Buscar
+                            </button>
+                        </div>
                     </div>
                     <div style='margin-bottom:12px;'>
                         <input type="number" id="cargaStockCantidad" placeholder="Cantidad" min="1" style="width:120px;text-align:center;font-size:18px;padding:7px 10px;">
@@ -415,7 +428,25 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
         <h2>🚚 Registro de Compras</h2>
         <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                <div><label>Producto:</label><select id="compraProducto" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
+                <div>
+                    <label>Producto:</label>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+                        <input type="hidden" id="compraProducto" value="">
+                        <span id="compraProducto-display"
+                              style="flex:1;padding:8px;border:1px solid #ddd;border-radius:5px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            Sin seleccionar
+                        </span>
+                        <button type="button"
+                                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                                    document.getElementById('compraProducto').value=p.id;
+                                    var d=document.getElementById('compraProducto-display');
+                                    d.textContent=p.nombre; d.style.color='#111827';
+                                }})"
+                                style="padding:8px 12px;background:#1e40af;color:white;border:none;border-radius:5px;cursor:pointer;white-space:nowrap;">
+                            🔍 Buscar
+                        </button>
+                    </div>
+                </div>
                 <div><label>Cantidad:</label><input type="number" id="compraCantidad" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div><label>Costo Unitario:</label><input type="number" id="compraCosto" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div><label>Proveedor:</label><select id="compraProveedor" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
@@ -541,10 +572,11 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
             <div id="resumenVentaCliente"></div>
             <div style="background:white; padding:20px; border-radius:10px;">
                 <h3>👤 Seleccionar Cliente</h3>
-                <input type="text" id="buscarCliente" placeholder="Buscar cliente..."
+                <input type="text" id="buscarCliente" placeholder="🔍 Buscar cliente..."
                     oninput="filtrarClientes()"
-                    style="width:100%; padding:10px; margin-bottom:10px;">
-                <select id="selectCliente" size="5" style="width:100%;"></select>
+                    style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; margin-bottom:10px;">
+                <div id="listaClientesCards"
+                     style="max-height:280px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;background:white;"></div>
                 <button onclick="abrirModalCliente()" style="margin-top:10px; width:100%;">
                     ➕ Nuevo Cliente
                 </button>
@@ -1030,6 +1062,8 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
 <script src="js/modules/proyeccion.js"></script>
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/agenda.js"></script>
+<script src="js/modules/producto-picker.js"></script>
+<script src="js/modules/cliente-picker.js"></script>
 <script src="js/modules/notificaciones.js"></script>
 <script src="js/core/navigation.js"></script>
     <script src="js/init.js"></script>
