@@ -83,8 +83,21 @@ window.renderConsultaInventario = function() {
             <th>Categoría</th><th>Subcategoría</th><th>Producto</th><th>Unidades</th><th>Costo Promedio</th><th>Total $</th><th>Antigüedad</th><th>Stock</th><th>Pedido</th>
         </tr></thead><tbody>`;
     let totalUnidades = 0, totalPesos = 0;
+    const kardex = window.movimientosInventario || [];
     productosFiltrados.forEach(p => {
-        const total = (p.stock || 0) * (p.costo || 0);
+        // Calcular costo promedio real desde el kardex
+        const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipo === 'entrada');
+        let costoPromedio = 0;
+        let totalCosto = 0;
+        let totalCantidad = 0;
+        entradas.forEach(mov => {
+            totalCosto += (mov.costoUnitario || 0) * (mov.cantidad || 0);
+            totalCantidad += mov.cantidad || 0;
+        });
+        if (totalCantidad > 0) {
+            costoPromedio = totalCosto / totalCantidad;
+        }
+        const total = (p.stock || 0) * costoPromedio;
         totalUnidades += p.stock || 0;
         totalPesos += total;
         // Estado de pedido
@@ -100,7 +113,7 @@ window.renderConsultaInventario = function() {
             <td>${p.subcategoria||''}</td>
             <td><b>${p.nombre}</b></td>
             <td style=\"text-align:right;\">${p.stock||0}</td>
-            <td style=\"text-align:right;\">${dinero(p.costo||0)}</td>
+            <td style=\"text-align:right;\">${dinero(costoPromedio)}</td>
             <td style=\"text-align:right;\">${dinero(total)}</td>
             <td style=\"text-align:center;\">${calcularAntiguedadProducto(p)}</td>
             <td style=\"text-align:center;\">${stockLabel}</td>
@@ -170,16 +183,11 @@ window.guardarCargaInicialStock = function() {
     const idx = window.productos.findIndex(p => String(p.id) === String(prodId));
     if (idx === -1) return alert('Producto no encontrado.');
     const p = window.productos[idx];
-    // Calcular nuevo costo promedio
+    // Solo sumar stock, NO modificar costo
     const stockAnterior = p.stock || 0;
-    const costoAnterior = p.costo || 0;
     const nuevoStock = stockAnterior + cantidad;
-    let nuevoCostoProm = costo;
-    if (stockAnterior > 0) {
-        nuevoCostoProm = ((stockAnterior * costoAnterior) + (cantidad * costo)) / nuevoStock;
-    }
     p.stock = nuevoStock;
-    p.costo = parseFloat(nuevoCostoProm.toFixed(2));
+    // NO modificar p.costo aquí
     window.productos[idx] = p;
     if (!StorageService.set('productos', window.productos)) {
         alert('Error guardando producto.');
