@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🔍 Auditoría — Mi Pueblito</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0f1117;
+    --bg2:      #181c27;
+    --bg3:      #1e2333;
+    --border:   #2a3045;
+    --accent:   #3b82f6;
+    --accent2:  #10b981;
+    --danger:   #ef4444;
+    --warn:     #f59e0b;
+    --text:     #e2e8f0;
+    --muted:    #6b7280;
+    --mono:     'IBM Plex Mono', monospace;
+    --sans:     'IBM Plex Sans', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+
+  /* LAYOUT */
+  #app { display: flex; height: 100vh; overflow: hidden; }
+
+  /* SIDEBAR */
+  #sidebar {
+    width: 220px; min-width: 220px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    padding: 0;
+  }
+  .brand {
+    padding: 22px 20px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand-title { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .brand-sub   { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
+
+  .nav { padding: 12px 0; flex: 1; }
+  .nav-section { padding: 8px 20px 4px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 20px; font-size: 13px; font-weight: 500;
+    cursor: pointer; color: var(--muted);
+    transition: all .15s; border-left: 2px solid transparent;
+  }
+  .nav-item:hover { color: var(--text); background: var(--bg3); }
+  .nav-item.active { color: var(--accent); background: rgba(59,130,246,.08); border-left-color: var(--accent); }
+  .nav-item .icon { font-size: 16px; }
+
+  .sidebar-footer {
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  /* MAIN */
+  #main { flex: 1; overflow-y: auto; background: var(--bg); }
+
+  .section { display: none; padding: 28px 32px; }
+  .section.active { display: block; }
+
+  /* HEADER */
+  .page-header { margin-bottom: 28px; }
+  .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+  .page-header p  { font-size: 13px; color: var(--muted); margin-top: 5px; }
+
+  /* STATS ROW */
+  .stats { display: flex; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+  .stat {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 18px; min-width: 140px;
+  }
+  .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+  .stat-val   { font-size: 20px; font-weight: 700; font-family: var(--mono); margin-top: 4px; }
+  .stat-val.green { color: var(--accent2); }
+  .stat-val.blue  { color: var(--accent); }
+  .stat-val.red   { color: var(--danger); }
+  .stat-val.warn  { color: var(--warn); }
+
+  /* CONTROLS BAR */
+  .controls {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .controls select, .controls input {
+    background: var(--bg2); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 12px; border-radius: 6px;
+    font-family: var(--sans); font-size: 13px; outline: none;
+  }
+  .controls select:focus, .controls input:focus { border-color: var(--accent); }
+  .controls input[type="text"] { width: 220px; }
+
+  /* BUTTONS */
+  .btn {
+    padding: 8px 16px; border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    font-family: var(--sans); transition: all .15s; white-space: nowrap;
+  }
+  .btn-primary   { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-success   { background: var(--accent2); color: #fff; }
+  .btn-success:hover { background: #059669; }
+  .btn-danger    { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #dc2626; }
+  .btn-ghost     { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* TABLE */
+  .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    background: var(--bg2); padding: 10px 14px; text-align: left;
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:hover { background: var(--bg2); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { padding: 10px 14px; vertical-align: middle; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+
+  /* BADGES */
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 9999px;
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+  }
+  .badge-green  { background: rgba(16,185,129,.15); color: #34d399; border: 1px solid rgba(16,185,129,.3); }
+  .badge-red    { background: rgba(239,68,68,.15);  color: #f87171; border: 1px solid rgba(239,68,68,.3); }
+  .badge-blue   { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.3); }
+  .badge-warn   { background: rgba(245,158,11,.15); color: #fbbf24; border: 1px solid rgba(245,158,11,.3); }
+
+  /* MODAL */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.65); z-index: 9999;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px; width: 100%; max-width: 520px;
+    max-height: 90vh; overflow-y: auto;
+    box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  }
+  .modal h2 { font-size: 17px; font-weight: 700; margin-bottom: 20px; color: var(--text); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-full  { grid-column: span 2; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .form-group input, .form-group select, .form-group textarea {
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 9px 12px; border-radius: 6px;
+    font-family: var(--sans); font-size: 13px; outline: none;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    border-color: var(--accent);
+  }
+  .form-group textarea { resize: vertical; min-height: 64px; }
+  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+
+  /* ALERT */
+  .alert { border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px; display: none; }
+  .alert.show { display: block; }
+  .alert-warn  { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); color: #fbbf24; }
+  .alert-info  { background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.3); color: #60a5fa; }
+  .alert-success { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); color: #34d399; }
+
+  /* EMPTY */
+  .empty { text-align: center; padding: 48px; color: var(--muted); }
+  .empty .icon { font-size: 36px; margin-bottom: 10px; }
+  .empty p { font-size: 13px; }
+
+  /* CONFIRM PANEL */
+  .confirm-box {
+    background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.3);
+    border-radius: 8px; padding: 14px; margin-bottom: 16px;
+  }
+  .confirm-box p { font-size: 13px; color: #f87171; margin-bottom: 8px; }
+  .confirm-box pre { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: pre-wrap; }
+
+  /* TOAST */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 18px; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 99999;
+    opacity: 0; transform: translateY(8px); pointer-events: none;
+    transition: all .25s; max-width: 340px;
+  }
+  #toast.visible { opacity: 1; transform: none; }
+  #toast.ok  { border-left: 3px solid var(--accent2); }
+  #toast.err { border-left: 3px solid var(--danger); }
+
+  /* DIVIDER */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+  @media (max-width: 600px) {
+    #sidebar { display: none; }
+    .section { padding: 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .form-full { grid-column: span 1; }
+    .stats { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- SIDEBAR -->
+  <nav id="sidebar">
+    <div class="brand">
+      <div class="brand-title">Auditoría</div>
+      <div class="brand-sub">Mi Pueblito POS</div>
+    </div>
+    <div class="nav">
+      <div class="nav-section">Módulos</div>
+      <div class="nav-item active" onclick="navTo('kardex')">
+        <span class="icon">📦</span> Kardex
+      </div>
+      <div class="nav-item" onclick="navTo('flujo')">
+        <span class="icon">💰</span> Flujo de Caja
+      </div>
+    </div>
+    <div class="sidebar-footer" id="sfooter">Cargando…</div>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main id="main">
+
+    <!-- =================== KARDEX =================== -->
+    <div id="sec-kardex" class="section active">
+      <div class="page-header">
+        <h1>📦 Kardex de Inventario</h1>
+        <p>Audita y modifica los movimientos de entrada y salida de inventario por producto.</p>
+      </div>
+
+      <div id="kardex-stats" class="stats"></div>
+
+      <div class="alert alert-warn" id="kardex-alert"></div>
+
+      <div class="controls">
+        <select id="kardexProdSel" onchange="loadKardex()">
+          <option value="">— Seleccionar producto —</option>
+        </select>
+        <select id="kardexTipoFil" onchange="loadKardex()">
+          <option value="">Todos los tipos</option>
+          <option value="entrada">Entradas</option>
+          <option value="salida">Salidas</option>
+        </select>
+        <button class="btn btn-success" onclick="openKardexModal(null)">＋ Nuevo movimiento</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Concepto</th>
+            <th style="text-align:right">Cantidad</th>
+            <th style="text-align:right">Costo Unit.</th>
+            <th style="text-align:center">Acciones</th>
+          </tr></thead>
+          <tbody id="kardexBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- =================== FLUJO CAJA =================== -->
+    <div id="sec-flujo" class="section">
+      <div class="page-header">
+        <h1>💰 Flujo de Caja</h1>
+        <p>Audita y modifica los movimientos de efectivo y bancos. Aquí puedes agregar tus saldos iniciales.</p>
+      </div>
+
+      <div id="flujo-stats" class="stats"></div>
+
+      <div class="alert alert-info show" id="flujo-tip">
+        💡 Para registrar un <strong>saldo inicial</strong>, agrega un movimiento de tipo <em>Ingreso</em> con concepto <em>"Saldo inicial"</em> y la cuenta correspondiente.
+      </div>
+
+      <div class="controls">
+        <select id="flujoCuentaFil" onchange="loadFlujo()">
+          <option value="">Todas las cuentas</option>
+        </select>
+        <select id="flujoTipoFil" onchange="loadFlujo()">
+          <option value="">Ingresos y egresos</option>
+          <option value="ingreso">Solo ingresos</option>
+          <option value="egreso">Solo egresos</option>
+        </select>
+        <input type="text" id="flujoBusca" placeholder="Buscar concepto…" oninput="loadFlujo()">
+        <button class="btn btn-success" onclick="openFlujoModal(null)">＋ Nuevo movimiento</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Fecha</th>
+            <th>Folio</th>
+            <th>Concepto</th>
+            <th>Cuenta</th>
+            <th style="text-align:center">Tipo</th>
+            <th style="text-align:right">Monto</th>
+            <th style="text-align:center">Acciones</th>
+          </tr></thead>
+          <tbody id="flujoBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </main><!-- /main -->
+</div><!-- /app -->
+
+<!-- =================== MODAL KARDEX =================== -->
+<div class="modal-overlay" id="modalKardex">
+  <div class="modal">
+    <h2 id="mkTitle">Movimiento de Inventario</h2>
+
+    <!-- confirm delete panel (hidden by default) -->
+    <div class="confirm-box" id="mkConfirm" style="display:none">
+      <p>⚠️ ¿Eliminar este movimiento? Esta acción no se puede deshacer.</p>
+      <pre id="mkConfirmDetail"></pre>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteKardex()">Sí, eliminar</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mkConfirm').style.display='none'">Cancelar</button>
+      </div>
+    </div>
+
+    <div class="form-grid" id="mkForm">
+      <div class="form-group form-full">
+        <label>Producto</label>
+        <select id="mkProd"></select>
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="mkTipo">
+          <option value="entrada">Entrada</option>
+          <option value="salida">Salida</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Cantidad</label>
+        <input type="number" id="mkCant" min="1" placeholder="1">
+      </div>
+      <div class="form-group">
+        <label>Costo Unitario ($)</label>
+        <input type="number" id="mkCosto" min="0" step="0.01" placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="datetime-local" id="mkFecha">
+      </div>
+      <div class="form-group form-full">
+        <label>Concepto</label>
+        <textarea id="mkConcepto" placeholder="Ej: Saldo inicial, Compra proveedor, Ajuste…"></textarea>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modalKardex')">Cancelar</button>
+      <button class="btn btn-danger" id="mkBtnDel" style="display:none" onclick="showKardexDeleteConfirm()">🗑 Eliminar</button>
+      <button class="btn btn-primary" onclick="saveKardex()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- =================== MODAL FLUJO =================== -->
+<div class="modal-overlay" id="modalFlujo">
+  <div class="modal">
+    <h2 id="mfTitle">Movimiento de Caja</h2>
+
+    <div class="confirm-box" id="mfConfirm" style="display:none">
+      <p>⚠️ ¿Eliminar este movimiento? Esta acción no se puede deshacer.</p>
+      <pre id="mfConfirmDetail"></pre>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteFlujo()">Sí, eliminar</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mfConfirm').style.display='none'">Cancelar</button>
+      </div>
+    </div>
+
+    <div class="form-grid" id="mfForm">
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="mfTipo">
+          <option value="ingreso">Ingreso ⬆️</option>
+          <option value="egreso">Egreso ⬇️</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Monto ($)</label>
+        <input type="number" id="mfMonto" min="0" step="0.01" placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label>Cuenta</label>
+        <select id="mfCuenta" onchange="actualizarEtiqueta()"></select>
+      </div>
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="datetime-local" id="mfFecha">
+      </div>
+      <div class="form-group form-full">
+        <label>Concepto</label>
+        <textarea id="mfConcepto" placeholder="Ej: Saldo inicial efectivo, Depósito apertura…"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Referencia (opcional)</label>
+        <input type="text" id="mfRef" placeholder="Folio, número…">
+      </div>
+      <div class="form-group">
+        <label>Medio de pago</label>
+        <select id="mfMedio">
+          <option value="efectivo">Efectivo</option>
+          <option value="transferencia">Transferencia</option>
+          <option value="tarjeta_debito">Tarjeta Débito</option>
+          <option value="tarjeta_credito">Tarjeta Crédito</option>
+          <option value="tarjeta_msi">Tarjeta MSI</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modalFlujo')">Cancelar</button>
+      <button class="btn btn-danger" id="mfBtnDel" style="display:none" onclick="showFlujoDeleteConfirm()">🗑 Eliminar</button>
+      <button class="btn btn-primary" onclick="saveFlujo()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+// ===== STATE =====
+let _kardexId = null; // editing kardex movement id
+let _flujoId  = null; // editing flujo movement id
+
+// ===== STORAGE HELPERS =====
+function lsGet(key, def=[]) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? def; }
+  catch { return def; }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); return true; }
+  catch(e) { toast('Error guardando datos: ' + e.message, 'err'); return false; }
+}
+function dinero(n) {
+  return '$' + (parseFloat(n)||0).toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function nowLocalISO() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function toLocaleStr(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString('es-MX');
+}
+
+// ===== TOAST =====
+let _toastTimer;
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'visible ' + type;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+// ===== NAVIGATION =====
+function navTo(id) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+  document.querySelector(`.nav-item[onclick="navTo('${id}')"]`).classList.add('active');
+  document.getElementById('sec-' + id).classList.add('active');
+  if (id === 'kardex') { populateKardexProductos(); loadKardex(); }
+  if (id === 'flujo')  { populateFlujoCuentas(); loadFlujo(); }
+}
+
+// ===== SIDEBAR FOOTER =====
+function updateFooter() {
+  const k = lsGet('movimientosInventario').length;
+  const f = lsGet('movimientosCaja').length;
+  document.getElementById('sfooter').textContent = `kardex: ${k} mvts | caja: ${f} mvts`;
+}
+
+// ===== INIT =====
+function init() {
+  populateKardexProductos();
+  populateFlujoCuentas();
+  loadKardex();
+  updateFooter();
+}
+
+// ============================================================
+// KARDEX
+// ============================================================
+function populateKardexProductos() {
+  const productos = lsGet('productos');
+  const sel = document.getElementById('kardexProdSel');
+  const mkProd = document.getElementById('mkProd');
+  const cur = sel.value;
+
+  let opts = '<option value="">— Seleccionar producto —</option>';
+  productos.sort((a,b)=>a.nombre.localeCompare(b.nombre)).forEach(p => {
+    opts += `<option value="${p.id}">${p.nombre} (ID:${p.id}) — stock: ${p.stock||0}</option>`;
+  });
+  sel.innerHTML = opts;
+  if (cur) sel.value = cur;
+
+  let opts2 = '<option value="">— Seleccionar producto —</option>';
+  productos.sort((a,b)=>a.nombre.localeCompare(b.nombre)).forEach(p => {
+    opts2 += `<option value="${p.id}">${p.nombre} (stock: ${p.stock||0})</option>`;
+  });
+  mkProd.innerHTML = opts2;
+}
+
+function loadKardex() {
+  const prodId  = document.getElementById('kardexProdSel').value;
+  const tipFil  = document.getElementById('kardexTipoFil').value;
+  const kardex  = lsGet('movimientosInventario');
+  const productos = lsGet('productos');
+
+  let movs = kardex;
+  if (prodId) movs = movs.filter(m => String(m.productoId) === String(prodId));
+  if (tipFil) movs = movs.filter(m => m.tipo === tipFil);
+
+  // Stats
+  const entradas = kardex.filter(m => m.tipo === 'entrada' && (!prodId || String(m.productoId)===String(prodId)));
+  const salidas  = kardex.filter(m => m.tipo === 'salida'  && (!prodId || String(m.productoId)===String(prodId)));
+  const totalEnt = entradas.reduce((s,m)=>s+(m.cantidad||0), 0);
+  const totalSal = salidas .reduce((s,m)=>s+(m.cantidad||0), 0);
+  const costoTotal = entradas.reduce((s,m)=>s+(m.costoUnitario||0)*(m.cantidad||0), 0);
+
+  document.getElementById('kardex-stats').innerHTML = `
+    <div class="stat"><div class="stat-label">Entradas</div><div class="stat-val green">${totalEnt.toLocaleString('es-MX')}</div></div>
+    <div class="stat"><div class="stat-label">Salidas</div><div class="stat-val red">${totalSal.toLocaleString('es-MX')}</div></div>
+    <div class="stat"><div class="stat-label">Teórico neto</div><div class="stat-val blue">${(totalEnt-totalSal).toLocaleString('es-MX')}</div></div>
+    <div class="stat"><div class="stat-label">Costo total entradas</div><div class="stat-val warn">${dinero(costoTotal)}</div></div>
+    <div class="stat"><div class="stat-label">Total movimientos</div><div class="stat-val">${kardex.length.toLocaleString('es-MX')}</div></div>
+  `;
+
+  const tbody = document.getElementById('kardexBody');
+  if (movs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="icon">📋</div><p>Sin movimientos${prodId?' para este producto':''}. Selecciona un producto o agrega un movimiento.</p></div></td></tr>`;
+    return;
+  }
+
+  // Find product name helper
+  const pMap = {};
+  productos.forEach(p => pMap[String(p.id)] = p.nombre);
+
+  tbody.innerHTML = [...movs].reverse().map(m => {
+    const badge = m.tipo === 'entrada'
+      ? '<span class="badge badge-green">⬆ Entrada</span>'
+      : '<span class="badge badge-red">⬇ Salida</span>';
+    const nombreProd = pMap[String(m.productoId)] || `ID:${m.productoId}`;
+    return `<tr>
+      <td class="mono" style="white-space:nowrap">${m.fecha||'—'}</td>
+      <td>${badge}</td>
+      <td>
+        ${!prodId ? `<small style="color:var(--muted)">${nombreProd}</small><br>` : ''}
+        ${m.concepto||'—'}
+      </td>
+      <td class="mono" style="text-align:right;font-weight:700">${(m.cantidad||0).toLocaleString('es-MX')}</td>
+      <td class="mono" style="text-align:right">${dinero(m.costoUnitario||0)}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openKardexModal('${m.id}')">✏️ Editar</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  updateFooter();
+}
+
+function openKardexModal(id) {
+  _kardexId = id;
+  const overlay = document.getElementById('modalKardex');
+  document.getElementById('mkConfirm').style.display = 'none';
+  document.getElementById('mkBtnDel').style.display = id ? 'block' : 'none';
+
+  if (id) {
+    document.getElementById('mkTitle').textContent = '✏️ Editar movimiento de Kardex';
+    const kardex = lsGet('movimientosInventario');
+    const m = kardex.find(x => String(x.id) === String(id));
+    if (!m) { toast('Movimiento no encontrado', 'err'); return; }
+    document.getElementById('mkProd').value  = m.productoId || '';
+    document.getElementById('mkTipo').value  = m.tipo || 'entrada';
+    document.getElementById('mkCant').value  = m.cantidad || '';
+    document.getElementById('mkCosto').value = m.costoUnitario || '';
+    document.getElementById('mkConcepto').value = m.concepto || '';
+    // parse fecha to datetime-local
+    try {
+      const d = new Date(m.fecha);
+      if (!isNaN(d)) {
+        const pad = n => String(n).padStart(2,'0');
+        document.getElementById('mkFecha').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } else {
+        document.getElementById('mkFecha').value = nowLocalISO();
+      }
+    } catch { document.getElementById('mkFecha').value = nowLocalISO(); }
+  } else {
+    document.getElementById('mkTitle').textContent = '＋ Nuevo movimiento de Kardex';
+    document.getElementById('mkProd').value  = document.getElementById('kardexProdSel').value;
+    document.getElementById('mkTipo').value  = 'entrada';
+    document.getElementById('mkCant').value  = '';
+    document.getElementById('mkCosto').value = '';
+    document.getElementById('mkFecha').value = nowLocalISO();
+    document.getElementById('mkConcepto').value = 'Saldo inicial de stock';
+  }
+
+  overlay.classList.add('open');
+}
+
+function saveKardex() {
+  const prodId  = document.getElementById('mkProd').value;
+  const tipo    = document.getElementById('mkTipo').value;
+  const cant    = parseInt(document.getElementById('mkCant').value);
+  const costo   = parseFloat(document.getElementById('mkCosto').value) || 0;
+  const fechaRaw = document.getElementById('mkFecha').value;
+  const concepto = document.getElementById('mkConcepto').value.trim();
+
+  if (!prodId) { toast('Selecciona un producto', 'err'); return; }
+  if (!cant || cant <= 0) { toast('La cantidad debe ser mayor a 0', 'err'); return; }
+  if (!fechaRaw) { toast('Ingresa una fecha', 'err'); return; }
+  if (!concepto) { toast('Ingresa un concepto', 'err'); return; }
+
+  const fechaStr = toLocaleStr(fechaRaw);
+  const kardex = lsGet('movimientosInventario');
+
+  if (_kardexId) {
+    // EDIT
+    const idx = kardex.findIndex(m => String(m.id) === String(_kardexId));
+    if (idx === -1) { toast('Movimiento no encontrado', 'err'); return; }
+    const old = kardex[idx];
+    kardex[idx] = { ...old, productoId: prodId, tipo, cantidad: cant, costoUnitario: costo, fecha: fechaStr, concepto };
+  } else {
+    // CREATE
+    kardex.push({
+      id: Date.now() + Math.random(),
+      productoId: prodId,
+      tipo, cantidad: cant,
+      costoUnitario: costo,
+      costoPromedio: costo,
+      fecha: fechaStr,
+      concepto
+    });
+  }
+
+  if (!lsSet('movimientosInventario', kardex)) return;
+
+  // Also update product stock if this is a new entry (not edit) or if editing changed values
+  // For new: adjust stock
+  if (!_kardexId) {
+    const productos = lsGet('productos');
+    const pIdx = productos.findIndex(p => String(p.id) === String(prodId));
+    if (pIdx !== -1) {
+      const delta = tipo === 'entrada' ? cant : -cant;
+      productos[pIdx].stock = (productos[pIdx].stock || 0) + delta;
+      lsSet('productos', productos);
+    }
+  }
+
+  toast(_kardexId ? '✅ Movimiento actualizado' : '✅ Movimiento registrado', 'ok');
+  closeModal('modalKardex');
+  populateKardexProductos();
+  loadKardex();
+}
+
+function showKardexDeleteConfirm() {
+  const kardex = lsGet('movimientosInventario');
+  const m = kardex.find(x => String(x.id) === String(_kardexId));
+  if (!m) return;
+  document.getElementById('mkConfirmDetail').textContent =
+    `Tipo: ${m.tipo} | Cantidad: ${m.cantidad} | Concepto: ${m.concepto}\nFecha: ${m.fecha} | Costo: ${dinero(m.costoUnitario||0)}`;
+  document.getElementById('mkConfirm').style.display = 'block';
+}
+
+function confirmDeleteKardex() {
+  const kardex = lsGet('movimientosInventario');
+  const m = kardex.find(x => String(x.id) === String(_kardexId));
+  if (!m) { toast('No se encontró el movimiento', 'err'); return; }
+
+  const nuevaLista = kardex.filter(x => String(x.id) !== String(_kardexId));
+  if (!lsSet('movimientosInventario', nuevaLista)) return;
+
+  // Revert stock
+  const productos = lsGet('productos');
+  const pIdx = productos.findIndex(p => String(p.id) === String(m.productoId));
+  if (pIdx !== -1) {
+    const delta = m.tipo === 'entrada' ? -(m.cantidad||0) : (m.cantidad||0);
+    productos[pIdx].stock = (productos[pIdx].stock || 0) + delta;
+    lsSet('productos', productos);
+  }
+
+  toast('🗑 Movimiento eliminado y stock revertido', 'ok');
+  closeModal('modalKardex');
+  populateKardexProductos();
+  loadKardex();
+}
+
+// ============================================================
+// FLUJO DE CAJA
+// ============================================================
+function populateFlujoCuentas() {
+  const tarjetas = lsGet('tarjetasConfig');
+  const fil = document.getElementById('flujoCuentaFil');
+  const mfCuenta = document.getElementById('mfCuenta');
+  const curFil = fil.value;
+
+  let optsF = '<option value="">Todas las cuentas</option><option value="efectivo">💵 Efectivo / Caja</option>';
+  let optsM = '<option value="efectivo">💵 Efectivo / Caja</option>';
+  tarjetas.forEach(t => {
+    const lbl = t.tipo === 'debito'
+      ? `🏦 ${t.banco}${t.ultimos4?' ••••'+t.ultimos4:''} Débito`
+      : `💳 ${t.banco} Crédito`;
+    optsF += `<option value="${t.banco}">${lbl}</option>`;
+    optsM += `<option value="${t.banco}">${lbl}</option>`;
+  });
+  fil.innerHTML = optsF;
+  mfCuenta.innerHTML = optsM;
+  if (curFil) fil.value = curFil;
+}
+
+function actualizarEtiqueta() {
+  // Computed automatically on save
+}
+
+function loadFlujo() {
+  const cuentaFil = document.getElementById('flujoCuentaFil').value;
+  const tipoFil   = document.getElementById('flujoTipoFil').value;
+  const busca     = (document.getElementById('flujoBusca').value||'').toLowerCase().trim();
+  const movs      = lsGet('movimientosCaja');
+
+  let filtered = movs;
+  if (cuentaFil) {
+    if (cuentaFil === 'efectivo') {
+      filtered = filtered.filter(m => {
+        const c = (m.cuenta||'').toLowerCase();
+        return c === 'efectivo' || c === 'caja' || m.medioPago === 'efectivo';
+      });
+    } else {
+      filtered = filtered.filter(m => m.cuenta === cuentaFil);
+    }
+  }
+  if (tipoFil) filtered = filtered.filter(m => {
+    const t = (m.tipo||'').toLowerCase();
+    return t === tipoFil;
+  });
+  if (busca) filtered = filtered.filter(m => (m.concepto||'').toLowerCase().includes(busca));
+
+  // Stats
+  const totalIng = movs.filter(m=>{const t=(m.tipo||'').toLowerCase();return t==='ingreso';}).reduce((s,m)=>s+(parseFloat(m.monto)||0),0);
+  const totalEgr = movs.filter(m=>{const t=(m.tipo||'').toLowerCase();return t==='egreso';}).reduce((s,m)=>s+(parseFloat(m.monto)||0),0);
+  const balance  = totalIng - totalEgr;
+
+  // per-account balances
+  const saldos = {};
+  movs.forEach(m => {
+    const etq = etiquetaCuenta(m);
+    if (!saldos[etq]) saldos[etq] = 0;
+    const monto = parseFloat(m.monto)||0;
+    const esIng = (m.tipo||'').toLowerCase() === 'ingreso';
+    saldos[etq] += esIng ? monto : -monto;
+  });
+
+  let saldosHTML = Object.entries(saldos).map(([etq, saldo]) => {
+    const cls = saldo >= 0 ? 'green' : 'red';
+    return `<div class="stat"><div class="stat-label">${etq}</div><div class="stat-val ${cls}">${dinero(saldo)}</div></div>`;
+  }).join('');
+
+  document.getElementById('flujo-stats').innerHTML = `
+    <div class="stat"><div class="stat-label">Total ingresos</div><div class="stat-val green">${dinero(totalIng)}</div></div>
+    <div class="stat"><div class="stat-label">Total egresos</div><div class="stat-val red">${dinero(totalEgr)}</div></div>
+    <div class="stat"><div class="stat-label">Balance neto</div><div class="stat-val ${balance>=0?'blue':'red'}">${dinero(balance)}</div></div>
+    <div class="stat"><div class="stat-label">Movimientos</div><div class="stat-val">${movs.length}</div></div>
+    ${saldosHTML}
+  `;
+
+  const tbody = document.getElementById('flujoBody');
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="icon">💸</div><p>Sin movimientos${busca||cuentaFil||tipoFil?' para este filtro':''}. Agrega un movimiento para empezar.</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = [...filtered].reverse().map(m => {
+    const esIng = (m.tipo||'').toLowerCase() === 'ingreso';
+    const badge = esIng
+      ? '<span class="badge badge-green">⬆ Ingreso</span>'
+      : '<span class="badge badge-red">⬇ Egreso</span>';
+    const etq = etiquetaCuenta(m);
+    return `<tr>
+      <td class="mono" style="white-space:nowrap;font-size:11px">${m.fecha||'—'}</td>
+      <td class="mono" style="color:var(--muted);font-size:11px">${m.folio||'—'}</td>
+      <td>${m.concepto||'—'}</td>
+      <td><strong>${etq}</strong></td>
+      <td style="text-align:center">${badge}</td>
+      <td class="mono" style="text-align:right;font-weight:700;color:${esIng?'var(--accent2)':'var(--danger)'}">${dinero(m.monto)}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openFlujoModal('${m.id}')">✏️ Editar</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  updateFooter();
+}
+
+function etiquetaCuenta(m) {
+  if (m.etiquetaCuenta) return m.etiquetaCuenta;
+  const c = (m.cuenta||'efectivo').toLowerCase();
+  if (c === 'efectivo' || c === 'caja') return '💵 Efectivo';
+  const tarjetas = lsGet('tarjetasConfig');
+  const t = tarjetas.find(x => x.banco === m.cuenta);
+  if (t) return t.tipo === 'debito' ? `🏦 ${t.banco} Débito` : `💳 ${t.banco} Crédito`;
+  return m.cuenta || '💵 Efectivo';
+}
+
+function openFlujoModal(id) {
+  _flujoId = id;
+  document.getElementById('mfConfirm').style.display = 'none';
+  document.getElementById('mfBtnDel').style.display = id ? 'block' : 'none';
+
+  if (id) {
+    document.getElementById('mfTitle').textContent = '✏️ Editar movimiento de Caja';
+    const movs = lsGet('movimientosCaja');
+    const m = movs.find(x => String(x.id) === String(id));
+    if (!m) { toast('Movimiento no encontrado', 'err'); return; }
+    document.getElementById('mfTipo').value    = (m.tipo||'ingreso').toLowerCase();
+    document.getElementById('mfMonto').value   = m.monto || '';
+    document.getElementById('mfConcepto').value = m.concepto || '';
+    document.getElementById('mfRef').value     = m.referencia || '';
+    document.getElementById('mfMedio').value   = m.medioPago || 'efectivo';
+    // set cuenta
+    const tarjetas = lsGet('tarjetasConfig');
+    populateFlujoCuentas();
+    const c = m.cuenta || 'efectivo';
+    document.getElementById('mfCuenta').value = c;
+    // fecha
+    try {
+      const d = new Date(m.fecha);
+      if (!isNaN(d)) {
+        const pad = n => String(n).padStart(2,'0');
+        document.getElementById('mfFecha').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } else document.getElementById('mfFecha').value = nowLocalISO();
+    } catch { document.getElementById('mfFecha').value = nowLocalISO(); }
+  } else {
+    document.getElementById('mfTitle').textContent = '＋ Nuevo movimiento de Caja';
+    document.getElementById('mfTipo').value    = 'ingreso';
+    document.getElementById('mfMonto').value   = '';
+    document.getElementById('mfConcepto').value = 'Saldo inicial';
+    document.getElementById('mfRef').value     = '';
+    document.getElementById('mfMedio').value   = 'efectivo';
+    document.getElementById('mfFecha').value   = nowLocalISO();
+    populateFlujoCuentas();
+    document.getElementById('mfCuenta').value  = 'efectivo';
+  }
+
+  document.getElementById('modalFlujo').classList.add('open');
+}
+
+function saveFlujo() {
+  const tipo    = document.getElementById('mfTipo').value;
+  const monto   = parseFloat(document.getElementById('mfMonto').value);
+  const cuenta  = document.getElementById('mfCuenta').value;
+  const fechaRaw = document.getElementById('mfFecha').value;
+  const concepto = document.getElementById('mfConcepto').value.trim();
+  const ref     = document.getElementById('mfRef').value.trim();
+  const medio   = document.getElementById('mfMedio').value;
+
+  if (!monto || monto <= 0)   { toast('El monto debe ser mayor a 0', 'err'); return; }
+  if (!fechaRaw)               { toast('Ingresa una fecha', 'err'); return; }
+  if (!concepto)               { toast('Ingresa un concepto', 'err'); return; }
+
+  // Build etiqueta cuenta
+  const tarjetas = lsGet('tarjetasConfig');
+  let etiqueta = '💵 Efectivo';
+  if (cuenta && cuenta !== 'efectivo') {
+    const t = tarjetas.find(x => x.banco === cuenta);
+    if (t) etiqueta = t.tipo === 'debito' ? `🏦 ${t.banco} Débito` : `💳 ${t.banco} Crédito`;
+  }
+
+  const fechaISO = new Date(fechaRaw).toISOString();
+  const movs = lsGet('movimientosCaja');
+
+  if (_flujoId) {
+    const idx = movs.findIndex(m => String(m.id) === String(_flujoId));
+    if (idx === -1) { toast('Movimiento no encontrado', 'err'); return; }
+    movs[idx] = { ...movs[idx], tipo, monto, cuenta, etiquetaCuenta: etiqueta, fecha: fechaISO, concepto, referencia: ref, medioPago: medio };
+  } else {
+    movs.push({
+      id: Date.now(),
+      tipo, monto, cuenta,
+      etiquetaCuenta: etiqueta,
+      fecha: fechaISO,
+      concepto,
+      referencia: ref,
+      medioPago: medio,
+      folio: null
+    });
+  }
+
+  if (!lsSet('movimientosCaja', movs)) return;
+  toast(_flujoId ? '✅ Movimiento actualizado' : '✅ Movimiento registrado', 'ok');
+  closeModal('modalFlujo');
+  loadFlujo();
+}
+
+function showFlujoDeleteConfirm() {
+  const movs = lsGet('movimientosCaja');
+  const m = movs.find(x => String(x.id) === String(_flujoId));
+  if (!m) return;
+  document.getElementById('mfConfirmDetail').textContent =
+    `Tipo: ${m.tipo} | Monto: ${dinero(m.monto)} | Cuenta: ${m.etiquetaCuenta||m.cuenta}\nConcepto: ${m.concepto}\nFecha: ${m.fecha}`;
+  document.getElementById('mfConfirm').style.display = 'block';
+}
+
+function confirmDeleteFlujo() {
+  const movs = lsGet('movimientosCaja');
+  const nuevaLista = movs.filter(m => String(m.id) !== String(_flujoId));
+  if (!lsSet('movimientosCaja', nuevaLista)) return;
+  toast('🗑 Movimiento de caja eliminado', 'ok');
+  closeModal('modalFlujo');
+  loadFlujo();
+}
+
+// ===== MODAL UTILS =====
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  _kardexId = null;
+  _flujoId  = null;
+}
+
+// Close on overlay click
+document.querySelectorAll('.modal-overlay').forEach(ov => {
+  ov.addEventListener('click', e => { if (e.target === ov) closeModal(ov.id); });
+});
+
+// ===== START =====
+init();
+</script>
+</body>
+</html>
