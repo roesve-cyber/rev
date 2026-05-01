@@ -3,12 +3,12 @@
 // https://console.firebase.google.com/
 
 const firebaseConfig = {
-  apiKey: "AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
-  authDomain: "mmpueblito-8fb29.firebaseapp.com",
-  projectId: "mmpueblito-8fb29",
-  storageBucket: "mmpueblito-8fb29.firebasestorage.app",
-  messagingSenderId: "32950655624",
-  appId: "1:32950655624:web:42a8657431319f9a25dd3d"
+    apiKey: "AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
+    authDomain: "mmpueblito-8fb29.firebaseapp.com",
+    projectId: "mmpueblito-8fb29",
+    storageBucket: "mmpueblito-8fb29.firebasestorage.app",
+    messagingSenderId: "32950655624",
+    appId: "1:32950655624:web:42a8657431319f9a25dd3d"
 };
 
 // Inicializar Firebase solo en producción (Vercel), desactivado en local (Live Server)
@@ -18,16 +18,33 @@ if (
     location.hostname.startsWith('192.168.') ||
     location.hostname === '' // Live Server usa hostname vacío
 ) {
+    // ==== ENTORNO LOCAL (PRUEBAS) ====
     window._firebaseActivo = false;
     console.warn('⚠️ Firebase desactivado — solo localStorage (entorno local)');
 } else {
+    // ==== ENTORNO PRODUCCIÓN (WEB/VERCEL) ====
     window._firebaseActivo = true;
     console.log('✅ Firebase activo — entorno producción/nube');
+    
     // Inicializar Firebase SDK
     if (typeof firebase !== 'undefined') {
         firebase.initializeApp(firebaseConfig);
         window._auth = firebase.auth();
         window._db = firebase.firestore();
+
+        // 🚀 MAGIA PWA: Activamos persistencia offline SOLO EN PRODUCCIÓN
+        // Esto permite que el guardado sea "al momento" y soporte pérdidas de conexión
+        window._db.enablePersistence()
+            .then(() => {
+                console.log("✅ Persistencia offline (caché) activada con éxito.");
+            })
+            .catch((err) => {
+                if (err.code == 'failed-precondition') {
+                    console.warn("⚠️ Persistencia falló: Múltiples pestañas abiertas.");
+                } else if (err.code == 'unimplemented') {
+                    console.warn("⚠️ El navegador no soporta persistencia offline.");
+                }
+            });
     } else {
         console.error('❌ Firebase SDK no cargado');
     }

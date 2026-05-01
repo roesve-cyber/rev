@@ -290,5 +290,80 @@ const StorageService = {
         return batch.commit().then(() => {
             console.log('✅ uploadAll: todos los datos subidos a Firebase');
         });
+    },
+    // =========================================================
+    // NUEVA FUNCIÓN: ESCUCHA EN TIEMPO REAL (AL MOMENTO)
+    // =========================================================
+    startRealtimeSync() {
+        // Si estamos en local (Live Server), no hacemos nada para no gastar lecturas
+        const esRutaLocal = window.location.hostname === "localhost" || 
+                            window.location.hostname === "127.0.0.1" || 
+                            window.location.protocol === "file:";
+
+        if (!window._firebaseActivo || !window._db || esRutaLocal) {
+            console.log("⏸️ Escucha en tiempo real desactivada (entorno local de pruebas)");
+            return;
+        }
+
+        console.log("📡 Iniciando escucha en tiempo real con Firebase...");
+
+        // onSnapshot mantiene una conexión viva con la nube
+        window._db.collection('posData').onSnapshot((snapshot) => {
+            let huboCambios = false;
+
+            snapshot.docChanges().forEach((change) => {
+                // Solo nos importan los datos que se modificaron desde otra computadora
+                if (change.type === "added" || change.type === "modified") {
+                    const clave = change.doc.id;
+                    const remoto = change.doc.data();
+                    
+                    if (!remoto) return;
+                    
+                    const tsRemoto = remoto._updatedAt || 0;
+                    
+                    try {
+                        const rawLocal = localStorage.getItem(clave);
+                        let tsLocal = 0;
+                        
+                        if (rawLocal) {
+                            const parsed = JSON.parse(rawLocal);
+                            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed._updatedAt) {
+                                tsLocal = parsed._updatedAt;
+                            }
+                        }
+
+                        // Comparamos el reloj: Si la nube tiene datos más nuevos, actualizamos la PC
+                        if (tsRemoto > tsLocal) {
+                            const { _updatedAt, ...datos } = remoto;
+                            const valorFinal = datos.data !== undefined ? datos.data : datos;
+                            
+                            // Guardamos directo en localStorage para no disparar un bucle infinito
+                            localStorage.setItem(clave, JSON.stringify(valorFinal));
+                            
+                            // Actualizamos las variables globales (como window.productos)
+                            if (clave === 'productos') window.productos = valorFinal;
+                            
+                            huboCambios = true;
+                            console.log(`🔄 Dato actualizado al momento: ${clave}`);
+                        }
+                    } catch (e) {
+                        console.warn(`⚠️ Error procesando cambio en tiempo real para ${clave}`);
+                    }
+                }
+            });
+
+            // Si la base de datos cambió, le decimos a la interfaz que se dibuje de nuevo
+            if (huboCambios) {
+                // Disparamos un evento para que cualquier parte del código sepa que hubo cambios
+                window.dispatchEvent(new Event('datosSincronizados'));
+                
+                // Si tienes la función de pintar inventario abierta, se recarga sola
+                if (typeof renderInventario === 'function') {
+                    renderInventario();
+                }
+            }
+        }, (error) => {
+            console.error("❌ Error en la escucha en tiempo real:", error);
+        });
     }
 };
