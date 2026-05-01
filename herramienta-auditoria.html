@@ -230,6 +230,9 @@
       <div class="nav-item" onclick="navTo('flujo')">
         <span class="icon">💰</span> Flujo de Caja
       </div>
+      <div class="nav-item" onclick="navTo('migracion')">
+        <span class="icon">📥</span> Migración Masiva
+    </div>
     </div>
     <div class="sidebar-footer" id="sfooter">Cargando…</div>
   </nav>
@@ -314,6 +317,33 @@
           </tr></thead>
           <tbody id="flujoBody"></tbody>
         </table>
+      </div>
+    </div>
+    <!-- =================== MIGRACIÓN MASIVA =================== -->
+    <div id="sec-migracion" class="section">
+      <div class="page-header">
+        <h1>📥 Carga Inicial y Migración</h1>
+        <p>Inyecta datos históricos en el sistema respetando la estructura original de la base de datos.</p>
+      </div>
+
+      <div class="alert alert-warn show">
+        ⚠️ <strong>Atención:</strong> Estas herramientas escriben directamente en la base de datos local. Asegúrate de tener el formato correcto antes de procesar.
+      </div>
+
+      <!-- Migración de Cuentas por Pagar (Proveedores) -->
+      <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <h3 style="color: var(--accent); margin-bottom: 10px;">🛒 Migrar Cuentas por Pagar (Proveedores)</h3>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">Formato JSON esperado: <span class="mono">[{ "proveedor": "Muebles X", "total": 5000, "saldoPendiente": 2500, "fecha": "2023-10-01" }]</span></p>
+        <textarea id="jsonCuentasPorPagar" placeholder="Pega aquí el arreglo JSON de tus deudas a proveedores..." style="width: 100%; height: 100px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 10px;"></textarea>
+        <button class="btn btn-success" onclick="procesarMigracionCXP()">Inyectar Cuentas por Pagar</button>
+      </div>
+
+      <!-- Migración de Cuentas por Cobrar (Clientes) -->
+      <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px;">
+        <h3 style="color: var(--accent); margin-bottom: 10px;">💳 Migrar Cuentas por Cobrar y Pagarés</h3>
+        <p style="font-size: 12px; color: var(--muted); margin-bottom: 10px;">Pega los datos del cliente, saldo, enganche y plazos para que el sistema regenere los pagarés matemáticamente.</p>
+        <textarea id="jsonCuentasPorCobrar" placeholder="Pega aquí el arreglo JSON de las deudas de tus clientes..." style="width: 100%; height: 150px; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 10px;"></textarea>
+        <button class="btn btn-primary" onclick="procesarMigracionCXC()">Inyectar Cuentas y Generar Pagarés</button>
       </div>
     </div>
 
@@ -494,7 +524,178 @@ function updateFooter() {
   const f = lsGet('movimientosCaja').length;
   document.getElementById('sfooter').textContent = `kardex: ${k} mvts | caja: ${f} mvts`;
 }
+// ============================================================
+// MIGRACIÓN MASIVA (TRADUCTORES)
+// ============================================================
 
+function procesarMigracionCXP() {
+  const raw = document.getElementById('jsonCuentasPorPagar').value.trim();
+  if (!raw) return toast('Pega el JSON primero', 'err');
+  
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) throw new Error("Los datos deben estar entre corchetes [ ]");
+    
+    let cxp = lsGet('cuentasPorPagar', []);
+    let agregadas = 0;
+
+    data.forEach(item => {
+      // Validaciones de seguridad
+      if (!item.proveedor || item.saldoPendiente === undefined) return;
+      
+      cxp.push({
+        id: Date.now() + Math.random(), // Generar ID único del sistema
+        compraId: item.compraId || Date.now(),
+        proveedor: item.proveedor,
+        producto: item.producto || "Saldo Migrado",
+        total: Number(item.total) || Number(item.saldoPendiente),
+        saldoPendiente: Number(item.saldoPendiente),
+        metodo: item.metodo || 'credito_proveedor',
+        formaPagoTexto: item.formaPagoTexto || 'Migración Histórica',
+        fecha: item.fecha || new Date().toLocaleDateString('es-MX'),
+        vencimiento: item.vencimiento || new Date().toLocaleDateString('es-MX')
+      });
+      agregadas++;
+    });
+
+    if (agregadas > 0) {
+      if (lsSet('cuentasPorPagar', cxp)) {
+        toast(`✅ ${agregadas} cuentas de proveedores migradas con éxito.`, 'ok');
+        document.getElementById('jsonCuentasPorPagar').value = ""; // Limpiamos el cuadro
+      }
+    } else {
+      toast('No se encontraron registros válidos en el texto.', 'err');
+    }
+  } catch(e) {
+    toast('Error en el formato JSON: ' + e.message, 'err');
+  }
+}
+
+function procesarMigracionCXC() {
+  const raw = document.getElementById('jsonCuentasPorCobrar').value.trim();
+  if (!raw) return toast('Pega el JSON primero', 'err');
+  
+  try {
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) throw new Error("Los datos deben estar entre corchetes [ ]");
+    
+    // Traemos TODAS las libretas del sistema
+    let cxc = lsGet('cuentasPorCobrar', []);
+    let pagares = lsGet('pagaresSistema', []);
+    let clientes = lsGet('clientes', []);
+    let ventasReg = lsGet('ventasRegistradas', []);
+    let agregadas = 0;
+
+    data.forEach(item => {
+      if (!item.nombre || item.saldoActual === undefined) return;
+      
+      const folio = item.folio || ("V-MIG-" + Math.floor(Math.random()*10000));
+      const saldo = Number(item.saldoActual);
+      const total = Number(item.total) || saldo;
+      const enganche = Number(item.enganche) || 0;
+      const periodicidad = item.periodicidad || 'semanal';
+      const fechaVentaDate = item.fechaVenta ? new Date(item.fechaVenta) : new Date();
+      const fechaVentaIso = fechaVentaDate.toISOString();
+      const fechaVentaStr = fechaVentaDate.toLocaleDateString('es-MX');
+      const pagosRestantes = Number(item.pagosRestantes) || 1;
+
+      // 1. Dar de alta al Cliente (Si no existe, lo crea)
+      let cli = clientes.find(c => c.nombre.toLowerCase() === item.nombre.toLowerCase());
+      let clienteId;
+      if (!cli) {
+          clienteId = Date.now() + Math.random();
+          clientes.push({
+              id: clienteId,
+              nombre: item.nombre,
+              telefono: item.telefono || "",
+              direccion: item.direccion || "",
+              fechaRegistro: fechaVentaStr
+          });
+      } else {
+          clienteId = cli.id;
+      }
+      
+      // 2. Crear la cuenta por cobrar
+      cxc.push({
+        folio: folio,
+        nombre: item.nombre,
+        clienteId: clienteId,
+        telefono: item.telefono || "",
+        direccion: item.direccion || "",
+        fechaVenta: fechaVentaIso,
+        fecha: fechaVentaIso,
+        totalContadoOriginal: total,
+        engancheRecibido: enganche,
+        saldoActual: saldo,
+        saldoOriginal: saldo,
+        metodo: "credito",
+        plan: { abono: item.montoPorPago || (saldo/pagosRestantes), total: saldo, meses: item.meses || 1 },
+        estado: saldo > 0 ? "Pendiente" : "Saldado",
+        abonos: [],
+        articulos: [{ nombre: "Saldo Migrado (Histórico)", cantidad: 1, precioContado: total }],
+        totalMercancia: total,
+        periodicidad: periodicidad
+      });
+
+      // 3. Generar Pagarés Matemáticamente
+      if (saldo > 0) {
+        let diasIntervalo = periodicidad === "quincenal" ? 14 : periodicidad === "mensual" ? 30 : 7;
+        let fechaPago = item.fechaPrimerPago ? new Date(item.fechaPrimerPago) : new Date(fechaVentaDate);
+        if (!item.fechaPrimerPago) fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+
+        const montoCuota = Number(item.montoPorPago) || (saldo / pagosRestantes);
+
+        for (let i = 1; i <= pagosRestantes; i++) {
+          pagares.push({
+            id: Date.now() + Math.random() + i,
+            folio: folio,
+            numeroPagere: `${folio}-${i}/${pagosRestantes}`,
+            clienteNombre: item.nombre,
+            fechaEmision: fechaVentaIso,
+            fechaVencimiento: new Date(fechaPago).toISOString(),
+            monto: montoCuota,
+            estado: "Pendiente",
+            diasAtrasoActual: 0
+          });
+          fechaPago.setDate(fechaPago.getDate() + diasIntervalo); // Avanza al siguiente pago
+        }
+      }
+
+      // 4. Registrar en Historial de Ventas (Para los reportes gráficos)
+      ventasReg.push({
+          folio: folio,
+          fechaVenta: fechaVentaIso,
+          fecha: fechaVentaStr,
+          clienteId: clienteId,
+          clienteNombre: item.nombre,
+          total: total,
+          enganche: enganche,
+          saldoAFinanciar: saldo,
+          metodoPago: "credito",
+          articulos: [{ id: "MIG", nombre: "Saldo Migrado (Histórico)", cantidad: 1, precio: total }],
+          vendedor: "Migración Masiva"
+      });
+
+      agregadas++;
+    });
+
+    if (agregadas > 0) {
+      // Guardar en las 4 libretas al mismo tiempo
+      if (lsSet('cuentasPorCobrar', cxc) && 
+          lsSet('pagaresSistema', pagares) && 
+          lsSet('clientes', clientes) && 
+          lsSet('ventasRegistradas', ventasReg)) {
+        toast(`✅ ${agregadas} clientes, cuentas, ventas y pagarés migrados con éxito.`, 'ok');
+        document.getElementById('jsonCuentasPorCobrar').value = ""; 
+      }
+    } else {
+      toast('No se encontraron registros válidos.', 'err');
+    }
+
+  } catch(e) {
+    toast('Error en el formato JSON: ' + e.message, 'err');
+  }
+}
 // ===== INIT =====
 function init() {
   populateKardexProductos();

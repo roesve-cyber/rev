@@ -126,24 +126,23 @@
         </div>
 
         <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
-            <div id="sub-cobranza" class="submenu oculto-submenu">
-                <button onclick="navA('cuentasxcobrar')">💰 Cuentas por Cobrar</button>
-                <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
-                <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
-                <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
-                <button onclick="navA('clientesmorosos')">🔴 Clientes Morosos</button>
-                <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
-            </div>
-        </div>
+    <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
+    <div id="sub-cobranza" class="submenu oculto-submenu">
+        <!-- Le cambiamos el nombre para que se note la mejora -->
+        <button onclick="navA('cuentasxcobrar')">🎯 Centro de Comando</button> 
+        <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
+        <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
+        <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
+        <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
+    </div>
+</div>
 
-        <div class="menu-item">
+       <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-bancos')">🏦 BANCOS <span>▾</span></button>
             <div id="sub-bancos" class="submenu oculto-submenu">
                 <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
                 <button onclick="navA('flujo-msi')">💳 MSI (Flujo)</button>
                 <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
-                <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
             </div>
         </div>
 
@@ -225,7 +224,30 @@
                 <h3 style='color:#1e40af;margin-bottom:10px;'>Historial de Costos de Producto</h3>
                 <div id="contenedorHistorialCostosAuditoria"></div>
             </div>
+            <!-- 👇 NUEVO PANEL DE MIGRACIÓN MASIVA 👇 -->
+            <div style="margin: 40px 0 0 0; padding: 25px; background: #eff6ff; border-radius: 10px; border: 2px dashed #3b82f6; text-align: left;">
+                <h3 style="color: #1e40af; margin-bottom: 15px;">📥 Carga Inicial / Migración Histórica</h3>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="font-weight:bold; color:#1e3a8a;">💳 Deudas de Clientes (Cuentas por Cobrar)</label>
+                    <p style="font-size:12px; color:#475569; margin-bottom:8px;">Pega el JSON. El sistema generará al cliente y calculará sus pagarés automáticamente.</p>
+                    <textarea id="jsonCuentasPorCobrarPOS" placeholder="Pega aquí el arreglo JSON [ { ... } ]" style="width:100%; height:120px; padding:10px; border-radius:6px; border:1px solid #93c5fd; font-family:monospace;"></textarea>
+                    <button onclick="procesarMigracionCXC_POS()" style="margin-top:10px; padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Inyectar Clientes y Pagarés</button>
+                </div>
 
+                <div>
+                    <label style="font-weight:bold; color:#92400e;">🛒 Deudas a Proveedores (Cuentas por Pagar)</label>
+                    <textarea id="jsonCuentasPorPagarPOS" placeholder="Pega aquí el arreglo JSON [ { ... } ]" style="width:100%; height:80px; padding:10px; border-radius:6px; border:1px solid #fcd34d; font-family:monospace; margin-top:8px;"></textarea>
+                    <button onclick="procesarMigracionCXP_POS()" style="margin-top:10px; padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Inyectar Proveedores</button>
+                </div>
+                <div style="margin-top: 20px;">
+                    <label style="font-weight:bold; color:#6b21a8;">💳 Deudas de Tarjetas de Crédito (MSI)</label>
+                    <p style="font-size:12px; color:#475569; margin-bottom:8px;">Pega el JSON. El sistema creará el calendario de pagos usando el día de corte de cada banco.</p>
+                    <textarea id="jsonCuentasMSIPOS" placeholder="Pega aquí el arreglo JSON [ { ... } ]" style="width:100%; height:80px; padding:10px; border-radius:6px; border:1px solid #c4b5fd; font-family:monospace;"></textarea>
+                    <button onclick="procesarMigracionMSI_POS()" style="margin-top:10px; padding:10px 20px; background:#9333ea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Inyectar Compras MSI</button>
+                </div>
+            </div>
+            <!-- 👆 FIN DEL PANEL DE MIGRACIÓN 👆 -->
             <!-- Modal carga inicial stock -->
             <div id="modalCargaInicialStock" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.35); z-index:100001; align-items:center; justify-content:center;">
                 <div style="background:white; padding:32px 28px; border-radius:12px; min-width:320px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.18); text-align:center;">
@@ -313,6 +335,7 @@
                 <option value="Atrasado">⚠️ Atrasado</option>
                 <option value="Crítico">🔴 Crítico</option>
                 <option value="Saldado">✔️ Saldado</option>
+                <option value="Promesa">📝 Promesa</option>
             </select>
             <button onclick="renderCuentasXCobrar()" style="padding:10px 20px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
         </div>
@@ -437,18 +460,27 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
                             Sin seleccionar
                         </span>
                         <button type="button"
-                                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
-                                    document.getElementById('compraProducto').value=p.id;
-                                    var d=document.getElementById('compraProducto-display');
-                                    d.textContent=p.nombre; d.style.color='#111827';
-                                }})"
-                                style="padding:8px 12px;background:#1e40af;color:white;border:none;border-radius:5px;cursor:pointer;white-space:nowrap;">
-                            🔍 Buscar
-                        </button>
+        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+            document.getElementById('compraProducto').value=p.id;
+            var d=document.getElementById('compraProducto-display');
+            d.textContent=p.nombre; d.style.color='#111827';
+            
+            /* 👇 NUEVO: Llena el costo automáticamente y muestra el mensaje 👇 */
+            var inputCosto = document.getElementById('compraCosto');
+            if(inputCosto) inputCosto.value = p.costo || 0;
+            alert('💡 Referencia de costo:\nEl último costo registrado para este producto es de: $' + (p.costo || 0));
+        }})"
+        style="padding:8px 12px;background:#1e40af;color:white;border:none;border-radius:5px;cursor:pointer;white-space:nowrap;">
+    🔍 Buscar
+</button>
                     </div>
                 </div>
                 <div><label>Cantidad:</label><input type="number" id="compraCantidad" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div><label>Costo Unitario:</label><input type="number" id="compraCosto" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+                <div style="grid-column: span 2;">
+                    <label>Características (Opcional):</label>
+                     <input type="text" id="compraCaracteristicas" placeholder="Ej. Color caoba, tela azul..." style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;">
+                </div>
                 <div><label>Proveedor:</label><select id="compraProveedor" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div><label>Método de Pago:</label><select id="compraMetodoPago" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;" onchange="gestionarCamposPago()"><option value="contado">Contado</option><option value="credito_proveedor">Crédito</option><option value="tarjeta_msi">MSI</option></select></div>
                 <div id="divCuentaOrigen" style="display:block;"><label>💳 Cuenta para anticipo:</label><select id="compraCuentaOrigen" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
@@ -530,7 +562,6 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
     <div id="bancos" class="vista oculto">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
             <h2>⚙️ Gestión de Cuentas y Tarjetas</h2>
-            <button onclick="abrirModalBanco()" style="padding:10px 20px; background:#6b21a8; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Agregar Tarjeta Crédito</button>
         </div>
         <div id="tablaBancosConfig"></div>
     </div>
