@@ -391,40 +391,77 @@ function pagarComision(id) {
     renderReporteComisiones(fechaDesde, fechaHasta);
 }
 
-function pagarComisionVendedor(vendedorId, fechaDesde, fechaHasta) {
-    const vendedores = StorageService.get('vendedores', []);
-    const v = vendedores.find(x => String(x.id) === String(vendedorId));
-    if (!v || !confirm(`¿Marcar todas las comisiones pendientes de ${v.nombre} como pagadas?`)) return;
-    const comisiones = StorageService.get('comisionesRegistradas', []);
-    const desde = fechaDesde ? new Date(fechaDesde + 'T00:00:00') : null;
-    const hasta = fechaHasta ? new Date(fechaHasta + 'T23:59:59') : null;
-    let totalPagado = 0;
-    const actualizadas = comisiones.map(c => {
-        if (String(c.vendedorId) !== String(vendedorId)) return c;
-        if (c.estado !== 'Pendiente') return c;
-        const f = new Date(c.fecha);
-        if (desde && f < desde) return c;
-        if (hasta && f > hasta) return c;
-        totalPagado += c.montoComision;
-        return { ...c, estado: 'Pagada', fechaPago: new Date().toISOString() };
+function abrirModalPagoComision(tipo, id, fechaDesde, fechaHasta, monto, nombre) {
+    if(monto <= 0) return alert("⚠️ No hay monto pendiente a pagar.");
+    
+    const modalHTML = `
+    <div data-modal="pago-comision" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;">
+        <div style="background:white;padding:30px;border-radius:12px;width:90%;max-width:400px;box-shadow:0 10px 25px rgba(0,0,0,0.1);">
+            <h2 style="margin-top:0;color:#7c3aed;">💰 Pagar Comisión</h2>
+            <p style="color:#4b5563;margin-bottom:20px;">Vendedor: <strong>${nombre}</strong><br>Monto a pagar: <strong style="color:#059669;font-size:18px;">${dinero(monto)}</strong></p>
+            
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿De qué caja/cuenta sale el dinero?</label>
+                ${window._buildSelectorCuentas('cuentaPagoComision', false)}
+            </div>
+
+            <div style="display:flex;gap:10px;">
+                <button onclick="ejecutarPagoComision('${tipo}', ${id}, '${fechaDesde}', '${fechaHasta}', ${monto}, '${nombre}')" style="flex:1;padding:12px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar Pago</button>
+                <button onclick="document.querySelector('[data-modal=&quot;pago-comision&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function ejecutarPagoComision(tipo, id, fechaDesde, fechaHasta, monto, nombre) {
+    const sel = document.getElementById('cuentaPagoComision');
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex].text;
+    
+    // 1. Descontar el dinero usando el Enchufe Universal
+    window._egresarCuenta({
+        monto: monto, cuentaId: cuentaId, etiqueta: etiqueta,
+        concepto: `Pago comisiones - ${nombre}`, referencia: `COMISION-${id}`
     });
-    StorageService.set('comisionesRegistradas', actualizadas);
-    if (totalPagado > 0) {
-        const movimientos = StorageService.get('movimientosCaja', []);
-        movimientos.push({
-            id: Date.now(),
-            folio: '-',
-            fecha: new Date().toLocaleDateString('es-MX'),
-            tipo: 'egreso',
-            monto: totalPagado,
-            concepto: `Pago comisiones período - ${v.nombre}`,
-            referencia: 'Comisiones vendedor',
-            cuenta: 'efectivo'
+
+    // 2. Marcar comisiones como pagadas
+    const comisiones = StorageService.get('comisionesRegistradas', []);
+    
+    if (tipo === 'individual') {
+        const idx = comisiones.findIndex(c => c.id === id);
+        if(idx !== -1) comisiones[idx] = { ...comisiones[idx], estado: 'Pagada', fechaPago: new Date().toISOString() };
+    } else {
+        const desde = fechaDesde && fechaDesde !== 'null' ? new Date(fechaDesde + 'T00:00:00') : null;
+        const hasta = fechaHasta && fechaHasta !== 'null' ? new Date(fechaHasta + 'T23:59:59') : null;
+        comisiones.forEach((c, idx) => {
+            if (String(c.vendedorId) === String(id) && c.estado === 'Pendiente') {
+                const f = new Date(c.fecha);
+                let entra = true;
+                if (desde && f < desde) entra = false;
+                if (hasta && f > hasta) entra = false;
+                if (entra) comisiones[idx] = { ...c, estado: 'Pagada', fechaPago: new Date().toISOString() };
+            }
         });
-        StorageService.set('movimientosCaja', movimientos);
     }
+    
+    StorageService.set('comisionesRegistradas', comisiones);
+    document.querySelector('[data-modal="pago-comision"]').remove();
+    alert(`✅ Comisión de ${dinero(monto)} pagada correctamente desde ${etiqueta}.`);
+    
     renderGestionVendedores();
-    renderReporteComisiones(fechaDesde, fechaHasta);
+    if(fechaDesde !== 'null') renderReporteComisiones(fechaDesde, fechaHasta);
+}
+
+// Renombrar los botones viejos para que llamen al modal
+function pagarComision(id) {
+    const c = StorageService.get('comisionesRegistradas', []).find(x => x.id === id);
+    if(c) abrirModalPagoComision('individual', id, null, null, c.montoComision, c.vendedorNombre);
+}
+function pagarComisionVendedor(vendedorId, fechaDesde, fechaHasta) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    const res = calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta);
+    if(v) abrirModalPagoComision('multiple', vendedorId, fechaDesde, fechaHasta, res.pendiente, v.nombre);
 }
 
 window.renderGestionVendedores = renderGestionVendedores;

@@ -245,30 +245,12 @@ function renderCarrito() {
                     </select>
                 </div>
 
-                <!-- CUENTA RECEPTORA (transferencia o enganche con transferencia) -->
-                <div id="divCuentaReceptora" class="oculto" style="margin-bottom:12px;">
-                    <label id="lblCuentaReceptora" style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">🏦 Cuenta receptora</label>
-                    <select id="selCuentaReceptora" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"></select>
+                <!-- 👇 ENCHUFE UNIVERSAL DE CAJAS/BANCOS 👇 -->
+                <div id="divSelectorUniversal" class="oculto" style="margin-bottom:12px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+                    <label style="font-size:13px; font-weight:bold; color:#166534; display:block; margin-bottom:6px;">💳 ¿A qué caja o cuenta ingresa el dinero hoy?</label>
+                    ${window._buildSelectorCuentas ? window._buildSelectorCuentas('cuentaReceptora_venta', false) : '<select id="cuentaReceptora_venta" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">💵 Efectivo Principal</option></select>'}
                 </div>
-
-                <!-- MODO ENGANCHE: efectivo vs transferencia (crédito/apartado con enganche) -->
-                <div id="divModoEnganche" class="oculto" style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:6px;">💰 ¿Cómo se recibe el enganche?</label>
-                    <div style="display:flex; gap:8px;">
-                        <label style="flex:1; cursor:pointer;">
-                            <input type="radio" name="modoEnganche" value="efectivo" checked onchange="actualizarInterfazPago()">
-                            <div id="btnModoEfectivo" style="margin-top:4px; padding:8px; border:2px solid #27ae60; border-radius:6px; text-align:center; font-size:13px; font-weight:bold; color:#166534; background:#dcfce7;">
-                                💵 Efectivo
-                            </div>
-                        </label>
-                        <label style="flex:1; cursor:pointer;">
-                            <input type="radio" name="modoEnganche" value="transferencia" onchange="actualizarInterfazPago()">
-                            <div id="btnModoTransferencia" style="margin-top:4px; padding:8px; border:2px solid #d1d5db; border-radius:6px; text-align:center; font-size:13px; font-weight:bold; color:#4a5568; background:#f9fafb;">
-                                🏦 Transferencia
-                            </div>
-                        </label>
-                    </div>
-                </div>
+                <!-- 👆 FIN ENCHUFE UNIVERSAL 👆 -->
 
                 <!-- RESULTADOS DEL PLAN -->
                 <div id="resultadosPago" style="margin-bottom:12px;"></div>
@@ -394,61 +376,23 @@ if (metodo === "credito") {
     divPeriodicidad?.classList.add("oculto");
 }
 
-    // ── CUENTA RECEPTORA / MODO DE COBRO ─────────────────────────────────────────
-    const divCuenta = document.getElementById("divCuentaReceptora");
-    const divModoEnganche = document.getElementById("divModoEnganche");
+    // ── CUENTA RECEPTORA / MODO DE COBRO (NUEVO MOTOR) ───────────────────────
+    const divUniversal = document.getElementById("divSelectorUniversal");
     const engancheVal = parseFloat(document.getElementById("numEnganche")?.value) || 0;
-    const cuentasDebito = tarjetasConfig.filter(t => t.tipo === "debito");
 
-    // Ocultar todo por defecto y limpiar
-    if (divCuenta) divCuenta.classList.add("oculto");
-    if (divModoEnganche) divModoEnganche.classList.add("oculto");
-
-    if (metodo === "contado") {
-        // Contado siempre va a caja/efectivo, no se pregunta
-        // (nada que mostrar)
-
-    } else if (metodo === "transferencia") {
-        // Transferencia: preguntar a qué cuenta débito entra el dinero
-        if (divCuenta) {
-            divCuenta.classList.remove("oculto");
-            const lbl = document.getElementById("lblCuentaReceptora");
-            if (lbl) lbl.textContent = "🏦 ¿A qué cuenta ingresa la transferencia?";
-            const optsHTML = cuentasDebito.length > 0
-                ? cuentasDebito.map(c => `<option value="${c.banco}">🏦 ${c.banco}</option>`).join('')
-                : '<option value="cuenta_debito">-- Registra cuentas en Bancos --</option>';
-            document.getElementById("selCuentaReceptora").innerHTML = optsHTML;
-        }
-
-    } else if ((metodo === "credito" || metodo === "apartado") && engancheVal > 0) {
-        // Crédito/Apartado con enganche: preguntar si el enganche entra en efectivo o transferencia
-        if (divModoEnganche) divModoEnganche.classList.remove("oculto");
-
-        // Sincronizar estilos de botones de modo según radio seleccionado
-        const modoSeleccionado = document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo";
-        const btnEfec = document.getElementById("btnModoEfectivo");
-        const btnTrans = document.getElementById("btnModoTransferencia");
-        if (btnEfec && btnTrans) {
-            if (modoSeleccionado === "efectivo") {
-                btnEfec.style.borderColor = "#27ae60"; btnEfec.style.background = "#dcfce7"; btnEfec.style.color = "#166534";
-                btnTrans.style.borderColor = "#d1d5db"; btnTrans.style.background = "#f9fafb"; btnTrans.style.color = "#4a5568";
-            } else {
-                btnEfec.style.borderColor = "#d1d5db"; btnEfec.style.background = "#f9fafb"; btnEfec.style.color = "#4a5568";
-                btnTrans.style.borderColor = "#3b82f6"; btnTrans.style.background = "#dbeafe"; btnTrans.style.color = "#1e40af";
+    if (divUniversal) {
+        // ¿Realmente está entrando dinero en este momento? 
+        if (metodo === "contado" || metodo === "transferencia" || engancheVal > 0) {
+            divUniversal.classList.remove("oculto");
+            
+            // Le agregamos un evento al selector para que se guarde al cambiar
+            const selNode = document.getElementById("cuentaReceptora_venta");
+            if (selNode && !selNode.hasAttribute('data-bound')) {
+                selNode.addEventListener('change', actualizarInterfazPago);
+                selNode.setAttribute('data-bound', 'true');
             }
-        }
-
-        if (modoSeleccionado === "transferencia") {
-            // Mostrar selector de cuenta débito
-            if (divCuenta) {
-                divCuenta.classList.remove("oculto");
-                const lbl = document.getElementById("lblCuentaReceptora");
-                if (lbl) lbl.textContent = "🏦 ¿A qué cuenta ingresa el enganche?";
-                const optsHTML = cuentasDebito.length > 0
-                    ? cuentasDebito.map(c => `<option value="${c.banco}">🏦 ${c.banco}</option>`).join('')
-                    : '<option value="cuenta_debito">-- Registra cuentas en Bancos --</option>';
-                document.getElementById("selCuentaReceptora").innerHTML = optsHTML;
-            }
+        } else {
+            divUniversal.classList.add("oculto");
         }
     }
 
@@ -519,6 +463,10 @@ if (metodo === "credito") {
         : (document.getElementById("selCuentaReceptora")?.value || "efectivo");
     // plan se guarda en seleccionarPlan()
     window._estadoPago.fechaVenta = document.getElementById("inputFechaVenta")?.value || new Date().toISOString().substring(0,10);
+// Guardamos la caja seleccionada en nuestra libreta de estado temporal
+    const selCaja = document.getElementById("cuentaReceptora_venta");
+    window._estadoPago.cuentaReceptora = selCaja ? selCaja.value : "efectivo";
+    window._estadoPago.etiquetaCuenta = selCaja && selCaja.selectedIndex >= 0 ? selCaja.options[selCaja.selectedIndex].text : "Efectivo";
 }
 
 function seleccionarPlan(index) {
@@ -1101,61 +1049,45 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         });
     });
 
-    // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
-    // Determinar cuenta receptora según método de pago
-    let cuentaReceptora;
-    if (metodoPago === "contado") {
-        cuentaReceptora = "efectivo";
-    } else if (metodoPago === "transferencia") {
-        cuentaReceptora = window._estadoPago.cuentaReceptora || "cuenta_debito";
-    } else {
-        // Crédito/Apartado: el enganche puede ser efectivo o transferencia
-        cuentaReceptora = window._estadoPago.modoEnganche === "transferencia"
-            ? (window._estadoPago.cuentaReceptora || "cuenta_debito")
-            : "efectivo";
+    // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA (CON ENCHUFE UNIVERSAL)
+    let montoIngresoHoy = 0;
+    let tituloConcepto = "";
+    
+    if (metodoPago === "contado" || metodoPago === "transferencia") {
+        montoIngresoHoy = totalContado;
+        tituloConcepto = "Venta";
+    } else if (enganche > 0) {
+        montoIngresoHoy = enganche;
+        tituloConcepto = "Enganche";
     }
 
-    if (metodoPago === "contado" || metodoPago === "transferencia") {
-        movimientosCaja.push({
-            id: Date.now(),
-            folio: folioVenta,
-            fecha: fechaHoy,
-            tipo: "ingreso",
-            monto: totalContado,
-            concepto: `Venta ${metodoPago === "transferencia" ? "Transferencia" : "Contado"} - ${clienteSeleccionado.nombre}`,
-            referencia: metodoPago === "transferencia" ? "Transferencia" : "Contado",
-            cuenta: cuentaReceptora
-        });
-        // ✅ Actualizar saldo real de la cuenta
-        if (cuentaReceptora === "efectivo") {
-            let cef = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
-            const c = cef.find(x => x.id === "efectivo");
-            if (c) { c.saldo = (Number(c.saldo) || 0) + totalContado; StorageService.set("cuentasEfectivo", cef); }
+    if (montoIngresoHoy > 0) {
+        const cuentaId = window._estadoPago.cuentaReceptora || 'efectivo';
+        const etiqueta = window._estadoPago.etiquetaCuenta || 'Efectivo';
+
+        // Invocamos al enchufe que hace toda la magia matemática y contable por nosotros
+        if (typeof window._ingresarCuenta === 'function') {
+            window._ingresarCuenta({
+                monto: montoIngresoHoy,
+                cuentaId: cuentaId,
+                etiqueta: etiqueta,
+                concepto: `${tituloConcepto} ${metodoPago} - ${clienteSeleccionado.nombre} (Folio: ${folioVenta})`,
+                referencia: `VENTA-${folioVenta}`
+            });
         } else {
-            let cban = StorageService.get("cuentas-bancarias", []);
-            const c = cban.find(x => String(x.id) === String(cuentaReceptora));
-            if (c) { c.saldo = (Number(c.saldo) || 0) + totalContado; StorageService.set("cuentas-bancarias", cban); }
-        }
-    } else if (enganche > 0) {
-        movimientosCaja.push({
-            id: Date.now(),
-            folio: folioVenta,
-            fecha: fechaHoy,
-            tipo: "ingreso",
-            monto: enganche,
-            concepto: `Enganche ${metodoPago} - ${clienteSeleccionado.nombre}`,
-            referencia: "Enganche",
-            cuenta: cuentaReceptora
-        });
-        // ✅ Actualizar saldo real de la cuenta con el enganche
-        if (cuentaReceptora === "efectivo") {
-            let cef = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
-            const c = cef.find(x => x.id === "efectivo");
-            if (c) { c.saldo = (Number(c.saldo) || 0) + enganche; StorageService.set("cuentasEfectivo", cef); }
-        } else {
-            let cban = StorageService.get("cuentas-bancarias", []);
-            const c = cban.find(x => String(x.id) === String(cuentaReceptora));
-            if (c) { c.saldo = (Number(c.saldo) || 0) + enganche; StorageService.set("cuentas-bancarias", cban); }
+            // Salvavidas por si el enchufe falla (Guarda el historial)
+            movimientosCaja.push({
+                id: Date.now(),
+                folio: folioVenta,
+                fecha: fechaHoy,
+                tipo: "ingreso",
+                monto: montoIngresoHoy,
+                concepto: `${tituloConcepto} ${metodoPago} - ${clienteSeleccionado.nombre}`,
+                referencia: `VENTA-${folioVenta}`,
+                cuenta: cuentaId,
+                etiquetaCuenta: etiqueta
+            });
+            StorageService.set("movimientosCaja", movimientosCaja);
         }
     }
 
@@ -1976,6 +1908,239 @@ function limpiarFiltrosReimpresion() {
     });
     renderReimprimirVenta();
 }
+// ============================================================
+// TRADUCTORES DE MIGRACIÓN (CONECTADOS A FIREBASE)
+// ============================================================
+function procesarMigracionCXC_POS() {
+    const raw = document.getElementById('jsonCuentasPorCobrarPOS').value.trim();
+    if (!raw) return alert('⚠️ Pega el JSON primero');
+    
+    try {
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data)) throw new Error("Los datos deben estar entre corchetes [ ]");
+        
+        let cxc = StorageService.get('cuentasPorCobrar', []);
+        let pagares = StorageService.get('pagaresSistema', []);
+        let clientesList = StorageService.get('clientes', []);
+        let ventasReg = StorageService.get('ventasRegistradas', []);
+        let agregadas = 0;
+
+        data.forEach(item => {
+            if (!item.nombre || item.saldoActual === undefined) return;
+            
+            const folio = item.folio || ("V-MIG-" + Math.floor(Math.random()*10000));
+            const saldo = Number(item.saldoActual);
+            const total = Number(item.total) || saldo;
+            const enganche = Number(item.enganche) || 0;
+            const periodicidad = item.periodicidad || 'semanal';
+            const fechaVentaDate = item.fechaVenta ? new Date(item.fechaVenta) : new Date();
+            const fechaVentaIso = fechaVentaDate.toISOString();
+            const fechaVentaStr = fechaVentaDate.toLocaleDateString('es-MX');
+            const pagosRestantes = Number(item.pagosRestantes) || 1;
+
+            // 1. Cliente
+            let cli = clientesList.find(c => c.nombre.toLowerCase() === item.nombre.toLowerCase());
+            let clienteId;
+            if (!cli) {
+                clienteId = Date.now() + Math.random();
+                clientesList.push({
+                    id: clienteId,
+                    nombre: item.nombre,
+                    telefono: item.telefono || "",
+                    direccion: item.direccion || "",
+                    fechaRegistro: fechaVentaStr
+                });
+            } else {
+                clienteId = cli.id;
+            }
+            
+            // 2. Cuenta por Cobrar
+            cxc.push({
+                folio: folio,
+                nombre: item.nombre,
+                clienteId: clienteId,
+                telefono: item.telefono || "",
+                direccion: item.direccion || "",
+                fechaVenta: fechaVentaIso,
+                fecha: fechaVentaIso,
+                totalContadoOriginal: total,
+                engancheRecibido: enganche,
+                saldoActual: saldo,
+                saldoOriginal: saldo,
+                metodo: "credito",
+                plan: { abono: item.montoPorPago || (saldo/pagosRestantes), total: saldo, meses: item.meses || 1 },
+                estado: saldo > 0 ? "Pendiente" : "Saldado",
+                abonos: [],
+                articulos: [{ nombre: "Saldo Migrado", cantidad: 1, precioContado: total }],
+                totalMercancia: total,
+                periodicidad: periodicidad
+            });
+
+            // 3. Pagarés
+            if (saldo > 0) {
+                let diasIntervalo = periodicidad === "quincenal" ? 14 : periodicidad === "mensual" ? 30 : 7;
+                let fechaPago = item.fechaPrimerPago ? new Date(item.fechaPrimerPago) : new Date(fechaVentaDate);
+                if (!item.fechaPrimerPago) fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+
+                const montoCuota = Number(item.montoPorPago) || (saldo / pagosRestantes);
+
+                for (let i = 1; i <= pagosRestantes; i++) {
+                    pagares.push({
+                        id: Date.now() + Math.random() + i,
+                        folio: folio,
+                        numeroPagere: `${folio}-${i}/${pagosRestantes}`,
+                        clienteNombre: item.nombre,
+                        fechaEmision: fechaVentaIso,
+                        fechaVencimiento: new Date(fechaPago).toISOString(),
+                        monto: montoCuota,
+                        estado: "Pendiente",
+                        diasAtrasoActual: 0
+                    });
+                    fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+                }
+            }
+
+            // 4. Ventas Registradas
+            ventasReg.push({
+                folio: folio,
+                fechaVenta: fechaVentaIso,
+                fecha: fechaVentaStr,
+                clienteId: clienteId,
+                clienteNombre: item.nombre,
+                total: total,
+                enganche: enganche,
+                saldoAFinanciar: saldo,
+                metodoPago: "credito",
+                articulos: [{ id: "MIG", nombre: "Saldo Migrado", cantidad: 1, precio: total }],
+                vendedor: "Migración Masiva"
+            });
+
+            agregadas++;
+        });
+
+        if (agregadas > 0) {
+            StorageService.set('cuentasPorCobrar', cxc);
+            StorageService.set('pagaresSistema', pagares);
+            StorageService.set('clientes', clientesList);
+            StorageService.set('ventasRegistradas', ventasReg);
+            
+            // Actualizar variables globales
+            window.clientes = clientesList; 
+
+            alert(`✅ ¡Éxito! ${agregadas} registros inyectados. La base de datos y Firebase se actualizaron.`);
+            document.getElementById('jsonCuentasPorCobrarPOS').value = "";
+        } else {
+            alert('⚠️ No se encontraron registros válidos.');
+        }
+    } catch(e) {
+        alert('❌ Error en el formato JSON: ' + e.message);
+    }
+}
+
+function procesarMigracionCXP_POS() {
+    const raw = document.getElementById('jsonCuentasPorPagarPOS').value.trim();
+    if (!raw) return alert('⚠️ Pega el JSON primero');
+    
+    try {
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data)) throw new Error("Los datos deben estar entre corchetes [ ]");
+        
+        let cxp = StorageService.get('cuentasPorPagar', []);
+        let agregadas = 0;
+
+        data.forEach(item => {
+            if (!item.proveedor || item.saldoPendiente === undefined) return;
+            cxp.push({
+                id: Date.now() + Math.random(),
+                compraId: item.compraId || Date.now(),
+                proveedor: item.proveedor,
+                producto: item.producto || "Saldo Migrado",
+                total: Number(item.total) || Number(item.saldoPendiente),
+                saldoPendiente: Number(item.saldoPendiente),
+                metodo: item.metodo || 'credito_proveedor',
+                formaPagoTexto: item.formaPagoTexto || 'Migración Histórica',
+                fecha: item.fecha || new Date().toLocaleDateString('es-MX'),
+                vencimiento: item.vencimiento || new Date().toLocaleDateString('es-MX')
+            });
+            agregadas++;
+        });
+
+        if (agregadas > 0) {
+            StorageService.set('cuentasPorPagar', cxp);
+            alert(`✅ ${agregadas} cuentas de proveedores migradas con éxito.`);
+            document.getElementById('jsonCuentasPorPagarPOS').value = "";
+        } else {
+            alert('⚠️ No se encontraron registros válidos.');
+        }
+    } catch(e) {
+        alert('❌ Error en el formato JSON: ' + e.message);
+    }
+}
+function procesarMigracionMSI_POS() {
+    const raw = document.getElementById('jsonCuentasMSIPOS').value.trim();
+    if (!raw) return alert('⚠️ Pega el JSON primero');
+    
+    try {
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data)) throw new Error("Los datos deben estar entre corchetes [ ]");
+        
+        let cuentasMSI = StorageService.get('cuentasMSI', []);
+        let agregadas = 0;
+
+        // Forzamos a que el sistema lea las tarjetas registradas
+        window.tarjetasConfig = StorageService.get("tarjetasConfig", []);
+
+        for (let item of data) {
+            if (!item.banco || !item.total || !item.meses) continue;
+
+            const fechaCompraDate = item.fechaCompra ? new Date(item.fechaCompra) : new Date();
+            const total = Number(item.total);
+            const meses = Number(item.meses);
+            const pagosRealizados = Number(item.pagosRealizados) || 0;
+
+            // Blindaje: Forzamos mayúsculas y quitamos espacios para que coincida perfecto
+            const nombreBanco = item.banco.trim().toUpperCase();
+
+            let calendario = [];
+            if (typeof calcularCalendarioMSI === 'function') {
+                calendario = calcularCalendarioMSI(fechaCompraDate, meses, nombreBanco);
+            }
+
+            // 🚨 VALIDACIÓN CRÍTICA 🚨
+            if (calendario.length === 0) {
+                alert(`⚠️ ALERTA: No pude calcular las fechas para el banco "${nombreBanco}".\n\n¿Ya registraste esta tarjeta en el menú "Bancos" con su día de corte?\n\nDeteniendo la migración para no generar errores. Resuelve el problema y vuelve a intentarlo.`);
+                return; // Aborta TODA la inyección al instante
+            }
+
+            cuentasMSI.push({
+                id: Date.now() + Math.random(),
+                compraId: "MIG-" + Date.now(),
+                banco: nombreBanco,
+                producto: item.producto || "Compra Histórica MSI",
+                total: total,
+                meses: meses,
+                cuotaMensual: total / meses,
+                fechaCompra: fechaCompraDate.toLocaleDateString('es-MX'),
+                calendario: calendario,
+                pagosRealizados: pagosRealizados
+            });
+            agregadas++;
+        }
+
+        if (agregadas > 0) {
+            StorageService.set('cuentasMSI', cuentasMSI);
+            alert(`✅ ¡Éxito! ${agregadas} compras a MSI migradas. El calendario de pagos se generó automáticamente.`);
+            document.getElementById('jsonCuentasMSIPOS').value = "";
+        }
+    } catch(e) {
+        alert('❌ Error en el formato JSON: ' + e.message);
+    }
+}
+window.procesarMigracionMSI_POS = procesarMigracionMSI_POS;
+
+// Exponer las funciones para que el HTML las encuentre
+window.procesarMigracionCXC_POS = procesarMigracionCXC_POS;
+window.procesarMigracionCXP_POS = procesarMigracionCXP_POS;
 
 window.renderReimprimirVenta = renderReimprimirVenta;
 window.reimprimirTicketVenta = reimprimirTicketVenta;

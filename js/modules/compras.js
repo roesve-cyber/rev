@@ -158,32 +158,35 @@ function eliminarProveedor(id) {
     }
 }
 
-// ===== HELPERS FINANCIEROS =====
+// ===== HELPERS FINANCIEROS (ENCHUFE UNIVERSAL) =====
 
-/** Lee cuenta seleccionada de un <select id="cuentaOrigen_{sufijo}"> o del selector legacy */
-function _getCuentaSeleccionada(sufijo) {
-    // intentar primero el selector con sufijo
-    let sel = document.getElementById(`cuentaOrigen_${sufijo}`);
-    // fallback al selector legacy
-    if (!sel) sel = document.getElementById('compraCuentaOrigen');
-    if (!sel) return { medioPago: 'efectivo', cuentaId: 'efectivo', etiqueta: 'Efectivo' };
-    const cuentaId = sel.value || 'efectivo';
-    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
-    const medioPago = cuentaId === 'efectivo' ? 'efectivo' : 'debito';
-    return { medioPago, cuentaId, etiqueta };
-}
+window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
+    const cajas = soloDebito ? [] : StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
+    const bancarias = StorageService.get('cuentas-bancarias', []);
+    const debito = bancarias.filter(c => c.tipo && c.tipo.toLowerCase().includes('debito'));
+    const todas = [...cajas, ...debito];
+    const opts = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
+};
 
-/** Descuenta de la cuenta y registra movimiento de caja */
-function _egresarCuenta({ monto, cuentaId, etiqueta, concepto, referencia }) {
-    if (cuentaId === 'efectivo') {
-        let cef = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo', saldo: 0 }]);
-        const c = cef.find(x => x.id === 'efectivo');
-        if (c) { c.saldo = (Number(c.saldo) || 0) - monto; StorageService.set('cuentasEfectivo', cef); }
+window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia }) {
+    // Detectar si el ID es de una caja de efectivo
+    const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
+    
+    if (isCaja) {
+        let cef = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
+        const c = cef.find(x => String(x.id) === String(cuentaId));
+        if (c) c.saldo = (Number(c.saldo) || 0) - monto;
+        else if (cef.length > 0) cef[0].saldo = (Number(cef[0].saldo) || 0) - monto; // Fallback
+        StorageService.set('cuentasEfectivo', cef);
     } else {
         let cban = StorageService.get('cuentas-bancarias', []);
-        const c = cban.find(x => String(x.id) === String(cuentaId));
-        if (c) { c.saldo = (Number(c.saldo) || 0) - monto; StorageService.set('cuentas-bancarias', cban); }
+        const c = cban.find(x => String(x.id) === String(cuentaId) || x.banco === cuentaId);
+        if (c) c.saldo = (Number(c.saldo) || 0) - monto;
+        StorageService.set('cuentas-bancarias', cban);
     }
+
+    // Registrar en el flujo de caja
     const movs = StorageService.get('movimientosCaja', []);
     movs.push({
         id: Date.now() + Math.random(),
@@ -192,23 +195,64 @@ function _egresarCuenta({ monto, cuentaId, etiqueta, concepto, referencia }) {
         monto,
         fecha: new Date().toISOString(),
         cuenta: cuentaId,
-        etiquetaCuenta: etiqueta,
-        medioPago: cuentaId === 'efectivo' ? 'efectivo' : 'debito',
+        etiquetaCuenta: etiqueta || cuentaId,
+        medioPago: isCaja ? 'efectivo' : 'transferencia',
         referencia
     });
     StorageService.set('movimientosCaja', movs);
+};
+window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha }) {
+    const cuentaRealId = (cuentaId === 'caja') ? 'efectivo' : cuentaId;
+    const isCaja = String(cuentaRealId).startsWith('caja_') || cuentaRealId === 'efectivo';
+    
+    if (isCaja) {
+        let cef = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
+        const c = cef.find(x => String(x.id) === String(cuentaRealId));
+        if (c) c.saldo = (Number(c.saldo) || 0) + monto;
+        else if (cef.length > 0) cef[0].saldo = (Number(cef[0].saldo) || 0) + monto; 
+        StorageService.set('cuentasEfectivo', cef);
+    } else {
+        let cban = StorageService.get('cuentas-bancarias', []);
+        const c = cban.find(x => String(x.id) === String(cuentaRealId) || x.banco === cuentaRealId);
+        if (c) c.saldo = (Number(c.saldo) || 0) + monto;
+        StorageService.set('cuentas-bancarias', cban);
+    }
+
+    const movs = StorageService.get('movimientosCaja', []);
+    movs.push({
+        id: Date.now() + Math.random(),
+        tipo: 'ingreso',
+        concepto,
+        monto,
+        // 👇 AHORA TOMA LA FECHA QUE LE MANDES, O USA HOY SI NO MANDAS NADA
+        fecha: fecha || new Date().toISOString(), 
+        cuenta: cuentaRealId,
+        etiquetaCuenta: etiqueta || cuentaRealId,
+        medioPago: isCaja ? 'efectivo' : 'transferencia',
+        referencia
+    });
+    StorageService.set('movimientosCaja', movs);
+};
+
+function _getCuentaSeleccionada(sufijo) {
+    let sel = document.getElementById(`cuentaOrigen_${sufijo}`) || document.getElementById('compraCuentaOrigen');
+    if (!sel) return { medioPago: 'efectivo', cuentaId: 'efectivo', etiqueta: '💵 Efectivo Principal' };
+    
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+    const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
+    
+    return { medioPago: isCaja ? 'efectivo' : 'debito', cuentaId, etiqueta };
 }
 
-/** Construye <select> con efectivo + cuentas débito */
-function _buildSelectorCuentas(idSelect, soloDebito) {
-    const efectivo  = soloDebito ? [] : StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo', saldo: 0 }]);
+function _poblarCuentasOrigen(targetId = "compraCuentaOrigen") {
+    const sel = document.getElementById(targetId);
+    if (!sel) return;
+    const cajas = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
     const bancarias = StorageService.get('cuentas-bancarias', []);
-    const debito    = bancarias.filter(c => c.tipo && c.tipo.toLowerCase().includes('debito'));
-    const todas     = [...efectivo, ...debito];
-    const opts = todas.map(c =>
-        `<option value="${c.id}">${c.nombre}${c.saldo !== undefined ? '  —  ' + dinero(c.saldo) : ''}</option>`
-    ).join('');
-    return `<select id="${idSelect}" style="width:100%;padding:9px;border:2px solid #d1d5db;border-radius:6px;font-size:14px;">${opts}</select>`;
+    const debito = bancarias.filter(c => c.tipo && c.tipo.toLowerCase().includes('debito'));
+    const todas = [...cajas, ...debito];
+    sel.innerHTML = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
 }
 
 // ===== COMPRAS =====
@@ -328,6 +372,10 @@ function registrarCompra() {
     }
 
     const totalCompra = cantidad * costoNuevo;
+    
+    // 👇 Leemos lo que el usuario escribió en el cuadrito 👇
+    const caracteristicas = document.getElementById("compraCaracteristicas")?.value || "";
+
     const nuevaCompra = {
         id: Date.now(),
         productoId,
@@ -336,7 +384,7 @@ function registrarCompra() {
         proveedorId,
         total: totalCompra,
         fecha: fechaHoyStr,
-        caracteristicas // <-- nuevo campo
+        caracteristicas // <-- Ahora sí, guarda la variable sin errores
     };
     compras.push(nuevaCompra);
     // Limpiar el input de características después de registrar
@@ -426,41 +474,12 @@ function registrarCompra() {
         console.error("❌ Error guardando recepciones");
     }
 
-    // Afectar el saldo real solo si el pago es de contado (sale dinero inmediatamente)
+    // Afectar el saldo real solo si el pago es de contado
     if (metodo === "contado") {
-        // --- A. DESCONTAR DEL SALDO REAL ---
-        if (cuentaOrigenId === "efectivo") {
-            // Buscamos tu lista de cuentas de efectivo
-            let cuentasEf = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
-            let c = cuentasEf.find(x => x.id === "efectivo");
-            if (c) {
-                c.saldo = (Number(c.saldo) || 0) - totalCompra; // Restamos el dinero
-                StorageService.set("cuentasEfectivo", cuentasEf);
-            }
-        } else {
-            // Buscamos en tus tarjetas bancarias
-            let cuentasBan = StorageService.get("cuentas-bancarias", []);
-            let c = cuentasBan.find(x => String(x.id) === String(cuentaOrigenId));
-            if (c) {
-                c.saldo = (Number(c.saldo) || 0) - totalCompra; // Restamos el dinero
-                StorageService.set("cuentas-bancarias", cuentasBan);
-            }
-        }
-
-        // --- B. REGISTRAR EL MOVIMIENTO (Para tu historial) ---
-        const movs = StorageService.get("movimientosCaja", []);
-        movs.push({
-            id: Date.now() + 10,
-            tipo: "egreso",
-            concepto: `Compra de contado — ${producto.nombre} a ${prov.nombre}`,
-            monto: totalCompra,
-            fecha: new Date().toISOString(),
-            cuenta: cuentaOrigenId,
-            etiquetaCuenta: cuentaOrigenNombre,
-            medioPago: "contado",
-            referencia: `COMPRA-${nuevaCompra.id}`
+        window._egresarCuenta({
+            monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
+            concepto: `Compra de contado — ${producto.nombre} a ${prov.nombre}`, referencia: `COMPRA-${nuevaCompra.id}`
         });
-        StorageService.set("movimientosCaja", movs);
     }
 
     alert(`✅ Registro Exitoso\nProveedor: ${prov.nombre}${avisoActualizacion}`);
@@ -818,15 +837,10 @@ function abrirNuevaOrdenCompra() {
                                 Sin seleccionar
                             </span>
                             <button type="button"
-                                    onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
-                                        document.getElementById('ocProductoSel').value=p.id;
-                                        var d=document.getElementById('ocProductoSel-display');
-                                        d.textContent=p.nombre+'  (Costo: '+dinero(p.costo||0)+')';
-                                        d.style.color='#111827';
-                                    }})"
-                                    style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
-                                🔍 Buscar
-                            </button>
+        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){document.getElementById('ocProductoSel').value=p.id;var d=document.getElementById('ocProductoSel-display');d.textContent=p.nombre+'  (Costo: '+dinero(p.costo||0)+')';d.style.color='#111827';alert('💡 Referencia de costo:\\nEl último costo registrado para este producto es de: $' + (p.costo || 0));}})"
+        style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+    🔍 Buscar
+</button>
                         </div>
                     </div>
                     <input type="text" id="ocCaracteristicas" placeholder="Características (tela, color, etc)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
@@ -1744,15 +1758,10 @@ function editarOrdenCompra(id) {
                     Sin seleccionar
                 </span>
                 <button type="button"
-                        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
-                            document.getElementById('editOcProductoSel').value=p.id;
-                            var d=document.getElementById('editOcProductoSel-display');
-                            d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';
-                            d.style.color='#111827';
-                        }})"
-                        style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
-                    🔍 Buscar
-                </button>
+        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){document.getElementById('editOcProductoSel').value=p.id;var d=document.getElementById('editOcProductoSel-display');d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';d.style.color='#111827';alert('💡 Referencia de costo:\\nEl último costo registrado para este producto es de: $' + (p.costo || 0));}})"
+        style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+    🔍 Buscar
+</button>
             </div>
           </div>
           <input type="number" id="editOcCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">

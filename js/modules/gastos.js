@@ -140,9 +140,6 @@ function _ejecutarEliminarCategoria(id) {
 }
 
 function abrirRegistrarGasto() {
-    const tarjetas = StorageService.get('tarjetasConfig', []);
-    const opcionesDebito = tarjetas.filter(t => t.tipo === 'debito').map(t =>
-        `<option value="${t.banco}">${t.banco} Débito</option>`).join('');
     const html = `
     <div data-modal="registrar-gasto" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:520px;padding:28px;max-height:90vh;overflow-y:auto;">
@@ -167,11 +164,8 @@ function abrirRegistrarGasto() {
             <input type="date" id="gastoFecha" value="${new Date().toISOString().split('T')[0]}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
           <div>
-            <label style="font-size:12px;font-weight:bold;color:#374151;">CUENTA DÉBITO (Cargo)</label>
-            <select id="gastoCuentaDebito" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-              <option value="caja">💵 Caja / Efectivo</option>
-              ${opcionesDebito}
-            </select>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">¿DE QUÉ CUENTA SALE EL DINERO?</label>
+            ${window._buildSelectorCuentas('gastoCuentaDebito', false)}
           </div>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="gastoRecurrente" onchange="toggleRecurrente()" style="width:18px;height:18px;">
@@ -194,42 +188,44 @@ function abrirRegistrarGasto() {
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
-function toggleRecurrente() {
-    const cb = document.getElementById('gastoRecurrente');
-    const div = document.getElementById('divPeriodicidad');
-    if (div) div.style.display = cb?.checked ? 'block' : 'none';
-}
-
 function guardarGasto() {
     const categoria = document.getElementById('gastoCategoria')?.value;
     const descripcion = document.getElementById('gastoDescripcion')?.value.trim();
     const monto = parseFloat(document.getElementById('gastoMonto')?.value) || 0;
     const fecha = document.getElementById('gastoFecha')?.value || new Date().toISOString().split('T')[0];
-    const cuentaDebito = document.getElementById('gastoCuentaDebito')?.value || 'caja';
     const recurrente = document.getElementById('gastoRecurrente')?.checked || false;
     const periodicidad = document.getElementById('gastoPeriodicidad')?.value || 'mensual';
+    
+    // Obtener cuenta conectada al enchufe
+    const selCuenta = document.getElementById('gastoCuentaDebito');
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].text;
+
     if (!descripcion) return alert('⚠️ La descripción es obligatoria.');
     if (monto <= 0) return alert('⚠️ El monto debe ser mayor a 0.');
+    
     const hoyStr = new Date().toISOString().split('T')[0];
-    const gasto = { id: Date.now(), categoria, descripcion, monto, fecha, cuentaDebito, recurrente, periodicidad, ultimaVez: recurrente ? hoyStr : null };
+    const gasto = { id: Date.now(), categoria, descripcion, monto, fecha, cuentaDebito: cuentaId, etiquetaCuenta: etiqueta, recurrente, periodicidad, ultimaVez: recurrente ? hoyStr : null };
+    
     const gastos = StorageService.get('gastosOperativos', []);
     gastos.push(gasto);
     StorageService.set('gastosOperativos', gastos);
-    // Registrar en movimientos de caja como egreso
-    const movs = StorageService.get('movimientosCaja', []);
-    movs.push({
-        id: Date.now() + 1,
-        tipo: 'egreso',
-        concepto: `Gasto: ${categoria} — ${descripcion}`,
-        monto,
-        fecha: new Date(fecha).toISOString(),
-        cuenta: cuentaDebito,
-        referencia: `GASTO-${gasto.id}`
+    
+    // Descontar usando el enchufe universal
+    window._egresarCuenta({
+        monto: monto, cuentaId: cuentaId, etiqueta: etiqueta,
+        concepto: `Gasto: ${categoria} — ${descripcion}`, referencia: `GASTO-${gasto.id}`
     });
-    StorageService.set('movimientosCaja', movs);
+
     document.querySelector('[data-modal="registrar-gasto"]')?.remove();
-    alert(`✅ Gasto registrado: ${dinero(monto)}`);
+    alert(`✅ Gasto registrado: ${dinero(monto)} (Restado de ${etiqueta})`);
     renderGestionGastos();
+}
+
+function toggleRecurrente() {
+    const cb = document.getElementById('gastoRecurrente');
+    const div = document.getElementById('divPeriodicidad');
+    if (div) div.style.display = cb?.checked ? 'block' : 'none';
 }
 
 function renderGestionGastos() {
