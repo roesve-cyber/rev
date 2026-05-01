@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
 
-        // Productos (global)
+        // Productos (global) -> Corregido a .get() seguro
         if (window._firebaseActivo && window._db) {
             // Cargar productos directamente desde Firestore
             window._db.collection('posData').doc('productos').get().then(doc => {
@@ -78,12 +78,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Navegar a dashboard y verificar alertas
         if (!window.location.pathname.includes("catalogo.html")) {
-    navA('dashboard');
-    actualizarContadorCarrito();
-    verificarAlertasPagares();
-}
+            navA('dashboard');
+            actualizarContadorCarrito();
+            verificarAlertasPagares();
+        }
         actualizarContadorCarrito();
         verificarAlertasPagares();
+        
+        // 🌟 INTEGRACIÓN SEGURA: INICIAR ESCUCHA EN TIEMPO REAL 🌟
+        if (typeof StorageService.startRealtimeSync === 'function') {
+            StorageService.startRealtimeSync();
+        }
         
         console.log("✅ Sistema cargado correctamente.");
         console.log("📊 Estado actual:");
