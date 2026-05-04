@@ -37,6 +37,7 @@ let movimientosCaja = StorageService.get("movimientosCaja", []);
 let requisicionesCompra = StorageService.get("requisicionesCompra", []);
 let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
 let pagaresSistema = StorageService.get("pagaresSistema", []);
+let sucursales = StorageService.get("sucursales", []);
 
 let cuentasEfectivo = StorageService.get("cuentasEfectivo", [
     { id: "efectivo", nombre: "💵 Efectivo", tipo: "efectivo", saldo: 0 }

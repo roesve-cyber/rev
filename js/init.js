@@ -67,6 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
         requisicionesCompra = StorageService.get("requisicionesCompra", []);
         salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
         
+        // Sucursales (multi-branch support)
+        sucursales = StorageService.get("sucursales", []);
+        if (typeof migrarSucursales === 'function') migrarSucursales();
+        
         // Migración de datos antiguos
         migrarStorageCuentasPorCobrar();
         

@@ -96,6 +96,14 @@
                 <button onclick="navA('configcategorias')">🏷️ Categorías</button>
                 <button onclick="abrirImportadorProductos()">📥 Importar Batch</button>
                 <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
+                <button onclick="navA('inventario-avanzado'); setTimeout(()=>{window.initInventarioAvanzado && window.initInventarioAvanzado();}, 100)">🏬 Análisis Multi-Sucursal</button>
+            </div>
+        </div>
+
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-sucursales')">🏬 SUCURSALES <span>▾</span></button>
+            <div id="sub-sucursales" class="submenu oculto-submenu">
+                <button onclick="navA('sucursales'); setTimeout(()=>{window.renderSucursales && window.renderSucursales();}, 100)">🏢 Gestionar Sucursales</button>
             </div>
         </div>
 
@@ -1069,6 +1077,80 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
     </div>
 </div>
 
+<!-- ===== SUCURSALES ===== -->
+<div id="sucursales" class="vista oculto" style="display:none;">
+    <div style="padding:30px;max-width:1200px;margin:0 auto;">
+        <div style="background:white;padding:30px;border-radius:15px;box-shadow:0 10px 25px rgba(0,0,0,0.08);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h2 style="margin:0;color:#1e40af;">🏬 Gestión de Sucursales</h2>
+            </div>
+            <!-- Formulario -->
+            <input type="hidden" id="sucEditId" value="">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px;margin-bottom:20px;">
+                <h3 style="margin:0 0 16px;color:#374151;font-size:15px;">➕ Agregar / Editar Sucursal</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div>
+                        <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">NOMBRE *</label>
+                        <input type="text" id="sucNombre" placeholder="Ej: Sucursal Norte" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">DIRECCIÓN</label>
+                        <input type="text" id="sucDireccion" placeholder="Calle, número, colonia" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">TELÉFONO</label>
+                        <input type="text" id="sucTelefono" placeholder="555-000-0000" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">GERENTE / ENCARGADO</label>
+                        <input type="text" id="sucGerente" placeholder="Nombre del responsable" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:14px;">
+                    <button id="btnGuardarSucursal" onclick="guardarSucursal()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Agregar Sucursal</button>
+                    <button onclick="limpiarFormularioSucursal()" style="padding:10px 16px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Limpiar</button>
+                </div>
+            </div>
+            <!-- Lista -->
+            <div id="tablaSucursales"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== ANÁLISIS DE INVENTARIO MULTI-SUCURSAL ===== -->
+<div id="inventario-avanzado" class="vista oculto" style="display:none;">
+    <div style="padding:30px;max-width:1400px;margin:0 auto;">
+        <div style="background:white;padding:30px;border-radius:15px;box-shadow:0 10px 25px rgba(0,0,0,0.08);">
+            <h2 style="color:#1e40af;margin-bottom:6px;">🏬 Análisis de Inventario Multi-Sucursal</h2>
+            <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">Consulta el stock por sucursal y color en tiempo real.</p>
+
+            <!-- Filtros -->
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;align-items:flex-end;">
+                <div>
+                    <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">SUCURSAL</label>
+                    <select id="filtroSucursalAnalisis" onchange="renderAnalisisInventario(); renderResumenPorColor();" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;min-width:200px;"></select>
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">CATEGORÍA</label>
+                    <select id="filtroCatAnalisis" onchange="renderAnalisisInventario();" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;min-width:180px;"></select>
+                </div>
+                <div>
+                    <label style="font-size:12px;font-weight:bold;color:#6b7280;display:block;margin-bottom:4px;">COLOR</label>
+                    <input type="text" id="filtroColorAnalisis" placeholder="Buscar color..." oninput="renderAnalisisInventario();" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;min-width:160px;">
+                </div>
+                <button onclick="renderAnalisisInventario();renderResumenPorColor();" style="padding:8px 16px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🔄 Actualizar</button>
+            </div>
+
+            <!-- Tabla principal -->
+            <div id="contenidoAnalisisInventario" style="margin-bottom:30px;"></div>
+
+            <!-- Resumen por color -->
+            <h3 style="color:#374151;margin-bottom:10px;font-size:15px;">🎨 Resumen por Color</h3>
+            <div id="contenidoResumenColor"></div>
+        </div>
+    </div>
+</div>
+
 <script src="js/services/storage.js"></script>
 <script src="js/services/validator.js"></script>
 <script src="js/services/calculator.js"></script>
@@ -1096,6 +1178,8 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
 <script src="js/modules/producto-picker.js"></script>
 <script src="js/modules/cliente-picker.js"></script>
 <script src="js/modules/notificaciones.js"></script>
+<script src="js/modules/sucursales.js"></script>
+<script src="js/modules/inventario-avanzado.js"></script>
 <script src="js/core/navigation.js"></script>
     <script src="js/init.js"></script>
     <!-- Eliminado override de navA para evitar ciclo infinito -->

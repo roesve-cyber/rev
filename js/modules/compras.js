@@ -826,6 +826,8 @@ function abrirNuevaOrdenCompra() {
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA ENTREGA ESTIMADA</label>
             <input type="date" id="ocFechaEntrega" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <label style="font-size:12px;font-weight:bold;color:#374151;margin-top:10px;display:block;">SUCURSAL DESTINO <span style="font-weight:normal;color:#9ca3af;">(opcional)</span></label>
+            <div id="divSucursalDestinoOC" style="margin-top:4px;"></div>
           </div>
         </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
@@ -873,6 +875,11 @@ function abrirNuevaOrdenCompra() {
     _renderTablaArticulosOC();
     // Llenar combo de cuenta para anticipo
     _poblarCuentasOrigen('ocCuentaOrigen');
+    // Poblar selector de sucursal destino
+    const divSucDest = document.getElementById('divSucursalDestinoOC');
+    if (divSucDest && typeof buildSelectorSucursales === 'function') {
+        divSucDest.innerHTML = buildSelectorSucursales('ocSucursalDestino', '', true);
+    }
     // Mostrar/ocultar combo según método de pago
     const metodoPagoSel = document.getElementById('ocMetodoPago');
     const divCuentaOC = document.getElementById('divCuentaOC');
@@ -978,6 +985,12 @@ function guardarOrdenCompra() {
     const prov = provs.find(p => String(p.id) === String(provId));
     const provNombre = prov ? prov.nombre : 'Sin proveedor';
     const total = arts.reduce((s, a) => s + a.subtotal, 0);
+    // Sucursal destino (opcional, campo nuevo)
+    const sucursalDestinoId = document.getElementById('ocSucursalDestino')?.value || '';
+    let sucursalDestinoNombre = '';
+    if (sucursalDestinoId && typeof obtenerSucursalPorId === 'function') {
+        sucursalDestinoNombre = obtenerSucursalPorId(sucursalDestinoId)?.nombre || '';
+    }
     const oc = {
         id: Date.now(),
         folio: _foliosOC(),
@@ -994,7 +1007,9 @@ function guardarOrdenCompra() {
             cuentaOrigen,
             meses
         },
-        anticipo_pagado: anticipo || 0
+        anticipo_pagado: anticipo || 0,
+        sucursalDestinoId:     sucursalDestinoId     || null,
+        sucursalDestinoNombre: sucursalDestinoNombre || null
     };
     const lista = StorageService.get('ordenesCompra', []);
     lista.push(oc);
@@ -1037,6 +1052,7 @@ function imprimirOrdenCompra(id) {
       </div>
     </div>
         <div style="margin-bottom:16px;"><strong>Proveedor:</strong> ${oc.proveedorNombre}</div>
+        ${oc.sucursalDestinoNombre ? `<div style="margin-bottom:16px;"><strong>Sucursal Destino:</strong> ${oc.sucursalDestinoNombre}</div>` : ''}
         <div style="margin-bottom:16px;"><strong>Condiciones comerciales:</strong><br>
             Forma de pago: <b>${oc.condicionesComerciales?.metodoPago === 'contado' ? 'Contado' : oc.condicionesComerciales?.metodoPago === 'credito' ? 'Crédito Proveedor' : oc.condicionesComerciales?.metodoPago === 'msi' ? 'Meses sin Intereses' : '-'}</b><br>
             ${oc.condicionesComerciales?.metodoPago === 'msi' ? `Meses: <b>${oc.condicionesComerciales?.meses}</b><br>` : ''}
@@ -1390,7 +1406,25 @@ function confirmarRecepcionOC(ocId) {
 const prods = StorageService.get('productos', []);
 itemsRecibidos.forEach(art => {
     const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
-    if (pidx !== -1) prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
+    if (pidx !== -1) {
+        prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
+        // Actualizar stockPorSucursal si la OC tiene sucursal destino
+        if (oc.sucursalDestinoId) {
+            if (!prods[pidx].stockPorSucursal) prods[pidx].stockPorSucursal = {};
+            const sid = oc.sucursalDestinoId;
+            if (!prods[pidx].stockPorSucursal[sid]) prods[pidx].stockPorSucursal[sid] = [];
+            const colorArt = (art.caracteristicas || prods[pidx].color || 'Sin color').trim();
+            const varIdx = prods[pidx].stockPorSucursal[sid].findIndex(
+                v => v.color.toLowerCase() === colorArt.toLowerCase()
+            );
+            if (varIdx !== -1) {
+                prods[pidx].stockPorSucursal[sid][varIdx].stock =
+                    (prods[pidx].stockPorSucursal[sid][varIdx].stock || 0) + art.cantidadRec;
+            } else {
+                prods[pidx].stockPorSucursal[sid].push({ color: colorArt, stock: art.cantidadRec });
+            }
+        }
+    }
 });
 StorageService.set('productos', prods);
 productos = prods;          // ← ESTA línea sincroniza el global
@@ -1405,7 +1439,12 @@ itemsRecibidos.forEach(art => {
         tipo: 'entrada',
         cantidad: art.cantidadRec,
         concepto: `Recepción OC ${oc.folio} — ${oc.proveedorNombre}`,
-        fecha: fechaRec.toLocaleString('es-MX')
+        fecha: fechaRec.toLocaleString('es-MX'),
+        // Campos extendidos para trazabilidad multi-sucursal (opcionales)
+        sucursalId:     oc.sucursalDestinoId     || null,
+        sucursalNombre: oc.sucursalDestinoNombre || null,
+        color:          art.caracteristicas      || null,
+        referencia:     oc.folio
     });
 });
 StorageService.set('movimientosInventario', kardex);
@@ -1556,6 +1595,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
         <div style="background:#f8fafc;border-radius:8px;padding:14px;">
             <div style="font-size:11px;color:#6b7280;font-weight:bold;text-transform:uppercase;margin-bottom:8px;">Proveedor</div>
             <div style="font-size:16px;font-weight:bold;">${oc.proveedorNombre}</div>
+            ${oc.sucursalDestinoNombre ? `<div style="font-size:12px;color:#3b82f6;margin-top:6px;">📍 Sucursal: <b>${oc.sucursalDestinoNombre}</b></div>` : ''}
         </div>
         <div style="background:#f8fafc;border-radius:8px;padding:14px;">
             <div style="font-size:11px;color:#6b7280;font-weight:bold;text-transform:uppercase;margin-bottom:8px;">Orden de Compra Origen</div>
