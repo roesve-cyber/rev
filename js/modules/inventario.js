@@ -1130,6 +1130,12 @@ window.agregarVarianteStock = function(prodId) {
         p.variantes.push({ ubicacion, color, stock });
     }
 
+    // Sincronizar p.stock con el total de variantes
+    p.stock = p.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+    // Guardar cambios
+    StorageService.set("productos", window.productos);
+
     // Registrar en Kardex para contabilidad
     registrarMovimiento(prodId, `Entrada - ${ubicacion} (${color})`, stock, "entrada");
     
@@ -1144,6 +1150,13 @@ window.eliminarVariante = function(prodId, index) {
     registrarMovimiento(prodId, `Corrección/Baja - ${v.ubicacion} (${v.color})`, v.stock, "salida");
     
     p.variantes.splice(index, 1);
+
+    // Sincronizar p.stock con el total de variantes
+    p.stock = p.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+    // Guardar cambios
+    StorageService.set("productos", window.productos);
+
     mostrarDetalleProductoMaestro(prodId);
 };
 function procesarDatosImportacion(texto) {
