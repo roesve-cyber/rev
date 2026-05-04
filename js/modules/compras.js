@@ -1087,6 +1087,11 @@ function recibirOrdenCompra(id) {
                        style="width:70px;padding:6px;border:2px solid #3b82f6;border-radius:6px;text-align:center;font-size:14px;font-weight:bold;">
             </td>
             <td id="recP_${i}" style="padding:10px;text-align:center;color:#d97706;font-weight:bold;">0</td>
+            <td style="padding:10px;text-align:center;">
+                <input type="text" id="recColor_${i}" value="${a.color || ''}"
+                       placeholder="Ej: Chocolate"
+                       style="width:90px;padding:5px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">
+            </td>
             <td style="padding:10px;text-align:right;color:#374151;">
                 <input type="number" id="recCosto_${i}" value="${a.costo}" min="0" step="0.01" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._actualizarCostoOCArticulo(${i}, this.value, ${id});}" />
             </td>
@@ -1148,6 +1153,7 @@ function recibirOrdenCompra(id) {
                 <th style="padding:10px;text-align:center;">Pedido</th>
                 <th style="padding:10px;text-align:center;">Recibido ✏️</th>
                 <th style="padding:10px;text-align:center;">Back Order</th>
+                <th style="padding:10px;text-align:center;">Color 🎨</th>
                 <th style="padding:10px;text-align:right;">Costo U.</th>
                 <th style="padding:10px;text-align:right;">Subtotal</th>
               </tr>
@@ -1155,7 +1161,7 @@ function recibirOrdenCompra(id) {
             <tbody>${filasArts}</tbody>
             <tfoot>
               <tr style="background:#f9fafb;font-weight:bold;">
-                <td colspan="5" style="padding:10px;text-align:right;">Total recibido:</td>
+                <td colspan="6" style="padding:10px;text-align:right;">Total recibido:</td>
                 <td id="recTotalMonto" style="padding:10px;text-align:right;color:#1e40af;font-size:16px;">${dinero(totalOC)}</td>
               </tr>
             </tfoot>
@@ -1306,8 +1312,9 @@ function confirmarRecepcionOC(ocId) {
         const inputVal = parseInt(document.getElementById(`recQ_${i}`)?.value) || 0;
         const cantRec = Math.max(0, inputVal);
         const backOrd = a.cantidad - Math.min(inputVal, a.cantidad);
+        const colorRec = document.getElementById(`recColor_${i}`)?.value.trim() || '';
         if (cantRec > 0) {
-            itemsRecibidos.push({ ...a, cantidadRec: cantRec, subtotal: cantRec * a.costo });
+            itemsRecibidos.push({ ...a, cantidadRec: cantRec, subtotal: cantRec * a.costo, colorRec });
             // Guardar historial de costos (recepción OC)
             guardarHistorialCosto({
                 productoId: a.productoId,
@@ -1390,7 +1397,21 @@ function confirmarRecepcionOC(ocId) {
 const prods = StorageService.get('productos', []);
 itemsRecibidos.forEach(art => {
     const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
-    if (pidx !== -1) prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
+    if (pidx !== -1) {
+        prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
+        // Agregar a variantes si se especificó color
+        if (art.colorRec) {
+            prods[pidx].variantes = prods[pidx].variantes || [];
+            const existente = prods[pidx].variantes.find(
+                v => v.ubicacion === 'Tienda' && v.color && v.color.toUpperCase() === art.colorRec.toUpperCase()
+            );
+            if (existente) {
+                existente.stock = (Number(existente.stock) || 0) + art.cantidadRec;
+            } else {
+                prods[pidx].variantes.push({ ubicacion: 'Tienda', color: art.colorRec, stock: art.cantidadRec });
+            }
+        }
+    }
 });
 StorageService.set('productos', prods);
 productos = prods;          // ← ESTA línea sincroniza el global
@@ -1399,12 +1420,15 @@ window.productos = prods;   // ← por si se referencia con window. en otro lado
     // Movimientos de inventario
     const kardex = StorageService.get('movimientosInventario', []);  // ← leer fresco
 itemsRecibidos.forEach(art => {
+    const concepto = art.colorRec
+        ? `Recepción OC ${oc.folio} — ${oc.proveedorNombre} (${art.colorRec})`
+        : `Recepción OC ${oc.folio} — ${oc.proveedorNombre}`;
     kardex.push({
         id: Date.now() + Math.random(),
         productoId: art.productoId,
         tipo: 'entrada',
         cantidad: art.cantidadRec,
-        concepto: `Recepción OC ${oc.folio} — ${oc.proveedorNombre}`,
+        concepto,
         fecha: fechaRec.toLocaleString('es-MX')
     });
 });
