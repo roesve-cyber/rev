@@ -503,6 +503,12 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
     }
 }
 
+// Recalcula p.stock como suma de todas las variantes del producto
+function _recalcularStockTotal(prod) {
+    if (!prod || !prod.variantes) return;
+    prod.stock = prod.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+}
+
 function eliminarProducto(id) {
     window.productos = window.productos.filter(p => String(p.id) !== String(id));
     if (!StorageService.set("productos", window.productos)) {
@@ -1130,8 +1136,8 @@ window.agregarVarianteStock = function(prodId) {
         p.variantes.push({ ubicacion, color, stock });
     }
 
-    // Registrar en Kardex para contabilidad
-    registrarMovimiento(prodId, `Entrada - ${ubicacion} (${color})`, stock, "entrada");
+    // Sincronizar p.stock con el total de variantes
+    _recalcularStockTotal(p);
     
     mostrarDetalleProductoMaestro(prodId);
 };
@@ -1144,6 +1150,13 @@ window.eliminarVariante = function(prodId, index) {
     registrarMovimiento(prodId, `Corrección/Baja - ${v.ubicacion} (${v.color})`, v.stock, "salida");
     
     p.variantes.splice(index, 1);
+
+    // Sincronizar p.stock con el total de variantes
+    _recalcularStockTotal(p);
+
+    // Guardar cambios
+    StorageService.set("productos", window.productos);
+
     mostrarDetalleProductoMaestro(prodId);
 };
 function procesarDatosImportacion(texto) {

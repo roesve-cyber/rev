@@ -155,17 +155,27 @@ function renderCarrito() {
 
         // Color selector (sugerencia)
         const coloresDisp = obtenerColoresDisponibles(p.id);
-        const colorSeleccionado = p.colorElegido || '';
+        let colorSeleccionado = p.colorElegido || '';
+
+        // Auto-seleccionar si sólo hay un color disponible
+        if (coloresDisp.length === 1 && !colorSeleccionado) {
+            colorSeleccionado = coloresDisp[0].color;
+            carrito[index].colorElegido = colorSeleccionado;
+            StorageService.set("carrito", carrito);
+        }
+
         let colorCell;
         if (coloresDisp.length > 0) {
+            const colorBorde = colorSeleccionado ? '#27ae60' : '#f59e0b';
             const opciones = coloresDisp.map(c =>
                 `<option value="${_escapeHtml(c.color)}" ${colorSeleccionado && colorSeleccionado.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${_escapeHtml(c.color)} (${c.stock} pzs)</option>`
             ).join('');
-            colorCell = `<select onchange="actualizarColorCarrito(${index}, this.value)"
-                style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;">
+            colorCell = `<select onchange="actualizarColorCarrito(${index}, this.value); renderCarrito();"
+                style="width:100%; padding:4px; border:2px solid ${colorBorde}; border-radius:4px; font-size:12px;">
                 <option value="">-- Color --</option>
                 ${opciones}
-            </select>`;
+            </select>
+            ${!colorSeleccionado ? '<small style="color:#f59e0b; font-size:10px;">⚠ Requerido</small>' : ''}`;
         } else {
             colorCell = `<small style="color:#94a3b8;">Sin var.</small>`;
         }
@@ -583,6 +593,18 @@ function confirmarVentaFinal() {
         return;
     }
 
+    // Validar que productos con variantes de color tengan color seleccionado
+    const sinColor = carrito.filter(item => {
+        const colores = obtenerColoresDisponibles(item.id);
+        return colores.length > 0 && !item.colorElegido;
+    });
+    if (sinColor.length > 0) {
+        const nombres = sinColor.map(p => String(p.nombre || '')).join(', ');
+        alert(`⚠️ Selecciona el color para: ${nombres}\n\nRegresa al carrito y elige el color de cada producto antes de continuar.`);
+        navA('carrito');
+        return;
+    }
+
     // Leer desde _estadoPago (más confiable que el DOM del carrito oculto)
     const metodoPago = window._estadoPago?.metodo
         || document.getElementById("selMetodoPago")?.value;
@@ -728,8 +750,9 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     const resumenProductos = carrito.map(p => {
         const cantidad = p.cantidad || 1;
         const subtotal = (p.precioContado || 0) * cantidad;
+        const colorInfo = p.colorElegido ? `<br><small style="color:#6b7280;">🎨 ${_escapeHtml(p.colorElegido)}</small>` : '';
         return `<tr>
-            <td>${p.nombre}</td>
+            <td>${p.nombre}${colorInfo}</td>
             <td style="text-align:center;">${cantidad}</td>
             <td style="text-align:right;">${dinero(p.precioContado)}</td>
             <td style="text-align:right; font-weight:bold;">${dinero(subtotal)}</td>
@@ -845,7 +868,14 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     carrito.forEach(item => {
         const prod = productos.find(p => String(p.id) === String(item.id));
         if (prod) {
-            if ((prod.stock || 0) >= (item.cantidad || 1)) {
+            const coloresDisp = obtenerColoresDisponibles(prod.id);
+            let stockEfectivo;
+            if (coloresDisp.length > 0 && item.colorElegido) {
+                stockEfectivo = obtenerStockPorColor(prod.id, item.colorElegido);
+            } else {
+                stockEfectivo = prod.stock || 0;
+            }
+            if (stockEfectivo >= (item.cantidad || 1)) {
                 productosConStock.push({ item, prod });
             } else {
                 productosSinStock.push({ item, prod });
@@ -1078,10 +1108,17 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
         const prod = productos.find(prod => String(prod.id) === String(item.id)); // ✅
         if (!prod) return;
         const decision = decisionesInventario[item.id];
-        const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
+        // Usar stock por color si el producto tiene variantes y un color elegido
+        const colorFinal = (decision && decision.color !== undefined) ? decision.color : (item.colorElegido || '');
+        const coloresDisp = obtenerColoresDisponibles(prod.id);
+        let stockEfectivo;
+        if (coloresDisp.length > 0 && colorFinal) {
+            stockEfectivo = obtenerStockPorColor(prod.id, colorFinal);
+        } else {
+            stockEfectivo = prod.stock || 0;
+        }
+        const tieneStock = stockEfectivo >= (item.cantidad || 1);
         if (tieneStock && decision && decision.entregar) {
-            // Si se cambió el color en el diálogo, usar ese; si no, usar el del carrito
-            const colorFinal = (decision.color !== undefined) ? decision.color : (item.colorElegido || '');
             productosAEntregar.push({ item: { ...item, colorElegido: colorFinal }, prod });
         } else {
             productosAPendiente.push({ item, prod });
@@ -1139,8 +1176,11 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
                 if (restante > 0) {
                     console.warn(`⚠️ Stock de variante insuficiente para color "${colorElegido}" en ${x.prod.nombre}. Faltaron ${restante} piezas en variantes.`);
                 }
+                // Recalcular stock total desde variantes para mantener consistencia
+                _recalcularStockTotal(x.prod);
+            } else {
+                x.prod.stock = stockActual - cantRequerida;
             }
-            x.prod.stock = stockActual - cantRequerida;
             const concepto = colorElegido
                 ? `Venta - ${folioVenta} (${colorElegido})`
                 : `Venta - ${folioVenta}`;
