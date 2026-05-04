@@ -133,6 +133,7 @@ function renderCarrito() {
                         <tr>
                             <th>Producto</th>
                             <th style="text-align:center;">Stock</th>
+                            <th style="text-align:center;">Color</th>
                             <th style="text-align:center;">Piezas</th>
                             <th style="text-align:right;">Precio</th>
                             <th style="text-align:center;">Acción</th>
@@ -148,12 +149,33 @@ function renderCarrito() {
         const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
         const textoStock = stock > 0 ? stock : "Sin stock";
 
+        // Color selector (sugerencia)
+        const coloresDisp = obtenerColoresDisponibles(p.id);
+        const colorSeleccionado = p.colorElegido || '';
+        let colorCell;
+        if (coloresDisp.length > 0) {
+            const opciones = coloresDisp.map(c =>
+                `<option value="${c.color}" ${colorSeleccionado && colorSeleccionado.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${c.color} (${c.stock} pzs)</option>`
+            ).join('');
+            colorCell = `<select onchange="actualizarColorCarrito(${index}, this.value)"
+                style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;">
+                <option value="">-- Color --</option>
+                ${opciones}
+            </select>`;
+        } else {
+            colorCell = `<small style="color:#94a3b8;">Sin var.</small>`;
+        }
+
         html += `
             <tr>
                 <td><strong>${p.nombre}</strong></td>
 
                 <td style="text-align:center; font-weight:bold; color:${colorStock};">
                     ${textoStock}
+                </td>
+
+                <td style="text-align:center; min-width:110px;">
+                    ${colorCell}
                 </td>
 
                 <td style="text-align:center;">
@@ -322,6 +344,34 @@ function actualizarCantidadCarrito(index, nuevaCantidad) {
             console.error("❌ Error actualizando cantidad");
         }
         renderCarrito();
+    }
+}
+
+// ===== HELPERS DE VARIANTES (COLOR) =====
+function obtenerColoresDisponibles(productoId) {
+    const prod = productos.find(p => String(p.id) === String(productoId));
+    if (!prod || !prod.variantes || prod.variantes.length === 0) return [];
+    const mapa = {};
+    prod.variantes.forEach(v => {
+        if (v.color) {
+            mapa[v.color] = (mapa[v.color] || 0) + (Number(v.stock) || 0);
+        }
+    });
+    return Object.entries(mapa).map(([color, stock]) => ({ color, stock }));
+}
+
+function obtenerStockPorColor(productoId, color) {
+    const prod = productos.find(p => String(p.id) === String(productoId));
+    if (!prod || !prod.variantes) return 0;
+    return prod.variantes
+        .filter(v => v.color && v.color.toUpperCase() === color.toUpperCase())
+        .reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+}
+
+function actualizarColorCarrito(index, color) {
+    if (index >= 0 && index < carrito.length) {
+        carrito[index].colorElegido = color;
+        StorageService.set("carrito", carrito);
     }
 }
 
@@ -811,11 +861,49 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         
         productosConStock.forEach(x => {
             const idProd = x.prod.id;
+            const colorElegido = x.item.colorElegido || '';
+            const cantRequerida = x.item.cantidad || 1;
+            const coloresDisp = obtenerColoresDisponibles(idProd);
+
+            // Color info block
+            let infoColor = '';
+            if (colorElegido) {
+                const stockColor = obtenerStockPorColor(idProd, colorElegido);
+                if (stockColor >= cantRequerida) {
+                    infoColor = `<small style="color:#166534; display:block; margin-top:4px;">✅ Color: <b>${colorElegido}</b> — Stock disponible: ${stockColor}</small>`;
+                } else {
+                    const alternativas = coloresDisp.filter(c => c.color.toUpperCase() !== colorElegido.toUpperCase() && c.stock >= cantRequerida);
+                    infoColor = `<small style="color:#991b1b; display:block; margin-top:4px;">⚠️ Sin stock suficiente de <b>${colorElegido}</b></small>`;
+                    if (alternativas.length > 0) {
+                        infoColor += `<small style="color:#374151; display:block;">Disponible en: ${alternativas.map(c => `${c.color} (${c.stock})`).join(', ')}</small>`;
+                    }
+                }
+            }
+
+            // Color selector in dialog
+            let colorSelectorHtml = '';
+            if (coloresDisp.length > 0) {
+                const opcs = coloresDisp.map(c =>
+                    `<option value="${c.color}" ${colorElegido && colorElegido.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${c.color} (${c.stock} pzs)</option>`
+                ).join('');
+                colorSelectorHtml = `
+                    <div style="margin-top:6px;">
+                        <label style="font-size:11px; color:#374151;">🎨 Color:</label>
+                        <select id="color-inv-${idProd}" onchange="cambiarColorInventario(${idProd}, this.value)"
+                                style="margin-left:4px; padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px;">
+                            <option value="">-- Sin color --</option>
+                            ${opcs}
+                        </select>
+                    </div>`;
+            }
+
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <strong>${x.prod.nombre}</strong><br>
-                        <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${x.item.cantidad || 1}</small>
+                        <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${cantRequerida}</small>
+                        ${infoColor}
+                        ${colorSelectorHtml}
                     </div>
                     <div style="display:flex; gap:8px;">
                         <button onclick="setDecisionInventario(${idProd}, true)" 
@@ -846,12 +934,19 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         productosSinStock.forEach(x => {
             const idProd = x.prod.id;
             decisionesInventario[idProd] = { entregar: false }; // Auto pendiente
+
+            const coloresDisp = obtenerColoresDisponibles(idProd);
+            let sugerenciasHtml = '';
+            if (coloresDisp.length > 0) {
+                sugerenciasHtml = `<small style="color:#374151; display:block; margin-top:4px;">Disponible en: ${coloresDisp.map(c => `${c.color} (${c.stock})`).join(', ')}</small>`;
+            }
             
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
                     <strong>${x.prod.nombre}</strong><br>
                     <small style="color:#991b1b;">⚠️ Se creará REQUISICIÓN DE COMPRA automáticamente</small><br>
                     <small style="color:#7f1d1d;">Stock actual: ${x.prod.stock || 0} | Solicitado: ${x.item.cantidad || 1}</small>
+                    ${sugerenciasHtml}
                 </div>
             `;
         });
@@ -891,7 +986,8 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
  * Guarda la decisión de cada producto (entregar o pendiente)
  */
 function setDecisionInventario(productoId, entregar) {
-    decisionesInventario[productoId] = { entregar };
+    if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
+    decisionesInventario[productoId].entregar = entregar;
     
     // Actualizar visual de botones
     const btnSi = document.getElementById(`btn-si-${productoId}`);
@@ -907,6 +1003,20 @@ function setDecisionInventario(productoId, entregar) {
         btnNo.style.opacity = '1';
         btnSi.style.background = '#cbd5e0';
         btnSi.style.opacity = '0.5';
+    }
+}
+
+/**
+ * Actualiza el color elegido para un producto en el diálogo de inventario
+ */
+function cambiarColorInventario(productoId, nuevoColor) {
+    if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
+    decisionesInventario[productoId].color = nuevoColor;
+    // Sincronizar con carrito
+    const idx = carrito.findIndex(item => String(item.id) === String(productoId));
+    if (idx !== -1) {
+        carrito[idx].colorElegido = nuevoColor;
+        StorageService.set("carrito", carrito);
     }
 }
 
@@ -966,7 +1076,9 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
         const decision = decisionesInventario[item.id];
         const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
         if (tieneStock && decision && decision.entregar) {
-            productosAEntregar.push({ item, prod });
+            // Si se cambió el color en el diálogo, usar ese; si no, usar el del carrito
+            const colorFinal = (decision.color !== undefined) ? decision.color : (item.colorElegido || '');
+            productosAEntregar.push({ item: { ...item, colorElegido: colorFinal }, prod });
         } else {
             productosAPendiente.push({ item, prod });
         }
@@ -1008,9 +1120,27 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     productosConStock.forEach(x => {
         const cantRequerida = x.item.cantidad || 1;
         const stockActual = x.prod.stock || 0;
+        const colorElegido = x.item.colorElegido || '';
         if (stockActual >= cantRequerida) {
+            // Descontar de la variante específica por color (FIFO por ubicación)
+            if (colorElegido && x.prod.variantes && x.prod.variantes.length > 0) {
+                let restante = cantRequerida;
+                x.prod.variantes.forEach(v => {
+                    if (restante > 0 && v.color && v.color.toUpperCase() === colorElegido.toUpperCase()) {
+                        const deducir = Math.min(Number(v.stock) || 0, restante);
+                        v.stock = (Number(v.stock) || 0) - deducir;
+                        restante -= deducir;
+                    }
+                });
+                if (restante > 0) {
+                    console.warn(`⚠️ Stock de variante insuficiente para color "${colorElegido}" en ${x.prod.nombre}. Faltaron ${restante} piezas en variantes.`);
+                }
+            }
             x.prod.stock = stockActual - cantRequerida;
-            registrarMovimiento(x.prod.id, `Venta - ${folioVenta}`, cantRequerida, "salida");
+            const concepto = colorElegido
+                ? `Venta - ${folioVenta} (${colorElegido})`
+                : `Venta - ${folioVenta}`;
+            registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
         } else {
             // Stock insuficiente en este punto (no debería ocurrir con la clasificación correcta)
             console.warn(`⚠️ Stock insuficiente para ${x.prod.nombre} al procesar venta. Creando requisición.`);
