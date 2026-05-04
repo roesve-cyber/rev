@@ -11,6 +11,10 @@ window._estadoPago = window._estadoPago || {
     plan: null          // objeto completo del plan elegido
 };
 
+function _escapeHtml(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function _esAdmin() {
     try {
         const sesion = sessionStorage.getItem('sesionActiva');
@@ -155,7 +159,7 @@ function renderCarrito() {
         let colorCell;
         if (coloresDisp.length > 0) {
             const opciones = coloresDisp.map(c =>
-                `<option value="${c.color}" ${colorSeleccionado && colorSeleccionado.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${c.color} (${c.stock} pzs)</option>`
+                `<option value="${_escapeHtml(c.color)}" ${colorSeleccionado && colorSeleccionado.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${_escapeHtml(c.color)} (${c.stock} pzs)</option>`
             ).join('');
             colorCell = `<select onchange="actualizarColorCarrito(${index}, this.value)"
                 style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;">
@@ -870,12 +874,12 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             if (colorElegido) {
                 const stockColor = obtenerStockPorColor(idProd, colorElegido);
                 if (stockColor >= cantRequerida) {
-                    infoColor = `<small style="color:#166534; display:block; margin-top:4px;">✅ Color: <b>${colorElegido}</b> — Stock disponible: ${stockColor}</small>`;
+                    infoColor = `<small style="color:#166534; display:block; margin-top:4px;">✅ Color: <b>${_escapeHtml(colorElegido)}</b> — Stock disponible: ${stockColor}</small>`;
                 } else {
                     const alternativas = coloresDisp.filter(c => c.color.toUpperCase() !== colorElegido.toUpperCase() && c.stock >= cantRequerida);
-                    infoColor = `<small style="color:#991b1b; display:block; margin-top:4px;">⚠️ Sin stock suficiente de <b>${colorElegido}</b></small>`;
+                    infoColor = `<small style="color:#991b1b; display:block; margin-top:4px;">⚠️ Sin stock suficiente de <b>${_escapeHtml(colorElegido)}</b></small>`;
                     if (alternativas.length > 0) {
-                        infoColor += `<small style="color:#374151; display:block;">Disponible en: ${alternativas.map(c => `${c.color} (${c.stock})`).join(', ')}</small>`;
+                        infoColor += `<small style="color:#374151; display:block;">Disponible en: ${alternativas.map(c => `${_escapeHtml(c.color)} (${c.stock})`).join(', ')}</small>`;
                     }
                 }
             }
@@ -884,7 +888,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             let colorSelectorHtml = '';
             if (coloresDisp.length > 0) {
                 const opcs = coloresDisp.map(c =>
-                    `<option value="${c.color}" ${colorElegido && colorElegido.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${c.color} (${c.stock} pzs)</option>`
+                    `<option value="${_escapeHtml(c.color)}" ${colorElegido && colorElegido.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${_escapeHtml(c.color)} (${c.stock} pzs)</option>`
                 ).join('');
                 colorSelectorHtml = `
                     <div style="margin-top:6px;">
@@ -1368,7 +1372,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             enganche:   enganche || 0,
             saldoAFinanciar: saldoAFinanciar || 0,
             metodoPago: metodoPago,
-            articulos:  carrito.map(p => ({ id: p.id, nombre: p.nombre, cantidad: p.cantidad || 1, precio: p.precioContado || 0 })),
+            articulos:  carrito.map(p => ({ id: p.id, nombre: p.nombre, colorElegido: p.colorElegido || '', cantidad: p.cantidad || 1, precio: p.precioContado || 0 })),
             vendedor:   _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
         });
         if (!StorageService.set('ventasRegistradas', ventasRegistradas)) {
@@ -1430,10 +1434,11 @@ function generarTicketMediaHoja(datosVenta) {
     datosVenta.articulos.forEach(art => {
         const cantidad = art.cantidad || 1;
         const subtotal = (art.precioContado || 0) * cantidad;
+        const colorInfo = art.colorElegido ? ` <small style="color:#666;">(${_escapeHtml(art.colorElegido)})</small>` : '';
         tablaProductos += `
             <tr>
                 <td style="border: 1px solid #333; padding: 8px; text-align: center;">${cantidad}</td>
-                <td style="border: 1px solid #333; padding: 8px;">${art.nombre}</td>
+                <td style="border: 1px solid #333; padding: 8px;">${art.nombre}${colorInfo}</td>
                 <td style="border: 1px solid #333; padding: 8px; text-align: right;">${dinero(art.precioContado)}</td>
                 <td style="border: 1px solid #333; padding: 8px; text-align: right;">${dinero(subtotal)}</td>
             </tr>
