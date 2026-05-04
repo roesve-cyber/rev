@@ -22,7 +22,7 @@ function actualizarStockSucursal(productoId, sucursalId, color, cantidad, tipo) 
 
     const colorKey = (color || 'Sin color').trim();
     const varIdx = p.stockPorSucursal[sucursalId].findIndex(
-        v => v.color.toLowerCase() === colorKey.toLowerCase()
+        v => (v.color || '').toLowerCase() === colorKey.toLowerCase()
     );
 
     if (varIdx !== -1) {

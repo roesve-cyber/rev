@@ -1413,15 +1413,15 @@ itemsRecibidos.forEach(art => {
             if (!prods[pidx].stockPorSucursal) prods[pidx].stockPorSucursal = {};
             const sid = oc.sucursalDestinoId;
             if (!prods[pidx].stockPorSucursal[sid]) prods[pidx].stockPorSucursal[sid] = [];
-            const colorArt = (art.caracteristicas || prods[pidx].color || 'Sin color').trim();
+            const receivedColor = (art.caracteristicas || prods[pidx].color || 'Sin color').trim();
             const varIdx = prods[pidx].stockPorSucursal[sid].findIndex(
-                v => v.color.toLowerCase() === colorArt.toLowerCase()
+                v => (v.color || '').toLowerCase() === receivedColor.toLowerCase()
             );
             if (varIdx !== -1) {
                 prods[pidx].stockPorSucursal[sid][varIdx].stock =
                     (prods[pidx].stockPorSucursal[sid][varIdx].stock || 0) + art.cantidadRec;
             } else {
-                prods[pidx].stockPorSucursal[sid].push({ color: colorArt, stock: art.cantidadRec });
+                prods[pidx].stockPorSucursal[sid].push({ color: receivedColor, stock: art.cantidadRec });
             }
         }
     }
