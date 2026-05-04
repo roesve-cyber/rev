@@ -599,7 +599,7 @@ function confirmarVentaFinal() {
         return colores.length > 0 && !item.colorElegido;
     });
     if (sinColor.length > 0) {
-        const nombres = sinColor.map(p => p.nombre).join(', ');
+        const nombres = sinColor.map(p => String(p.nombre || '')).join(', ');
         alert(`⚠️ Selecciona el color para: ${nombres}\n\nRegresa al carrito y elige el color de cada producto antes de continuar.`);
         navA('carrito');
         return;
@@ -1177,7 +1177,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
                     console.warn(`⚠️ Stock de variante insuficiente para color "${colorElegido}" en ${x.prod.nombre}. Faltaron ${restante} piezas en variantes.`);
                 }
                 // Recalcular stock total desde variantes para mantener consistencia
-                x.prod.stock = x.prod.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+                _recalcularStockTotal(x.prod);
             } else {
                 x.prod.stock = stockActual - cantRequerida;
             }
