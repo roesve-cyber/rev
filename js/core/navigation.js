@@ -1,79 +1,120 @@
-// NAVEGACIÓN
-function navA(vistaId) {
-    const idLimpio = vistaId.toLowerCase();
-    
-    // Cerrar todos los modales abiertos
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.classList.add('oculto');
-        modal.style.display = 'none';
-    });
-    // Eliminar modales dinámicos del DOM
-    document.querySelectorAll('[data-modal]').forEach(modal => modal.remove());
-    
+// ===== CONTROL DE NAVEGACIÓN Y BOTÓN "ATRÁS" (PWA) =====
+
+// ===== CONTROL DE NAVEGACIÓN Y BOTÓN "ATRÁS" (PWA) =====
+
+window.navA = function(vistaId, isPopState = false) {
+    // 1. Ocultar todas las vistas
     document.querySelectorAll('.vista').forEach(v => {
         v.classList.add('oculto');
         v.style.display = 'none';
     });
 
-    const destino = document.getElementById(idLimpio);
-    if (destino) {
-        destino.classList.remove('oculto');
-        destino.style.display = 'block';
-
-        if (idLimpio === 'inventario') renderInventario();
-        if (idLimpio === 'proveedores') renderProveedores();
-        if (idLimpio === 'clientes') renderClientes();
-        if (idLimpio === 'configcategorias') renderCategorias();
-        if (idLimpio === 'recepcion') renderRecepciones();
-        if (idLimpio === 'cuentasporpagar') renderCuentasPorPagar();
-        if (idLimpio === 'tienda') mostrarProductos();
-        if (idLimpio === 'bancos') renderBancosConfig();
-        if (idLimpio === 'flujo-msi') { renderDashboardMSI(); renderCuentasMSI(); }
-        if (idLimpio === 'flujocaja') renderFlujoCaja();
-        if (idLimpio === 'cuentas-bancarias') renderCuentasBancarias();
-        if (idLimpio === 'compras') prepararVistaCompras();
-        if (idLimpio === 'carrito') renderCarrito();
-        if (idLimpio === 'cuentasxcobrar') renderCuentasXCobrar();
-        if (idLimpio === 'cobranzaesperada') renderCobranzaEsperada();
-        if (idLimpio === 'logistica') renderLogistica();
-        if (idLimpio === 'listaprecios') renderListaPrecios();
-        if (idLimpio === 'reporte-ventas') renderReporteVentas();
-        if (idLimpio === 'reporte-compras') renderReporteCompras();
-        if (idLimpio === 'reporte-flujo') renderReporteFlujo();
-        if (idLimpio === 'entregas') renderEntregas();
-        if (idLimpio === 'cuentas-bancarias') renderCuentasBancarias();
-        if (idLimpio === 'reimprimir-venta') renderReimprimirVenta();
-        if (idLimpio === 'dashboard') renderDashboard();
-        if (idLimpio === 'configuracion-nube') _actualizarEstadoFirebaseUI();
-        if (idLimpio === 'agendacobros') renderAgendaCobros();
-        if (idLimpio === 'auditoria-productos') {
-            renderHistorialCostosAuditoria();
-        }
-        if (idLimpio === 'ordenescompra') window.renderListaOrdenesCompra && window.renderListaOrdenesCompra();
-        if (idLimpio === 'cotizaciones' && typeof window.abrirListaCotizaciones === 'function') window.abrirListaCotizaciones();
+    // 2. Mostrar la vista solicitada
+    const vistaDestino = document.getElementById(vistaId);
+    if (vistaDestino) {
+        vistaDestino.classList.remove('oculto');
+        vistaDestino.style.display = 'block';
     }
 
-    const sb = document.getElementById("sidebar");
-    if (sb && sb.classList.contains("active")) {
-        toggleMenu();
-    }
-}
+    // 🌟 3. AUTO-RENDERIZAR (¡La pieza que nos faltaba!) 🌟
+    // Esto asegura que al abrir una pantalla, sus datos se pinten inmediatamente
+    try {
+        if (vistaId === 'inventario' && typeof renderInventario === 'function') renderInventario();
+        if (vistaId === 'tienda' && typeof renderTienda === 'function') renderTienda();
+        if (vistaId === 'clientes' && typeof renderClientes === 'function') renderClientes();
+        if (vistaId === 'proveedores' && typeof renderProveedores === 'function') renderProveedores();
+        if (vistaId === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+        if (vistaId === 'cobranzaesperada' && typeof renderCobranzaEsperada === 'function') renderCobranzaEsperada();
+        if (vistaId === 'listaprecios' && typeof renderListaPrecios === 'function') renderListaPrecios();
+        if (vistaId === 'entregas' && typeof renderEntregas === 'function') renderEntregas();
+        if (vistaId === 'carrito' && typeof renderCarrito === 'function') renderCarrito();
+        if (vistaId === 'cuentas-bancarias' && typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+        if (vistaId === 'bancos' && typeof renderBancosConfig === 'function') renderBancosConfig();
+        if (vistaId === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+    } catch(e) { console.warn("Aviso renderizando vista:", e); }
 
-function toggleMenu() {
-    const sb = document.getElementById("sidebar");
-    const ov = document.querySelector(".overlay");
-    if (sb) {
-        sb.classList.toggle("active");
-        const isActive = sb.classList.contains("active");
-        sb.style.left = isActive ? "0" : "-280px";
-        if (ov) {
-            ov.style.display = isActive ? "block" : "none";
-            ov.classList.toggle("active", isActive);
+    // 4. RETRAER EL MENÚ AL SELECCIONAR ALGO
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
+    
+    if (window.innerWidth < 1024) {
+        // En celular: Siempre cerrar el menú
+        if (sidebar) sidebar.classList.remove('active');
+        if (overlay) overlay.classList.remove('active');
+    } else {
+        // En Computadora: Ocultar menú para pantalla completa
+        const appContainer = document.getElementById('app-container');
+        if (sidebar && !sidebar.classList.contains('oculto-desktop')) {
+            sidebar.classList.add('oculto-desktop');
+            if (appContainer) appContainer.classList.add('full-width');
         }
     }
-}
 
-function toggleSubmenu(id) {
-    const sub = document.getElementById(id);
-    if (sub) sub.classList.toggle("oculto-submenu");
-}
+    // 5. GUARDAR EN EL HISTORIAL (Protegido)
+    if (!isPopState) {
+        try { history.pushState({ vista: vistaId }, '', `#${vistaId}`); } catch (e) {}
+    }
+};
+
+// ===== INTELIGENCIA DEL BOTÓN "ATRÁS" =====
+window.addEventListener('popstate', (event) => {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('active')) {
+        window.toggleMenu(); 
+        try { history.pushState({ vista: event.state ? event.state.vista : 'inicio' }, '', window.location.hash); } catch(e){}
+        return;
+    }
+
+    const modalAbierto = document.querySelector('.modal:not(.oculto), [data-modal]');
+    if (modalAbierto) {
+        if (modalAbierto.id) {
+            modalAbierto.classList.add('oculto');
+            modalAbierto.style.display = 'none';
+        } else {
+            modalAbierto.remove(); 
+        }
+        try { history.pushState({ vista: event.state ? event.state.vista : 'inicio' }, '', window.location.hash); } catch(e){}
+        return;
+    }
+
+    if (event.state && event.state.vista) {
+        navA(event.state.vista, true);
+    } else {
+        navA('inicio', true);
+    }
+});
+
+// Guardar la vista inicial cuando el sistema arranca
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.location.pathname.includes("catalogo.html")) {
+        try { history.replaceState({ vista: 'inicio' }, '', '#inicio'); } catch(e){}
+    }
+});
+
+window.toggleMenu = function() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
+    const appContainer = document.getElementById('app-container');
+
+    if (!sidebar) return;
+
+    if (window.innerWidth >= 1024) {
+        sidebar.classList.toggle('oculto-desktop');
+        if (appContainer) {
+            appContainer.classList.toggle('full-width');
+        }
+    } else {
+        sidebar.classList.toggle('active');
+        if (overlay) {
+            overlay.classList.toggle('active');
+        }
+    }
+};
+// ===== CONTROL DE SUBMENÚS =====
+window.toggleSubmenu = function(submenuId) {
+    const submenu = document.getElementById(submenuId);
+    if (submenu) {
+        // Alterna la clase que oculta/muestra el submenú
+        submenu.classList.toggle('oculto-submenu');
+    }
+};
