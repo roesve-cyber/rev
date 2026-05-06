@@ -178,29 +178,51 @@ const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency
 
 const LogicaCredito = {
     calcularCredito(precioContado, enganchePersonalizado = null) {
-      // Cálculo del Enganche: 10% redondeado al siguiente 10
-      // Ejemplo: $1,543 -> 10% = 154.3 -> Redondeo a $160
       const engancheBase = precioContado * 0.10;
       const engancheRedondeado = Math.ceil(engancheBase / 10) * 10;
-      // Si hay enganche personalizado válido, usarlo
       const enganche = (typeof enganchePersonalizado === 'number' && enganchePersonalizado >= engancheRedondeado) ? enganchePersonalizado : engancheRedondeado;
-      // La base del crédito es la diferencia
       const saldoAFinanciar = precioContado - enganche;
+
+      // 1. LEER CONFIGURACIÓN GLOBAL
+      let config = null;
+      try { config = JSON.parse(localStorage.getItem('configCreditoGlobal')); } catch(e){}
+
+      let plazosConfig = [];
+      if (!config || !config.plazos || config.plazos.length === 0) {
+          for (let i = 1; i <= 6; i++) plazosConfig.push({ meses: i, tasa: (i <= 3) ? 2 : 2.5 });
+      } else {
+          plazosConfig = config.plazos;
+      }
+      plazosConfig.sort((a, b) => a.meses - b.meses);
+
+      // 2. LEER REGLA ESPECÍFICA DEL PRODUCTO (Si aplica)
+      if (typeof prodSeleccionado !== 'undefined' && prodSeleccionado && prodSeleccionado.configCredito && prodSeleccionado.configCredito.usaReglaGlobal === false) {
+          if (prodSeleccionado.configCredito.permitirCredito === false) return []; // Bloqueado para crédito
+          plazosConfig = prodSeleccionado.configCredito.plazos || [];
+          plazosConfig.sort((a, b) => a.meses - b.meses);
+      }
+
       let resultados = [];
       let totalAnterior = 0;
-      for (let m = 1; m <= 6; m++) {
-        let tasa = (m <= 3) ? 0.02 : 0.025;
-        let totalBase = saldoAFinanciar * (1 + (tasa * m));
+
+      // 3. CÁLCULO
+      plazosConfig.forEach(plazoObj => {
+        let m = plazoObj.meses;
+        let tasaDecimal = plazoObj.tasa / 100;
+        let totalBase = saldoAFinanciar * (1 + (tasaDecimal * m));
         let semanas = m * 4;
         let pagoSemanal = totalBase / semanas;
-        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10; // Redondeo de abono
+        
+        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
         let totalFinal = (pagoSemanal * semanas) + enganche;
-        // Asegurar que el total a crédito sea progresivo por mes
+
         let intentos = 0;
         while (totalFinal <= totalAnterior && intentos++ < 100) {
           pagoSemanal += 5;
           totalFinal = (pagoSemanal * semanas) + enganche;
         }
+        if (intentos >= 100) return;
+        
         totalAnterior = totalFinal;
         resultados.push({ 
           meses: m, 
@@ -209,20 +231,20 @@ const LogicaCredito = {
           total: totalFinal,
           enganche
         });
-      }
+      });
       return resultados;
     },
 
     calcularConPeriodicidad(precio, periodicidad = 'semanal', enganchePersonalizado = null) {
-      const planesSemanales = this.calcularCredito(precio, enganchePersonalizado);
+      const planes = this.calcularCredito(precio, enganchePersonalizado);
       let mult = 1;
       if (periodicidad === 'quincenal') mult = 2;
       if (periodicidad === 'mensual') mult = 4;
-      return planesSemanales.map(plan => ({
+      return planes.map(plan => ({
         meses: plan.meses,
         pagos: Math.round(plan.semanas / mult),
         abono: plan.abono * mult,
-        enganche: plan.enganche // Pasamos el enganche al resultado
+        enganche: plan.enganche
       }));
     }
 };

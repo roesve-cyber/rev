@@ -1,32 +1,11 @@
-<!-- ===== CONSULTA DE INVENTARIO ===== -->
-<div id="consulta-inventario" class="vista oculto" style="display:none;">
-    <div style="padding: 30px; max-width: 1400px; margin: 0 auto;">
-        <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);">
-            <h2 style="color: #1e40af; margin-bottom: 10px;">📊 Consulta Dinámica de Inventarios</h2>
-            <div style="display:flex; gap:16px; margin-bottom:20px; align-items:center; flex-wrap:wrap;">
-                <select id="filtroCatInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
-                <select id="filtroSubInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
-                <select id="filtroStockInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:160px;">
-                    <option value="todos">Stock: Todos</option>
-                    <option value="con">Con stock</option>
-                    <option value="sin">Sin stock</option>
-                </select>
-                <select id="filtroPedidoInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:220px;">
-                    <option value="todos">Estado pedido: Todos</option>
-                    <option value="pendiente">Pendiente de recibir</option>
-                    <option value="baja">Pendiente de baja</option>
-                    <option value="ninguno">Sin pedido pendiente</option>
-                </select>
-            </div>
-            <div id="tablaConsultaInventario"></div>
-        </div>
-    </div>
-</div>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <title>POS Mueblería - Mi Pueblito</title>
     <link rel="stylesheet" href="/estilos.css">
 	<link rel="manifest" href="/manifest.json">
@@ -105,6 +84,8 @@
                 <button onclick="navA('compras')">➕ Nueva Compra</button>
                 <button onclick="navA('proveedores')">👥 Mis Proveedores</button>
                 <button onclick="navA('recepcion')">🚚 Recepción</button>
+                <!-- 👇 ESTE ES EL BOTÓN NUEVO 👇 -->
+                <button onclick="navA('requisiciones'); renderRequisiciones();">📝 Requisiciones</button>
                 <button onclick="navA('cuentasporpagar')">💳 Cuentas por Pagar</button>
                 <button onclick="navA('ordenescompra')">📋 Órdenes de Compra</button>
             </div>
@@ -143,15 +124,18 @@
                 <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
                 <button onclick="navA('flujo-msi')">💳 MSI (Flujo)</button>
                 <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
+                <button onclick="navA('conciliacion'); setTimeout(renderConciliacion, 100)">📑 Conciliación y Transf.</button>
             </div>
         </div>
 
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-reportes')">📊 REPORTES <span>▾</span></button>
             <div id="sub-reportes" class="submenu oculto-submenu">
+                <button onclick="navA('dashboard'); renderDashboard();">📉 Dashboard Principal</button>
                 <button onclick="navA('reporte-ventas')">💰 Ventas</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
                 <button onclick="navA('reporte-flujo')">💵 Flujo de Efectivo</button>
+                <button onclick="navA('reporte-rentabilidad'); renderReporteRentabilidad();">📈 Rentabilidad Real</button>
             </div>
         </div>
 
@@ -168,6 +152,11 @@
                 <button onclick="navA('vendedores');renderGestionVendedores();">👤 Vendedores</button>
                 <button onclick="navA('descuentos');renderGestionDescuentos();">🎯 Descuentos y Promos</button>
                 <button onclick="navA('configuracion-nube');">☁️ Nube y Respaldos</button>
+                <button onclick="navA('ubicaciones'); renderUbicaciones();">📍 Bodegas y Ubicaciones</button> 
+                
+                <!-- 👇 BOTÓN DE REGLAS DE CRÉDITO AGREGADO AQUÍ 👇 -->
+                <button onclick="navA('configuracion'); setTimeout(renderConfiguracion, 100);">💳 Reglas de Crédito</button> 
+                
                 <li id="menuItemUsuarios" style="display:none;list-style:none;" onclick="navA('usuarios');renderGestionUsuarios();">👤 Usuarios del sistema</li>
             </div>
         </div>
@@ -203,6 +192,45 @@
 
 <!-- ===== CONTENIDO PRINCIPAL ===== -->
 <main id="app-container">
+<!-- ===== CONSULTA DE INVENTARIO ===== -->
+
+<div id="conciliacion" class="vista oculto">
+    <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div>
+            <h2>📑 Conciliación Bancaria</h2>
+            <p style="color:#718096; margin:0;">Valida que el saldo del sistema coincida con tu estado de cuenta real.</p>
+        </div>
+        <div style="display:flex; gap:10px;">
+            <button onclick="abrirModalTransferencia()" style="padding:10px 18px; background:#6366f1; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">📲 Transferir entre Cuentas</button>
+            <button onclick="renderConciliacion()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">🔄 Actualizar</button>
+        </div>
+    </div>
+    <div id="contenedorConciliacion"></div>
+</div>
+
+<div id="consulta-inventario" class="vista oculto" style="display:none;">
+    <div style="padding: 30px; max-width: 1400px; margin: 0 auto;">
+        <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);">
+            <h2 style="color: #1e40af; margin-bottom: 10px;">📊 Consulta Dinámica de Inventarios</h2>
+            <div style="display:flex; gap:16px; margin-bottom:20px; align-items:center; flex-wrap:wrap;">
+                <select id="filtroCatInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
+                <select id="filtroSubInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
+                <select id="filtroStockInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:160px;">
+                    <option value="todos">Stock: Todos</option>
+                    <option value="con">Con stock</option>
+                    <option value="sin">Sin stock</option>
+                </select>
+                <select id="filtroPedidoInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:220px;">
+                    <option value="todos">Estado pedido: Todos</option>
+                    <option value="pendiente">Pendiente de recibir</option>
+                    <option value="baja">Pendiente de baja</option>
+                    <option value="ninguno">Sin pedido pendiente</option>
+                </select>
+            </div>
+            <div id="tablaConsultaInventario"></div>
+        </div>
+    </div>
+</div>
 <div id="auditoria-productos" class="vista oculto" style="display: none;">
     <div style="padding: 30px; max-width: 900px; margin: 0 auto;">
         <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center;">
@@ -218,6 +246,9 @@
                 <button onclick="abrirModalCargaInicialStock()" style="padding: 20px; background: #2563eb; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
                     ➕ Carga inicial de stock
                 </button>
+                <button onclick="abrirCotizadorAuditoria()" style="padding: 20px; background: #d97706; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
+    📄 Cotización Avanzada
+</button>
             </div>
 
             <div style="margin: 30px 0 0 0; padding: 20px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; text-align: left;">
@@ -249,9 +280,10 @@
             </div>
             <!-- 👆 FIN DEL PANEL DE MIGRACIÓN 👆 -->
             <!-- Modal carga inicial stock -->
-            <div id="modalCargaInicialStock" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.35); z-index:100001; align-items:center; justify-content:center;">
+            <div id="modalCargaInicialStock" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.35); z-index:9000; align-items:center; justify-content:center;">
                 <div style="background:white; padding:32px 28px; border-radius:12px; min-width:320px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.18); text-align:center;">
                     <h2 style='margin-bottom:18px;color:#1e40af;font-size:20px;'>Carga inicial de stock</h2>
+                    
                     <div style='margin-bottom:12px;'>
                         <input type="hidden" id="cargaStockProducto" value="">
                         <div style="display:flex;align-items:center;gap:8px;">
@@ -270,12 +302,21 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- 👇 NUEVOS CAMPOS: COLOR Y UBICACIÓN 👇 -->
+                    <div style='margin-bottom:12px; display:flex; gap:10px;'>
+                        <input type="text" id="cargaStockColor" placeholder="Color (Ej. Rojo)" style="flex:1; text-align:center; font-size:14px; padding:7px 10px; border:1px solid #d1d5db; border-radius:6px;">
+                        <select id="cargaStockUbicacion" style="flex:1; font-size:14px; padding:7px 10px; border:1px solid #d1d5db; border-radius:6px; background:#f0fdf4;"></select>
+                    </div>
+                    <!-- 👆 FIN NUEVOS CAMPOS 👆 -->
+
                     <div style='margin-bottom:12px;'>
-                        <input type="number" id="cargaStockCantidad" placeholder="Cantidad" min="1" style="width:120px;text-align:center;font-size:18px;padding:7px 10px;">
+                        <input type="number" id="cargaStockCantidad" placeholder="Cantidad a ingresar" min="1" style="width:100%;text-align:center;font-size:15px;padding:9px 10px; border:1px solid #d1d5db; border-radius:6px;">
                     </div>
                     <div style='margin-bottom:18px;'>
-                        <input type="number" id="cargaStockCosto" placeholder="Costo unitario" min="0" step="0.01" style="width:120px;text-align:center;font-size:18px;padding:7px 10px;">
+                        <input type="number" id="cargaStockCosto" placeholder="Costo unitario $" min="0" step="0.01" style="width:100%;text-align:center;font-size:15px;padding:9px 10px; border:1px solid #d1d5db; border-radius:6px;">
                     </div>
+                    
                     <button onclick="guardarCargaInicialStock()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;">Guardar</button>
                     <button onclick="cerrarModalCargaInicialStock()" style="padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;">Cancelar</button>
                 </div>
@@ -404,6 +445,7 @@
                 <option value="pagar">💰 Cuentas por Pagar</option>
                 <option value="inventario">📦 Inventario</option>
                 <option value="clientes">👥 Clientes</option>
+                <option value="rentabilidad">📊 Rentabilidad Real</option>
             </select>
             <input type="date" id="fechaInicio" onchange="actualizarReporte()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
             <input type="date" id="fechaFin" onchange="actualizarReporte()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
@@ -445,7 +487,10 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
         </div>
         <div id="listaCategoriasCards" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; padding: 10px;"></div>
     </div>
-
+    <!-- REQUISICIONES -->
+    <div id="requisiciones" class="vista oculto">
+        <div id="contenidoRequisiciones"></div>
+    </div>
     <!-- COMPRAS -->
     <div id="compras" class="vista oculto">
         <h2>🚚 Registro de Compras</h2>
@@ -477,9 +522,23 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
                 </div>
                 <div><label>Cantidad:</label><input type="number" id="compraCantidad" min="1" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
                 <div><label>Costo Unitario:</label><input type="number" id="compraCosto" min="0" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+                
+                <!-- 👇 NUEVOS CAMPOS DE UBICACIÓN Y COLOR 👇 -->
+                <div>
+                    <label>Color (Opcional):</label>
+                    <input type="text" id="compraColor" placeholder="Ej. Azul" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;">
+                </div>
+                <div>
+                    <label>Ubicación de destino:</label>
+                    <select id="compraUbicacion" onclick="cargarUbicacionesCompra()" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px; background:#f0fdf4;">
+                        <option value="General">-- General --</option>
+                    </select>
+                </div>
+                <!-- 👆 FIN NUEVOS CAMPOS 👆 -->
+
                 <div style="grid-column: span 2;">
-                    <label>Características (Opcional):</label>
-                     <input type="text" id="compraCaracteristicas" placeholder="Ej. Color caoba, tela azul..." style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;">
+                    <label>Características Extras:</label>
+                     <input type="text" id="compraCaracteristicas" placeholder="Ej. Tela antimanchas..." style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;">
                 </div>
                 <div><label>Proveedor:</label><select id="compraProveedor" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></select></div>
                 <div><label>Método de Pago:</label><select id="compraMetodoPago" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;" onchange="gestionarCamposPago()"><option value="contado">Contado</option><option value="credito_proveedor">Crédito</option><option value="tarjeta_msi">MSI</option></select></div>
@@ -545,6 +604,8 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h2>📦 Control de Inventario</h2>
             <div style="display:flex; gap:8px;">
+                <button onclick="abrirModalTransferenciaInv()" style="background:#3b82f6; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🚚 Transferir</button>
+                <button onclick="abrirModalAjusteInv()" style="background:#f59e0b; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⚖️ Ajuste</button>
                 <button onclick="abrirProductoForm()" style="background:#27ae60; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Nuevo</button>
                 <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄</button>
             </div>
@@ -619,11 +680,48 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
             </div>
         </div>
     </div>
-
+    <!-- GESTIÓN DE UBICACIONES -->
+    <div id="ubicaciones" class="vista oculto">
+        <div class="vista-header">
+            <h2>📍 Bodegas y Ubicaciones</h2>
+            <p>Define los lugares físicos donde guardas tu mercancía (Ej. Piso de Ventas, Bodega 1).</p>
+        </div>
+        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+            <input type="text" id="nuevaUbicacionNombre" placeholder="Escribe la nueva ubicación..." style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <button onclick="guardarUbicacion()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">➕ Añadir Ubicación</button>
+        </div>
+        <div id="tablaUbicaciones"></div>
+    </div>
     <!-- CONFIGURACIÓN -->
     <div id="configuracion" class="vista oculto">
-        <h2>⚙️ Configuración del Sistema</h2>
-        <p style="color:gray;">Próximamente más opciones de configuración.</p>
+        <div class="vista-header" style="margin-bottom:20px;">
+            <h2>⚙️ Configuración del Sistema</h2>
+            <p style="color:#718096; margin:0;">Ajustes globales de crédito y reglas de la tienda.</p>
+        </div>
+        
+        <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">
+                <h3 style="color:#1e40af; margin:0;">💳 Regla Global de Crédito</h3>
+                <button onclick="renderConfiguracion()" style="background:none; border:none; cursor:pointer; font-size:18px;">🔄</button>
+            </div>
+            <p style="font-size:13px; color:#6b7280; margin-bottom:20px;">Define los plazos y tasas de interés que aplicarán por defecto a <b>todos los productos</b> (a menos que el producto tenga una regla especial).</p>
+            
+            <div id="listaPlazosGlobales" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; min-height:40px; padding:10px; background:#f8fafc; border-radius:8px; border:1px dashed #cbd5e1;">
+                <!-- Aquí se inyectan los plazos dinámicos -->
+            </div>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:15px; align-items:end; background:#eff6ff; padding:20px; border-radius:8px; border:1px solid #bfdbfe;">
+                <div class="campo">
+                    <label style="color:#1e40af;">AGREGAR PLAZO (MESES)</label>
+                    <input type="number" id="cfgMesesGlobal" min="1" placeholder="Ej: 12" style="border-color:#93c5fd;">
+                </div>
+                <div class="campo">
+                    <label style="color:#1e40af;">TASA MENSUAL (%)</label>
+                    <input type="number" id="cfgTasaGlobal" min="0" step="0.1" placeholder="Ej: 3.5" style="border-color:#93c5fd;">
+                </div>
+                <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">➕ Agregar Plazo</button>
+            </div>
+        </div>
     </div>
 
     <!-- CARRITO -->
@@ -637,17 +735,6 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
         </div>
         <p style="color:#4a5568; margin-bottom:20px;">Ventas con salida de almacén pendiente.</p>
         <div id="panel-entregas-pendientes"></div>
-    </div>
-
-    <!-- LOGÍSTICA (legacy, sin link en menú) -->
-    <div id="logistica" class="vista oculto">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
-            <h2 style="margin:0;">📋 Logística de ventas</h2>
-            <button type="button" onclick="renderLogistica()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄</button>
-        </div>
-        <p style="color:#4a5568; margin-bottom:20px;">Salidas de almacén pendientes y requisiciones de compra.</p>
-        <div id="panel-salidas-pendientes"></div>
-        <div id="panel-requisiciones-venta" style="margin-top:28px;"></div>
     </div>
 
     <!-- REPORTE VENTAS -->
@@ -743,6 +830,18 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
             <h3 style="margin:0 0 15px 0; color:#2c3e50;">📋 Movimientos de Caja</h3>
             <div id="rfTabla" style="overflow-x:auto;"></div>
         </div>
+    </div>
+
+    <div id="reporte-rentabilidad" class="vista oculto">
+        <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div>
+                <h2>📈 Rentabilidad Real</h2>
+                <p style="color:#718096; margin:0;">Análisis de utilidad neta deduciendo costos y gastos operativos.</p>
+            </div>
+            <button onclick="renderReporteRentabilidad()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔄 Actualizar</button>
+        </div>
+        
+        <div id="contenidoRentabilidad"></div> 
     </div>
 
         <!-- MODAL IMPORTADOR DE PRODUCTOS -->
@@ -1062,13 +1161,130 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
    		<textarea id="pCaracteristicas" placeholder="Ej: Estructura acero, tela antimanchas, patas desmontables"></textarea>
 	   </div>
         </div>
+        <!-- NUEVA PESTAÑA: REGLAS DE CRÉDITO DEL PRODUCTO -->
+            <div style="margin-top:25px; border-top:2px solid #f1f5f9; padding-top:20px;">
+                <h4 style="margin:0 0 15px 0; color:#7c3aed; display:flex; align-items:center; gap:8px;">💳 Reglas de Financiamiento Especiales</h4>
+                
+                <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:15px; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0;">
+                    <input type="checkbox" id="pUsaReglaGlobal" checked onchange="toggleConfigCreditoProd()" style="width:20px; height:20px; accent-color:#7c3aed;">
+                    <span style="font-size:14px; font-weight:bold; color:#374151;">Usar regla de crédito global de la tienda</span>
+                </label>
+                
+                <div id="pConfigCreditoExtra" style="display:none; background:#fffbeb; padding:20px; border-radius:8px; border:1px solid #fde68a;">
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:15px; border-bottom:1px dashed #fcd34d; padding-bottom:15px;">
+                        <input type="checkbox" id="pPermitirCredito" checked style="width:20px; height:20px; accent-color:#d97706;">
+                        <span style="font-size:14px; font-weight:bold; color:#b45309;">¿Permitir vender este producto a crédito?</span>
+                    </label>
+                    
+                    <p style="font-size:12px; color:#92400e; margin:0 0 15px 0;">Añade plazos específicos (Ej. Promoción de 6 meses al 0%). Si lo dejas vacío, se usará el plazo global pero respetando el bloqueo de arriba.</p>
+                    
+                    <div id="listaPlazosProd" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:15px; min-height:30px;"></div>
+                    
+                    <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end;">
+                        <div class="campo">
+                            <label style="color:#d97706;">Plazo (Meses)</label>
+                            <input type="number" id="pPlazoProd" min="1" placeholder="Ej: 6" style="border-color:#fcd34d;">
+                        </div>
+                        <div class="campo">
+                            <label style="color:#d97706;">Tasa Mensual (%)</label>
+                            <input type="number" id="pTasaProd" min="0" step="0.1" placeholder="Ej: 0" style="border-color:#fcd34d;">
+                        </div>
+                        <button type="button" onclick="agregarPlazoProd()" style="padding:10px 15px; background:#d97706; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; height:40px;">➕</button>
+                    </div>
+                </div>
+            </div>
         <div style="display:flex; gap:10px; margin-top:20px;">
             <button onclick="guardarProductoDB()" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💾 Guardar</button>
             <button onclick="cerrarProductoForm()" style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cancelar</button>
         </div>
     </div>
 </div>
+<div id="modalAjusteInv" class="modal oculto" style="display:none;">
+    <div class="modal-content" style="max-width:450px;">
+        <h2 style="color:#d97706; margin-top:0;">⚖️ Ajuste de Inventario</h2>
+        <p style="font-size:12px; color:#64748b; margin-bottom:20px;">Úsalo para registrar mermas, productos dañados o errores de conteo.</p>
+        
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <div class="campo">
+                <label>PRODUCTO A AJUSTAR</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="hidden" id="ajusteProductoId">
+                    <div id="ajusteProductoDisplay" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:6px; background:#f8fafc; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Sin seleccionar</div>
+                    <button onclick="abrirSelectorProducto({titulo:'Seleccionar Producto', onSeleccion: p => { document.getElementById('ajusteProductoId').value = p.id; document.getElementById('ajusteProductoDisplay').innerText = p.nombre; document.getElementById('ajusteProductoDisplay').style.color = '#0f172a'; }})" style="padding:10px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer;">🔍</button>
+                </div>
+            </div>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div class="campo">
+                    <label>TIPO DE AJUSTE</label>
+                    <select id="ajusteTipo" style="width:100%;">
+                        <option value="salida">➖ Restar Stock (Merma)</option>
+                        <option value="entrada">➕ Sumar Stock (Sobrante)</option>
+                    </select>
+                </div>
+                <div class="campo">
+                    <label>CANTIDAD</label>
+                    <input type="number" id="ajusteCantidad" min="1" placeholder="Ej. 1" style="width:100%; text-align:center;">
+                </div>
+            </div>
 
+            <div class="campo">
+                <label>UBICACIÓN AFECTADA</label>
+                <select id="ajusteUbicacion" style="width:100%;"></select>
+            </div>
+
+            <div class="campo">
+                <label>MOTIVO / JUSTIFICACIÓN</label>
+                <input type="text" id="ajusteMotivo" placeholder="Ej. Mercancía dañada por humedad..." style="width:100%;">
+            </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:25px;">
+            <button onclick="ejecutarAjusteInv()" style="flex:1; padding:12px; background:#f59e0b; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">💾 Aplicar Ajuste</button>
+            <button onclick="document.getElementById('modalAjusteInv').style.display='none'" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<div id="modalTransferenciaInv" class="modal oculto" style="display:none;">
+    <div class="modal-content" style="max-width:450px;">
+        <h2 style="color:#2563eb; margin-top:0;">🚚 Transferencia Interna</h2>
+        <p style="font-size:12px; color:#64748b; margin-bottom:20px;">Mueve mercancía de una bodega a otra sin afectar tu stock global.</p>
+        
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <div class="campo">
+                <label>PRODUCTO A MOVER</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="hidden" id="transfProductoId">
+                    <div id="transfProductoDisplay" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:6px; background:#f8fafc; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Sin seleccionar</div>
+                    <button onclick="abrirSelectorProducto({titulo:'Seleccionar Producto', onSeleccion: p => { document.getElementById('transfProductoId').value = p.id; document.getElementById('transfProductoDisplay').innerText = p.nombre; document.getElementById('transfProductoDisplay').style.color = '#0f172a'; }})" style="padding:10px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer;">🔍</button>
+                </div>
+            </div>
+            
+            <div class="campo">
+                <label>CANTIDAD A MOVER</label>
+                <input type="number" id="transfCantidad" min="1" placeholder="Ej. 2" style="width:100%; text-align:center; font-size:16px;">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#eff6ff; padding:15px; border-radius:8px; border:1px solid #bfdbfe;">
+                <div class="campo">
+                    <label style="color:#1e40af;">SALE DE (ORIGEN)</label>
+                    <select id="transfOrigen" style="width:100%; border-color:#93c5fd;"></select>
+                </div>
+                <div class="campo">
+                    <label style="color:#1e40af;">ENTRA A (DESTINO)</label>
+                    <select id="transfDestino" style="width:100%; border-color:#93c5fd;"></select>
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:25px;">
+            <button onclick="ejecutarTransferenciaInv()" style="flex:1; padding:12px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Confirmar Envío</button>
+            <button onclick="document.getElementById('modalTransferenciaInv').style.display='none'" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+        </div>
+    </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 <script src="js/services/storage.js"></script>
 <script src="js/services/validator.js"></script>
 <script src="js/services/calculator.js"></script>
@@ -1082,7 +1298,6 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
 <script src="js/modules/clientes.js"></script>
 <script src="js/modules/compras.js"></script>
 <script src="js/modules/bancos.js"></script>
-<script src="js/modules/logistica.js"></script>
 <script src="js/modules/reportes.js"></script>
 <script src="js/modules/dashboard.js"></script>
 <script src="js/modules/cotizaciones.js"></script>
@@ -1096,8 +1311,10 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
 <script src="js/modules/producto-picker.js"></script>
 <script src="js/modules/cliente-picker.js"></script>
 <script src="js/modules/notificaciones.js"></script>
+<script src="js/modules/configuracion.js"></script>
+<script src="js/modules/conciliacion.js"></script>
 <script src="js/core/navigation.js"></script>
-    <script src="js/init.js"></script>
+<script src="js/init.js"></script>
     <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {
