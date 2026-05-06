@@ -245,16 +245,6 @@ function _getCuentaSeleccionada(sufijo) {
     return { medioPago: isCaja ? 'efectivo' : 'debito', cuentaId, etiqueta };
 }
 
-function _poblarCuentasOrigen(targetId = "compraCuentaOrigen") {
-    const sel = document.getElementById(targetId);
-    if (!sel) return;
-    const cajas = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
-    const bancarias = StorageService.get('cuentas-bancarias', []);
-    const debito = bancarias.filter(c => c.tipo && c.tipo.toLowerCase().includes('debito'));
-    const todas = [...cajas, ...debito];
-    sel.innerHTML = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-}
-
 // ===== COMPRAS =====
 function prepararVistaCompras() {
     // compraProducto es ahora un hidden input + picker dinámico (ver index.html)
@@ -319,6 +309,21 @@ function gestionarCamposPago() {
     actualizarSelectBancos();
 }
 
+// Función para cargar las ubicaciones en el select cuando el usuario le da clic
+function cargarUbicacionesCompra() {
+    const select = document.getElementById("compraUbicacion");
+    // Si ya tiene más de 1 opción, significa que ya cargó, no lo volvemos a cargar
+    if (!select || select.options.length > 1) return; 
+    
+    const ubicaciones = StorageService.get("ubicacionesConfig", []);
+    let html = '<option value="General">-- General --</option>';
+    ubicaciones.forEach(u => {
+        html += `<option value="${u.nombre}">${u.nombre}</option>`;
+    });
+    select.innerHTML = html;
+}
+
+// Función principal de registro de compras actualizada
 function registrarCompra() {
     const productoId  = parseInt(document.getElementById("compraProducto").value);
     const proveedorId = parseInt(document.getElementById("compraProveedor").value);
@@ -328,6 +333,10 @@ function registrarCompra() {
     const metodo      = comboPago.value;
     const formaPagoTexto = comboPago.options[comboPago.selectedIndex].text;
     const ingresoInmediato = document.getElementById("compraIngresoInmediato")?.checked ?? true;
+
+    // 👇 1. LEEMOS EL COLOR Y LA UBICACIÓN 👇
+    const colorNuevo = document.getElementById("compraColor")?.value.trim() || 'General';
+    const ubicacionNueva = document.getElementById("compraUbicacion")?.value || 'General';
 
     if (!proveedorId || !productoId || isNaN(cantidad) || isNaN(costoNuevo) || cantidad <= 0) {
         alert("⚠️ Por favor completa todos los campos correctamente.");
@@ -347,7 +356,8 @@ function registrarCompra() {
     const mensajeConfirmar =
         `¿Deseas registrar esta compra?\n\n` +
         `Proveedor: ${prov.nombre}\n` +
-        `Producto: ${producto.nombre}\n` +
+        `Producto: ${producto.nombre} (${colorNuevo})\n` +
+        `Ubicación destino: ${ubicacionNueva}\n` +
         `Total: ${dinero(cantidad * costoNuevo)}\n` +
         `Pago Estimado: ${fechaPagoMensaje}`;
 
@@ -372,26 +382,29 @@ function registrarCompra() {
     }
 
     const totalCompra = cantidad * costoNuevo;
-    
-    // 👇 Leemos lo que el usuario escribió en el cuadrito 👇
     const caracteristicas = document.getElementById("compraCaracteristicas")?.value || "";
 
     const nuevaCompra = {
         id: Date.now(),
         productoId,
-        productoNombre: producto.nombre,   // ← guardamos el nombre para que el historial no dependa del catálogo
+        productoNombre: producto.nombre,   
         proveedor: prov.nombre,
         proveedorId,
         total: totalCompra,
         fecha: fechaHoyStr,
-        caracteristicas // <-- Ahora sí, guarda la variable sin errores
+        caracteristicas,
+        color: colorNuevo,           // <-- Guardamos el color en el historial
+        ubicacion: ubicacionNueva    // <-- Guardamos la ubicación en el historial
     };
     compras.push(nuevaCompra);
-    // Limpiar el input de características después de registrar
+
     const caracteristicasInput = document.getElementById("compraCaracteristicas");
     if (caracteristicasInput) caracteristicasInput.value = "";
+    const colorInput = document.getElementById("compraColor");
+    if (colorInput) colorInput.value = "";
+    const ubicacionInput = document.getElementById("compraUbicacion");
+    if (ubicacionInput) ubicacionInput.value = "General";
 
-    // Guardar historial de costos (compra directa)
     guardarHistorialCosto({
         productoId,
         precioCompra: costoNuevo,
@@ -413,10 +426,35 @@ function registrarCompra() {
         proveedor: prov.nombre,
         fechaPedido: nuevaCompra.fecha,
         metodoPago: formaPagoTexto,
-        estatus: ingresoInmediato ? "Completado" : "Pendiente"
+        estatus: ingresoInmediato ? "Completado" : "Pendiente",
+        color: colorNuevo,           // <-- Sabe de qué color viene
+        ubicacion: ubicacionNueva    // <-- Sabe a qué bodega va
     };
     recepciones.push(nuevaRecepcion);
-    if (ingresoInmediato) actualizarStock(productoId, cantidad, `Compra a ${prov.nombre}`);
+
+    // 👇 2. DISTRIBUIR EL STOCK EN LAS VARIANTES SI ENTRA INMEDIATAMENTE 👇
+    if (ingresoInmediato) {
+        // Actualiza el stock general (tu función original)
+        actualizarStock(productoId, cantidad, `Compra a ${prov.nombre} (${colorNuevo})`);
+
+        // Actualizamos la "cajita" específica (Color + Ubicación)
+        if (!producto.variantes) producto.variantes = [];
+        
+        const varianteExistente = producto.variantes.find(v => 
+            (v.color || "General").toUpperCase() === colorNuevo.toUpperCase() && 
+            (v.ubicacion || "General").toUpperCase() === ubicacionNueva.toUpperCase()
+        );
+
+        if (varianteExistente) {
+            varianteExistente.stock = (Number(varianteExistente.stock) || 0) + cantidad;
+        } else {
+            producto.variantes.push({
+                color: colorNuevo,
+                ubicacion: ubicacionNueva,
+                stock: cantidad
+            });
+        }
+    }
 
     if (metodo !== "contado") {
         const detalleDeuda = {
@@ -474,7 +512,6 @@ function registrarCompra() {
         console.error("❌ Error guardando recepciones");
     }
 
-    // Afectar el saldo real solo si el pago es de contado
     if (metodo === "contado") {
         window._egresarCuenta({
             monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
@@ -483,7 +520,10 @@ function registrarCompra() {
     }
 
     alert(`✅ Registro Exitoso\nProveedor: ${prov.nombre}${avisoActualizacion}`);
-    limpiarFormularioCompra();
+    
+    // Si la función limpiarFormularioCompra existe, la ejecuta
+    if(typeof limpiarFormularioCompra === 'function') limpiarFormularioCompra();
+    
     navA('compras');
 }
 
@@ -546,7 +586,12 @@ function renderRecepciones() {
 }
 
 function procesarRecepcionFisica(idRecepcion) {
+    // --- CORRECCIÓN: Asegurar la lectura de las bases de datos primero ---
+    let productos = StorageService.get("productos", []);
+    let movimientosInventario = StorageService.get("movimientosInventario", []);
     let recs = StorageService.get("recepciones", []);
+    // ---------------------------------------------------------------------
+
     const index = recs.findIndex(r => r.id == idRecepcion);
     if (index === -1) return;
 
@@ -563,6 +608,21 @@ const prod = productos.find(p => String(p.id) === String(rec.productoId));
     
     if (prod) {
         prod.stock = (parseInt(prod.stock) || 0) + cantidad;
+
+        if (!prod.variantes) prod.variantes = [];
+        const colorRecepcion = rec.color || 'General';
+        const ubicacionRecepcion = rec.ubicacion || 'General';
+        
+        const varExistente = prod.variantes.find(v => 
+            (v.color || "General").toUpperCase() === colorRecepcion.toUpperCase() && 
+            (v.ubicacion || "General").toUpperCase() === ubicacionRecepcion.toUpperCase()
+        );
+
+        if (varExistente) {
+            varExistente.stock = (Number(varExistente.stock) || 0) + cantidad;
+        } else {
+            prod.variantes.push({ color: colorRecepcion, ubicacion: ubicacionRecepcion, stock: cantidad });
+        }
         
         movimientosInventario.push({
             id: Date.now(),
@@ -955,13 +1015,21 @@ function _renderTablaArticulosOC() {
 function guardarOrdenCompra() {
     const arts = window._articulosOC || [];
     if (arts.length === 0) return alert('⚠️ Agrega al menos un artículo.');
+    
+    // --- CORRECCIÓN: Mover estas 3 líneas HACIA ARRIBA ---
     const provId = document.getElementById('ocProveedor')?.value;
+    const provs = StorageService.get('proveedores', []);
+    const prov = provs.find(p => String(p.id) === String(provId));
+    const provNombre = prov ? prov.nombre : 'Sin proveedor';
+    // -------------------------------------------------------
+
     const fechaEntrega = document.getElementById('ocFechaEntrega')?.value;
     const notas = document.getElementById('ocNotas')?.value.trim() || '';
     const borrador = document.getElementById('ocBorrador')?.checked ?? true;
     const metodoPago = document.getElementById('ocMetodoPago')?.value || '';
     const cuentaOrigen = document.getElementById('ocCuentaOrigen')?.value || '';
-    // Si hay anticipo, afectar la cuenta seleccionada
+    
+    // Ahora el anticipo ya sabe quién es provNombre
     const anticipo = parseFloat(document.getElementById('ocAnticipo')?.value || '0');
     if (anticipo > 0 && cuentaOrigen) {
         const etiqueta = document.getElementById('ocCuentaOrigen')?.options[document.getElementById('ocCuentaOrigen')?.selectedIndex]?.text || cuentaOrigen;
@@ -969,14 +1037,11 @@ function guardarOrdenCompra() {
             monto: anticipo,
             cuentaId: cuentaOrigen,
             etiqueta,
-            concepto: `Anticipo OC a ${provNombre}`,
+            concepto: `Anticipo OC a ${provNombre}`, 
             referencia: `ANTICIPO-OC-${Date.now()}`
         });
     }
     const meses = document.getElementById('ocMeses')?.value || '';
-    const provs = StorageService.get('proveedores', []);
-    const prov = provs.find(p => String(p.id) === String(provId));
-    const provNombre = prov ? prov.nombre : 'Sin proveedor';
     const total = arts.reduce((s, a) => s + a.subtotal, 0);
     const oc = {
         id: Date.now(),
@@ -1103,12 +1168,20 @@ function recibirOrdenCompra(id) {
         const lista = StorageService.get('ordenesCompra', []);
         const oc = lista.find(x => x.id === ocId);
         if (!oc) return;
+        
         const art = oc.articulos[idx];
         art.costo = parseFloat(nuevoCosto) || 0;
         art.subtotal = art.cantidad * art.costo;
         StorageService.set('ordenesCompra', lista);
-        // Actualizar la vista
-        recibirOrdenCompra(ocId);
+        
+        // --- CORRECCIÓN: Actualizar solo el subtotal en la vista, NO redibujar todo ---
+        const inputCant = parseInt(document.getElementById(`recQ_${idx}`)?.value) || 0;
+        const subtotalVisual = document.getElementById(`recSub_${idx}`);
+        if (subtotalVisual) {
+            subtotalVisual.textContent = dinero(inputCant * art.costo);
+        }
+        // Llamamos a la función que recalcula el total inferior sin borrar los inputs
+        window._ocActualizarPendiente(idx, art.cantidad); 
     };
 
     const selectorCuentas = _buildSelectorCuentas('recCuentaPago', false);
@@ -1402,13 +1475,14 @@ itemsRecibidos.forEach(art => {
         // Agregar a variantes si se especificó color
         if (art.colorRec) {
             prods[pidx].variantes = prods[pidx].variantes || [];
+            // --- CORRECCIÓN: Usar 'General' en lugar de 'Tienda' fijo ---
             const existente = prods[pidx].variantes.find(
-                v => v.ubicacion === 'Tienda' && v.color && v.color.toUpperCase() === art.colorRec.toUpperCase()
+                v => v.ubicacion === 'General' && v.color && v.color.toUpperCase() === art.colorRec.toUpperCase()
             );
             if (existente) {
                 existente.stock = (Number(existente.stock) || 0) + art.cantidadRec;
             } else {
-                prods[pidx].variantes.push({ ubicacion: 'Tienda', color: art.colorRec, stock: art.cantidadRec });
+                prods[pidx].variantes.push({ ubicacion: 'General', color: art.colorRec, stock: art.cantidadRec });
             }
         }
     }
@@ -1901,6 +1975,315 @@ function _generarOpcionesCuentasDebito() {
     return opciones;
 }
 
+// ============================================================
+// MÓDULO DE REQUISICIONES Y ÓRDENES DE COMPRA
+// ============================================================
+
+// Memoria temporal para la Orden de Compra que estamos armando
+window._borradorOrden = {
+    requisicionesVinculadas: [],
+    items: []
+};
+
+/**
+ * 1. PANTALLA DE REQUISICIONES PENDIENTES
+ * Muestra la lista de lo que se vendió pero no hay stock
+ */
+function renderRequisiciones() {
+    // Asegúrate de que el ID del contenedor coincida con tu HTML de compras
+    const contenedor = document.getElementById("contenidoRequisiciones");
+    if (!contenedor) return;
+
+    const reqs = StorageService.get("requisicionesCompra", []).filter(r => r.estatus === "Pendiente");
+
+    if (reqs.length === 0) {
+        contenedor.innerHTML = `
+            <div style="background:white; padding:40px; border-radius:10px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <h2 style="color:#16a34a;">✅ Todo al día</h2>
+                <p style="color:#6b7280;">No hay requisiciones pendientes. Todo lo vendido tenía stock.</p>
+            </div>`;
+        return;
+    }
+
+    let filas = reqs.map(r => `
+        <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding:10px; text-align:center;">
+                <input type="checkbox" class="chk-req" value="${r.id}" style="width:18px; height:18px; cursor:pointer;">
+            </td>
+            <td style="padding:10px;">${r.fecha}</td>
+            <td style="padding:10px; font-weight:bold; color:#1e40af;">${r.folioVenta}</td>
+            <td style="padding:10px;">${r.producto}</td>
+            <td style="padding:10px; text-align:center; font-weight:bold;">${r.cantidad}</td>
+            <td style="padding:10px;"><span style="background:#fef3c7; color:#d97706; padding:4px 8px; border-radius:4px; font-size:12px;">${r.estatus}</span></td>
+        </tr>
+    `).join('');
+
+    contenedor.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h2 style="margin:0; color:#1e40af;">📋 Requisiciones Pendientes</h2>
+            <button onclick="iniciarOrdenDesdeRequisiciones()" 
+                    style="padding:12px 20px; background:#27ae60; color:white; border:none; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer; box-shadow:0 4px 6px rgba(39,174,96,0.2);">
+                🛒 Crear Orden de Compra con lo seleccionado
+            </button>
+        </div>
+
+        <div style="background:white; border-radius:10px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+            <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                <thead>
+                    <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
+                        <th style="padding:12px; text-align:center;"><input type="checkbox" onchange="document.querySelectorAll('.chk-req').forEach(c => c.checked = this.checked)" style="width:18px; height:18px;"></th>
+                        <th style="padding:12px; text-align:left;">Fecha</th>
+                        <th style="padding:12px; text-align:left;">Folio Venta</th>
+                        <th style="padding:12px; text-align:left;">Producto / Variante</th>
+                        <th style="padding:12px; text-align:center;">Cantidad</th>
+                        <th style="padding:12px; text-align:left;">Estatus</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+/**
+ * 2. RECOLECTA LAS REQUISICIONES SELECCIONADAS Y ABRE EL BORRADOR
+ */
+function iniciarOrdenDesdeRequisiciones() {
+    const seleccionados = Array.from(document.querySelectorAll('.chk-req:checked')).map(cb => cb.value);
+    
+    if (seleccionados.length === 0) {
+        alert("⚠️ Selecciona al menos una requisición para crear la orden de compra.");
+        return;
+    }
+
+    const reqsTotales = StorageService.get("requisicionesCompra", []);
+    
+    // Limpiamos el borrador
+    window._borradorOrden = {
+        requisicionesVinculadas: seleccionados,
+        items: []
+    };
+
+    // Transformamos las requisiciones en "items" para la orden
+    seleccionados.forEach(idReq => {
+        const req = reqsTotales.find(r => String(r.id) === String(idReq));
+        if (req) {
+            window._borradorOrden.items.push({
+                idInterno: req.productoId, // <-- CORRECCIÓN: Usar el ID real, no un random
+                nombre: req.producto,
+                cantidad: req.cantidad,
+                costoUnitario: 0,
+                origen: `Requisición (Venta: ${req.folioVenta})`
+            });
+        }
+    });
+
+    renderBorradorOrdenCompra();
+}
+
+/**
+ * 3. INTERFAZ DE LA ORDEN DE COMPRA (EL "CARRITO" DE COMPRAS)
+ */
+function renderBorradorOrdenCompra() {
+    const contenedor = document.getElementById("contenidoRequisiciones");
+    if (!contenedor) return;
+
+    let totalOrden = 0;
+
+    let filasItems = window._borradorOrden.items.map((item, index) => {
+        const subtotal = item.cantidad * item.costoUnitario;
+        totalOrden += subtotal;
+
+        return `
+        <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px;">
+                <strong>${item.nombre}</strong><br>
+                <small style="color:#64748b;">${item.origen}</small>
+            </td>
+            <td style="padding:10px; text-align:center;">
+                <input type="number" value="${item.cantidad}" min="1" 
+                    onchange="actualizarBorradorOC(${index}, 'cantidad', this.value)"
+                    style="width:60px; padding:6px; text-align:center; border:1px solid #cbd5e1; border-radius:4px;">
+            </td>
+            <td style="padding:10px; text-align:right;">
+                $<input type="number" value="${item.costoUnitario}" min="0" step="0.01"
+                    onchange="actualizarBorradorOC(${index}, 'costoUnitario', this.value)"
+                    style="width:80px; padding:6px; text-align:right; border:1px solid #cbd5e1; border-radius:4px;">
+            </td>
+            <td style="padding:10px; text-align:right; font-weight:bold; color:#1e40af;">
+                $${subtotal.toFixed(2)}
+            </td>
+            <td style="padding:10px; text-align:center;">
+                <button onclick="eliminarItemBorradorOC(${index})" style="background:#fee2e2; color:#ef4444; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    contenedor.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h2 style="margin:0; color:#1e40af;">📝 Nueva Orden de Compra</h2>
+            <button onclick="renderRequisiciones()" style="padding:10px 16px; background:#64748b; color:white; border:none; border-radius:6px; cursor:pointer;">← Volver</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 2.5fr 1fr; gap:20px;">
+            <!-- LADO IZQUIERDO: LISTA DE PRODUCTOS -->
+            <div style="background:white; border-radius:10px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                    <h3 style="margin:0;">Productos a Pedir</h3>
+                    <button onclick="abrirBuscadorParaOC()" style="padding:8px 14px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                        ➕ Agregar otro producto al pedido
+                    </button>
+                </div>
+
+                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                    <thead>
+                        <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
+                            <th style="padding:10px; text-align:left;">Producto / Variante</th>
+                            <th style="padding:10px; text-align:center;">Cantidad</th>
+                            <th style="padding:10px; text-align:right;">Costo Unit.</th>
+                            <th style="padding:10px; text-align:right;">Subtotal</th>
+                            <th style="padding:10px; text-align:center;">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filasItems || '<tr><td colspan="5" style="text-align:center; padding:20px; color:#94a3b8;">La orden está vacía</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- LADO DERECHO: DATOS DEL PROVEEDOR Y GUARDAR -->
+            <div style="background:white; border-radius:10px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,0.05); height:fit-content;">
+                <h3 style="margin-top:0;">Resumen del Pedido</h3>
+                
+                <div style="margin-bottom:15px;">
+                    <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:4px;">🏢 Proveedor</label>
+                    <input type="text" id="ocProveedor" placeholder="Ej. Muebles Finos SA" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                </div>
+
+                <div style="margin-bottom:20px;">
+                    <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:4px;">📅 Fecha Esperada</label>
+                    <input type="date" id="ocFechaEsperada" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                </div>
+
+                <div style="background:#f0fdf4; padding:15px; border-radius:8px; text-align:center; margin-bottom:20px; border:1px solid #bbf7d0;">
+                    <span style="font-size:12px; color:#166534; font-weight:bold;">TOTAL ORDEN DE COMPRA</span><br>
+                    <span style="font-size:28px; font-weight:bold; color:#15803d;">$${totalOrden.toFixed(2)}</span>
+                </div>
+
+                <button onclick="guardarOrdenCompraFinal()" style="width:100%; padding:14px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer;">
+                    💾 Emitir Orden de Compra
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Actualiza cantidades y costos en el borrador
+function actualizarBorradorOC(index, campo, valor) {
+    if(window._borradorOrden.items[index]) {
+        window._borradorOrden.items[index][campo] = parseFloat(valor) || 0;
+        renderBorradorOrdenCompra();
+    }
+}
+
+// Eliminar un item del borrador
+function eliminarItemBorradorOC(index) {
+    window._borradorOrden.items.splice(index, 1);
+    renderBorradorOrdenCompra();
+}
+
+/**
+ * 4. PUENTE CON TU SELECTOR UNIVERSAL DE PRODUCTOS
+ */
+function abrirBuscadorParaOC() {
+    if (typeof window.abrirSelectorProducto === 'function') {
+        window.abrirSelectorProducto({
+            titulo: "🛒 Agregar a la Orden de Compra",
+            onSeleccion: (productoElegido) => {
+                let colorEspecifico = prompt(`¿Qué color/variante de ${productoElegido.nombre} deseas pedir?`);
+                let nombreFinal = colorEspecifico ? `${productoElegido.nombre} (Color: ${colorEspecifico})` : productoElegido.nombre;
+
+                window._borradorOrden.items.push({
+                    idInterno: productoElegido.id, // <-- CORRECCIÓN: Usar el ID real del catálogo
+                    nombre: nombreFinal,
+                    cantidad: 1,
+                    costoUnitario: productoElegido.costo || 0, // Aprovechamos para traer su costo real
+                    origen: "Agregado Manualmente"
+                });
+                renderBorradorOrdenCompra();
+            }
+        });
+    } else {
+        alert("⚠️ No se encontró el selector universal de productos.");
+    }
+}
+
+/**
+ * 5. GUARDAR LA ORDEN DE COMPRA FINAL
+ */
+function guardarOrdenCompraFinal() {
+    const proveedor = document.getElementById("ocProveedor").value.trim();
+    const fechaEsperada = document.getElementById("ocFechaEsperada").value;
+
+    if (!proveedor) return alert("⚠️ Debes escribir el nombre del proveedor.");
+    if (window._borradorOrden.items.length === 0) return alert("⚠️ La orden está vacía.");
+
+    // Validar que no haya costos en 0
+    const hayCostosCero = window._borradorOrden.items.some(i => i.costoUnitario <= 0);
+    if (hayCostosCero) {
+        if(!confirm("⚠️ Algunos productos tienen el costo en $0.00. ¿Estás seguro de emitir la orden así?")) return;
+    }
+
+    const folioOC = "OC-" + Date.now().toString().slice(-6);
+    const totalOC = window._borradorOrden.items.reduce((s, i) => s + (i.cantidad * i.costoUnitario), 0);
+
+    // 1. Guardar la nueva Orden de Compra (CORREGIDO PARA COMPATIBILIDAD)
+    let ordenes = StorageService.get("ordenesCompra", []);
+    
+    // Adaptar los items al formato estándar de OC
+    const articulosAdaptados = window._borradorOrden.items.map(item => ({
+        productoId: item.idInterno, 
+        nombre: item.nombre,
+        cantidad: item.cantidad,
+        costo: item.costoUnitario, 
+        subtotal: item.cantidad * item.costoUnitario,
+        caracteristicas: item.origen
+    }));
+
+    ordenes.push({
+        id: Date.now(),
+        folio: folioOC,
+        proveedorNombre: proveedor, // Antes decía solo "proveedor"
+        proveedorId: null,
+        fechaEmision: new Date().toISOString(), // Formato estándar
+        fechaEntregaEstimada: fechaEsperada || null, // Antes decía "fechaEsperada"
+        total: totalOC,
+        articulos: articulosAdaptados, // Antes decía "items"
+        estado: "Enviada", // Antes decía "estatus: En Camino"
+        notas: "Generada desde Requisiciones",
+        requisicionesVinculadas: window._borradorOrden.requisicionesVinculadas
+    });
+    StorageService.set("ordenesCompra", ordenes);
+
+    // 2. Actualizar el estatus de las requisiciones para que ya no salgan en "Pendientes"
+    let reqsTotales = StorageService.get("requisicionesCompra", []);
+    window._borradorOrden.requisicionesVinculadas.forEach(idReq => {
+        let r = reqsTotales.find(x => String(x.id) === String(idReq));
+        if (r) r.estatus = `En Orden (${folioOC})`;
+    });
+    StorageService.set("requisicionesCompra", reqsTotales);
+
+    // Limpiamos memoria
+    window._borradorOrden = { requisicionesVinculadas: [], items: [] };
+
+    alert(`✅ Orden de Compra ${folioOC} creada con éxito.`);
+    
+    // Regresamos a ver las requisiciones (que ahora debe estar vacío si procesamos todo)
+    renderRequisiciones();
+}
+
+// Exponer la función para que el menú HTML la encuentre
+window.renderRequisiciones = renderRequisiciones;
 window.renderProveedores = renderProveedores;
 window.guardarProveedor = guardarProveedor;
 window.eliminarProveedor = eliminarProveedor;

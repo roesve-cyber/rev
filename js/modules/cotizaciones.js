@@ -1,4 +1,4 @@
-// ===== COTIZACIONES =====
+// ===== COTIZACIONES (DUAL: VENTAS Y AUDITORÍA MULTI-PLAZO) =====
 
 function _foliosCot() {
     const hoy = new Date();
@@ -16,18 +16,87 @@ function _foliosCot() {
     const seq = String(ultimoNum + 1).padStart(4, '0');
     return 'COT-' + ymd + '-' + seq;
 }
+
 const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {
     style: 'currency',
     currency: 'MXN'
 }).format(n);
+
+// Llama al cotizador simple (Ventas)
 function abrirCotizador() {
+    window._customPlanesAuditoria = [];
+    _renderCotizadorHTML(false);
+}
+
+// Llama al cotizador avanzado (Auditoría)
+function abrirCotizadorAuditoria() {
+    window._customPlanesAuditoria = [];
+    _renderCotizadorHTML(true);
+}
+
+// Generador dinámico de la vista según el rol/sección
+function _renderCotizadorHTML(isAuditoria) {
+    window._isCotizadorAuditoria = isAuditoria;
     document.querySelector('[data-modal="cotizador"]')?.remove();
-    // Los pickers de cliente y producto abren modales dinámicos (no se pre-generan opciones)
+
+    // Campos condicionales para producto libre
+    const camposLibre = isAuditoria ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">NOMBRE DEL PRODUCTO</label>
+                <input type="text" id="cotNombreLibre" placeholder="Ej: Mesa de madera..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">COSTO DE ADQUISICIÓN ($)</label>
+                <input type="number" id="cotCostoLibre" value="0" min="0" oninput="_actualizarPrecioSugerido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">MARGEN DESEADO (%)</label>
+                <input type="number" id="cotMargenLibre" value="30" min="0" max="99" oninput="_actualizarPrecioSugerido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">PRECIO FINAL (editable)</label>
+                <input type="number" id="cotPrecioManual" value="0" min="0" step="0.01" style="width:100%;padding:8px;border:1px solid #2563eb;border-radius:6px;margin-top:3px;font-weight:bold;">
+            </div>
+        </div>
+    ` : `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">NOMBRE DEL PRODUCTO</label>
+                <input type="text" id="cotNombreLibre" placeholder="Ej: Mesa de madera..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">PRECIO FINAL ($)</label>
+                <input type="number" id="cotPrecioManual" value="0" min="0" step="0.01" style="width:100%;padding:8px;border:1px solid #2563eb;border-radius:6px;margin-top:3px;font-weight:bold;">
+            </div>
+        </div>
+    `;
+
+    // Panel condicional MULTIPLE de plan personalizado
+    const camposCustomPlan = isAuditoria ? `
+        <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:14px;">
+            <h4 style="margin:0 0 8px;color:#92400e;font-size:13px;">⚙️ Agregar Planes de Crédito (Auditoría)</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+                <div>
+                    <label style="font-size:11px;font-weight:bold;color:#92400e;">PLAZO ADICIONAL (Meses)</label>
+                    <input type="number" id="cotPlazoCustomInput" placeholder="Ej: 9" min="1" style="width:100%;padding:8px;border:1px solid #fcd34d;border-radius:6px;margin-top:3px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;color:#92400e;">TASA MENSUAL (%)</label>
+                    <input type="number" id="cotTasaCustomInput" placeholder="Ej: 3" min="0" step="0.1" style="width:100%;padding:8px;border:1px solid #fcd34d;border-radius:6px;margin-top:3px;">
+                </div>
+                <button type="button" onclick="_agregarPlanCustom()" style="padding:9px 14px;background:#d97706;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;" title="Agregar Plan">➕ Agregar</button>
+            </div>
+            <div id="listaCustomPlanes" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+        </div>
+    ` : '';
 
     const html = `
     <div data-modal="cotizador" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:760px;padding:28px;margin:auto;">
-        <h2 style="margin:0 0 20px;color:#1e40af;">📄 Nueva Cotización</h2>
+        <h2 style="margin:0 0 20px;color:${isAuditoria ? '#d97706' : '#1e40af'};">📄 Nueva Cotización ${isAuditoria ? '(Avanzada)' : ''}</h2>
 
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
@@ -97,26 +166,7 @@ function abrirCotizador() {
             <button onclick="agregarArticuloCotizacion()" style="padding:9px 16px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
           </div>
           <div id="cotProductoLibreFields" style="display:none;background:#f9fafb;border-radius:6px;padding:12px;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
-              <div>
-                <label style="font-size:11px;font-weight:bold;color:#374151;">NOMBRE DEL PRODUCTO</label>
-                <input type="text" id="cotNombreLibre" placeholder="Ej: Mesa de madera..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
-              </div>
-              <div>
-                <label style="font-size:11px;font-weight:bold;color:#374151;">COSTO DE ADQUISICIÓN ($)</label>
-                <input type="number" id="cotCostoLibre" value="0" min="0" oninput="_actualizarPrecioSugerido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
-              </div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div>
-                <label style="font-size:11px;font-weight:bold;color:#374151;">MARGEN DESEADO (%)</label>
-                <input type="number" id="cotMargenLibre" value="30" min="0" max="99" oninput="_actualizarPrecioSugerido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
-              </div>
-              <div>
-                <label style="font-size:11px;font-weight:bold;color:#374151;">PRECIO FINAL (editable)</label>
-                <input type="number" id="cotPrecioManual" value="0" min="0" step="0.01" style="width:100%;padding:8px;border:1px solid #2563eb;border-radius:6px;margin-top:3px;font-weight:bold;">
-              </div>
-            </div>
+            ${camposLibre}
           </div>
         </div>
 
@@ -145,6 +195,8 @@ function abrirCotizador() {
           </div>
         </div>
 
+        ${camposCustomPlan}
+
         <div id="cotPlanesDiv" style="margin-bottom:14px;display:none;">
           <h4 style="margin:0 0 8px;color:#374151;font-size:14px;">📅 Tabla de Plazos de Crédito</h4>
           <div id="cotTablaPlanesContainer"></div>
@@ -161,6 +213,40 @@ function abrirCotizador() {
     _renderTablaArticulosCot();
 }
 
+// ── Helpers de Planes Personalizados ──
+window._agregarPlanCustom = function() {
+    const meses = parseInt(document.getElementById('cotPlazoCustomInput').value);
+    const tasa = parseFloat(document.getElementById('cotTasaCustomInput').value);
+    
+    if (isNaN(meses) || meses <= 0 || isNaN(tasa) || tasa < 0) {
+        return alert("⚠️ Ingresa un plazo en meses y una tasa válida.");
+    }
+    
+    window._customPlanesAuditoria.push({ meses, tasa });
+    document.getElementById('cotPlazoCustomInput').value = '';
+    document.getElementById('cotTasaCustomInput').value = '';
+    _renderCustomPlanes();
+    _actualizarPlanesCot();
+};
+
+window._eliminarPlanCustom = function(idx) {
+    window._customPlanesAuditoria.splice(idx, 1);
+    _renderCustomPlanes();
+    _actualizarPlanesCot();
+};
+
+window._renderCustomPlanes = function() {
+    const cont = document.getElementById('listaCustomPlanes');
+    if (!cont) return;
+    cont.innerHTML = window._customPlanesAuditoria.map((p, i) => `
+        <div style="background:#fde68a;color:#92400e;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:6px;">
+            ${p.meses}m al ${p.tasa}%
+            <button type="button" onclick="_eliminarPlanCustom(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;margin-left:4px;">✕</button>
+        </div>
+    `).join('');
+};
+
+
 function _onCotProductoChange() {
     const sel = document.getElementById('cotProductoSel');
     const libFields = document.getElementById('cotProductoLibreFields');
@@ -173,6 +259,7 @@ function _onCotProductoChange() {
 }
 
 function _actualizarPrecioSugerido() {
+    if (!window._isCotizadorAuditoria) return; // Solo disponible en Auditoría
     const costo = parseFloat(document.getElementById('cotCostoLibre')?.value) || 0;
     const margen = parseFloat(document.getElementById('cotMargenLibre')?.value) || 0;
     let precioSugerido = 0;
@@ -212,10 +299,44 @@ function _actualizarPlanesCot() {
 
     planesDiv.style.display = 'block';
 
-    // Obtener periodicidad seleccionada
     const periodicidadSel = document.getElementById('cotPeriodicidad')?.value || 'semanal';
     const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+    
+    // Obtener los planes estándar de sistema
     const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, periodicidadSel);
+
+    // Calcular los planes personalizados si estamos en modo auditoría
+    if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
+        window._customPlanesAuditoria.forEach(custom => {
+            let mult = 1;
+            if (periodicidadSel === 'quincenal') mult = 2;
+            if (periodicidadSel === 'mensual') mult = 4;
+
+            const tasaDecimal = custom.tasa / 100;
+            let totalBase = saldo * (1 + (tasaDecimal * custom.meses));
+            let semanas = custom.meses * 4;
+            let pagoSemanal = totalBase / semanas;
+            pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+            let totalFinal = (pagoSemanal * semanas) + enganche;
+
+            let pagos = Math.round(semanas / mult);
+            let abono = pagoSemanal * mult;
+
+            // Agregamos al arreglo de planes y le ponemos el badge de Custom
+            planes.push({
+                meses: custom.meses,
+                pagos: pagos,
+                abono: abono,
+                total: totalFinal,
+                enganche: enganche,
+                custom: true
+            });
+        });
+        
+        // Ordenar todos los planes por meses (de menor a mayor) para que se vea ordenado en la tabla
+        planes.sort((a,b) => a.meses - b.meses);
+    }
+
     let tablaHtml = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="background:#f3f4f6;">
         <th style="padding:8px;text-align:center;">Plazo</th>
@@ -224,9 +345,11 @@ function _actualizarPlanesCot() {
         <th style="padding:8px;text-align:right;">Total a Pagar</th>
       </tr></thead>
       <tbody>`;
+      
     planes.forEach(plan => {
-        tablaHtml += `<tr>
-          <td style="padding:7px;text-align:center;">${plan.meses} meses (${plan.pagos} pagos)</td>
+        const customBadge = plan.custom ? ' <br><span style="background:#f59e0b;color:white;padding:2px 6px;border-radius:10px;font-size:9px;">Personalizado</span>' : '';
+        tablaHtml += `<tr style="${plan.custom ? 'background:#fffbeb;' : ''}">
+          <td style="padding:7px;text-align:center;">${plan.meses} meses (${plan.pagos} pagos)${customBadge}</td>
           <td style="padding:7px;text-align:center;">${labelMap[periodicidadSel]}</td>
           <td style="padding:7px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(plan.abono)}</td>
           <td style="padding:7px;text-align:right;">${dinero(plan.total)}</td>
@@ -235,7 +358,6 @@ function _actualizarPlanesCot() {
     tablaHtml += '</tbody></table>';
     container.innerHTML = tablaHtml;
 
-    // Actualizar tabla cuando cambie la periodicidad
     const periodicidadCombo = document.getElementById('cotPeriodicidad');
     if (periodicidadCombo && !periodicidadCombo._cotListener) {
         periodicidadCombo.addEventListener('change', _actualizarPlanesCot);
@@ -252,13 +374,20 @@ function agregarArticuloCotizacion() {
     if (!window._articulosCot) window._articulosCot = [];
 
     if (sel.value === '__libre__') {
-        // Free/unregistered product
         const nombre = document.getElementById('cotNombreLibre')?.value.trim();
         const precio = parseFloat(document.getElementById('cotPrecioManual')?.value) || 0;
+        
         if (!nombre) return alert('⚠️ Escribe el nombre del producto.');
         if (precio <= 0) return alert('⚠️ El precio debe ser mayor a 0.');
-        const costo = parseFloat(document.getElementById('cotCostoLibre')?.value) || 0;
-        const margen = parseFloat(document.getElementById('cotMargenLibre')?.value) || 0;
+        
+        let costo = 0;
+        let margen = 0;
+        
+        if (window._isCotizadorAuditoria) {
+            costo = parseFloat(document.getElementById('cotCostoLibre')?.value) || 0;
+            margen = parseFloat(document.getElementById('cotMargenLibre')?.value) || 0;
+        }
+
         window._articulosCot.push({
             productoId: null,
             nombre,
@@ -269,11 +398,13 @@ function agregarArticuloCotizacion() {
             cantidad: cant,
             subtotal: cant * precio
         });
-        // Reset libre fields
+        
         document.getElementById('cotNombreLibre').value = '';
-        document.getElementById('cotCostoLibre').value = '0';
-        document.getElementById('cotMargenLibre').value = '30';
         document.getElementById('cotPrecioManual').value = '0';
+        if (window._isCotizadorAuditoria) {
+            document.getElementById('cotCostoLibre').value = '0';
+            document.getElementById('cotMargenLibre').value = '30';
+        }
     } else {
         const productosLista = StorageService.get('productos', []);
         const prod = productosLista.find(p => String(p.id) === String(sel.value));
@@ -289,7 +420,6 @@ function agregarArticuloCotizacion() {
     }
 
     cantInput.value = 1;
-    // Resetear picker de producto en cotizador
     sel.value = '';
     const displayCot = document.getElementById('cotProductoSel-display');
     if (displayCot) { displayCot.textContent = 'Sin seleccionar'; displayCot.style.color = '#6b7280'; }
@@ -353,6 +483,10 @@ function generarCotizacion() {
     const hoy = new Date();
     const fechaVenc = new Date(hoy.getTime() + vigDias * 24 * 3600 * 1000);
     const periodicidad = document.getElementById('cotPeriodicidad')?.value || 'semanal';
+    
+    // Capturar TODOS los planes custom creados
+    const customPlanes = window._isCotizadorAuditoria ? [...(window._customPlanesAuditoria || [])] : [];
+
     const cot = {
       id: Date.now(),
       folio: _foliosCot(),
@@ -367,11 +501,14 @@ function generarCotizacion() {
       periodicidad,
       vigenciaDias: vigDias,
       notas,
-      estado: 'Vigente'
+      estado: 'Vigente',
+      customPlanes // Se guarda el arreglo de plazos personalizados
     };
+    
     const lista = StorageService.get('cotizaciones', []);
     lista.push(cot);
     StorageService.set('cotizaciones', lista);
+    
     document.querySelector('[data-modal="cotizador"]')?.remove();
     alert(`✅ Cotización ${cot.folio} generada correctamente.`);
     if (document.getElementById('listaCotizaciones')) abrirListaCotizaciones();
@@ -448,7 +585,6 @@ function imprimirCotizacion(id) {
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     
-    // Filas de productos con fuente ajustada
     const rows = c.articulos.map(a => `
         <tr>
             <td style="padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px;">${a.nombre}</td>
@@ -456,14 +592,47 @@ function imprimirCotizacion(id) {
             <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
         </tr>`).join('');
 
-    // Planes según periodicidad seleccionada
     let planeRows = '';
+    let hasCustom = false;
+    
     if (c.saldoFinanciar > 0) {
       const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
       const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
+      
+      // Recalcular TODOS los planes custom para impresión
+      if (c.customPlanes && c.customPlanes.length > 0) {
+          c.customPlanes.forEach(custom => {
+            let mult = 1;
+            if (c.periodicidad === 'quincenal') mult = 2;
+            if (c.periodicidad === 'mensual') mult = 4;
+
+            const tasaDecimal = custom.tasa / 100;
+            let totalBase = c.saldoFinanciar * (1 + (tasaDecimal * custom.meses));
+            let semanas = custom.meses * 4;
+            let pagoSemanal = totalBase / semanas;
+            pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+            let totalFinal = (pagoSemanal * semanas) + c.enganche;
+
+            let pagos = Math.round(semanas / mult);
+            let abono = pagoSemanal * mult;
+
+            planes.push({
+                meses: custom.meses,
+                pagos: pagos,
+                abono: abono,
+                total: totalFinal,
+                enganche: c.enganche,
+                custom: true
+            });
+            hasCustom = true;
+          });
+          
+          planes.sort((a,b) => a.meses - b.meses);
+      }
+
       planeRows = planes.map(plan => `
         <tr>
-          <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)</td>
+          <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
           <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
           <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
         </tr>`).join('');
@@ -478,20 +647,9 @@ function imprimirCotizacion(id) {
       <title>COT-${c.folio}</title>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
       <style>
-        /* AJUSTE DE HOJA ANGOSTA (80mm) */
         @page { size: 80mm auto; margin: 0; }
-        body { 
-          font-family: 'Courier New', Courier, monospace; 
-          margin: 0; padding: 0; 
-          background: #f0f0f0; 
-          display: flex; flex-direction: column; align-items: center; 
-        }
-        #area-impresion { 
-          width: 72mm; /* Aprovecha el ancho de 80mm dejando margen mínimo */
-          padding: 4mm; 
-          background: white; 
-          box-sizing: border-box;
-        }
+        body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
+        #area-impresion { width: 72mm; padding: 4mm; background: white; box-sizing: border-box; }
         .controles { margin: 10px 0; display: flex; gap: 5px; }
         h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
         .separator { border-top: 1px double #000; margin: 5px 0; }
@@ -504,11 +662,7 @@ function imprimirCotizacion(id) {
         .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
         .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
         .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
-        @media print { 
-          .controles { display: none !important; } 
-          body { background: white; }
-          #area-impresion { width: 100%; padding: 2mm; }
-        }
+        @media print { .controles { display: none !important; } body { background: white; } #area-impresion { width: 100%; padding: 2mm; } }
       </style>
     </head>
     <body>
@@ -551,6 +705,7 @@ function imprimirCotizacion(id) {
             </thead>
             <tbody>${planeRows}</tbody>
           </table>
+          ${hasCustom ? '<div style="font-size:8px; margin-top:4px;">* Plan personalizado</div>' : ''}
         ` : ''}
 
         <div class="footer">
@@ -589,7 +744,6 @@ function convertirCotizacionAVenta(id) {
 
     cot.articulos.forEach(art => {
         if (art.esLibre) {
-            // Manejo de producto manual
             const planes = CalculatorService.calcularCredito(art.precio);
             const plan = planes[5] || planes[0];
             carritoActual.push({
@@ -638,6 +792,7 @@ function eliminarCotizacion(id) {
 }
 
 window.abrirCotizador = abrirCotizador;
+window.abrirCotizadorAuditoria = abrirCotizadorAuditoria;
 window._onCotProductoChange = _onCotProductoChange;
 window._actualizarPrecioSugerido = _actualizarPrecioSugerido;
 window._toggleEngancheCot = _toggleEngancheCot;

@@ -105,18 +105,19 @@ function guardarCliente() {
         alert("⚠️ " + validacion.errores.join("\n"));
         return;
     }
+    let clientesBD = StorageService.get("clientes", []);
 
     if (clienteEditandoId) {
-        const index = clientes.findIndex(c => c.id === clienteEditandoId);
+        const index = clientesBD.findIndex(c => c.id === clienteEditandoId);
         if (index !== -1) {
-            clientes[index].nombre   = nombre;
-            clientes[index].direccion = direccion;
-            clientes[index].telefono = telefono;
-            clientes[index].referencia = referencia;
+            clientesBD[index].nombre   = nombre;
+            clientesBD[index].direccion = direccion;
+            clientesBD[index].telefono = telefono;
+            clientesBD[index].referencia = referencia;
         }
         clienteEditandoId = null;
     } else {
-        clientes.push({
+        clientesBD.push({
             id: Date.now(),
             nombre,
             direccion,
@@ -126,7 +127,7 @@ function guardarCliente() {
         });
     }
 
-    if (!StorageService.set("clientes", clientes)) {
+    if (!StorageService.set("clientes", clientesBD)) {
         alert("❌ Error guardando cliente");
         return;
     }
@@ -177,8 +178,10 @@ function renderClientes() {
 
 function eliminarCliente(id) {
     if (confirm("¿Eliminar este cliente definitivamente?")) {
-        clientes = clientes.filter(c => c.id !== id);
-        if (!StorageService.set("clientes", clientes)) {
+        // CÓDIGO NUEVO:
+        let clientesBD = StorageService.get("clientes", []);
+        clientesBD = clientesBD.filter(c => c.id !== id);
+        if (!StorageService.set("clientes", clientesBD)) {
             console.error("❌ Error eliminando cliente");
             return;
         }
@@ -208,12 +211,29 @@ function mostrarInfoCliente() {
     const div = document.getElementById("infoCliente");
     if (!clienteSeleccionado || !div) return;
 
+    // Obtener la calificación del Buró
+    const score = window.calcularCalificacionCliente(clienteSeleccionado.id);
+
     div.innerHTML = `
-        <div style="background:#f7fafc; padding:15px; border-radius:8px;">
-            <strong style="font-size:16px;">${clienteSeleccionado.nombre}</strong><br>
-            ${clienteSeleccionado.direccion ? `📍 ${clienteSeleccionado.direccion}<br>` : ''}
-            ${clienteSeleccionado.telefono ? `📞 ${clienteSeleccionado.telefono}<br>` : ''}
-            ${clienteSeleccionado.referencia ? `📝 ${clienteSeleccionado.referencia}` : ''}
+        <div style="background:#f8fafc; padding:16px; border-radius:12px; border:1px solid #e2e8f0; position:relative;">
+            
+            <div style="position:absolute; top:-12px; right:15px; background:${score.bg}; border:1px solid ${score.color}; padding:4px 10px; border-radius:20px; box-shadow:0 2px 4px rgba(0,0,0,0.05); display:flex; flex-direction:column; align-items:center;">
+                <span style="font-size:14px;">${score.estrellas}</span>
+                <span style="font-size:9px; font-weight:bold; color:${score.color}; text-transform:uppercase;">${score.texto}</span>
+            </div>
+
+            <strong style="font-size:16px; color:#0f172a; display:block; margin-bottom:8px;">👤 ${clienteSeleccionado.nombre}</strong>
+            <div style="font-size:13px; color:#475569; line-height:1.5;">
+                ${clienteSeleccionado.direccion ? `📍 ${clienteSeleccionado.direccion}<br>` : ''}
+                ${clienteSeleccionado.telefono ? `📞 ${clienteSeleccionado.telefono}<br>` : ''}
+                ${clienteSeleccionado.referencia ? `📝 ${clienteSeleccionado.referencia}` : ''}
+            </div>
+            
+            ${score.estrellas.includes('⭐') && score.estrellas.length < 3 ? `
+                <div style="margin-top:10px; padding:8px; background:#fee2e2; border-left:3px solid #ef4444; border-radius:4px; font-size:11px; color:#991b1b; font-weight:bold;">
+                    ⚠️ Recomendación: Cliente con historial de morosidad. Se sugiere exigir un enganche mayor o cobrar de contado.
+                </div>
+            ` : ''}
         </div>
     `;
 }
@@ -1614,8 +1634,9 @@ function guardarClienteDesdeModal() {
         fechaRegistro: new Date().toLocaleDateString()
     };
 
-    clientes.push(nuevo);
-    if (!StorageService.set("clientes", clientes)) {
+    let clientesBD = StorageService.get("clientes", []);
+    clientesBD.push(nuevo);
+    if (!StorageService.set("clientes", clientesBD)) {
         alert("❌ Error guardando cliente");
         return;
     }
@@ -2241,7 +2262,13 @@ function abrirEstadoCuentaCliente(clienteId) {
                         <img src="img/logo.png" style="width:55px; height:55px; object-fit:contain;" onerror="this.style.display='none'">
                         <div>
                             <div style="font-size:20px; font-weight:bold; color:#1e3a5f;">MUEBLERÍA MI PUEBLITO</div>
-                            <div style="font-size:15px; color:#374151; font-weight:600;">Estado de Cuenta — ${esc(cliente.nombre)}</div>
+                            <div style="font-size:15px; color:#374151; font-weight:600; display:flex; align-items:center; gap:10px;">
+                                Estado de Cuenta — ${esc(cliente.nombre)}
+                                ${(() => {
+                                    const score = window.calcularCalificacionCliente(cliente.id);
+                                    return `<span style="background:${score.bg}; color:${score.color}; font-size:10px; padding:2px 8px; border-radius:12px; border:1px solid ${score.color};">${score.estrellas} ${score.texto}</span>`;
+                                })()}
+                            </div>
                             ${cliente.telefono ? `<div style="font-size:13px; color:#6b7280;">📞 ${esc(cliente.telefono)}</div>` : ''}
                             ${cliente.direccion ? `<div style="font-size:13px; color:#6b7280;">📍 ${esc(cliente.direccion)}</div>` : ''}
                         </div>
@@ -2695,6 +2722,61 @@ function guardarPromesaPago(folio) {
     alert('✅ Promesa de pago registrada. El cliente ha sido clasificado como "Promesa".');
     renderCuentasXCobrar();
 }
+
+// ===== BURÓ DE CRÉDITO INTERNO (SCORING) =====
+window.calcularCalificacionCliente = function(clienteId) {
+    const pagares = StorageService.get("pagaresSistema", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    
+    // Filtrar los pagarés de este cliente
+    const pagaresCliente = pagares.filter(p => String(p.clienteId) === String(clienteId));
+    
+    if (pagaresCliente.length === 0) {
+        return { estrellas: '🌟 N/A', texto: 'Cliente Nuevo', color: '#64748b', bg: '#f1f5f9' };
+    }
+
+    let totalPagares = pagaresCliente.length;
+    let pagaresAtrasados = 0;
+    let maxDiasAtrasoHist = 0;
+    const hoy = new Date();
+
+    pagaresCliente.forEach(p => {
+        // Calcular atraso de los que ya se pagaron pero se pagaron tarde
+        if (p.estado === 'Pagado' && p.fechaAbono) {
+            const fVenc = new Date(p.fechaVencimiento);
+            const fPago = new Date(p.fechaAbono);
+            if (fPago > fVenc) {
+                const dias = Math.floor((fPago - fVenc) / (1000 * 60 * 60 * 24));
+                if (dias > 3) pagaresAtrasados++; // Damos 3 días de tolerancia
+                if (dias > maxDiasAtrasoHist) maxDiasAtrasoHist = dias;
+            }
+        } 
+        // Calcular atraso de los que siguen pendientes
+        else if (p.estado !== 'Pagado' && p.estado !== 'Cancelado') {
+            const fVenc = new Date(p.fechaVencimiento);
+            if (fVenc < hoy) {
+                const dias = Math.floor((hoy - fVenc) / (1000 * 60 * 60 * 24));
+                pagaresAtrasados++;
+                if (dias > maxDiasAtrasoHist) maxDiasAtrasoHist = dias;
+            }
+        }
+    });
+
+    const porcentajeIncumplimiento = (pagaresAtrasados / totalPagares) * 100;
+
+    // Asignar calificación
+    if (maxDiasAtrasoHist === 0 && porcentajeIncumplimiento === 0) {
+        return { estrellas: '🌟🌟🌟🌟🌟', texto: 'Excelente (Puntual)', color: '#15803d', bg: '#dcfce7' }; // Verde
+    } else if (maxDiasAtrasoHist <= 7 && porcentajeIncumplimiento <= 20) {
+        return { estrellas: '⭐⭐⭐⭐', texto: 'Bueno (Atrasos leves)', color: '#0369a1', bg: '#e0f2fe' }; // Azul
+    } else if (maxDiasAtrasoHist <= 15 && porcentajeIncumplimiento <= 40) {
+        return { estrellas: '⭐⭐⭐', texto: 'Regular', color: '#b45309', bg: '#fef3c7' }; // Amarillo
+    } else if (maxDiasAtrasoHist <= 45) {
+        return { estrellas: '⭐⭐', texto: 'Riesgoso', color: '#c2410c', bg: '#ffedd5' }; // Naranja
+    } else {
+        return { estrellas: '⭐', texto: 'Moroso Crítico', color: '#b91c1c', bg: '#fee2e2' }; // Rojo
+    }
+};
 
 window.abrirModalPromesaPago = abrirModalPromesaPago;
 window.guardarPromesaPago = guardarPromesaPago;

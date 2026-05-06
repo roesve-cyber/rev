@@ -83,10 +83,9 @@ function renderGestionVendedores() {
 }
 
 function abrirFormVendedor(id) {
-      // Valor por defecto: si no existe, usa el de crédito
-      const comisionApartado = v ? (v.porcentajeComisionApartado ?? v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0) : 0;
     const vendedores = StorageService.get('vendedores', []);
     const v = id ? vendedores.find(x => x.id === id) : null;
+    const comisionApartado = v ? (v.porcentajeComisionApartado ?? v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0) : 0;
     const tipoActual = v ? (v.tipoComision || 'al_cierre') : 'al_cierre';
     const html = `
     <div data-modal="form-vendedor" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">

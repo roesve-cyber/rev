@@ -50,7 +50,7 @@ function renderSubcategorias(cat, prods, callback) {
     cont.innerHTML = `<button onclick="renderCategorias(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a categorías</button>
                       <p style="font-weight:bold;margin-bottom:10px;">${cat.nombre} > Selecciona subcategoría:</p>`;
     
-    cat.subcategorias.forEach(sub => {
+    (cat.subcategorias || []).forEach(sub => {
         const btn = document.createElement('button');
         btn.innerHTML = `🏷️ ${sub.nombre}`;
         btn.style = "width:100%;text-align:left;padding:10px;margin-bottom:5px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer;";

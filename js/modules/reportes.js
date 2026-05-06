@@ -34,9 +34,13 @@ function renderReporteVentas() {
     const hasta = document.getElementById('rvFechaHasta')?.value;
     const metodo = document.getElementById('rvMetodo')?.value || '';
 
-    let ventas = [...(cuentasPorCobrar || [])];
+    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
+    const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+    const movimientosCaja = StorageService.get("movimientosCaja", []);
 
-    const contado = (movimientosCaja || []).filter(m => m.tipo === 'ingreso' && m.referencia === 'Contado');
+    let ventas = [...cuentasPorCobrar];
+
+    const contado = movimientosCaja.filter(m => m.tipo === 'ingreso' && m.referencia === 'Contado');
     const ventasContado = contado.map(m => ({
         folio: m.folio || '-',
         nombre: m.concepto || '-',
@@ -100,8 +104,12 @@ function renderReporteVentas() {
 }
 
 function exportarReporteVentas() {
-    const ventas = [...(cuentasPorCobrar || [])];
-    const contado = (movimientosCaja || []).filter(m => m.tipo === 'ingreso' && m.referencia === 'Contado')
+    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
+    const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+    const movimientosCaja = StorageService.get("movimientosCaja", []);
+
+    const ventas = [...cuentasPorCobrar];
+    const contado = movimientosCaja.filter(m => m.tipo === 'ingreso' && m.referencia === 'Contado')
         .map(m => ({ folio: m.folio || '-', nombre: m.concepto || '-', fechaVenta: m.fecha, totalContadoOriginal: m.monto, metodo: 'contado', estado: 'Pagado', saldoActual: 0 }));
     const todas = [...ventas, ...contado];
     _csvDescargar('reporte-ventas.csv',
@@ -116,7 +124,10 @@ function renderReporteCompras() {
     const desde = document.getElementById('rcFechaDesde')?.value;
     const hasta = document.getElementById('rcFechaHasta')?.value;
 
-    let lista = [...(compras || [])];
+    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
+    const compras = StorageService.get("compras", []);
+    let lista = [...compras];
+
     if (desde) lista = lista.filter(c => (c.fechaISO || c.fecha || '') >= desde);
     if (hasta) lista = lista.filter(c => (c.fechaISO || c.fecha || '') <= hasta + 'T23:59:59');
 
@@ -141,9 +152,12 @@ function renderReporteCompras() {
 }
 
 function exportarReporteCompras() {
+    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
+    const compras = StorageService.get("compras", []);
+
     _csvDescargar('reporte-compras.csv',
         ['ID', 'Proveedor', 'Fecha', 'Total'],
-        (compras || []).map(c => [c.id || '-', c.proveedor || '-', c.fechaISO || c.fecha || '-', c.total || 0])
+        compras.map(c => [c.id || '-', c.proveedor || '-', c.fechaISO || c.fecha || '-', c.total || 0])
     );
 }
 
@@ -153,7 +167,10 @@ function renderReporteFlujo() {
     const desde = document.getElementById('rfFechaDesde')?.value;
     const hasta = document.getElementById('rfFechaHasta')?.value;
 
-    let lista = [...(movimientosCaja || [])];
+    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
+    const movimientosCaja = StorageService.get("movimientosCaja", []);
+    let lista = [...movimientosCaja];
+
     if (desde) lista = lista.filter(m => (m.fecha || '') >= desde);
     if (hasta) lista = lista.filter(m => (m.fecha || '') <= hasta + 'T23:59:59');
 
@@ -185,11 +202,79 @@ function renderReporteFlujo() {
 }
 
 function exportarReporteFlujo() {
+    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
+    const movimientosCaja = StorageService.get("movimientosCaja", []);
+
     _csvDescargar('reporte-flujo.csv',
         ['Folio', 'Fecha', 'Tipo', 'Monto', 'Concepto', 'Referencia'],
-        (movimientosCaja || []).map(m => [m.folio || '-', m.fecha || '-', m.tipo || '-', m.monto || 0, m.concepto || '-', m.referencia || '-'])
+        movimientosCaja.map(m => [m.folio || '-', m.fecha || '-', m.tipo || '-', m.monto || 0, m.concepto || '-', m.referencia || '-'])
     );
 }
+
+// ===== REPORTE DE RENTABILIDAD PURA =====
+window.renderReporteRentabilidad = function() {
+    const cont = document.getElementById('contenidoRentabilidad'); // <--- AHORA APUNTA AQUÍ
+    if (!cont) return;
+
+    const ventas = StorageService.get("ventasRegistradas", []);
+    const gastos = StorageService.get("gastosOperativos", []);
+    const productos = StorageService.get("productos", []);
+    
+    // 1. CÁLCULO DE INGRESOS Y COSTO DE MERCANCÍA (COGS)
+    let totalVentas = 0;
+    let costoMercanciaTotal = 0;
+
+    ventas.forEach(v => {
+        totalVentas += (v.total || 0);
+        
+        // Sumar el costo individual de cada artículo en la venta
+        (v.articulos || []).forEach(art => {
+            const pData = productos.find(p => String(p.id) === String(art.id || art.productoId));
+            const costoUnitario = pData ? (pData.costo || 0) : (art.costo || 0);
+            costoMercanciaTotal += costoUnitario * (art.cantidad || 1);
+        });
+    });
+
+    // 2. CÁLCULO DE GASTOS OPERATIVOS
+    const totalGastos = gastos.reduce((s, g) => s + (g.monto || 0), 0);
+
+    const utilidadBruta = totalVentas - costoMercanciaTotal;
+    const utilidadNeta = utilidadBruta - totalGastos;
+    const margenNeto = totalVentas > 0 ? (utilidadNeta / totalVentas * 100).toFixed(1) : 0;
+
+    cont.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:25px;">
+        <div style="background:white;padding:25px;border-radius:15px;box-shadow:var(--shadow-sm);border:1px solid var(--border-color);">
+            <div style="margin-bottom:15px;display:flex;justify-content:space-between;">
+                <span style="color:#64748b;">(+) Ingresos por Ventas</span>
+                <strong style="color:#16a34a;">${dinero(totalVentas)}</strong>
+            </div>
+            <div style="margin-bottom:15px;display:flex;justify-content:space-between;border-bottom:1px solid #f1f5f9;padding-bottom:10px;">
+                <span style="color:#64748b;">(-) Costo de Mercancía</span>
+                <strong style="color:#dc2626;">${dinero(costoMercanciaTotal)}</strong>
+            </div>
+            <div style="margin-bottom:15px;display:flex;justify-content:space-between;">
+                <span style="font-weight:bold;">(=) UTILIDAD BRUTA</span>
+                <strong style="font-size:18px;">${dinero(utilidadBruta)}</strong>
+            </div>
+            <div style="margin-bottom:15px;display:flex;justify-content:space-between;border-bottom:1px solid #f1f5f9;padding-bottom:10px;">
+                <span style="color:#64748b;">(-) Gastos Operativos (Fijos/Var)</span>
+                <strong style="color:#dc2626;">${dinero(totalGastos)}</strong>
+            </div>
+            <div style="margin-top:20px;display:flex;justify-content:space-between;background:#eff6ff;padding:15px;border-radius:10px;">
+                <span style="font-weight:bold;color:#1e40af;">(=) UTILIDAD NETA LIBRE</span>
+                <strong style="font-size:22px;color:#1e40af;">${dinero(utilidadNeta)}</strong>
+            </div>
+        </div>
+
+        <div style="background:#f8fafc;padding:25px;border-radius:15px;border:1px dashed #cbd5e1;text-align:center;display:flex;flex-direction:column;justify-content:center;">
+            <small style="color:#64748b;font-weight:bold;text-transform:uppercase;">Margen Neto de Ganancia</small>
+            <div style="font-size:48px;font-weight:900;color:${utilidadNeta > 0 ? '#10b981' : '#dc2626'};">${margenNeto}%</div>
+            <p style="font-size:12px;color:#94a3b8;margin-top:10px;">Por cada $100 que entran, te quedan <b>${dinero(utilidadNeta / (totalVentas/100 || 1))}</b> libres después de pagar mercancía y gastos.</p>
+        </div>
+      </div>
+    `;
+};
 
 // Expose to global scope
 window.renderReporteVentas = renderReporteVentas;

@@ -95,7 +95,7 @@ function renderCarrito() {
     const vistaCarrito = document.getElementById("carrito");
     if (!vistaCarrito) return;
 
-    // 👉 Detectar admin
+    // Detectar admin
     const esAdmin = _esAdmin();
 
     if (carrito.length === 0) {
@@ -153,22 +153,22 @@ function renderCarrito() {
         const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
         const textoStock = stock > 0 ? stock : "Sin stock";
 
-        // Color selector (sugerencia)
+        // === LÓGICA DE COLOR (TEXTO LIBRE CON SUGERENCIAS) ===
         const coloresDisp = obtenerColoresDisponibles(p.id);
         const colorSeleccionado = p.colorElegido || '';
-        let colorCell;
-        if (coloresDisp.length > 0) {
-            const opciones = coloresDisp.map(c =>
-                `<option value="${_escapeHtml(c.color)}" ${colorSeleccionado && colorSeleccionado.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${_escapeHtml(c.color)} (${c.stock} pzs)</option>`
-            ).join('');
-            colorCell = `<select onchange="actualizarColorCarrito(${index}, this.value)"
-                style="width:100%; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px;">
-                <option value="">-- Color --</option>
-                ${opciones}
-            </select>`;
-        } else {
-            colorCell = `<small style="color:#94a3b8;">Sin var.</small>`;
-        }
+        
+        // Creamos sugerencias (datalist) por si ya hay colores registrados
+        let opcionesDatalist = coloresDisp.map(c => `<option value="${_escapeHtml(c.color)}">`).join('');
+        
+        let colorCell = `
+            <input type="text" list="colores-${index}" value="${_escapeHtml(colorSeleccionado)}" 
+                onchange="actualizarColorCarrito(${index}, this.value)"
+                placeholder="Escribe color..."
+                style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:12px; text-align:center;">
+            <datalist id="colores-${index}">
+                ${opcionesDatalist}
+            </datalist>
+        `;
 
         html += `
             <tr>
@@ -188,7 +188,6 @@ function renderCarrito() {
                         style="width:50px; padding:6px; text-align:center; border:1px solid #ddd; border-radius:4px;">
                 </td>
 
-                <!-- 🔥 PRECIO EDITABLE SOLO ADMIN -->
                 <td style="text-align:right; font-weight:bold; color:#27ae60;">
                     ${
                         esAdmin
@@ -271,12 +270,11 @@ function renderCarrito() {
                     </select>
                 </div>
 
-                <!-- 👇 ENCHUFE UNIVERSAL DE CAJAS/BANCOS 👇 -->
+                <!-- ENCHUFE UNIVERSAL DE CAJAS/BANCOS -->
                 <div id="divSelectorUniversal" class="oculto" style="margin-bottom:12px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
                     <label style="font-size:13px; font-weight:bold; color:#166534; display:block; margin-bottom:6px;">💳 ¿A qué caja o cuenta ingresa el dinero hoy?</label>
                     ${window._buildSelectorCuentas ? window._buildSelectorCuentas('cuentaReceptora_venta', false) : '<select id="cuentaReceptora_venta" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">💵 Efectivo Principal</option></select>'}
                 </div>
-                <!-- 👆 FIN ENCHUFE UNIVERSAL 👆 -->
 
                 <!-- RESULTADOS DEL PLAN -->
                 <div id="resultadosPago" style="margin-bottom:12px;"></div>
@@ -303,6 +301,7 @@ function renderCarrito() {
     `;
 
     vistaCarrito.innerHTML = html;
+    
     // Resetear estado de pago al renderizar el carrito
     window._estadoPago = {
         metodo: "contado",
@@ -316,24 +315,18 @@ function renderCarrito() {
     plazoSeleccionado = null;
     setTimeout(() => actualizarInterfazPago(), 30);
 }
-function cambiarPrecioCarrito(index, nuevoPrecio) {
 
+function cambiarPrecioCarrito(index, nuevoPrecio) {
     if (!_esAdmin()) {
         alert("No autorizado");
         return;
     }
-
     nuevoPrecio = parseFloat(nuevoPrecio);
-
     if (isNaN(nuevoPrecio) || nuevoPrecio <= 0) return;
-
     carrito[index].precioContado = nuevoPrecio;
-
     StorageService.set("carrito", carrito);
-
     renderCarrito();
 }
-
 
 function actualizarCantidadCarrito(index, nuevaCantidad) {
     const cantidad = parseInt(nuevaCantidad);
@@ -341,7 +334,6 @@ function actualizarCantidadCarrito(index, nuevaCantidad) {
         alert("La cantidad debe ser mayor a 0");
         return;
     }
-    
     if (index >= 0 && index < carrito.length) {
         carrito[index].cantidad = cantidad;
         if (!StorageService.set("carrito", carrito)) {
@@ -351,30 +343,58 @@ function actualizarCantidadCarrito(index, nuevaCantidad) {
     }
 }
 
-// ===== HELPERS DE VARIANTES (COLOR) =====
+// ===== HELPERS DE VARIANTES (COLOR Y UBICACIÓN) =====
+
+// 1. Obtiene los colores sumando el stock de todas las ubicaciones
 function obtenerColoresDisponibles(productoId) {
     const prod = productos.find(p => String(p.id) === String(productoId));
     if (!prod || !prod.variantes || prod.variantes.length === 0) return [];
-    const mapa = {};
+    
+    const mapaColores = {};
     prod.variantes.forEach(v => {
         if (v.color) {
-            mapa[v.color] = (mapa[v.color] || 0) + (Number(v.stock) || 0);
+            // Sumamos el stock de este color, sin importar la ubicación
+            mapaColores[v.color] = (mapaColores[v.color] || 0) + (Number(v.stock) || 0);
         }
     });
-    return Object.entries(mapa).map(([color, stock]) => ({ color, stock }));
+    
+    return Object.entries(mapaColores).map(([color, stock]) => ({ color, stock }));
 }
 
+// 2. Obtiene el stock total de un color específico
 function obtenerStockPorColor(productoId, color) {
     const prod = productos.find(p => String(p.id) === String(productoId));
     if (!prod || !prod.variantes) return 0;
+    
     return prod.variantes
         .filter(v => v.color && v.color.toUpperCase() === color.toUpperCase())
         .reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
 }
 
+// 3. Obtiene en qué ubicaciones está disponible un color específico
+function obtenerUbicacionesPorColor(productoId, color) {
+    const prod = productos.find(p => String(p.id) === String(productoId));
+    if (!prod || !prod.variantes) return [];
+    
+    // Filtramos solo las variantes que coincidan con el color y tengan stock > 0
+    return prod.variantes
+        .filter(v => v.color && v.color.toUpperCase() === color.toUpperCase() && (Number(v.stock) || 0) > 0)
+        .map(v => ({ ubicacion: v.ubicacion || 'General', stock: v.stock }));
+}
+
 function actualizarColorCarrito(index, color) {
     if (index >= 0 && index < carrito.length) {
         carrito[index].colorElegido = color;
+        // Al cambiar de color, reseteamos la ubicación elegida porque podría no estar ahí
+        carrito[index].ubicacionElegida = ""; 
+        StorageService.set("carrito", carrito);
+    }
+}
+
+// 4. Guarda la ubicación elegida en el carrito
+function actualizarUbicacionCarrito(index, ubicacion) {
+    if (index >= 0 && index < carrito.length) {
+        carrito[index].ubicacionElegida = ubicacion;
         StorageService.set("carrito", carrito);
     }
 }
@@ -392,9 +412,9 @@ function aplicarMetodoStockDefaults() {
         chkR.checked = true;
     }
 }
+
 // Esta es la "libreta" donde anotamos los datos
 function capturarDatosCredito() {
-    // En tu código, el ID del enganche es "numEnganche"
     const inputEnganche = document.getElementById("numEnganche");
     const selPeriodicidad = document.getElementById("selPeriodicidad");
 
@@ -418,17 +438,17 @@ function actualizarInterfazPago() {
     let enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
 
     if (metodo === "credito" || metodo === "apartado") {
-    divEnganche?.classList.remove("oculto");
-} else {
-    divEnganche?.classList.add("oculto");
-    enganche = 0;
-}
+        divEnganche?.classList.remove("oculto");
+    } else {
+        divEnganche?.classList.add("oculto");
+        enganche = 0;
+    }
 
-if (metodo === "credito") {
-    divPeriodicidad?.classList.remove("oculto");
-} else {
-    divPeriodicidad?.classList.add("oculto");
-}
+    if (metodo === "credito") {
+        divPeriodicidad?.classList.remove("oculto");
+    } else {
+        divPeriodicidad?.classList.add("oculto");
+    }
 
     // ── CUENTA RECEPTORA / MODO DE COBRO (NUEVO MOTOR) ───────────────────────
     const divUniversal = document.getElementById("divSelectorUniversal");
@@ -515,9 +535,9 @@ if (metodo === "credito") {
     window._estadoPago.cuentaReceptora = metodo === "contado"
         ? "efectivo"
         : (document.getElementById("selCuentaReceptora")?.value || "efectivo");
-    // plan se guarda en seleccionarPlan()
     window._estadoPago.fechaVenta = document.getElementById("inputFechaVenta")?.value || new Date().toISOString().substring(0,10);
-// Guardamos la caja seleccionada en nuestra libreta de estado temporal
+    
+    // Guardamos la caja seleccionada en nuestra libreta de estado temporal
     const selCaja = document.getElementById("cuentaReceptora_venta");
     window._estadoPago.cuentaReceptora = selCaja ? selCaja.value : "efectivo";
     window._estadoPago.etiquetaCuenta = selCaja && selCaja.selectedIndex >= 0 ? selCaja.options[selCaja.selectedIndex].text : "Efectivo";
@@ -528,21 +548,12 @@ function seleccionarPlan(index) {
     window._estadoPago.planIndex = index;
 
     try {
-        // 1. Calculamos el total real del carrito ahora mismo
         const totalCarrito = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
-        
-        // 2. Obtenemos el enganche y la periodicidad de la pantalla
         const enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
         const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
-        
-        // 3. Calculamos el saldo (Lo que realmente se va a pagar a crédito)
         const saldo = totalCarrito - enganche;
-
-        // 4. Generamos los planes con el CalculatorService
-        // IMPORTANTE: Usamos el saldo real. Si el saldo es 0 o menor, usamos el total.
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo > 0 ? saldo : totalCarrito, periodicidad);
         
-        // 5. Guardamos el plan elegido en la libreta
         if (planes && planes[index]) {
             window._estadoPago.plan = planes[index];
             console.log("✅ Plan guardado con éxito:", window._estadoPago.plan);
@@ -550,14 +561,11 @@ function seleccionarPlan(index) {
     } catch(e) {
         console.error("❌ Error al guardar el plan:", e);
     }
-
-    // Refrescamos la pantalla para que se vea el botón seleccionado
     actualizarInterfazPago();
 }
 
 function eliminarDelCarrito(index) {
     if (index >= 0 && index < carrito.length) {
-        const producto = carrito[index];
         carrito.splice(index, 1);
         if (!StorageService.set("carrito", carrito)) {
             console.error("❌ Error guardando carrito");
@@ -566,10 +574,7 @@ function eliminarDelCarrito(index) {
     }
 }
 
-// ===== VENTA FINAL (FUNCIÓN ÚNICA - NO DUPLICADA) =====
-/**
- * Confirma la venta final con todos los parámetros validados
- */
+// ===== VENTA FINAL =====
 function confirmarVentaFinal() {
     console.log("🔍 Iniciando confirmarVentaFinal()...");
 
@@ -583,30 +588,22 @@ function confirmarVentaFinal() {
         return;
     }
 
-    // Leer desde _estadoPago (más confiable que el DOM del carrito oculto)
-    const metodoPago = window._estadoPago?.metodo
-        || document.getElementById("selMetodoPago")?.value;
-    console.log("Método de pago:", metodoPago, "| Estado guardado:", window._estadoPago);
+    const metodoPago = window._estadoPago?.metodo || document.getElementById("selMetodoPago")?.value;
 
     if (!metodoPago) {
         alert("⚠️ Regresa al carrito y selecciona un método de pago.");
         return;
     }
 
-    // ==== FIX AUDITORIA: Aplicar descuentos antes del cálculo de totales ====
     let descuentoAplicado = 0;
     if (typeof aplicarDescuentosAlCarrito === "function") {
         descuentoAplicado = aplicarDescuentosAlCarrito(carrito, clienteSeleccionado.id) || 0;
     }
-    // ========================================================================
 
     const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
-    const totalConDescuento = totalContado - descuentoAplicado; // actualizado
+    const totalConDescuento = totalContado - descuentoAplicado; 
 
-    console.log("Total contado:", totalContado, "| Descuento aplicado:", descuentoAplicado, "| Total con descuento:", totalConDescuento);
-
-    let enganche = window._estadoPago?.enganche
-        ?? parseFloat(document.getElementById("numEnganche")?.value) ?? 0;
+    let enganche = window._estadoPago?.enganche ?? parseFloat(document.getElementById("numEnganche")?.value) ?? 0;
     if (enganche < 0) enganche = 0;
 
     if (enganche > totalConDescuento) {
@@ -618,14 +615,9 @@ function confirmarVentaFinal() {
     let planElegido = null;
 
     if (metodoPago === "credito") {
-        const periodicidad = window._estadoPago?.periodicidad
-            || document.getElementById("selPeriodicidad")?.value || "semanal";
-        console.log("Periodicidad:", periodicidad);
-
+        const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
-        // Usar planIndex guardado en estado, luego plazoSeleccionado global, luego 0
         const planIdx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
-        console.log("Plan index:", planIdx, "| plazoSeleccionado global:", plazoSeleccionado);
 
         if (planIdx === null || planIdx === undefined || planIdx < 0 || planIdx >= planes.length) {
             alert("⚠️ Selecciona un plazo de crédito en el carrito antes de continuar.");
@@ -633,7 +625,6 @@ function confirmarVentaFinal() {
         }
 
         planElegido = planes[planIdx];
-        // Sincronizar el índice global
         plazoSeleccionado = planIdx;
 
         if (!planElegido || planElegido.abono === 0) {
@@ -641,14 +632,10 @@ function confirmarVentaFinal() {
             return;
         }
 
-        // Guardar el plan en estado
         window._estadoPago.plan = planElegido;
         window._estadoPago.periodicidad = periodicidad;
-        console.log("Plan elegido:", planElegido);
     }
 
-    console.log("✅ Todos los datos validados. Mostrando resumen...");
-    // Capture selected vendor from cart view
     const selVnd = document.getElementById("selVendedor");
     if (selVnd && selVnd.value) {
         const vendedores = StorageService.get("vendedores", []);
@@ -657,11 +644,9 @@ function confirmarVentaFinal() {
         _vendedorSeleccionado = null;
     }
 
-    // ==== FIX AUDITORIA: Pasa descuento aplicado al resumen ====
     mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, descuentoAplicado, totalConDescuento);
 }
 
-// Cambia la firma para recibir y mostrar descuento
 function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, descuentoAplicado = 0, totalConDescuento = null) {
     const periodicidad = document.getElementById("selPeriodicidad")?.value || "semanal";
     let detalleMetodo = "";
@@ -679,28 +664,20 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
             </div>
         `;
     } else if (metodoPago === "credito") {
-        // === RECÁLCULO BLINDADO (Ignora datos corruptos o ceros de otras funciones) ===
-        
-        // 1. Obtenemos el total y el enganche reales
         const totalCarrito = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
         const engancheReal = window._estadoPago?.enganche || enganche || 0;
         const periodicidadResumen = window._estadoPago?.periodicidad || "semanal";
         
-        // 2. Calculamos el saldo. 
-        // IMPORTANTE: Si el saldo da 0 o negativo, usamos el total base para que los pagarés no salgan en $0.00
         let saldo = totalCarrito - engancheReal;
         let saldoBase = saldo > 0 ? saldo : totalCarrito;
 
-        // 3. Generamos los planes matemáticos frescos aquí mismo
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidadResumen);
         
-        // 4. Recuperamos exactamente el botón (índice) que el usuario presionó
         let idx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
         if (idx < 0 || idx >= planes.length) idx = 0;
         
         let plan = planes[idx];
 
-        // Seguro anti-ceros final
         if (!plan || !plan.abono || plan.abono === 0) {
             plan = planes.find(p => p.abono > 0) || planes[0];
         }
@@ -720,7 +697,6 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
             </div>
         `;
         
-        // Lo dejamos listo para la base de datos
         _planElegidoPendiente = plan;
         planElegido = plan;
     }
@@ -736,12 +712,9 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
         </tr>`;
     }).join('');
 
-    // Para métodos no-crédito usar planElegido (null); para crédito
-    // se sobreescribirá abajo con el plan recalculado.
     _planElegidoPendiente = planElegido;
     document.querySelector('[data-modal="resumen-venta"]')?.remove();
 
-    // ==== FIX AUDITORIA: Mostrar el descuento si fue aplicado ====
     const resumenFinanciero = `
         <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
             <p style="margin:8px 0; display:flex; justify-content:space-between;">
@@ -808,40 +781,29 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
+
 function cancelarYVolverAlCarrito() {
-    // Ocultar modales estáticos
     document.querySelectorAll('.modal').forEach(modal => {
         modal.classList.add('oculto');
         modal.style.display = 'none';
     });
-    // Eliminar modales dinámicos del DOM
     document.querySelectorAll('[data-modal]').forEach(modal => modal.remove());
-    
-    // Ir al carrito
     navA('carrito');
 }
 
 function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
-    console.log("🔄 Procesando venta con inventario...");
-    console.log("Plan elegido final:", _planElegidoPendiente);
     mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, _planElegidoPendiente);
-    if (typeof acumularPuntosCliente === "function" && clienteSeleccionado) {
-        acumularPuntosCliente(clienteSeleccionado.id, totalContado);
-    }
 }
 
 /**
  * Dialogo interactivo de gestión de inventario
- * Pregunta por cada producto si se entrega o se deja pendiente
  */
 function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido) {
     let productosConStock = [];
     let productosSinStock = [];
 
-    // Reiniciar decisiones para evitar estado residual de un diálogo anterior
     decisionesInventario = {};
 
-    // Clasificar productos: solo "con stock" si hay suficiente para la cantidad solicitada
     carrito.forEach(item => {
         const prod = productos.find(p => String(p.id) === String(item.id));
         if (prod) {
@@ -853,10 +815,8 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         }
     });
 
-    // Crear modal interactivo
     let htmlProductos = '';
 
-    // PRODUCTOS CON STOCK - Preguntar SÍ o NO
     if (productosConStock.length > 0) {
         htmlProductos += `
             <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px; border-left:5px solid #27ae60;">
@@ -865,49 +825,36 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         
         productosConStock.forEach(x => {
             const idProd = x.prod.id;
-            const colorElegido = x.item.colorElegido || '';
             const cantRequerida = x.item.cantidad || 1;
-            const coloresDisp = obtenerColoresDisponibles(idProd);
 
-            // Color info block
-            let infoColor = '';
-            if (colorElegido) {
-                const stockColor = obtenerStockPorColor(idProd, colorElegido);
-                if (stockColor >= cantRequerida) {
-                    infoColor = `<small style="color:#166534; display:block; margin-top:4px;">✅ Color: <b>${_escapeHtml(colorElegido)}</b> — Stock disponible: ${stockColor}</small>`;
-                } else {
-                    const alternativas = coloresDisp.filter(c => c.color.toUpperCase() !== colorElegido.toUpperCase() && c.stock >= cantRequerida);
-                    infoColor = `<small style="color:#991b1b; display:block; margin-top:4px;">⚠️ Sin stock suficiente de <b>${_escapeHtml(colorElegido)}</b></small>`;
-                    if (alternativas.length > 0) {
-                        infoColor += `<small style="color:#374151; display:block;">Disponible en: ${alternativas.map(c => `${_escapeHtml(c.color)} (${c.stock})`).join(', ')}</small>`;
-                    }
-                }
-            }
+            const colorElegido = x.item.colorElegido || '';
+            const ubicacionElegida = x.item.ubicacionElegida || '';
 
-            // Color selector in dialog
-            let colorSelectorHtml = '';
-            if (coloresDisp.length > 0) {
-                const opcs = coloresDisp.map(c =>
-                    `<option value="${_escapeHtml(c.color)}" ${colorElegido && colorElegido.toUpperCase() === c.color.toUpperCase() ? 'selected' : ''}>${_escapeHtml(c.color)} (${c.stock} pzs)</option>`
-                ).join('');
-                colorSelectorHtml = `
-                    <div style="margin-top:6px;">
-                        <label style="font-size:11px; color:#374151;">🎨 Color:</label>
-                        <select id="color-inv-${idProd}" onchange="cambiarColorInventario(${idProd}, this.value)"
-                                style="margin-left:4px; padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px;">
-                            <option value="">-- Sin color --</option>
-                            ${opcs}
-                        </select>
-                    </div>`;
-            }
+            let colorSelectorHtml = `
+                <div style="margin-top:6px;">
+                    <label style="font-size:11px; color:#374151;">🎨 Color:</label>
+                    <input type="text" value="${_escapeHtml(colorElegido)}" 
+                        onchange="cambiarColorInventario(${idProd}, this.value)"
+                        placeholder="Ej. Rojo" 
+                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; width:120px;">
+                </div>`;
+
+            let ubicacionSelectorHtml = `
+                <div style="margin-top:6px;">
+                    <label style="font-size:11px; color:#374151;">📍 Ubicación:</label>
+                    <input type="text" value="${_escapeHtml(ubicacionElegida)}"
+                        onchange="cambiarUbicacionInventario(${idProd}, this.value)"
+                        placeholder="Ej. Bodega 1" 
+                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:120px;">
+                </div>`;
 
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <strong>${x.prod.nombre}</strong><br>
                         <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${cantRequerida}</small>
-                        ${infoColor}
                         ${colorSelectorHtml}
+                        ${ubicacionSelectorHtml}
                     </div>
                     <div style="display:flex; gap:8px;">
                         <button onclick="setDecisionInventario(${idProd}, true)" 
@@ -928,7 +875,6 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         htmlProductos += `</div>`;
     }
 
-    // PRODUCTOS SIN STOCK - Solo aviso
     if (productosSinStock.length > 0) {
         htmlProductos += `
             <div style="background:#fee2e2; padding:15px; border-radius:8px; border-left:5px solid #dc2626;">
@@ -937,20 +883,15 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         
         productosSinStock.forEach(x => {
             const idProd = x.prod.id;
-            decisionesInventario[idProd] = { entregar: false }; // Auto pendiente
-
-            const coloresDisp = obtenerColoresDisponibles(idProd);
-            let sugerenciasHtml = '';
-            if (coloresDisp.length > 0) {
-                sugerenciasHtml = `<small style="color:#374151; display:block; margin-top:4px;">Disponible en: ${coloresDisp.map(c => `${c.color} (${c.stock})`).join(', ')}</small>`;
-            }
+            decisionesInventario[idProd] = { entregar: false }; 
+            const colorElegido = x.item.colorElegido || 'Sin especificar';
             
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
                     <strong>${x.prod.nombre}</strong><br>
                     <small style="color:#991b1b;">⚠️ Se creará REQUISICIÓN DE COMPRA automáticamente</small><br>
-                    <small style="color:#7f1d1d;">Stock actual: ${x.prod.stock || 0} | Solicitado: ${x.item.cantidad || 1}</small>
-                    ${sugerenciasHtml}
+                    <small style="color:#7f1d1d;">Stock actual: ${x.prod.stock || 0} | Solicitado: ${x.item.cantidad || 1}</small><br>
+                    <small style="color:#374151;">Color solicitado: <b>${_escapeHtml(colorElegido)}</b></small>
                 </div>
             `;
         });
@@ -958,7 +899,6 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         htmlProductos += `</div>`;
     }
 
-    // Eliminar modal anterior si existe
     document.querySelector('[data-modal="dialogo-inventario"]')?.remove();
 
     const modalHTML = `
@@ -986,14 +926,10 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-/**
- * Guarda la decisión de cada producto (entregar o pendiente)
- */
 function setDecisionInventario(productoId, entregar) {
     if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
     decisionesInventario[productoId].entregar = entregar;
     
-    // Actualizar visual de botones
     const btnSi = document.getElementById(`btn-si-${productoId}`);
     const btnNo = document.getElementById(`btn-no-${productoId}`);
     
@@ -1010,13 +946,11 @@ function setDecisionInventario(productoId, entregar) {
     }
 }
 
-/**
- * Actualiza el color elegido para un producto en el diálogo de inventario
- */
 function cambiarColorInventario(productoId, nuevoColor) {
     if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
     decisionesInventario[productoId].color = nuevoColor;
-    // Sincronizar con carrito
+    decisionesInventario[productoId].ubicacion = ""; 
+
     const idx = carrito.findIndex(item => String(item.id) === String(productoId));
     if (idx !== -1) {
         carrito[idx].colorElegido = nuevoColor;
@@ -1024,16 +958,16 @@ function cambiarColorInventario(productoId, nuevoColor) {
     }
 }
 
-/**
- * Confirma todas las decisiones y procesa la venta
- */
+function cambiarUbicacionInventario(productoId, nuevaUbicacion) {
+    if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
+    decisionesInventario[productoId].ubicacion = nuevaUbicacion;
+}
+
 function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
-    // 1. Lógica del plan (ya la tienes)
     let planElegido = _planElegidoPendiente;
     if (metodoPago === "credito") {
         if (!planElegido || !planElegido.abono || planElegido.abono === 0) {
-            const periodicidad = window._estadoPago?.periodicidad
-                || document.getElementById("selPeriodicidad")?.value || "semanal";
+            const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
             const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
             const planIdx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
             const safeIdx = (planIdx >= 0 && planIdx < planes.length) ? planIdx : 0;
@@ -1044,18 +978,13 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
         }
     }
 
-    // --- NUEVO: CÁLCULO DEL IMPORTE DE VENTA CORRECTO ---
-    // Si es crédito, sumamos Enganche + Total de Pagarés (con intereses). 
-    // Si no, usamos el precio de contado normal.
     let montoVentaFinal = totalContado;
     if (metodoPago === "credito" && planElegido) {
         montoVentaFinal = enganche + (planElegido.total || 0);
     }
-    // ---------------------------------------------------
 
     const folioVenta = "V-" + Date.now().toString().slice(-6);
 
-    // Lógica de fechas (ya la tienes)
     const inputFechaEl = document.getElementById("inputFechaVenta");
     const fechaGuardada = window._estadoPago?.fechaVenta;
     let fechaVentaDate;
@@ -1075,23 +1004,23 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
     let productosAPendiente = [];
 
     carrito.forEach(item => {
-        const prod = productos.find(prod => String(prod.id) === String(item.id)); // ✅
+        const prod = productos.find(prod => String(prod.id) === String(item.id)); 
         if (!prod) return;
         const decision = decisionesInventario[item.id];
         const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
+        
         if (tieneStock && decision && decision.entregar) {
-            // Si se cambió el color en el diálogo, usar ese; si no, usar el del carrito
             const colorFinal = (decision.color !== undefined) ? decision.color : (item.colorElegido || '');
-            productosAEntregar.push({ item: { ...item, colorElegido: colorFinal }, prod });
+            const ubicacionFinal = (decision.ubicacion !== undefined) ? decision.ubicacion : (item.ubicacionElegida || '');
+            productosAEntregar.push({ item: { ...item, colorElegido: colorFinal, ubicacionElegida: ubicacionFinal }, prod });
         } else {
             productosAPendiente.push({ item, prod });
         }
     });
 
-    // IMPORTANTE: Ahora pasamos "montoVentaFinal" en lugar de "totalContado"
     procesarVentaFinal(
         metodoPago, 
-        montoVentaFinal, // <--- Cambio aquí
+        montoVentaFinal, 
         enganche, 
         saldoAFinanciar, 
         planElegido,
@@ -1106,68 +1035,78 @@ function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldo
 function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock) {
 
-    // ── GUARD: recalcular totalContado desde el carrito si llega 0 / NaN ────
     if (!totalContado || isNaN(totalContado) || totalContado <= 0) {
         totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
     }
-    // ──────────────────────────────────────────────────────────────────────────
 
-    requisicionesCompra = StorageService.get("requisicionesCompra", []);
-    movimientosCaja = StorageService.get("movimientosCaja", []);
-    cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
-    salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
-    pagaresSistema = StorageService.get("pagaresSistema", []);
+    let requisicionesCompra = StorageService.get("requisicionesCompra", []);
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    let cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+    let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
+    let pagaresSistema = StorageService.get("pagaresSistema", []);
 
     let entregasPendientes = [];
 
-    // PASO 1: ACTUALIZAR STOCK (solo si hay stock suficiente; guard anti-negativo)
+    // PASO 1: ACTUALIZAR STOCK 
+    // PASO 1: ACTUALIZAR STOCK 
     productosConStock.forEach(x => {
         const cantRequerida = x.item.cantidad || 1;
         const stockActual = x.prod.stock || 0;
         const colorElegido = x.item.colorElegido || '';
+        const ubicacionElegida = x.item.ubicacionElegida || ''; 
+
         if (stockActual >= cantRequerida) {
-            // Descontar de la variante específica por color (FIFO por ubicación)
-            if (colorElegido && x.prod.variantes && x.prod.variantes.length > 0) {
+            
+            // --- INICIO DE LA CORRECCIÓN (PUNTO 5) ---
+            // Descontar de la variante específica por color Y UBICACIÓN
+            if (x.prod.variantes && x.prod.variantes.length > 0) {
                 let restante = cantRequerida;
+                
+                // Intento 1: Buscar coincidencia exacta
                 x.prod.variantes.forEach(v => {
-                    if (restante > 0 && v.color && v.color.toUpperCase() === colorElegido.toUpperCase()) {
-                        const deducir = Math.min(Number(v.stock) || 0, restante);
-                        v.stock = (Number(v.stock) || 0) - deducir;
+                    const coincideColor = !colorElegido || (v.color && v.color.toUpperCase() === colorElegido.toUpperCase());
+                    const coincideUbicacion = !ubicacionElegida || (v.ubicacion && v.ubicacion.toUpperCase() === ubicacionElegida.toUpperCase());
+
+                    if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
+                        const deducir = Math.min(Number(v.stock), restante);
+                        v.stock -= deducir;
                         restante -= deducir;
                     }
                 });
+
+                // Intento 2: Si hubo un error de dedo y quedó restante, descontar de donde haya (para no descuadrar)
                 if (restante > 0) {
-                    console.warn(`⚠️ Stock de variante insuficiente para color "${colorElegido}" en ${x.prod.nombre}. Faltaron ${restante} piezas en variantes.`);
+                    x.prod.variantes.forEach(v => {
+                        if (restante > 0 && Number(v.stock) > 0) {
+                            const deducir = Math.min(Number(v.stock), restante);
+                            v.stock -= deducir;
+                            restante -= deducir;
+                        }
+                    });
                 }
             }
+            // --- FIN DE LA CORRECCIÓN ---
+
             x.prod.stock = stockActual - cantRequerida;
             const concepto = colorElegido
-                ? `Venta - ${folioVenta} (${colorElegido})`
+                ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})`
                 : `Venta - ${folioVenta}`;
-            registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
-        } else {
-            // Stock insuficiente en este punto (no debería ocurrir con la clasificación correcta)
-            console.warn(`⚠️ Stock insuficiente para ${x.prod.nombre} al procesar venta. Creando requisición.`);
-            requisicionesCompra.push({
-                id: Date.now() + Math.random(),
-                fecha: fechaHoy,
-                producto: x.prod.nombre,
-                folioVenta,
-                cantidad: cantRequerida - stockActual,
-                motivo: "Stock insuficiente al confirmar entrega",
-                estatus: "Pendiente"
-            });
+            if (typeof registrarMovimiento === 'function') registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
         }
     });
 
-    // PASO 2: CREAR ENTREGAS PENDIENTES
+    // PASO 2: CREAR ENTREGAS PENDIENTES Y REQUISICIONES (SIN STOCK)
     productosSinStock.forEach(x => {
         const cantidadSolicitada = x.item.cantidad || 1;
+        const colorElegido = x.item.colorElegido || '';
+        
+        const nombreConColor = colorElegido ? `${x.prod.nombre} (Color: ${colorElegido})` : x.prod.nombre;
+
         entregasPendientes.push({
             id: Date.now() + Math.random(),
             folioVenta,
             productoId: x.prod.id,
-            nombre: x.prod.nombre,
+            nombre: nombreConColor,
             cantidad: cantidadSolicitada,
             motivo: "Sin stock en almacén"
         });
@@ -1175,7 +1114,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         requisicionesCompra.push({
             id: Date.now() + Math.random(),
             fecha: fechaHoy,
-            producto: x.prod.nombre,
+            producto: nombreConColor, 
             folioVenta,
             cantidad: cantidadSolicitada,
             motivo: "Venta sin stock disponible",
@@ -1183,7 +1122,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         });
     });
 
-    // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA (CON ENCHUFE UNIVERSAL)
+    // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
     let montoIngresoHoy = 0;
     let tituloConcepto = "";
     
@@ -1199,7 +1138,6 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         const cuentaId = window._estadoPago.cuentaReceptora || 'efectivo';
         const etiqueta = window._estadoPago.etiquetaCuenta || 'Efectivo';
 
-        // Invocamos al enchufe que hace toda la magia matemática y contable por nosotros
         if (typeof window._ingresarCuenta === 'function') {
             window._ingresarCuenta({
                 monto: montoIngresoHoy,
@@ -1209,7 +1147,6 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
                 referencia: `VENTA-${folioVenta}`
             });
         } else {
-            // Salvavidas por si el enchufe falla (Guarda el historial)
             movimientosCaja.push({
                 id: Date.now(),
                 folio: folioVenta,
@@ -1227,11 +1164,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     // PASO 4: CREAR CUENTAS POR COBRAR
     if (metodoPago === "credito" || metodoPago === "apartado") {
-        const saldoPendiente = metodoPago === "credito"
-            ? planElegido.total   // planElegido.total ya es calculado sobre saldoAFinanciar (precio - enganche)
-            : saldoAFinanciar;    // apartado: precio - enganche
+        const saldoPendiente = metodoPago === "credito" ? planElegido.total : saldoAFinanciar;    
 
-        // Calcular y guardar los saldos requeridos para cada plan posible
         let saldosPorMes = [];
         if (planElegido && (metodoPago === "credito")) {
             const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
@@ -1269,10 +1203,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
         // PASO 5: CREAR PAGARÉS
         if (metodoPago === "credito" && planElegido) {
-            const periodicidad = window._estadoPago?.periodicidad
-                || document.getElementById("selPeriodicidad")?.value || "semanal";
+            const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
             let diasIntervalo = 7;
-            
             if (periodicidad === "quincenal") diasIntervalo = 14;
             if (periodicidad === "mensual") diasIntervalo = 30;
             
@@ -1300,27 +1232,15 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             }
         }
 
-        if (!StorageService.set("cuentasPorCobrar", cuentasPorCobrar)) {
-            console.error("❌ Error guardando cuentas por cobrar");
-        }
-        if (!StorageService.set("pagaresSistema", pagaresSistema)) {
-            console.error("❌ Error guardando pagarés");
-        }
+        if (!StorageService.set("cuentasPorCobrar", cuentasPorCobrar)) console.error("❌ Error guardando cuentas por cobrar");
+        if (!StorageService.set("pagaresSistema", pagaresSistema)) console.error("❌ Error guardando pagarés");
     }
 
     // GUARDAR TODO
-    if (!StorageService.set("productos", productos)) {
-        console.error("❌ Error guardando productos");
-    }
-    if (!StorageService.set("movimientosCaja", movimientosCaja)) {
-        console.error("❌ Error guardando movimientos de caja");
-    }
-    if (!StorageService.set("movimientosInventario", movimientosInventario)) {
-        console.error("❌ Error guardando movimientos de inventario");
-    }
-    if (!StorageService.set("requisicionesCompra", requisicionesCompra)) {
-        console.error("❌ Error guardando requisiciones");
-    }
+    if (!StorageService.set("productos", productos)) console.error("❌ Error guardando productos");
+    if (!StorageService.set("movimientosCaja", movimientosCaja)) console.error("❌ Error guardando movimientos de caja");
+    if (!StorageService.set("movimientosInventario", movimientosInventario)) console.error("❌ Error guardando movimientos de inventario");
+    if (!StorageService.set("requisicionesCompra", requisicionesCompra)) console.error("❌ Error guardando requisiciones");
 
     if (entregasPendientes.length > 0) {
         salidasPendientesVenta.push({
@@ -1335,12 +1255,10 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             items: entregasPendientes,
             estatus: "Pendiente"
         });
-        if (!StorageService.set("salidasPendientesVenta", salidasPendientesVenta)) {
-            console.error("❌ Error guardando salidas pendientes");
-        }
+        if (!StorageService.set("salidasPendientesVenta", salidasPendientesVenta)) console.error("❌ Error guardando salidas pendientes");
     }
 
-    // GENERAR TICKET
+    // GENERAR TICKET Y REGISTRAR
     const datosVenta = {
         folio: folioVenta,
         fecha: fechaHoy,
@@ -1359,7 +1277,6 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         tasaMorosidad: 2
     };
 
-    // REGISTRAR EN ventasRegistradas (para el dashboard y reportes)
     try {
         const ventasRegistradas = StorageService.get('ventasRegistradas', []);
         ventasRegistradas.push({
@@ -1375,47 +1292,43 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             articulos:  carrito.map(p => ({ id: p.id, nombre: p.nombre, colorElegido: p.colorElegido || '', cantidad: p.cantidad || 1, precio: p.precioContado || 0 })),
             vendedor:   _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
         });
-        if (!StorageService.set('ventasRegistradas', ventasRegistradas)) {
-            console.error('❌ Error guardando ventasRegistradas');
-        }
+        if (!StorageService.set('ventasRegistradas', ventasRegistradas)) console.error('❌ Error guardando ventasRegistradas');
     } catch(e) {
         console.warn('⚠️ Error registrando en ventasRegistradas:', e.message);
     }
 
     generarTicketMediaHoja(datosVenta);
 
-    // REGISTRAR COMISIÓN DEL VENDEDOR
     if (_vendedorSeleccionado) {
-        // Guardar el método de venta globalmente para que el módulo de vendedores lo detecte
         window._ultimaVentaMetodo = metodoPago;
         registrarComisionVenta(folioVenta, totalContado, _vendedorSeleccionado.id);
         setTimeout(() => { window._ultimaVentaMetodo = undefined; }, 1000);
     }
 
-    // Cerrar y eliminar todos los modales dinámicos
     document.querySelectorAll('[data-modal]').forEach(m => m.remove());
     document.querySelectorAll('.modal').forEach(m => {
         m.classList.add('oculto');
         m.style.display = 'none';
     });
 
-    // LIMPIAR
     carrito = [];
     clienteSeleccionado = null;
     plazoSeleccionado = null;
     _vendedorSeleccionado = null;
-    if (!StorageService.set("carrito", carrito)) {
-        console.error("❌ Error limpiando carrito");
-    }
+    if (!StorageService.set("carrito", carrito)) console.error("❌ Error limpiando carrito");
     actualizarContadorCarrito();
+
+    if (typeof acumularPuntosCliente === "function" && clienteSeleccionado) {
+        acumularPuntosCliente(clienteSeleccionado.id, totalContado);
+    }
 
     alert(`✅ VENTA REGISTRADA\n\nFolio: ${folioVenta}\nCliente: ${datosVenta.cliente.nombre}\nTotal: ${dinero(datosVenta.total)}`);
     navA('tienda');
 }
+
 function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
     const cliente = datosVenta.cliente.nombre || "________________";
     const fecha = datosVenta.fecha;
-    const lugar = "Xalapa, Veracruz";
 
     if (esCompacta) {
         return `PAGARÉ: Yo ${cliente} me obligo a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)} conforme al calendario de pagos; incumplimiento genera interés moratorio del 2% mensual; firmado  en Santiago Cuaula Tlaxcala el ${fecha}.`;
@@ -1424,27 +1337,29 @@ function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
     return `PAGARÉ: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crédito otorgado, misma que cubriré en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarán intereses moratorios del 2% mensual sobre saldos insolutos; este pagaré se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligándome a cumplir en el domicilio del acreedor y sometiéndome para su interpretación y cumplimiento a la jurisdicción de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.`;
 }
 
-// ===== GENERADOR DE TICKETS (COMPLETO) =====
+// ===== GENERADOR DE TICKETS =====
+// ===== GENERADOR DE TICKETS (VERSIÓN PREMIUM EMBELLECIDA) =====
 function generarTicketMediaHoja(datosVenta) {
-    // Preparar datos
     const folio = datosVenta.folio;
     const fechaActual = datosVenta.fecha;
     
+    // 1. Tabla de Productos
     let tablaProductos = '';
     datosVenta.articulos.forEach(art => {
         const cantidad = art.cantidad || 1;
         const subtotal = (art.precioContado || 0) * cantidad;
-        const colorInfo = art.colorElegido ? ` <small style="color:#666;">(${_escapeHtml(art.colorElegido)})</small>` : '';
+        const colorInfo = art.colorElegido ? ` <small style="color:#64748b; font-weight:bold;">(${_escapeHtml(art.colorElegido)})</small>` : '';
         tablaProductos += `
             <tr>
-                <td style="border: 1px solid #333; padding: 8px; text-align: center;">${cantidad}</td>
-                <td style="border: 1px solid #333; padding: 8px;">${art.nombre}${colorInfo}</td>
-                <td style="border: 1px solid #333; padding: 8px; text-align: right;">${dinero(art.precioContado)}</td>
-                <td style="border: 1px solid #333; padding: 8px; text-align: right;">${dinero(subtotal)}</td>
+                <td class="td-center"><b>${cantidad}</b></td>
+                <td><b>${art.nombre}</b>${colorInfo}</td>
+                <td class="td-right">${dinero(art.precioContado)}</td>
+                <td class="td-right" style="color:#15803d; font-weight:bold;">${dinero(subtotal)}</td>
             </tr>
         `;
     });
 
+    // 2. Tabla de Pagarés (Si es a crédito)
     let tablaPagares = '';
     let totalAPagar = 0;
 
@@ -1454,33 +1369,32 @@ function generarTicketMediaHoja(datosVenta) {
 
         pagaresDelFolio.forEach((pagar, index) => {
             const fechaPago = new Date(pagar.fechaVencimiento);
-            const fechaFormato = fechaPago.toLocaleDateString('es-MX');
+            const fechaFormato = fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
             totalAPagar += pagar.monto;
             
             tablaPagares += `
                 <tr>
-                    <td style="border: 1px solid #333; padding: 6px; text-align: center; font-weight: bold;">${index + 1}</td>
-                    <td style="border: 1px solid #333; padding: 6px; text-align: center;">${fechaFormato}</td>
-                    <td style="border: 1px solid #333; padding: 6px; text-align: right; font-weight: bold;">${dinero(pagar.monto)}</td>
-                    <td class="celda-llenar" style="padding: 6px;"></td>
-                    <td class="celda-llenar" style="padding: 6px;"></td>
-                    <td class="celda-llenar" style="padding: 6px;"></td>
+                    <td class="td-center" style="font-weight: bold; color:#1e3a8a;">${index + 1}</td>
+                    <td class="td-center">${fechaFormato}</td>
+                    <td class="td-right" style="font-weight: bold; color:#b91c1c;">${dinero(pagar.monto)}</td>
+                    <td class="celda-llenar"></td>
+                    <td class="celda-llenar"></td>
                 </tr>
             `;
         });
     }
 
-    // Tabla de resumen de planes
-    // SIEMPRE calcular saldoParaPlanes como suma de precios de contado de los productos menos el enganche
+    // 3. Tabla de Planes Disponibles (Referencia)
     let saldoParaPlanes = (datosVenta.articulos || []).reduce(
         (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
     ) - (datosVenta.enganche || 0);
     if (saldoParaPlanes < 0) saldoParaPlanes = 0;
-    // Usar la periodicidad real de la venta, no siempre semanal
+    
     const periodicidadTicket = datosVenta.periodicidad || window._estadoPago?.periodicidad || "semanal";
     const planesDisponibles = CalculatorService.calcularCreditoConPeriodicidad
         ? CalculatorService.calcularCreditoConPeriodicidad(saldoParaPlanes, periodicidadTicket)
         : CalculatorService.calcularCredito(saldoParaPlanes);
+    
     const textoPeriodo = periodicidadTicket === "quincenal" ? "/quin" : periodicidadTicket === "mensual" ? "/mes" : "/sem";
     let tablaPlanes = '';
     planesDisponibles.forEach(plan => {
@@ -1489,301 +1403,251 @@ function generarTicketMediaHoja(datosVenta) {
         const montoMostrar = plan.meses === 1 ? dinero(saldoParaPlanes) : `${dinero(plan.abono)}${textoPeriodo}`;
         const totalMostrar = plan.meses === 1 ? dinero(saldoParaPlanes) : dinero(plan.total);
         tablaPlanes += `
-            <td style="border: 1px solid #333; padding: 8px; text-align: center;">
-                <strong>${textoMeses}</strong><br>
-                ${montoMostrar}<br>
-                <small style="color:#555;">Total: ${totalMostrar}</small><br>
-                <small>${textoInteres}</small>
+            <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: center; background:#f8fafc;">
+                <strong style="color:#1e3a8a;">${textoMeses}</strong><br>
+                <span style="font-weight:bold; font-size:12px; color:#15803d;">${montoMostrar}</span><br>
+                <small style="color:#64748b;">Total: ${totalMostrar}</small><br>
+                <small style="font-size:8px;">${textoInteres}</small>
             </td>
         `;
     });
 
     const filasPagares = tablaPagares.split('</tr>').filter(f => f.trim());
-const esDobleColumna = datosVenta.metodo === "credito" && datosVenta.plan && filasPagares.length > 12;
+    const esDobleColumna = datosVenta.metodo === "credito" && datosVenta.plan && filasPagares.length > 12;
 
-function construirTablaPagares(filas) {
-    return `
-    <table class="tabla-pagares">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>VENCIMIENTO</th>
-                <th>IMPORTE</th>
-                <th>FECHA PAGO</th>
-                <th>PAGO</th>
-                <th>SALDO</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${filas.join('</tr>')}
-        </tbody>
-    </table>`;
-}
+    function construirTablaPagares(filas) {
+        return `
+        <table class="tabla-moderna">
+            <thead>
+                <tr>
+                    <th class="td-center">#</th>
+                    <th class="td-center">VENCIMIENTO</th>
+                    <th class="td-right">IMPORTE</th>
+                    <th class="td-center">FECHA PAGO</th>
+                    <th class="td-center">FIRMA / SELLO</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${filas.join('</tr>')}
+            </tbody>
+        </table>`;
+    }
 
-let pagaresHTML = '';
+    let pagaresHTML = '';
+    if (esDobleColumna) {
+        const mitad = Math.ceil(filasPagares.length / 2);
+        const col1 = filasPagares.slice(0, mitad);
+        const col2 = filasPagares.slice(mitad);
+        pagaresHTML = `
+        <div class="pagares-doble">
+            ${construirTablaPagares(col1)}
+            ${construirTablaPagares(col2)}
+        </div>`;
+    } else {
+        pagaresHTML = construirTablaPagares(filasPagares);
+    }
 
-if (esDobleColumna) {
-    const mitad = Math.ceil(filasPagares.length / 2);
+    // 4. Construcción del HTML Final
+    const ticketHTML = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+    <meta charset="UTF-8">
+    <title>Nota de Venta - ${folio}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        
+        @page { size: Letter landscape; margin: 0; }
+        body { 
+            font-family: 'Inter', Arial, sans-serif; 
+            margin: 0; 
+            background: #e2e8f0; 
+            color: #0f172a; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .barra-herramientas {
+            width: 100%; background: #1e293b; padding: 15px; text-align: center; display: flex; justify-content: center; gap: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .barra-herramientas button {
+            padding: 10px 20px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s;
+        }
+        .btn-print { background: #3b82f6; color: white; }
+        .btn-img { background: #10b981; color: white; }
+        .btn-print:hover { background: #2563eb; }
+        .btn-img:hover { background: #059669; }
 
-    const col1 = filasPagares.slice(0, mitad);
-    const col2 = filasPagares.slice(mitad);
+        .hoja { 
+            background: white; 
+            width: 260mm; 
+            height: 195mm; 
+            margin: 20px auto; 
+            padding: 15mm; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15); 
+            border-radius: 12px; 
+            display: flex; 
+            gap: 8mm; 
+            position: relative; 
+            overflow: hidden; 
+            box-sizing: border-box;
+        }
 
-    pagaresHTML = `
-    <div class="pagares-doble">
-        ${construirTablaPagares(col1)}
-        ${construirTablaPagares(col2)}
-    </div>`;
-} else {
-    pagaresHTML = construirTablaPagares(filasPagares);
-}
+        .watermark {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.04; width: 60%; pointer-events: none; z-index: 0;
+        }
 
+        .izq { width: 33%; border-right: 2px dashed #cbd5e1; padding-right: 8mm; display: flex; flex-direction: column; z-index: 1; }
+        .der { width: 67%; display: flex; flex-direction: column; z-index: 1; }
+        
+        .logo-container { text-align: center; margin-bottom: 5mm; }
+        .logo-container img { max-width: 110px; max-height: 110px; object-fit: contain; }
+        
+        .titulo-empresa { text-align: center; font-size: 18px; font-weight: 800; color: #1e3a8a; letter-spacing: 0.5px; margin: 0 0 2px 0; }
+        .sub-empresa { text-align: center; font-size: 10px; color: #64748b; margin-bottom: 6mm; line-height: 1.4; }
+        
+        .info-box { background: #f8fafc; border: 1px solid #e2e8f0; padding: 4mm; border-radius: 8px; margin-bottom: 4mm; }
+        .info-box-title { font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 2mm; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
+        .info-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+        .info-row strong { color: #0f172a; }
+        
+        .total-box { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 10px; text-align: center; padding: 5mm; margin-top: auto; }
+        .total-label { font-size: 12px; font-weight: 800; color: #166534; letter-spacing: 1px; }
+        .total-amount { font-size: 32px; font-weight: 800; color: #15803d; margin-top: 2px; }
+        
+        .firma-box { text-align: center; margin-top: 8mm; }
+        .firma-linea { border-top: 1px solid #334155; width: 85%; margin: 0 auto 3px auto; }
+        .firma-texto { font-size: 10px; color: #64748b; font-weight: 600; }
 
-const ticketHTML = `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
+        .seccion-titulo { font-size: 14px; font-weight: 800; color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 2px; margin: 0 0 3mm 0; text-transform: uppercase; }
+        
+        .tabla-moderna { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+        .tabla-moderna th { background: #f1f5f9; color: #334155; font-size: 10px; padding: 6px; text-transform: uppercase; border-bottom: 2px solid #cbd5e1; }
+        .tabla-moderna td { font-size: 11px; padding: 6px; border-bottom: 1px solid #e2e8f0; }
+        .td-center { text-align: center; }
+        .td-right { text-align: right; }
+        .celda-llenar { border-bottom: 1px dashed #94a3b8 !important; }
+        
+        .pagares-doble { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+        .planes { width: 100%; border-collapse: collapse; }
+        
+        .legal { font-size: 8.5px; color: #64748b; text-align: justify; line-height: 1.5; border-top: 1px dashed #cbd5e1; padding-top: 3mm; margin-top: auto; }
 
-<style>
-@page { size: Letter landscape; margin: 10mm; }
+        @media print {
+            body { background: white; padding: 0; }
+            .barra-herramientas { display: none !important; }
+            .hoja { margin: 0; border-radius: 0; box-shadow: none; width: 100%; height: 100%; padding: 10mm; }
+        }
+    </style>
+    </head>
+    <body>
+        
+    <div class="barra-herramientas no-print">
+        <button class="btn-print" onclick="window.print()">🖨️ Imprimir Ticket</button>
+        <button class="btn-img" onclick="guardarComoImagen()">🖼️ Guardar como Imagen</button>
+    </div>
 
-body {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    margin: 0;
-    color: #1f2937;
-}
+    <div class="hoja" id="nota-venta">
+        <img src="img/logo.png" class="watermark" onerror="this.style.display='none'">
+        
+        <div class="izq">
+            <div class="logo-container">
+                <img src="img/logo.png" onerror="this.outerHTML='<span style=\\'font-size:40px;\\'>🏛️</span>'">
+            </div>
+            <h1 class="titulo-empresa">MI PUEBLITO</h1>
+            <div class="sub-empresa">MUEBLERÍA Y LÍNEA BLANCA<br>Santiago Cuaula, Tlaxcala</div>
 
-.ticket {
-    display: flex;
-    gap: 15px;
-}
+            <div class="info-box" style="background:#eff6ff; border-color:#bfdbfe;">
+                <div class="info-row" style="margin-bottom:0;">
+                    <span style="color:#1e40af; font-weight:bold;">FOLIO:</span>
+                    <strong style="color:#1e3a8a; font-size:14px;">${folio}</strong>
+                </div>
+                <div class="info-row" style="margin-top:2px;">
+                    <span style="color:#64748b;">FECHA:</span>
+                    <strong>${fechaActual}</strong>
+                </div>
+            </div>
 
-/* IZQUIERDA */
-.izq {
-    width: 30%;
-    border-right: 2px dashed #d1d5db;
-    padding-right: 10px;
-    display: flex;
-    flex-direction: column;
-}
+            <div class="info-box">
+                <div class="info-box-title">Datos del Cliente</div>
+                <div style="font-size:13px; font-weight:bold; color:#0f172a; margin-bottom:3px;">${datosVenta.cliente.nombre}</div>
+                <div style="font-size:11px; color:#475569;">${datosVenta.cliente.telefono ? '📞 ' + datosVenta.cliente.telefono + '<br>' : ''}
+                ${datosVenta.cliente.direccion ? '📍 ' + datosVenta.cliente.direccion : ''}</div>
+            </div>
 
-.logo {
-    text-align: center;
-    margin-bottom: 10px;
-}
+            <div class="info-box">
+                <div class="info-box-title">Resumen de Operación</div>
+                <div class="info-row"><span>Método:</span> <strong style="text-transform:uppercase;">${datosVenta.metodo}</strong></div>
+                <div class="info-row"><span>Enganche Inicial:</span> <strong>${dinero(datosVenta.enganche || 0)}</strong></div>
+                <div class="info-row"><span>Saldo a Financiar:</span> <strong>${dinero(datosVenta.total - (datosVenta.enganche || 0))}</strong></div>
+            </div>
 
-.logo img {
-    width: 70px;
-    height: 70px;
-    object-fit: contain;
-}
+            <div class="total-box">
+                <div class="total-label">TOTAL OPERACIÓN</div>
+                <div class="total-amount">${dinero(datosVenta.total)}</div>
+            </div>
 
-.titulo {
-    text-align: center;
-    font-weight: bold;
-    color: #1e3a8a;
-}
+            <div class="firma-box">
+                <div class="firma-linea"></div>
+                <div class="firma-texto">FIRMA DE CONFORMIDAD</div>
+            </div>
+        </div>
 
-.box {
-    border: 1px solid #e5e7eb;
-    background: #f9fafb;
-    padding: 8px;
-    border-radius: 6px;
-    margin-bottom: 8px;
-    font-size: 11px;
-}
+        <div class="der">
+            <h3 class="seccion-titulo">DESCRIPCIÓN DE PRODUCTOS</h3>
+            <table class="tabla-moderna">
+                <thead><tr><th class="td-center" style="width:10%;">CANT</th><th>DESCRIPCIÓN</th><th class="td-right" style="width:20%;">P. UNIT</th><th class="td-right" style="width:20%;">SUBTOTAL</th></tr></thead>
+                <tbody>${tablaProductos}</tbody>
+            </table>
+            
+            ${datosVenta.metodo === "credito" ? `
+                <h3 class="seccion-titulo" style="margin-top:5mm;">CALENDARIO DE PAGARÉS</h3>
+                ${pagaresHTML}
+            ` : `
+                <h3 class="seccion-titulo" style="margin-top:5mm;">PLANES DISPONIBLES (REFERENCIA)</h3>
+                <table class="planes"><tr>${tablaPlanes}</tr></table>
+            `}
+            
+            <div class="legal">${generarLeyendaPagare(datosVenta, totalAPagar, filasPagares.length > 15)}</div>
+        </div>
+    </div>
 
-.total {
-    border: 2px solid #16a34a;
-    text-align: center;
-    padding: 10px;
-    border-radius: 6px;
-    margin-top: auto;
-}
+    <!-- Script para exportar a imagen -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        function guardarComoImagen() {
+            const btnImg = document.querySelector('.btn-img');
+            btnImg.innerText = "⏳ Generando...";
+            const nodo = document.getElementById('nota-venta');
+            html2canvas(nodo, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => {
+                const enlace = document.createElement('a');
+                enlace.download = 'Nota_Venta_' + '${folio}' + '.png';
+                enlace.href = canvas.toDataURL('image/png');
+                enlace.click();
+                btnImg.innerText = "🖼️ Guardar como Imagen";
+            });
+        }
+    </script>
+    </body>
+    </html>`;
 
-.total strong {
-    font-size: 24px;
-    color: #16a34a;
-}
-
-.firma {
-    margin-top: 20px;
-    text-align: center;
-    font-size: 10px;
-}
-
-/* DERECHA */
-.der {
-    width: 70%;
-}
-
-h3 {
-    font-size: 13px;
-    margin: 8px 0;
-    color: #1e3a8a;
-}
-
-/* TABLAS */
-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 10px;
-}
-
-th {
-    background: #1e3a8a;
-    color: white;
-    padding: 6px;
-}
-
-td {
-    padding: 5px;
-    border-bottom: 1px solid #e5e7eb;
-}
-
-/* PAGARES DOBLE */
-.pagares-doble {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-}
-
-/* CELDAS VACIAS PARA LLENAR */
-td.celda-llenar {
-    border-bottom: 1px solid #000;
-}
-
-/* PLANES */
-.planes td {
-    border: 1px solid #e5e7eb;
-    text-align: center;
-    padding: 6px;
-}
-
-/* LEGAL */
-.legal {
-    font-size: 8px;
-    margin-top: 10px;
-    line-height: 1.4;
-    border-top: 1px solid #ddd;
-    padding-top: 6px;
-}
-</style>
-</head>
-
-<body>
-
-<div class="ticket">
-
-<!-- IZQUIERDA -->
-<div class="izq">
-
-<div class="logo">
-    <img src="img/logo.png" onerror="this.style.display='none'">
-</div>
-
-<div class="titulo">
-MUEBLERÍA MI PUEBLITO<br>
-<small>Folio: ${folio}</small><br>
-<small>${fechaActual}</small>
-</div>
-
-<div class="box">
-<strong>CLIENTE</strong><br>
-${datosVenta.cliente.nombre}<br>
-${datosVenta.cliente.telefono || ''}<br>
-${datosVenta.cliente.direccion || ''}
-</div>
-
-<div class="box">
-<strong>RESUMEN</strong><br>
-Método: ${datosVenta.metodo}<br>
-Enganche: ${dinero(datosVenta.enganche || 0)}<br>
-Saldo: ${dinero(datosVenta.total - (datosVenta.enganche || 0))}
-</div>
-
-<div class="total">
-TOTAL<br>
-<strong>${dinero(datosVenta.total)}</strong>
-</div>
-
-<div class="firma">
-_________________________<br>
-FIRMA CLIENTE
-</div>
-
-</div>
-
-<!-- DERECHA -->
-<div class="der">
-
-<h3>PRODUCTOS</h3>
-<table>
-<thead>
-<tr>
-<th>CANT</th>
-<th>DESCRIPCIÓN</th>
-<th>P. UNIT</th>
-<th>SUBTOTAL</th>
-</tr>
-</thead>
-<tbody>
-${tablaProductos}
-</tbody>
-</table>
-
-${datosVenta.metodo === "credito" ? `
-<h3>CALENDARIO DE PAGARÉS</h3>
-
-${pagaresHTML}
-
-` : ''}
-
-<h3>PLANES DISPONIBLES</h3>
-<table class="planes">
-<tr>
-${tablaPlanes}
-</tr>
-</table>
-
-<div class="legal">
-${generarLeyendaPagare(datosVenta, totalAPagar, filasPagares.length > 18)}
-
-</div>
-
-</div>
-
-</body>
-</html>
-`;
-
-
-    // Crear e imprimir
+    // 5. Abrir la ventana
     const ventanaImpresion = window.open('', '_blank');
     if (!ventanaImpresion) {
         alert("⚠️ Habilita las ventanas emergentes para imprimir el ticket");
-        return;
+    } else {
+        ventanaImpresion.document.write(ticketHTML);
+        ventanaImpresion.document.close();
+        ventanaImpresion.focus();
     }
     
-    ventanaImpresion.document.write(ticketHTML);
-    ventanaImpresion.document.close();
-    ventanaImpresion.focus();
-    
-    setTimeout(() => {
-        ventanaImpresion.print();
-    }, 500);
-    // Guardar ticket en registro
+    // El guardado del ticket en la base de datos se mantiene intacto
     guardarTicketEnRegistro(datosVenta, folio);
 }
 
-/**
- * Guarda el ticket en el registro histórico
- * @param {Object} datosVenta - Datos de la venta
- * @param {string} folio - Folio único del ticket
- */
 function guardarTicketEnRegistro(datosVenta, folio) {
     let registroTickets = StorageService.get("registroTickets", []);
-    
     const pagares = StorageService.get("pagaresSistema", []);
     const pagaresDelFolio = pagares.filter(p => p.folio === folio);
 
@@ -1876,6 +1740,7 @@ function abrirDetalleEntrega(idSalida) {
     const s = salidasPendientesVenta.find(x => x.id === idSalida);
     if (!s) return;
 
+    let clientes = StorageService.get("clientes", []);
     const clienteObj = clientes.find(c => c.id === s.clienteId || c.id === Number(s.clienteId));
     const direccion = clienteObj ? (clienteObj.direccion || '—') : '—';
     const telefono = clienteObj ? (clienteObj.telefono || '—') : '—';
@@ -2043,6 +1908,7 @@ function limpiarFiltrosReimpresion() {
     });
     renderReimprimirVenta();
 }
+
 // ============================================================
 // TRADUCTORES DE MIGRACIÓN (CONECTADOS A FIREBASE)
 // ============================================================
@@ -2073,7 +1939,6 @@ function procesarMigracionCXC_POS() {
             const fechaVentaStr = fechaVentaDate.toLocaleDateString('es-MX');
             const pagosRestantes = Number(item.pagosRestantes) || 1;
 
-            // 1. Cliente
             let cli = clientesList.find(c => c.nombre.toLowerCase() === item.nombre.toLowerCase());
             let clienteId;
             if (!cli) {
@@ -2089,7 +1954,6 @@ function procesarMigracionCXC_POS() {
                 clienteId = cli.id;
             }
             
-            // 2. Cuenta por Cobrar
             cxc.push({
                 folio: folio,
                 nombre: item.nombre,
@@ -2111,7 +1975,6 @@ function procesarMigracionCXC_POS() {
                 periodicidad: periodicidad
             });
 
-            // 3. Pagarés
             if (saldo > 0) {
                 let diasIntervalo = periodicidad === "quincenal" ? 14 : periodicidad === "mensual" ? 30 : 7;
                 let fechaPago = item.fechaPrimerPago ? new Date(item.fechaPrimerPago) : new Date(fechaVentaDate);
@@ -2135,7 +1998,6 @@ function procesarMigracionCXC_POS() {
                 }
             }
 
-            // 4. Ventas Registradas
             ventasReg.push({
                 folio: folio,
                 fechaVenta: fechaVentaIso,
@@ -2159,7 +2021,6 @@ function procesarMigracionCXC_POS() {
             StorageService.set('clientes', clientesList);
             StorageService.set('ventasRegistradas', ventasReg);
             
-            // Actualizar variables globales
             window.clientes = clientesList; 
 
             alert(`✅ ¡Éxito! ${agregadas} registros inyectados. La base de datos y Firebase se actualizaron.`);
@@ -2211,6 +2072,7 @@ function procesarMigracionCXP_POS() {
         alert('❌ Error en el formato JSON: ' + e.message);
     }
 }
+
 function procesarMigracionMSI_POS() {
     const raw = document.getElementById('jsonCuentasMSIPOS').value.trim();
     if (!raw) return alert('⚠️ Pega el JSON primero');
@@ -2222,7 +2084,6 @@ function procesarMigracionMSI_POS() {
         let cuentasMSI = StorageService.get('cuentasMSI', []);
         let agregadas = 0;
 
-        // Forzamos a que el sistema lea las tarjetas registradas
         window.tarjetasConfig = StorageService.get("tarjetasConfig", []);
 
         for (let item of data) {
@@ -2233,7 +2094,6 @@ function procesarMigracionMSI_POS() {
             const meses = Number(item.meses);
             const pagosRealizados = Number(item.pagosRealizados) || 0;
 
-            // Blindaje: Forzamos mayúsculas y quitamos espacios para que coincida perfecto
             const nombreBanco = item.banco.trim().toUpperCase();
 
             let calendario = [];
@@ -2241,10 +2101,9 @@ function procesarMigracionMSI_POS() {
                 calendario = calcularCalendarioMSI(fechaCompraDate, meses, nombreBanco);
             }
 
-            // 🚨 VALIDACIÓN CRÍTICA 🚨
             if (calendario.length === 0) {
                 alert(`⚠️ ALERTA: No pude calcular las fechas para el banco "${nombreBanco}".\n\n¿Ya registraste esta tarjeta en el menú "Bancos" con su día de corte?\n\nDeteniendo la migración para no generar errores. Resuelve el problema y vuelve a intentarlo.`);
-                return; // Aborta TODA la inyección al instante
+                return; 
             }
 
             cuentasMSI.push({
@@ -2271,12 +2130,32 @@ function procesarMigracionMSI_POS() {
         alert('❌ Error en el formato JSON: ' + e.message);
     }
 }
-window.procesarMigracionMSI_POS = procesarMigracionMSI_POS;
 
-// Exponer las funciones para que el HTML las encuentre
+// ============================================================
+// EXPOSICIÓN GLOBAL PARA QUE HTML Y EL MENÚ ENCUENTREN LAS FUNCIONES
+// ============================================================
+window.renderCarrito = renderCarrito;
+window.agregarAlCarrito = agregarAlCarrito;
+window.agregarAlCarritoDesdeModal = agregarAlCarritoDesdeModal;
+window.eliminarDelCarrito = eliminarDelCarrito;
+window.actualizarCantidadCarrito = actualizarCantidadCarrito;
+window.cambiarPrecioCarrito = cambiarPrecioCarrito;
+window.actualizarColorCarrito = actualizarColorCarrito;
+window.actualizarUbicacionCarrito = actualizarUbicacionCarrito;
+window.actualizarInterfazPago = actualizarInterfazPago;
+window.seleccionarPlan = seleccionarPlan;
+window.confirmarVentaFinal = confirmarVentaFinal;
+window.cancelarYVolverAlCarrito = cancelarYVolverAlCarrito;
+window.procesarVentaConInventario = procesarVentaConInventario;
+window.setDecisionInventario = setDecisionInventario;
+window.cambiarColorInventario = cambiarColorInventario;
+window.cambiarUbicacionInventario = cambiarUbicacionInventario;
+window.confirmarDecisionesInventario = confirmarDecisionesInventario;
+window.abrirDetalleEntrega = abrirDetalleEntrega;
+window.renderEntregas = renderEntregas;
+window.procesarMigracionMSI_POS = procesarMigracionMSI_POS;
 window.procesarMigracionCXC_POS = procesarMigracionCXC_POS;
 window.procesarMigracionCXP_POS = procesarMigracionCXP_POS;
-
 window.renderReimprimirVenta = renderReimprimirVenta;
 window.reimprimirTicketVenta = reimprimirTicketVenta;
 window.limpiarFiltrosReimpresion = limpiarFiltrosReimpresion;

@@ -24,109 +24,130 @@ function calcularAntiguedadProducto(p) {
     let diffAnios = Math.floor(diffMeses / 12);
     return diffAnios + ' años';
 }
+// ===== REPORTE UNIFICADO: CONSULTA DE INVENTARIO MAESTRA (PRO + VARIANTES) =====
 window.renderConsultaInventario = function() {
     const cont = document.getElementById('tablaConsultaInventario');
-    // Filtros
-    const catSel = document.getElementById('filtroCatInv');
-    const subSel = document.getElementById('filtroSubInv');
-    const stockSel = document.getElementById('filtroStockInv');
-    const pedidoSel = document.getElementById('filtroPedidoInv');
-    const cat = catSel?.value || 'todos';
-    const sub = subSel?.value || 'todos';
-    const stockFiltro = stockSel?.value || 'todos';
-    const pedidoFiltro = pedidoSel?.value || 'todos';
-    let productosFiltrados = (window.productos || []).filter(p =>
-        (cat === 'todos' || p.categoria === cat) &&
-        (sub === 'todos' || p.subcategoria === sub)
-    );
+    if (!cont) return;
 
-    // Filtro de stock
-    if (stockFiltro === 'con') {
-        productosFiltrados = productosFiltrados.filter(p => (p.stock || 0) > 0);
-    } else if (stockFiltro === 'sin') {
-        productosFiltrados = productosFiltrados.filter(p => !p.stock || p.stock === 0);
-    }
+    // 1. Obtención de Filtros
+    const cat = document.getElementById('filtroCatInv')?.value || 'todos';
+    const sub = document.getElementById('filtroSubInv')?.value || 'todos';
+    const stockFiltro = document.getElementById('filtroStockInv')?.value || 'todos';
+    const pedidoFiltro = document.getElementById('filtroPedidoInv')?.value || 'todos';
 
-    // Filtro de estado de pedido
-    // Se asume que window.ordenesCompra está disponible y tiene estado y articulos
-    let ocs = window.ordenesCompra || [];
-    // Mapear productos con estado de pedido
+    // 2. Preparación de Datos (Kardex y Órdenes de Compra)
+    const kardex = window.movimientosInventario || [];
+    const ocs = window.ordenesCompra || [];
     const estadoPedidoPorProd = {};
+    
     ocs.forEach(oc => {
         if (!oc.articulos) return;
         oc.articulos.forEach(a => {
             if (!a.productoId) return;
-            if (oc.estado === 'Borrador' || oc.estado === 'Pendiente' || oc.estado === 'Pendiente de recibir') {
+            if (['Borrador', 'Pendiente', 'Pendiente de recibir'].includes(oc.estado)) {
                 estadoPedidoPorProd[a.productoId] = 'pendiente';
             } else if (oc.estado === 'Pendiente de baja') {
                 estadoPedidoPorProd[a.productoId] = 'baja';
             }
         });
     });
-    if (pedidoFiltro !== 'todos') {
-        productosFiltrados = productosFiltrados.filter(p => {
-            const estado = estadoPedidoPorProd[p.id] || 'ninguno';
-            return pedidoFiltro === estado;
-        });
-    }
 
-    // Ordenar por categoría, subcategoría, nombre
-    productosFiltrados.sort((a, b) => {
-        if (a.categoria !== b.categoria) return (a.categoria||'').localeCompare(b.categoria||'');
-        if (a.subcategoria !== b.subcategoria) return (a.subcategoria||'').localeCompare(b.subcategoria||'');
-        return a.nombre.localeCompare(b.nombre);
+    // 3. Filtrado de Productos
+    let productosFiltrados = (window.productos || []).filter(p => {
+        const coincideCat = (cat === 'todos' || cat === 'todas' || p.categoria === cat);
+        const coincideSub = (sub === 'todos' || sub === 'todas' || p.subcategoria === sub);
+        const coincideStock = stockFiltro === 'todos' ? true : (stockFiltro === 'con' ? (p.stock > 0) : (p.stock <= 0));
+        const estado = estadoPedidoPorProd[p.id] || 'ninguno';
+        const coincidePedido = pedidoFiltro === 'todos' ? true : (pedidoFiltro === estado);
+        
+        return coincideCat && coincideSub && coincideStock && coincidePedido;
     });
 
-    // Renderizar tabla profesional
-    let html = `<div style="overflow-x:auto;"><table class=\"tabla-admin tabla-inventario\" style=\"width:100%;font-size:15px;box-shadow:0 2px 8px #0001;border-radius:10px;overflow:hidden;\">
-        <thead><tr style=\"background:#f1f5f9;\">
-            <th>Categoría</th><th>Subcategoría</th><th>Producto</th><th>Unidades</th><th>Costo Promedio</th><th>Total $</th><th>Antigüedad</th><th>Stock</th><th>Pedido</th>
-        </tr></thead><tbody>`;
-    let totalUnidades = 0, totalPesos = 0;
-    const kardex = window.movimientosInventario || [];
+    // 4. Renderizado de Estructura de Tabla
+    let html = `
+    <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:12px;">
+        <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white; font-size:14px;">
+            <thead>
+                <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
+                    <th style="padding:15px;">Producto / Categoría</th>
+                    <th style="padding:15px; text-align:center;">Stock Total</th>
+                    <th style="padding:15px;">Desglose por Ubicación y Color</th>
+                    <th style="padding:15px; text-align:right;">Valorización</th>
+                    <th style="padding:15px; text-align:center;">Estado</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    let totalGlobalUnidades = 0;
+    let totalGlobalPesos = 0;
+
     productosFiltrados.forEach(p => {
-        // Calcular costo promedio real desde el kardex
+        // Lógica de Costo Promedio (del reporte 1)
         const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipo === 'entrada');
-        let costoPromedio = 0;
-        let totalCosto = 0;
-        let totalCantidad = 0;
+        let totalCosto = 0, totalCantidadEntrada = 0;
         entradas.forEach(mov => {
             totalCosto += (mov.costoUnitario || 0) * (mov.cantidad || 0);
-            totalCantidad += mov.cantidad || 0;
+            totalCantidadEntrada += mov.cantidad || 0;
         });
-        if (totalCantidad > 0) {
-            costoPromedio = totalCosto / totalCantidad;
+        const costoPromedio = totalCantidadEntrada > 0 ? (totalCosto / totalCantidadEntrada) : (p.costo || 0);
+        const valorTotal = (p.stock || 0) * costoPromedio;
+
+        totalGlobalUnidades += (p.stock || 0);
+        totalGlobalPesos += valorTotal;
+
+        // Lógica de Desglose de Variantes (del reporte 2)
+        let desgloseHtml = '';
+        if (p.variantes && p.variantes.length > 0) {
+            desgloseHtml = p.variantes.filter(v => v.stock > 0).map(v => `
+                <div style="display:inline-block; background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1; padding:4px 8px; border-radius:6px; margin:2px; font-size:11px;">
+                    <b>${v.ubicacion}</b>: ${v.color} (${v.stock} pzs)
+                </div>
+            `).join('');
         }
-        const total = (p.stock || 0) * costoPromedio;
-        totalUnidades += p.stock || 0;
-        totalPesos += total;
-        // Estado de pedido
+        if (!desgloseHtml) desgloseHtml = '<small style="color:#94a3b8;">Sin desglose (stock antiguo)</small>';
+
+        // Etiquetas de Estado (Pedido y Antigüedad)
         const estadoPedido = estadoPedidoPorProd[p.id] || 'ninguno';
-        let pedidoLabel = '';
-        if (estadoPedido === 'pendiente') pedidoLabel = '<span style="color:#f59e42;font-weight:bold;">Pendiente de recibir</span>';
-        else if (estadoPedido === 'baja') pedidoLabel = '<span style="color:#e11d48;font-weight:bold;">Pendiente de baja</span>';
-        else pedidoLabel = '<span style="color:#22c55e;font-weight:bold;">Sin pedido</span>';
-        // Stock label
-        let stockLabel = (p.stock || 0) > 0 ? '<span style="color:#22c55e;font-weight:bold;">✔</span>' : '<span style="color:#e11d48;font-weight:bold;">✖</span>';
-        html += `<tr>
-            <td>${p.categoria||''}</td>
-            <td>${p.subcategoria||''}</td>
-            <td><b>${p.nombre}</b></td>
-            <td style=\"text-align:right;\">${p.stock||0}</td>
-            <td style=\"text-align:right;\">${dinero(costoPromedio)}</td>
-            <td style=\"text-align:right;\">${dinero(total)}</td>
-            <td style=\"text-align:center;\">${calcularAntiguedadProducto(p)}</td>
-            <td style=\"text-align:center;\">${stockLabel}</td>
-            <td style=\"text-align:center;\">${pedidoLabel}</td>
-        </tr>`;
+        const labelPedido = estadoPedido === 'pendiente' ? '<span style="color:#f59e42;">● Pedido Pendiente</span>' : 
+                            estadoPedido === 'baja' ? '<span style="color:#e11d48;">● Pendiente Baja</span>' : '';
+        const antiguedad = typeof calcularAntiguedadProducto === 'function' ? calcularAntiguedadProducto(p) : '-';
+
+        html += `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:12px;">
+                    <div style="font-weight:bold; color:#1e40af;">${p.nombre}</div>
+                    <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
+                </td>
+                <td style="padding:12px; text-align:center;">
+                    <span style="font-size:16px; font-weight:bold; color:${(p.stock||0)>0?'#16a34a':'#dc2626'}">${p.stock || 0}</span>
+                </td>
+                <td style="padding:12px;">${desgloseHtml}</td>
+                <td style="padding:12px; text-align:right;">
+                    <div style="font-weight:bold;">${dinero(valorTotal)}</div>
+                    <div style="font-size:11px; color:#94a3b8;">CP: ${dinero(costoPromedio)}</div>
+                </td>
+                <td style="padding:12px; text-align:center; line-height:1.2;">
+                    <div style="font-size:11px; font-weight:bold;">${labelPedido}</div>
+                    <div style="font-size:10px; color:#64748b; margin-top:4px;">Antigüedad: ${antiguedad}</div>
+                </td>
+            </tr>`;
     });
-    html += `</tbody><tfoot><tr style=\"background:#f8fafc;font-weight:bold;\">
-        <td colspan=\"3\" style=\"padding:10px;text-align:right;\">Totales:</td>
-        <td style=\"padding:10px;text-align:right;\">${totalUnidades}</td>
-        <td></td>
-        <td style=\"padding:10px;text-align:right;\">${dinero(totalPesos)}</td>
-        <td colspan=\"3\"></td>
-    </tr></tfoot></table></div>`;
+
+    // 5. Pie de Tabla con Totales
+    html += `
+            </tbody>
+            <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
+                <tr>
+                    <td style="padding:15px; text-align:right;">TOTALES:</td>
+                    <td style="padding:15px; text-align:center; font-size:16px;">${totalGlobalUnidades}</td>
+                    <td></td>
+                    <td style="padding:15px; text-align:right; font-size:16px; color:#1e40af;">${dinero(totalGlobalPesos)}</td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>`;
+
     cont.innerHTML = html;
 }
 
@@ -154,68 +175,110 @@ window.initConsultaInventario = function() {
     renderConsultaInventario();
 }
 // === CARGA INICIAL DE STOCK ===
-window.abrirModalCargaInicialStock = function() {
+// ============================================================
+// MODIFICACIONES PARA CARGA INICIAL DE STOCK (COLORES Y UBICACIÓN)
+// ============================================================
+
+function abrirModalCargaInicialStock() {
     const modal = document.getElementById('modalCargaInicialStock');
     if (!modal) return;
-    // cargaStockProducto es ahora un hidden input + picker dinámico (ver index.html)
-    const hidProd     = document.getElementById('cargaStockProducto');
-    const displayProd = document.getElementById('cargaStockProducto-display');
-    if (hidProd)     { hidProd.value = ''; }
-    if (displayProd) { displayProd.textContent = 'Sin seleccionar'; displayProd.style.color = '#6b7280'; }
+    
+    // Limpiar campos
+    document.getElementById('cargaStockProducto').value = '';
+    const display = document.getElementById('cargaStockProducto-display');
+    if (display) { display.textContent = 'Sin seleccionar'; display.style.color = '#6b7280'; }
     document.getElementById('cargaStockCantidad').value = '';
     document.getElementById('cargaStockCosto').value = '';
+    document.getElementById('cargaStockColor').value = '';
+    
+    // Llenar ubicaciones automáticamente desde el catálogo que creamos en el Paso 1
+    const selectUbicacion = document.getElementById('cargaStockUbicacion');
+    if (selectUbicacion) {
+        const ubicaciones = StorageService.get("ubicacionesConfig", []);
+        let opciones = '<option value="General">-- Ubicación General --</option>';
+        ubicaciones.forEach(u => {
+            opciones += `<option value="${u.nombre}">${u.nombre}</option>`;
+        });
+        selectUbicacion.innerHTML = opciones;
+    }
+
     modal.style.display = 'flex';
 }
 
-window.cerrarModalCargaInicialStock = function() {
+function guardarCargaInicialStock() {
+    const idProd = document.getElementById('cargaStockProducto').value;
+    const cant = parseInt(document.getElementById('cargaStockCantidad').value);
+    const costo = parseFloat(document.getElementById('cargaStockCosto').value) || 0;
+    
+    // Leemos el color y la ubicación. Si los dejan vacíos, les ponemos "General"
+    const color = document.getElementById('cargaStockColor').value.trim() || 'General';
+    const ubicacion = document.getElementById('cargaStockUbicacion').value || 'General';
+
+    if (!idProd) return alert('⚠️ Selecciona un producto.');
+    if (isNaN(cant) || cant <= 0) return alert('⚠️ Ingresa una cantidad válida mayor a 0.');
+
+    const productos = StorageService.get('productos', []);
+    const p = window.productos.find(x => String(x.id) === String(idProd));
+    if (!p) return alert('⚠️ Producto no encontrado.');
+
+    // 1. Actualizar el stock general (La suma de todo)
+    p.stock = (p.stock || 0) + cant;
+    if (costo > 0) p.costo = costo;
+
+    // 2. Actualizar las variantes (Las "cajitas" de Color + Ubicación)
+    if (!p.variantes) p.variantes = [];
+    
+    // Buscar si ya habíamos metido este mismo color en esta misma bodega antes
+    const varianteExistente = p.variantes.find(v => 
+        (v.color || "General").toUpperCase() === color.toUpperCase() && 
+        (v.ubicacion || "General").toUpperCase() === ubicacion.toUpperCase()
+    );
+
+    if (varianteExistente) {
+        // Si ya existía, solo le sumamos más
+        varianteExistente.stock = (Number(varianteExistente.stock) || 0) + cant;
+    } else {
+        // Si no existía, creamos la nueva "cajita"
+        p.variantes.push({
+            color: color,
+            ubicacion: ubicacion,
+            stock: cant
+        });
+    }
+
+    // Guardar cambios en el catálogo de productos
+    StorageService.set('productos', productos);
+
+    // 3. Registrar el movimiento en el historial detallado
+    const movimientos = StorageService.get('movimientosInventario', []);
+    movimientos.push({
+        id: Date.now(),
+        productoId: p.id,
+        productoNombre: p.nombre,
+        tipo: 'entrada',
+        cantidad: cant,
+        fecha: new Date().toISOString(),
+        concepto: `Carga inicial - Color: ${color} | Ubic: ${ubicacion}`,
+        costoUnitario: costo
+    });
+    StorageService.set('movimientosInventario', movimientos);
+
+    // Actualizar la tabla de inventario si estamos en esa vista
+    if (typeof renderInventario === 'function') renderInventario();
+
+    cerrarModalCargaInicialStock();
+    alert(`✅ Se agregaron ${cant} piezas a ${ubicacion} (Color: ${color}).\nEl sistema ya lo recuerda para futuras ventas.`);
+}
+
+function cerrarModalCargaInicialStock() {
     const modal = document.getElementById('modalCargaInicialStock');
     if (modal) modal.style.display = 'none';
 }
 
-window.guardarCargaInicialStock = function() {
-    const prodId = document.getElementById('cargaStockProducto').value;
-    const cantidad = parseInt(document.getElementById('cargaStockCantidad').value);
-    const costo = parseFloat(document.getElementById('cargaStockCosto').value);
-    if (!prodId || !cantidad || cantidad <= 0 || isNaN(costo) || costo < 0) {
-        alert('Completa todos los campos correctamente.');
-        return;
-    }
-    const idx = window.productos.findIndex(p => String(p.id) === String(prodId));
-    if (idx === -1) return alert('Producto no encontrado.');
-    const p = window.productos[idx];
-    // Solo sumar stock, NO modificar costo
-    const stockAnterior = p.stock || 0;
-    const nuevoStock = stockAnterior + cantidad;
-    p.stock = nuevoStock;
-    // NO modificar p.costo aquí
-    window.productos[idx] = p;
-    if (!StorageService.set('productos', window.productos)) {
-        alert('Error guardando producto.');
-        return;
-    }
-    // Registrar en kardex
-    const mov = {
-        id: Date.now() + Math.random(),
-        productoId: p.id,
-        tipo: 'entrada',
-        cantidad: cantidad,
-        concepto: 'Carga inicial de stock',
-        fecha: new Date().toLocaleString('es-MX'),
-        costoUnitario: costo,
-        costoPromedio: p.costo
-    };
-    let kardex = StorageService.get('movimientosInventario', []);
-    kardex.push(mov);
-    StorageService.set('movimientosInventario', kardex);
-    window.movimientosInventario = kardex;
-    // También actualizar la variable global si existe fuera de window
-    if (typeof movimientosInventario !== 'undefined') {
-        movimientosInventario = kardex;
-    }
-    cerrarModalCargaInicialStock();
-    renderInventario();
-    alert('Stock cargado y valuado a costo promedio.');
-}
+// Exponer funciones
+window.abrirModalCargaInicialStock = abrirModalCargaInicialStock;
+window.guardarCargaInicialStock = guardarCargaInicialStock;
+window.cerrarModalCargaInicialStock = cerrarModalCargaInicialStock;
 // Solo cuenta cuántos productos tienen IDs duplicados (sin corregir)
 window.contarIdsDuplicados = function() {
     const ids = {};
@@ -539,9 +602,11 @@ function abrirProductoForm(id = null) {
     const inputImagen = document.getElementById("pImagen");
     const inputSub    = document.getElementById("pSubcategoria");
 
+    let p = null; // <--- CORRECCIÓN: Declaramos 'p' aquí para que exista en toda la función
+
     if (id) {
         productoEditando = id;
-        const p = window.productos.find(prod => String(prod.id) === String(id));
+        p = window.productos.find(prod => String(prod.id) === String(id));
         if (!p) return;
         document.getElementById("tituloModalProducto").innerText = "✏️ Editar Producto";
         inputNombre.value = p.nombre;
@@ -563,6 +628,22 @@ function abrirProductoForm(id = null) {
         inputModelo.value = "";
         inputImagen.value = "";
     }
+    
+    // --- LÓGICA FINANCIERA DEL PRODUCTO ---
+    window._plazosProductoTemp = [];
+    if (id && p && p.configCredito && p.configCredito.usaReglaGlobal === false) {
+        document.getElementById("pUsaReglaGlobal").checked = false;
+        document.getElementById("pPermitirCredito").checked = p.configCredito.permitirCredito;
+        window._plazosProductoTemp = p.configCredito.plazos || [];
+    } else {
+        document.getElementById("pUsaReglaGlobal").checked = true;
+        document.getElementById("pPermitirCredito").checked = true;
+    }
+    if (typeof toggleConfigCreditoProd === "function") {
+        toggleConfigCreditoProd();
+        _dibujarPlazosProd();
+    }
+    
     modal.classList.remove("oculto");
     modal.style.display = 'flex';
 }
@@ -587,6 +668,16 @@ function guardarProductoDB() {
         if (cat.subcategorias.find(s => s.nombre === subcatNombre)) categoriaPadre = cat.nombre;
     });
 
+    // Capturar reglas de financiamiento
+    const usaGlobal = document.getElementById("pUsaReglaGlobal")?.checked ?? true;
+    const permitirCredito = document.getElementById("pPermitirCredito")?.checked ?? true;
+    
+    const configCredito = usaGlobal ? null : {
+        usaReglaGlobal: false,
+        permitirCredito: permitirCredito,
+        plazos: window._plazosProductoTemp || []
+    };
+
     // Estructura de producto actualizada
     const datosProducto = {
         nombre, costo, precio: precioManual,
@@ -594,7 +685,7 @@ function guardarProductoDB() {
         categoria: categoriaPadre,
         subcategoria: subcatNombre,
         caracteristicas,
-        // Inicializamos variantes si es nuevo, o conservamos las existentes
+        configCredito, // <----- ESTA ES LA LÍNEA MÁGICA
         variantes: productoEditando ? (window.productos.find(p => String(p.id) === String(productoEditando))?.variantes || []) : []
     };
 
@@ -955,22 +1046,18 @@ function guardarCambiosVisor(id) {
     if (!confirm(`¿Guardar cambios para "${p.nombre}"?`)) return;
 
     p.nombre       = document.getElementById("editNombre")?.value || p.nombre;
-    p.color        = document.getElementById("editColor")?.value  || '';
     p.marca        = document.getElementById("editMarca")?.value  || '';
-    p.modelo       = document.getElementById("editModelo")?.value || '';
-    p.categoria    = document.getElementById("editCategoria")?.value || p.categoria;
-    p.subcategoria = document.getElementById("editSubcategoria")?.value || p.subcategoria;
-    p.imagen       = document.getElementById("editImagen")?.value || '';
     p.costo        = parseFloat(document.getElementById("editCosto")?.value) || p.costo;
     p.precio       = parseFloat(document.getElementById("editPrecio")?.value) || p.precio;
-    p.descripcion  = document.getElementById("editDescripcion")?.value || '';
     p.caracteristicas = document.getElementById("editCaracteristicas")?.value || '';
+
+    // Borramos p.color, p.modelo, p.descripcion y p.imagen porque ya no están en tu Visor Maestro
 
     if (!StorageService.set("productos", window.productos)) {
         alert("❌ Error guardando cambios");
         return;
     }
-    renderInventario(); // Refresca la tabla de productos para mostrar la nueva imagen
+    renderInventario(); 
     alert("✅ Cambios guardados correctamente.");
 }
 
@@ -1091,6 +1178,78 @@ function insertarProductoSistema(p) {
 
     return { ok: true };
 }
+
+// ============================================================
+// CATÁLOGO DE UBICACIONES (Bodegas, Sucursales, etc.)
+// ============================================================
+
+function renderUbicaciones() {
+    const contenedor = document.getElementById("tablaUbicaciones");
+    if (!contenedor) return;
+
+    // Le damos dos ubicaciones por defecto si el sistema está vacío
+    let ubicaciones = StorageService.get("ubicacionesConfig", [
+        { id: 1, nombre: "Piso de Ventas" },
+        { id: 2, nombre: "Bodega Principal" }
+    ]);
+
+    // Las guardamos en memoria si es la primera vez
+    if(StorageService.get("ubicacionesConfig", []).length === 0) {
+        StorageService.set("ubicacionesConfig", ubicaciones);
+    }
+
+    let filas = ubicaciones.map(u => `
+        <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:12px; font-weight:bold; color:#1e40af;">📍 ${u.nombre}</td>
+            <td style="padding:12px; text-align:center;">
+                <button onclick="eliminarUbicacion(${u.id})" style="background:#fee2e2; color:#ef4444; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">🗑️ Eliminar</button>
+            </td>
+        </tr>
+    `).join('');
+
+    contenedor.innerHTML = `
+        <div style="background:white; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); overflow:hidden;">
+            <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                <thead style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
+                    <tr>
+                        <th style="padding:12px; text-align:left;">Nombre de la Ubicación</th>
+                        <th style="padding:12px; text-align:center; width:100px;">Acción</th>
+                    </tr>
+                </thead>
+                <tbody>${filas || '<tr><td colspan="2" style="text-align:center; padding:20px; color:#94a3b8;">No hay ubicaciones registradas</td></tr>'}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function guardarUbicacion() {
+    const input = document.getElementById("nuevaUbicacionNombre");
+    const nombre = input.value.trim();
+    if (!nombre) return alert("⚠️ Escribe un nombre para la ubicación.");
+
+    let ubicaciones = StorageService.get("ubicacionesConfig", []);
+    
+    // Evitar duplicados
+    if (ubicaciones.some(u => u.nombre.toLowerCase() === nombre.toLowerCase())) {
+        return alert("⚠️ Esta ubicación ya existe.");
+    }
+
+    ubicaciones.push({ id: Date.now(), nombre: nombre });
+    StorageService.set("ubicacionesConfig", ubicaciones);
+    input.value = "";
+    renderUbicaciones();
+}
+
+function eliminarUbicacion(id) {
+    if (!confirm("⚠️ ¿Seguro que deseas eliminar esta ubicación? (Asegúrate de no tener inventario guardado aquí)")) return;
+    let ubicaciones = StorageService.get("ubicacionesConfig", []);
+    ubicaciones = ubicaciones.filter(u => u.id !== id);
+    StorageService.set("ubicacionesConfig", ubicaciones);
+    renderUbicaciones();
+}
+
+// Exponemos la función al HTML
+window.renderUbicaciones = renderUbicaciones;
 function renderTablaVariantes(variantes, prodId) {
     if (!variantes || variantes.length === 0) return '<p style="padding: 15px; color: #94a3b8; text-align: center; font-size: 12px;">No hay existencias registradas.</p>';
     
@@ -1112,6 +1271,7 @@ function renderTablaVariantes(variantes, prodId) {
     </table>`;
 }
 
+// CORRECCIÓN PARA AÑADIR VARIANTE
 window.agregarVarianteStock = function(prodId) {
     const ubicacion = document.getElementById('newVarUbicacion').value;
     const color = document.getElementById('newVarColor').value.trim();
@@ -1122,7 +1282,6 @@ window.agregarVarianteStock = function(prodId) {
     const p = window.productos.find(prod => String(prod.id) === String(prodId));
     p.variantes = p.variantes || [];
 
-    // Si ya existe esa combinación, sumamos el stock
     const existente = p.variantes.find(v => v.ubicacion === ubicacion && v.color.toUpperCase() === color.toUpperCase());
     if (existente) {
         existente.stock += stock;
@@ -1130,12 +1289,14 @@ window.agregarVarianteStock = function(prodId) {
         p.variantes.push({ ubicacion, color, stock });
     }
 
-    // Registrar en Kardex para contabilidad
+    // --- LÍNEA NUEVA: ACTUALIZAR STOCK GENERAL ---
+    p.stock = (p.stock || 0) + stock; 
+
     registrarMovimiento(prodId, `Entrada - ${ubicacion} (${color})`, stock, "entrada");
-    
     mostrarDetalleProductoMaestro(prodId);
 };
 
+// CORRECCIÓN PARA ELIMINAR VARIANTE
 window.eliminarVariante = function(prodId, index) {
     if (!confirm("¿Eliminar esta existencia del inventario?")) return;
     const p = window.productos.find(prod => String(prod.id) === String(prodId));
@@ -1143,9 +1304,167 @@ window.eliminarVariante = function(prodId, index) {
     const v = p.variantes[index];
     registrarMovimiento(prodId, `Corrección/Baja - ${v.ubicacion} (${v.color})`, v.stock, "salida");
     
+    // --- LÍNEA NUEVA: RESTAR AL STOCK GENERAL ---
+    p.stock = (p.stock || 0) - v.stock; 
+
     p.variantes.splice(index, 1);
     mostrarDetalleProductoMaestro(prodId);
 };
+
+// =========================================================
+// MÓDULO: AJUSTES Y TRANSFERENCIAS DE INVENTARIO
+// =========================================================
+
+// --- AJUSTES (MERMAS / SOBRANTES) ---
+window.abrirModalAjusteInv = function() {
+    const ubs = StorageService.get('ubicacionesConfig', [{id:'General', nombre:'Piso de Ventas (General)'}]);
+    let opts = '';
+    ubs.forEach(u => opts += `<option value="${u.nombre}">${u.nombre}</option>`);
+    
+    document.getElementById('ajusteUbicacion').innerHTML = opts;
+    document.getElementById('ajusteProductoId').value = '';
+    document.getElementById('ajusteProductoDisplay').innerText = 'Sin seleccionar';
+    document.getElementById('ajusteProductoDisplay').style.color = '#64748b';
+    document.getElementById('ajusteCantidad').value = '';
+    document.getElementById('ajusteMotivo').value = '';
+    
+    // 👇 ESTA ES LA MAGIA QUE FALTABA: Quitar el candado CSS
+    const modal = document.getElementById('modalAjusteInv');
+    modal.classList.remove('oculto');
+    modal.style.display = 'flex';
+};
+
+window.ejecutarAjusteInv = function() {
+    const idProd = document.getElementById('ajusteProductoId').value;
+    const tipo = document.getElementById('ajusteTipo').value;
+    const cant = parseFloat(document.getElementById('ajusteCantidad').value);
+    const ubi = document.getElementById('ajusteUbicacion').value;
+    const motivo = document.getElementById('ajusteMotivo').value;
+
+    if(!idProd) return alert("Selecciona un producto.");
+    if(isNaN(cant) || cant <= 0) return alert("Ingresa una cantidad válida.");
+    if(!motivo) return alert("Debes ingresar un motivo para el ajuste (Auditoría).");
+
+    const productos = StorageService.get("productos", []);
+    const idx = productos.findIndex(p => String(p.id) === String(idProd));
+    
+    if(idx === -1) return alert("Producto no encontrado.");
+    
+    let p = productos[idx];
+    p.stockPorUbicacion = p.stockPorUbicacion || {};
+    p.stock = parseFloat(p.stock) || 0;
+
+    if(tipo === 'salida') {
+        p.stock -= cant;
+        p.stockPorUbicacion[ubi] = (parseFloat(p.stockPorUbicacion[ubi]) || 0) - cant;
+    } else {
+        p.stock += cant;
+        p.stockPorUbicacion[ubi] = (parseFloat(p.stockPorUbicacion[ubi]) || 0) + cant;
+    }
+
+    const movs = StorageService.get("movimientosInventario", []);
+    movs.push({
+        id: Date.now(),
+        fecha: new Date().toISOString(),
+        tipo: tipo === 'salida' ? 'Egreso (Merma/Ajuste)' : 'Ingreso (Sobrante/Ajuste)',
+        productoId: p.id,
+        productoNombre: p.nombre,
+        cantidad: cant,
+        ubicacion: ubi,
+        motivo: motivo,
+        usuario: "Admin" 
+    });
+
+    productos[idx] = p;
+    StorageService.set("productos", productos);
+    StorageService.set("movimientosInventario", movs);
+
+    alert(`✅ Ajuste aplicado con éxito.`);
+    
+    // Cerrar y volver a poner candado
+    const modal = document.getElementById('modalAjusteInv');
+    modal.classList.add('oculto');
+    modal.style.display = 'none';
+    
+    if(typeof renderInventario === 'function') renderInventario();
+};
+
+// --- TRANSFERENCIAS ENTRE BODEGAS ---
+window.abrirModalTransferenciaInv = function() {
+    const ubs = StorageService.get('ubicacionesConfig', [{id:'General', nombre:'Piso de Ventas (General)'}]);
+    let opts = '';
+    ubs.forEach(u => opts += `<option value="${u.nombre}">${u.nombre}</option>`);
+    
+    document.getElementById('transfOrigen').innerHTML = opts;
+    document.getElementById('transfDestino').innerHTML = opts;
+    
+    document.getElementById('transfProductoId').value = '';
+    document.getElementById('transfProductoDisplay').innerText = 'Sin seleccionar';
+    document.getElementById('transfProductoDisplay').style.color = '#64748b';
+    document.getElementById('transfCantidad').value = '';
+    
+    // 👇 MAGIA DEL CSS AQUÍ TAMBIÉN
+    const modal = document.getElementById('modalTransferenciaInv');
+    modal.classList.remove('oculto');
+    modal.style.display = 'flex';
+};
+
+window.ejecutarTransferenciaInv = function() {
+    const idProd = document.getElementById('transfProductoId').value;
+    const cant = parseFloat(document.getElementById('transfCantidad').value);
+    const origen = document.getElementById('transfOrigen').value;
+    const destino = document.getElementById('transfDestino').value;
+
+    if(!idProd) return alert("Selecciona un producto.");
+    if(isNaN(cant) || cant <= 0) return alert("Ingresa una cantidad válida.");
+    if(origen === destino) return alert("El origen y el destino no pueden ser el mismo.");
+
+    const productos = StorageService.get("productos", []);
+    const idx = productos.findIndex(p => String(p.id) === String(idProd));
+    
+    if(idx === -1) return alert("Producto no encontrado.");
+    
+    let p = productos[idx];
+    p.stockPorUbicacion = p.stockPorUbicacion || {};
+    
+    const stockOrigen = parseFloat(p.stockPorUbicacion[origen]) || 0;
+    if(stockOrigen < cant) {
+        if(!confirm(`⚠️ ATENCIÓN: Solo hay ${stockOrigen} piezas en [${origen}]. ¿Deseas forzar el movimiento de todos modos y dejar la bodega en negativo?`)) {
+            return;
+        }
+    }
+
+    p.stockPorUbicacion[origen] = stockOrigen - cant;
+    p.stockPorUbicacion[destino] = (parseFloat(p.stockPorUbicacion[destino]) || 0) + cant;
+
+    const movs = StorageService.get("movimientosInventario", []);
+    movs.push({
+        id: Date.now(),
+        fecha: new Date().toISOString(),
+        tipo: 'Transferencia Interna',
+        productoId: p.id,
+        productoNombre: p.nombre,
+        cantidad: cant,
+        origen: origen,
+        destino: destino,
+        motivo: `Mover mercancía de ${origen} a ${destino}`,
+        usuario: "Admin"
+    });
+
+    productos[idx] = p;
+    StorageService.set("productos", productos);
+    StorageService.set("movimientosInventario", movs);
+
+    alert(`🚚 Transferencia completada: ${cant} pieza(s) enviadas a ${destino}.`);
+    
+    // Cerrar y volver a poner candado
+    const modal = document.getElementById('modalTransferenciaInv');
+    modal.classList.add('oculto');
+    modal.style.display = 'none';
+    
+    if(typeof renderInventario === 'function') renderInventario();
+};
+
 function procesarDatosImportacion(texto) {
     let productosAImportar = [];
 

@@ -762,9 +762,6 @@ function renderFlujoCaja() {
 // Variable global para recordar la cuenta de débito seleccionada en el filtro
 window._filtroCuentaLiquidez = 'Todos';
 
-// Variable global para recordar la cuenta de débito/efectivo seleccionada en el filtro
-window._filtroCuentaLiquidez = 'Todos';
-
 function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (cuentaSeleccionada !== null) { window._filtroCuentaLiquidez = cuentaSeleccionada; }
     

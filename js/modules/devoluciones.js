@@ -114,24 +114,39 @@ function procesarDevolucion(folio) {
     StorageService.set('historialDevoluciones', devoluciones);
 
     if (reingresarStock) {
-    const prods = StorageService.get('productos', []);
-    const pidx = prods.findIndex(p => String(p.id) === String(art.id || art.productoId));
-    if (pidx !== -1) {
-        prods[pidx].stock = (prods[pidx].stock || 0) + cantidad;
-        StorageService.set('productos', prods);
-        // ✅ AGREGAR:
-        const movs = StorageService.get('movimientosInventario', []);
-        movs.push({
-            id: Date.now(),
-            productoId: art.id || art.productoId,
-            tipo: 'entrada',
-            cantidad,
-            concepto: `Devolución ${devolucion.folio} — ${motivo}`,
-            fecha: new Date().toLocaleString('es-MX')
-        });
-        StorageService.set('movimientosInventario', movs);
+        const prods = StorageService.get('productos', []);
+        const pidx = prods.findIndex(p => String(p.id) === String(art.id || art.productoId));
+        if (pidx !== -1) {
+            prods[pidx].stock = (prods[pidx].stock || 0) + cantidad;
+            
+            // --- CORRECCIÓN: Reingresar también en la variante correspondiente ---
+            if (!prods[pidx].variantes) prods[pidx].variantes = [];
+            const colorOriginal = art.colorElegido || 'General';
+            const varExistente = prods[pidx].variantes.find(v => 
+                (v.color||'General').toUpperCase() === colorOriginal.toUpperCase() && 
+                (v.ubicacion||'General').toUpperCase() === 'GENERAL'
+            );
+            if(varExistente) {
+                varExistente.stock = (Number(varExistente.stock) || 0) + cantidad;
+            } else {
+                prods[pidx].variantes.push({ ubicacion: 'General', color: colorOriginal, stock: cantidad });
+            }
+            // ---------------------------------------------------------------------
+
+            StorageService.set('productos', prods);
+            
+            const movs = StorageService.get('movimientosInventario', []);
+            movs.push({
+                id: Date.now(),
+                productoId: art.id || art.productoId,
+                tipo: 'entrada',
+                cantidad,
+                concepto: `Devolución ${devolucion.folio} — ${motivo}`,
+                fecha: new Date().toLocaleString('es-MX')
+            });
+            StorageService.set('movimientosInventario', movs);
+        }
     }
-}
 
 // ===== Ajuste de saldo y registro de reembolso en caja =====
     if (devolucion.monto > 0) {
@@ -148,14 +163,39 @@ function procesarDevolucion(folio) {
         });
         StorageService.set('movimientosCaja', movs);
 
-        // Si fue crédito, también reducir el saldo pendiente en CxC
+        // Si fue crédito, también reducir el saldo pendiente en CxC y cancelar Pagarés
         if (fueCredito) {
             const cuentas = StorageService.get('cuentasPorCobrar', []);
-            const cuenta = cuentas.find(c => (c.folioVenta || c.folio) === folio);
-            if (cuenta) {
-                // ✅ Campo correcto: saldoActual (no saldo)
-                cuenta.saldoActual = Math.max(0, (cuenta.saldoActual || 0) - devolucion.monto);
+            const idxCuenta = cuentas.findIndex(c => (c.folioVenta || c.folio) === folio);
+            if (idxCuenta !== -1) {
+                cuentas[idxCuenta].saldoActual = Math.max(0, (cuentas[idxCuenta].saldoActual || 0) - devolucion.monto);
                 StorageService.set('cuentasPorCobrar', cuentas);
+                
+                // --- CORRECCIÓN: Cancelar Pagarés (de los últimos a los primeros) ---
+                let pagares = StorageService.get('pagaresSistema', []);
+                let pagaresFolio = pagares.filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
+                                          .sort((a,b) => new Date(b.fechaVencimiento) - new Date(a.fechaVencimiento)); 
+                
+                let montoADescontar = devolucion.monto;
+                pagaresFolio.forEach(p => {
+                    if (montoADescontar <= 0) return;
+                    const saldoPagare = (p.estado === 'Parcial') ? (p.monto - (p.montoAbonado || 0)) : p.monto;
+                    
+                    if (montoADescontar >= (saldoPagare - 0.01)) {
+                        p.estado = 'Cancelado';
+                        p.nota = 'Cancelado por devolución';
+                        montoADescontar -= saldoPagare;
+                    } else {
+                        p.estado = 'Parcial';
+                        p.montoAbonado = (p.montoAbonado || 0) + montoADescontar;
+                        p.nota = 'Rebajado por devolución';
+                        montoADescontar = 0;
+                    }
+                    
+                    const pIdx = pagares.findIndex(x => x.id === p.id);
+                    if (pIdx !== -1) pagares[pIdx] = p;
+                });
+                StorageService.set('pagaresSistema', pagares);
             }
         }
     }

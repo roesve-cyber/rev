@@ -127,9 +127,14 @@ function renderPanelPuntos() {
 }
 
 function guardarConfigPuntos() {
-    const puntosXCien = parseFloat(document.getElementById('cfgPuntosXCien')?.value) || 1;
-    const pesosPorPunto = parseFloat(document.getElementById('cfgPesosPorPunto')?.value) || 0.10;
+    let valPuntos = parseFloat(document.getElementById('cfgPuntosXCien')?.value);
+    const puntosXCien = isNaN(valPuntos) ? 1 : valPuntos; // CORREGIDO
+
+    let valPesos = parseFloat(document.getElementById('cfgPesosPorPunto')?.value);
+    const pesosPorPunto = isNaN(valPesos) ? 0.10 : valPesos; // CORREGIDO
+
     const activo = document.getElementById('cfgPuntosActivo')?.checked ?? true;
+    
     StorageService.set('programaPuntos', { puntosXCien, pesosPorPunto, activo });
     alert('✅ Configuración guardada.');
     renderPanelPuntos();
