@@ -2281,6 +2281,56 @@ function guardarOrdenCompraFinal() {
     // Regresamos a ver las requisiciones (que ahora debe estar vacío si procesamos todo)
     renderRequisiciones();
 }
+window.renderCuentasPorPagar = function() {
+    const contenedor = document.getElementById("listaCuentasPorPagar");
+    if (!contenedor) return;
+
+    let cuentas = StorageService.get("cuentasPorPagar", []) || [];
+    
+    // Filtro blindado contra valores vacíos
+    let deudas = cuentas.filter(c => parseFloat(c.saldoPendiente || 0) > 0);
+
+    if (deudas.length === 0) {
+        contenedor.innerHTML = "<p style='text-align:center; padding:20px; color:#10b981; font-weight:bold;'>✅ ¡No tienes deudas pendientes con proveedores!</p>";
+        return;
+    }
+
+    let html = `
+        <table class="tabla-admin">
+            <thead>
+                <tr>
+                    <th>Fecha / Proveedor</th>
+                    <th>Método</th>
+                    <th>Total</th>
+                    <th>Saldo Pendiente</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    deudas.forEach(c => {
+        // Formateo de fecha por si viene cruda
+        const fechaVenta = c.fecha ? new Date(c.fecha).toLocaleDateString() : '-';
+
+        html += `
+            <tr>
+                <td>
+                    ${fechaVenta}<br>
+                    <strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="verDetalleCompra('${c.id}')">${c.proveedor || 'General'}</strong>
+                </td>
+                <td><small>${c.metodo || c.formaPagoTexto || '-'}</small></td>
+                <td>${dinero(c.total)}</td>
+                <td style="color:red; font-weight:bold;">${dinero(c.saldoPendiente)}</td>
+                <td>
+                    <button onclick="registrarAbonoProveedor('${c.id}')" style="background:#2c3e50; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">
+                        💵 Abonar
+                    </button>
+                </td>
+            </tr>`;
+    });
+
+    contenedor.innerHTML = html + "</tbody></table>";
+};
 
 // Exponer la función para que el menú HTML la encuentre
 window.renderRequisiciones = renderRequisiciones;
