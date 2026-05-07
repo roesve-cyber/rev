@@ -1,103 +1,87 @@
 // ===== INICIALIZACIÓN =====
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.pathname.includes("catalogo.html")) {
         console.log("🛍️ Modo catálogo público");
         return;
     }
     if (typeof verificarSesionInicial === 'function') verificarSesionInicial();
     console.log("🚀 Iniciando sistema POS Mueblería Mi Pueblito...");
+    
     try {
-        // ✅ Inicializar todos los datos con valores por defecto si están vacíos
-        
-        // Categorías
-        if (!categoriasData || categoriasData.length === 0) {
-            categoriasData = [
+        // 1. Despertar la base de datos local (Instantáneo)
+        await StorageService.init();
+
+        // ☁️ 2. SINCRONIZACIÓN FIREBASE (Descarga la nube antes de arrancar)
+        if (window._firebaseActivo && window._db) {
+            console.log("☁️ Sincronizando con Firebase al arrancar...");
+            try {
+                // Esperamos a que descargue todos los productos y clientes de la nube
+                await StorageService.syncAll(); 
+            } catch (e) {
+                console.warn("⚠️ Trabajando Offline. Se usarán los datos locales.", e);
+            }
+        }
+
+        // 3. Cargar TODO a la memoria global de forma SEGURA (con || [] para evitar crasheos)
+        window.categoriasData = StorageService.get("categoriasData", []) || [];
+        if (window.categoriasData.length === 0) {
+            window.categoriasData = [
                 { nombre: "Recámaras", subcategorias: [{ nombre: "Roperos", margen: 35 }, { nombre: "Bases", margen: 30 }] },
                 { nombre: "Salas", subcategorias: [{ nombre: "Sofás", margen: 40 }] }
             ];
-            StorageService.set("categoriasData", categoriasData);
+            StorageService.set("categoriasData", window.categoriasData);
         }
         
-        // Tarjetas/Bancos
-        if (!tarjetasConfig || tarjetasConfig.length === 0) {
-            tarjetasConfig = [
+        window.tarjetasConfig = StorageService.get("tarjetasConfig", []) || [];
+        if (window.tarjetasConfig.length === 0) {
+            window.tarjetasConfig = [
                 { banco: "BBVA", diaCorte: 15, diaLimite: 5 },
                 { banco: "BANAMEX", diaCorte: 1, diaLimite: 20 }
             ];
-            StorageService.set("tarjetasConfig", tarjetasConfig);
+            StorageService.set("tarjetasConfig", window.tarjetasConfig);
         }
-        
 
-        // Productos (global) -> Corregido a .get() seguro
-        if (window._firebaseActivo && window._db) {
-            // Cargar productos directamente desde Firestore
-            window._db.collection('posData').doc('productos').get().then(doc => {
-                window.productos = (doc.data()?.data || []);
-                console.log('🟢 Productos cargados desde Firestore:', window.productos.length);
-                if (typeof renderInventario === 'function') renderInventario();
-            }).catch(e => {
-                console.error('❌ Error cargando productos desde Firestore:', e);
-                window.productos = [];
-            });
-        } else {
-            window.productos = StorageService.get("productos", []);
-        }
+        // Leer variables (ya actualizadas por Firebase o locales)
+        window.productos = StorageService.get("productos", []) || [];
+        window.clientes = StorageService.get("clientes", []) || [];
+        window.carrito = StorageService.get("carrito", []) || [];
+        window.cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []) || [];
+        window.pagaresSistema = StorageService.get("pagaresSistema", []) || [];
+        window.proveedores = StorageService.get("proveedores", []) || [];
+        window.movimientosInventario = StorageService.get("movimientosInventario", []) || [];
+        window.recepciones = StorageService.get("recepciones", []) || [];
+        window.compras = StorageService.get("compras", []) || [];
+        window.cuentasPorPagar = StorageService.get("cuentasPorPagar", []) || [];
+        window.deudasMSI = StorageService.get("deudasMSI", []) || [];
+        window.movimientosCaja = StorageService.get("movimientosCaja", []) || [];
+        window.requisicionesCompra = StorageService.get("requisicionesCompra", []) || [];
+        window.salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []) || [];
         
-        // Clientes
-        clientes = StorageService.get("clientes", []);
-        
-        // Carrito
-        carrito = StorageService.get("carrito", []);
-        
-        // Cuentas por cobrar
-        cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
-        
-        // Pagarés
-        pagaresSistema = StorageService.get("pagaresSistema", []);
-        
-        // Otros
-        proveedores = StorageService.get("proveedores", []);
-        movimientosInventario = StorageService.get("movimientosInventario", []);
-        recepciones = StorageService.get("recepciones", []);
-        compras = StorageService.get("compras", []);
-        cuentasPorPagar = StorageService.get("cuentasPorPagar", []);
-        deudasMSI = StorageService.get("deudasMSI", []);
-        movimientosCaja = StorageService.get("movimientosCaja", []);
-        requisicionesCompra = StorageService.get("requisicionesCompra", []);
-        salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
-        
-        // Migración de datos antiguos
-        migrarStorageCuentasPorCobrar();
-        
-        // Inicializar notificaciones
+        // Ejecutar funciones iniciales
+        if (typeof migrarStorageCuentasPorCobrar === 'function') migrarStorageCuentasPorCobrar();
         if (typeof inicializarNotificaciones === 'function') inicializarNotificaciones();
-        
-        // Verificar gastos recurrentes
         if (typeof verificarGastosRecurrentes === 'function') verificarGastosRecurrentes();
         
-        // Navegar a dashboard y verificar alertas
+        // 4. Arrancar la interfaz gráfica
         if (!window.location.pathname.includes("catalogo.html")) {
-            navA('dashboard');
-            actualizarContadorCarrito();
-            verificarAlertasPagares();
+            if (typeof navA === 'function') navA('inicio');
+            if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
+            if (typeof verificarAlertasPagares === 'function') verificarAlertasPagares();
         }
-        actualizarContadorCarrito();
-        verificarAlertasPagares();
         
-        // 🌟 INTEGRACIÓN SEGURA: INICIAR ESCUCHA EN TIEMPO REAL 🌟
         if (typeof StorageService.startRealtimeSync === 'function') {
             StorageService.startRealtimeSync();
         }
         
-        console.log("✅ Sistema cargado correctamente.");
+        console.log("✅ Sistema cargado y sincronizado correctamente.");
         console.log("📊 Estado actual:");
-        console.log(`   • Categorías: ${categoriasData.length}`);
-        console.log(`   • Bancos: ${tarjetasConfig.length}`);
+        console.log(`   • Categorías: ${window.categoriasData.length}`);
+        console.log(`   • Bancos: ${window.tarjetasConfig.length}`);
         console.log(`   • Productos: ${window.productos.length}`);
-        console.log(`   • Clientes: ${clientes.length}`);
+        console.log(`   • Clientes: ${window.clientes.length}`);
         
     } catch (e) {
-        console.warn("⚠️ Aviso en carga inicial:", e);
+        console.error("⚠️ Error crítico en carga inicial:", e);
     }
 });
