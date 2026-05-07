@@ -16,8 +16,7 @@ window.navA = function(vistaId, isPopState = false) {
         vistaDestino.style.display = 'block';
     }
 
-    // 🌟 3. AUTO-RENDERIZAR (¡La pieza que nos faltaba!) 🌟
-    // Esto asegura que al abrir una pantalla, sus datos se pinten inmediatamente
+    // 3. AUTO-RENDERIZAR
     try {
         if (vistaId === 'inventario' && typeof renderInventario === 'function') renderInventario();
         if (vistaId === 'tienda' && typeof renderTienda === 'function') renderTienda();
@@ -33,24 +32,23 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
     } catch(e) { console.warn("Aviso renderizando vista:", e); }
 
-    // 4. RETRAER EL MENÚ AL SELECCIONAR ALGO
+    // 4. RETRAER EL MENÚ AL SELECCIONAR ALGO Y QUITAR EL FONDO OSCURO (OVERLAY)
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('overlay');
+    const appContainer = document.getElementById('app-container');
     
     if (window.innerWidth < 1024) {
-        // En celular: Siempre cerrar el menú
         if (sidebar) sidebar.classList.remove('active');
         if (overlay) overlay.classList.remove('active');
     } else {
-        // En Computadora: Ocultar menú para pantalla completa
-        const appContainer = document.getElementById('app-container');
         if (sidebar && !sidebar.classList.contains('oculto-desktop')) {
             sidebar.classList.add('oculto-desktop');
             if (appContainer) appContainer.classList.add('full-width');
+            if (overlay) overlay.classList.remove('active'); // <-- Apagamos el overlay al seleccionar
         }
     }
 
-    // 5. GUARDAR EN EL HISTORIAL (Protegido)
+    // 5. GUARDAR EN EL HISTORIAL
     if (!isPopState) {
         try { history.pushState({ vista: vistaId }, '', `#${vistaId}`); } catch (e) {}
     }
@@ -100,14 +98,19 @@ window.toggleMenu = function() {
 
     if (window.innerWidth >= 1024) {
         sidebar.classList.toggle('oculto-desktop');
-        if (appContainer) {
-            appContainer.classList.toggle('full-width');
+        if (appContainer) appContainer.classList.toggle('full-width');
+        
+        // 👇 MAGIA: Activar el "clic afuera" también en Computadora
+        if (overlay) {
+            if (!sidebar.classList.contains('oculto-desktop')) {
+                overlay.classList.add('active'); // Prende el fondo oscuro
+            } else {
+                overlay.classList.remove('active'); // Apaga el fondo oscuro
+            }
         }
     } else {
         sidebar.classList.toggle('active');
-        if (overlay) {
-            overlay.classList.toggle('active');
-        }
+        if (overlay) overlay.classList.toggle('active');
     }
 };
 // ===== CONTROL DE SUBMENÚS =====
@@ -118,3 +121,21 @@ window.toggleSubmenu = function(submenuId) {
         submenu.classList.toggle('oculto-submenu');
     }
 };
+
+// 👇 ESTE ES EL "CABLE" QUE FALTA PARA EL CLIC AFUERA
+document.addEventListener('DOMContentLoaded', () => {
+    const overlayEl = document.getElementById('overlay');
+    if (overlayEl) {
+        overlayEl.addEventListener('click', () => {
+            const sidebar = document.getElementById('sidebar');
+            // Si el menú está abierto en PC, lo cerramos
+            if (window.innerWidth >= 1024 && sidebar && !sidebar.classList.contains('oculto-desktop')) {
+                window.toggleMenu();
+            } 
+            // Si el menú está abierto en celular, lo cerramos
+            else if (window.innerWidth < 1024 && sidebar && sidebar.classList.contains('active')) {
+                window.toggleMenu();
+            }
+        });
+    }
+});
