@@ -43,24 +43,15 @@
     </div>
 </div>
 
-<!-- ===== SIDEBAR PRINCIPAL ===== -->
-<div id="sidebar" class="sidebar">
+<div id="sidebar" class="sidebar oculto-desktop">
     <div class="sidebar-header">
         <div class="logo-container-menu">
             <img src="img/logo.png" class="logo-menu" alt="Logo" onerror="this.style.display='none'">
             <span class="brand-name" style="color:white; font-weight:bold;">Mi Pueblito</span>
         </div>
-        <button class="menu-toggle" onclick="toggleMenu()" style="margin:0;">✕</button>
-    </div>
-
-        <nav class="sidebar-nav">
-
-        <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-apartados')">📦 APARTADOS <span>▾</span></button>
-            <div id="sub-apartados" class="submenu oculto-submenu">
-                <button onclick="navA('apartados'); setTimeout(()=>{window.renderApartados && window.renderApartados();}, 100)">📋 Seguimiento de Apartados</button>
-            </div>
         </div>
+
+    <nav class="sidebar-nav">
 <!-- ===== VISTA APARTADOS ===== -->
 <div id="apartados" class="vista oculto" style="display:none;">
     <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">
@@ -191,7 +182,7 @@
 </div>
 
 <!-- ===== CONTENIDO PRINCIPAL ===== -->
-<main id="app-container">
+<main id="app-container" class="full-width">
 <!-- ===== CONSULTA DE INVENTARIO ===== -->
 
 <div id="conciliacion" class="vista oculto">
@@ -1313,8 +1304,8 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
 <script src="js/modules/notificaciones.js"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
-<script src="js/core/navigation.js"></script>
-<script src="js/init.js"></script>
+<script src="js/core/navigation.js?v=2"></script>
+<script src="js/init.js?v=2"></script>
     <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {

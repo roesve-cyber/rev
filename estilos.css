@@ -315,6 +315,13 @@ div#ventas, div#compras {
     .modal-content, div[data-modal] > div { padding: 20px !important; width: 95% !important; border-radius: 16px !important; }
 }
 
+/* Ocultar la 'X' del menú lateral en computadoras (El botón ☰ de la barra superior ya hace su trabajo) */
+@media (min-width: 1024px) {
+    .sidebar-header .menu-toggle { 
+        display: none !important; 
+    }
+}
+
 .logo-menu { height: 35px; width: auto; object-fit: contain; }
 .logo-container-menu { display: flex; align-items: center; gap: 8px; }
 
