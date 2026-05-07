@@ -86,7 +86,7 @@
                 <button onclick="navA('recepcion')">🚚 Recepción</button>
                 <!-- 👇 ESTE ES EL BOTÓN NUEVO 👇 -->
                 <button onclick="navA('requisiciones'); renderRequisiciones();">📝 Requisiciones</button>
-                <button onclick="navA('cuentasporpagar')">💳 Cuentas por Pagar</button>
+                <button onclick="navA('cuentasporpagar'); if(typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();">💳 Cuentas por Pagar</button>
                 <button onclick="navA('ordenescompra')">📋 Órdenes de Compra</button>
             </div>
         </div>
