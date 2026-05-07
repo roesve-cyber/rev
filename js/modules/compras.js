@@ -703,10 +703,14 @@ function renderCuentasPorPagar() {
 }
 
 window.verDetalleCompra = function(idCuenta) {
-    alert("¡Sí conectó! El ID es: " + idCuenta);
     const cuentas = StorageService.get("cuentasPorPagar", []);
-    const c = cuentas.find(x => x.id === idCuenta);
-    if (!c) return;
+    // 👇 AQUÍ ESTÁ LA MAGIA: String() asegura que la comparación sea perfecta
+    const c = cuentas.find(x => String(x.id) === String(idCuenta));
+    
+    if (!c) {
+        console.error("No se encontró la compra con ID:", idCuenta);
+        return;
+    }
 
     const modalHTML = `
         <div data-modal="detalle-compra" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
@@ -759,18 +763,23 @@ window.verDetalleCompra = function(idCuenta) {
         </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
-}
+};
 
 window.registrarAbonoProveedor = function(idCuenta) {
-    alert("¡Botón de abono presionado! ID: " + idCuenta);
     const cuentas = StorageService.get("cuentasPorPagar", []);
-    const index = cuentas.findIndex(c => c.id === idCuenta);
-    if (index === -1) return;
+    // 👇 AQUÍ TAMBIÉN ESTÁ LA MAGIA DE LA BÚSQUEDA
+    const index = cuentas.findIndex(c => String(c.id) === String(idCuenta));
+    
+    if (index === -1) {
+        console.error("No se encontró la cuenta para abonar");
+        return;
+    }
     const cuenta = cuentas[index];
 
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
 
-    const modalHTML = `<div data-modal="abono-proveedor" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:6000;display:flex;justify-content:center;align-items:center;">
+    const modalHTML = `
+    <div data-modal="abono-proveedor" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:6000;display:flex;justify-content:center;align-items:center;">
         <div style="background:white;padding:30px;border-radius:15px;width:90%;max-width:550px;max-height:90vh;overflow-y:auto;">
             <h2 style="margin-top:0;">💵 Pagar a ${cuenta.proveedor}</h2>
             <div style="background:#f8f9fa;padding:15px;border-radius:8px;margin-bottom:20px;">
@@ -789,7 +798,7 @@ window.registrarAbonoProveedor = function(idCuenta) {
                 ${_buildSelectorCuentas('cuentaOrigen_proveedor', false)}
             </div>
             <div style="display:flex;gap:10px;">
-                <button onclick="confirmarAbonoProveedor(${idCuenta})"
+                <button onclick="confirmarAbonoProveedor('${idCuenta}')"
                         style="flex:1;padding:12px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">
                     ✅ Registrar Pago
                 </button>
@@ -800,8 +809,9 @@ window.registrarAbonoProveedor = function(idCuenta) {
             </div>
         </div>
     </div>`;
+    
     document.body.insertAdjacentHTML('beforeend', modalHTML);
-}
+};
 
 function confirmarAbonoProveedor(idCuenta) {
     const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor")?.value);
