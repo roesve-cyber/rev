@@ -1,19 +1,16 @@
-// ===== STORAGE SERVICE (BLINDADO CON INDEXEDDB + FALLBACK A LOCALSTORAGE) =====
+// ===== STORAGE SERVICE (BLINDADO IDB + FIREBASE SYNC) =====
 const StorageService = {
     _cache: {}, 
     _isReady: false,
-    _usandoLocalForage: true, // Bandera para saber qué base nos dejó usar el navegador
+    _usandoLocalForage: true, 
 
     async init() {
         try {
-            // 1. Intentar usar la base de datos gigante
             localforage.config({ name: 'MiPueblitoERP', storeName: 'datos_muebleria' });
             
-            // Probar si el navegador nos bloquea (Tracking Prevention)
             await localforage.setItem('_prueba', '1');
             await localforage.removeItem('_prueba');
 
-            // Si llegamos aquí, no hay bloqueos. Procedemos con la migración.
             const migrado = localStorage.getItem('_migradoIDB');
             if (!migrado) {
                 console.log("📦 Migrando datos a base segura...");
@@ -26,20 +23,16 @@ const StorageService = {
                 localStorage.setItem('_migradoIDB', 'true');
             }
 
-            // Cargar de IndexedDB a la RAM
             const keys = await localforage.keys();
             for (let key of keys) {
                 this._cache[key] = await localforage.getItem(key);
             }
-            console.log("🚀 Sistema blindado: Base de datos cargada (IndexedDB).");
+            console.log("🚀 Sistema blindado: Base de datos local cargada.");
 
         } catch (error) {
-            // 🚨 ¡FALLBACK SALVAVIDAS! 🚨
-            // Si el navegador bloqueó localForage, rescatamos los datos del almacenamiento clásico
-            console.warn("⚠️ Navegador bloqueó IndexedDB. Usando localStorage clásico por seguridad.");
-            this._usandoLocalForage = false; // Cambiamos de estrategia
+            console.warn("⚠️ Navegador bloqueó IndexedDB. Usando localStorage clásico.");
+            this._usandoLocalForage = false; 
             
-            // Cargar TODO desde localStorage clásico a la RAM
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 try {
@@ -48,7 +41,7 @@ const StorageService = {
             }
         }
 
-        // Asignar variables globales (Vital para que el catálogo no salga vacío)
+        // Asignar variables globales
         window.productos = this.get("productos", []);
         window.categoriasData = this.get("categoriasData", []);
         window.carrito = this.get("carrito", []);
@@ -73,11 +66,18 @@ const StorageService = {
         if (key === 'productos') window.productos = value;
         if (key === 'carrito') window.carrito = value;
         
-        // 3. Guardado físico dependiendo de lo que el navegador nos haya permitido
+        // 3. Guardado físico local
         if (this._usandoLocalForage) {
-            localforage.setItem(key, value).catch(err => console.error("Error guardando:", err));
+            localforage.setItem(key, value).catch(err => console.error("Error guardando local:", err));
         } else {
             localStorage.setItem(key, JSON.stringify(value));
+        }
+
+        // ☁️ 4. AUTO-GUARDADO EN FIREBASE (En segundo plano)
+        // Si hay internet, lo sube. Si no hay, Firebase lo guarda en cola y lo sube cuando regrese el internet.
+        if (window._firebaseActivo && window._db) {
+            window._db.collection('posData').doc(key).set({ data: value })
+                .catch(e => console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red."));
         }
 
         return true;
@@ -85,15 +85,77 @@ const StorageService = {
 
     remove(key) {
         delete this._cache[key];
-        if (this._usandoLocalForage) {
-            localforage.removeItem(key);
-        } else {
-            localStorage.removeItem(key);
+        if (this._usandoLocalForage) localforage.removeItem(key);
+        else localStorage.removeItem(key);
+    },
+
+    // ☁️ FUNCIONES DE NUBE (Ahora sí conectadas a Firestore)
+    async syncAll() {
+        if (!window._firebaseActivo || !window._db) {
+            return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
+        }
+        
+        const tablas = [
+            "productos", "clientes", "categoriasData", "tarjetasConfig", 
+            "cuentasPorCobrar", "pagaresSistema", "proveedores", 
+            "movimientosInventario", "recepciones", "compras", 
+            "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
+        ];
+
+        try {
+            console.log("⬇️ Descargando datos de la nube...");
+            for (let tabla of tablas) {
+                const doc = await window._db.collection('posData').doc(tabla).get();
+                if (doc.exists) {
+                    const datosNube = doc.data().data || [];
+                    
+                    // Actualizar memoria RAM y Locales usando nuestra propia función set (evitando enviar de regreso a Firebase innecesariamente)
+                    this._cache[tabla] = datosNube;
+                    if (tabla === 'productos') window.productos = datosNube;
+                    if (tabla === 'categoriasData') window.categoriasData = datosNube;
+                    if (tabla === 'clientes') window.clientes = datosNube;
+                    
+                    if (this._usandoLocalForage) await localforage.setItem(tabla, datosNube);
+                    else localStorage.setItem(tabla, JSON.stringify(datosNube));
+                }
+            }
+            return true;
+        } catch (error) {
+            console.error("❌ Error al descargar de Firebase:", error);
+            throw error;
         }
     },
 
-    async syncAll() { return Promise.resolve(); },
-    async uploadAll() { return Promise.resolve(); }
+    async uploadAll() {
+        if (!window._firebaseActivo || !window._db) {
+            return Promise.reject(new Error("Firebase no está configurado o activo."));
+        }
+        
+        const tablas = [
+            "productos", "clientes", "categoriasData", "tarjetasConfig", 
+            "cuentasPorCobrar", "pagaresSistema", "proveedores", 
+            "movimientosInventario", "recepciones", "compras", 
+            "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
+        ];
+
+        try {
+            console.log("⬆️ Subiendo datos a la nube...");
+            for (let tabla of tablas) {
+                const datosLocales = this.get(tabla, []);
+                await window._db.collection('posData').doc(tabla).set({ data: datosLocales });
+            }
+            return true;
+        } catch (error) {
+            console.error("❌ Error al subir a Firebase:", error);
+            throw error;
+        }
+    },
+
+    startRealtimeSync() {
+        if (window._firebaseActivo && window._db) {
+            console.log("📡 Módulo de Firebase enlazado correctamente.");
+        }
+    }
 };
 
 window.StorageService = StorageService;
