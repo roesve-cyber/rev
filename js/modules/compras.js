@@ -703,6 +703,7 @@ function renderCuentasPorPagar() {
 }
 
 window.verDetalleCompra = function(idCuenta) {
+    alert("¡Sí conectó! El ID es: " + idCuenta);
     const cuentas = StorageService.get("cuentasPorPagar", []);
     const c = cuentas.find(x => x.id === idCuenta);
     if (!c) return;
@@ -761,6 +762,7 @@ window.verDetalleCompra = function(idCuenta) {
 }
 
 window.registrarAbonoProveedor = function(idCuenta) {
+    alert("¡Botón de abono presionado! ID: " + idCuenta);
     const cuentas = StorageService.get("cuentasPorPagar", []);
     const index = cuentas.findIndex(c => c.id === idCuenta);
     if (index === -1) return;
