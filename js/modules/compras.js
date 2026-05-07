@@ -702,7 +702,7 @@ function renderCuentasPorPagar() {
     contenedor.innerHTML = html + "</tbody></table>";
 }
 
-function verDetalleCompra(idCuenta) {
+window.verDetalleCompra = function(idCuenta) {
     const cuentas = StorageService.get("cuentasPorPagar", []);
     const c = cuentas.find(x => x.id === idCuenta);
     if (!c) return;
@@ -760,7 +760,7 @@ function verDetalleCompra(idCuenta) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-function registrarAbonoProveedor(idCuenta) {
+window.registrarAbonoProveedor = function(idCuenta) {
     const cuentas = StorageService.get("cuentasPorPagar", []);
     const index = cuentas.findIndex(c => c.id === idCuenta);
     if (index === -1) return;
