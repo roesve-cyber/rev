@@ -30,6 +30,9 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'cuentas-bancarias' && typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
         if (vistaId === 'bancos' && typeof renderBancosConfig === 'function') renderBancosConfig();
         if (vistaId === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+        if (vistaId === 'ordenescompra' && typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+        if (vistaId === 'requisiciones' && typeof renderRequisiciones === 'function') renderRequisiciones();
+        if (vistaId === 'cuentasporpagar' && typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
     } catch(e) { console.warn("Aviso renderizando vista:", e); }
 
     // 4. RETRAER EL MENÚ AL SELECCIONAR ALGO Y QUITAR EL FONDO OSCURO (OVERLAY)
