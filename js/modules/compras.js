@@ -704,64 +704,139 @@ function renderCuentasPorPagar() {
 
 window.verDetalleCompra = function(idCuenta) {
     const cuentas = StorageService.get("cuentasPorPagar", []);
-    // 👇 AQUÍ ESTÁ LA MAGIA: String() asegura que la comparación sea perfecta
     const c = cuentas.find(x => String(x.id) === String(idCuenta));
+    if (!c) return;
+
+    // 1. Buscamos el origen del pedido (Compra Directa u Orden de Compra)
+    const compras = StorageService.get("compras", []);
+    const ordenes = StorageService.get("ordenesCompra", []);
     
-    if (!c) {
-        console.error("No se encontró la compra con ID:", idCuenta);
-        return;
+    let compraOriginal = compras.find(comp => String(comp.id) === String(c.id) || String(comp.id) === String(c.compraId)) || 
+                         ordenes.find(oc => String(oc.id) === String(c.id) || String(oc.id) === String(c.compraId));
+
+    let listaArticulos = [];
+    
+    // 2. Extraer artículos de forma prioritaria
+    if (compraOriginal && compraOriginal.articulos && Array.isArray(compraOriginal.articulos)) {
+        listaArticulos = compraOriginal.articulos;
+    } else {
+        // RESCATE KARDEX: Si es una compra vieja, buscamos en el historial de inventario
+        const kardex = StorageService.get("movimientosInventario", []);
+        const movs = kardex.filter(m => String(m.compraId) === String(c.compraId) || String(m.compraId) === String(c.id));
+        
+        if (movs.length > 0) {
+            listaArticulos = movs.map(m => ({
+                producto: m.productoNombre,
+                cantidad: parseFloat(m.cantidad) || 1,
+                costo: parseFloat(m.costoUnitario) || 0
+            }));
+        } else {
+            // Plan de Emergencia: Usar los datos planos de la deuda
+            const cant = parseFloat(c.cantidad || (compraOriginal ? compraOriginal.cantidad : 1)) || 1;
+            const totalC = parseFloat(c.total || 0);
+            listaArticulos.push({
+                producto: c.producto || 'Mercancía General',
+                cantidad: cant,
+                costo: cant > 0 ? (totalC / cant) : totalC
+            });
+        }
     }
 
+    // 3. Renderizar filas y calcular el subtotal real sumando producto por producto
+    let filasHTML = '';
+    let subtotalReal = 0;
+
+    listaArticulos.forEach(art => {
+        const cant = parseFloat(art.cantidad) || parseFloat(art.cantidadRec) || 1;
+        const costoNeto = parseFloat(art.costo || art.precioOriginal || 0);
+        const importe = cant * costoNeto;
+        subtotalReal += importe;
+
+        filasHTML += `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 12px 10px; color: #0f172a;">
+                    <strong>${art.nombre || art.producto || art.productoNombre || 'Artículo'}</strong>
+                    ${art.caracteristicas ? `<br><small style="color:#64748b;">${art.caracteristicas}</small>` : ''}
+                </td>
+                <td style="padding: 12px 10px; text-align:center;">${cant}</td>
+                <td style="padding: 12px 10px; text-align: right;">${dinero(costoNeto)}</td>
+                <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #1e293b;">${dinero(importe)}</td>
+            </tr>
+        `;
+    });
+
+    // 4. Matemáticas Financieras Exactas
+    // Si la suma de los productos es menor al total cobrado (ej. envío o impuestos), respetamos el total original
+    if (subtotalReal < (parseFloat(c.total) || 0)) {
+        subtotalReal = parseFloat(c.total);
+    }
+    
+    const saldoPendiente = parseFloat(c.saldoPendiente) || 0;
+    
+    // El total de abonos es la diferencia matemática entre el costo real y lo que aún debes
+    // Esto incluye automáticamente los anticipos dados antes de la entrega.
+    let abonosRegistrados = subtotalReal - saldoPendiente;
+    if (abonosRegistrados < 0) abonosRegistrados = 0;
+
+    // 5. Dibujar el documento
     const modalHTML = `
-        <div data-modal="detalle-compra" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
-            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:500px; max-height:90vh; overflow-y:auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h2 style="margin:0;">📦 Detalle de Compra</h2>
-                    <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
-                </div>
-                <div style="display:grid; gap:12px;">
-                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
-                        <span style="color:#6b7280;">Proveedor</span>
-                        <strong>${c.proveedor}</strong>
+        <div data-modal="detalle-compra" style="position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(3px); z-index:6000; display:flex; justify-content:center; align-items:center;">
+            <div style="background:white; padding:40px; border-radius:10px; width:95%; max-width:800px; max-height:90vh; overflow-y:auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+                
+                <div style="border-bottom: 3px solid #1e3a8a; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <h2 style="margin: 0; color: #1e3a8a; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">DOCUMENTO DE COMPRA</h2>
+                        <p style="margin: 5px 0 0 0; color: #64748b; font-size: 14px;">Folio interno: <strong style="color:#0f172a;">#${c.compraId || c.id}</strong></p>
                     </div>
-                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
-                        <span style="color:#6b7280;">Fecha de Compra</span>
-                        <strong>${c.fecha}</strong>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
-                        <span style="color:#6b7280;">Método de Pago</span>
-                        <strong>${c.formaPagoTexto || c.metodo || '-'}</strong>
-                    </div>
-                    <div style="border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
-                        <span style="color:#6b7280;">Productos:</span>
-                        <table style="width:100%; margin-top:8px; font-size:14px; border-collapse:collapse;">
-                            <thead><tr style="background:#f9fafb;">
-                                <th style="padding:6px 8px; text-align:left;">Producto</th>
-                                <th style="padding:6px 8px; text-align:right;">Cantidad</th>
-                            </tr></thead>
-                            <tbody>
-                                <tr>
-                                    <td style="padding:6px 8px;">${c.producto || '-'}</td>
-                                    <td style="padding:6px 8px; text-align:right;">${c.cantidad || 1}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; border-bottom:1px solid #f3f4f6; padding-bottom:8px;">
-                        <span style="color:#6b7280;">Total de Compra</span>
-                        <strong>${dinero(c.total)}</strong>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; padding-bottom:8px;">
-                        <span style="color:#6b7280;">Saldo Pendiente</span>
-                        <strong style="color:#e74c3c;">${dinero(c.saldoPendiente)}</strong>
+                    <div style="text-align: right;">
+                        <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="background:none; border:none; font-size:24px; cursor:pointer; color:#94a3b8; line-height:1;">✕</button>
+                        <p style="margin: 10px 0 0 0; color: #64748b; font-size: 14px;">Fecha: <strong style="color:#0f172a;">${c.fecha || '-'}</strong></p>
                     </div>
                 </div>
-                <div style="margin-top:20px; text-align:right;">
-                    <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
+
+                <div style="margin-bottom: 30px; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: bold;">Proveedor / Acreedor</p>
+                    <p style="margin: 4px 0 0 0; font-weight: bold; font-size: 18px; color: #0f172a;">${c.proveedor || 'No especificado'}</p>
+                </div>
+                
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px;">
+                        <thead style="background: #f1f5f9; color: #475569;">
+                            <tr>
+                                <th style="padding: 12px 10px; text-align: left; font-weight: bold;">Producto / Detalle</th>
+                                <th style="padding: 12px 10px; text-align: center; font-weight: bold;">Unidades</th>
+                                <th style="padding: 12px 10px; text-align: right; font-weight: bold;">Costo Neto</th>
+                                <th style="padding: 12px 10px; text-align: right; font-weight: bold;">Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>${filasHTML}</tbody>
+                    </table>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end;">
+                    <div style="width: 320px; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span style="color: #64748b; font-size: 14px;">Subtotal Original:</span>
+                            <strong style="color: #0f172a; font-size: 15px;">${dinero(subtotalReal)}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color:#10b981;">
+                            <span style="font-size: 14px;">Abonos / Anticipos:</span>
+                            <strong style="font-size: 15px;">- ${dinero(abonosRegistrados)}</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-top: 2px solid #cbd5e1; padding-top: 12px; font-size: 18px; color: #dc2626;">
+                            <strong>SALDO A PAGAR:</strong>
+                            <strong>${dinero(saldoPendiente)}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px; text-align: right; border-top: 1px solid #e2e8f0; padding-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="padding: 12px 25px; background: #64748b; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right:10px;">Cerrar Vista</button>
+                    ${saldoPendiente > 0 ? `<button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove(); registrarAbonoProveedor('${c.id}');" style="padding: 12px 25px; background: #1e3a8a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Registrar Abono</button>` : ''}
                 </div>
             </div>
-        </div>`;
-
+        </div>
+    `;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 };
 
@@ -834,7 +909,7 @@ function confirmarAbonoProveedor(idCuenta) {
     });
 
     cuenta.saldoPendiente -= montoAbono;
-
+    StorageService.set("cuentasPorPagar", cuentas);
     alert("✅ Pago registrado correctamente.");
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
     renderCuentasPorPagar();

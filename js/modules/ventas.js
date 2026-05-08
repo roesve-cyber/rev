@@ -2131,6 +2131,219 @@ function procesarMigracionMSI_POS() {
     }
 }
 
+// =====================================================================
+// 🔒 MÓDULO DE AUDITORÍA CXC (MODIFICACIÓN DE VENTAS Y PAGARÉS)
+// SOLO ADMINISTRADORES
+// =====================================================================
+
+function abrirAuditoriaCxC() {
+    // 1. VALIDACIÓN DE SEGURIDAD ESTRICTA
+    // Ajusta esta línea según cómo guardes al usuario en tu sistema
+    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
+    
+    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
+        alert("⛔ ACCESO DENEGADO: Esta función es exclusiva para Administradores.");
+        return;
+    }
+
+    // 2. CREACIÓN DEL MODAL
+    const modalHTML = `
+    <div data-modal="auditoria-cxc" style="position:fixed; inset:0; background:rgba(15,23,42,0.9); z-index:9999; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(5px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:900px; margin-top:20px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #ef4444; padding-bottom:15px; margin-bottom:20px;">
+                <div>
+                    <h2 style="margin:0; color:#b91c1c; font-size:24px;">🛠️ Auditoría CxC: Edición de Ventas</h2>
+                    <p style="margin:0; color:#64748b; font-size:14px;">Modificación profunda de fechas y pagarés (Uso exclusivo Admin)</p>
+                </div>
+                <button onclick="document.querySelector('[data-modal=\\'auditoria-cxc\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">✕ Cerrar</button>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-bottom:25px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
+                <input type="text" id="auditFolioInput" placeholder="Ej. V-123456" style="flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:6px; font-size:16px;">
+                <button onclick="buscarVentaAuditoria()" style="background:#0f172a; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">🔍 Buscar Folio</button>
+            </div>
+
+            <div id="auditContenedorDatos">
+                <div style="text-align:center; padding:40px; color:#94a3b8;">Ingresa un folio para comenzar la auditoría.</div>
+            </div>
+
+        </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function buscarVentaAuditoria() {
+    const folio = document.getElementById("auditFolioInput").value.trim().toUpperCase();
+    if (!folio) return alert("Por favor ingresa un folio.");
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+
+    const cuenta = cuentas.find(c => String(c.folio).toUpperCase() === folio);
+    if (!cuenta) {
+        document.getElementById("auditContenedorDatos").innerHTML = `<div style="padding:20px; background:#fef2f2; color:#b91c1c; border-radius:8px; border:1px solid #fecaca;">❌ No se encontró ninguna cuenta con el folio: ${folio}</div>`;
+        return;
+    }
+
+    // Buscar pagarés asociados al folio o al clienteId si no tienen folio explícito
+    let pagaresVenta = pagares.filter(p => String(p.folio).toUpperCase() === folio);
+    
+    // Ordenar pagarés por fecha
+    pagaresVenta.sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    // Guardar temporalmente en memoria para poder agregar/quitar antes de guardar definitivamente
+    window._auditCuentaActual = JSON.parse(JSON.stringify(cuenta));
+    window._auditPagaresActuales = JSON.parse(JSON.stringify(pagaresVenta));
+
+    dibujarFormularioAuditoria();
+}
+
+function dibujarFormularioAuditoria() {
+    const cuenta = window._auditCuentaActual;
+    const pagares = window._auditPagaresActuales;
+
+    // Formatear la fecha de la venta para el input type="date"
+    let fechaVentaDate = "";
+    if(cuenta.fechaVenta) {
+        try { fechaVentaDate = new Date(cuenta.fechaVenta).toISOString().split('T')[0]; } catch(e) {}
+    }
+
+    let pagaresHTML = pagares.map((p, index) => {
+        let fechaVencDate = "";
+        if(p.fechaVencimiento) {
+            try { fechaVencDate = new Date(p.fechaVencimiento).toISOString().split('T')[0]; } catch(e) {}
+        }
+
+        return `
+        <tr style="background:${p.estado === 'Pagado' ? '#f0fdf4' : '#fff'}; border-bottom:1px solid #e2e8f0;">
+            <td style="padding:8px;"><input type="text" value="${p.numeroPagere || ''}" onchange="window._auditPagaresActuales[${index}].numeroPagere = this.value" style="width:100px; padding:6px; border:1px solid #cbd5e1; border-radius:4px;"></td>
+            <td style="padding:8px;"><input type="date" value="${fechaVencDate}" onchange="window._auditPagaresActuales[${index}].fechaVencimiento = this.value + 'T12:00:00Z'" style="padding:6px; border:1px solid #cbd5e1; border-radius:4px;"></td>
+            <td style="padding:8px;"><input type="number" step="0.01" value="${p.monto || 0}" onchange="window._auditPagaresActuales[${index}].monto = Number(this.value)" style="width:100px; padding:6px; border:1px solid #cbd5e1; border-radius:4px;"></td>
+            <td style="padding:8px;">
+                <select onchange="window._auditPagaresActuales[${index}].estado = this.value" style="padding:6px; border:1px solid #cbd5e1; border-radius:4px;">
+                    <option value="Pendiente" ${p.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                    <option value="Pagado" ${p.estado === 'Pagado' ? 'selected' : ''}>Pagado</option>
+                    <option value="Cancelado" ${p.estado === 'Cancelado' ? 'selected' : ''}>Cancelado</option>
+                </select>
+            </td>
+            <td style="padding:8px; text-align:center;">
+                <button onclick="eliminarPagareAuditoria(${index})" style="background:#ef4444; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;" title="Eliminar Pagaré">🗑️</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    const html = `
+    <div style="background:#f8fafc; padding:20px; border-radius:8px; margin-bottom:20px; border:1px solid #e2e8f0;">
+        <h3 style="margin-top:0; color:#334155; font-size:16px;">👤 Datos Generales de la Cuenta</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div>
+                <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Cliente</label>
+                <input type="text" value="${cuenta.nombre || cuenta.cliente || ''}" disabled style="width:100%; padding:8px; background:#e2e8f0; border:1px solid #cbd5e1; border-radius:4px;">
+            </div>
+            <div>
+                <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Fecha de Venta</label>
+                <input type="date" id="auditFechaVenta" value="${fechaVentaDate}" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; background:#fffbdd; border-color:#fde047;">
+                <small style="color:#d97706;">* Modificar esta fecha afecta el cálculo de antiguedad.</small>
+            </div>
+        </div>
+    </div>
+
+    <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #e2e8f0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0; color:#334155; font-size:16px;">📝 Tabla de Amortización (Pagarés)</h3>
+            <button onclick="agregarPagareAuditoria()" style="background:#10b981; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold;">+ Nuevo Pagaré</button>
+        </div>
+        
+        <table style="width:100%; border-collapse:collapse; text-align:left;">
+            <thead>
+                <tr style="background:#f1f5f9; color:#475569; font-size:13px;">
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1;">N° Pagaré</th>
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1;">Fecha Vencimiento</th>
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1;">Monto ($)</th>
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1;">Estado</th>
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1; text-align:center;">Acción</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${pagaresHTML || '<tr><td colspan="5" style="text-align:center; padding:15px; color:#94a3b8;">No hay pagarés. Haz clic en "+ Nuevo Pagaré" para agregar.</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-top:25px; text-align:right;">
+        <button onclick="guardarAuditoriaDefinitiva()" style="background:#b91c1c; color:white; border:none; padding:12px 25px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(220, 38, 38, 0.2);">
+            ⚠️ Guardar Cambios en Base de Datos
+        </button>
+    </div>
+    `;
+
+    document.getElementById("auditContenedorDatos").innerHTML = html;
+}
+
+function agregarPagareAuditoria() {
+    const cuenta = window._auditCuentaActual;
+    const nuevoIndex = window._auditPagaresActuales.length + 1;
+    
+    // Crear un pagaré vacío asociado a la cuenta actual
+    window._auditPagaresActuales.push({
+        id: Date.now() + Math.floor(Math.random() * 1000), // Generar ID único
+        folio: cuenta.folio,
+        clienteId: cuenta.clienteId || cuenta.id,
+        numeroPagere: `${cuenta.folio}-${nuevoIndex}/${nuevoIndex}`,
+        fechaVencimiento: new Date().toISOString(),
+        monto: 0,
+        estado: "Pendiente"
+    });
+    
+    dibujarFormularioAuditoria();
+}
+
+function eliminarPagareAuditoria(index) {
+    if(!confirm("¿Estás seguro de eliminar este pagaré? Esta acción no se puede deshacer si guardas los cambios.")) return;
+    window._auditPagaresActuales.splice(index, 1);
+    dibujarFormularioAuditoria();
+}
+
+function guardarAuditoriaDefinitiva() {
+    if(!confirm("⚠️ ADVERTENCIA: Estás a punto de reescribir los datos de esta venta y sus pagarés. ¿Continuar?")) return;
+
+    const folio = window._auditCuentaActual.folio;
+    
+    // 1. Obtener bases de datos actuales
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    let pagaresSistema = StorageService.get("pagaresSistema", []);
+
+    // 2. Actualizar la cuenta (Fecha de Venta)
+    const indexCuenta = cuentas.findIndex(c => String(c.folio).toUpperCase() === String(folio).toUpperCase());
+    if(indexCuenta !== -1) {
+        const nuevaFechaVenta = document.getElementById("auditFechaVenta").value;
+        if(nuevaFechaVenta) {
+            cuentas[indexCuenta].fechaVenta = nuevaFechaVenta + "T10:00:00Z";
+        }
+    }
+
+    // 3. Eliminar todos los pagarés viejos de este folio
+    pagaresSistema = pagaresSistema.filter(p => String(p.folio).toUpperCase() !== String(folio).toUpperCase());
+
+    // 4. Inyectar los pagarés nuevos/modificados
+    pagaresSistema = pagaresSistema.concat(window._auditPagaresActuales);
+
+    // 5. Guardar en Base de Datos
+    StorageService.set("cuentasPorCobrar", cuentas);
+    StorageService.set("pagaresSistema", pagaresSistema);
+
+    alert("✅ Cambios de auditoría guardados exitosamente. El Estado de Cuenta ha sido actualizado.");
+    
+    // Cerrar modal y refrescar (si estás en la vista de cobranza)
+    document.querySelector('[data-modal="auditoria-cxc"]').remove();
+    if(typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+}
+
+// Exponer la función globalmente para poder llamarla desde un botón
+window.abrirAuditoriaCxC = abrirAuditoriaCxC;
+
 // ============================================================
 // EXPOSICIÓN GLOBAL PARA QUE HTML Y EL MENÚ ENCUENTREN LAS FUNCIONES
 // ============================================================

@@ -280,203 +280,293 @@ function calcularCalendarioMSI(fechaRef, meses, nombreBanco) {
     return cronograma;
 }
 
-// ===== MSI DASHBOARD =====
-function renderDashboardMSI(bancoSeleccionado = 'Todos') {
-    const contenedorBancos = document.getElementById('listaBancosMSI');
-    const contenedorMeses  = document.getElementById('listaMesesMSI');
-    const tituloMeses      = document.getElementById('tituloMesesMSI');
-    if (!contenedorBancos || !contenedorMeses) return;
+// =====================================================================
+// 💳 MSI DASHBOARD - VERSIÓN DEFINITIVA (CÁLCULO REAL E HISTORIAL CONTABLE)
+// =====================================================================
+// =====================================================================
+// 💳 MSI DASHBOARD - VERSIÓN LIMPIA (LEE LOS DATOS TRANSVERSALES EXACTOS)
+// =====================================================================
+window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
+    if (bancoSelect !== null) window._msiFiltroBanco = bancoSelect;
+    else if (!window._msiFiltroBanco) window._msiFiltroBanco = 'Todos';
+
+    if (mesSelect !== null) window._msiFiltroMes = mesSelect;
+    else if (!window._msiFiltroMes) window._msiFiltroMes = 'Todos';
 
     const deudas = StorageService.get("cuentasMSI", []);
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
 
+    // 1. CÁLCULOS GLOBALES DE DEUDA
     let totalesPorBanco = {};
-    let originalPorBanco = {};
     let deudaTotalGlobal = 0;
-    let deudaOriginalTotal = 0;
-    tarjetasConfig.forEach(t => { totalesPorBanco[t.banco] = 0; originalPorBanco[t.banco] = 0; });
+    
+    tarjetasConfig.filter(t => !t.tipo || t.tipo === "credito").forEach(t => totalesPorBanco[t.banco] = 0);
+    
     deudas.forEach(deuda => {
-        if (!totalesPorBanco[deuda.banco]) totalesPorBanco[deuda.banco] = 0;
-        if (!originalPorBanco[deuda.banco]) originalPorBanco[deuda.banco] = 0;
+        if (totalesPorBanco[deuda.banco] === undefined) totalesPorBanco[deuda.banco] = 0;
         const totalVal  = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
-        const cuotaVal  = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
-        const pagos     = parseInt(deuda.pagosRealizados || 0);
-        const restante  = totalVal - (pagos * cuotaVal);
-        totalesPorBanco[deuda.banco] += Math.max(0, restante);
-        originalPorBanco[deuda.banco] += totalVal;
-        deudaTotalGlobal += Math.max(0, restante);
-        deudaOriginalTotal += totalVal;
+        const yaPagado = parseFloat(deuda.montoPagado || 0);
+        const restante  = Math.max(0, totalVal - yaPagado);
+        
+        totalesPorBanco[deuda.banco] += restante;
+        deudaTotalGlobal += restante;
     });
 
-    // ── KPIs ──────────────────────────────────────────────────────────────
-    const hoy = new Date();
-    let mesAct  = hoy.getMonth() + 1;
-    let anioAct = hoy.getFullYear();
+    // 2. NIVEL 1: FILTROS Y BOTÓN
+    let btnPagarTarjeta = '';
+    if (window._msiFiltroBanco !== 'Todos' && totalesPorBanco[window._msiFiltroBanco] > 0) {
+        btnPagarTarjeta = `<button onclick="abrirModalPagoTarjeta('${window._msiFiltroBanco}')" style="padding:8px 16px; background:#8b5cf6; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; box-shadow:0 2px 4px rgba(139, 92, 246, 0.3); transition:0.2s;">💳 Abonar a ${window._msiFiltroBanco}</button>`;
+    }
 
-    // ── Cronograma real: usa el calendario guardado en cada deuda ──────────
-    // Antes iteraba desde el mes actual (mesAct + i), lo que ignoraba las
-    // reglas de corte bancario y siempre mostraba el primer pago en el mes
-    // en curso aunque realmente cayera el mes siguiente.
-    let cronograma = {};
-    deudas.forEach(deuda => {
-        if (bancoSeleccionado !== 'Todos' && deuda.banco !== bancoSeleccionado) return;
-        const cuotaVal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
-        const pagos    = parseInt(deuda.pagosRealizados || 0);
-        const calendario = deuda.calendario || [];
+    let htmlNivel1 = `
+        <div style="margin-bottom:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="margin:0; color:#475569; font-size:12px; text-transform:uppercase;">1️⃣ Deuda Global</h4>
+                ${btnPagarTarjeta}
+            </div>
+            <div style="display:flex; gap:10px; overflow-x:auto; padding-bottom:5px;">
+                <div onclick="renderDashboardMSI('Todos')" style="cursor:pointer; min-width:140px; padding:12px; border-radius:8px; border:2px solid ${window._msiFiltroBanco === 'Todos' ? '#8b5cf6' : '#e2e8f0'}; background:${window._msiFiltroBanco === 'Todos' ? '#faf5ff' : 'white'}; text-align:center;">
+                    <div style="font-size:11px; color:#6b7280; text-transform:uppercase; font-weight:bold;">Total Acumulado</div>
+                    <div style="font-weight:900; font-size:16px; color:#7c3aed;">${dinero(deudaTotalGlobal)}</div>
+                </div>`;
+                
+    Object.keys(totalesPorBanco).forEach(banco => {
+        const isActivo = window._msiFiltroBanco === banco;
+        htmlNivel1 += `
+                <div onclick="renderDashboardMSI('${banco}')" style="cursor:pointer; min-width:140px; padding:12px; border-radius:8px; border:2px solid ${isActivo ? '#3b82f6' : '#e2e8f0'}; background:${isActivo ? '#eff6ff' : 'white'}; text-align:center;">
+                    <div style="font-size:11px; color:#6b7280; font-weight:bold;">🏦 ${banco}</div>
+                    <div style="font-weight:900; font-size:16px; color:#1d4ed8;">${dinero(totalesPorBanco[banco])}</div>
+                </div>`;
+    });
+    htmlNivel1 += `</div></div>`;
 
-        // Solo iteramos las cuotas aún no pagadas
-        const cuotasPendientes = calendario.slice(pagos);
-        cuotasPendientes.forEach(pago => {
-            // pago.fecha viene como "YYYY-MM-DD" → clave "YYYY-MM"
-            const clave = pago.fecha.substring(0, 7);
-            if (!cronograma[clave]) cronograma[clave] = { total: 0, detalles: [] };
-            cronograma[clave].total += cuotaVal;
-            cronograma[clave].detalles.push(
-                `<b>${deuda.banco}</b>: ${deuda.producto || 'Compra'} — Cuota ${pago.n} de ${deuda.meses} (${dinero(cuotaVal)}) | 📅 ${pago.fecha}`
-            );
+    // 3. RECOPILAR CUOTAS (Leyendo directamente el estado real)
+    let cronogramaGlobal = {};
+    const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+    let deudasNivel2 = window._msiFiltroBanco === 'Todos' ? deudas : deudas.filter(d => d.banco === window._msiFiltroBanco);
+
+    deudasNivel2.forEach(deuda => {
+        const configBanco = tarjetasConfig.find(t => t.banco === deuda.banco) || { diaLimite: 1 };
+        const diaLimite = parseInt(configBanco.diaLimite) || 1;
+        const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+
+        (deuda.calendario || []).forEach((pago) => {
+            if (pago.estado !== 'Pagado') {
+                // Descontamos lo parcial si existe
+                let abonado = parseFloat(pago.montoAbonado || 0);
+                let saldoPendienteDeEstaCuota = cuotaOriginal - abonado;
+
+                if (saldoPendienteDeEstaCuota > 0) {
+                    const partes = pago.fecha.split('-');
+                    let anioPago = parseInt(partes[0]);
+                    let mesPago = parseInt(partes[1]) - 1;
+                    
+                    const fechaPagoReal = new Date(anioPago, mesPago, diaLimite, 0, 0, 0);
+                    const mesClave = `${anioPago}-${String(mesPago + 1).padStart(2, '0')}`;
+
+                    if (!cronogramaGlobal[mesClave]) cronogramaGlobal[mesClave] = { total: 0, detalles: [] };
+                    cronogramaGlobal[mesClave].total += saldoPendienteDeEstaCuota;
+                    cronogramaGlobal[mesClave].detalles.push({ 
+                        deuda, 
+                        pago, 
+                        cuotaOriginal: cuotaOriginal,
+                        cuotaPendienteReal: saldoPendienteDeEstaCuota,
+                        fechaExigible: fechaPagoReal,
+                        esParcial: pago.estado === 'Parcial'
+                    });
+                }
+            }
         });
     });
 
-    const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-
-    const mesesConPagos = Object.values(cronograma).filter(d => d.total > 0);
-    const proximoPagoKey = Object.keys(cronograma).sort().find(k => cronograma[k].total > 0);
-    const [proximoAnio, proximoMes] = proximoPagoKey ? proximoPagoKey.split('-') : ['-', '-'];
-    const proximoPagoLabel = proximoPagoKey
-        ? `${mesesNombre[parseInt(proximoMes)-1]} ${proximoAnio}`
-        : 'Sin pagos';
-    const bancosActivos = Object.keys(totalesPorBanco).filter(b => (totalesPorBanco[b] || 0) > 0).length;
-    const promedioMensual = mesesConPagos.length > 0
-        ? mesesConPagos.reduce((s, d) => s + d.total, 0) / mesesConPagos.length
-        : 0;
-
-    const kpisHTML = `
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:15px; margin-bottom:25px;">
-            <div style="background:#fee2e2; padding:18px; border-radius:10px; text-align:center;">
-                <div style="font-size:22px; margin-bottom:4px;">💳</div>
-                <small style="color:#7f1d1d; font-weight:bold; font-size:11px;">TOTAL DEUDA MSI</small>
-                <div style="font-size:20px; font-weight:bold; color:#dc2626; margin-top:4px;">${dinero(deudaTotalGlobal)}</div>
-            </div>
-            <div style="background:#dbeafe; padding:18px; border-radius:10px; text-align:center;">
-                <div style="font-size:22px; margin-bottom:4px;">📅</div>
-                <small style="color:#1e3a8a; font-weight:bold; font-size:11px;">PRÓXIMO PAGO</small>
-                <div style="font-size:18px; font-weight:bold; color:#1d4ed8; margin-top:4px;">${proximoPagoLabel}</div>
-            </div>
-            <div style="background:#d1fae5; padding:18px; border-radius:10px; text-align:center;">
-                <div style="font-size:22px; margin-bottom:4px;">🏦</div>
-                <small style="color:#065f46; font-weight:bold; font-size:11px;">BANCOS ACTIVOS</small>
-                <div style="font-size:26px; font-weight:bold; color:#059669; margin-top:4px;">${bancosActivos}</div>
-            </div>
-            <div style="background:#fef3c7; padding:18px; border-radius:10px; text-align:center;">
-                <div style="font-size:22px; margin-bottom:4px;">💰</div>
-                <small style="color:#92400e; font-weight:bold; font-size:11px;">PROMEDIO MENSUAL</small>
-                <div style="font-size:20px; font-weight:bold; color:#d97706; margin-top:4px;">${dinero(promedioMensual)}</div>
-            </div>
+    // 4. NIVEL 2: FILTROS DE MESES
+    let htmlNivel2 = `<div style="margin-bottom:20px; padding-top:15px; border-top:1px dashed #cbd5e1;"><div style="display:flex; gap:10px; overflow-x:auto; padding-bottom:5px;">
+        <div onclick="renderDashboardMSI(null, 'Todos')" style="cursor:pointer; min-width:120px; padding:10px; border-radius:8px; border:2px solid ${window._msiFiltroMes === 'Todos' ? '#f59e0b' : '#e2e8f0'}; background:${window._msiFiltroMes === 'Todos' ? '#fffbeb' : 'white'}; text-align:center;">
+            <div style="font-size:10px; color:#6b7280; font-weight:bold; text-transform:uppercase;">📂 Ver Todo</div>
+            <div style="font-weight:bold; font-size:13px; color:#d97706;">Pendientes</div>
         </div>`;
 
-    const kpisContainer = document.getElementById('flujo-msi');
-    const existingKpis = document.getElementById('msi-kpis');
-    if (existingKpis) existingKpis.remove();
-    const kpisEl = document.createElement('div');
-    kpisEl.id = 'msi-kpis';
-    kpisEl.innerHTML = kpisHTML;
-    const gridMsi = kpisContainer?.querySelector('.grid-msi');
-    if (gridMsi) gridMsi.before(kpisEl);
-
-    // ── Tarjetas de bancos con barra de progreso ───────────────────────────
-    let htmlBancos = `
-        <div class="tarjeta-banco-msi ${bancoSeleccionado === 'Todos' ? 'activo' : ''}" onclick="renderDashboardMSI('Todos')" style="box-shadow:0 2px 6px rgba(0,0,0,0.08);">
-            <span>🌍 Todos</span>
-            <span style="font-weight:bold; color:#e74c3c;">${dinero(deudaTotalGlobal)}</span>
-        </div>`;
-    Object.keys(totalesPorBanco).forEach(banco => {
-        const restante = totalesPorBanco[banco] || 0;
-        const original = originalPorBanco[banco] || 0;
-        const progreso = original > 0 ? Math.min(100, ((original - restante) / original) * 100).toFixed(0) : 0;
-        htmlBancos += `
-            <div class="tarjeta-banco-msi ${bancoSeleccionado === banco ? 'activo' : ''}" onclick="renderDashboardMSI('${banco}')" style="box-shadow:0 2px 6px rgba(0,0,0,0.08);">
-                <span>🏦 ${banco}</span>
-                <span style="font-weight:bold;">${dinero(restante)}</span>
-                <div style="background:#e2e8f0; border-radius:4px; height:5px; margin-top:6px; width:100%;">
-                    <div style="background:#3498db; height:100%; border-radius:4px; width:${progreso}%;"></div>
-                </div>
-                <small style="color:#718096; font-size:11px;">${progreso}% pagado</small>
-            </div>`;
-    });
-    contenedorBancos.innerHTML = htmlBancos;
-
-    if (tituloMeses) tituloMeses.innerText = `Proyección de Pagos (${bancoSeleccionado})`;
-
-    const claveActual = `${anioAct}-${mesAct.toString().padStart(2, '0')}`;
-    let mesNext = mesAct + 1;
-    let anioNext = anioAct;
-    if (mesNext > 12) { mesNext = 1; anioNext++; }
-    const claveSiguiente = `${anioNext}-${mesNext.toString().padStart(2, '0')}`;
-
-    let htmlMeses = '';
-    Object.keys(cronograma).sort().forEach(clave => {
+    Object.keys(cronogramaGlobal).sort().forEach(clave => {
         const [anio, mes] = clave.split('-');
-        const data = cronograma[clave];
-        if (data.total > 0) {
-            let bgColor = 'white';
-            let borderColor = '#e2e8f0';
-            if (clave === claveActual) { bgColor = '#fee2e2'; borderColor = '#e74c3c'; }
-            else if (clave === claveSiguiente) { bgColor = '#fef3c7'; borderColor = '#f59e0b'; }
-
-            const detallesHtml = data.detalles.map((det, idx) => {
-                // Extraer la fecha de la cuota del string "... | 📅 YYYY-MM-DD"
-                const fechaMatch = det.match(/📅 (\d{4}-\d{2}-\d{2})/);
-                const fechaCuota = fechaMatch ? new Date(fechaMatch[1] + 'T00:00:00') : null;
-                const estaVencida = fechaCuota && fechaCuota < hoy;
-                const estaHoy     = fechaCuota && fechaCuota.toDateString() === hoy.toDateString();
-                const claveDetalle = `conciliado_${clave}_${idx}`;
-                const yaConciliado = localStorage.getItem(claveDetalle) === '1';
-
-                // Texto limpio sin la parte de fecha (ya se muestra en el badge)
-                const detTexto = det.replace(/\s*\|\s*📅 \d{4}-\d{2}-\d{2}/, '');
-                const fechaLegible = fechaCuota
-                    ? fechaCuota.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
-                    : '';
-
-                let bgDet = yaConciliado ? '#f0fdf4' : (estaVencida ? '#fef2f2' : (estaHoy ? '#fff7ed' : 'transparent'));
-                let colorDet = yaConciliado ? '#15803d' : (estaVencida ? '#dc2626' : (estaHoy ? '#d97706' : '#374151'));
-                let badgeDet = yaConciliado
-                    ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">✅ Conciliado</span>`
-                    : (estaVencida
-                        ? `<span style="background:#fee2e2;color:#dc2626;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">⚠️ Vencido</span>`
-                        : (estaHoy
-                            ? `<span style="background:#fef3c7;color:#d97706;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">🔔 Hoy</span>`
-                            : `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:2px 6px;border-radius:9999px;margin-left:6px;">📅 ${fechaLegible}</span>`));
-
-                return `<div class="fila-conciliacion" style="display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:6px;background:${bgDet};margin-bottom:4px;border:1px solid ${yaConciliado ? '#86efac' : (estaVencida ? '#fca5a5' : '#e2e8f0')};">
-                    <input type="checkbox" ${yaConciliado ? 'checked' : ''}
-                        onchange="
-                            if(this.checked){ localStorage.setItem('${claveDetalle}','1'); }
-                            else { localStorage.removeItem('${claveDetalle}'); }
-                            renderDashboardMSI('${bancoSeleccionado}');
-                        "
-                        style="cursor:pointer;width:16px;height:16px;margin-top:2px;flex-shrink:0;">
-                    <div style="flex:1;">
-                        <span style="color:${colorDet};font-size:13px;${yaConciliado ? 'text-decoration:line-through;' : ''}">${detTexto}</span>
-                        ${badgeDet}
-                    </div>
-                </div>`;
-            }).join('');
-
-            htmlMeses += `
-                <div class="mes-msi-card" style="background:${bgColor}; border:1px solid ${borderColor}; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-                    <div style="width: 100%;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #edf2f7; padding-bottom:8px; margin-bottom:8px;">
-                            <strong>📅 ${mesesNombre[parseInt(mes)-1]} ${anio}</strong>
-                            <span style="font-weight:bold; color:#27ae60; font-size:1.1em;">${dinero(data.total)}</span>
-                        </div>
-                        <div class="detalles-mes-interactivo">${detallesHtml}</div>
-                    </div>
-                </div>`;
-        }
+        const isActivo = window._msiFiltroMes === clave;
+        htmlNivel2 += `<div onclick="renderDashboardMSI(null, '${clave}')" style="cursor:pointer; min-width:110px; padding:10px; border-radius:8px; border:2px solid ${isActivo ? '#10b981' : '#e2e8f0'}; background:${isActivo ? '#ecfdf5' : 'white'}; text-align:center;">
+            <div style="font-size:11px; color:#6b7280; font-weight:bold; text-transform:uppercase;">📅 ${mesesNombre[parseInt(mes)-1]} ${anio.substring(2)}</div>
+            <div style="font-weight:900; font-size:14px; color:#059669;">${dinero(cronogramaGlobal[clave].total)}</div>
+        </div>`;
     });
+    htmlNivel2 += `</div></div>`;
 
-    contenedorMeses.innerHTML = htmlMeses || '<p style="text-align:center; color:gray; padding:20px;">Sin pagos pendientes.</p>';
-}
+    // 5. NIVEL 3: LISTA EXIGIBLE
+    let htmlNivel3 = `<div style="background:white; border-radius:8px; border:1px solid #e2e8f0; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05);">`;
+    let hayPagosNivel3 = false;
+    
+    Object.keys(cronogramaGlobal).sort().forEach(clave => {
+        if (window._msiFiltroMes !== 'Todos' && window._msiFiltroMes !== clave) return;
+        hayPagosNivel3 = true;
+        const [anio, mes] = clave.split('-');
+        htmlNivel3 += `<div style="background:#f1f5f9; padding:8px 15px; font-size:11px; font-weight:bold; color:#475569; border-bottom:1px solid #e2e8f0; text-transform:uppercase; letter-spacing:1px;">Cobros del mes: ${mesesNombre[parseInt(mes)-1]} ${anio}</div>`;
+        
+        cronogramaGlobal[clave].detalles.sort((a,b) => a.fechaExigible - b.fechaExigible).forEach((det) => {
+            const estaVencida = det.fechaExigible < hoy;
+            const numCuota = det.pago.n || det.pago.numero;
+            const totalCuotas = det.deuda.meses || det.deuda.plazo;
+            const nombreProd = det.deuda.producto || det.deuda.concepto || 'Compra MSI';
+
+            htmlNivel3 += `
+                <div onclick="abrirHistorialMSI(${det.deuda.id})" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; padding:12px 15px; border-bottom:1px solid #f1f5f9; background:${estaVencida ? '#fef2f2' : 'white'}; transition:0.2s;" onmouseover="this.style.filter='brightness(0.95)'" onmouseout="this.style.filter='none'">
+                    <div>
+                        <span style="font-weight:bold; color:#1e293b; font-size:13px;">📅 Límite: ${det.fechaExigible.toLocaleDateString('es-MX', {day:'2-digit', month:'long'})}</span>
+                        ${det.esParcial ? `<span style="background:#fef3c7; color:#92400e; font-size:10px; padding:2px 6px; border-radius:9999px; margin-left:6px;">Abono Parcial</span>` : ''}
+                        <br><small style="color:#64748b;">${nombreProd} (Cuota ${numCuota}/${totalCuotas}) | 🏦 ${det.deuda.banco}</small>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-weight:900; color:${estaVencida ? '#dc2626' : '#059669'}; font-size:16px;">
+                            ${estaVencida ? '⚠️ ' : ''}${dinero(det.cuotaPendienteReal)}
+                        </div>
+                        ${estaVencida ? `<div style="color:white; background:#dc2626; border-radius:4px; font-weight:bold; font-size:9px; padding:2px 4px; display:inline-block; margin-top:2px;">VENCIDA</div>` : ''}
+                    </div>
+                </div>`;
+        });
+    });
+    
+    if (!hayPagosNivel3) htmlNivel3 += `<div style="padding:40px 20px; text-align:center; color:#9ca3af;">No tienes pagos pendientes. 🎉</div>`;
+    htmlNivel3 += `</div>`;
+
+    const mainContainer = document.getElementById('flujo-msi');
+    if (!mainContainer) return;
+    let cascadaWrapper = document.getElementById("wrapper-cascada-msi");
+    if (!cascadaWrapper) {
+        const headerH2 = mainContainer.querySelector('h2');
+        mainContainer.innerHTML = '';
+        if (headerH2) mainContainer.appendChild(headerH2);
+        cascadaWrapper = document.createElement("div");
+        cascadaWrapper.id = "wrapper-cascada-msi";
+        mainContainer.appendChild(cascadaWrapper);
+    }
+    cascadaWrapper.innerHTML = htmlNivel1 + htmlNivel2 + htmlNivel3;
+};
+
+// =====================================================================
+// MODAL DE HISTORIAL (AHORA MUESTRA CUÁNTO RESTA EXACTAMENTE)
+// =====================================================================
+window.abrirHistorialMSI = function(id) {
+    const deudas = StorageService.get("cuentasMSI", []);
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
+    const movimientos = StorageService.get("movimientosCaja", []); 
+    const deuda = deudas.find(d => String(d.id) === String(id));
+    if(!deuda) return;
+
+    document.querySelector('[data-modal="historial-msi"]')?.remove();
+
+    const configBanco = tarjetasConfig.find(t => t.banco === deuda.banco) || { diaLimite: 1 };
+    const diaLimite = parseInt(configBanco.diaLimite) || 1;
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+
+    const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+    const totalDeuda = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
+    const yaPagado = parseFloat(deuda.montoPagado || 0);
+    const pct = Math.min(100, (yaPagado / totalDeuda) * 100).toFixed(0);
+
+    // 1. DIBUJAR CALENDARIO CON ESTADOS REALES
+    let filasCalendario = (deuda.calendario || []).map((p) => {
+        const partes = p.fecha.split('-');
+        const fechaPagoReal = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, diaLimite, 0, 0, 0);
+        
+        const estaPagada = p.estado === 'Pagado';
+        const esParcial = p.estado === 'Parcial';
+        const vencida = !estaPagada && fechaPagoReal < hoy;
+        
+        let colorEstado = '#3b82f6';
+        let txtEstado = '⏳ Pendiente';
+        
+        if (estaPagada) { colorEstado = '#10b981'; txtEstado = '✅ Pagado'; }
+        else if (esParcial && vencida) { colorEstado = '#ea580c'; txtEstado = '⚠️ Parcial Vencido'; }
+        else if (esParcial) { colorEstado = '#ea580c'; txtEstado = '⏳ Pago Parcial'; }
+        else if (vencida) { colorEstado = '#ef4444'; txtEstado = '⚠️ Vencido'; }
+
+        // 👉 FORMATO VISUAL DEL SALDO (Tachar lo viejo, mostrar lo que falta)
+        let textoMonto = dinero(cuotaOriginal);
+        if (esParcial) {
+            let abonado = parseFloat(p.montoAbonado || 0);
+            let faltante = cuotaOriginal - abonado;
+            textoMonto = `<span style="text-decoration:line-through; color:#94a3b8; font-size:11px; display:block; margin-bottom:2px;">${dinero(cuotaOriginal)}</span>
+                          <span style="color:#b45309; font-weight:bold;">Restan ${dinero(faltante)}</span>`;
+        } else if (estaPagada) {
+            textoMonto = `<span style="color:#10b981;">${dinero(cuotaOriginal)}</span>`;
+        }
+
+        return `
+        <tr style="border-bottom:1px solid #f1f5f9; background:${estaPagada ? '#f0fdf4' : (vencida && !esParcial ? '#fef2f2' : (esParcial ? '#fff7ed' : 'transparent'))}">
+            <td style="padding:12px; text-align:center; color:#64748b; font-weight:bold;">${p.n || p.numero}</td>
+            <td style="padding:12px; font-weight:bold;">${fechaPagoReal.toLocaleDateString('es-MX')}</td>
+            <td style="padding:12px; text-align:right;">${textoMonto}</td>
+            <td style="padding:12px; text-align:center; font-weight:bold; color:${colorEstado}; font-size:12px;">${txtEstado}</td>
+        </tr>`;
+    }).join('');
+
+    // 2. ABONOS (Historial de Caja)
+    const abonosDeEsteBanco = movimientos.filter(m => 
+        m.referencia === `PAGO-TC-${deuda.banco}` || 
+        (m.concepto && m.concepto.includes('Tarjeta de Crédito') && m.concepto.includes(deuda.banco))
+    ).sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+
+    let htmlAbonos = '';
+    if(abonosDeEsteBanco.length > 0) {
+        htmlAbonos = abonosDeEsteBanco.map(m => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">
+                <div><span style="font-weight:bold; color:#334155;">${new Date(m.fecha).toLocaleDateString('es-MX')}</span> <span style="color:#64748b; margin-left:8px;">Desde: ${m.etiquetaCuenta || m.cuenta}</span></div>
+                <div style="font-weight:bold; color:#10b981;">+ ${dinero(m.monto)}</div>
+            </div>
+        `).join('');
+    } else {
+        htmlAbonos = `<div style="padding:15px; text-align:center; color:#94a3b8; font-size:12px;">Aún no hay abonos globales registrados en caja para esta tarjeta.</div>`;
+    }
+
+    // 3. CONSTRUIR MODAL
+    const modalHTML = `
+    <div data-modal="historial-msi" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:99999; display:flex; justify-content:center; align-items:center; padding:20px; backdrop-filter:blur(5px);">
+        <div style="background:white; border-radius:16px; width:100%; max-width:650px; padding:30px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5); max-height: 90vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:25px; border-bottom:1px solid #e2e8f0; padding-bottom:15px;">
+                <div>
+                    <h3 style="margin:0; color:#1e40af; font-size:24px;">🏦 ${deuda.banco}</h3>
+                    <p style="margin:5px 0 0 0; color:#0f172a; font-weight:bold; font-size:16px;">${deuda.producto || deuda.concepto}</p>
+                </div>
+                <button onclick="this.closest('[data-modal]').remove()" style="background:#f1f5f9; border:none; padding:10px 15px; border-radius:8px; cursor:pointer; font-weight:bold; color:#475569; transition: 0.2s;">✕ Cerrar</button>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px; margin-bottom:25px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                    <div><small style="color:#64748b; font-weight:bold; text-transform:uppercase;">Deuda Original</small><div style="font-weight:900; font-size:18px; color:#0f172a;">${dinero(totalDeuda)}</div></div>
+                    <div style="text-align:right;"><small style="color:#64748b; font-weight:bold; text-transform:uppercase;">Avance (${pct}%)</small><div style="font-weight:900; font-size:18px; color:#10b981;">${dinero(yaPagado)}</div></div>
+                </div>
+                <div style="background:#e2e8f0; height:10px; border-radius:5px; width:100%; overflow:hidden;">
+                    <div style="background:#10b981; height:100%; width:${pct}%;"></div>
+                </div>
+            </div>
+
+            <h4 style="margin:0 0 10px 0; color:#334155; font-size:14px; text-transform:uppercase;">📋 Calendario de Mensualidades</h4>
+            <div style="border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin-bottom: 25px;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead style="background:#f1f5f9;">
+                        <tr><th style="padding:12px; color:#475569;"># Cuota</th><th style="padding:12px; text-align:left; color:#475569;">Día Límite Pago</th><th style="padding:12px; text-align:right; color:#475569;">Monto</th><th style="padding:12px; color:#475569;">Estatus</th></tr>
+                    </thead>
+                    <tbody>${filasCalendario}</tbody>
+                </table>
+            </div>
+
+            <h4 style="margin:0 0 10px 0; color:#334155; font-size:14px; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
+                💸 Abonos Globales a esta Tarjeta <small style="font-weight:normal; color:#64748b; text-transform:none;">(Historial de Caja)</small>
+            </h4>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:5px 15px;">
+                ${htmlAbonos}
+            </div>
+        </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
 
 function renderCuentasMSI() {
     const contenedor = document.getElementById("listaCuentasMSI");
@@ -489,15 +579,22 @@ function renderCuentasMSI() {
     }
 
     const hoy = new Date();
-
     let html = '';
-    cuentasMSI.forEach((c, cIdx) => {
-        const porcentaje = Math.min(100, ((c.pagosRealizados || 0) / c.meses) * 100).toFixed(0);
-        const pagosHechos = c.pagosRealizados || 0;
-        const calendario  = c.calendario || [];
-        const estaTerminado = pagosHechos >= c.meses;
 
-        // ── Encabezado de la compra ────────────────────────────────────────────
+    cuentasMSI.forEach((c) => {
+        // 👉 BUG DE MIGRACIÓN CORREGIDO AQUÍ (plazo vs meses)
+        const plazoTotal = c.plazo || c.meses || 1;
+        const totalDeuda = parseFloat(String(c.total || 0).replace(/[$,]/g, ''));
+        const cuota = parseFloat(String(c.cuotaMensual || 0).replace(/[$,]/g, ''));
+        
+        // Calcular el progreso real usando el dinero
+        let yaPagado = c.montoPagado !== undefined ? c.montoPagado : ((c.pagosRealizados || 0) * cuota);
+        const porcentaje = totalDeuda > 0 ? Math.min(100, (yaPagado / totalDeuda) * 100).toFixed(0) : 0;
+        const estaTerminado = yaPagado >= totalDeuda - 0.5;
+        const pagosHechos = cuota > 0 ? Math.floor(yaPagado / cuota) : 0;
+
+        const calendario = c.calendario || [];
+
         html += `
         <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; margin-bottom:20px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.05);">
             <div style="background:${estaTerminado ? '#f0fdf4' : '#eff6ff'}; padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
@@ -509,22 +606,20 @@ function renderCuentasMSI() {
                 <div style="text-align:right;">
                     <div style="font-size:13px; color:#6b7280;">Total: <strong>${dinero(c.total)}</strong></div>
                     <div style="font-size:13px; color:#27ae60;">Mensualidad: <strong>${dinero(c.cuotaMensual)}</strong></div>
-                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra || '—'}</div>
+                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? new Date(c.fechaCompra).toLocaleDateString('es-MX') : '—'}</div>
                 </div>
             </div>
 
-            <!-- Barra de progreso -->
             <div style="padding:12px 20px; border-bottom:1px solid #f3f4f6;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                     <small style="color:#6b7280;">Progreso de pagos</small>
-                    <small style="font-weight:bold; color:#1e40af;">${pagosHechos} de ${c.meses} meses (${porcentaje}%)</small>
+                    <small style="font-weight:bold; color:#1e40af;">${dinero(yaPagado)} de ${dinero(totalDeuda)} (${porcentaje}%)</small>
                 </div>
                 <div style="background:#e2e8f0; border-radius:4px; height:8px; width:100%;">
                     <div style="background:${estaTerminado ? '#16a34a' : '#3498db'}; height:100%; border-radius:4px; width:${porcentaje}%; transition:width 0.3s;"></div>
                 </div>
             </div>
 
-            <!-- Calendario de cuotas -->
             <div style="padding:16px 20px;">
                 <strong style="font-size:13px; color:#374151; display:block; margin-bottom:10px;">📋 Calendario de Cuotas</strong>
                 <div style="overflow-x:auto;">
@@ -538,73 +633,43 @@ function renderCuentasMSI() {
                     </tr></thead>
                     <tbody>`;
 
-        if (calendario.length === 0) {
-            // Si por alguna razón no tiene calendario, mostramos filas básicas
-            for (let i = 0; i < c.meses; i++) {
-                const pagada = i < pagosHechos;
-                html += `<tr style="background:${pagada ? '#f0fdf4' : ''}">
-                    <td style="padding:8px 10px; text-align:center; color:#9ca3af;">${i + 1}</td>
-                    <td style="padding:8px 10px; color:#9ca3af;">Sin fecha calculada</td>
-                    <td style="padding:8px 10px; text-align:right;">${dinero(c.cuotaMensual)}</td>
-                    <td style="padding:8px 10px; text-align:center;">${pagada
-                        ? '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:9999px;">✅ Pagado</span>'
-                        : '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;">⏳ Pendiente</span>'}</td>
-                    <td style="padding:8px 10px;text-align:center;">—</td>
-                </tr>`;
-            }
-        } else {
+        if (calendario.length > 0) {
             calendario.forEach((pago, pIdx) => {
-                const pagada   = pIdx < pagosHechos;
-                const esSiguiente = pIdx === pagosHechos && !estaTerminado;
+                // Ahora lee el estado real que seteamos en el abono global
+                const estaPagada = pago.estado === 'Pagado';
+                const esParcial = pago.estado === 'Parcial';
                 const fechaPago  = new Date(pago.fecha + 'T00:00:00');
-                const vencida    = !pagada && fechaPago < hoy;
-                const esHoyPago  = !pagada && fechaPago.toDateString() === hoy.toDateString();
-                const fechaLabel = fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' });
+                const vencida    = !estaPagada && fechaPago < hoy;
+                const esHoyPago  = !estaPagada && fechaPago.toDateString() === hoy.toDateString();
+                const esSiguiente = !estaPagada && !vencida && pIdx === pagosHechos;
 
-                let rowBg     = pagada ? '#f0fdf4' : (vencida ? '#fef2f2' : (esSiguiente ? '#fefce8' : ''));
+                let rowBg = estaPagada ? '#f0fdf4' : (vencida ? '#fef2f2' : (esParcial ? '#fff7ed' : ''));
                 let estadoBadge = '';
-                if (pagada) {
-                    estadoBadge = '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:9999px;font-size:11px;">✅ Pagado</span>';
-                } else if (vencida) {
-                    const diasAtraso = Math.floor((hoy - fechaPago) / (1000 * 60 * 60 * 24));
-                    estadoBadge = `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:9999px;font-size:11px;">⚠️ Vencido ${diasAtraso}d</span>`;
-                } else if (esHoyPago) {
-                    estadoBadge = '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:9999px;font-size:11px;">🔔 Hoy</span>';
-                } else if (esSiguiente) {
-                    estadoBadge = '<span style="background:#fef9c3;color:#92400e;padding:2px 8px;border-radius:9999px;font-size:11px;">→ Próximo</span>';
-                } else {
-                    estadoBadge = '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;font-size:11px;">⏳ Pendiente</span>';
-                }
+                
+                if (estaPagada) estadoBadge = '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:9999px;font-size:11px;">✅ Pagado</span>';
+                else if (esParcial) estadoBadge = `<span style="background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:9999px;font-size:11px;">⏳ Parcial (${dinero(pago.montoAbonado)})</span>`;
+                else if (vencida) estadoBadge = `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:9999px;font-size:11px;">⚠️ Vencido</span>`;
+                else if (esHoyPago) estadoBadge = '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:9999px;font-size:11px;">🔔 Hoy</span>';
+                else estadoBadge = '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;font-size:11px;">⏳ Pendiente</span>';
 
                 let accionBtn = '';
-                if (!pagada && (vencida || esSiguiente || esHoyPago)) {
+                if (!estaPagada && !esParcial && (vencida || esSiguiente || esHoyPago)) {
                     accionBtn = `<button onclick="marcarPagoMSI(${c.id}, ${pIdx + 1})"
                         style="padding:4px 10px; background:#16a34a; color:white; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">
-                        💰 Marcar pagado
-                    </button>`;
-                } else if (pagada && pIdx === pagosHechos - 1) {
-                    // Último pago marcado: ofrecer deshacer
-                    accionBtn = `<button onclick="deshacerPagoMSI(${c.id})"
-                        style="padding:4px 10px; background:#9ca3af; color:white; border:none; border-radius:5px; cursor:pointer; font-size:11px;">
-                        ↩ Deshacer
+                        💰 Pago Individual
                     </button>`;
                 }
 
                 html += `<tr style="background:${rowBg}; border-bottom:1px solid #f3f4f6;">
-                    <td style="padding:8px 10px; text-align:center; font-weight:bold; color:${vencida ? '#dc2626' : '#374151'};">${pago.n}</td>
-                    <td style="padding:8px 10px; color:${vencida ? '#dc2626' : '#374151'}; font-weight:${(esSiguiente || vencida) ? 'bold' : 'normal'};">${fechaLabel}</td>
-                    <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(c.cuotaMensual)}</td>
+                    <td style="padding:8px 10px; text-align:center; font-weight:bold; color:${vencida ? '#dc2626' : '#374151'};">${pago.n || pago.numero}</td>
+                    <td style="padding:8px 10px; color:${vencida ? '#dc2626' : '#374151'}; font-weight:${vencida ? 'bold' : 'normal'};">${fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: 'long' })}</td>
+                    <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(pago.monto || c.cuotaMensual)}</td>
                     <td style="padding:8px 10px; text-align:center;">${estadoBadge}</td>
                     <td style="padding:8px 10px; text-align:center;">${accionBtn}</td>
                 </tr>`;
             });
         }
-
-        html += `       </tbody>
-                </table>
-                </div>
-            </div>
-        </div>`;
+        html += `</tbody></table></div></div></div>`;
     });
 
     contenedor.innerHTML = html;
@@ -781,17 +846,16 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     const saldosDebito = {};
     cuentasDebito.forEach(t => saldosDebito[t.banco] = parseFloat(t.saldoInicial) || 0);
 
+    // 👉 CORRECCIÓN DE BUG: Reconocimiento inteligente de cajas
     movimientos.forEach(m => {
         const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
         const monto = parseFloat(m.monto) || 0;
         
-        // Sumar/restar a Cajas
-        if (m.medioPago === "efectivo" || m.cuenta === "efectivo" || m.cuenta === "caja") {
-            const idCajaAfectada = m.cuenta === "efectivo" || m.cuenta === "caja" ? "efectivo" : m.cuenta;
-            if (saldosCajas[idCajaAfectada] !== undefined) {
+        // Sumar/restar a Cajas (Verificamos si el ID existe en nuestras cajas)
+        if (saldosCajas[m.cuenta] !== undefined || m.cuenta === "efectivo" || m.cuenta === "caja") {
+            const idCajaAfectada = (m.cuenta === "efectivo" || m.cuenta === "caja") ? "efectivo" : m.cuenta;
+            if(saldosCajas[idCajaAfectada] !== undefined) {
                 saldosCajas[idCajaAfectada] += esIngreso ? monto : -monto;
-            } else if (saldosCajas["efectivo"] !== undefined) {
-                saldosCajas["efectivo"] += esIngreso ? monto : -monto; // Fallback
             }
         } 
         // Sumar/restar a Bancos Débito
@@ -814,7 +878,6 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
                 </div>
             </div>`;
 
-    // Render Cajas
     cajas.forEach(c => {
         const saldo = saldosCajas[c.id];
         const isActive = window._filtroCuentaLiquidez === c.id;
@@ -827,7 +890,6 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             </div>`;
     });
 
-    // Render Débito
     cuentasDebito.forEach(t => {
         const saldo = saldosDebito[t.banco];
         const isActive = window._filtroCuentaLiquidez === t.banco;
@@ -873,7 +935,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
             rightPanelHTML += `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:10px;">${m.fecha ? m.fecha.substring(0,10) : ""}</td>
+                    <td style="padding:10px;">${m.fecha ? new Date(m.fecha).toLocaleDateString('es-MX') : ""}</td>
                     <td style="padding:10px;">${m.concepto || ""}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
                     <td style="padding:10px; text-align:right; font-weight:bold; color:${color};">${icon} ${dinero(m.monto)}</td>
@@ -1227,78 +1289,125 @@ function procesarPagoTarjetaGlobal(banco) {
     if (isNaN(montoAbono) || montoAbono <= 0) return alert("⚠️ Ingresa un monto válido mayor a 0.");
 
     let cuentasMSI = StorageService.get("cuentasMSI", []);
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
     
-    // 1. Filtrar las deudas activas de este banco y ordenarlas de más vieja a más nueva
-    let deudasActivas = cuentasMSI.filter(d => {
-        if (d.banco !== banco) return false;
-        const total = parseFloat(String(d.total || 0).replace(/[$,]/g, ''));
-        const cuota = parseFloat(String(d.cuotaMensual || 0).replace(/[$,]/g, ''));
-        const pagado = d.montoPagado !== undefined ? d.montoPagado : ((d.pagosRealizados || 0) * cuota);
-        return pagado < total;
+    // Obtenemos el día límite del banco para saber las fechas exactas
+    const configBanco = tarjetasConfig.find(t => t.banco === banco) || { diaLimite: 1 };
+    const diaLimite = parseInt(configBanco.diaLimite) || 1;
+
+    // =========================================================================
+    // 1. EXTRAER TODAS LAS CUOTAS PENDIENTES EN UNA LÍNEA DE TIEMPO (Transversal)
+    // =========================================================================
+    let todasLasCuotas = [];
+
+    cuentasMSI.filter(d => d.banco === banco).forEach(deuda => {
+        const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+        
+        (deuda.calendario || []).forEach((pago, index) => {
+            if (pago.estado !== 'Pagado') {
+                // Calculamos su fecha real de cobro para ordenar cronológicamente
+                const partes = pago.fecha.split('-');
+                const fechaReal = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, diaLimite, 0, 0, 0);
+                
+                // Calculamos cuánto se debe exactamente de ESTA cuota específica
+                let pendienteCuota = cuotaOriginal;
+                if (pago.estado === 'Parcial' && pago.montoAbonado !== undefined) {
+                    pendienteCuota = cuotaOriginal - parseFloat(pago.montoAbonado);
+                }
+
+                todasLasCuotas.push({
+                    deudaId: deuda.id,
+                    pagoRef: pago,
+                    cuotaOriginal: cuotaOriginal,
+                    montoFaltante: pendienteCuota,
+                    fechaReal: fechaReal.getTime() // Se convierte a número para ordenar fácil
+                });
+            }
+        });
     });
 
-    deudasActivas.sort((a, b) => new Date(a.fechaCompra) - new Date(b.fechaCompra));
+    // 2. ORDENAR: De la cuota más antigua (ej. Abril) a la más nueva (ej. Mayo)
+    todasLasCuotas.sort((a, b) => a.fechaReal - b.fechaReal);
 
-    // 2. Aplicar el pago en cascada
+    // =========================================================================
+    // 3. APLICAR EL DINERO BARRÍENDO LAS CUOTAS MENSUALES
+    // =========================================================================
     let dineroRestante = montoAbono;
-    
-    for (let deuda of deudasActivas) {
-        if (dineroRestante <= 0) break;
 
-        const totalDeuda = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
-        const cuota = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
-        let yaPagado = deuda.montoPagado !== undefined ? deuda.montoPagado : ((deuda.pagosRealizados || 0) * cuota);
-        let saldoPendiente = totalDeuda - yaPagado;
+    for (let item of todasLasCuotas) {
+        if (dineroRestante <= 0.01) break; // Si ya no hay dinero, salimos del ciclo
 
-        if (dineroRestante >= saldoPendiente) {
-            // Liquida esta deuda
-            deuda.montoPagado = totalDeuda;
-            deuda.pagosRealizados = deuda.meses;
-            dineroRestante -= saldoPendiente;
-        } else {
-            // Abono parcial a esta deuda
-            deuda.montoPagado = yaPagado + dineroRestante;
-            deuda.pagosRealizados = Math.floor(deuda.montoPagado / cuota);
+        if (dineroRestante >= item.montoFaltante - 0.05) { 
+            // El dinero alcanza para liquidar esta cuota del mes
+            dineroRestante -= item.montoFaltante;
+            item.pagoRef.estado = 'Pagado';
+            item.pagoRef.montoAbonado = item.cuotaOriginal;
+        } else { 
+            // El dinero no alcanza, se hace un abono parcial a la cuota
+            item.pagoRef.estado = 'Parcial';
+            item.pagoRef.montoAbonado = (item.cuotaOriginal - item.montoFaltante) + dineroRestante;
             dineroRestante = 0;
         }
-
-        // Actualizar en el arreglo original
-        const idxOriginal = cuentasMSI.findIndex(c => c.id === deuda.id);
-        if (idxOriginal !== -1) cuentasMSI[idxOriginal] = deuda;
     }
+
+    // =========================================================================
+    // 4. RECALCULAR LA ESTADÍSTICA GLOBAL DE CADA PRODUCTO
+    // =========================================================================
+    cuentasMSI.filter(d => d.banco === banco).forEach(deuda => {
+        let totalPagadoAqui = 0;
+        let cuotasLiquidadas = 0;
+        const cuota = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+
+        (deuda.calendario || []).forEach(pago => {
+            if (pago.estado === 'Pagado') {
+                totalPagadoAqui += cuota;
+                cuotasLiquidadas++;
+            } else if (pago.estado === 'Parcial') {
+                totalPagadoAqui += parseFloat(pago.montoAbonado || 0);
+            }
+        });
+
+        // Actualizamos los totales del producto para que las barras de progreso sean exactas
+        deuda.montoPagado = totalPagadoAqui;
+        deuda.pagosRealizados = cuotasLiquidadas;
+    });
 
     StorageService.set("cuentasMSI", cuentasMSI);
 
-    // 3. Registrar el egreso de la cuenta origen
+    // =========================================================================
+    // 5. REGISTROS DE CAJA Y FÍSICOS (Intactos)
+    // =========================================================================
     const movs = StorageService.get("movimientosCaja", []);
     movs.push({
         id: Date.now(),
         tipo: "egreso",
-        concepto: `Pago global a Tarjeta de Crédito — ${banco}`,
+        concepto: `Pago a Corte Mensual Tarjeta de Crédito — ${banco}`,
         monto: montoAbono,
         fecha: new Date().toISOString(),
         cuenta: cuentaOrigen,
         etiquetaCuenta: cuentaOrigenEtiqueta,
-        medioPago: cuentaOrigen === "efectivo" ? "efectivo" : "transferencia",
+        medioPago: cuentaOrigen === "efectivo" || cuentaOrigen.startsWith("caja_") ? "efectivo" : "transferencia",
         referencia: `PAGO-TC-${banco}`
     });
     StorageService.set("movimientosCaja", movs);
 
-    // Actualizar saldos físicos de caja o bancos
-    if (cuentaOrigen === "efectivo") {
-        let cef = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo", saldo: 0 }]);
-        const c = cef.find(x => x.id === "efectivo");
+    if (cuentaOrigen === "efectivo" || cuentaOrigen.startsWith("caja_")) {
+        let cef = StorageService.get("cuentasEfectivo", []);
+        const c = cef.find(x => x.id === cuentaOrigen);
         if (c) { c.saldo = (Number(c.saldo) || 0) - montoAbono; StorageService.set("cuentasEfectivo", cef); }
     } else {
         let cban = StorageService.get("cuentas-bancarias", []);
-        // En tu sistema, cuentaOrigen es el nombre del banco (ej. "BBVA")
         const c = cban.find(x => x.banco === cuentaOrigen || x.id === cuentaOrigen);
         if (c) { c.saldo = (Number(c.saldo) || 0) - montoAbono; StorageService.set("cuentas-bancarias", cban); }
     }
 
     document.querySelector('[data-modal="pago-tarjeta"]').remove();
-    alert(`✅ Pago de ${dinero(montoAbono)} a la tarjeta ${banco} registrado correctamente.`);
-    renderDashboardMSI();
+    alert(`✅ Pago de $${montoAbono.toFixed(2)} a la tarjeta ${banco} distribuido correctamente en el corte mensual.`);
+    
+    // Forzamos la recarga de las pantallas
+    if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    if (typeof renderDashboardMSI === 'function') renderDashboardMSI();
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 }
 
 window.renderCuentasBancarias = renderCuentasBancarias;
