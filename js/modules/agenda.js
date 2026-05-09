@@ -104,7 +104,7 @@ function abrirDiaAgenda(fechaStr) {
     <div data-modal="dia-agenda" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:700px;padding:28px;max-height:85vh;overflow-y:auto;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-          <h2 style="margin:0;color:#1e40af;">📅 Pagarés al ${fecha.toLocaleDateString('es-MX')}</h2>
+          <h2 style="margin:0;color:#1e40af;">📅 Pagarés al ${fecha.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</h2>
           <button onclick="document.querySelector('[data-modal=dia-agenda]')?.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;">✕</button>
         </div>
         <div style="overflow-x:auto;">

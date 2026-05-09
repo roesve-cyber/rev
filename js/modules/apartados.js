@@ -49,8 +49,8 @@ function renderApartados() {
             html += `<tr>
                 <td>${a.folio}</td>
                 <td>${a.clienteNombre}</td>
-                <td>${new Date(a.fechaApartado).toLocaleDateString('es-MX')}</td>
-                <td>${a.fechaCompromiso ? new Date(a.fechaCompromiso).toLocaleDateString('es-MX') : '-'}</td>
+                <td>${new Date(a.fechaApartado).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+                <td>${a.fechaCompromiso ? new Date(a.fechaCompromiso).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</td>
                 <td>${dinero(abonado)}</td>
                 <td style="color:#dc2626; font-weight:bold;">${dinero(a.saldoPendiente)}</td>
                 <td>${a.estado}</td>
@@ -92,7 +92,7 @@ function abrirHistorialAbonos(folio) {
     } else {
         let html = '<table style="width:100%;font-size:14px;"><thead><tr><th>Monto</th><th>Fecha</th></tr></thead><tbody>';
         ap.abonos.forEach(ab => {
-            html += `<tr><td>${dinero(ab.monto)}</td><td>${new Date(ab.fechaAbono).toLocaleDateString('es-MX')}</td></tr>`;
+            html += `<tr><td>${dinero(ab.monto)}</td><td>${new Date(ab.fechaAbono).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td></tr>`;
         });
         html += '</tbody></table>';
         cont.innerHTML = html;

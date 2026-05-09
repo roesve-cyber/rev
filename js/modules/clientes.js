@@ -514,12 +514,12 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
             : '';
             
         const textoPromesa = estadoCta.promesaVigente 
-            ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${new Date(c.promesaPago.fecha).toLocaleDateString('es-MX')}</span>` 
+            ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${new Date(c.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</span>` 
             : '';
 
         htmlTabla += `<tr>
             <td><strong>${c.nombre}</strong><br><small style="color:#718096;">${c.folio}</small></td>
-            <td>${c.fechaVenta ? new Date(c.fechaVenta).toLocaleDateString('es-MX') : '-'}</td>
+            <td>${c.fechaVenta ? new Date(c.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</td>
             <td>${dinero(c.totalContadoOriginal ?? 0)}${enganche > 0 ? `<br><small style="color:#27ae60;">✅ Enganche: ${dinero(enganche)}</small>` : ''}</td>
             <td style="font-weight:bold; color:${color};">${dinero(estadoCta.saldoTotal)}</td>
             <td>${pagaresTexto}${vencidosTexto}${textoPromesa}<br><small style="color:#4b5563;">Estado: ${estadoCta.estadoGeneral}</small></td>
@@ -586,7 +586,7 @@ window.enviarRecordatorioWhatsApp = function(folio) {
 
     // Si hay una promesa de pago vigente, se lo recordamos cordialmente
     if (estadoCta.promesaVigente && estadoCta.cuenta.promesaPago) {
-        const fechaP = new Date(estadoCta.cuenta.promesaPago.fecha).toLocaleDateString('es-MX');
+        const fechaP = new Date(estadoCta.cuenta.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
         mensaje += `\n\nTenemos registrada tu *promesa de pago para el día ${fechaP}*. ¡Muchas gracias por tu compromiso!`;
     }
 
@@ -1689,7 +1689,7 @@ function generarTicketAbonoTermico(datosAbono) {
         const estadoCell = p.parcial ? '⚠️ PARCIAL' : '✅ PAG.';
         return `<tr class="pagare-cubierto">
                     <td>${i + 1}</td>
-                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX'))}</td>
+                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }))}</td>
                     <td style="text-align:right;">${montoCell}</td>
                     <td>${estadoCell}</td>
                 </tr>`;
@@ -1917,7 +1917,7 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:22px; font-weight:bold; color:#1e40af;">Folio: ${esc(folio)}</div>
-                        <div style="font-size:14px; color:#64748b; margin-top:4px;">Emisión: ${new Date().toLocaleDateString('es-MX')}</div>
+                        <div style="font-size:14px; color:#64748b; margin-top:4px;">Emisión: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</div>
                         <span style="display:inline-block; margin-top:8px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:bold; background:${estadoGeneral==='Saldado'?'#dcfce7':estadoGeneral==='Al corriente'?'#dbeafe':'#fee2e2'}; color:${estadoGeneral==='Saldado'?'#166534':estadoGeneral==='Al corriente'?'#1e40af':'#991b1b'};">${estadoGeneral.toUpperCase()}</span>
                     </div>
                 </div>
@@ -1931,7 +1931,7 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:12px; color:#64748b; text-transform:uppercase; font-weight:bold; letter-spacing:1px; margin-bottom:4px;">Fecha de Venta</div>
-                        <div style="font-size:16px; font-weight:bold; color:#0f172a;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX') : '-'}</div>
+                        <div style="font-size:16px; font-weight:bold; color:#0f172a;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</div>
                         <div style="font-size:13px; color:#475569; margin-top:4px;">Modalidad: ${cuenta.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</div>
                     </div>
                 </div>
@@ -2118,7 +2118,7 @@ function imprimirEstadoCuentaFolio(folio) {
         </div>
         <div class="header-info">
             <h2>Folio: ${esc(folio)}</h2>
-            <p>Emisión: ${new Date().toLocaleDateString('es-MX')} ${new Date().toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit'})}</p>
+            <p>Emisión: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })} ${new Date().toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit'})}</p>
             <p>Página 1 de 1</p>
         </div>
     </div>
@@ -2127,7 +2127,7 @@ function imprimirEstadoCuentaFolio(folio) {
         <div class="client-box">
             <h4>Datos de la Venta</h4>
             <p>Cliente: ${esc(cuenta.nombre)}</p>
-            <p style="font-weight:normal; font-size:11px;">Teléfono: ${esc(cuenta.telefono || 'N/A')} &nbsp;|&nbsp; Fecha: ${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX') : '-'}</p>
+            <p style="font-weight:normal; font-size:11px;">Teléfono: ${esc(cuenta.telefono || 'N/A')} &nbsp;|&nbsp; Fecha: ${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</p>
         </div>
         <div class="kpi-box">
             <span>Venta Original</span>
@@ -2237,7 +2237,7 @@ function abrirEstadoCuentaCliente(clienteId) {
                 <div style="background:#f8fafc; padding:12px 16px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <span style="font-weight:bold; color:#1e3a5f;">${esc(cuenta.folio)}</span>
-                        <span style="margin-left:12px; font-size:13px; color:#6b7280;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX') : '-'}</span>
+                        <span style="margin-left:12px; font-size:13px; color:#6b7280;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</span>
                         ${vencidos.length > 0 ? `<span style="margin-left:10px; background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:9999px; font-size:12px;">⚠️ ${vencidos.length} vencido(s)</span>` : ''}
                     </div>
                     <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove(); abrirEstadoCuentaFolio('${esc(cuenta.folio)}');" style="padding:6px 12px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📋 Ver detalle</button>
@@ -2484,7 +2484,7 @@ function abrirHistorialAbonos(folio) {
             </div>
             <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #3b82f6;">
                 <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Fecha Venta</div>
-                <div style="font-weight:bold; margin-top:4px;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX') : '—'}</div>
+                <div style="font-weight:bold; margin-top:4px;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '—'}</div>
             </div>
             <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #f59e0b;">
                 <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Total Original</div>
@@ -2659,7 +2659,7 @@ function reimprimirTicketAbono(folio, indexAbono) {
         cliente: { nombre: cuenta.nombre, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: abono.monto || 0,
         nuevoSaldo: saldoActual,
-        fecha: abono.fecha || new Date().toLocaleDateString('es-MX'),
+        fecha: abono.fecha || new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }),
         metodoCobro: abono.etiquetaCuenta || abono.medioPago || 'Efectivo',
         cuentaDestino: abono.cuentaDestino || abono.etiquetaCuenta || '',
         pagaresCubiertos: pagaresDelFolio.filter(p => p.estado === "Pagado"),
