@@ -242,7 +242,7 @@ function calcularFechaPago(fechaCompraStr, bancoNombre) {
     if (diaLimite < diaCorte) mes += 1;
 
     // El objeto Date ajusta automáticamente si el mes pasa de 11 (Diciembre) al año siguiente
-    return new Date(anio, mes, diaLimite).toLocaleDateString('es-MX');
+    return new Date(anio, mes, diaLimite).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
 }
 
 function calcularCalendarioMSI(fechaRef, meses, nombreBanco) {
@@ -500,7 +500,7 @@ window.abrirHistorialMSI = function(id) {
         return `
         <tr style="border-bottom:1px solid #f1f5f9; background:${estaPagada ? '#f0fdf4' : (vencida && !esParcial ? '#fef2f2' : (esParcial ? '#fff7ed' : 'transparent'))}">
             <td style="padding:12px; text-align:center; color:#64748b; font-weight:bold;">${p.n || p.numero}</td>
-            <td style="padding:12px; font-weight:bold;">${fechaPagoReal.toLocaleDateString('es-MX')}</td>
+            <td style="padding:12px; font-weight:bold;">${fechaPagoReal.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
             <td style="padding:12px; text-align:right;">${textoMonto}</td>
             <td style="padding:12px; text-align:center; font-weight:bold; color:${colorEstado}; font-size:12px;">${txtEstado}</td>
         </tr>`;
@@ -516,7 +516,7 @@ window.abrirHistorialMSI = function(id) {
     if(abonosDeEsteBanco.length > 0) {
         htmlAbonos = abonosDeEsteBanco.map(m => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">
-                <div><span style="font-weight:bold; color:#334155;">${new Date(m.fecha).toLocaleDateString('es-MX')}</span> <span style="color:#64748b; margin-left:8px;">Desde: ${m.etiquetaCuenta || m.cuenta}</span></div>
+                <div><span style="font-weight:bold; color:#334155;">${new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</span> <span style="color:#64748b; margin-left:8px;">Desde: ${m.etiquetaCuenta || m.cuenta}</span></div>
                 <div style="font-weight:bold; color:#10b981;">+ ${dinero(m.monto)}</div>
             </div>
         `).join('');
@@ -606,7 +606,7 @@ function renderCuentasMSI() {
                 <div style="text-align:right;">
                     <div style="font-size:13px; color:#6b7280;">Total: <strong>${dinero(c.total)}</strong></div>
                     <div style="font-size:13px; color:#27ae60;">Mensualidad: <strong>${dinero(c.cuotaMensual)}</strong></div>
-                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? new Date(c.fechaCompra).toLocaleDateString('es-MX') : '—'}</div>
+                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? new Date(c.fechaCompra).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '—'}</div>
                 </div>
             </div>
 
@@ -935,7 +935,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
             rightPanelHTML += `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:10px;">${m.fecha ? new Date(m.fecha).toLocaleDateString('es-MX') : ""}</td>
+                    <td style="padding:10px;">${m.fecha ? new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : ""}</td>
                     <td style="padding:10px;">${m.concepto || ""}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
                     <td style="padding:10px; text-align:right; font-weight:bold; color:${color};">${icon} ${dinero(m.monto)}</td>
@@ -1409,7 +1409,78 @@ function procesarPagoTarjetaGlobal(banco) {
     if (typeof renderDashboardMSI === 'function') renderDashboardMSI();
     if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 }
+// =====================================================================
+// ⚙️ FUNCIONES DE EDICIÓN (RESTAURADAS Y CORREGIDAS)
+// =====================================================================
 
+window.abrirModalEdicionCaja = function(index = null) {
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    let nombreCaja = (index !== null) ? cajas[index].nombre.replace("💵 ", "") : "";
+
+    const modalHTML = `
+        <div data-modal="edicion-caja" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+            <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:350px;">
+                <h3 style="margin-top:0;">${index !== null ? '✏️ Editar Caja' : '💵 Nueva Caja'}</h3>
+                <input type="text" id="modalCajaNombre" value="${nombreCaja}" placeholder="Nombre de la caja" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; margin-bottom:20px;">
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.guardarCajaModal(${index})" style="flex:1; padding:12px; background:#10b981; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Guardar</button>
+                    <button onclick="document.querySelector('[data-modal=&quot;edicion-caja&quot;]').remove()" style="flex:1; padding:12px; background:#eee; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.guardarCajaModal = function(index) {
+    const nombre = document.getElementById("modalCajaNombre").value.trim();
+    if (!nombre) return alert("Nombre obligatorio");
+    const cajas = StorageService.get("cuentasEfectivo", []);
+    const nombreFormateado = "💵 " + nombre;
+    if (index === null) cajas.push({ id: "caja_" + Date.now(), nombre: nombreFormateado, saldo: 0 });
+    else cajas[index].nombre = nombreFormateado;
+    StorageService.set("cuentasEfectivo", cajas);
+    location.reload();
+};
+
+window.abrirModalEdicionBanco = function(tipo, index = null) {
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const t = (index !== null) ? tarjetas[index] : { banco: "", ultimos4: "", saldoInicial: 0, diaCorte: 1, diaLimite: 1 };
+
+    const modalHTML = `
+        <div data-modal="edicion-banco" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+            <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:400px;">
+                <h3>${index !== null ? '✏️ Editar' : '🏦 Nuevo'} ${tipo.toUpperCase()}</h3>
+                <input type="text" id="mNombre" value="${t.banco}" placeholder="Nombre del Banco" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px;">
+                ${tipo === 'debito' ? 
+                    `<input type="number" id="mSaldo" value="${t.saldoInicial}" placeholder="Saldo Inicial" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px;">` :
+                    `<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                        <input type="number" id="mCorte" value="${t.diaCorte}" placeholder="Día Corte">
+                        <input type="number" id="mLimite" value="${t.diaLimite}" placeholder="Día Pago">
+                     </div>`
+                }
+                <div style="display:flex; gap:10px; margin-top:10px;">
+                    <button onclick="window.confirmarEdicionBanco('${tipo}', ${index})" style="flex:1; padding:12px; background:#3b82f6; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Confirmar</button>
+                    <button onclick="document.querySelector('[data-modal=&quot;edicion-banco&quot;]').remove()" style="flex:1; padding:12px; background:#eee; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.confirmarEdicionBanco = function(tipo, index) {
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const nuevo = {
+        banco: document.getElementById("mNombre").value.toUpperCase(),
+        tipo: tipo,
+        saldoInicial: tipo === 'debito' ? parseFloat(document.getElementById("mSaldo").value) : 0,
+        diaCorte: tipo === 'credito' ? parseInt(document.getElementById("mCorte").value) : 0,
+        diaLimite: tipo === 'credito' ? parseInt(document.getElementById("mLimite").value) : 0
+    };
+    if (index === null) tarjetas.push(nuevo);
+    else tarjetas[index] = nuevo;
+    StorageService.set("tarjetasConfig", tarjetas);
+    location.reload();
+};
 window.renderCuentasBancarias = renderCuentasBancarias;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
