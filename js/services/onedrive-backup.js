@@ -69,7 +69,57 @@ async function conectarOneDrive() {
     }
 }
 
-// ── Subir respaldo a OneDrive ────────────────────────────────────────────────
+// ── Listar respaldos en OneDrive ─────────────────────────────────────────────
+async function listarBackupsOneDrive() {
+    const token = await _obtenerTokenOneDrive();
+    if (!token) return [];
+
+    try {
+        const resp = await fetch(
+            `https://graph.microsoft.com/v1.0/me/drive/root:/${_BACKUP_FOLDER}:/children?$orderby=lastModifiedDateTime desc`,
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!resp.ok) {
+            if (resp.status === 404) return []; // Carpeta aún no existe
+            throw new Error(`HTTP ${resp.status}`);
+        }
+        const json = await resp.json();
+        return json.value || [];
+    } catch (e) {
+        console.error('❌ Error listando backups OneDrive:', e.message);
+        return [];
+    }
+}
+
+
+// ── Mostrar lista de respaldos en el panel ───────────────────────────────────
+async function mostrarListaBackups() {
+    const cont = document.getElementById('listaBackupsOneDrive');
+    if (!cont) return;
+    cont.innerHTML = '<p style="color:#6b7280;font-size:13px;">Cargando...</p>';
+
+    const archivos = await listarBackupsOneDrive();
+    if (!archivos.length) {
+        cont.innerHTML = '<p style="color:#6b7280;font-size:13px;">No se encontraron respaldos.</p>';
+        return;
+    }
+
+    const rows = archivos.map(f => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+            <div>
+                <div style="font-size:13px;font-weight:600;color:#374151;">${f.name}</div>
+                <div style="font-size:11px;color:#9ca3af;">${new Date(f.lastModifiedDateTime).toLocaleString('es-MX')} — ${(f.size/1024).toFixed(1)} KB</div>
+            </div>
+            <button onclick="restaurarBackupOneDrive('${f.id}')" 
+                style="padding:6px 12px;background:#dc2626;color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px;">
+                ♻️ Restaurar
+            </button>
+        </div>`).join('');
+
+    cont.innerHTML = `<div style="margin-top:10px;">${rows}</div>`;
+}
+
+// ── Subir respaldo a OneDrive (BARRIDO DINÁMICO) ──────────────────────────────
 async function subirBackupOneDrive() {
     const token = await _obtenerTokenOneDrive();
     if (!token) {
@@ -83,13 +133,21 @@ async function subirBackupOneDrive() {
         datos: {}
     };
 
-    if (typeof CLAVES_SISTEMA !== 'undefined') {
-        CLAVES_SISTEMA.forEach(k => {
-            const val = localStorage.getItem(k);
-            if (val) {
-                try { backup.datos[k] = JSON.parse(val); } catch (_) {}
+    // BARRIDO TOTAL: Leemos absolutamente todo el LocalStorage
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        // Ignorar basura del navegador, tokens de MSAL o variables temporales
+        if (key.startsWith('msal.') || key.startsWith('_')) continue;
+
+        const val = localStorage.getItem(key);
+        if (val) {
+            try { 
+                backup.datos[key] = JSON.parse(val); 
+            } catch (_) {
+                // Si tienes alguna configuración en texto plano, la guarda directo
+                backup.datos[key] = val; 
             }
-        });
+        }
     }
 
     const fecha = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -119,96 +177,29 @@ async function subirBackupOneDrive() {
     }
 }
 
-// ── Listar respaldos en OneDrive ─────────────────────────────────────────────
-async function listarBackupsOneDrive() {
-    const token = await _obtenerTokenOneDrive();
-    if (!token) return [];
-
-    try {
-        const resp = await fetch(
-            `https://graph.microsoft.com/v1.0/me/drive/root:/${_BACKUP_FOLDER}:/children?$orderby=lastModifiedDateTime desc`,
-            { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (!resp.ok) {
-            if (resp.status === 404) return []; // Carpeta aún no existe
-            throw new Error(`HTTP ${resp.status}`);
-        }
-        const json = await resp.json();
-        return json.value || [];
-    } catch (e) {
-        console.error('❌ Error listando backups OneDrive:', e.message);
-        return [];
-    }
-}
-
-// ── Restaurar respaldo desde OneDrive ────────────────────────────────────────
-async function restaurarBackupOneDrive(itemId) {
-    if (!confirm('⚠️ Esto reemplazará TODOS los datos actuales con el respaldo seleccionado. ¿Continuar?')) return;
-
-    const token = await _obtenerTokenOneDrive();
-    if (!token) return;
-
-    try {
-        const resp = await fetch(
-            `https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/content`,
-            { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const backup = await resp.json();
-        const datos = backup.datos || backup;
-        Object.entries(datos).forEach(([k, v]) => {
-            if (typeof v !== 'string') StorageService.set(k, v);
-        });
-        alert('✅ Datos restaurados correctamente. Recargando...');
-        location.reload();
-    } catch (e) {
-        console.error('❌ Error restaurando respaldo:', e.message);
-        alert('❌ Error restaurando respaldo: ' + e.message);
-    }
-}
-
-// ── Mostrar lista de respaldos en el panel ───────────────────────────────────
-async function mostrarListaBackups() {
-    const cont = document.getElementById('listaBackupsOneDrive');
-    if (!cont) return;
-    cont.innerHTML = '<p style="color:#6b7280;font-size:13px;">Cargando...</p>';
-
-    const archivos = await listarBackupsOneDrive();
-    if (!archivos.length) {
-        cont.innerHTML = '<p style="color:#6b7280;font-size:13px;">No se encontraron respaldos.</p>';
-        return;
-    }
-
-    const rows = archivos.map(f => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;">
-            <div>
-                <div style="font-size:13px;font-weight:600;color:#374151;">${f.name}</div>
-                <div style="font-size:11px;color:#9ca3af;">${new Date(f.lastModifiedDateTime).toLocaleString('es-MX')} — ${(f.size/1024).toFixed(1)} KB</div>
-            </div>
-            <button onclick="restaurarBackupOneDrive('${f.id}')" 
-                style="padding:6px 12px;background:#dc2626;color:white;border:none;border-radius:5px;cursor:pointer;font-size:12px;">
-                ♻️ Restaurar
-            </button>
-        </div>`).join('');
-
-    cont.innerHTML = `<div style="margin-top:10px;">${rows}</div>`;
-}
-
-// ── Exportar todos los datos a JSON local ────────────────────────────────────
+// ── Exportar todos los datos a JSON local (BARRIDO DINÁMICO) ──────────────────
 function exportarBackupJSON() {
     const backup = {
-        _version: 1,
+        _version: 2, // Subimos a versión 2 para identificar el barrido dinámico
         _fecha: new Date().toISOString(),
         datos: {}
     };
 
-    if (typeof CLAVES_SISTEMA !== 'undefined') {
-        CLAVES_SISTEMA.forEach(k => {
-            const val = localStorage.getItem(k);
-            if (val) {
-                try { backup.datos[k] = JSON.parse(val); } catch (_) {}
+    // BARRIDO TOTAL: Leemos absolutamente todo el LocalStorage
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        // Ignorar basura del navegador, tokens de MSAL o variables temporales
+        if (key.startsWith('msal.') || key.startsWith('_')) continue;
+
+        const val = localStorage.getItem(key);
+        if (val) {
+            try { 
+                backup.datos[key] = JSON.parse(val); 
+            } catch (_) {
+                // Si tienes alguna configuración en texto plano, la guarda directo
+                backup.datos[key] = val; 
             }
-        });
+        }
     }
 
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -219,7 +210,46 @@ function exportarBackupJSON() {
     URL.revokeObjectURL(a.href);
 }
 
-// ── Importar datos desde JSON local ─────────────────────────────────────────
+// ── Restaurar respaldo desde OneDrive (DINÁMICO) ─────────────────────────────
+async function restaurarBackupOneDrive(fileId) {
+    const token = await _obtenerTokenOneDrive();
+    if (!token) return;
+
+    if (!confirm('⚠️ Esto borrará TODOS los datos actuales y los reemplazará con el respaldo de OneDrive. ¿Continuar?')) return;
+
+    try {
+        const resp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${fileId}/content`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (!resp.ok) throw new Error('No se pudo descargar el archivo.');
+        
+        const backup = await resp.json();
+        const datos = backup.datos || backup;
+
+        // 1. LIMPIEZA TOTAL: Borramos el LocalStorage actual para evitar conflictos
+        localStorage.clear();
+
+        // 2. RESTAURACIÓN TOTAL: Insertamos cada llave del respaldo
+        Object.entries(datos).forEach(([k, v]) => {
+            if (typeof v === 'object' && v !== null) {
+                // Si es objeto/array, usamos el servicio que lo stringifica
+                StorageService.set(k, v);
+            } else {
+                // Si es un valor simple (string/number), lo guardamos directo
+                localStorage.setItem(k, v);
+            }
+        });
+
+        alert('✅ Datos restaurados desde OneDrive con éxito. Recargando...');
+        location.reload();
+    } catch (e) {
+        console.error('❌ Error al restaurar:', e.message);
+        alert('❌ Error al restaurar el respaldo: ' + e.message);
+    }
+}
+
+// ── Importar datos desde JSON local (DINÁMICO) ──────────────────────────────
 function importarBackupJSON(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -232,10 +262,20 @@ function importarBackupJSON(event) {
         try {
             const backup = JSON.parse(e.target.result);
             const datos = backup.datos || backup;
+
+            // 1. LIMPIEZA TOTAL
+            localStorage.clear();
+
+            // 2. RESTAURACIÓN TOTAL
             Object.entries(datos).forEach(([k, v]) => {
-                if (typeof v !== 'string') StorageService.set(k, v);
+                if (typeof v === 'object' && v !== null) {
+                    StorageService.set(k, v);
+                } else {
+                    localStorage.setItem(k, v);
+                }
             });
-            alert('✅ Datos restaurados correctamente. Recargando...');
+
+            alert('✅ Datos restaurados correctamente desde el archivo. Recargando...');
             location.reload();
         } catch (err) {
             alert('❌ Archivo inválido o corrupto: ' + err.message);
