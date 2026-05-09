@@ -1410,75 +1410,105 @@ function procesarPagoTarjetaGlobal(banco) {
     if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 }
 // =====================================================================
-// ⚙️ FUNCIONES DE EDICIÓN (RESTAURADAS Y CORREGIDAS)
+// ⚙️ GESTIÓN DE BANCOS Y CAJAS (REVISADO LÍNEA POR LÍNEA)
 // =====================================================================
-
-window.abrirModalEdicionCaja = function(index = null) {
-    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
-    let nombreCaja = (index !== null) ? cajas[index].nombre.replace("💵 ", "") : "";
-
-    const modalHTML = `
-        <div data-modal="edicion-caja" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
-            <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:350px;">
-                <h3 style="margin-top:0;">${index !== null ? '✏️ Editar Caja' : '💵 Nueva Caja'}</h3>
-                <input type="text" id="modalCajaNombre" value="${nombreCaja}" placeholder="Nombre de la caja" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; margin-bottom:20px;">
-                <div style="display:flex; gap:10px;">
-                    <button onclick="window.guardarCajaModal(${index})" style="flex:1; padding:12px; background:#10b981; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Guardar</button>
-                    <button onclick="document.querySelector('[data-modal=&quot;edicion-caja&quot;]').remove()" style="flex:1; padding:12px; background:#eee; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
-                </div>
-            </div>
-        </div>`;
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-};
-
-window.guardarCajaModal = function(index) {
-    const nombre = document.getElementById("modalCajaNombre").value.trim();
-    if (!nombre) return alert("Nombre obligatorio");
-    const cajas = StorageService.get("cuentasEfectivo", []);
-    const nombreFormateado = "💵 " + nombre;
-    if (index === null) cajas.push({ id: "caja_" + Date.now(), nombre: nombreFormateado, saldo: 0 });
-    else cajas[index].nombre = nombreFormateado;
-    StorageService.set("cuentasEfectivo", cajas);
-    location.reload();
-};
 
 window.abrirModalEdicionBanco = function(tipo, index = null) {
     const tarjetas = StorageService.get("tarjetasConfig", []);
-    const t = (index !== null) ? tarjetas[index] : { banco: "", ultimos4: "", saldoInicial: 0, diaCorte: 1, diaLimite: 1 };
+    const t = (index !== null) ? tarjetas[index] : { 
+        banco: "", ultimos4: "", saldoInicial: 0, diaCorte: 1, diaLimite: 1 
+    };
 
     const modalHTML = `
-        <div data-modal="edicion-banco" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
-            <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:400px;">
-                <h3>${index !== null ? '✏️ Editar' : '🏦 Nuevo'} ${tipo.toUpperCase()}</h3>
-                <input type="text" id="mNombre" value="${t.banco}" placeholder="Nombre del Banco" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px;">
-                ${tipo === 'debito' ? 
-                    `<input type="number" id="mSaldo" value="${t.saldoInicial}" placeholder="Saldo Inicial" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:6px;">` :
-                    `<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-                        <input type="number" id="mCorte" value="${t.diaCorte}" placeholder="Día Corte">
-                        <input type="number" id="mLimite" value="${t.diaLimite}" placeholder="Día Pago">
-                     </div>`
-                }
-                <div style="display:flex; gap:10px; margin-top:10px;">
-                    <button onclick="window.confirmarEdicionBanco('${tipo}', ${index})" style="flex:1; padding:12px; background:#3b82f6; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Confirmar</button>
-                    <button onclick="document.querySelector('[data-modal=&quot;edicion-banco&quot;]').remove()" style="flex:1; padding:12px; background:#eee; border:none; border-radius:6px; cursor:pointer;">Cerrar</button>
-                </div>
+    <div data-modal="edit-banco" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:400px; box-shadow:0 20px 25px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#1e40af;">${index !== null ? '✏️ Editar' : '🏦 Nuevo'} ${tipo.toUpperCase()}</h3>
+            
+            <div style="margin-top:15px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#64748b; margin-bottom:5px;">Nombre del Banco</label>
+                <input type="text" id="mBancoNombre" value="${t.banco}" placeholder="Ej: BANAMEX" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; text-transform:uppercase;">
             </div>
-        </div>`;
+
+            ${tipo === 'debito' ? `
+                <div style="margin-top:15px;">
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#64748b; margin-bottom:5px;">Últimos 4 Dígitos</label>
+                    <input type="text" id="mBancoDigitos" value="${t.ultimos4 || ''}" maxlength="4" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+                </div>
+                <div style="margin-top:15px;">
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#64748b; margin-bottom:5px;">Saldo Inicial (Liquidez)</label>
+                    <input type="number" id="mBancoSaldo" value="${t.saldoInicial || 0}" step="0.01" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+                </div>
+            ` : `
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:15px;">
+                    <div>
+                        <label style="display:block; font-weight:bold; font-size:12px; color:#ef4444; margin-bottom:5px;">📅 Corte (Día)</label>
+                        <input type="number" id="mBancoCorte" value="${t.diaCorte || 1}" min="1" max="31" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+                    </div>
+                    <div>
+                        <label style="display:block; font-weight:bold; font-size:12px; color:#10b981; margin-bottom:5px;">💰 Pago (Día)</label>
+                        <input type="number" id="mBancoLimite" value="${t.diaLimite || 1}" min="1" max="31" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+                    </div>
+                </div>
+            `}
+
+            <div style="display:flex; gap:10px; margin-top:30px;">
+                <button onclick="window.confirmarGuardadoBanco('${tipo}', ${index})" style="flex:2; padding:12px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">💾 Guardar</button>
+                <button onclick="document.querySelector('[data-modal=&quot;edit-banco&quot;]').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 };
 
-window.confirmarEdicionBanco = function(tipo, index) {
-    const tarjetas = StorageService.get("tarjetasConfig", []);
-    const nuevo = {
-        banco: document.getElementById("mNombre").value.toUpperCase(),
-        tipo: tipo,
-        saldoInicial: tipo === 'debito' ? parseFloat(document.getElementById("mSaldo").value) : 0,
-        diaCorte: tipo === 'credito' ? parseInt(document.getElementById("mCorte").value) : 0,
-        diaLimite: tipo === 'credito' ? parseInt(document.getElementById("mLimite").value) : 0
-    };
-    if (index === null) tarjetas.push(nuevo);
-    else tarjetas[index] = nuevo;
+window.confirmarGuardadoBanco = function(tipo, index) {
+    const nombre = document.getElementById("mBancoNombre").value.trim().toUpperCase();
+    if (!nombre) return alert("⚠️ El nombre es obligatorio.");
+
+    let tarjetas = StorageService.get("tarjetasConfig", []);
+    let datos = { banco: nombre, tipo: tipo };
+
+    if (tipo === 'debito') {
+        datos.ultimos4 = document.getElementById("mBancoDigitos").value.trim();
+        datos.saldoInicial = parseFloat(document.getElementById("mBancoSaldo").value) || 0;
+        datos.diaCorte = 0; datos.diaLimite = 0;
+    } else {
+        datos.diaCorte = parseInt(document.getElementById("mBancoCorte").value) || 1;
+        datos.diaLimite = parseInt(document.getElementById("mBancoLimite").value) || 1;
+        datos.ultimos4 = ""; datos.saldoInicial = 0;
+    }
+
+    if (index === null) tarjetas.push(datos);
+    else tarjetas[index] = datos;
+
     StorageService.set("tarjetasConfig", tarjetas);
+    location.reload();
+};
+
+window.abrirModalEdicionCaja = function(index = null) {
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    let nombre = (index !== null) ? cajas[index].nombre.replace("💵 ", "") : "";
+
+    const html = `
+    <div data-modal="edit-caja" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; padding:30px; border-radius:12px; width:300px;">
+            <h3 style="margin:0 0 20px 0;">${index !== null ? '✏️ Editar Caja' : '💵 Nueva Caja'}</h3>
+            <input type="text" id="mCajaNombre" value="${nombre}" placeholder="Nombre de caja" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px;">
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="window.confirmarGuardadoCaja(${index})" style="flex:1; padding:12px; background:#10b981; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Guardar</button>
+                <button onclick="document.querySelector('[data-modal=&quot;edit-caja&quot;]').remove()" style="flex:1; padding:12px; background:#eee; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.confirmarGuardadoCaja = function(index) {
+    const n = document.getElementById("mCajaNombre").value.trim();
+    if (!n) return alert("Nombre obligatorio.");
+    let cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    if (index === null) cajas.push({ id: "caja_" + Date.now(), nombre: "💵 " + n, saldo: 0 });
+    else cajas[index].nombre = "💵 " + n;
+    StorageService.set("cuentasEfectivo", cajas);
     location.reload();
 };
 window.renderCuentasBancarias = renderCuentasBancarias;
