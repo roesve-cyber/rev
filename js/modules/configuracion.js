@@ -122,81 +122,9 @@ function eliminarPlazoProd(index) {
     window._plazosProductoTemp.splice(index, 1);
     _dibujarPlazosProd();
 }
-// =========================================================
-// MÓDULO: EXPORTAR / IMPORTAR BACKUP JSON (ACTUALIZADO)
-// =========================================================
-
-window.exportarBackupJSON = function() {
-    try {
-        // 1. Definimos las tablas clave del sistema
-        const tablas = [
-            "productos", "clientes", "categoriasData", "tarjetasConfig", 
-            "cuentasPorCobrar", "pagaresSistema", "proveedores", 
-            "movimientosInventario", "recepciones", "compras", 
-            "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
-        ];
-        
-        let backupData = {};
-        
-        // 2. Extraemos la información de la memoria blindada
-        for (let tabla of tablas) {
-            backupData[tabla] = StorageService.get(tabla, []);
-        }
-
-        // 3. Empaquetamos todo en un archivo .json
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-        const anchor = document.createElement('a');
-        const fecha = new Date().toISOString().split('T')[0];
-        
-        anchor.setAttribute("href", dataStr);
-        anchor.setAttribute("download", `Backup_MiPueblito_${fecha}.json`);
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-
-        console.log("✅ Backup exportado con éxito.");
-    } catch (error) {
-        console.error("❌ Error al exportar:", error);
-        alert("Ocurrió un error al exportar el archivo.");
-    }
-};
-
-window.importarBackupJSON = function(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const data = JSON.parse(e.target.result);
-            const tablas = Object.keys(data);
-            
-            if (!confirm(`⚠️ ATENCIÓN: Vas a importar un archivo con ${tablas.length} tablas de datos.\n\nEsto reemplazará la información actual en tu memoria local y se sincronizará con la nube.\n\n¿Estás completamente seguro?`)) {
-                event.target.value = ''; // Limpiar el input si cancela
-                return;
-            }
-
-            // Inyectamos tabla por tabla en el sistema usando el canal oficial
-            let importadas = 0;
-            for (let tabla of tablas) {
-                // El .set() se encarga de guardar en RAM, en LocalForage y enviarlo a Firebase
-                StorageService.set(tabla, data[tabla]);
-                importadas++;
-            }
-
-            alert(`✅ ¡Éxito! Se restauraron ${importadas} tablas de datos.\n\nEl sistema se recargará para aplicar todos los cambios visuales.`);
-            
-            // Recargamos la pestaña para que las variables globales y tablas se dibujen con lo nuevo
-            window.location.reload();
-
-        } catch (error) {
-            console.error("❌ Error leyendo el JSON:", error);
-            alert("El archivo que seleccionaste está corrupto o no es un formato válido del sistema.");
-        }
-    };
-    
-    reader.readAsText(file);
-};
+// Nota: exportarBackupJSON e importarBackupJSON se definen en
+// js/services/onedrive-backup.js (fuente única de verdad).
+// TABLAS_SISTEMA también está disponible allí como window.TABLAS_SISTEMA.
 
 // Exponer globalmente
 window.renderConfiguracion = renderConfiguracion;
