@@ -2,57 +2,14 @@
 // Lee y escribe SIEMPRE a través de StorageService (IndexedDB + caché RAM).
 // Nunca accede a localStorage directamente: esos datos ya fueron migrados a IDB.
 
-// ── Registro completo de tablas del sistema ─────────────────────────────────
-// Fuente única de verdad. Usada por: exportar, importar, syncAll, uploadAll.
-// Excluye claves de sesión (sesionActiva, usuarioActual) y estado transitorio (carrito).
+// js/services/onedrive-backup.js
+
 const TABLAS_SISTEMA = [
-    // Catálogo y stock
-    "productos",
-    "categoriasData",
-    "movimientosInventario",
-    "historialCostos",
-    "ubicaciones",
-    "ubicacionesConfig",
-    // Clientes y cobranza
-    "clientes",
-    "cuentasPorCobrar",
-    "pagaresSistema",
-    "registroTickets",
-    "puntosPorCliente",
-    "programaPuntos",
-    // Ventas
-    "ventasRegistradas",
-    "cotizaciones",
-    "apartados",
-    "salidasPendientesVenta",
-    "historialDevoluciones",
-    "garantiasProductos",
-    // Compras y proveedores
-    "proveedores",
-    "compras",
-    "recepciones",
-    "ordenesCompra",
-    "requisicionesCompra",
-    "cuentasPorPagar",
-    "deudasMSI",
-    // Tesorería y bancos
-    "movimientosCaja",
-    "cuentasEfectivo",
-    "cuentasMSI",
-    "cuentas-bancarias",
-    "tarjetasConfig",
-    // Gastos
-    "gastosOperativos",
-    "categoriasGasto",
-    // Vendedores
-    "vendedores",
-    "comisionesRegistradas",
-    // Descuentos
-    "descuentosActivos",
-    // Configuración
-    "configCreditoGlobal",
-    "configEmpresa",
-    "usuariosConfig",
+    "productos", "categoriasData", "movimientosInventario",
+    "clientesSistema", "cuentasPorCobrar", "pagaresSistema", // <-- Agregadas
+    "ventasRegistradas", "cotizaciones", "apartados",
+    "proveedores", "compras", "gastos", "movimientosCaja",
+    "cuentasEfectivo", "tarjetasConfig", "configuracionPos"
 ];
 
 window.TABLAS_SISTEMA = TABLAS_SISTEMA;
@@ -79,97 +36,56 @@ function _construirBackup() {
     };
 }
 
-// ── EXPORTAR ─────────────────────────────────────────────────────────────────
-window.exportarBackupJSON = function () {
-    try {
-        const backup = _construirBackup();
-        const json   = JSON.stringify(backup, null, 2);
-        const blob   = new Blob([json], { type: "application/json" });
-        const url    = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        const fecha  = new Date().toISOString().split("T")[0];
-        anchor.href     = url;
-        anchor.download = `REV-BACKUP-v${BACKUP_VERSION}-${fecha}.json`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
-        console.log(`✅ Backup exportado: ${backup._tablas} tablas, ${(json.length / 1024).toFixed(1)} KB`);
-    } catch (err) {
-        console.error("❌ Error al exportar backup:", err);
-        alert("Error al exportar. Revisa la consola.");
-    }
+// --- EXPORTAR TODO (Corregido para IndexedDB/StorageService) ---
+window.exportarBackupJSON = function() {
+    const backup = { 
+        _fecha: new Date().toISOString(), 
+        _version: "2.0",
+        datos: {} 
+    };
+
+    // En lugar de recorrer localStorage, recorremos nuestras tablas oficiales
+    TABLAS_SISTEMA.forEach(tabla => {
+        const data = StorageService.get(tabla, null);
+        if (data) {
+            backup.datos[tabla] = data;
+        }
+    });
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `REV-POS-BACKUP-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    console.log("💾 Respaldo generado desde StorageService.");
 };
 
-// ── IMPORTAR ─────────────────────────────────────────────────────────────────
-window.importarBackupJSON = function (event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    event.target.value = "";
-
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        let parsed;
+// --- IMPORTAR TODO (Corregido) ---
+window.importarBackupJSON = function(event) {
+    const archivo = event.target.files[0];
+    if (!archivo || !confirm('⚠️ Se borrarán los datos actuales. ¿Continuar?')) return;
+    
+    const lector = new FileReader();
+    lector.onload = (e) => {
         try {
-            parsed = JSON.parse(e.target.result);
-        } catch {
-            alert("❌ El archivo está corrupto o no es un JSON válido.");
-            return;
+            const json = JSON.parse(e.target.result);
+            const datos = json.datos || json;
+
+            // Limpiamos con el servicio para evitar residuos
+            TABLAS_SISTEMA.forEach(t => localStorage.removeItem(t)); 
+
+            // Guardamos cada tabla usando el StorageService
+            Object.entries(datos).forEach(([key, value]) => {
+                StorageService.set(key, value);
+            });
+
+            alert('✅ Sistema restaurado con éxito. Reiniciando...');
+            location.reload();
+        } catch (err) { 
+            alert('❌ El archivo de respaldo no es válido.'); 
         }
-
-        // Acepta formato v2 ({ datos: {...} }) y v1 (objeto plano)
-        const esV2   = parsed._version && parsed.datos;
-        const datos  = esV2 ? parsed.datos : parsed;
-        const tablas = Object.keys(datos);
-        const fecha  = parsed._fecha
-            ? new Date(parsed._fecha).toLocaleString("es-MX")
-            : "desconocida";
-        const version = parsed._version || 1;
-
-        if (tablas.length === 0) {
-            alert("❌ El archivo no contiene datos válidos.");
-            return;
-        }
-
-        // Resumen antes de confirmar
-        const resumen = tablas.map(t => {
-            const val = datos[t];
-            const n   = Array.isArray(val) ? val.length + " registros"
-                      : (typeof val === "object" ? "configuración" : "—");
-            return `  • ${t}: ${n}`;
-        }).join("\n");
-
-        const ok = confirm(
-            `📦 RESUMEN DEL BACKUP\n` +
-            `Versión: ${version}  |  Fecha: ${fecha}\n` +
-            `Tablas encontradas: ${tablas.length}\n\n` +
-            `${resumen}\n\n` +
-            `⚠️  Se REEMPLAZARÁN los datos de las tablas listadas.\n` +
-            `Datos en otras tablas se conservarán intactos.\n\n` +
-            `¿Continuar con la restauración?`
-        );
-        if (!ok) return;
-
-        let importadas = 0;
-        const errores = [];
-        for (const [tabla, valor] of Object.entries(datos)) {
-            try {
-                StorageService.set(tabla, valor);
-                importadas++;
-            } catch (err) {
-                errores.push(tabla);
-                console.error(`❌ Error restaurando "${tabla}":`, err);
-            }
-        }
-
-        if (errores.length > 0) {
-            alert(`⚠️ Restauración parcial.\n${importadas} tablas OK.\n${errores.length} con error: ${errores.join(", ")}\n\nRecargando...`);
-        } else {
-            alert(`✅ Restauración completa.\n${importadas} tablas restauradas.\n\nRecargando...`);
-        }
-        window.location.reload();
     };
-    reader.readAsText(file);
+    reader.readAsText(archivo);
 };
 
 // ── OneDrive ──────────────────────────────────────────────────────────────────

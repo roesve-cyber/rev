@@ -1,3 +1,14 @@
+// Función de escape global para limpiar texto
+window._esc = function(estu) {
+    if (!estu) return "";
+    if (typeof estu !== 'string') return estu;
+    return estu
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+};
 const ValidatorService = {
   validarProducto(producto) {
     const errores = [];

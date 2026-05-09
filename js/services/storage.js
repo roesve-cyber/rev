@@ -95,10 +95,12 @@ const StorageService = {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
         }
         
-        const tablas = [
-            "productos", "clientes", "categoriasData", "tarjetasConfig", 
-            "cuentasPorCobrar", "pagaresSistema", "proveedores", 
-            "movimientosInventario", "recepciones", "compras", 
+        // Usa la lista completa declarada en onedrive-backup.js (fuente única de verdad).
+        // Si aún no está disponible (carga muy temprana), usa la lista de respaldo mínima.
+        const tablas = window.TABLAS_SISTEMA || [
+            "productos", "clientes", "categoriasData", "tarjetasConfig",
+            "cuentasPorCobrar", "pagaresSistema", "proveedores",
+            "movimientosInventario", "recepciones", "compras",
             "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
         ];
 
@@ -131,10 +133,10 @@ const StorageService = {
             return Promise.reject(new Error("Firebase no está configurado o activo."));
         }
         
-        const tablas = [
-            "productos", "clientes", "categoriasData", "tarjetasConfig", 
-            "cuentasPorCobrar", "pagaresSistema", "proveedores", 
-            "movimientosInventario", "recepciones", "compras", 
+        const tablas = window.TABLAS_SISTEMA || [
+            "productos", "clientes", "categoriasData", "tarjetasConfig",
+            "cuentasPorCobrar", "pagaresSistema", "proveedores",
+            "movimientosInventario", "recepciones", "compras",
             "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
         ];
 
