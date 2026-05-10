@@ -96,7 +96,7 @@ function renderDashboard() {
         ? `<tr><td colspan="4" style="padding:16px; text-align:center; color:#6b7280;">Sin ventas registradas</td></tr>`
         : ventasRecientes.map(v => {
             const fecha = v.fechaVenta || v.fechaIso
-                ? new Date(v.fechaVenta || v.fechaIso).toLocaleDateString('es-MX')
+                ? new Date(v.fechaVenta || v.fechaIso).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })
                 : '—';
             const cliente = v.clienteNombre || v.cliente?.nombre || '—';
             const total = v.total || v.totalVenta || 0;

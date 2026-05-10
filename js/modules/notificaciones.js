@@ -81,7 +81,7 @@ function recopilarNotificaciones() {
         const fv = new Date(c.fechaVencimiento);
         if (fv <= en3dias) {
             const id = `cxp_${c.id}_vence`;
-            if (!vistas.includes(id)) notifs.push({ tipo: 'cxp', icono: '💳', color: '#dc2626', msg: `Pago a ${c.proveedor || 'proveedor'}: ${dinero(c.saldoPendiente)} vence el ${fv.toLocaleDateString('es-MX')}`, id });
+            if (!vistas.includes(id)) notifs.push({ tipo: 'cxp', icono: '💳', color: '#dc2626', msg: `Pago a ${c.proveedor || 'proveedor'}: ${dinero(c.saldoPendiente)} vence el ${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}`, id });
         }
     });
 

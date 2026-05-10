@@ -1239,7 +1239,9 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     // GUARDAR TODO
     if (!StorageService.set("productos", productos)) console.error("❌ Error guardando productos");
     if (!StorageService.set("movimientosCaja", movimientosCaja)) console.error("❌ Error guardando movimientos de caja");
-    if (!StorageService.set("movimientosInventario", movimientosInventario)) console.error("❌ Error guardando movimientos de inventario");
+    // NOTA: movimientosInventario NO se re-guarda aquí.
+    // registrarMovimiento() ya escribe en IDB internamente.
+    // Volver a guardar la copia local sobreescribiría esos movimientos.
     if (!StorageService.set("requisicionesCompra", requisicionesCompra)) console.error("❌ Error guardando requisiciones");
 
     if (entregasPendientes.length > 0) {
@@ -1299,6 +1301,25 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 
     generarTicketMediaHoja(datosVenta);
 
+    if (datosVenta.articulos && datosVenta.articulos.length > 0) {
+    // Filtramos solo lo que realmente se entrega (por si hubiera preventas en el futuro)
+    // Por ahora, asumimos que lo que se procesa en el carrito como "entrega" genera el vale
+    const articulosParaVale = datosVenta.articulos.map(a => ({
+        nombre: a.nombre,
+        colorElegido: a.colorElegido || '',
+        cantidad: a.cantidad || 1
+    }));
+
+    // Retrasamos un segundo el segundo popup para evitar que el navegador bloquee las ventanas
+    setTimeout(() => {
+        generarValeEntrega({
+            folioVenta: datosVenta.folio,
+            clienteNombre: datosVenta.cliente.nombre,
+            metodoPago: datosVenta.metodo
+        }, articulosParaVale);
+    }, 1000);
+}
+
     if (_vendedorSeleccionado) {
         window._ultimaVentaMetodo = metodoPago;
         registrarComisionVenta(folioVenta, totalContado, _vendedorSeleccionado.id);
@@ -1311,6 +1332,11 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         m.style.display = 'none';
     });
 
+    // Guardar referencias antes de limpiar el estado
+    const _clienteParaPuntos = clienteSeleccionado;
+    const _folioParaPuntos   = folioVenta;
+    const _totalParaPuntos   = totalContado;
+
     carrito = [];
     clienteSeleccionado = null;
     plazoSeleccionado = null;
@@ -1318,8 +1344,15 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     if (!StorageService.set("carrito", carrito)) console.error("❌ Error limpiando carrito");
     actualizarContadorCarrito();
 
-    if (typeof acumularPuntosCliente === "function" && clienteSeleccionado) {
-        acumularPuntosCliente(clienteSeleccionado.id, totalContado);
+    // FIX: clienteSeleccionado ya es null aquí, usar la referencia guardada
+    // FIX: la firma correcta es acumularPuntosCliente(clienteId, nombre, total, folio)
+    if (typeof acumularPuntosCliente === "function" && _clienteParaPuntos) {
+        acumularPuntosCliente(
+            _clienteParaPuntos.id,
+            _clienteParaPuntos.nombre,
+            _totalParaPuntos,
+            _folioParaPuntos
+        );
     }
 
     alert(`✅ VENTA REGISTRADA\n\nFolio: ${folioVenta}\nCliente: ${datosVenta.cliente.nombre}\nTotal: ${dinero(datosVenta.total)}`);
@@ -1337,312 +1370,176 @@ function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
     return `PAGARÉ: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crédito otorgado, misma que cubriré en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarán intereses moratorios del 2% mensual sobre saldos insolutos; este pagaré se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligándome a cumplir en el domicilio del acreedor y sometiéndome para su interpretación y cumplimiento a la jurisdicción de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.`;
 }
 
-// ===== GENERADOR DE TICKETS =====
-// ===== GENERADOR DE TICKETS (VERSIÓN PREMIUM EMBELLECIDA) =====
+// ===== GENERADOR DE TICKET TÉRMICO (80MM) CON CALENDARIO LIMPIO =====
 function generarTicketMediaHoja(datosVenta) {
     const folio = datosVenta.folio;
     const fechaActual = datosVenta.fecha;
     
-    // 1. Tabla de Productos
-    let tablaProductos = '';
-    datosVenta.articulos.forEach(art => {
-        const cantidad = art.cantidad || 1;
-        const subtotal = (art.precioContado || 0) * cantidad;
-        const colorInfo = art.colorElegido ? ` <small style="color:#64748b; font-weight:bold;">(${_escapeHtml(art.colorElegido)})</small>` : '';
-        tablaProductos += `
-            <tr>
-                <td class="td-center"><b>${cantidad}</b></td>
-                <td><b>${art.nombre}</b>${colorInfo}</td>
-                <td class="td-right">${dinero(art.precioContado)}</td>
-                <td class="td-right" style="color:#15803d; font-weight:bold;">${dinero(subtotal)}</td>
-            </tr>
-        `;
-    });
-
-    // 2. Tabla de Pagarés (Si es a crédito)
-    let tablaPagares = '';
+    // 1. Cálculos de Pagarés y Saldo
     let totalAPagar = 0;
+    let tablaPagares = '';
+    const pagares = StorageService.get("pagaresSistema", []);
+    const pagaresDelFolio = pagares.filter(p => p.folio === folio);
 
-    if (datosVenta.metodo === "credito" && datosVenta.plan) {
-        const pagares = StorageService.get("pagaresSistema", []);
-        const pagaresDelFolio = pagares.filter(p => p.folio === folio);
-
+    if (datosVenta.metodo === "credito") {
         pagaresDelFolio.forEach((pagar, index) => {
             const fechaPago = new Date(pagar.fechaVencimiento);
-            const fechaFormato = fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+            const fechaFmt = fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' });
             totalAPagar += pagar.monto;
             
+            // SOLO NÚMERO, FECHA Y MONTO
             tablaPagares += `
                 <tr>
-                    <td class="td-center" style="font-weight: bold; color:#1e3a8a;">${index + 1}</td>
-                    <td class="td-center">${fechaFormato}</td>
-                    <td class="td-right" style="font-weight: bold; color:#b91c1c;">${dinero(pagar.monto)}</td>
-                    <td class="celda-llenar"></td>
-                    <td class="celda-llenar"></td>
-                </tr>
-            `;
+                    <td align="left" style="padding: 3px 0;">${index + 1}</td>
+                    <td align="center" style="padding: 3px 0;">${fechaFmt}</td>
+                    <td align="right" style="padding: 3px 0; font-weight: bold;">${dinero(pagar.monto)}</td>
+                </tr>`;
         });
     }
 
-    // 3. Tabla de Planes Disponibles (Referencia)
-    let saldoParaPlanes = (datosVenta.articulos || []).reduce(
-        (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
-    ) - (datosVenta.enganche || 0);
-    if (saldoParaPlanes < 0) saldoParaPlanes = 0;
-    
-    const periodicidadTicket = datosVenta.periodicidad || window._estadoPago?.periodicidad || "semanal";
-    const planesDisponibles = CalculatorService.calcularCreditoConPeriodicidad
-        ? CalculatorService.calcularCreditoConPeriodicidad(saldoParaPlanes, periodicidadTicket)
-        : CalculatorService.calcularCredito(saldoParaPlanes);
-    
-    const textoPeriodo = periodicidadTicket === "quincenal" ? "/quin" : periodicidadTicket === "mensual" ? "/mes" : "/sem";
-    let tablaPlanes = '';
-    planesDisponibles.forEach(plan => {
-        const textoMeses = plan.meses === 1 ? `${plan.meses} MES (Contado)` : `${plan.meses} MESES`;
-        const textoInteres = plan.meses === 1 ? '(Sin interés)' : `(${plan.pagos} pagos${textoPeriodo})`;
-        const montoMostrar = plan.meses === 1 ? dinero(saldoParaPlanes) : `${dinero(plan.abono)}${textoPeriodo}`;
-        const totalMostrar = plan.meses === 1 ? dinero(saldoParaPlanes) : dinero(plan.total);
-        tablaPlanes += `
-            <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: center; background:#f8fafc;">
-                <strong style="color:#1e3a8a;">${textoMeses}</strong><br>
-                <span style="font-weight:bold; font-size:12px; color:#15803d;">${montoMostrar}</span><br>
-                <small style="color:#64748b;">Total: ${totalMostrar}</small><br>
-                <small style="font-size:8px;">${textoInteres}</small>
-            </td>
-        `;
+    // 2. Tabla de Productos
+    let listaProductos = '';
+    datosVenta.articulos.forEach(art => {
+        const subtotal = (art.precioContado || 0) * (art.cantidad || 1);
+        listaProductos += `
+            <div style="margin-bottom: 4px; font-size: 11px;">
+                <div style="display:flex; justify-content:space-between;">
+                    <span><b>${art.cantidad || 1}x</b> ${art.nombre}</span>
+                    <b>${dinero(subtotal)}</b>
+                </div>
+                ${art.colorElegido ? `<small style="display:block; color:#555;">🎨 Color: ${art.colorElegido}</small>` : ''}
+            </div>`;
     });
 
-    const filasPagares = tablaPagares.split('</tr>').filter(f => f.trim());
-    const esDobleColumna = datosVenta.metodo === "credito" && datosVenta.plan && filasPagares.length > 12;
+    // 3. Política de Liquidación Anticipada (TODOS LOS PLAZOS)
+    let planesHTML = '';
+    if (datosVenta.metodo === "credito") {
+        let saldoParaPlanes = (datosVenta.articulos || []).reduce(
+            (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
+        ) - (datosVenta.enganche || 0);
+        
+        const periodicidad = datosVenta.periodicidad || "semanal";
+        const todosLosPlanes = CalculatorService.calcularCreditoConPeriodicidad
+            ? CalculatorService.calcularCreditoConPeriodicidad(saldoParaPlanes, periodicidad)
+            : CalculatorService.calcularCredito(saldoParaPlanes);
 
-    function construirTablaPagares(filas) {
-        return `
-        <table class="tabla-moderna">
-            <thead>
-                <tr>
-                    <th class="td-center">#</th>
-                    <th class="td-center">VENCIMIENTO</th>
-                    <th class="td-right">IMPORTE</th>
-                    <th class="td-center">FECHA PAGO</th>
-                    <th class="td-center">FIRMA / SELLO</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${filas.join('</tr>')}
-            </tbody>
-        </table>`;
+        todosLosPlanes.forEach(p => {
+            const totalConEnganche = p.total + (datosVenta.enganche || 0);
+            planesHTML += `
+                <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #ccc; padding:4px 0;">
+                    <span style="font-size:10px;">${p.meses} Meses:</span>
+                    <strong style="font-size:11px;">${dinero(totalConEnganche)}</strong>
+                </div>`;
+        });
     }
 
-    let pagaresHTML = '';
-    if (esDobleColumna) {
-        const mitad = Math.ceil(filasPagares.length / 2);
-        const col1 = filasPagares.slice(0, mitad);
-        const col2 = filasPagares.slice(mitad);
-        pagaresHTML = `
-        <div class="pagares-doble">
-            ${construirTablaPagares(col1)}
-            ${construirTablaPagares(col2)}
-        </div>`;
-    } else {
-        pagaresHTML = construirTablaPagares(filasPagares);
-    }
-
-    // 4. Construcción del HTML Final
+    // 4. Estructura HTML del Ticket de 80mm
     const ticketHTML = `
     <!DOCTYPE html>
     <html lang="es">
     <head>
     <meta charset="UTF-8">
-    <title>Nota de Venta - ${folio}</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-        
-        @page { size: Letter landscape; margin: 0; }
+        @page { size: 80mm auto; margin: 0; }
         body { 
-            font-family: 'Inter', Arial, sans-serif; 
-            margin: 0; 
-            background: #e2e8f0; 
-            color: #0f172a; 
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            font-family: 'Courier New', Courier, monospace; 
+            width: 72mm; margin: 4mm auto; color: #000; background: #fff;
+            line-height: 1.2; font-size: 12px;
         }
-        
-        .barra-herramientas {
-            width: 100%; background: #1e293b; padding: 15px; text-align: center; display: flex; justify-content: center; gap: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .barra-herramientas button {
-            padding: 10px 20px; font-size: 14px; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s;
-        }
-        .btn-print { background: #3b82f6; color: white; }
-        .btn-img { background: #10b981; color: white; }
-        .btn-print:hover { background: #2563eb; }
-        .btn-img:hover { background: #059669; }
-
-        .hoja { 
-            background: white; 
-            width: 260mm; 
-            height: 195mm; 
-            margin: 20px auto; 
-            padding: 15mm; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15); 
-            border-radius: 12px; 
-            display: flex; 
-            gap: 8mm; 
-            position: relative; 
-            overflow: hidden; 
-            box-sizing: border-box;
-        }
-
-        .watermark {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.04; width: 60%; pointer-events: none; z-index: 0;
-        }
-
-        .izq { width: 33%; border-right: 2px dashed #cbd5e1; padding-right: 8mm; display: flex; flex-direction: column; z-index: 1; }
-        .der { width: 67%; display: flex; flex-direction: column; z-index: 1; }
-        
-        .logo-container { text-align: center; margin-bottom: 5mm; }
-        .logo-container img { max-width: 110px; max-height: 110px; object-fit: contain; }
-        
-        .titulo-empresa { text-align: center; font-size: 18px; font-weight: 800; color: #1e3a8a; letter-spacing: 0.5px; margin: 0 0 2px 0; }
-        .sub-empresa { text-align: center; font-size: 10px; color: #64748b; margin-bottom: 6mm; line-height: 1.4; }
-        
-        .info-box { background: #f8fafc; border: 1px solid #e2e8f0; padding: 4mm; border-radius: 8px; margin-bottom: 4mm; }
-        .info-box-title { font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; margin-bottom: 2mm; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
-        .info-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
-        .info-row strong { color: #0f172a; }
-        
-        .total-box { background: #f0fdf4; border: 2px solid #22c55e; border-radius: 10px; text-align: center; padding: 5mm; margin-top: auto; }
-        .total-label { font-size: 12px; font-weight: 800; color: #166534; letter-spacing: 1px; }
-        .total-amount { font-size: 32px; font-weight: 800; color: #15803d; margin-top: 2px; }
-        
-        .firma-box { text-align: center; margin-top: 8mm; }
-        .firma-linea { border-top: 1px solid #334155; width: 85%; margin: 0 auto 3px auto; }
-        .firma-texto { font-size: 10px; color: #64748b; font-weight: 600; }
-
-        .seccion-titulo { font-size: 14px; font-weight: 800; color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 2px; margin: 0 0 3mm 0; text-transform: uppercase; }
-        
-        .tabla-moderna { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
-        .tabla-moderna th { background: #f1f5f9; color: #334155; font-size: 10px; padding: 6px; text-transform: uppercase; border-bottom: 2px solid #cbd5e1; }
-        .tabla-moderna td { font-size: 11px; padding: 6px; border-bottom: 1px solid #e2e8f0; }
-        .td-center { text-align: center; }
-        .td-right { text-align: right; }
-        .celda-llenar { border-bottom: 1px dashed #94a3b8 !important; }
-        
-        .pagares-doble { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
-        .planes { width: 100%; border-collapse: collapse; }
-        
-        .legal { font-size: 8.5px; color: #64748b; text-align: justify; line-height: 1.5; border-top: 1px dashed #cbd5e1; padding-top: 3mm; margin-top: auto; }
-
-        @media print {
-            body { background: white; padding: 0; }
-            .barra-herramientas { display: none !important; }
-            .hoja { margin: 0; border-radius: 0; box-shadow: none; width: 100%; height: 100%; padding: 10mm; }
-        }
+        .centro { text-align: center; }
+        .negrita { font-weight: bold; }
+        .separador { border-top: 1px dashed #000; margin: 8px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .total-box { border: 2px solid #000; padding: 10px; margin: 10px 0; text-align: center; }
+        .legal { font-size: 9.5px; text-align: justify; margin: 10px 0; line-height: 1.3; }
+        .no-print { background: #eee; padding: 10px; text-align: center; margin-bottom: 10px; }
+        @media print { .no-print { display: none; } }
     </style>
     </head>
     <body>
-        
-    <div class="barra-herramientas no-print">
-        <button class="btn-print" onclick="window.print()">🖨️ Imprimir Ticket</button>
-        <button class="btn-img" onclick="guardarComoImagen()">🖼️ Guardar como Imagen</button>
-    </div>
+        <div class="no-print"><button onclick="window.print()" style="padding:10px 20px; cursor:pointer;">🖨️ IMPRIMIR TICKET</button></div>
 
-    <div class="hoja" id="nota-venta">
-        <img src="img/logo.png" class="watermark" onerror="this.style.display='none'">
-        
-        <div class="izq">
-            <div class="logo-container">
-                <img src="img/logo.png" onerror="this.outerHTML='<span style=\\'font-size:40px;\\'>🏛️</span>'">
-            </div>
-            <h1 class="titulo-empresa">MI PUEBLITO</h1>
-            <div class="sub-empresa">MUEBLERÍA Y LÍNEA BLANCA<br>Santiago Cuaula, Tlaxcala</div>
-
-            <div class="info-box" style="background:#eff6ff; border-color:#bfdbfe;">
-                <div class="info-row" style="margin-bottom:0;">
-                    <span style="color:#1e40af; font-weight:bold;">FOLIO:</span>
-                    <strong style="color:#1e3a8a; font-size:14px;">${folio}</strong>
-                </div>
-                <div class="info-row" style="margin-top:2px;">
-                    <span style="color:#64748b;">FECHA:</span>
-                    <strong>${fechaActual}</strong>
-                </div>
-            </div>
-
-            <div class="info-box">
-                <div class="info-box-title">Datos del Cliente</div>
-                <div style="font-size:13px; font-weight:bold; color:#0f172a; margin-bottom:3px;">${datosVenta.cliente.nombre}</div>
-                <div style="font-size:11px; color:#475569;">${datosVenta.cliente.telefono ? '📞 ' + datosVenta.cliente.telefono + '<br>' : ''}
-                ${datosVenta.cliente.direccion ? '📍 ' + datosVenta.cliente.direccion : ''}</div>
-            </div>
-
-            <div class="info-box">
-                <div class="info-box-title">Resumen de Operación</div>
-                <div class="info-row"><span>Método:</span> <strong style="text-transform:uppercase;">${datosVenta.metodo}</strong></div>
-                <div class="info-row"><span>Enganche Inicial:</span> <strong>${dinero(datosVenta.enganche || 0)}</strong></div>
-                <div class="info-row"><span>Saldo a Financiar:</span> <strong>${dinero(datosVenta.total - (datosVenta.enganche || 0))}</strong></div>
-            </div>
-
-            <div class="total-box">
-                <div class="total-label">TOTAL OPERACIÓN</div>
-                <div class="total-amount">${dinero(datosVenta.total)}</div>
-            </div>
-
-            <div class="firma-box">
-                <div class="firma-linea"></div>
-                <div class="firma-texto">FIRMA DE CONFORMIDAD</div>
-            </div>
+        <div class="centro">
+            <img src="img/logo.png" style="width:50px; height:50px; object-fit:contain;" onerror="this.style.display='none'">
+            <div class="negrita" style="font-size:16px;">MI PUEBLITO</div>
+            <div style="font-size:10px;">Mueblería y Línea Blanca<br>Santiago Cuaula, Tlaxcala</div>
         </div>
 
-        <div class="der">
-            <h3 class="seccion-titulo">DESCRIPCIÓN DE PRODUCTOS</h3>
-            <table class="tabla-moderna">
-                <thead><tr><th class="td-center" style="width:10%;">CANT</th><th>DESCRIPCIÓN</th><th class="td-right" style="width:20%;">P. UNIT</th><th class="td-right" style="width:20%;">SUBTOTAL</th></tr></thead>
-                <tbody>${tablaProductos}</tbody>
+        <div class="separador"></div>
+
+        <div>
+            <b>FOLIO: ${folio}</b><br>
+            FECHA: ${fechaActual}<br>
+            CLIENTE: ${datosVenta.cliente.nombre}<br>
+            ${datosVenta.cliente.telefono ? 'TEL: ' + datosVenta.cliente.telefono : ''}
+        </div>
+
+        <div class="separador"></div>
+        <div class="centro negrita" style="font-size:10px;">DETALLE DE COMPRA</div>
+        <div style="margin-top:5px;">${listaProductos}</div>
+
+        <div class="separador"></div>
+
+        <div style="display:flex; justify-content:space-between;">
+            <span>Subtotal Mercancía:</span>
+            <span>${dinero(datosVenta.total - (datosVenta.intereses || 0))}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+            <span>Enganche Recibido:</span>
+            <span>${dinero(datosVenta.enganche || 0)}</span>
+        </div>
+        
+        <div class="total-box">
+            <div style="font-size:10px;">TOTAL A PAGAR</div>
+            <div style="font-size:24px;" class="negrita">${dinero(datosVenta.total)}</div>
+        </div>
+
+        ${datosVenta.metodo === "credito" ? `
+            <div class="centro negrita" style="background:#000; color:#fff; padding:4px; font-size:10px; margin-bottom:5px;">POLÍTICA DE LIQUIDACIÓN</div>
+            <div style="font-size:9px; text-align:center; margin-bottom:5px;">Si liquida anticipadamente, el total baja a:</div>
+            ${planesHTML}
+            
+            <div class="separador"></div>
+            <div class="centro negrita" style="font-size:10px; margin-bottom:5px;">CALENDARIO DE PAGOS</div>
+            <table style="margin-bottom: 10px;">
+                <thead>
+                    <tr style="border-bottom:1px solid #000;">
+                        <th align="left" style="padding-bottom:3px;">#</th>
+                        <th align="center" style="padding-bottom:3px;">VENCIMIENTO</th>
+                        <th align="right" style="padding-bottom:3px;">MONTO</th>
+                    </tr>
+                </thead>
+                <tbody>${tablaPagares}</tbody>
             </table>
-            
-            ${datosVenta.metodo === "credito" ? `
-                <h3 class="seccion-titulo" style="margin-top:5mm;">CALENDARIO DE PAGARÉS</h3>
-                ${pagaresHTML}
-            ` : `
-                <h3 class="seccion-titulo" style="margin-top:5mm;">PLANES DISPONIBLES (REFERENCIA)</h3>
-                <table class="planes"><tr>${tablaPlanes}</tr></table>
-            `}
-            
-            <div class="legal">${generarLeyendaPagare(datosVenta, totalAPagar, filasPagares.length > 15)}</div>
-        </div>
-    </div>
+        ` : ''}
 
-    <!-- Script para exportar a imagen -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script>
-        function guardarComoImagen() {
-            const btnImg = document.querySelector('.btn-img');
-            btnImg.innerText = "⏳ Generando...";
-            const nodo = document.getElementById('nota-venta');
-            html2canvas(nodo, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => {
-                const enlace = document.createElement('a');
-                enlace.download = 'Nota_Venta_' + '${folio}' + '.png';
-                enlace.href = canvas.toDataURL('image/png');
-                enlace.click();
-                btnImg.innerText = "🖼️ Guardar como Imagen";
-            });
-        }
-    </script>
+        <div class="separador"></div>
+
+        <div class="legal">
+            ${generarLeyendaPagare(datosVenta, totalAPagar, false)}
+        </div>
+
+        <div style="margin-top:30px; text-align:center;">
+            <div style="border-top: 1px solid #000; width: 80%; margin: 0 auto;"></div>
+            <div class="negrita" style="font-size:10px; margin-top:5px;">FIRMA DE CONFORMIDAD</div>
+        </div>
+
+        <div class="centro" style="margin-top:20px; font-size:9px;">
+            *** Gracias por su compra ***<br>
+            Mueblería Mi Pueblito
+        </div>
     </body>
     </html>`;
 
-    // 5. Abrir la ventana
-    const ventanaImpresion = window.open('', '_blank');
-    if (!ventanaImpresion) {
-        alert("⚠️ Habilita las ventanas emergentes para imprimir el ticket");
-    } else {
-        ventanaImpresion.document.write(ticketHTML);
-        ventanaImpresion.document.close();
-        ventanaImpresion.focus();
+    const win = window.open('', '_blank');
+    if (!win) {
+        alert("⚠️ Habilita las ventanas emergentes para ver el ticket.");
+        return;
     }
+    win.document.write(ticketHTML);
+    win.document.close();
+    win.focus();
     
-    // El guardado del ticket en la base de datos se mantiene intacto
     guardarTicketEnRegistro(datosVenta, folio);
 }
 
@@ -1654,7 +1551,7 @@ function guardarTicketEnRegistro(datosVenta, folio) {
     const ticketRegistro = {
         id: Date.now(),
         folio: folio,
-        fechaEmision: datosVenta.fechaIso,
+        fechaEmision: datosVenta.fechaIso || new Date().toISOString(),
         cliente: {
             id: datosVenta.cliente.id,
             nombre: datosVenta.cliente.nombre,
@@ -1687,7 +1584,18 @@ function guardarTicketEnRegistro(datosVenta, folio) {
         ultimaActualizacion: new Date().toISOString()
     };
 
-    registroTickets.push(ticketRegistro);
+    // 🛡️ BLINDAJE ANTI-DUPLICADOS
+    const indexExistente = registroTickets.findIndex(t => t.folio === folio);
+    
+    if (indexExistente !== -1) {
+        // Si ya existe (ej. es una reimpresión), mantenemos su ID original y solo actualizamos
+        ticketRegistro.id = registroTickets[indexExistente].id;
+        registroTickets[indexExistente] = ticketRegistro;
+    } else {
+        // Si es totalmente nuevo, lo agregamos a la lista
+        registroTickets.push(ticketRegistro);
+    }
+
     if (!StorageService.set("registroTickets", registroTickets)) {
         console.error("❌ Error guardando ticket en registro");
     }
@@ -1735,59 +1643,73 @@ function renderEntregas() {
     contenedor.innerHTML = html + "</tbody></table>";
 }
 
+// ===== DETALLE DE ENTREGA (CON SOPORTE PARCIAL) =====
 function abrirDetalleEntrega(idSalida) {
     salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
-    const s = salidasPendientesVenta.find(x => x.id === idSalida);
+    const s = salidasPendientesVenta.find(x => String(x.id) === String(idSalida));
     if (!s) return;
 
     let clientes = StorageService.get("clientes", []);
-    const clienteObj = clientes.find(c => c.id === s.clienteId || c.id === Number(s.clienteId));
-    const direccion = clienteObj ? (clienteObj.direccion || '—') : '—';
+    const clienteObj = clientes.find(c => String(c.id) === String(s.clienteId));
+    const direccion = clienteObj ? (clienteObj.direccion || '—') : (s.clienteDireccion || '—');
     const telefono = clienteObj ? (clienteObj.telefono || '—') : '—';
 
-    const itemsHtml = (s.items || []).map(i => `
+    // Generamos los inputs para que el vendedor decida cuánto entregar hoy
+    const itemsHtml = (s.items || []).map((i, index) => {
+        if (i.cantidad <= 0) return ''; // Si ya se entregó todo este item, lo omitimos
+        
+        return `
         <tr>
-            <td style="padding:6px 8px; border-bottom:1px solid #f3f4f6;">${i.nombre || '—'}</td>
-            <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${i.cantidad || 1}</td>
-            <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #f3f4f6;">${dinero(i.precio || 0)}</td>
-        </tr>`).join('');
-
-    const totalVenta = (s.items || []).reduce((acc, i) => acc + ((i.precio || 0) * (i.cantidad || 1)), 0);
+            <td style="padding:8px; border-bottom:1px solid #f3f4f6;">
+                <strong>${i.nombre || '—'}</strong>
+                ${i.colorElegido ? `<br><small style="color:#64748b;">Color: ${i.colorElegido}</small>` : ''}
+            </td>
+            <td style="padding:8px; text-align:center; border-bottom:1px solid #f3f4f6; color:#b91c1c; font-weight:bold;">
+                ${i.cantidad}
+            </td>
+            <td style="padding:8px; text-align:center; border-bottom:1px solid #f3f4f6;">
+                <input type="number" id="entregar-${s.id}-${index}" min="0" max="${i.cantidad}" value="${i.cantidad}" 
+                    style="width:60px; padding:6px; text-align:center; border:2px solid #3b82f6; border-radius:6px; font-weight:bold;">
+            </td>
+        </tr>`;
+    }).join('');
 
     const modalHTML = `
         <div data-modal="detalle-entrega" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
-            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:580px; max-height:90vh; overflow-y:auto;">
+            <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h2 style="margin:0;">🚚 Detalle de Entrega</h2>
+                    <h2 style="margin:0; color:#1e3a8a;">🚚 Gestión de Entrega</h2>
                     <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
                 </div>
-                <div style="display:grid; gap:10px; margin-bottom:20px; background:#f8fafc; padding:15px; border-radius:8px;">
+                
+                <div style="display:grid; gap:8px; margin-bottom:20px; background:#f8fafc; padding:15px; border-radius:8px; border: 1px solid #e2e8f0; font-size:13px;">
                     <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Folio:</span><strong>${s.folioVenta}</strong></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Cliente:</span><strong>${s.clienteNombre || '—'}</strong></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Dirección:</span><span>${direccion}</span></div>
                     <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Teléfono:</span><span>${telefono}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Fecha:</span><span>${s.fecha || '—'}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Método de Pago:</span><span>${s.metodoPago || '—'}</span></div>
                 </div>
-                <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:15px;">
-                    <thead><tr style="background:#f3f4f6;">
-                        <th style="padding:6px 8px; text-align:left;">Producto</th>
-                        <th style="padding:6px 8px; text-align:right;">Cant.</th>
-                        <th style="padding:6px 8px; text-align:right;">Precio</th>
+
+                <div style="background:#fffbeb; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:12px; border:1px solid #fcd34d;">
+                    💡 <strong>Entregas Parciales:</strong> Modifica la cantidad en la columna "A entregar hoy". Si el cliente se lleva solo una parte, el resto seguirá quedando pendiente en el sistema.
+                </div>
+
+                <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:20px;">
+                    <thead><tr style="background:#f1f5f9;">
+                        <th style="padding:10px; text-align:left;">Producto</th>
+                        <th style="padding:10px; text-align:center;">Pendiente</th>
+                        <th style="padding:10px; text-align:center; color:#1d4ed8;">A entregar hoy</th>
                     </tr></thead>
                     <tbody>${itemsHtml}</tbody>
                 </table>
-                <div style="text-align:right; font-size:16px; font-weight:bold; color:#2c3e50; margin-bottom:20px;">
-                    Total: ${dinero(totalVenta)}
-                </div>
+                
                 <div style="display:flex; gap:10px;">
-                    <button onclick="aplicarSalidaPendienteVentas(${s.id}); document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();"
-                            style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
-                        ✅ Aplicar Entrega
+                    <button onclick="aplicarSalidaPendienteVentas('${s.id}')"
+                            style="flex:2; padding:14px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">
+                        ✅ Registrar Entrega e Imprimir Vale
                     </button>
                     <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();"
-                            style="flex:1; padding:12px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">
-                        ✕ Cerrar
+                            style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
+                        Cancelar
                     </button>
                 </div>
             </div>
@@ -1796,7 +1718,163 @@ function abrirDetalleEntrega(idSalida) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-// ===== REIMPRIMIR TICKET DE VENTA =====
+function aplicarSalidaPendienteVentas(idSalida) {
+    let salidas = StorageService.get("salidasPendientesVenta", []);
+    const idx = salidas.findIndex(s => String(s.id) === String(idSalida));
+    if (idx === -1) return;
+
+    const s = salidas[idx];
+    const productosActuales = StorageService.get("productos", []);
+    let entregadosHoy = [];
+    let quedanPendientes = false;
+
+    (s.items || []).forEach((item, index) => {
+        const inputEl = document.getElementById(`entregar-${s.id}-${index}`);
+        let cantAEntregar = inputEl ? parseInt(inputEl.value) : 0;
+        
+        if (cantAEntregar > 0) {
+            const prod = productosActuales.find(p => String(p.id) === String(item.productoId));
+            if (prod) {
+                // Descuento de stock
+                prod.stock = Math.max(0, (prod.stock || 0) - cantAEntregar);
+                
+                // Registro de movimiento de inventario
+                registrarMovimientoInterno(prod.id, `Entrega - ${s.folioVenta}`, cantAEntregar, "salida");
+
+                entregadosHoy.push({
+                    nombre: item.nombre,
+                    colorElegido: item.colorElegido || '',
+                    cantidad: cantAEntregar
+                });
+                item.cantidad -= cantAEntregar;
+            }
+        }
+        if (item.cantidad > 0) quedanPendientes = true;
+    });
+
+    if (entregadosHoy.length === 0) return alert("⚠️ No hay nada que entregar.");
+
+    s.estatus = quedanPendientes ? "Parcial" : "Entregado";
+    s.fechaUltimaEntrega = new Date().toLocaleDateString();
+
+    StorageService.set("salidasPendientesVenta", salidas);
+    StorageService.set("productos", productosActuales);
+
+    document.querySelector('[data-modal="detalle-entrega"]')?.remove();
+    
+    // Imprimir Vale
+    generarValeEntrega(s, entregadosHoy);
+    renderEntregas();
+}
+
+// Función auxiliar para mantener limpio el historial
+function registrarMovimientoInterno(id, concepto, cant, tipo) {
+    const movs = StorageService.get("movimientosInventario", []);
+    movs.push({
+        id: Date.now(),
+        productoId: id,
+        tipo: tipo,
+        cantidad: cant,
+        concepto: concepto,
+        fecha: new Date().toLocaleString()
+    });
+    StorageService.set("movimientosInventario", movs);
+}
+// ===== VALE DE ENTREGA TÉRMICO (80MM) =====
+function generarValeEntrega(datosSalida, articulosEntregadosHoy) {
+    const folio = datosSalida.folioVenta;
+    const fechaImpresion = new Date().toLocaleString('es-MX', { hour12: true });
+
+    let listaHTML = '';
+    articulosEntregadosHoy.forEach(art => {
+        listaHTML += `
+            <div style="border-bottom: 1px dashed #ccc; padding: 6px 0;">
+                <div style="display:flex; justify-content:space-between; font-size: 13px;">
+                    <span style="font-weight:bold;">${art.cantidad}x</span>
+                    <span style="flex:1; margin-left:8px; text-align:left;">${art.nombre}</span>
+                </div>
+                ${art.colorElegido ? `<small style="display:block; color:#555; margin-left:25px;">Color: ${art.colorElegido}</small>` : ''}
+            </div>`;
+    });
+
+    const htmlVale = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: 80mm auto; margin: 0; }
+        body { 
+            font-family: 'Courier New', Courier, monospace; 
+            width: 72mm; margin: 4mm auto; color: #000; background: #fff;
+            line-height: 1.3; font-size: 12px;
+        }
+        .centro { text-align: center; }
+        .negrita { font-weight: bold; }
+        .separador { border-top: 2px dashed #000; margin: 12px 0; }
+        .caja-legal { border: 1px solid #000; padding: 10px; margin: 15px 0; font-size: 10px; text-align: justify; line-height: 1.4; }
+        .no-print { background: #eee; padding: 10px; text-align: center; margin-bottom: 10px; }
+        @media print { .no-print { display: none; } }
+    </style>
+    </head>
+    <body>
+        <div class="no-print">
+            <button onclick="window.print()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">🖨️ IMPRIMIR VALE</button>
+        </div>
+
+        <div class="centro">
+            <div class="negrita" style="font-size:18px;">MI PUEBLITO</div>
+            <div style="font-size:12px; margin-top:2px;">VALE DE SALIDA Y ENTREGA</div>
+            <div style="font-size:10px; margin-top:2px;">${fechaImpresion}</div>
+        </div>
+
+        <div class="separador"></div>
+
+        <div>
+            <b>REF VENTA: ${folio}</b><br>
+            CLIENTE: ${datosSalida.clienteNombre || 'Público en General'}<br>
+            MÉTODO: ${datosSalida.metodoPago || '—'}
+        </div>
+
+        <div class="separador"></div>
+        <div class="centro negrita" style="font-size:11px; margin-bottom:8px;">MERCANCÍA ENTREGADA HOY:</div>
+        <div>
+            ${listaHTML}
+        </div>
+
+        <div class="caja-legal">
+            <div class="centro negrita" style="margin-bottom:5px;">DECLARACIÓN DE CONFORMIDAD</div>
+            Recibí de entera conformidad la mercancía descrita en la parte superior. Manifiesto que el producto ha sido revisado detalladamente frente a mí y se encuentra en <b>perfectas condiciones físicas</b>, sin raspaduras, manchas, roturas o defectos de fabricación visibles. Acepto que a partir de este momento la custodia, cuidado y traslado de los bienes corre por mi exclusiva cuenta.
+        </div>
+
+        <div style="margin-top:50px; text-align:center;">
+            <div style="border-top: 1px solid #000; width: 85%; margin: 0 auto;"></div>
+            <div class="negrita" style="font-size:11px; margin-top:5px;">FIRMA DEL CLIENTE</div>
+        </div>
+
+        <div style="margin-top:40px; text-align:center;">
+            <div style="border-top: 1px solid #000; width: 60%; margin: 0 auto;"></div>
+            <div style="font-size:10px; margin-top:5px;">ENTREGÓ (ALMACÉN/PISO)</div>
+        </div>
+
+        <div class="centro" style="margin-top:30px; font-size:9px;">
+            *** Conserve este documento ***<br>
+            Mueblería Mi Pueblito
+        </div>
+    </body>
+    </html>`;
+
+    const win = window.open('', '_blank');
+    if(win){
+        win.document.write(htmlVale);
+        win.document.close();
+        win.focus();
+    } else {
+        alert("⚠️ Habilita las ventanas emergentes para ver el Vale de Entrega.");
+    }
+}
+window.aplicarSalidaPendienteVentas = aplicarSalidaPendienteVentas;
+
 function renderReimprimirVenta() {
     const contenedor = document.getElementById("contenidoReimprimirVenta");
     if (!contenedor) return;
@@ -1832,6 +1910,16 @@ function renderReimprimirVenta() {
         return true;
     }).sort((a, b) => new Date(b.fechaEmision) - new Date(a.fechaEmision));
 
+    // 🧹 LIMPIEZA VISUAL: Filtramos los duplicados históricos para que no salgan en pantalla
+    const foliosUnicos = new Set();
+    filtrados = filtrados.filter(t => {
+        if (foliosUnicos.has(t.folio)) {
+            return false; // Ya lo vimos, lo ocultamos
+        }
+        foliosUnicos.add(t.folio);
+        return true; // Es nuevo, lo mostramos
+    });
+
     if (filtrados.length === 0) {
         contenedor.innerHTML = `<div style="background:#f3f4f6; padding:30px; border-radius:10px; text-align:center; color:#6b7280;">
             <p style="font-size:16px;">🔍 Sin resultados para los filtros aplicados.</p>
@@ -1860,10 +1948,10 @@ function renderReimprimirVenta() {
             <td>${t.cliente?.nombre || '—'}</td>
             <td>${fecha}</td>
             <td><strong>${dinero(total)}</strong></td>
-            <td>${metodo}</td>
+            <td style="text-transform: uppercase;">${metodo}</td>
             <td style="text-align:center;">
                 <button onclick="reimprimirTicketVenta('${folioEsc}')"
-                        style="padding:6px 12px; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">
+                        style="padding:6px 12px; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">
                     🖨️ Reimprimir
                 </button>
             </td>
@@ -2339,6 +2427,96 @@ function guardarAuditoriaDefinitiva() {
     // Cerrar modal y refrescar (si estás en la vista de cobranza)
     document.querySelector('[data-modal="auditoria-cxc"]').remove();
     if(typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+}
+// ===== GENERADOR DE VALE DE ENTREGA (PARA ENTREGAS TOTALES O PARCIALES) =====
+function generarValeEntrega(datosVenta, articulosAEntregar) {
+    const folio = datosVenta.folio;
+    const fechaEntrega = new Date().toLocaleDateString('es-MX', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    let listaEntregada = '';
+    articulosAEntregar.forEach(art => {
+        listaEntregada += `
+            <div style="border-bottom: 1px solid #eee; padding: 5px 0;">
+                <div style="display:flex; justify-content:space-between; font-size: 13px;">
+                    <span><b>${art.cantidad || 1}x</b> ${art.nombre}</span>
+                </div>
+                ${art.colorElegido ? `<small style="color:#555;">🎨 Color: ${art.colorElegido}</small>` : ''}
+            </div>`;
+    });
+
+    const htmlVale = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: 80mm auto; margin: 0; }
+        body { 
+            font-family: 'Courier New', monospace; 
+            width: 72mm; margin: 4mm auto; color: #000; background: #fff;
+            line-height: 1.3; font-size: 12px;
+        }
+        .centro { text-align: center; }
+        .negrita { font-weight: bold; }
+        .separador { border-top: 1px dashed #000; margin: 10px 0; }
+        .caja-conformidad { border: 1px solid #000; padding: 8px; margin: 15px 0; font-size: 10px; text-align: justify; }
+        .no-print { background: #f0f0f0; padding: 10px; text-align: center; margin-bottom: 10px; }
+        @media print { .no-print { display: none; } }
+    </style>
+    </head>
+    <body>
+        <div class="no-print">
+            <button onclick="window.print()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">🖨️ IMPRIMIR COMPROBANTE</button>
+        </div>
+
+        <div class="centro">
+            <div class="negrita" style="font-size:16px;">MI PUEBLITO</div>
+            <div class="negrita">COMPROBANTE DE ENTREGA</div>
+            <div style="font-size:10px;">${fechaEntrega}</div>
+        </div>
+
+        <div class="separador"></div>
+
+        <div>
+            <b>VENTA REF: ${folio}</b><br>
+            CLIENTE: ${datosVenta.cliente.nombre}<br>
+            DIRECCIÓN: ${datosVenta.cliente.direccion || 'Entrega en tienda'}
+        </div>
+
+        <div class="separador"></div>
+        <div class="centro negrita" style="font-size:11px;">MERCANCÍA QUE RECIBE:</div>
+        <div style="margin-top:10px;">
+            ${listaEntregada}
+        </div>
+
+        <div class="caja-conformidad">
+            <b>DECLARACIÓN DE CONFORMIDAD:</b><br>
+            Recibí de entera conformidad la mercancía arriba descrita. Manifiesto que el producto ha sido revisado a detalle y se encuentra en <b>perfectas condiciones físicas</b>, sin raspaduras, golpes o defectos de fabricación visibles. Acepto que a partir de este momento la custodia y cuidado del mueble corre por mi cuenta.
+        </div>
+
+        <div style="margin-top:40px; text-align:center;">
+            <div style="border-top: 1px solid #000; width: 80%; margin: 0 auto;"></div>
+            <div class="negrita" style="font-size:10px; margin-top:5px;">FIRMA DEL CLIENTE</div>
+            <div style="font-size:9px;">DNI/Identificación: ________________</div>
+        </div>
+
+        <div style="margin-top:30px; text-align:center;">
+            <div style="border-top: 1px solid #000; width: 60%; margin: 0 auto;"></div>
+            <div style="font-size:9px; margin-top:5px;">ENTREGADO POR (Personal)</div>
+        </div>
+
+        <div class="centro" style="margin-top:30px; font-size:9px;">
+            *** Documento para control de inventario ***<br>
+            Mueblería Mi Pueblito
+        </div>
+    </body>
+    </html>`;
+
+    const win = window.open('', '_blank');
+    win.document.write(htmlVale);
+    win.document.close();
 }
 
 // Exponer la función globalmente para poder llamarla desde un botón

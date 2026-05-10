@@ -1,6 +1,7 @@
 // ===== HELPERS DE CUENTA / MEDIO DE PAGO =====
-// Definir clientes globalmente para evitar ReferenceError
-clientes = StorageService.get("clientes", []);
+// Definir clientes globalmente correctamente
+window.clientes = StorageService.get("clientes", []);
+
 function _escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -107,15 +108,15 @@ function guardarCliente() {
     }
     let clientesBD = StorageService.get("clientes", []);
 
-    if (clienteEditandoId) {
-        const index = clientesBD.findIndex(c => c.id === clienteEditandoId);
+    if (window.clienteEditandoId) {
+        const index = clientesBD.findIndex(c => c.id === window.clienteEditandoId);
         if (index !== -1) {
             clientesBD[index].nombre   = nombre;
             clientesBD[index].direccion = direccion;
             clientesBD[index].telefono = telefono;
             clientesBD[index].referencia = referencia;
         }
-        clienteEditandoId = null;
+        window.clienteEditandoId = null;
     } else {
         clientesBD.push({
             id: Date.now(),
@@ -143,7 +144,11 @@ function renderClientes() {
     const cont = document.getElementById("listaClientes");
     if (!cont) return;
 
-    if (clientes.length === 0) {
+    // LA CLAVE: Leer directo del baúl de datos, no de variables temporales
+    const listaClientes = StorageService.get("clientes", []);
+    window.clientes = listaClientes; // Sincronizar memoria global
+
+    if (listaClientes.length === 0) {
         cont.innerHTML = "<p style='color:gray; padding:20px;'>No hay clientes registrados.</p>";
         return;
     }
@@ -159,7 +164,7 @@ function renderClientes() {
             </tr></thead>
             <tbody>`;
 
-    clientes.forEach(c => {
+    listaClientes.forEach(c => {
         html += `
             <tr>
                 <td><b>${_escapeHtml(c.nombre)}</b></td>
@@ -178,7 +183,6 @@ function renderClientes() {
 
 function eliminarCliente(id) {
     if (confirm("¿Eliminar este cliente definitivamente?")) {
-        // CÓDIGO NUEVO:
         let clientesBD = StorageService.get("clientes", []);
         clientesBD = clientesBD.filter(c => c.id !== id);
         if (!StorageService.set("clientes", clientesBD)) {
@@ -190,29 +194,29 @@ function eliminarCliente(id) {
 }
 
 function prepararEdicionCliente(id) {
-    const c = clientes.find(cli => cli.id === id);
+    const c = window.clientes.find(cli => cli.id === id);
     if (!c) return;
     document.getElementById("clienteNombre").value   = c.nombre;
     document.getElementById("clienteDireccion").value = c.direccion || '';
     document.getElementById("clienteTelefono").value = c.telefono || '';
     document.getElementById("clienteReferencia").value = c.referencia || '';
-    clienteEditandoId = id;
+    window.clienteEditandoId = id;
     window.scrollTo(0, 0);
 }
 
 // ===== CUENTAS POR COBRAR =====
 function irASeleccionCliente() {
-    navA("seleccionarcliente");
+    if(typeof navA === 'function') navA("seleccionarcliente");
     renderResumenVentaCliente();
     cargarClientesSelect();
 }
 
 function mostrarInfoCliente() {
     const div = document.getElementById("infoCliente");
-    if (!clienteSeleccionado || !div) return;
+    if (!window.clienteSeleccionado || !div) return;
 
     // Obtener la calificación del Buró
-    const score = window.calcularCalificacionCliente(clienteSeleccionado.id);
+    const score = window.calcularCalificacionCliente(window.clienteSeleccionado.id);
 
     div.innerHTML = `
         <div style="background:#f8fafc; padding:16px; border-radius:12px; border:1px solid #e2e8f0; position:relative;">
@@ -222,11 +226,11 @@ function mostrarInfoCliente() {
                 <span style="font-size:9px; font-weight:bold; color:${score.color}; text-transform:uppercase;">${score.texto}</span>
             </div>
 
-            <strong style="font-size:16px; color:#0f172a; display:block; margin-bottom:8px;">👤 ${clienteSeleccionado.nombre}</strong>
+            <strong style="font-size:16px; color:#0f172a; display:block; margin-bottom:8px;">👤 ${window.clienteSeleccionado.nombre}</strong>
             <div style="font-size:13px; color:#475569; line-height:1.5;">
-                ${clienteSeleccionado.direccion ? `📍 ${clienteSeleccionado.direccion}<br>` : ''}
-                ${clienteSeleccionado.telefono ? `📞 ${clienteSeleccionado.telefono}<br>` : ''}
-                ${clienteSeleccionado.referencia ? `📝 ${clienteSeleccionado.referencia}` : ''}
+                ${window.clienteSeleccionado.direccion ? `📍 ${window.clienteSeleccionado.direccion}<br>` : ''}
+                ${window.clienteSeleccionado.telefono ? `📞 ${window.clienteSeleccionado.telefono}<br>` : ''}
+                ${window.clienteSeleccionado.referencia ? `📝 ${window.clienteSeleccionado.referencia}` : ''}
             </div>
             
             ${score.estrellas.includes('⭐') && score.estrellas.length < 3 ? `
@@ -238,28 +242,30 @@ function mostrarInfoCliente() {
     `;
 }
 
-function cargarClientesSelect(lista = clientes) {
-    // Renderiza tarjetas dinámicas en el contenedor del picker de clientes (vista seleccionarcliente)
+// Le quitamos el valor por defecto para obligarlo a buscar en el baúl
+function cargarClientesSelect(lista = null) {
     const cont = document.getElementById("listaClientesCards");
     if (!cont) return;
 
+    const listaUsar = lista || StorageService.get("clientes", []);
+    window.clientes = StorageService.get("clientes", []);
+
     cont.innerHTML = "";
 
-    if (lista.length === 0) {
+    if (listaUsar.length === 0) {
         cont.innerHTML = "<p style='color:#9ca3af;text-align:center;padding:20px;'>Sin resultados.</p>";
         return;
     }
 
-    lista.forEach(c => {
+    listaUsar.forEach(c => {
         const div = document.createElement("div");
-        const isSelected = clienteSeleccionado && clienteSeleccionado.id === c.id;
+        const isSelected = window.clienteSeleccionado && window.clienteSeleccionado.id === c.id;
         div.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer;background:${isSelected ? '#eff6ff' : 'white'};transition:background 0.15s;`;
         div.onmouseover = () => { if (!isSelected) div.style.background = '#f9fafb'; };
-        div.onmouseout  = () => { if (!(clienteSeleccionado && clienteSeleccionado.id === c.id)) div.style.background = 'white'; };
+        div.onmouseout  = () => { if (!(window.clienteSeleccionado && window.clienteSeleccionado.id === c.id)) div.style.background = 'white'; };
         div.onclick = () => {
-            clienteSeleccionado = clientes.find(cl => cl.id === c.id);
+            window.clienteSeleccionado = window.clientes.find(cl => cl.id === c.id);
             mostrarInfoCliente();
-            // Resaltar el seleccionado
             cont.querySelectorAll('div').forEach(d => {
                 d.style.background = 'white';
                 d.style.fontWeight = 'normal';
@@ -280,13 +286,11 @@ function cargarClientesSelect(lista = clientes) {
 
 function filtrarClientes() {
     const texto = document.getElementById("buscarCliente").value.toLowerCase();
-
-    const filtrados = clientes.filter(c =>
+    const filtrados = window.clientes.filter(c =>
         (c.nombre || "").toLowerCase().includes(texto) ||
         (c.telefono || "").includes(texto) ||
-        (c.referencia || "").toLowerCase().includes(texto) // <-- ¡Búsqueda por referencia añadida!
+        (c.referencia || "").toLowerCase().includes(texto) 
     );
-
     cargarClientesSelect(filtrados);
 }
 
@@ -308,8 +312,8 @@ function abrirModalCliente() {
         fechaRegistro: new Date().toLocaleDateString()
     };
 
-    clientes.push(nuevo);
-    if (!StorageService.set("clientes", clientes)) {
+    window.clientes.push(nuevo);
+    if (!StorageService.set("clientes", window.clientes)) {
         console.error("❌ Error guardando cliente");
         return;
     }
@@ -321,9 +325,9 @@ function renderResumenVentaCliente() {
     const cont = document.getElementById("resumenVentaCliente");
     if (!cont) return;
 
+    const carrito = StorageService.get("carrito", []);
     let totalContado = carrito.reduce((sum, p) => sum + ((p.precioContado || 0) * (p.cantidad || 1)), 0);
 
-    // Leer estado del carrito (los elementos están en el div oculto del carrito)
     const metodo = document.getElementById("selMetodoPago")?.value || "contado";
     let enganche = parseFloat(document.getElementById("numEnganche")?.value) || 0;
     if (enganche < 0) enganche = 0;
@@ -351,7 +355,6 @@ function renderResumenVentaCliente() {
             </div>`;
     }).join("");
 
-    // Detalle financiero según método
     let detalleFinanciero = `<div style="display:flex; justify-content:space-between; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #e2e8f0;">
             <span style="color:#4a5568;">Subtotal:</span><strong>${dinero(totalContado)}</strong>
         </div>`;
@@ -382,7 +385,7 @@ function renderResumenVentaCliente() {
         if (typeof CalculatorService !== "undefined") {
             try {
                 const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo > 0 ? saldo : totalContado, periodicidad);
-                const idx = (typeof plazoSeleccionado === "number" && plazoSeleccionado >= 0 && plazoSeleccionado < planes.length) ? plazoSeleccionado : 0;
+                const idx = (typeof window.plazoSeleccionado === "number" && window.plazoSeleccionado >= 0 && window.plazoSeleccionado < planes.length) ? window.plazoSeleccionado : 0;
                 const plan = planes[idx];
                 if (plan) planInfo = `<div style="background:#ede9fe; padding:8px; border-radius:5px; margin-top:8px; font-size:12px;">
                         📅 ${plan.meses} meses • ${textoPerio} • ${dinero(plan.abono)}/período<br>
@@ -409,7 +412,6 @@ function renderResumenVentaCliente() {
         </div>`;
 }
 
-// Variable global para recordar qué pestaña del Centro de Comando está activa
 window._pestanaCobranzaActiva = 'todas';
 
 function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
@@ -418,7 +420,6 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
     
-    // Si viene un filtro de estado por el select, sobreescribe la pestaña
     if (filtroEstado) {
         window._pestanaCobranzaActiva = filtroEstado === "Promesa" ? "promesas" : (filtroEstado === "Saldado" ? "saldadas" : "todas");
     }
@@ -431,7 +432,6 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
         return;
     }
 
-    // --- 1. CONSTRUCCIÓN DE LAS PESTAÑAS (TABS) ---
     let htmlTabs = `
     <div style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
         <button onclick="cambiarPestanaCobranza('todas')" style="flex: 1; min-width: 120px; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; border: none; background: ${window._pestanaCobranzaActiva === 'todas' ? '#1e40af' : '#f3f4f6'}; color: ${window._pestanaCobranzaActiva === 'todas' ? 'white' : '#4b5563'};">
@@ -465,34 +465,20 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
 
     let cuentasMostradas = 0;
 
-    // --- 2. PROCESAMIENTO DE CUENTAS (USANDO EL MOTOR CENTRAL) ---
     cuentas.forEach(c => {
         const estadoCta = window._calcularEstadoCuenta(c.folio);
         if(!estadoCta) return;
 
-        // Lógica de Pestañas (Filtro Principal)
         let mostrarEnPestana = false;
         switch (window._pestanaCobranzaActiva) {
-            case 'todas':
-                mostrarEnPestana = estadoCta.estadoGeneral !== "Saldado";
-                break;
-            case 'al_corriente':
-                mostrarEnPestana = estadoCta.estadoGeneral === "Al corriente";
-                break;
-            case 'morosos':
-                mostrarEnPestana = estadoCta.estadoGeneral === "Atrasado" || estadoCta.estadoGeneral === "Crítico";
-                break;
-            case 'promesas':
-                mostrarEnPestana = estadoCta.estadoGeneral === "Promesa";
-                break;
-            case 'saldadas':
-                mostrarEnPestana = estadoCta.estadoGeneral === "Saldado";
-                break;
+            case 'todas': mostrarEnPestana = estadoCta.estadoGeneral !== "Saldado"; break;
+            case 'al_corriente': mostrarEnPestana = estadoCta.estadoGeneral === "Al corriente"; break;
+            case 'morosos': mostrarEnPestana = estadoCta.estadoGeneral === "Atrasado" || estadoCta.estadoGeneral === "Crítico"; break;
+            case 'promesas': mostrarEnPestana = estadoCta.estadoGeneral === "Promesa"; break;
+            case 'saldadas': mostrarEnPestana = estadoCta.estadoGeneral === "Saldado"; break;
         }
 
         if (!mostrarEnPestana) return;
-
-        // Filtro Secundario (Buscador y Select)
         if (filtroEstado && filtroEstado !== estadoCta.estadoGeneral) return;
 
         const dataCliente = clientesBase.find(cli => String(cli.id) === String(c.clienteId) || cli.nombre === c.nombre) || {};
@@ -528,7 +514,6 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
                 <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:4px;" title="Registrar Abono">💰</button>
                 <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 10px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:4px;" title="Registrar Promesa">📝</button>
                 <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="padding:6px 10px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:4px;" title="Estado de Cuenta">📋</button>
-                <!-- 👇 AQUÍ AGREGAMOS EL BOTÓN DE WHATSAPP 👇 -->
                 <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 10px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer;" title="Enviar WhatsApp">💬</button>
             </td>
         </tr>`;
@@ -542,24 +527,20 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
 
     contenedor.innerHTML = htmlTabs + htmlTabla;
 }
+
 window.cambiarPestanaCobranza = function(pestana) {
     window._pestanaCobranzaActiva = pestana;
-    
-    // Limpiamos los filtros tradicionales para que no interfieran con la pestaña
     const inputBusqueda = document.getElementById("filtroClienteCobranza");
     const selectEstado = document.getElementById("filtroEstadoCobranza");
     if(inputBusqueda) inputBusqueda.value = "";
     if(selectEstado) selectEstado.value = "";
-    
     renderCuentasXCobrar();
 };
-// ===== AUTOMATIZACIÓN DE WHATSAPP =====
+
 window.enviarRecordatorioWhatsApp = function(folio) {
-    // 1. Usar el Motor Central para obtener la deuda exacta
     const estadoCta = window._calcularEstadoCuenta(folio);
     if (!estadoCta) return alert("❌ Error al leer la cuenta.");
 
-    // 2. Buscar el teléfono del cliente
     const clientesBase = StorageService.get("clientes", []);
     const cliente = clientesBase.find(cli => String(cli.id) === String(estadoCta.cuenta.clienteId) || cli.nombre === estadoCta.cuenta.nombre);
 
@@ -567,24 +548,18 @@ window.enviarRecordatorioWhatsApp = function(folio) {
         return alert("⚠️ Este cliente no tiene un número de teléfono registrado.");
     }
 
-    // 3. Limpiar el número de teléfono (quitar guiones, espacios)
     let telefono = cliente.telefono.replace(/\D/g, '');
-    
-    // Si tiene 10 dígitos, le agregamos el código de México (+52) automáticamente
     if (telefono.length === 10) {
         telefono = '52' + telefono;
     }
 
-    // 4. Armar el mensaje inteligentemente según el estado de la cuenta
     let mensaje = `Hola *${cliente.nombre}*, te saludamos de *Mueblería Mi Pueblito* 🛋️.\n\n`;
-    
     if (estadoCta.montoVencido > 0) {
         mensaje += `Te recordamos amablemente que tienes un saldo vencido por *$${estadoCta.montoVencido.toFixed(2)}* correspondiente al folio ${folio}.\n\n¿Podemos ayudarte con algo para poner tu cuenta al corriente?`;
     } else {
         mensaje += `Te escribimos para recordarte de tu saldo activo por *$${estadoCta.saldoTotal.toFixed(2)}* del folio ${folio}.\n\nCualquier duda estamos a tus órdenes.`;
     }
 
-    // Si hay una promesa de pago vigente, se lo recordamos cordialmente
     if (estadoCta.promesaVigente && estadoCta.cuenta.promesaPago) {
         const fechaP = new Date(estadoCta.cuenta.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
         mensaje += `\n\nTenemos registrada tu *promesa de pago para el día ${fechaP}*. ¡Muchas gracias por tu compromiso!`;
@@ -592,17 +567,14 @@ window.enviarRecordatorioWhatsApp = function(folio) {
 
     mensaje += `\n\nExcelente día. ✨`;
 
-    // 5. Abrir WhatsApp Web / App
     const url = `https://api.whatsapp.com/send?phone=${telefono}&text=${encodeURIComponent(mensaje)}`;
     window.open(url, '_blank');
 };
+
 function filtrarCuentasCobranza() {
     renderCuentasXCobrar();
 }
 
-// ==========================================
-// 1. REEMPLAZA renderCobranzaEsperada
-// ==========================================
 function renderCobranzaEsperada() {
     const contenedor = document.getElementById("escaleraCobranza");
     if (!contenedor) return;
@@ -618,7 +590,6 @@ function renderCobranzaEsperada() {
         posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [] };
     }
 
-    // A. CALCULAR LO ESPERADO (Solo lo que realmente falta por cobrar)
     pagares.forEach(p => {
         if (p.estado === "Pendiente" || p.estado === "Parcial") {
             const fechaPago = new Date(p.fechaVencimiento);
@@ -628,7 +599,6 @@ function renderCobranzaEsperada() {
                 posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [] };
             }
 
-            // Calculamos lo que falta (ej. si era de 1000 y pagó 400, solo esperamos 600)
             const montoRestante = (p.monto || 0) - (p.montoAbonado || 0);
 
             if (montoRestante > 0) {
@@ -643,11 +613,9 @@ function renderCobranzaEsperada() {
         }
     });
 
-    // B. CALCULAR RECAUDACIÓN REAL (El dinero que realmente entró en ese mes)
     cuentas.forEach(cuenta => {
         if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
             cuenta.abonos.forEach(abono => {
-                // Parsear la fecha del abono para saber en qué mes cayó el dinero
                 const partes = (abono.fecha || '').split('/');
                 let fechaEfectiva = hoy;
                 if (partes.length === 3) {
@@ -666,13 +634,11 @@ function renderCobranzaEsperada() {
         }
     });
 
-    // C. DIBUJAR LAS TARJETAS (Tu mismo diseño)
     let html = `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap:20px;">`;
 
     Object.entries(posMeses).forEach(([mes, datos]) => {
-        if (datos.total === 0) return; // Si no hay nada esperado ni recaudado, se oculta
+        if (datos.total === 0) return; 
 
-        // Calcular porcentaje visual
         const baseCalculo = datos.esperado + datos.recaudado;
         const porcentajeRecaudo = baseCalculo > 0 ? (datos.recaudado / baseCalculo * 100).toFixed(1) : 0;
         
@@ -699,9 +665,6 @@ function renderCobranzaEsperada() {
     contenedor.innerHTML = html;
 }
 
-// ==========================================
-// 2. REEMPLAZA abrirDetalleCobranza
-// ==========================================
 function abrirDetalleCobranza(mesKeyEncoded) {
     const mes = decodeURIComponent(mesKeyEncoded);
     const pagares = StorageService.get("pagaresSistema", []);
@@ -723,7 +686,6 @@ function abrirDetalleCobranza(mesKeyEncoded) {
         const venc = new Date(p.fechaVencimiento);
         const diasAtraso = p.estado !== "Pagado" && venc < hoy ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24)) : 0;
         
-        // Etiqueta visual clara del estado
         let atrasoHtml = '';
         if (p.estado === "Pagado") {
             atrasoHtml = `<span style="color:#27ae60; font-weight:bold; font-size:12px;">✅ Pagado</span>`;
@@ -799,7 +761,6 @@ function exportarCobranzaEsperada() {
     link.click();
 }
 
-// ===== HELPERS: COMBOS DE CUENTA ORIGEN/DESTINO =====
 function _buildCuentaOrigen(idSufijo) {
     return `
         <div class="campo" style="margin-bottom:10px;">
@@ -829,7 +790,7 @@ function _actualizarCuentaEspecifica(idSufijo) {
     const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
     
     if (medio === 'efectivo') {
-        divCuenta.style.display = 'block'; // Mostramos para que elijas la caja
+        divCuenta.style.display = 'block'; 
         selCuenta.innerHTML = cajas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
     } else if (medio === 'transferencia') {
         const cuentasDebito = tarjetas.filter(t => t.tipo === 'debito');
@@ -882,7 +843,7 @@ function abrirModalAbonoAvanzado(folio) {
     
     if (!cuenta) return alert("Cuenta no encontrada.");
 
-    const hoy = new Date(); // Necesario para calcular atrasos
+    const hoy = new Date();
     const todosPagares = pagares
         .filter(p => p.folio === folio)
         .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
@@ -893,7 +854,6 @@ function abrirModalAbonoAvanzado(folio) {
         return s + (p.monto || 0);
     }, 0);
     
-    // --- MANTENEMOS LA CORRECCIÓN DEL PRECIO DE CONTADO ($6,800) ---
     let precioContadoReal = 0;
     if (cuenta.articulos && cuenta.articulos.length > 0) {
         precioContadoReal = cuenta.articulos.reduce((sum, art) => {
@@ -916,7 +876,6 @@ function abrirModalAbonoAvanzado(folio) {
     const diasDesdeVenta = Math.floor((hoy - fechaVenta) / (1000 * 60 * 60 * 24));
     const aplicaPoliticaContado = diasDesdeVenta <= 30; 
 
-    // Lógica de planes cercanos
     let montoProximoMes = null;
     let mesesPlanMasCercano = null;
     if (!aplicaPoliticaContado && Array.isArray(cuenta.saldosPorMes)) {
@@ -935,7 +894,6 @@ function abrirModalAbonoAvanzado(folio) {
             </table>
         </div>` : '';
 
-    // --- RESTAURACIÓN DE LÓGICA DE VENCIDOS ---
     const pagaresHTML = todosPagares.length > 0 ? `
         <div style="margin-bottom:20px;">
             <strong style="color:#374151;">📋 Pagarés:</strong>
@@ -950,7 +908,6 @@ function abrirModalAbonoAvanzado(folio) {
                         
                         let montoDisp = esPagado ? 0 : (p.estado === 'Parcial' ? (p.monto - p.montoAbonado) : p.monto);
                         
-                        // Estilo de fila y badge
                         const rowStyle = esPagado ? 'color:#9ca3af; background:#f9fafb;' : (esVencido ? 'background:#fff1f2;' : '');
                         let badge = `<span style="padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold; ${
                             esPagado ? 'background:#e5e7eb; color:#4b5563;' : 
@@ -968,9 +925,6 @@ function abrirModalAbonoAvanzado(folio) {
             </table>
         </div>` : '';
 
-    // ==========================================
-    // INYECCIÓN DEL SELECTOR UNIVERSAL DE CUENTAS
-    // ==========================================
     let selectorCuentasHTML = '';
     if (typeof window._buildSelectorCuentas === 'function') {
         selectorCuentasHTML = window._buildSelectorCuentas('cuentaOrigen_abono', false);
@@ -1041,47 +995,34 @@ function actualizarAvisoPoliticaAbono(cuenta) {
     const avisoDiv = document.getElementById("avisoPoliticaAbono");
     if (!avisoDiv) return;
 
-    // --- DATOS BASE ---
-    // Precio de la etiqueta (ej. 8800)
     const precioContadoOriginal = Number(cuenta.totalContadoOriginal || 0);
-    // Lo que ya dejó en la tienda (ej. 2000)
     const enganche = Number(cuenta.engancheRecibido || 0);
-    // El saldo real que quedó de la mercancía (ej. 6800)
     const saldoBaseSinInteres = precioContadoOriginal - enganche;
 
-    // --- CÁLCULO DE TIEMPO ---
     const fechaVenta = new Date(cuenta.fecha);
     const fechaHoy = new Date();
     const diferenciaSms = fechaHoy - fechaVenta;
     const dias = Math.floor(diferenciaSms / (1000 * 60 * 60 * 24));
 
-    // --- CONSULTA A LA CALCULADORA ---
-    // Obtenemos todos los posibles planes (1 a 6 meses) para ese saldo de 6800
     const planes = CalculatorService.calcularCredito(saldoBaseSinInteres);
 
     let montoParaLiquidar = 0;
     let mensaje = "";
 
     if (dias <= 30) {
-        // ESCENARIO 1: Menos de 30 días -> Precio Contado
         montoParaLiquidar = saldoBaseSinInteres;
         mensaje = `Política de pago anticipado: Dentro de los primeros 30 días, el cliente puede liquidar al precio sin interés con: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
     } else if (dias <= 60) {
-        // ESCENARIO 2: 31 a 60 días -> Plan 2 Meses (Índice 1)
         montoParaLiquidar = planes[1].total;
         mensaje = `Han pasado ${dias} días. El periodo de contado venció. Puede liquidar con el costo a 2 meses de: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
     } else if (dias <= 90) {
-        // ESCENARIO 3: 61 a 90 días -> Plan 3 Meses (Índice 2)
         montoParaLiquidar = planes[2].total;
         mensaje = `Venta con ${dias} días. Monto para liquidar según plan de 3 meses: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
     } else {
-        // ESCENARIO 4: Más de 90 días -> Se cobra el total del contrato original
         montoParaLiquidar = Number(cuenta.totalVenta || 0); 
         mensaje = `Días transcurridos: ${dias}. Para liquidar debe cubrir el saldo total de su plan actual: <b>$${montoParaLiquidar.toLocaleString('en-US', {minimumFractionDigits:2})}</b>.`;
     }
 
-    // --- RESTAR ABONOS EXTRAS ---
-    // Si el cliente ya dio abonos después del enganche, se restan del monto calculado arriba
     const totalAbonado = (cuenta.abonos || []).reduce((sum, ab) => sum + Number(ab.monto), 0);
     const pagoFinal = montoParaLiquidar - totalAbonado;
 
@@ -1095,7 +1036,6 @@ function actualizarAvisoPoliticaAbono(cuenta) {
 }
 
 function evaluarPoliticaLiquidacion(folio, montoAbono) {
-
     const pagares = StorageService.get("pagaresSistema", []);
     const pagaresFolio = pagares.filter(p => p.folio === folio);
 
@@ -1139,25 +1079,21 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
         plan: planAplicable
     };
 } 
-function confirmarPoliticaAntesDeGuardar(folio, monto, continuar) {
 
+function confirmarPoliticaAntesDeGuardar(folio, monto, continuar) {
     const evalPol = evaluarPoliticaLiquidacion(folio, monto);
 
-    // No aplica → sigue normal
     if (!evalPol || !evalPol.aplica) {
         continuar(false);
         return;
     }
 
-    // CASO 1: el monto ya coincide EXACTO → aplicar automático
     if (Math.abs(monto - evalPol.montoCorrecto) < 0.01) {
         continuar(true, evalPol);
         return;
     }
 
-    // CASO 2: el cliente puede pagar menos → sugerir ajuste
     if (monto > evalPol.montoCorrecto) {
-
         if (!confirm(
             `💡 LIQUIDACIÓN INTELIGENTE\n\n` +
             `El cliente puede liquidar con:\n${dinero(evalPol.montoCorrecto)}\n\n` +
@@ -1167,19 +1103,15 @@ function confirmarPoliticaAntesDeGuardar(folio, monto, continuar) {
             continuar(false);
             return;
         }
-
         continuar(true, evalPol);
         return;
     }
 
-    // CASO 3: le falta para liquidar → solo sugerencia visual (no bloquear)
     continuar(false);
 }
 
 function aplicarPoliticaLiquidacion(folio) {
-
     let pagares = StorageService.get("pagaresSistema", []);
-
     pagares = pagares.map(p => {
         if (p.folio === folio && p.estado !== "Pagado") {
             return {
@@ -1189,15 +1121,12 @@ function aplicarPoliticaLiquidacion(folio) {
         }
         return p;
     });
-
     StorageService.set("pagaresSistema", pagares);
 }
-
 
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado) {
     const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
     
-    // 👇 LEER LA FECHA SELECCIONADA POR EL USUARIO
     const fechaAbonoRaw = document.getElementById("fechaAbonoInput")?.value;
     const fechaObj = fechaAbonoRaw ? new Date(fechaAbonoRaw + "T12:00:00") : new Date();
     const fechaAbonoStr = fechaObj.toLocaleDateString("es-MX");
@@ -1293,7 +1222,6 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         }
     }
 
-    // 👇 USAMOS LA FECHA SELECCIONADA PARA LOS PAGARÉS
     let _todosActualizados = _todosLosPagares.map(p => {
         if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
             return { ...p, estado: "Pagado", fechaAbono: fechaAbonoStr, montoAbonado: p.monto };
@@ -1323,7 +1251,6 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         const cuentaAct = cuentasXCobrar[idxCuenta];
         cuentaAct.abonos = cuentaAct.abonos || [];
         
-        // 👇 USAMOS LA FECHA SELECCIONADA PARA EL HISTORIAL DE ABONOS
         cuentaAct.abonos.push({
             fecha: fechaAbonoStr,
             monto: montoFinal,
@@ -1359,7 +1286,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
                 etiqueta: etiqueta,
                 concepto: `Abono a ${cuentaAct.nombre} - ${folio}`,
                 referencia: `ABONO-${folio}`,
-                fecha: fechaAbonoIso // 👇 ENVIAMOS LA FECHA AL FLUJO DE EFECTIVO
+                fecha: fechaAbonoIso 
             });
         } else {
             let movimientos = StorageService.get("movimientosCaja", []);
@@ -1396,7 +1323,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         },
         montoAbono: montoFinal,
         nuevoSaldo: nuevoSaldoReal,
-        fecha: fechaAbonoStr, // 👇 LA FECHA DEL TICKET AHORA COINCIDE CON LA APLICADA
+        fecha: fechaAbonoStr, 
         metodoCobro: medioPago || "efectivo",
         cuentaDestino: etiqueta || "efectivo",
         pagaresCubiertos: _pagaresCubiertosTicket,
@@ -1408,6 +1335,28 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     if (typeof window.registrarComisionAbono === 'function' && _cuentaData && _cuentaData.vendedorId) {
         window.registrarComisionAbono(folio, montoFinal, _cuentaData.vendedorId);
+    }
+
+    try {
+        const _tickets = StorageService.get("registroTickets", []);
+        const _tIdx = _tickets.findIndex(t => t.folio === folio);
+        if (_tIdx !== -1 && _tickets[_tIdx].pagares) {
+            const _pagaresActualizados = StorageService.get("pagaresSistema", []);
+            _tickets[_tIdx].pagares = _tickets[_tIdx].pagares.map(tp => {
+                const pActual = _pagaresActualizados.find(p => p.numeroPagere === tp.numeroPagere);
+                if (!pActual) return tp;
+                return {
+                    ...tp,
+                    estado:        pActual.estado,
+                    fechaAbono:    pActual.fechaAbono    || tp.fechaAbono,
+                    montoAbonado:  pActual.montoAbonado  || tp.montoAbonado
+                };
+            });
+            _tickets[_tIdx].ultimaActualizacion = new Date().toISOString();
+            StorageService.set("registroTickets", _tickets);
+        }
+    } catch(e) {
+        console.warn("⚠️ No se pudo sincronizar registroTickets:", e.message);
     }
 
     alert(`✅ Abono registrado exitosamente por ${dinero(montoFinal)}.`);
@@ -1530,10 +1479,6 @@ function generarTicketAbono(datosAbono) {
             style="margin:4px; padding:8px 14px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px;">
         📷 Guardar como Imagen
     </button>
-    <button onclick="exportarTicketPDF()" 
-            style="margin:4px; padding:8px 14px; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px;">
-        📄 Guardar como PDF
-    </button>
 </div>
 <script>
 function exportarTicketImagen() {
@@ -1549,9 +1494,6 @@ function exportarTicketImagen() {
     };
     script.onerror = function() { window.print(); };
     document.head.appendChild(script);
-}
-function exportarTicketPDF() {
-    window.print();
 }
 <\/script>
 </body>
@@ -1730,7 +1672,6 @@ function generarTicketAbonoTermico(datosAbono) {
         table { width: 100%; border-collapse: collapse; font-size: 10px; }
         td, th { padding: 2px 4px; text-align: left; }
         th { border-bottom: 1px solid #000; font-weight: bold; }
-        .pagare-cubierto td { }
         .mensaje-ok { border: 1px dashed #000; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
         .mensaje-atraso { background: #000; color: #fff; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
         .firma-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
@@ -1757,7 +1698,6 @@ function generarTicketAbonoTermico(datosAbono) {
             <div class="info-empresa">
                 <div class="negrita grande">MUEBLERÍA MI PUEBLITO</div>
                 <div style="font-size:9px;">Santiago Cuaula, Tlaxcala</div>
-                <div style="font-size:9px;">Tel. 228 123 4567</div>
             </div>
         </div>
 
@@ -1814,7 +1754,7 @@ function generarTicketAbonoTermico(datosAbono) {
 
         <hr class="separador">
         <div class="pie">
-            <div>Mueblería Mi Pueblito • Roberto Escobedo Vega</div>
+            <div>Mueblería Mi Pueblito</div>
             <div>Este recibo es válido como comprobante de pago.</div>
         </div>
     </div>
@@ -1845,9 +1785,8 @@ function generarTicketAbonoTermico(datosAbono) {
     setTimeout(() => { vent.print(); }, 800);
 }
 
-// ===== ESTADO DE CUENTA POR FOLIO (OPTIMIZADO Y EMBELLECIDO) =====
+// ===== ESTADO DE CUENTA POR FOLIO =====
 function abrirEstadoCuentaFolio(folio) {
-    // 1. Usar el Motor Central para obtener todo pre-calculado al instante
     const estadoCta = window._calcularEstadoCuenta(folio);
     if (!estadoCta) return alert("Cuenta no encontrada.");
 
@@ -1857,7 +1796,6 @@ function abrirEstadoCuentaFolio(folio) {
     const abonos = cuenta.abonos || [];
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-    // 2. Construir la tabla de Pagarés (Amortización)
     const amortizacionHTML = pagares.length > 0
         ? pagares.map((p, i) => {
             const esVencido = p.estado === "Pendiente" && new Date(p.fechaVencimiento) < new Date();
@@ -1880,17 +1818,15 @@ function abrirEstadoCuentaFolio(folio) {
         }).join('')
         : `<tr><td colspan="6" style="padding:20px; text-align:center; color:#94a3b8; font-style:italic;">Sin pagarés registrados</td></tr>`;
 
-    // 3. Construir la tabla de Abonos (Ocultando cajas físicas)
     const abonosHTML = abonos.length > 0
         ? abonos.map(a => {
-            // Lógica de privacidad de cajas
             let etiqueta = a.etiquetaCuenta || a.medioPago || '-';
             const esEfectivo = (a.medioPago === 'efectivo') || String(a.cuentaId||a.cuenta||'').startsWith('caja_') || String(a.cuentaId||a.cuenta||'') === 'efectivo';
             
             if (esEfectivo) {
                 etiqueta = '💵 Efectivo';
             } else if (!etiqueta.includes('🏦') && !etiqueta.includes('💳')) {
-                etiqueta = '🏦 ' + etiqueta; // Si es banco y no tiene ícono, se lo ponemos
+                etiqueta = '🏦 ' + etiqueta; 
             }
 
             return `<tr style="border-bottom:1px solid #e2e8f0;">
@@ -1901,12 +1837,10 @@ function abrirEstadoCuentaFolio(folio) {
         }).join('')
         : `<tr><td colspan="3" style="padding:20px; text-align:center; color:#94a3b8; font-style:italic;">Sin abonos registrados</td></tr>`;
 
-    // 4. Modal Visual
     const modalHTML = `
         <div data-modal="estado-cuenta-folio" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(4px);">
             <div id="estadoCuentaFolioDoc" style="background:white; padding:35px; border-radius:16px; width:100%; max-width:900px; margin:0 auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);">
                 
-                <!-- Cabecera -->
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:25px; border-bottom:2px solid #f1f5f9; padding-bottom:20px;">
                     <div style="display:flex; align-items:center; gap:20px;">
                         <img src="img/logo.png" style="width:70px; height:70px; object-fit:contain; border-radius:10px;" onerror="this.style.display='none'">
@@ -1922,7 +1856,6 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                 </div>
 
-                <!-- Info Cliente -->
                 <div style="background:#f8fafc; padding:20px; border-radius:12px; margin-bottom:25px; border:1px solid #e2e8f0; display:flex; justify-content:space-between;">
                     <div>
                         <div style="font-size:12px; color:#64748b; text-transform:uppercase; font-weight:bold; letter-spacing:1px; margin-bottom:4px;">Datos del Cliente</div>
@@ -1936,7 +1869,6 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                 </div>
 
-                <!-- Tarjetas KPI -->
                 <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px; margin-bottom:30px;">
                     <div style="padding:15px; border-radius:12px; background:#fff; border:1px solid #e2e8f0; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         <div style="font-size:12px; color:#64748b; font-weight:bold; margin-bottom:5px;">TOTAL VENTA</div>
@@ -1961,685 +1893,112 @@ function abrirEstadoCuentaFolio(folio) {
                     <span style="color:#b91c1c; font-weight:bold; font-size:15px;">⚠️ Atención: Cuenta con ${pagaresVencidos.length} pagaré(s) vencido(s) por un total de ${dinero(montoVencido)}</span>
                 </div>` : ''}
 
-                <!-- Tablas divididas para mejor lectura -->
                 <div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:25px; margin-bottom:30px;">
-                    <!-- Columna Izquierda: Amortización -->
                     <div>
                         <h3 style="margin:0 0 15px 0; color:#0f172a; font-size:16px; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">📋 Amortización</h3>
                         <div style="overflow-x:auto;">
                             <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                                <thead><tr style="background:#f8fafc;">
-                                    <th style="padding:10px 8px; text-align:center; color:#475569; font-weight:bold;">#</th>
-                                    <th style="padding:10px 8px; text-align:left; color:#475569; font-weight:bold;">Vencimiento</th>
-                                    <th style="padding:10px 8px; text-align:right; color:#475569; font-weight:bold;">Monto</th>
-                                    <th style="padding:10px 8px; text-align:center; color:#475569; font-weight:bold;">Estado</th>
-                                    <th style="padding:10px 8px; text-align:left; color:#475569; font-weight:bold;">Pagado El</th>
-                                    <th style="padding:10px 8px; text-align:right; color:#475569; font-weight:bold;">Abono</th>
-                                </tr></thead>
+                                <thead>
+                                    <tr style="background:#f8fafc;">
+                                        <th style="padding:10px 8px; text-align:center; color:#64748b;">No.</th>
+                                        <th style="padding:10px 8px; text-align:left; color:#64748b;">Vencimiento</th>
+                                        <th style="padding:10px 8px; text-align:right; color:#64748b;">Monto</th>
+                                        <th style="padding:10px 8px; text-align:center; color:#64748b;">Estado</th>
+                                        <th style="padding:10px 8px; text-align:left; color:#64748b;">F. Pago</th>
+                                        <th style="padding:10px 8px; text-align:right; color:#64748b;">Abonado</th>
+                                    </tr>
+                                </thead>
                                 <tbody>${amortizacionHTML}</tbody>
                             </table>
                         </div>
                     </div>
-                    
-                    <!-- Columna Derecha: Abonos -->
+
                     <div>
-                        <h3 style="margin:0 0 15px 0; color:#0f172a; font-size:16px; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">💰 Historial de Pagos</h3>
-                        <div style="overflow-x:auto;">
+                        <h3 style="margin:0 0 15px 0; color:#0f172a; font-size:16px; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">💰 Historial de Abonos</h3>
+                        <div style="background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0; overflow:hidden;">
                             <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                                <thead><tr style="background:#f8fafc;">
-                                    <th style="padding:10px 8px; text-align:left; color:#475569; font-weight:bold;">Fecha</th>
-                                    <th style="padding:10px 8px; text-align:right; color:#475569; font-weight:bold;">Monto</th>
-                                    <th style="padding:10px 8px; text-align:left; color:#475569; font-weight:bold;">Método</th>
-                                </tr></thead>
+                                <thead>
+                                    <tr style="background:#f1f5f9;">
+                                        <th style="padding:10px 8px; text-align:left; color:#64748b;">Fecha</th>
+                                        <th style="padding:10px 8px; text-align:right; color:#64748b;">Importe</th>
+                                        <th style="padding:10px 8px; text-align:left; color:#64748b;">Medio</th>
+                                    </tr>
+                                </thead>
                                 <tbody>${abonosHTML}</tbody>
                             </table>
                         </div>
                     </div>
                 </div>
 
-                <!-- Botones -->
-                <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; border-top:1px solid #e2e8f0; padding-top:20px;">
-                    <button onclick="imprimirEstadoCuentaFolio('${folio}')" style="padding:12px 24px; background:#0f172a; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:8px;">
-                        <span style="font-size:18px;">🖨️</span> Imprimir Documento
-                    </button>
-                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-folio&quot;]')?.remove();" style="padding:12px 24px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
-                        ✕ Cerrar
-                    </button>
+                <div class="no-print" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #e2e8f0; padding-top:20px; margin-top:20px;">
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="imprimirEstadoCuentaFolio()" style="padding:10px 16px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:500; cursor:pointer;">🖨️ Imprimir PDF</button>
+                        <button onclick="guardarImagenEstadoCuenta()" style="padding:10px 16px; background:#059669; color:white; border:none; border-radius:8px; font-weight:500; cursor:pointer;">📷 Guardar Imagen</button>
+                    </div>
+                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-folio&quot;]').remove();" style="padding:10px 20px; background:#ef4444; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✕ Cerrar</button>
                 </div>
+                
             </div>
         </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-// ===== IMPRESIÓN DEL ESTADO DE CUENTA (TAMAÑO CARTA EXACTO) =====
-function imprimirEstadoCuentaFolio(folio) {
-    const estadoCta = window._calcularEstadoCuenta(folio);
-    if (!estadoCta) return;
-
-    const { cuenta, pagares, pagaresVencidos, montoVencido, saldoTotal, totalAbonado } = estadoCta;
-    const totalVenta = Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0);
-    const enganche = Number(cuenta.engancheRecibido || 0);
-    const abonos = cuenta.abonos || [];
-    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-
-    // Amortización (Más compacto para impresión)
-    const amortizacionRows = pagares.map((p, i) => {
-        const esVencido = p.estado === "Pendiente" && new Date(p.fechaVencimiento) < new Date();
-        const estadoLabel = p.estado === "Pagado" ? 'Pagado' : esVencido ? '**Vencido**' : p.estado === "Cancelado" ? 'Cancelado' : p.estado === "Parcial" ? 'Parcial' : 'Pendiente';
-        return `<tr>
-            <td class="centrado">${i + 1}</td>
-            <td>${esc(p.fechaVencimiento || '-')}</td>
-            <td class="derecha"><strong>${dinero(p.monto || 0)}</strong></td>
-            <td class="centrado ${esVencido ? 'texto-rojo' : ''}">${estadoLabel}</td>
-            <td>${esc(p.fechaAbono || '-')}</td>
-            <td class="derecha">${p.montoAbonado ? dinero(p.montoAbonado) : '-'}</td>
-        </tr>`;
-    }).join('');
-
-    // Abonos (Filtro de privacidad de cajas)
-    const abonosRows = abonos.map(a => {
-        let etiqueta = a.etiquetaCuenta || a.medioPago || '-';
-        const esEfectivo = (a.medioPago === 'efectivo') || String(a.cuentaId||a.cuenta||'').startsWith('caja_') || String(a.cuentaId||a.cuenta||'') === 'efectivo';
-        if (esEfectivo) etiqueta = 'Efectivo'; // Impresión limpia, sin emojis
-
-        return `<tr>
-            <td>${esc(a.fecha || '-')}</td>
-            <td class="derecha"><strong>${dinero(a.monto || 0)}</strong></td>
-            <td>${esc(etiqueta)}</td>
-        </tr>`;
-    }).join('') || `<tr><td colspan="3" class="centrado" style="color:#64748b;">Sin pagos registrados</td></tr>`;
-
-    // Plantilla HTML Optimizada para Tamaño Carta
-    const printHTML = `<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Estado de Cuenta - ${esc(folio)}</title>
-    <style>
-        /* CSS ESPECÍFICO PARA TAMAÑO CARTA (8.5 x 11 pulgadas) */
-        @page { size: letter; margin: 10mm 15mm; }
-        * { box-sizing: border-box; }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 11px; color: #1e293b; line-height: 1.3; }
-        
-        /* Cabecera */
-        .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 15px; }
-        .logo-box { display: flex; align-items: center; gap: 15px; }
-        .logo { width: 60px; height: 60px; object-fit: contain; }
-        .company-name { font-size: 20px; font-weight: 900; margin: 0; color: #0f172a; text-transform: uppercase; }
-        .doc-title { font-size: 12px; color: #64748b; letter-spacing: 1px; text-transform: uppercase; }
-        .header-info { text-align: right; }
-        .header-info h2 { margin: 0; font-size: 16px; color: #0f172a; }
-        .header-info p { margin: 2px 0 0 0; color: #64748b; font-size: 10px; }
-
-        /* Cliente y Resumen Financiero */
-        .top-section { display: flex; gap: 20px; margin-bottom: 15px; }
-        .client-box { flex: 1; border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; background: #f8fafc; }
-        .client-box h4 { margin: 0 0 5px 0; font-size: 10px; color: #64748b; text-transform: uppercase; }
-        .client-box p { margin: 2px 0; font-size: 12px; font-weight: bold; }
-        
-        .kpi-box { display: flex; flex-direction: column; justify-content: center; text-align: center; border: 1px solid #cbd5e1; border-radius: 6px; width: 120px; }
-        .kpi-box span { font-size: 9px; color: #64748b; text-transform: uppercase; font-weight: bold; margin-bottom: 3px; margin-top: 5px; }
-        .kpi-box strong { font-size: 14px; color: #0f172a; margin-bottom: 5px; }
-        .kpi-saldo { background: ${saldoTotal > 0 ? '#fff1f2' : '#f0fdf4'}; border-color: ${saldoTotal > 0 ? '#fecdd3' : '#bbf7d0'}; }
-        .kpi-saldo strong { color: ${saldoTotal > 0 ? '#be123c' : '#15803d'}; font-size: 16px;}
-
-        .alert-box { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 8px; border-radius: 4px; font-weight: bold; text-align: center; margin-bottom: 15px; font-size: 11px; }
-
-        /* Tablas: Compactas para evitar saltos de página */
-        .tables-container { display: flex; gap: 20px; align-items: flex-start; }
-        .table-wrapper { flex: 1; }
-        .table-wrapper.izq { flex: 1.5; } /* Da más espacio a los pagarés */
-        
-        h3 { margin: 0 0 8px 0; font-size: 12px; color: #0f172a; text-transform: uppercase; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
-        
-        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-        th { background: #f1f5f9; color: #475569; padding: 5px; text-align: left; font-size: 10px; border-bottom: 1px solid #cbd5e1; text-transform: uppercase; }
-        td { padding: 4px 5px; border-bottom: 1px dashed #e2e8f0; font-size: 10px; }
-        
-        .centrado { text-align: center; }
-        .derecha { text-align: right; }
-        .texto-rojo { color: #dc2626; font-weight: bold; }
-        
-        /* Pie de página */
-        .footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #cbd5e1; text-align: center; font-size: 9px; color: #64748b; }
-        
-        @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="logo-box">
-            <img src="img/logo.png" class="logo" onerror="this.style.display='none'">
-            <div>
-                <h1 class="company-name">Mueblería Mi Pueblito</h1>
-                <div class="doc-title">Estado de Cuenta del Cliente</div>
-            </div>
-        </div>
-        <div class="header-info">
-            <h2>Folio: ${esc(folio)}</h2>
-            <p>Emisión: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })} ${new Date().toLocaleTimeString('es-MX', {hour: '2-digit', minute:'2-digit'})}</p>
-            <p>Página 1 de 1</p>
-        </div>
-    </div>
-
-    <div class="top-section">
-        <div class="client-box">
-            <h4>Datos de la Venta</h4>
-            <p>Cliente: ${esc(cuenta.nombre)}</p>
-            <p style="font-weight:normal; font-size:11px;">Teléfono: ${esc(cuenta.telefono || 'N/A')} &nbsp;|&nbsp; Fecha: ${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</p>
-        </div>
-        <div class="kpi-box">
-            <span>Venta Original</span>
-            <strong>${dinero(totalVenta)}</strong>
-        </div>
-        <div class="kpi-box">
-            <span>Abonado (Inc. Eng)</span>
-            <strong>${dinero(totalAbonado + enganche)}</strong>
-        </div>
-        <div class="kpi-box kpi-saldo">
-            <span>Saldo a Liquidar</span>
-            <strong>${dinero(saldoTotal)}</strong>
-        </div>
-    </div>
-
-    ${pagaresVencidos.length > 0 ? `<div class="alert-box">⚠️ Atención: El cliente presenta ${pagaresVencidos.length} pagaré(s) con fecha vencida por un total de ${dinero(montoVencido)}</div>` : ''}
-
-    <div class="tables-container">
-        <!-- Tabla Pagarés -->
-        <div class="table-wrapper izq">
-            <h3>Calendario de Pagos</h3>
-            <table>
-                <thead><tr>
-                    <th class="centrado">#</th>
-                    <th>Vencimiento</th>
-                    <th class="derecha">Importe</th>
-                    <th class="centrado">Status</th>
-                    <th>Pago El</th>
-                    <th class="derecha">Abonado</th>
-                </tr></thead>
-                <tbody>${amortizacionRows || '<tr><td colspan="6" class="centrado">No hay pagarés</td></tr>'}</tbody>
-            </table>
-        </div>
-
-        <!-- Tabla Abonos -->
-        <div class="table-wrapper">
-            <h3>Historial de Recibos</h3>
-            <table>
-                <thead><tr>
-                    <th>Fecha</th>
-                    <th class="derecha">Monto Recibido</th>
-                    <th>Forma de Pago</th>
-                </tr></thead>
-                <tbody>${abonosRows}</tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="footer">
-        Este documento es de carácter informativo y refleja los movimientos registrados hasta la fecha y hora de emisión.<br>
-        Mueblería Mi Pueblito • Santiago Cuaula, Tlaxcala.
-    </div>
-
-    <script>window.onload = function(){ setTimeout(() => { window.print(); }, 500); };<\/script>
-</body>
-</html>`;
-
-    const vent = window.open('', '_blank');
-    if (!vent) { alert("⚠️ Habilita las ventanas emergentes para imprimir."); return; }
-    vent.document.write(printHTML);
-    vent.document.close();
-}
-
-function guardarImagenEstadoCuenta(elementId) {
-    const el = document.getElementById(elementId);
-    if (!el) return;
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    script.onload = function() {
-        html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => {
-            const link = document.createElement('a');
-            link.download = 'estado-cuenta-' + elementId + '.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-        }).catch(err => { console.error(err); alert('No se pudo generar la imagen. Usa el botón 🖨️ Imprimir para guardar el documento como PDF desde tu navegador.'); });
-    };
-    script.onerror = function() { alert('No se pudo cargar la herramienta de imagen. Verifica tu conexión a internet o usa el botón 🖨️ Imprimir para guardar el estado de cuenta como PDF.'); };
-    document.head.appendChild(script);
-}
-
-// ===== ESTADO DE CUENTA POR CLIENTE =====
+// ===== FUNCIONES RECUPERADAS PARA QUE NO EXPLOTE EL SISTEMA =====
 function abrirEstadoCuentaCliente(clienteId) {
-    const clientesData = StorageService.get("clientes", []);
     const cuentas = StorageService.get("cuentasPorCobrar", []);
-    const pagaresSistema = StorageService.get("pagaresSistema", []);
-    const cliente = clientesData.find(c => c.id === clienteId);
-    if (!cliente) return alert("Cliente no encontrado.");
-
-    const hoy = new Date();
-    const cuentasCliente = cuentas.filter(c => c.clienteId === clienteId || c.nombre === cliente.nombre);
-    const cuentasActivas = cuentasCliente.filter(c => c.estado !== "Saldado");
-    const totalAdeudado = cuentasActivas.reduce((s, c) => s + Number(c.saldoActual || 0), 0);
-    const foliosActivos = cuentasActivas.length;
-    const pagaresCliente = pagaresSistema.filter(p => cuentasCliente.some(c => c.folio === p.folio));
-    const pagaresVencidosGlobal = pagaresCliente.filter(p => p.estado === "Pendiente" && new Date(p.fechaVencimiento) < hoy);
-    const montoVencidoGlobal = pagaresVencidosGlobal.reduce((s, p) => s + (p.monto || 0), 0);
-    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-
-    const foliosHTML = cuentasActivas.length > 0
-        ? cuentasActivas.map(cuenta => {
-            const pagaresDelFolio = pagaresSistema.filter(p => p.folio === cuenta.folio);
-            const pendientes = pagaresDelFolio.filter(p => p.estado === "Pendiente");
-            const vencidos = pendientes.filter(p => new Date(p.fechaVencimiento) < hoy);
-            const abonos = cuenta.abonos || [];
-            const totalAbonado = abonos.reduce((s, a) => s + (a.monto || 0), 0);
-            return `<div style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:12px; overflow:hidden;">
-                <div style="background:#f8fafc; padding:12px 16px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <span style="font-weight:bold; color:#1e3a5f;">${esc(cuenta.folio)}</span>
-                        <span style="margin-left:12px; font-size:13px; color:#6b7280;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</span>
-                        ${vencidos.length > 0 ? `<span style="margin-left:10px; background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:9999px; font-size:12px;">⚠️ ${vencidos.length} vencido(s)</span>` : ''}
-                    </div>
-                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove(); abrirEstadoCuentaFolio('${esc(cuenta.folio)}');" style="padding:6px 12px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;">📋 Ver detalle</button>
-                </div>
-                <div style="padding:12px 16px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px; font-size:13px;">
-                    <div><span style="color:#6b7280;">Total venta:</span><br><b>${dinero(cuenta.totalContadoOriginal || 0)}</b></div>
-                    <div><span style="color:#6b7280;">Total abonado:</span><br><b style="color:#059669;">${dinero(totalAbonado)}</b></div>
-                    <div><span style="color:#6b7280;">Saldo actual:</span><br><b style="color:${Number(cuenta.saldoActual || 0) > 0 ? '#dc2626' : '#059669'};">${dinero(cuenta.saldoActual || 0)}</b></div>
-                </div>
-                <div style="padding:0 16px 12px 16px; font-size:13px; color:#6b7280;">
-                    Pagarés: ${pendientes.length} pendiente(s) de ${pagaresDelFolio.length} total
-                </div>
-            </div>`;
-        }).join('')
-        : `<div style="padding:20px; text-align:center; color:#6b7280;">Este cliente no tiene cuentas activas.</div>`;
-
-    const modalHTML = `
-        <div data-modal="estado-cuenta-cliente" style="position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
-            <div id="estadoCuentaClienteDoc" style="background:white; padding:30px; border-radius:15px; width:95%; max-width:850px; margin:0 auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid #e5e7eb; padding-bottom:15px;">
-                    <div style="display:flex; align-items:center; gap:16px;">
-                        <img src="img/logo.png" style="width:55px; height:55px; object-fit:contain;" onerror="this.style.display='none'">
-                        <div>
-                            <div style="font-size:20px; font-weight:bold; color:#1e3a5f;">MUEBLERÍA MI PUEBLITO</div>
-                            <div style="font-size:15px; color:#374151; font-weight:600; display:flex; align-items:center; gap:10px;">
-                                Estado de Cuenta — ${esc(cliente.nombre)}
-                                ${(() => {
-                                    const score = window.calcularCalificacionCliente(cliente.id);
-                                    return `<span style="background:${score.bg}; color:${score.color}; font-size:10px; padding:2px 8px; border-radius:12px; border:1px solid ${score.color};">${score.estrellas} ${score.texto}</span>`;
-                                })()}
-                            </div>
-                            ${cliente.telefono ? `<div style="font-size:13px; color:#6b7280;">📞 ${esc(cliente.telefono)}</div>` : ''}
-                            ${cliente.direccion ? `<div style="font-size:13px; color:#6b7280;">📍 ${esc(cliente.direccion)}</div>` : ''}
-                        </div>
-                    </div>
-                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove();" style="background:none; border:none; font-size:24px; cursor:pointer; color:#6b7280;">✕</button>
-                </div>
-
-                <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-bottom:20px;">
-                    <div style="background:#fef2f2; border:1px solid #fecaca; padding:16px; border-radius:8px; text-align:center;">
-                        <div style="font-size:11px; color:#b91c1c;">TOTAL ADEUDADO</div>
-                        <div style="font-size:22px; font-weight:bold; color:#991b1b;">${dinero(totalAdeudado)}</div>
-                    </div>
-                    <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:16px; border-radius:8px; text-align:center;">
-                        <div style="font-size:11px; color:#1d4ed8;">FOLIOS ACTIVOS</div>
-                        <div style="font-size:22px; font-weight:bold; color:#1e40af;">${foliosActivos}</div>
-                    </div>
-                    <div style="background:${pagaresVencidosGlobal.length > 0 ? '#fee2e2' : '#f0fdf4'}; border:1px solid ${pagaresVencidosGlobal.length > 0 ? '#fecaca' : '#bbf7d0'}; padding:16px; border-radius:8px; text-align:center;">
-                        <div style="font-size:11px; color:${pagaresVencidosGlobal.length > 0 ? '#b91c1c' : '#15803d'};">PAGARÉS VENCIDOS</div>
-                        <div style="font-size:22px; font-weight:bold; color:${pagaresVencidosGlobal.length > 0 ? '#991b1b' : '#166534'};">${pagaresVencidosGlobal.length}</div>
-                        ${pagaresVencidosGlobal.length > 0 ? `<div style="font-size:12px; color:#991b1b;">${dinero(montoVencidoGlobal)}</div>` : ''}
-                    </div>
-                </div>
-
-                <h3 style="margin:0 0 12px 0; color:#1e3a5f;">📁 Detalle por Folio</h3>
-                ${foliosHTML}
-
-                <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; margin-top:15px;">
-                    <button onclick="guardarImagenEstadoCuenta('estadoCuentaClienteDoc')" style="padding:10px 20px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer;">📷 Guardar Imagen</button>
-                    <button onclick="document.querySelector('[data-modal=&quot;estado-cuenta-cliente&quot;]')?.remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cerrar</button>
-                </div>
-            </div>
-        </div>`;
-
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    const cuenta = cuentas.find(c => String(c.clienteId) === String(clienteId) && c.estado !== 'Saldado') || cuentas.find(c => String(c.clienteId) === String(clienteId));
+    
+    if (cuenta) {
+        abrirEstadoCuentaFolio(cuenta.folio);
+    } else {
+        alert("Este cliente no tiene cuentas de crédito registradas.");
+    }
 }
 
-// ===== CLIENTES MOROSOS =====
-function renderClientesMorosos() {
-    const cont = document.getElementById('contenidoMorosos');
-    if (!cont) return;
+function imprimirEstadoCuentaFolio() {
+    window.print();
+}
 
-    const filtroNombre = (document.getElementById('morosoFiltroNombre')?.value || '').toLowerCase();
-    const filtroMin = parseFloat(document.getElementById('morosoFiltroMin')?.value) || 0;
-
-    const cuentas = StorageService.get('cuentasPorCobrar', []);
-    const clientesLista = StorageService.get('clientes', []);
-
-    let registros = [];
-    let totalMoroso = 0;
-
-    cuentas.forEach(c => {
-        // 🔥 El motor hace todo el trabajo sucio
-        const estadoCta = window._calcularEstadoCuenta(c.folio);
-        if(!estadoCta) return;
-
-        // Solo queremos los que tienen saldo vencido Y que NO tienen una promesa de pago activa
-        if (estadoCta.montoVencido > 0 && estadoCta.estadoGeneral !== 'Saldado' && !estadoCta.promesaVigente) {
-            const cli = clientesLista.find(x => String(x.id) === String(c.clienteId));
-            const telefono = cli ? (cli.telefono || '-') : '-';
-            
-            if (filtroNombre && !c.nombre.toLowerCase().includes(filtroNombre)) return;
-            if (filtroMin > 0 && estadoCta.montoVencido < filtroMin) return;
-
-            totalMoroso += estadoCta.montoVencido;
-
-            registros.push({
-                folio: c.folio,
-                nombre: c.nombre,
-                telefono,
-                vencidos: estadoCta.pagaresVencidos.length,
-                diasMax: estadoCta.diasMaxAtraso,
-                montoVencido: estadoCta.montoVencido,
-                saldoTotal: estadoCta.saldoTotal
+function guardarImagenEstadoCuenta() {
+    const el = document.getElementById('estadoCuentaFolioDoc');
+    if (!el) { window.print(); return; }
+    
+    if (typeof html2canvas === 'undefined') {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        script.onload = function() {
+            html2canvas(el).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'Estado_Cuenta.png';
+                link.href = canvas.toDataURL();
+                link.click();
             });
-        }
-    });
+        };
+        document.head.appendChild(script);
+    } else {
+        html2canvas(el).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'Estado_Cuenta.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+    }
+}
 
-    // Ordenar de mayor a menor deuda vencida
-    registros.sort((a, b) => b.montoVencido - a.montoVencido);
-
-    const rows = registros.map(r => {
-        let semaforo = '🟡';
-        if (r.diasMax > 60) semaforo = '🔴';
-        else if (r.diasMax >= 30) semaforo = '🟠';
-        
-        return `<tr>
-          <td style="padding:10px;">${semaforo} ${r.nombre}</td>
-          <td style="padding:10px;text-align:center;">${r.telefono}</td>
-          <td style="padding:10px;text-align:center;">${r.vencidos}</td>
-          <td style="padding:10px;text-align:center;color:#dc2626;font-weight:bold;">${r.diasMax} días</td>
-          <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(r.montoVencido)}</td>
-          <td style="padding:10px;text-align:right;">${dinero(r.saldoTotal)}</td>
-          <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
-            ${r.telefono !== '-' ? `<a href="tel:${r.telefono}" style="font-size:18px;text-decoration:none;" title="Llamar">📞</a>` : ''}
-            <button onclick="abrirModalAbonoAvanzado('${r.folio}')" style="padding:3px 8px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Abonar</button>
-          </td>
-        </tr>`;
-    }).join('');
-
-    cont.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
-        <div style="background:#fef2f2;padding:20px;border-radius:10px;text-align:center;">
-          <small style="color:#dc2626;">CLIENTES MOROSOS</small><br>
-          <strong style="font-size:28px;color:#dc2626;">${registros.length}</strong>
-        </div>
-        <div style="background:#fef2f2;padding:20px;border-radius:10px;text-align:center;">
-          <small style="color:#dc2626;">MONTO VENCIDO TOTAL</small><br>
-          <strong style="font-size:22px;color:#dc2626;">${dinero(totalMoroso)}</strong>
-        </div>
-        <div style="background:#fef9c3;padding:20px;border-radius:10px;text-align:center;">
-          <small style="color:#92400e;">LEYENDA</small><br>
-          <span style="font-size:13px;">🔴 &gt;60d &nbsp; 🟠 30-60d &nbsp; 🟡 &lt;30d</span>
-        </div>
-      </div>
-      <div style="background:white;padding:16px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:16px;">
-        <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
-          <div>
-            <label style="font-size:11px;font-weight:bold;color:#374151;">BUSCAR CLIENTE</label>
-            <input type="text" id="morosoFiltroNombre" oninput="renderClientesMorosos()" placeholder="Nombre..."
-                   style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
-          </div>
-          <div>
-            <label style="font-size:11px;font-weight:bold;color:#374151;">MONTO MÍNIMO ($)</label>
-            <input type="number" id="morosoFiltroMin" oninput="renderClientesMorosos()" placeholder="0" min="0"
-                   style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;width:120px;">
-          </div>
-          <button onclick="exportarMorososCSV()" style="padding:8px 16px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📥 Exportar CSV</button>
-        </div>
-      </div>
-      <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-        ${registros.length === 0 ? '<p style="color:#9ca3af;text-align:center;padding:20px;">🎉 Sin clientes morosos.</p>' : `
-        <div style="overflow-x:auto;">
-          <table style="width:100%;border-collapse:collapse;font-size:14px;">
-            <thead><tr style="background:#f3f4f6;">
-              <th style="padding:10px;text-align:left;">Cliente</th>
-              <th style="padding:10px;text-align:center;">Teléfono</th>
-              <th style="padding:10px;text-align:center;"># Pagarés Vencidos</th>
-              <th style="padding:10px;text-align:center;">Días Máx.</th>
-              <th style="padding:10px;text-align:right;">Monto Vencido</th>
-              <th style="padding:10px;text-align:right;">Saldo Total</th>
-              <th style="padding:10px;text-align:center;">Acciones</th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>`}
-      </div>`;
+function renderClientesMorosos() {
+    renderCuentasXCobrar('', 'Atrasado');
 }
 
 function exportarMorososCSV() {
-    const cont = document.getElementById('contenidoMorosos');
-    if (!cont) return;
-    // Re-calcular datos sin filtros para exportar todo
-    const hoy = new Date();
-    const pagares = StorageService.get('pagaresSistema', []);
-    const cxc = StorageService.get('cuentasPorCobrar', []);
-    const clientesLista = StorageService.get('clientes', []);
-    const porFolio = {};
-    pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Vencido' || p.estado === 'Parcial').forEach(p => {
-        const fv = new Date(p.fechaVencimiento);
-        const diasAtraso = fv < hoy ? Math.floor((hoy - fv) / (1000 * 60 * 60 * 24)) : 0;
-        if (!porFolio[p.folio]) porFolio[p.folio] = { pagares: [], vencidos: 0, diasMax: 0, montoVencido: 0, saldoTotal: 0 };
-        porFolio[p.folio].saldoTotal += p.monto || 0;
-        if (diasAtraso > 0) { porFolio[p.folio].vencidos++; porFolio[p.folio].montoVencido += p.monto || 0; porFolio[p.folio].diasMax = Math.max(porFolio[p.folio].diasMax, diasAtraso); }
-    });
-    const registros = Object.entries(porFolio).filter(([, v]) => v.vencidos > 0).map(([folio, v]) => {
-        const cuenta = cxc.find(c => c.folio === folio);
-        const nombre = cuenta ? cuenta.nombre : folio;
-        const clienteId = cuenta ? cuenta.clienteId : null;
-        const cli = clientesLista.find(c => String(c.id) === String(clienteId));
-        const telefono = cli ? (cli.telefono || '') : '';
-        return { folio, nombre, telefono, ...v };
-    }).sort((a, b) => b.montoVencido - a.montoVencido);
-    let csv = 'Cliente,Telefono,Folio,Pagares Vencidos,Dias Max Atraso,Monto Vencido,Saldo Total\n';
-    registros.forEach(r => {
-        csv += `"${r.nombre}","${r.telefono}","${r.folio}",${r.vencidos},${r.diasMax},${r.montoVencido.toFixed(2)},${r.saldoTotal.toFixed(2)}\n`;
-    });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'morosos.csv'; a.click();
-    URL.revokeObjectURL(url);
+    exportarCobranzaEsperada();
 }
 
-// ===== HISTORIAL DE ABONOS POR FOLIO =====
 function abrirHistorialAbonos(folio) {
-    const cuentas = StorageService.get("cuentasPorCobrar", []);
-    const pagaresSistema = StorageService.get("pagaresSistema", []);
-    const cuenta = cuentas.find(c => c.folio === folio);
-    if (!cuenta) { alert("Cuenta no encontrada."); return; }
-
-    const hoy = new Date();
-    const abonos = cuenta.abonos || [];
-    const articulos = cuenta.articulos || [];
-    const totalAbonado = abonos.reduce((s, a) => s + (a.monto || 0), 0);
-    const enganche = Number(cuenta.engancheRecibido || 0);
-    const totalVenta = Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0);
-    const pagaresDelFolio = pagaresSistema
-        .filter(p => p.folio === folio)
-        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
-    const pagaresCubiertos = pagaresDelFolio.filter(p => p.estado === "Pagado").length;
-    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-
-    // Sección 1: Resumen de cuenta
-    const resumenHTML = `
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:20px;">
-            <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #3b82f6;">
-                <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Cliente</div>
-                <div style="font-weight:bold; color:#1e3a5f; margin-top:4px;">${esc(cuenta.nombre)}</div>
-            </div>
-            <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #3b82f6;">
-                <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Folio</div>
-                <div style="font-weight:bold; color:#1d4ed8; margin-top:4px;">${esc(folio)}</div>
-            </div>
-            <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #3b82f6;">
-                <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Fecha Venta</div>
-                <div style="font-weight:bold; margin-top:4px;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '—'}</div>
-            </div>
-            <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #f59e0b;">
-                <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Total Original</div>
-                <div style="font-weight:bold; color:#92400e; margin-top:4px;">${dinero(totalVenta)}</div>
-            </div>
-            <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid #22c55e;">
-                <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Enganche</div>
-                <div style="font-weight:bold; color:#15803d; margin-top:4px;">${dinero(enganche)}</div>
-            </div>
-            <div style="background:#f8fafc; padding:14px; border-radius:8px; border-left:4px solid ${cuenta.estado === 'Saldado' ? '#22c55e' : '#ef4444'};">
-                <div style="font-size:11px; color:#6b7280; text-transform:uppercase;">Estado</div>
-                <div style="font-weight:bold; color:${cuenta.estado === 'Saldado' ? '#15803d' : '#991b1b'}; margin-top:4px;">${esc(cuenta.estado || 'Activo')}</div>
-            </div>
-        </div>`;
-
-    // Sección 2: Artículos
-    const articulosHTML = articulos.length > 0
-        ? `<h4 style="margin:0 0 10px 0; color:#1e3a5f;">🛋️ Artículos de la Venta</h4>
-           <div style="overflow-x:auto; margin-bottom:20px;">
-               <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                   <thead><tr style="background:#f3f4f6;">
-                       <th style="padding:8px 10px; text-align:left;">Producto</th>
-                       <th style="padding:8px 10px; text-align:center;">Cant.</th>
-                       <th style="padding:8px 10px; text-align:right;">Precio Unit.</th>
-                       <th style="padding:8px 10px; text-align:right;">Subtotal</th>
-                   </tr></thead>
-                   <tbody>
-                       ${articulos.map(a => `<tr style="border-bottom:1px solid #f3f4f6;">
-                           <td style="padding:8px 10px;">${esc(a.nombre || a.productoNombre || '—')}</td>
-                           <td style="padding:8px 10px; text-align:center;">${a.cantidad || 1}</td>
-                           <td style="padding:8px 10px; text-align:right;">${dinero(a.precioContado || a.precio || 0)}</td>
-                           <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero((a.precioContado || a.precio || 0) * (a.cantidad || 1))}</td>
-                       </tr>`).join('')}
-                   </tbody>
-               </table>
-           </div>`
-        : '';
-
-    // Sección 3: Historial de abonos
-    const abonosFilas = abonos.length > 0
-        ? abonos.map((a, idx) => `<tr style="border-bottom:1px solid #f3f4f6;">
-            <td style="padding:8px 10px;">${esc(a.fecha || '—')}</td>
-            <td style="padding:8px 10px; text-align:right; font-weight:bold; color:#15803d;">${dinero(a.monto || 0)}</td>
-            <td style="padding:8px 10px;">${esc(a.medioPago || a.etiquetaCuenta || '—')}</td>
-            <td style="padding:8px 10px;">${esc(a.cuentaDestino || a.etiquetaCuenta || '—')}</td>
-            <td style="padding:8px 10px; text-align:center;">
-                <button onclick="reimprimirTicketAbono('${esc(folio)}', ${idx})"
-                        style="padding:4px 8px; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">🖨️</button>
-            </td>
-        </tr>`).join('')
-        : `<tr><td colspan="5" style="padding:14px; text-align:center; color:#6b7280;">Sin abonos registrados</td></tr>`;
-
-    // Sección 4: Estado de pagarés
-    const pagaresFilas = pagaresDelFolio.length > 0
-        ? pagaresDelFolio.map((p, i) => {
-            const venc = new Date(p.fechaVencimiento);
-            const esVencido = (p.estado === "Pendiente" || p.estado === "Parcial") && venc < hoy;
-            let estadoBadge, rowBg;
-            if (p.estado === "Pagado") {
-                estadoBadge = `<span style="background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:9999px; font-size:11px;">✅ Pagado</span>`;
-                rowBg = '#f0fdf4';
-            } else if (p.estado === "Parcial") {
-                estadoBadge = `<span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:9999px; font-size:11px;">⚠️ Parcial</span>`;
-                rowBg = esVencido ? '#fef3c7' : '';
-            } else if (esVencido) {
-                estadoBadge = `<span style="background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:9999px; font-size:11px;">🔴 Vencido</span>`;
-                rowBg = '#fef2f2';
-            } else if (p.estado === "Cancelado") {
-                estadoBadge = `<span style="background:#e5e7eb; color:#374151; padding:2px 8px; border-radius:9999px; font-size:11px;">✖ Cancelado</span>`;
-                rowBg = '#f9fafb';
-            } else {
-                estadoBadge = `<span style="background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:9999px; font-size:11px;">⏳ Pendiente</span>`;
-                rowBg = '';
-            }
-            return `<tr style="border-bottom:1px solid #f3f4f6; ${rowBg ? 'background:' + rowBg + ';' : ''}">
-                <td style="padding:8px 10px; text-align:center;">${i + 1}</td>
-                <td style="padding:8px 10px;">${esc(p.fechaVencimiento || '—')}</td>
-                <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(p.monto || 0)}</td>
-                <td style="padding:8px 10px; text-align:right;">${p.montoAbonado ? dinero(p.montoAbonado) : '—'}</td>
-                <td style="padding:8px 10px; text-align:center;">${estadoBadge}</td>
-            </tr>`;
-        }).join('')
-        : `<tr><td colspan="5" style="padding:14px; text-align:center; color:#6b7280;">Sin pagarés registrados</td></tr>`;
-
-    const modalHTML = `
-        <div data-modal="historial-abonos" style="position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:8000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
-            <div style="background:white; padding:30px; border-radius:15px; width:95%; max-width:900px; margin:0 auto;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid #e5e7eb; padding-bottom:15px;">
-                    <div style="display:flex; align-items:center; gap:14px;">
-                        <img src="img/logo.png" style="width:50px; height:50px; object-fit:contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
-                        <div>
-                            <div style="font-size:18px; font-weight:bold; color:#1e3a5f;">Historial de Cuenta</div>
-                            <div style="font-size:13px; color:#6b7280;">Folio: ${esc(folio)} — ${esc(cuenta.nombre)}</div>
-                        </div>
-                    </div>
-                    <button onclick="document.querySelector('[data-modal=&quot;historial-abonos&quot;]')?.remove();"
-                            style="background:none; border:none; font-size:24px; cursor:pointer; color:#6b7280;">✕</button>
-                </div>
-
-                <!-- Resumen -->
-                ${resumenHTML}
-
-                <!-- Artículos -->
-                ${articulosHTML}
-
-                <!-- Historial de abonos -->
-                <h4 style="margin:0 0 10px 0; color:#1e3a5f;">💰 Historial de Abonos</h4>
-                <div style="overflow-x:auto; margin-bottom:20px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                        <thead><tr style="background:#f3f4f6;">
-                            <th style="padding:8px 10px; text-align:left;">Fecha</th>
-                            <th style="padding:8px 10px; text-align:right;">Monto</th>
-                            <th style="padding:8px 10px; text-align:left;">Medio de Pago</th>
-                            <th style="padding:8px 10px; text-align:left;">Cuenta Destino</th>
-                            <th style="padding:8px 10px; text-align:center;">🖨️</th>
-                        </tr></thead>
-                        <tbody>${abonosFilas}</tbody>
-                        <tfoot>
-                            <tr style="background:#f0fdf4; font-weight:bold;">
-                                <td style="padding:8px 10px;" colspan="2">Total abonado: ${dinero(totalAbonado)}</td>
-                                <td colspan="3"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-
-                <!-- Estado de pagarés -->
-                <h4 style="margin:0 0 10px 0; color:#1e3a5f;">📋 Estado de Pagarés</h4>
-                <div style="background:#f8fafc; padding:10px 14px; border-radius:6px; margin-bottom:10px; font-size:13px; color:#374151;">
-                    <strong>${pagaresCubiertos} de ${pagaresDelFolio.length}</strong> pagaré(s) cubierto(s)
-                </div>
-                <div style="overflow-x:auto; margin-bottom:24px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                        <thead><tr style="background:#f3f4f6;">
-                            <th style="padding:8px 10px; text-align:center;">#</th>
-                            <th style="padding:8px 10px; text-align:left;">Vencimiento</th>
-                            <th style="padding:8px 10px; text-align:right;">Monto</th>
-                            <th style="padding:8px 10px; text-align:right;">Abonado</th>
-                            <th style="padding:8px 10px; text-align:center;">Estado</th>
-                        </tr></thead>
-                        <tbody>${pagaresFilas}</tbody>
-                    </table>
-                </div>
-
-                <div style="text-align:right;">
-                    <button onclick="document.querySelector('[data-modal=&quot;historial-abonos&quot;]')?.remove();"
-                            style="padding:10px 24px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer; font-size:14px;">✕ Cerrar</button>
-                </div>
-            </div>
-        </div>`;
-
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    // Si estás usando la misma vista detallada
+    abrirEstadoCuentaFolio(folio);
 }
 
-// ===== REIMPRIMIR TICKET DE ABONO =====
 function reimprimirTicketAbono(folio, indexAbono) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const pagaresSistema = StorageService.get("pagaresSistema", []);
@@ -2671,6 +2030,7 @@ function reimprimirTicketAbono(folio, indexAbono) {
 
     generarTicketAbonoTermico(datosAbono);
 }
+
 // ===== PROMESA DE PAGO =====
 function abrirModalPromesaPago(folio) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -2726,9 +2086,6 @@ function guardarPromesaPago(folio) {
 // ===== BURÓ DE CRÉDITO INTERNO (SCORING) =====
 window.calcularCalificacionCliente = function(clienteId) {
     const pagares = StorageService.get("pagaresSistema", []);
-    const cuentas = StorageService.get("cuentasPorCobrar", []);
-    
-    // Filtrar los pagarés de este cliente
     const pagaresCliente = pagares.filter(p => String(p.clienteId) === String(clienteId));
     
     if (pagaresCliente.length === 0) {
@@ -2741,17 +2098,15 @@ window.calcularCalificacionCliente = function(clienteId) {
     const hoy = new Date();
 
     pagaresCliente.forEach(p => {
-        // Calcular atraso de los que ya se pagaron pero se pagaron tarde
         if (p.estado === 'Pagado' && p.fechaAbono) {
             const fVenc = new Date(p.fechaVencimiento);
             const fPago = new Date(p.fechaAbono);
             if (fPago > fVenc) {
                 const dias = Math.floor((fPago - fVenc) / (1000 * 60 * 60 * 24));
-                if (dias > 3) pagaresAtrasados++; // Damos 3 días de tolerancia
+                if (dias > 3) pagaresAtrasados++; 
                 if (dias > maxDiasAtrasoHist) maxDiasAtrasoHist = dias;
             }
         } 
-        // Calcular atraso de los que siguen pendientes
         else if (p.estado !== 'Pagado' && p.estado !== 'Cancelado') {
             const fVenc = new Date(p.fechaVencimiento);
             if (fVenc < hoy) {
@@ -2764,17 +2119,16 @@ window.calcularCalificacionCliente = function(clienteId) {
 
     const porcentajeIncumplimiento = (pagaresAtrasados / totalPagares) * 100;
 
-    // Asignar calificación
     if (maxDiasAtrasoHist === 0 && porcentajeIncumplimiento === 0) {
-        return { estrellas: '🌟🌟🌟🌟🌟', texto: 'Excelente (Puntual)', color: '#15803d', bg: '#dcfce7' }; // Verde
+        return { estrellas: '🌟🌟🌟🌟🌟', texto: 'Excelente (Puntual)', color: '#15803d', bg: '#dcfce7' }; 
     } else if (maxDiasAtrasoHist <= 7 && porcentajeIncumplimiento <= 20) {
-        return { estrellas: '⭐⭐⭐⭐', texto: 'Bueno (Atrasos leves)', color: '#0369a1', bg: '#e0f2fe' }; // Azul
+        return { estrellas: '⭐⭐⭐⭐', texto: 'Bueno (Atrasos leves)', color: '#0369a1', bg: '#e0f2fe' }; 
     } else if (maxDiasAtrasoHist <= 15 && porcentajeIncumplimiento <= 40) {
-        return { estrellas: '⭐⭐⭐', texto: 'Regular', color: '#b45309', bg: '#fef3c7' }; // Amarillo
+        return { estrellas: '⭐⭐⭐', texto: 'Regular', color: '#b45309', bg: '#fef3c7' }; 
     } else if (maxDiasAtrasoHist <= 45) {
-        return { estrellas: '⭐⭐', texto: 'Riesgoso', color: '#c2410c', bg: '#ffedd5' }; // Naranja
+        return { estrellas: '⭐⭐', texto: 'Riesgoso', color: '#c2410c', bg: '#ffedd5' }; 
     } else {
-        return { estrellas: '⭐', texto: 'Moroso Crítico', color: '#b91c1c', bg: '#fee2e2' }; // Rojo
+        return { estrellas: '⭐', texto: 'Moroso Crítico', color: '#b91c1c', bg: '#fee2e2' }; 
     }
 };
 

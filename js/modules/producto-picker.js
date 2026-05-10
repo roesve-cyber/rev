@@ -24,43 +24,54 @@ window.abrirSelectorProducto = function(opciones) {
             </div>
 
             <div id="picker-contenido" style="padding:20px;overflow-y:auto;flex:1;">
-                </div>
+            </div>
         </div>
     </div>`;
 
     document.body.insertAdjacentHTML('beforeend', html);
-    renderCategorias(cats, prods, onSeleccion);
+    
+    // Llamamos a la nueva función renombrada
+    renderCategoriasPicker(cats, prods, onSeleccion);
 };
 
-function renderCategorias(cats, prods, callback) {
+// Función RENOMBRADA para no chocar con inventario.js
+function renderCategoriasPicker(cats, prods, callback) {
     const cont = document.getElementById('picker-contenido');
+    if (!cont) return; // Escudo protector
+
     cont.innerHTML = '<p style="color:#6b7280;margin-bottom:15px;">Selecciona una categoría:</p>';
     
     cats.forEach(cat => {
         const btn = document.createElement('button');
         btn.innerHTML = `📁 ${cat.nombre}`;
         btn.style = "width:100%;text-align:left;padding:12px;margin-bottom:8px;border:1px solid #e5e7eb;border-radius:8px;background:white;cursor:pointer;font-weight:bold;";
-        btn.onclick = () => renderSubcategorias(cat, prods, callback);
+        btn.onclick = () => renderSubcategoriasPicker(cat, prods, callback);
         cont.appendChild(btn);
     });
 }
 
-function renderSubcategorias(cat, prods, callback) {
+// Función RENOMBRADA
+function renderSubcategoriasPicker(cat, prods, callback) {
     const cont = document.getElementById('picker-contenido');
-    cont.innerHTML = `<button onclick="renderCategorias(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a categorías</button>
+    if (!cont) return; // Escudo protector
+
+    cont.innerHTML = `<button onclick="renderCategoriasPicker(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a categorías</button>
                       <p style="font-weight:bold;margin-bottom:10px;">${cat.nombre} > Selecciona subcategoría:</p>`;
     
     (cat.subcategorias || []).forEach(sub => {
         const btn = document.createElement('button');
         btn.innerHTML = `🏷️ ${sub.nombre}`;
         btn.style = "width:100%;text-align:left;padding:10px;margin-bottom:5px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;cursor:pointer;";
-        btn.onclick = () => renderProductosFinales(cat.nombre, sub.nombre, prods, callback);
+        btn.onclick = () => renderProductosFinalesPicker(cat.nombre, sub.nombre, prods, callback);
         cont.appendChild(btn);
     });
 }
 
-function renderProductosFinales(catNom, subNom, prods, callback) {
+// Función RENOMBRADA
+function renderProductosFinalesPicker(catNom, subNom, prods, callback) {
     const cont = document.getElementById('picker-contenido');
+    if (!cont) return; // Escudo protector
+
     // Permitir que la subcategoría sea string u objeto, y comparar como lo hace el producto
     const filtrados = prods.filter(p => {
         const catOk = p.categoria === catNom;
@@ -70,7 +81,9 @@ function renderProductosFinales(catNom, subNom, prods, callback) {
     });
 
     const catObj = (window._pickerState?.cats || []).find(c => c.nombre === catNom);
-    cont.innerHTML = `<button onclick="catObj ? renderSubcategorias(window._pickerState.cats.find(c=>c.nombre==='${catNom}'), window._pickerState.prods, window._pickerState.onSeleccion) : renderCategorias(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a subcategorías</button>
+    
+    // Se actualizaron los onclicks para usar las nuevas funciones
+    cont.innerHTML = `<button onclick="catObj ? renderSubcategoriasPicker(window._pickerState.cats.find(c=>c.nombre==='${catNom}'), window._pickerState.prods, window._pickerState.onSeleccion) : renderCategoriasPicker(window._pickerState.cats, window._pickerState.prods, window._pickerState.onSeleccion)" style="background:none;border:none;color:#2563eb;cursor:pointer;margin-bottom:10px;">⬅ Volver a subcategorías</button>
                       <p style="font-weight:bold;">${catNom} > ${subNom}</p>
                       <p style="color:#6b7280;font-size:12px;margin-bottom:10px;">Elige el producto:</p>`;
 

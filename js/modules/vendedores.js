@@ -324,7 +324,7 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
       <td style="padding:8px;">${_escHtml(c.folio)}</td>
       <td style="padding:8px;text-align:right;">${dinero(c.totalVenta)}</td>
       <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
-      <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX')}</td>
+      <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
       <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre'}</td>
       <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
       <td style="padding:8px;text-align:center;">${c.estado === 'Pendiente' ? `<button onclick="pagarComision(${c.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Pagar</button>` : '✅'}</td>
@@ -376,7 +376,7 @@ function pagarComision(id) {
     movimientos.push({
         id: Date.now(),
         folio: c.folio,
-        fecha: new Date().toLocaleDateString('es-MX'),
+        fecha: new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }),
         tipo: 'egreso',
         monto: c.montoComision,
         concepto: `Pago comisión - ${c.vendedorNombre} (${c.folio})`,

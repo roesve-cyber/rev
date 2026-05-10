@@ -86,7 +86,7 @@ function renderReporteVentas() {
     // Tabla
     const filas = todas.map(v => {
         const fecha = v.fechaVenta ? new Date(v.fechaVenta) : null;
-        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX') : (v.fechaVenta || '-');
+        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : (v.fechaVenta || '-');
         return [
             v.folio || '-',
             v.nombre || '-',
@@ -185,7 +185,7 @@ function renderReporteFlujo() {
 
     const filas = lista.map(m => {
         const fecha = m.fecha ? new Date(m.fecha) : null;
-        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX') : '-';
+        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-';
         return [
             m.folio || '-',
             fechaStr,

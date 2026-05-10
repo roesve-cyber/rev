@@ -344,17 +344,35 @@ function verificarGastosRecurrentes() {
             const nuevoId = Date.now() + Math.floor(Math.random() * 1000);
             const nuevo = { ...g, id: nuevoId, fecha: hoyStr, ultimaVez: hoyStr };
             gastos.push(nuevo);
-            const movs = StorageService.get('movimientosCaja', []);
-            movs.push({
-                id: Date.now() + 2,
-                tipo: 'egreso',
-                concepto: `Gasto recurrente: ${g.categoria} — ${g.descripcion}`,
-                monto: g.monto,
-                fecha: new Date().toISOString(),
-                cuenta: g.cuentaDebito || 'caja',
-                referencia: `GASTO-${nuevo.id}`
-            });
-            StorageService.set('movimientosCaja', movs);
+
+            // FIX 4: Actualizar ultimaVez en el objeto ORIGINAL para evitar duplicados en la próxima carga
+            const idxOriginal = gastos.findIndex(x => x.id === g.id);
+            if (idxOriginal !== -1) gastos[idxOriginal].ultimaVez = hoyStr;
+
+            // FIX 5: Usar _egresarCuenta para actualizar el saldo real de la cuenta
+            if (typeof window._egresarCuenta === 'function') {
+                window._egresarCuenta({
+                    monto:      g.monto,
+                    cuentaId:   g.cuentaDebito   || 'efectivo',
+                    etiqueta:   g.etiquetaCuenta || 'Efectivo',
+                    concepto:   `Gasto recurrente: ${g.categoria} — ${g.descripcion}`,
+                    referencia: `GASTO-${nuevo.id}`
+                });
+            } else {
+                // Fallback si _egresarCuenta aún no está disponible
+                const movs = StorageService.get('movimientosCaja', []);
+                movs.push({
+                    id: Date.now() + 2,
+                    tipo: 'egreso',
+                    concepto: `Gasto recurrente: ${g.categoria} — ${g.descripcion}`,
+                    monto: g.monto,
+                    fecha: new Date().toISOString(),
+                    cuenta: g.cuentaDebito || 'efectivo',
+                    etiquetaCuenta: g.etiquetaCuenta || 'Efectivo',
+                    referencia: `GASTO-${nuevo.id}`
+                });
+                StorageService.set('movimientosCaja', movs);
+            }
             nuevos++;
         }
     });

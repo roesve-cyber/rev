@@ -162,8 +162,19 @@ function eliminarProveedor(id) {
 
 window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     const cajas = soloDebito ? [] : StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
-    const bancarias = StorageService.get('cuentas-bancarias', []);
-    const debito = bancarias.filter(c => c.tipo && c.tipo.toLowerCase().includes('debito'));
+    
+    // LA SOLUCIÓN: Leemos directamente de la fuente maestra (tarjetasConfig) 
+    // que es la que sobrevive a los respaldos de JSON.
+    const tarjetas = StorageService.get('tarjetasConfig', []);
+    
+    // Mapeamos las tarjetas de débito. 
+    // IMPORTANTE: el ID debe ser el nombre del banco (t.banco) para que 
+    // las matemáticas del dashboard de Liquidez cuadren exactas.
+    const debito = tarjetas.filter(t => t.tipo === "debito").map(t => ({
+        id: t.banco, 
+        nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`
+    }));
+
     const todas = [...cajas, ...debito];
     const opts = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
     return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
@@ -891,7 +902,7 @@ window.registrarAbonoProveedor = function(idCuenta) {
 function confirmarAbonoProveedor(idCuenta) {
     const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor")?.value);
     let cuentas = StorageService.get("cuentasPorPagar", []);
-    const index = cuentas.findIndex(c => c.id === idCuenta);
+    const index = cuentas.findIndex(c => String(c.id) === String(idCuenta)); // FIX: era c.id === idCuenta (number vs string)
     if (index === -1) return;
     const cuenta = cuentas[index];
 

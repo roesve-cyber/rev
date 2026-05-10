@@ -151,7 +151,7 @@ function abrirHistorialPuntosCliente(clienteId) {
         const color = h.tipo === 'acumulado' ? '#16a34a' : '#dc2626';
         const signo = h.tipo === 'acumulado' ? '+' : '';
         return `<tr>
-          <td style="padding:8px;">${new Date(h.fecha).toLocaleDateString('es-MX')}</td>
+          <td style="padding:8px;">${new Date(h.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
           <td style="padding:8px;">${h.descripcion || ''}</td>
           <td style="padding:8px;text-align:center;color:${color};font-weight:bold;">${signo}${h.puntos}</td>
         </tr>`;

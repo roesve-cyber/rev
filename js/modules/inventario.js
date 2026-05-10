@@ -373,25 +373,37 @@ function limpiarFiltros() {
 function actualizarCombosFiltros() {
     const filtroCat = document.getElementById("filtroCategoria");
     const filtroSub = document.getElementById("filtroSubcategoria");
+
+    // 1. EL ESCUDO: Si no estamos en una pantalla con estos filtros, abortamos sin error.
     if (!filtroCat) return;
 
+    // 2. RECUPERAR ORIGINAL: Guardamos lo que el usuario ya tenía seleccionado
     const catPrevia = filtroCat.value;
     const subPrevia = filtroSub ? filtroSub.value : "todos";
 
+    // 3. LLENAR CATEGORÍAS (Usando tus datos originales)
     let htmlCat = '<option value="todos">-- Todas las Categorías --</option>';
-    categoriasData.forEach(cat => {
-        htmlCat += `<option value="${cat.nombre}">${cat.nombre}</option>`;
-    });
+    // Usamos categoriasData que es tu fuente global de verdad
+    if (typeof categoriasData !== 'undefined') {
+        categoriasData.forEach(cat => {
+            htmlCat += `<option value="${cat.nombre}">${cat.nombre}</option>`;
+        });
+    }
+    
     filtroCat.innerHTML = htmlCat;
     filtroCat.value = catPrevia || "todos";
 
+    // 4. LLENAR SUBCATEGORÍAS (Solo si el elemento existe y hay una categoría seleccionada)
     if (filtroSub) {
         let htmlSub = '<option value="todos">-- Todas las Subcategorías --</option>';
-        if (filtroCat.value !== "todos") {
+        
+        if (filtroCat.value !== "todos" && typeof categoriasData !== 'undefined') {
             const catInfo = categoriasData.find(c => c.nombre === filtroCat.value);
             if (catInfo && catInfo.subcategorias) {
                 catInfo.subcategorias.forEach(sub => {
-                    htmlSub += `<option value="${sub.nombre}">${sub.nombre}</option>`;
+                    // Mantenemos tu lógica de manejar sub como objeto con .nombre
+                    const nombreSub = typeof sub === 'string' ? sub : sub.nombre;
+                    htmlSub += `<option value="${nombreSub}">${nombreSub}</option>`;
                 });
             }
         }
@@ -456,13 +468,19 @@ function renderInventario(listaAMostrar = window.productos) {
         });
     }
 
+    html += `</tbody></table>`;
+    cont.innerHTML = html;
+} // <-- AQUÍ SE CIERRA CORRECTAMENTE LA FUNCIÓN DE LA TABLA
 
-// Modal para editar ID
+// ====================================================================
+// FUNCIONES DEL MODAL DE EDICIÓN DE ID (AHORA VIVEN AFUERA, SEGURAS)
+// ====================================================================
+
 window.abrirModalEditarId = function(id) {
-        const p = window.productos.find(prod => String(prod.id) === String(id));
+    const p = window.productos.find(prod => String(prod.id) === String(id));
     if (!p) return;
     // Contar cuántas veces aparece ese ID en la base local
-        const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
+    const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
     // Modal básico
     let modal = document.getElementById('modalEditarId');
     if (modal) modal.remove();
@@ -471,13 +489,13 @@ window.abrirModalEditarId = function(id) {
     modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.35);z-index:100000;display:flex;align-items:center;justify-content:center;';
     modal.innerHTML = `
       <div style="background:white;padding:32px 28px;border-radius:12px;min-width:320px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);text-align:center;">
-        <h2 style=\"margin-bottom:18px;color:#1e40af;font-size:20px;\">Editar ID de producto</h2>
-        <div style=\"margin-bottom:12px;\"><b>Producto:</b> ${p.nombre}</div>
-        <div style=\"margin-bottom:12px;\"><b>ID actual:</b> <span style=\"color:#1e40af;font-weight:bold;\">${p.id}</span></div>
-        <div style=\"margin-bottom:12px;\"><b>Veces que aparece este ID:</b> <span style=\"color:#e67e22;font-weight:bold;\">${repeticiones}</span></div>
-        <input type=\"text\" id=\"inputNuevoId\" value=\"${p.id}\" style=\"width:120px;text-align:center;font-size:18px;padding:7px 10px;margin-bottom:18px;border:2px solid #e5e7eb;border-radius:7px;\"><br>
-        <button onclick=\"guardarNuevoIdModal(${p.id})\" style=\"padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;\">Guardar</button>
-        <button onclick=\"cerrarModalEditarId()\" style=\"padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;\">Cancelar</button>
+        <h2 style="margin-bottom:18px;color:#1e40af;font-size:20px;">Editar ID de producto</h2>
+        <div style="margin-bottom:12px;"><b>Producto:</b> ${p.nombre}</div>
+        <div style="margin-bottom:12px;"><b>ID actual:</b> <span style="color:#1e40af;font-weight:bold;">${p.id}</span></div>
+        <div style="margin-bottom:12px;"><b>Veces que aparece este ID:</b> <span style="color:#e67e22;font-weight:bold;">${repeticiones}</span></div>
+        <input type="text" id="inputNuevoId" value="${p.id}" style="width:120px;text-align:center;font-size:18px;padding:7px 10px;margin-bottom:18px;border:2px solid #e5e7eb;border-radius:7px;"><br>
+        <button onclick="guardarNuevoIdModal(${p.id})" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;">Guardar</button>
+        <button onclick="cerrarModalEditarId()" style="padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;">Cancelar</button>
       </div>
     `;
     document.body.appendChild(modal);
@@ -521,11 +539,6 @@ window.guardarNuevoIdModal = async function(idActual) {
         renderInventario();
     }
 }
-
-    html += `</tbody></table>`;
-    cont.innerHTML = html;
-}
-
 function confirmarEliminarProducto(id) {
     const producto = window.productos.find(p => String(p.id) === String(id));
     if (!producto) {
@@ -545,9 +558,9 @@ function actualizarStock(id, cant, concepto) {
     if (idx !== -1) {
         window.productos[idx].stock = (window.productos[idx].stock || 0) + cant;
         registrarMovimiento(id, concepto, cant, "entrada");
-        if (!StorageService.set("productos", window.productos)) {
+        StorageService.set("productos", window.productos).catch(function() {
             console.error("❌ Error guardando productos");
-        }
+        });
     }
 }
 
@@ -700,7 +713,9 @@ function guardarProductoDB() {
         window.productos.push({ id: Date.now(), ...datosProducto, stock: 0 });
     }
 
-    if (!StorageService.set("productos", window.productos)) return alert("❌ Error guardando producto");
+    StorageService.set("productos", window.productos).catch(function() { 
+        alert("❌ Error guardando producto"); 
+    });
 
     cerrarProductoForm();
     renderInventario();
@@ -900,16 +915,28 @@ function actualizarDisplayProducto(costo, precio, margen) {
     }
 }
 
-
 // ===== CATEGORÍAS =====
 function renderCategorias() {
-    const contenedor = document.getElementById("listaCategoriasCards");
+    // 1. Usamos el ID exactamente como está en tu index.html
+    const contenedor = document.getElementById('listaCategoriasCards');
+    
+    // 2. El escudo: Si no estamos en la pantalla, no hacemos nada
     if (!contenedor) return;
+
+    // 3. Leemos de la variable global de tu sistema
+    const categorias = window.categoriasData || StorageService.get('categoriasData', []); 
+    
     contenedor.innerHTML = "";
 
-    categoriasData.forEach((cat, indexCat) => {
+    if (categorias.length === 0) {
+        contenedor.innerHTML = '<p style="text-align:center; color:gray; padding:20px; width: 100%;">No hay categorías guardadas aún.</p>';
+        return;
+    }
+
+    // 4. Dibujamos las tarjetas
+    categorias.forEach((cat, indexCat) => {
         let card = document.createElement("div");
-        card.style = "background: white; border-radius: 10px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #3498db;";
+        card.style = "background: white; border-radius: 10px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #3498db; margin-bottom: 20px;";
 
         let html = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -926,20 +953,22 @@ function renderCategorias() {
                 </thead>
                 <tbody>`;
 
-        cat.subcategorias.forEach((sub, indexSub) => {
-            html += `
-                <tr style="border-bottom: 1px solid #fafafa;">
-                    <td style="padding: 8px 5px;">${sub.nombre}</td>
-                    <td style="padding: 8px 5px; text-align: center;">
-                        <input type="number" value="${sub.margen}"
-                            onchange="actualizarMargen(${indexCat}, ${indexSub}, this.value)"
-                            style="width: 55px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 2px;">
-                    </td>
-                    <td style="text-align: right;">
-                        <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:none; border:none; cursor:pointer; color:#e74c3c;">✕</button>
-                    </td>
-                </tr>`;
-        });
+        if (cat.subcategorias && cat.subcategorias.length > 0) {
+            cat.subcategorias.forEach((sub, indexSub) => {
+                html += `
+                    <tr style="border-bottom: 1px solid #fafafa;">
+                        <td style="padding: 8px 5px;">${sub.nombre}</td>
+                        <td style="padding: 8px 5px; text-align: center;">
+                            <input type="number" value="${sub.margen}"
+                                onchange="actualizarMargen(${indexCat}, ${indexSub}, this.value)"
+                                style="width: 55px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 2px;">
+                        </td>
+                        <td style="text-align: right;">
+                            <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:none; border:none; cursor:pointer; color:#e74c3c;">✕</button>
+                        </td>
+                    </tr>`;
+            });
+        }
 
         html += `
                 </tbody>
@@ -953,22 +982,24 @@ function renderCategorias() {
 }
 
 function guardarCategoriasConfig() {
-    if (!StorageService.set("categoriasData", categoriasData)) {
+    // Guardado moderno usando Promesas
+    StorageService.set("categoriasData", window.categoriasData).catch(function() {
         console.error("❌ Error guardando categorías");
-        return;
-    }
+    });
     renderCategorias();
-    actualizarCombosFiltros();
+    if (typeof actualizarCombosFiltros === 'function') actualizarCombosFiltros();
 }
 
 function nuevaCategoria() {
     const nombre = prompt("Nombre de la nueva categoría (Ej: Comedores, Oficinas):");
     if (nombre && nombre.trim()) {
-        categoriasData.push({ nombre: nombre.trim(), subcategorias: [] });
+        // Aseguramos que la variable exista antes de agregarle datos
+        if (!window.categoriasData) window.categoriasData = StorageService.get('categoriasData', []);
+        
+        window.categoriasData.push({ nombre: nombre.trim(), subcategorias: [] });
         guardarCategoriasConfig();
     }
 }
-
 function agregarSubcategoria(indexCat) {
     const nombre = prompt("Nombre de la subcategoría:");
     const margen = prompt("¿Qué margen de ganancia (%) deseas?", "30");
