@@ -1,10 +1,10 @@
 // Variables globales
-let categoriasData = StorageService.get("categoriasData", [
+var categoriasData = StorageService.get("categoriasData", [
     { nombre: "Recámaras", subcategorias: [{ nombre: "Roperos", margen: 35 }, { nombre: "Bases", margen: 30 }] },
     { nombre: "Salas", subcategorias: [{ nombre: "Sofás", margen: 40 }] }
 ]);
 
-let tarjetasConfig = StorageService.get("tarjetasConfig", [
+var tarjetasConfig = StorageService.get("tarjetasConfig", [
     { banco: "BBVA", diaCorte: 15, diaLimite: 5 },
     { banco: "BANAMEX", diaCorte: 1, diaLimite: 20 }
 ]);
@@ -19,37 +19,37 @@ if (!tarjetasConfig || tarjetasConfig.length === 0) {
     console.log("✅ tarjetasConfig inicializado con valores por defecto");
 }
 
-let productos = StorageService.get("productos", []);
-let proveedores = StorageService.get("proveedores", []);
-let clientes = StorageService.get("clientes", []);
-let carrito = StorageService.get("carrito", []);
-let movimientosInventario = StorageService.get("movimientosInventario", []);
-let recepciones = StorageService.get("recepciones", []);
-let compras = StorageService.get("compras", []);
-let cuentasPorPagar = StorageService.get("cuentasPorPagar", []);
-let deudasMSI = StorageService.get("deudasMSI", []);
-let cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+var productos = StorageService.get("productos", []);
+var proveedores = StorageService.get("proveedores", []);
+var clientes = StorageService.get("clientes", []);
+var carrito = StorageService.get("carrito", []);
+var movimientosInventario = StorageService.get("movimientosInventario", []);
+var recepciones = StorageService.get("recepciones", []);
+var compras = StorageService.get("compras", []);
+var cuentasPorPagar = StorageService.get("cuentasPorPagar", []);
+var deudasMSI = StorageService.get("deudasMSI", []);
+var cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
 if (!Array.isArray(cuentasPorCobrar)) {
     cuentasPorCobrar = [];
     StorageService.set("cuentasPorCobrar", cuentasPorCobrar);
 }
-let movimientosCaja = StorageService.get("movimientosCaja", []);
-let requisicionesCompra = StorageService.get("requisicionesCompra", []);
-let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
-let pagaresSistema = StorageService.get("pagaresSistema", []);
+var movimientosCaja = StorageService.get("movimientosCaja", []);
+var requisicionesCompra = StorageService.get("requisicionesCompra", []);
+var salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
+var pagaresSistema = StorageService.get("pagaresSistema", []);
 
-let cuentasEfectivo = StorageService.get("cuentasEfectivo", [
+var cuentasEfectivo = StorageService.get("cuentasEfectivo", [
     { id: "efectivo", nombre: "💵 Efectivo", tipo: "efectivo", saldo: 0 }
 ]);
 
-let plazoSeleccionado = null;
-let productoEditando = null;
-let productoActualId = null;
-let clienteEditandoId = null;
-let clienteSeleccionado = null;
-let _planElegidoPendiente = null;
-let decisionesInventario = {};
-let _vendedorSeleccionado = null;
+var plazoSeleccionado = null;
+var productoEditando = null;
+var productoActualId = null;
+var clienteEditandoId = null;
+var clienteSeleccionado = null;
+var _planElegidoPendiente = null;
+var decisionesInventario = {};
+var _vendedorSeleccionado = null;
 
 // Funciones utilidades
 function dinero(valor) {
@@ -95,10 +95,9 @@ function migrarStorageCuentasPorCobrar() {
                 abonos: Array.isArray(row.abonos) ? row.abonos : []
             });
         });
-        if (!StorageService.set("cuentasPorCobrar", actual)) {
+        StorageService.set("cuentasPorCobrar", actual).catch(function() {
             console.warn("⚠️ No se pudo guardar migración");
-            return;
-        }
+        });
         localStorage.removeItem("cuentasPorCobrarCliente");
         cuentasPorCobrar = actual;
     } catch (e) {
