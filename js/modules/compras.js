@@ -945,7 +945,7 @@ function abrirNuevaOrdenCompra() {
     const selProds = prods.map(p => `<option value="${p.id}" data-costo="${p.costo || 0}">${p.nombre} (Costo: ${dinero(p.costo || 0)})</option>`).join('');
     const html = `
     <div data-modal="nueva-oc" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
-      <div style="background:white;border-radius:12px;width:100%;max-width:720px;padding:28px;margin:auto;">
+      <div style="background:white;border-radius:12px;width:100%;max-width:950px;padding:30px;margin:auto;">
         <h2 style="margin:0 0 20px;color:#1e40af;">📋 Nueva Orden de Compra</h2>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
@@ -1927,7 +1927,7 @@ function editarOrdenCompra(id) {
 
     const html = `
     <div data-modal="editar-oc" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
-      <div style="background:white;border-radius:12px;width:100%;max-width:720px;padding:28px;margin:auto;">
+      <div style="background:white;border-radius:12px;width:100%;max-width:950px;padding:30px;margin:auto;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
             <h2 style="margin:0;color:#1e40af;">✏️ Editar OC — ${oc.folio}</h2>
             <button onclick="document.querySelector('[data-modal=editar-oc]')?.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;">✕</button>
