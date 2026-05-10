@@ -63,7 +63,7 @@
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-prod')">📦 PRODUCTOS <span>▾</span></button>
             <div id="sub-prod" class="submenu oculto-submenu">
                 <button onclick="navA('inventario')">📋 Inventario</button>
-                <button onclick="navA('configcategorias')">🏷️ Categorías</button>
+                <button onclick="navA('configcategorias'); renderCategorias();">🏷️ Categorías</button>
                 <button onclick="abrirImportadorProductos()">📥 Importar Batch</button>
                 <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
             </div>
@@ -86,9 +86,9 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas')">💳 VENTAS <span>▾</span></button>
             <div id="sub-ventas" class="submenu oculto-submenu">
-                <button onclick="navA('tienda')">🖼️ Catálogo</button>
+                <button onclick="navA('tienda'); mostrarProductos();">🖼️ Catálogo</button>
                 <button onclick="navA('carrito')">🛒 Carrito</button>
-                <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
+                <button onclick="navA('listaprecios'); renderListaPrecios();">📊 Lista de Precios</button>
                 <button onclick="navA('seleccionarcliente')">✅ Finalizar Venta</button>
                 <button onclick="navA('entregas')">🚚 Entregas</button>
                 <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
