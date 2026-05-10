@@ -6,10 +6,11 @@
 
 const TABLAS_SISTEMA = [
     "productos", "categoriasData", "movimientosInventario",
-    "clientesSistema", "cuentasPorCobrar", "pagaresSistema", // <-- Agregadas
+    "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
     "ventasRegistradas", "cotizaciones", "apartados",
     "proveedores", "compras", "gastos", "movimientosCaja",
-    "cuentasEfectivo", "tarjetasConfig", "configuracionPos"
+    "cuentasEfectivo", "tarjetasConfig", "configuracionPos",
+    "recepciones", "cuentasPorPagar", "deudasMSI", "ubicacionesConfig"
 ];
 
 window.TABLAS_SISTEMA = TABLAS_SISTEMA;
@@ -66,26 +67,44 @@ window.importarBackupJSON = function(event) {
     if (!archivo || !confirm('⚠️ Se borrarán los datos actuales. ¿Continuar?')) return;
     
     const lector = new FileReader();
-    lector.onload = (e) => {
+    lector.onload = async (e) => { 
         try {
             const json = JSON.parse(e.target.result);
             const datos = json.datos || json;
 
-            // Limpiamos con el servicio para evitar residuos
-            TABLAS_SISTEMA.forEach(t => localStorage.removeItem(t)); 
+            // 1. Guardar en la base de datos local (IndexedDB)
+            await Promise.all(Object.entries(datos).map(([key, value]) => {
+                let valorCorregido = value;
+                if (typeof value === 'string') {
+                try { valorCorregido = JSON.parse(value); } catch(e) {}
+                    }
+                return StorageService.set(key, valorCorregido); // <-- Cambiamos 'value' por 'valorCorregido'
+            }));
 
-            // Guardamos cada tabla usando el StorageService
-            Object.entries(datos).forEach(([key, value]) => {
-                StorageService.set(key, value);
-            });
+            // 2. REPARACIÓN: Sincronizar las variables globales con los nuevos datos
+            // Esto es necesario para que las funciones de 'render' vean los cambios
+            if (datos.productos) window.productos = datos.productos;
+            if (datos.categoriasData) window.categoriasData = datos.categoriasData;
+            if (datos.movimientosInventario) window.movimientosInventario = datos.movimientosInventario;
 
-            alert('✅ Sistema restaurado con éxito. Reiniciando...');
+            // 3. Renderizado seguro
+            // Ahora, si estás en la vista de inventario, se actualizará.
+            // Si estás en configuración, renderCategorias() simplemente no hará nada (gracias al paso 1).
+            if (typeof renderCategorias === 'function') renderCategorias();
+            if (typeof actualizarCombosFiltros === 'function') actualizarCombosFiltros();
+            
+            alert('✅ Respaldo restaurado con éxito.');
+            
+            // Si quieres que todo el sistema se refresque por completo:
             location.reload();
+
+
         } catch (err) { 
-            alert('❌ El archivo de respaldo no es válido.'); 
+            console.error("Error detallado:", err);
+            alert(`❌ Error al importar: ${err.message}`); 
         }
     };
-    reader.readAsText(archivo);
+    lector.readAsText(archivo);
 };
 
 // ── OneDrive ──────────────────────────────────────────────────────────────────

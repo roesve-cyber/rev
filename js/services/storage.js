@@ -29,6 +29,34 @@ const StorageService = {
             }
             console.log("🚀 Sistema blindado: Base de datos local cargada.");
 
+            // ==========================================
+            // BLINDAJE CONTRA CARRERAS DE VELOCIDAD
+            // ==========================================
+            
+            // 1. Unificamos la tabla de clientes de la migración
+            if (this._cache["clientesSistema"] && (!this._cache["clientes"] || this._cache["clientes"].length === 0)) {
+                this._cache["clientes"] = this._cache["clientesSistema"];
+                localforage.setItem("clientes", this._cache["clientes"]);
+            }
+
+            // 2. Inyectamos los datos a la memoria global DESPUÉS de abrir el baúl
+            window.clientes = this._cache["clientes"] || [];
+            window.cuentasPorCobrar = this._cache["cuentasPorCobrar"] || [];
+            window.pagaresSistema = this._cache["pagaresSistema"] || [];
+            window.productos = this._cache["productos"] || [];
+            window.categoriasData = this._cache["categoriasData"] || [];
+            window.tarjetasConfig = this._cache["tarjetasConfig"] || [];
+            window.movimientosCaja = this._cache["movimientosCaja"] || [];
+            window.cuentasMSI = this._cache["cuentasMSI"] || [];
+            window.apartados = this._cache["apartados"] || [];
+
+            // 3. Forzamos un redibujado automático para que las tablas no queden vacías
+            setTimeout(() => {
+                if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+                if (typeof renderClientes === 'function') renderClientes();
+            }, 300);
+            // ==========================================
+
         } catch (error) {
             console.warn("⚠️ Navegador bloqueó IndexedDB. Usando localStorage clásico.");
             this._usandoLocalForage = false; 
@@ -65,28 +93,34 @@ const StorageService = {
         // 2. Actualizar variables globales
         if (key === 'productos') window.productos = value;
         if (key === 'carrito') window.carrito = value;
+        if (key === 'categoriasData') window.categoriasData = value;
         
-        // 3. Guardado físico local
+        // 3. Guardado físico local (AHORA RETORNA LA PROMESA)
+        let dbPromise = Promise.resolve();
         if (this._usandoLocalForage) {
-            localforage.setItem(key, value).catch(err => console.error("Error guardando local:", err));
+            dbPromise = localforage.setItem(key, value).catch(err => console.error("Error guardando local:", err));
         } else {
             localStorage.setItem(key, JSON.stringify(value));
         }
 
-        // ☁️ 4. AUTO-GUARDADO EN FIREBASE (En segundo plano)
-        // Si hay internet, lo sube. Si no hay, Firebase lo guarda en cola y lo sube cuando regrese el internet.
+        // ☁️ 4. AUTO-GUARDADO EN FIREBASE
         if (window._firebaseActivo && window._db) {
             window._db.collection('posData').doc(key).set({ data: value })
                 .catch(e => console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red."));
         }
 
-        return true;
+        return dbPromise; // <-- Clave para poder usar await
     },
 
     remove(key) {
         delete this._cache[key];
-        if (this._usandoLocalForage) localforage.removeItem(key);
-        else localStorage.removeItem(key);
+        if (this._usandoLocalForage) {
+            // El .catch evita que un rechazo de IndexedDB detenga la importación
+            return localforage.removeItem(key).catch(e => console.warn("Aviso al borrar:", e)); 
+        } else {
+            localStorage.removeItem(key);
+            return Promise.resolve();
+        }
     },
 
     // ☁️ FUNCIONES DE NUBE (Ahora sí conectadas a Firestore)
