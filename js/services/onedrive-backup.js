@@ -40,7 +40,7 @@ function _construirBackup() {
 // --- EXPORTAR TODO (Corregido para IndexedDB/StorageService) ---
 window.exportarBackupJSON = function() {
     const backup = { 
-        _fecha: new Date().toISOString(), 
+        _fecha: Date.now(), 
         _version: "2.0",
         datos: {} 
     };
