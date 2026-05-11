@@ -15,7 +15,7 @@ function calcularAntiguedadProducto(p) {
     if (!fechaStr) return '-';
     let fecha = new Date(fechaStr);
     if (isNaN(fecha.getTime())) return '-';
-    let ahora = new Date();
+    let ahora = new Date().getTime();
     let diffMs = ahora - fecha;
     let diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     if (diffDias < 31) return diffDias + ' días';
@@ -29,6 +29,9 @@ window.renderConsultaInventario = function() {
     const cont = document.getElementById('tablaConsultaInventario');
     if (!cont) return;
 
+    // Helper de moneda local por seguridad
+    const formatoDinero = (val) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val || 0);
+
     // 1. Obtención de Filtros
     const cat = document.getElementById('filtroCatInv')?.value || 'todos';
     const sub = document.getElementById('filtroSubInv')?.value || 'todos';
@@ -36,8 +39,8 @@ window.renderConsultaInventario = function() {
     const pedidoFiltro = document.getElementById('filtroPedidoInv')?.value || 'todos';
 
     // 2. Preparación de Datos (Kardex y Órdenes de Compra)
-    const kardex = window.movimientosInventario || [];
-    const ocs = window.ordenesCompra || [];
+    const kardex = window.movimientosInventario || StorageService.get("movimientosInventario", []);
+    const ocs = window.ordenesCompra || StorageService.get("ordenesCompra", []);
     const estadoPedidoPorProd = {};
     
     ocs.forEach(oc => {
@@ -53,103 +56,271 @@ window.renderConsultaInventario = function() {
     });
 
     // 3. Filtrado de Productos
-    let productosFiltrados = (window.productos || []).filter(p => {
+    const productosBase = window.productos || StorageService.get("productos", []);
+    let productosFiltrados = productosBase.filter(p => {
         const coincideCat = (cat === 'todos' || cat === 'todas' || p.categoria === cat);
         const coincideSub = (sub === 'todos' || sub === 'todas' || p.subcategoria === sub);
-        const coincideStock = stockFiltro === 'todos' ? true : (stockFiltro === 'con' ? (p.stock > 0) : (p.stock <= 0));
+        const coincideStock = stockFiltro === 'todos' ? true : (stockFiltro === 'con' ? ((p.stock || 0) > 0) : ((p.stock || 0) <= 0));
         const estado = estadoPedidoPorProd[p.id] || 'ninguno';
         const coincidePedido = pedidoFiltro === 'todos' ? true : (pedidoFiltro === estado);
         
         return coincideCat && coincideSub && coincideStock && coincidePedido;
     });
 
-    // 4. Renderizado de Estructura de Tabla
-    let html = `
-    <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:12px;">
-        <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white; font-size:14px;">
-            <thead>
-                <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
-                    <th style="padding:15px;">Producto / Categoría</th>
-                    <th style="padding:15px; text-align:center;">Stock Total</th>
-                    <th style="padding:15px;">Desglose por Ubicación y Color</th>
-                    <th style="padding:15px; text-align:right;">Valorización</th>
-                    <th style="padding:15px; text-align:center;">Estado</th>
-                </tr>
-            </thead>
-            <tbody>`;
-
+    // 4. Pre-cálculo de Filas y Totales
     let totalGlobalUnidades = 0;
     let totalGlobalPesos = 0;
+    let filasHTML = '';
 
     productosFiltrados.forEach(p => {
-        // Lógica de Costo Promedio (del reporte 1)
+        // Cálculo Costo Promedio
         const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipo === 'entrada');
         let totalCosto = 0, totalCantidadEntrada = 0;
         entradas.forEach(mov => {
-            totalCosto += (mov.costoUnitario || 0) * (mov.cantidad || 0);
-            totalCantidadEntrada += mov.cantidad || 0;
+            totalCosto += (parseFloat(mov.costoUnitario) || 0) * (parseInt(mov.cantidad) || 0);
+            totalCantidadEntrada += parseInt(mov.cantidad) || 0;
         });
         const costoPromedio = totalCantidadEntrada > 0 ? (totalCosto / totalCantidadEntrada) : (p.costo || 0);
-        const valorTotal = (p.stock || 0) * costoPromedio;
+        
+        const stockActual = parseFloat(p.stock) || 0;
+        const valorTotal = stockActual * costoPromedio;
 
-        totalGlobalUnidades += (p.stock || 0);
+        totalGlobalUnidades += stockActual;
         totalGlobalPesos += valorTotal;
 
-        // Lógica de Desglose de Variantes (del reporte 2)
+        // Desglose de Variantes
         let desgloseHtml = '';
-        if (p.variantes && p.variantes.length > 0) {
-            desgloseHtml = p.variantes.filter(v => v.stock > 0).map(v => `
+        const variantes = p.variantes || [];
+        const stockEnVariantes = variantes.reduce((s, v) => s + (parseFloat(v.stock) || 0), 0);
+        const stockSinAsignar = Math.max(0, stockActual - stockEnVariantes);
+
+        if (stockSinAsignar > 0) {
+            desgloseHtml += `
+                <div style="display:inline-block; background:#fef2f2; border:1px solid #fecdd3; color:#be123c; padding:4px 8px; border-radius:6px; margin:2px; font-size:11px;">
+                    ⚠️ <b>Stock sin asignar</b>: ${stockSinAsignar} pzs
+                </div>`;
+        }
+
+        if (variantes.length > 0) {
+            desgloseHtml += variantes.filter(v => parseFloat(v.stock) > 0).map(v => `
                 <div style="display:inline-block; background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1; padding:4px 8px; border-radius:6px; margin:2px; font-size:11px;">
-                    <b>${v.ubicacion}</b>: ${v.color} (${v.stock} pzs)
+                    📍 <b>${v.ubicacion}</b>: ${v.color} <b>(${v.stock} pzs)</b>
                 </div>
             `).join('');
         }
-        if (!desgloseHtml) desgloseHtml = '<small style="color:#94a3b8;">Sin desglose (stock antiguo)</small>';
 
-        // Etiquetas de Estado (Pedido y Antigüedad)
+        if (!desgloseHtml) desgloseHtml = '<small style="color:#94a3b8;">Agotado / Sin stock</small>';
+
+        // Etiquetas
         const estadoPedido = estadoPedidoPorProd[p.id] || 'ninguno';
-        const labelPedido = estadoPedido === 'pendiente' ? '<span style="color:#f59e42;">● Pedido Pendiente</span>' : 
-                            estadoPedido === 'baja' ? '<span style="color:#e11d48;">● Pendiente Baja</span>' : '';
+        const labelPedido = estadoPedido === 'pendiente' ? '<span style="display:inline-block; background:#fff7ed; border:1px solid #fcd34d; color:#d97706; padding:3px 8px; border-radius:12px; margin-bottom:4px;">📦 Pedido Pendiente</span>' : 
+                            estadoPedido === 'baja' ? '<span style="display:inline-block; background:#fff1f2; border:1px solid #fecdd3; color:#e11d48; padding:3px 8px; border-radius:12px; margin-bottom:4px;">🔻 Pendiente Baja</span>' : '';
         const antiguedad = typeof calcularAntiguedadProducto === 'function' ? calcularAntiguedadProducto(p) : '-';
 
-        html += `
-            <tr style="border-bottom:1px solid #f1f5f9;">
+        filasHTML += `
+            <tr style="border-bottom:1px solid #f1f5f9; transition:0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
                 <td style="padding:12px;">
-                    <div style="font-weight:bold; color:#1e40af;">${p.nombre}</div>
-                    <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
+                    <div style="font-weight:bold; color:#0f172a; font-size:14px; margin-bottom:4px;">${p.nombre}</div>
+                    <span style="font-size:11px; background:#e2e8f0; color:#475569; padding:3px 8px; border-radius:12px;">${p.categoria || 'Sin Cat'} > ${p.subcategoria || 'Sin Sub'}</span>
                 </td>
                 <td style="padding:12px; text-align:center;">
-                    <span style="font-size:16px; font-weight:bold; color:${(p.stock||0)>0?'#16a34a':'#dc2626'}">${p.stock || 0}</span>
+                    <span style="font-size:18px; font-weight:900; color:${stockActual > 0 ? '#16a34a' : '#dc2626'}; background:${stockActual > 0 ? '#dcfce7' : '#fee2e2'}; padding:4px 12px; border-radius:8px;">${stockActual}</span>
                 </td>
-                <td style="padding:12px;">${desgloseHtml}</td>
+                <td style="padding:12px; max-width:250px;">${desgloseHtml}</td>
                 <td style="padding:12px; text-align:right;">
-                    <div style="font-weight:bold;">${dinero(valorTotal)}</div>
-                    <div style="font-size:11px; color:#94a3b8;">CP: ${dinero(costoPromedio)}</div>
+                    <div style="font-weight:900; color:#1e40af; font-size:14px;">${formatoDinero(valorTotal)}</div>
+                    <div style="font-size:11px; color:#64748b; margin-top:2px;">Promedio: ${formatoDinero(costoPromedio)}</div>
                 </td>
-                <td style="padding:12px; text-align:center; line-height:1.2;">
-                    <div style="font-size:11px; font-weight:bold;">${labelPedido}</div>
-                    <div style="font-size:10px; color:#64748b; margin-top:4px;">Antigüedad: ${antiguedad}</div>
+                <td style="padding:12px; text-align:center;">
+                    ${labelPedido}
+                    <div style="font-size:11px; color:#64748b;">⏳ Antigüedad: <b>${antiguedad}</b></div>
+                </td>
+                <td style="padding:12px; text-align:center;">
+                    <button onclick="abrirModalAsignacionRapida('${p.id}')" style="padding:8px 12px; background:#3b82f6; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; box-shadow:0 2px 4px rgba(59,130,246,0.3); transition:0.2s;">
+                        📍 Asignar / Mover
+                    </button>
                 </td>
             </tr>`;
     });
 
-    // 5. Pie de Tabla con Totales
-    html += `
-            </tbody>
-            <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
-                <tr>
-                    <td style="padding:15px; text-align:right;">TOTALES:</td>
-                    <td style="padding:15px; text-align:center; font-size:16px;">${totalGlobalUnidades}</td>
-                    <td></td>
-                    <td style="padding:15px; text-align:right; font-size:16px; color:#1e40af;">${dinero(totalGlobalPesos)}</td>
-                    <td></td>
+    // 5. Renderizado Final con Dashboard
+    let html = `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:15px; margin-bottom:20px;">
+        <div style="background:linear-gradient(135deg, #f0fdf4, #dcfce7); border:1px solid #bbf7d0; padding:20px; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <div style="font-size:12px; color:#166534; font-weight:bold; letter-spacing:1px; margin-bottom:5px;">📦 UNIDADES EN INVENTARIO</div>
+                <div style="font-size:32px; font-weight:900; color:#15803d; line-height:1;">${totalGlobalUnidades}</div>
+            </div>
+            <span style="font-size:35px; opacity:0.5;">📊</span>
+        </div>
+        <div style="background:linear-gradient(135deg, #eff6ff, #dbeafe); border:1px solid #bfdbfe; padding:20px; border-radius:12px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <div style="font-size:12px; color:#1e40af; font-weight:bold; letter-spacing:1px; margin-bottom:5px;">💰 VALORIZACIÓN ESTIMADA</div>
+                <div style="font-size:32px; font-weight:900; color:#1d4ed8; line-height:1;">${formatoDinero(totalGlobalPesos)}</div>
+            </div>
+            <span style="font-size:35px; opacity:0.5;">💵</span>
+        </div>
+    </div>
+
+    <div style="overflow-x:auto; box-shadow:0 4px 15px rgba(0,0,0,0.05); border-radius:12px; background:white; border:1px solid #e2e8f0;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+                <tr style="background:#0f172a; color:white;">
+                    <th style="padding:15px; text-align:left;">Producto / Categoría</th>
+                    <th style="padding:15px; text-align:center;">Stock Total</th>
+                    <th style="padding:15px; text-align:left;">Desglose por Ubicación y Color</th>
+                    <th style="padding:15px; text-align:right;">Valorización</th>
+                    <th style="padding:15px; text-align:center;">Estado y Antigüedad</th>
+                    <th style="padding:15px; text-align:center;">Acción Rápida</th>
                 </tr>
-            </tfoot>
+            </thead>
+            <tbody>
+                ${filasHTML || `<tr><td colspan="6" style="padding:40px; text-align:center; color:#94a3b8; font-size:16px;">No hay productos con los filtros actuales.</td></tr>`}
+            </tbody>
         </table>
     </div>`;
 
     cont.innerHTML = html;
-}
+};
+
+// --- MÓDULO NUEVO: ASIGNACIÓN RÁPIDA DESDE EL REPORTE ---
+window.abrirModalAsignacionRapida = function(id) {
+    const p = (window.productos || StorageService.get("productos", [])).find(prod => String(prod.id) === String(id));
+    if (!p) return;
+
+    p.variantes = p.variantes || [];
+    const stockActual = parseFloat(p.stock) || 0;
+    const stockEnVariantes = p.variantes.reduce((s, v) => s + (parseFloat(v.stock) || 0), 0);
+    const stockSinAsignar = Math.max(0, stockActual - stockEnVariantes);
+
+    let origenesHTML = '';
+    if (stockSinAsignar > 0) {
+        origenesHTML += `<option value="SIN_ASIGNAR">⚠️ Inventario Sin Asignar (${stockSinAsignar} disponibles)</option>`;
+    }
+    p.variantes.forEach((v, idx) => {
+        if (parseFloat(v.stock) > 0) {
+            origenesHTML += `<option value="${idx}">📍 ${v.ubicacion} — Color: ${v.color} (${v.stock} disponibles)</option>`;
+        }
+    });
+
+    if (origenesHTML === '') {
+        return alert("❌ Este producto tiene 0 stock disponible. No hay piezas que puedas mover.");
+    }
+
+    const ubicaciones = StorageService.get("ubicacionesConfig", [
+        { id: 1, nombre: "Piso de Ventas (General)" },
+        { id: 2, nombre: "Bodega Principal" }
+    ]);
+    const destinosHTML = ubicaciones.map(u => `<option value="${u.nombre}">${u.nombre}</option>`).join('');
+
+    const modalHTML = `
+        <div id="modalAsignacionRapida" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:9999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+            <div style="background:white; border-radius:16px; padding:30px; width:90%; max-width:550px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; border-bottom:2px solid #f1f5f9; padding-bottom:15px;">
+                    <div>
+                        <h2 style="margin:0 0 5px 0; color:#1e3a8a; font-size:20px;">📍 Mover / Asignar Inventario</h2>
+                        <span style="font-weight:bold; color:#475569;">${p.nombre}</span>
+                    </div>
+                    <button onclick="document.getElementById('modalAsignacionRapida').remove()" style="background:none; border:none; font-size:24px; color:#94a3b8; cursor:pointer;">✕</button>
+                </div>
+
+                <div style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
+                    <label style="display:block; margin-bottom:8px; font-weight:bold; font-size:13px; color:#0f172a;">1️⃣ ¿De dónde vas a tomar las piezas?</label>
+                    <select id="asigOrigen" style="width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; font-size:14px; background:white;">
+                        ${origenesHTML}
+                    </select>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
+                    <div>
+                        <label style="display:block; margin-bottom:8px; font-weight:bold; font-size:13px; color:#0f172a;">2️⃣ Ubicación Destino:</label>
+                        <select id="asigDestinoUbi" style="width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; font-size:14px;">
+                            ${destinosHTML}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:8px; font-weight:bold; font-size:13px; color:#0f172a;">3️⃣ Color de la pieza:</label>
+                        <input type="text" id="asigDestinoColor" placeholder="Ej. Chocolate..." value="General" style="width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; box-sizing:border-box; font-size:14px;">
+                    </div>
+                </div>
+
+                <div style="margin-bottom:25px; text-align:center;">
+                    <label style="display:block; margin-bottom:8px; font-weight:bold; font-size:14px; color:#0f172a;">🔢 ¿Cuántas piezas vas a mover?</label>
+                    <input type="number" id="asigCantidad" min="1" placeholder="0" style="width:150px; padding:12px; text-align:center; border-radius:8px; border:2px solid #3b82f6; font-size:24px; font-weight:900; color:#1e40af;">
+                </div>
+
+                <button onclick="guardarAsignacionRapida('${p.id}')" style="width:100%; padding:16px; background:#10b981; color:white; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 4px 6px rgba(16,185,129,0.3); transition:0.2s;">
+                    🚚 Confirmar Movimiento
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.guardarAsignacionRapida = function(id) {
+    const origenVal = document.getElementById('asigOrigen').value;
+    const ubiDestino = document.getElementById('asigDestinoUbi').value;
+    const colorDestino = document.getElementById('asigDestinoColor').value.trim() || 'General';
+    const cantidad = parseFloat(document.getElementById('asigCantidad').value);
+
+    if (isNaN(cantidad) || cantidad <= 0) return alert("⚠️ Ingresa una cantidad válida mayor a 0.");
+
+    const productos = StorageService.get('productos', []);
+    const idx = productos.findIndex(prod => String(prod.id) === String(id));
+    if (idx === -1) return alert("❌ Producto no encontrado en la base de datos.");
+
+    let p = productos[idx];
+    p.variantes = p.variantes || [];
+
+    // Validar extracción del Origen
+    let nombreOrigen = "Sin Asignar (General)";
+    if (origenVal !== "SIN_ASIGNAR") {
+        const vOrigen = p.variantes[origenVal];
+        if (!vOrigen || parseFloat(vOrigen.stock) < cantidad) return alert("❌ No hay suficiente stock en el origen seleccionado.");
+        vOrigen.stock = parseFloat(vOrigen.stock) - cantidad;
+        nombreOrigen = `${vOrigen.ubicacion} (${vOrigen.color})`;
+    } else {
+        const stockEnVariantes = p.variantes.reduce((s, v) => s + (parseFloat(v.stock) || 0), 0);
+        const stockSinAsignar = Math.max(0, (parseFloat(p.stock) || 0) - stockEnVariantes);
+        if (stockSinAsignar < cantidad) return alert("❌ No hay suficiente stock 'Sin Asignar' para realizar este movimiento.");
+    }
+
+    // Inyectar en Destino
+    const varianteDestino = p.variantes.find(v => v.ubicacion.toUpperCase() === ubiDestino.toUpperCase() && v.color.toUpperCase() === colorDestino.toUpperCase());
+    if (varianteDestino) {
+        varianteDestino.stock = parseFloat(varianteDestino.stock) + cantidad;
+    } else {
+        p.variantes.push({ ubicacion: ubiDestino, color: colorDestino, stock: cantidad });
+    }
+
+    // Limpieza (Quitar variantes en cero para no ensuciar el reporte)
+    p.variantes = p.variantes.filter(v => parseFloat(v.stock) > 0);
+
+    // Guardar Producto
+    StorageService.set("productos", productos);
+    window.productos = productos; // Sincronizar memoria global
+
+    // Registrar en el Kardex Histórico
+    const movs = StorageService.get("movimientosInventario", []);
+    movs.push({
+        id: Date.now(),
+        fecha: Date.now(),
+        tipo: 'Traslado Interno',
+        productoId: p.id,
+        productoNombre: p.nombre,
+        cantidad: cantidad,
+        origen: nombreOrigen,
+        destino: `${ubiDestino} (${colorDestino})`,
+        motivo: `Asignación desde Centro de Control`,
+        usuario: "Admin"
+    });
+    StorageService.set("movimientosInventario", movs);
+
+    document.getElementById('modalAsignacionRapida').remove();
+    alert(`✅ ¡Listo! Se movieron ${cantidad} pieza(s) a ${ubiDestino} (Color: ${colorDestino}).`);
+    renderConsultaInventario(); // Recargar la tabla automáticamente
+};
 
 window.initConsultaInventario = function() {
     // Llenar combos de filtro
@@ -157,23 +328,29 @@ window.initConsultaInventario = function() {
     const subSel = document.getElementById('filtroSubInv');
     const stockSel = document.getElementById('filtroStockInv');
     const pedidoSel = document.getElementById('filtroPedidoInv');
+    
     if (!catSel || !subSel || !stockSel || !pedidoSel) return;
-    let cats = [...new Set((window.productos||[]).map(p=>p.categoria).filter(Boolean))];
-    catSel.innerHTML = '<option value="todos">Todas las categorías</option>' + cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+    
+    const productosBase = window.productos || StorageService.get("productos", []);
+    let cats = [...new Set(productosBase.map(p => p.categoria).filter(Boolean))];
+    
+    catSel.innerHTML = '<option value="todos">Todas las categorías</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    
     catSel.onchange = function() {
         const cat = catSel.value;
-        let subs = (window.productos||[]).filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
+        let subs = productosBase.filter(p => cat === 'todos' || p.categoria === cat).map(p => p.subcategoria).filter(Boolean);
         subs = [...new Set(subs)];
-        subSel.innerHTML = '<option value="todos">Todas las subcategorías</option>' + subs.map(s=>`<option value="${s}">${s}</option>`).join('');
+        subSel.innerHTML = '<option value="todos">Todas las subcategorías</option>' + subs.map(s => `<option value="${s}">${s}</option>`).join('');
         subSel.value = 'todos';
         renderConsultaInventario();
     };
+    
     subSel.onchange = renderConsultaInventario;
     stockSel.onchange = renderConsultaInventario;
     pedidoSel.onchange = renderConsultaInventario;
-    catSel.onchange();
-    renderConsultaInventario();
-}
+    
+    catSel.onchange(); // Dispara la primera carga
+};
 // === CARGA INICIAL DE STOCK ===
 // ============================================================
 // MODIFICACIONES PARA CARGA INICIAL DE STOCK (COLORES Y UBICACIÓN)
@@ -257,7 +434,7 @@ function guardarCargaInicialStock() {
         productoNombre: p.nombre,
         tipo: 'entrada',
         cantidad: cant,
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         concepto: `Carga inicial - Color: ${color} | Ubic: ${ubicacion}`,
         costoUnitario: costo
     });
@@ -568,7 +745,7 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
     const movimiento = {
         id: Date.now(),
         productoId: productoId,
-        fecha: new Date().toLocaleString(),
+        fecha: Date.now(),
         concepto: concepto,
         cantidad: Math.abs(cantidad),
         tipo: tipo
@@ -1396,7 +1573,7 @@ window.ejecutarAjusteInv = function() {
     const movs = StorageService.get("movimientosInventario", []);
     movs.push({
         id: Date.now(),
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         tipo: tipo === 'salida' ? 'Egreso (Merma/Ajuste)' : 'Ingreso (Sobrante/Ajuste)',
         productoId: p.id,
         productoNombre: p.nombre,
@@ -1471,7 +1648,7 @@ window.ejecutarTransferenciaInv = function() {
     const movs = StorageService.get("movimientosInventario", []);
     movs.push({
         id: Date.now(),
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         tipo: 'Transferencia Interna',
         productoId: p.id,
         productoNombre: p.nombre,

@@ -242,7 +242,7 @@ function calcularFechaPago(fechaCompraStr, bancoNombre) {
     if (diaLimite < diaCorte) mes += 1;
 
     // El objeto Date ajusta automáticamente si el mes pasa de 11 (Diciembre) al año siguiente
-    return new Date(anio, mes, diaLimite).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+    return new Date(anio, mes, diaLimite).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function calcularCalendarioMSI(fechaRef, meses, nombreBanco) {
@@ -500,7 +500,7 @@ window.abrirHistorialMSI = function(id) {
         return `
         <tr style="border-bottom:1px solid #f1f5f9; background:${estaPagada ? '#f0fdf4' : (vencida && !esParcial ? '#fef2f2' : (esParcial ? '#fff7ed' : 'transparent'))}">
             <td style="padding:12px; text-align:center; color:#64748b; font-weight:bold;">${p.n || p.numero}</td>
-            <td style="padding:12px; font-weight:bold;">${fechaPagoReal.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+            <td style="padding:12px; font-weight:bold;">${fechaPagoReal.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
             <td style="padding:12px; text-align:right;">${textoMonto}</td>
             <td style="padding:12px; text-align:center; font-weight:bold; color:${colorEstado}; font-size:12px;">${txtEstado}</td>
         </tr>`;
@@ -516,7 +516,7 @@ window.abrirHistorialMSI = function(id) {
     if(abonosDeEsteBanco.length > 0) {
         htmlAbonos = abonosDeEsteBanco.map(m => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px;">
-                <div><span style="font-weight:bold; color:#334155;">${new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</span> <span style="color:#64748b; margin-left:8px;">Desde: ${m.etiquetaCuenta || m.cuenta}</span></div>
+                <div><span style="font-weight:bold; color:#334155;">${new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span> <span style="color:#64748b; margin-left:8px;">Desde: ${m.etiquetaCuenta || m.cuenta}</span></div>
                 <div style="font-weight:bold; color:#10b981;">+ ${dinero(m.monto)}</div>
             </div>
         `).join('');
@@ -606,7 +606,7 @@ function renderCuentasMSI() {
                 <div style="text-align:right;">
                     <div style="font-size:13px; color:#6b7280;">Total: <strong>${dinero(c.total)}</strong></div>
                     <div style="font-size:13px; color:#27ae60;">Mensualidad: <strong>${dinero(c.cuotaMensual)}</strong></div>
-                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? new Date(c.fechaCompra).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '—'}</div>
+                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? new Date(c.fechaCompra).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}</div>
                 </div>
             </div>
 
@@ -697,7 +697,7 @@ function marcarPagoMSI(id, numeroCuota) {
         tipo: "egreso",
         concepto: `Pago MSI — ${deuda.banco}: ${deuda.producto || 'Compra'} (cuota ${numeroCuota}/${deuda.meses})`,
         monto: deuda.cuotaMensual,
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         cuenta: deuda.banco,
         etiquetaCuenta: `💳 ${deuda.banco} Crédito`,
         medioPago: "tarjeta_msi",
@@ -935,7 +935,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
             rightPanelHTML += `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:10px;">${m.fecha ? new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : ""}</td>
+                    <td style="padding:10px;">${m.fecha ? new Date(m.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : ""}</td>
                     <td style="padding:10px;">${m.concepto || ""}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
                     <td style="padding:10px; text-align:right; font-weight:bold; color:${color};">${icon} ${dinero(m.monto)}</td>
@@ -1383,7 +1383,7 @@ function procesarPagoTarjetaGlobal(banco) {
         tipo: "egreso",
         concepto: `Pago a Corte Mensual Tarjeta de Crédito — ${banco}`,
         monto: montoAbono,
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         cuenta: cuentaOrigen,
         etiquetaCuenta: cuentaOrigenEtiqueta,
         medioPago: cuentaOrigen === "efectivo" || cuentaOrigen.startsWith("caja_") ? "efectivo" : "transferencia",

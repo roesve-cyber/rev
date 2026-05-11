@@ -34,7 +34,7 @@ function buscarVentaDevolucion() {
         `<option value="${i}">${a.nombre.replace(/</g,'&lt;').replace(/>/g,'&gt;')} (x${a.cantidad || 1})</option>`).join('');
     const clienteNombre = (venta.clienteNombre || venta.nombre || 'Cliente').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const folioSafe = (venta.folio || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const fechaStr = new Date(venta.fecha || venta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+    const fechaStr = new Date(venta.fecha || venta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
     cont.innerHTML = `
       <div style="background:#f9fafb;padding:16px;border-radius:8px;margin-bottom:16px;">
         <strong>${folioSafe}</strong> — ${clienteNombre}<br>
@@ -106,7 +106,7 @@ function procesarDevolucion(folio) {
         motivo,
         notas,
         reingresarStock,
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         monto: (art.precioContado || art.precio || 0) * cantidad
     };
     const devoluciones = StorageService.get('historialDevoluciones', []);
@@ -142,7 +142,7 @@ function procesarDevolucion(folio) {
                 tipo: 'entrada',
                 cantidad,
                 concepto: `Devolución ${devolucion.folio} — ${motivo}`,
-                fecha: new Date().toLocaleString('es-MX')
+                fecha: new Date()window.formatearFechaMX
             });
             StorageService.set('movimientosInventario', movs);
         }
@@ -157,7 +157,7 @@ function procesarDevolucion(folio) {
             tipo: "egreso",
             concepto: `Reembolso devolución (${devolucion.folio}) — ${devolucion.productoNombre}`,
             monto: devolucion.monto,
-            fecha: new Date().toISOString(),
+            fecha: Date.now(),
             cuenta: "efectivo",
             referencia: devolucion.folioVenta
         });
@@ -218,7 +218,7 @@ function renderHistorialDevoluciones() {
       <td style="padding:10px;">${d.motivo}</td>
       <td style="padding:10px;text-align:right;">${dinero(d.monto)}</td>
       <td style="padding:10px;text-align:center;">${d.reingresarStock ? '✅' : '❌'}</td>
-      <td style="padding:10px;text-align:center;">${new Date(d.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+      <td style="padding:10px;text-align:center;">${new Date(d.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
     </tr>`).join('');
     cont.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -295,8 +295,8 @@ function renderControlGarantias() {
           <td style="padding:10px;">${g.productoNombre}</td>
           <td style="padding:10px;">${nombre}</td>
           <td style="padding:10px;text-align:center;">${g.mesesGarantia} meses</td>
-          <td style="padding:10px;text-align:center;">${new Date(g.fechaCompra).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
-          <td style="padding:10px;text-align:center;">${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+          <td style="padding:10px;text-align:center;">${new Date(g.fechaCompra).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+          <td style="padding:10px;text-align:center;">${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${colors[estado]};font-weight:bold;">${estado}</span></td>
           <td style="padding:10px;text-align:center;">${estado !== 'En reclamación' ? `<button onclick="marcarGarantiaReclamacion(${g.id})" style="padding:3px 8px;background:#dc2626;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">🔴 Reclamar</button>` : ''}</td>
         </tr>`;

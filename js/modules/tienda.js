@@ -379,7 +379,7 @@ function renderListaPrecios() {
         <div style="padding: 20px;">
             <div style="margin-bottom: 30px;">
                 <h1 style="color: #1a3a70; text-align: center; font-size: 28px; margin: 0 0 10px 0;">📊 LISTA DE PRECIOS</h1>
-                <p style="text-align: center; color: #718096; margin: 0;">Mueblería Mi Pueblito - ${new Date().toLocaleDateString('es-MX')}</p>
+                <p style="text-align: center; color: #718096; margin: 0;">Mueblería Mi Pueblito - ${new Date()window.formatearFechaCortaMX}</p>
             </div>`;
 
     Object.keys(productosAgrupados).sort().forEach(categoria => {

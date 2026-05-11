@@ -17,7 +17,7 @@ function acumularPuntosCliente(clienteId, nombre, total, folio) {
     const todos = StorageService.get('puntosPorCliente', []);
     const idx = todos.findIndex(p => String(p.clienteId) === String(clienteId));
     const entrada = {
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         tipo: 'acumulado',
         puntos,
         folio,
@@ -44,7 +44,7 @@ function canjearPuntosDescuento(clienteId, puntosACanjear) {
     todos[idx].puntos -= canjear;
     todos[idx].historial = todos[idx].historial || [];
     todos[idx].historial.push({
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         tipo: 'canje',
         puntos: -canjear,
         descripcion: `Canje de ${canjear} puntos = ${dinero(montoDescuento)} de descuento`
@@ -151,7 +151,7 @@ function abrirHistorialPuntosCliente(clienteId) {
         const color = h.tipo === 'acumulado' ? '#16a34a' : '#dc2626';
         const signo = h.tipo === 'acumulado' ? '+' : '';
         return `<tr>
-          <td style="padding:8px;">${new Date(h.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+          <td style="padding:8px;">${new Date(h.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
           <td style="padding:8px;">${h.descripcion || ''}</td>
           <td style="padding:8px;text-align:center;color:${color};font-weight:bold;">${signo}${h.puntos}</td>
         </tr>`;

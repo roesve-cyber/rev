@@ -161,7 +161,7 @@ function abrirRegistrarGasto() {
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA</label>
-            <input type="date" id="gastoFecha" value="${new Date().toISOString().split('T')[0]}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <input type="date" id="gastoFecha" value="${window.obtenerHoyInputMX()}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">¿DE QUÉ CUENTA SALE EL DINERO?</label>
@@ -366,7 +366,7 @@ function verificarGastosRecurrentes() {
                     tipo: 'egreso',
                     concepto: `Gasto recurrente: ${g.categoria} — ${g.descripcion}`,
                     monto: g.monto,
-                    fecha: new Date().toISOString(),
+                    fecha: Date.now(),
                     cuenta: g.cuentaDebito || 'efectivo',
                     etiquetaCuenta: g.etiquetaCuenta || 'Efectivo',
                     referencia: `GASTO-${nuevo.id}`

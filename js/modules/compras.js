@@ -204,7 +204,7 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         tipo: 'egreso',
         concepto,
         monto,
-        fecha: new Date().toISOString(),
+        fecha: Date.now(),
         cuenta: cuentaId,
         etiquetaCuenta: etiqueta || cuentaId,
         medioPago: isCaja ? 'efectivo' : 'transferencia',
@@ -236,7 +236,7 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         concepto,
         monto,
         // 👇 AHORA TOMA LA FECHA QUE LE MANDES, O USA HOY SI NO MANDAS NADA
-        fecha: fecha || new Date().toISOString(), 
+        fecha: fecha || Date.now(), 
         cuenta: cuentaRealId,
         etiquetaCuenta: etiqueta || cuentaRealId,
         medioPago: isCaja ? 'efectivo' : 'transferencia',
@@ -361,7 +361,7 @@ function registrarCompra() {
     const bancoSel = document.getElementById("compraBancoSeleccionado")?.value || "";
     const cuentaOrigenId = document.getElementById("compraCuentaOrigen")?.value || "efectivo";
     const cuentaOrigenNombre = document.getElementById("compraCuentaOrigen")?.options[document.getElementById("compraCuentaOrigen")?.selectedIndex]?.text || "Efectivo";
-    const fechaHoyStr = new Date().toLocaleDateString();
+    const fechaHoyStr = window.formatearFechaCortaMX(Date.now());
     const fechaPagoMensaje = (metodo === "contado") ? "Hoy (Contado)" : calcularFechaPago(fechaHoyStr, bancoSel);
 
     const mensajeConfirmar =
@@ -641,7 +641,7 @@ const prod = productos.find(p => String(p.id) === String(rec.productoId));
             tipo: 'entrada',
             cantidad,
             concepto: `Recepción - Prov: ${rec.proveedor}`,
-            fecha: new Date().toLocaleString()
+            fecha: Date.now()
         });
     } else {
         alert("Error: El producto ya no existe en la base de datos.");
@@ -1026,7 +1026,7 @@ function abrirNuevaOrdenCompra() {
     // Fecha entrega: default hoy + 15 días
     const fechaEnt = new Date(); fechaEnt.setDate(fechaEnt.getDate() + 15);
     const ocFechaEl = document.getElementById('ocFechaEntrega');
-    if (ocFechaEl) ocFechaEl.value = fechaEnt.toISOString().substring(0, 10);
+    if (ocFechaEl) ocFechaEl.value = window.fechaParaInput(fechaEnt).substring(0, 10);
     window._articulosOC = [];
     _renderTablaArticulosOC();
     // Llenar combo de cuenta para anticipo
@@ -1148,7 +1148,7 @@ function guardarOrdenCompra() {
         proveedorNombre: provNombre,
         articulos: arts,
         total,
-        fechaEmision: new Date().toISOString(),
+        fechaEmision: Date.now(),
         fechaEntregaEstimada: fechaEntrega || null,
         estado: borrador ? 'Borrador' : 'Enviada',
         notas,
@@ -1195,8 +1195,8 @@ function imprimirOrdenCompra(id) {
     <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
       <div><strong>ORDEN DE COMPRA</strong><br><span style="font-size:20px;color:#1e40af;">${oc.folio}</span><br><span style="color:${oc.estado==='Enviada'?'#16a34a':'#d97706'}">${oc.estado}</span></div>
       <div style="text-align:right;">
-        <div>Emisión: ${new Date(oc.fechaEmision).toLocaleDateString('es-MX')}</div>
-        ${oc.fechaEntregaEstimada ? `<div>Entrega est.: ${new Date(oc.fechaEntregaEstimada).toLocaleDateString('es-MX')}</div>` : ''}
+        <div>Emisión: ${new Date(oc.fechaEmision)window.formatearFechaCortaMX}</div>
+        ${oc.fechaEntregaEstimada ? `<div>Entrega est.: ${new Date(oc.fechaEntregaEstimada)window.formatearFechaCortaMX}</div>` : ''}
       </div>
     </div>
         <div style="margin-bottom:16px;"><strong>Proveedor:</strong> ${oc.proveedorNombre}</div>
@@ -1470,7 +1470,7 @@ function confirmarRecepcionOC(ocId) {
     const oc = lista[idx];
 
     const fechaRec   = new Date();
-    const fechaStr   = fechaRec.toLocaleDateString('es-MX');
+    const fechaStr   = fechaRecwindow.formatearFechaCortaMX;
     let notas      = document.getElementById('recNotas')?.value.trim() || '';
     const metodoPago = window._ocMetodoPago || 'no';
 
@@ -1601,7 +1601,7 @@ itemsRecibidos.forEach(art => {
         tipo: 'entrada',
         cantidad: art.cantidadRec,
         concepto,
-        fecha: fechaRec.toLocaleString('es-MX')
+        fecha: fechaRecwindow.formatearFechaMX
     });
 });
 StorageService.set('movimientosInventario', kardex);
@@ -1635,7 +1635,7 @@ movimientosInventario = kardex;   // ✅ sincronizar global
             formaPagoTexto: `Saldo OC ${oc.folio}`,
             plazo: 30,
             fecha: fechaStr,
-            vencimiento: fechaVenc.toLocaleDateString('es-MX'),
+            vencimiento: fechaVencwindow.formatearFechaCortaMX,
             vencimientoIso: fechaVenc.toISOString()
         });
         StorageService.set('cuentasPorPagar', cxp);
@@ -1651,7 +1651,7 @@ movimientosInventario = kardex;   // ✅ sincronizar global
             proveedorNombre: oc.proveedorNombre,
             articulos: itemsBackOrder,
             total: itemsBackOrder.reduce((s, a) => s + a.subtotal, 0),
-            fechaEmision: new Date().toISOString(),
+            fechaEmision: Date.now(),
             fechaEntregaEstimada: null,
             estado: 'Borrador',
             notas: `Back Order de ${oc.folio}`,
@@ -1868,8 +1868,8 @@ function renderListaOrdenesCompra() {
                 return `<tr style="border-bottom:1px solid #f3f4f6;">
                     <td style="padding:10px;font-weight:bold;">${oc.folio}${boVinculo}${boHijo}</td>
                     <td style="padding:10px;">${oc.proveedorNombre}</td>
-                    <td style="padding:10px;">${new Date(oc.fechaEmision).toLocaleDateString('es-MX')}</td>
-                    <td style="padding:10px;">${oc.fechaEntregaEstimada ? new Date(oc.fechaEntregaEstimada).toLocaleDateString('es-MX') : '—'}</td>
+                    <td style="padding:10px;">${new Date(oc.fechaEmision)window.formatearFechaCortaMX}</td>
+                    <td style="padding:10px;">${oc.fechaEntregaEstimada ? new Date(oc.fechaEntregaEstimada)window.formatearFechaCortaMX : '—'}</td>
                     <td style="padding:10px;text-align:right;font-weight:bold;">${dinero(oc.total)}</td>
                     <td style="padding:10px;text-align:center;">
                         <span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${oc.estado}</span>
@@ -2353,7 +2353,7 @@ function guardarOrdenCompraFinal() {
         folio: folioOC,
         proveedorNombre: proveedor, // Antes decía solo "proveedor"
         proveedorId: null,
-        fechaEmision: new Date().toISOString(), // Formato estándar
+        fechaEmision: Date.now(), // Formato estándar
         fechaEntregaEstimada: fechaEsperada || null, // Antes decía "fechaEsperada"
         total: totalOC,
         articulos: articulosAdaptados, // Antes decía "items"

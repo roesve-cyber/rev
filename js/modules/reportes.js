@@ -86,7 +86,7 @@ function renderReporteVentas() {
     // Tabla
     const filas = todas.map(v => {
         const fecha = v.fechaVenta ? new Date(v.fechaVenta) : null;
-        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : (v.fechaVenta || '-');
+        const fechaStr = fecha && !isNaN(fecha) ? window.formatearFechaCortaMX(fecha) : (v.fechaVenta || '-');
         return [
             v.folio || '-',
             v.nombre || '-',
@@ -164,42 +164,210 @@ function exportarReporteCompras() {
 // --- Reporte Flujo de Efectivo ---
 
 function renderReporteFlujo() {
-    const desde = document.getElementById('rfFechaDesde')?.value;
-    const hasta = document.getElementById('rfFechaHasta')?.value;
+    const cont = document.getElementById('reporte-flujo');
+    if (!cont) return;
 
-    // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---
-    const movimientosCaja = StorageService.get("movimientosCaja", []);
-    let lista = [...movimientosCaja];
+    // 1. LIMPIEZA INICIAL
+    cont.innerHTML = "";
 
-    if (desde) lista = lista.filter(m => (m.fecha || '') >= desde);
-    if (hasta) lista = lista.filter(m => (m.fecha || '') <= hasta + 'T23:59:59');
+    // 2. CAPTURA DE FILTROS EN MEMORIA
+    const fDesde = window._filtroFlujoFInicio || '';
+    const fHasta = window._filtroFlujoFFin || '';
+    const cuentaFiltro = window._filtroFlujoCuenta || 'todas';
+    const periodoAgrupar = window._filtroFlujoPeriodo || 'diario';
+    const ordenBloques = window._filtroFlujoOrden || 'desc';
 
-    const ingresos = lista.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + Number(m.monto || 0), 0);
-    const egresos = lista.filter(m => m.tipo === 'egreso').reduce((s, m) => s + Number(m.monto || 0), 0);
-    const saldo = ingresos - egresos;
+    // 3. OBTENER CUENTAS REALES
+    const cuentasConfig = StorageService.get("cuentasBancarias", []); 
+    const cuentasActivas = [...new Set([
+        'Efectivo', 
+        ...cuentasConfig.map(c => c.nombre),
+        ...(StorageService.get("registroTickets", []).map(t => t.venta?.cuentaReceptora).filter(Boolean))
+    ])];
 
-    document.getElementById('rfKpis').innerHTML =
-        _kpiCard('Ingresos', dinero(ingresos), '#27ae60', '⬆️') +
-        _kpiCard('Egresos', dinero(egresos), '#e74c3c', '⬇️') +
-        _kpiCard('Saldo', dinero(saldo), saldo >= 0 ? '#27ae60' : '#e74c3c', '💵');
+    // 4. CONSOLIDACIÓN DE MOVIMIENTOS
+    const tickets = StorageService.get("registroTickets", []);
+    const cuentasCxC = StorageService.get("cuentasPorCobrar", []);
+    const compras = StorageService.get("ordenesCompra", []);
+    const manuales = StorageService.get("movimientosManuales", []);
 
-    const filas = lista.map(m => {
-        const fecha = m.fecha ? new Date(m.fecha) : null;
-        const fechaStr = fecha && !isNaN(fecha) ? fecha.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-';
-        return [
-            m.folio || '-',
-            fechaStr,
-            m.tipo === 'ingreso' ? '⬆️ Ingreso' : '⬇️ Egreso',
-            dinero(m.monto || 0),
-            m.concepto || '-',
-            m.referencia || '-'
-        ];
+    let movimientos = [];
+
+    tickets.forEach(t => {
+        const met = t.venta?.cuentaReceptora || t.venta?.modoEnganche || 'Efectivo';
+        const monto = (t.venta?.metodoPago === 'contado' || t.venta?.metodoPago === 'transferencia') ? parseFloat(t.venta?.total) : parseFloat(t.venta?.enganche);
+        if(monto > 0) movimientos.push({ fecha: t.fechaEmision, concepto: `Venta: ${t.folio}`, tipo: 'ingreso', cuenta: met, monto: monto });
     });
-    document.getElementById('rfTabla').innerHTML = _tablaHTML(
-        ['Folio', 'Fecha', 'Tipo', 'Monto', 'Concepto', 'Referencia'],
-        filas.length ? filas : [['Sin registros', '', '', '', '', '']]
-    );
+    
+    cuentasCxC.forEach(c => (c.abonos || []).forEach(ab => {
+        movimientos.push({ fecha: ab.fecha, concepto: `Abo: ${c.nombre}`, tipo: 'ingreso', cuenta: ab.medioPago || 'Efectivo', monto: parseFloat(ab.monto) });
+    }));
+
+    compras.forEach(com => { 
+        if (com.pagado > 0) movimientos.push({ fecha: com.fecha || new Date().toISOString(), concepto: `Prov: ${com.proveedor}`, tipo: 'egreso', cuenta: com.metodoPago || 'Efectivo', monto: parseFloat(com.pagado) }); 
+    });
+
+    manuales.forEach(m => movimientos.push(m));
+
+    // 5. FILTRADO
+    let movsFiltrados = movimientos.filter(m => {
+        const coincideCuenta = (cuentaFiltro === 'todas' || m.cuenta === cuentaFiltro);
+        const fMov = new Date(m.fecha);
+        let coincideRango = true;
+        if (fDesde) coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
+        if (fHasta) coincideRango = coincideRango && fMov <= new Date(fHasta + "T23:59:59");
+        return coincideCuenta && coincideRango;
+    });
+
+    // 6. AGRUPACIÓN DINÁMICA (Semanas Lun-Dom)
+    const grupos = {};
+    movsFiltrados.forEach(m => {
+        const d = new Date(m.fecha);
+        let clave = "";
+        let sortKey = d.getTime();
+
+        if (periodoAgrupar === 'diario') {
+            clave = d.toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', year:'numeric' });
+        } else if (periodoAgrupar === 'semanal') {
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            const lunes = new Date(new Date(d).setDate(diff));
+            const domingo = new Date(new Date(lunes).setDate(lunes.getDate() + 6));
+            clave = `${lunes.getDate()}/${lunes.getMonth()+1} al ${domingo.getDate()}/${domingo.getMonth()+1}`;
+            sortKey = lunes.getTime();
+        } else {
+            clave = d.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+            sortKey = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+        }
+
+        if (!grupos[clave]) grupos[clave] = { ing: 0, egr: 0, items: [], sortKey };
+        if (m.tipo === 'ingreso') grupos[clave].ing += m.monto; else grupos[clave].egr += m.monto;
+        grupos[clave].items.push(m);
+    });
+
+    // 7. RENDERIZADO HORIZONTAL
+    const dinero = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v || 0);
+    const clavesOrd = Object.keys(grupos).sort((a,b) => ordenBloques === 'desc' ? grupos[b].sortKey - grupos[a].sortKey : grupos[a].sortKey - grupos[b].sortKey);
+
+    let totalIng = 0; let totalEgr = 0;
+    const bloquesHTML = clavesOrd.map(clave => {
+        const g = grupos[clave];
+        totalIng += g.ing; totalEgr += g.egr;
+        const balance = g.ing - g.egr;
+        return `
+            <div style="min-width:320px; background:white; border-radius:12px; border:1px solid #e2e8f0; display:flex; flex-direction:column; max-height:450px; box-shadow:0 4px 10px rgba(0,0,0,0.05);">
+                <div style="padding:15px; background:#1e3a8a; color:white; border-radius:12px 12px 0 0;">
+                    <div style="font-weight:bold; font-size:14px;">${clave.toUpperCase()}</div>
+                    <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:12px;">
+                        <span style="color:#4ade80;">+ ${dinero(g.ing)}</span>
+                        <span style="color:#f87171;">- ${dinero(g.egr)}</span>
+                    </div>
+                    <div style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.3); text-align:right; font-weight:bold;">
+                        Neto: ${dinero(balance)}
+                    </div>
+                </div>
+                <div style="flex:1; overflow-y:auto; padding:10px; background:#fcfcfc; border-radius:0 0 12px 12px;">
+                    ${g.items.map(i => `
+                        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px;">
+                            <div style="max-width:180px;"><b>${i.concepto}</b><br><small style="color:#94a3b8;">${i.cuenta}</small></div>
+                            <span style="font-weight:bold; color:${i.tipo==='ingreso'?'#16a34a':'#dc2626'};">${i.tipo==='ingreso'?'+':'-'}${dinero(i.monto)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+    }).join('');
+
+    cont.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div>
+                <h2 style="margin:0; color:#1e40af;">💵 Flujo de Efectivo Horizontal</h2>
+                <p style="color:#718096; margin:0;">Movimientos segmentados y filtrados por banco/caja.</p>
+            </div>
+            <button onclick="abrirModalGastoExtra()" style="padding:10px 18px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💸 Nuevo Gasto / Ingreso</button>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:15px; background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:25px; align-items:end;">
+            <div><label style="font-size:10px; font-weight:bold; color:#64748b;">CUENTA:</label>
+                <select onchange="window._filtroFlujoCuenta=this.value; renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="todas">🏦 Ver Todas</option>
+                    ${cuentasActivas.map(c => `<option value="${c}" ${cuentaFiltro===c?'selected':''}>${c}</option>`).join('')}
+                </select>
+            </div>
+            <div><label style="font-size:10px; font-weight:bold; color:#64748b;">AGRUPAR:</label>
+                <select onchange="window._filtroFlujoPeriodo=this.value; window._filtroFlujoFInicio=''; window._filtroFlujoFFin=''; renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="diario" ${periodoAgrupar==='diario'?'selected':''}>Diario</option>
+                    <option value="semanal" ${periodoAgrupar==='semanal'?'selected':''}>Semanal (Lun-Dom)</option>
+                    <option value="mensual" ${periodoAgrupar==='mensual'?'selected':''}>Mensual</option>
+                </select>
+            </div>
+            <div><label style="font-size:10px; font-weight:bold; color:#64748b;">DESDE:</label>
+                <input type="date" value="${fDesde}" onchange="window._filtroFlujoFInicio=this.value; renderReporteFlujo();" style="display:block; padding:7px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+            </div>
+            <div><label style="font-size:10px; font-weight:bold; color:#64748b;">HASTA:</label>
+                <input type="date" value="${fHasta}" onchange="window._filtroFlujoFFin=this.value; renderReporteFlujo();" style="display:block; padding:7px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+            </div>
+            <div><label style="font-size:10px; font-weight:bold; color:#64748b;">ORDEN:</label>
+                <select onchange="window._filtroFlujoOrden=this.value; renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="desc" ${ordenBloques==='desc'?'selected':''}>Más reciente primero</option>
+                    <option value="asc" ${ordenBloques==='asc'?'selected':''}>Más antiguo primero</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px; margin-bottom:25px;">
+            <div style="background:#f0fdf4; border-left:5px solid #16a34a; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);"><small style="color:#166534; font-weight:bold;">INGRESOS DEL FILTRO</small><br><strong style="font-size:22px; color:#15803d;">${dinero(totalIng)}</strong></div>
+            <div style="background:#fff1f2; border-left:5px solid #dc2626; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);"><small style="color:#991b1b; font-weight:bold;">EGRESOS DEL FILTRO</small><br><strong style="font-size:22px; color:#b91c1c;">${dinero(totalEgr)}</strong></div>
+            <div style="background:#eff6ff; border-left:5px solid #1e40af; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);"><small style="color:#1e3a8a; font-weight:bold;">BALANCE NETO</small><br><strong style="font-size:22px; color:#1e40af;">${dinero(totalIng - totalEgr)}</strong></div>
+        </div>
+
+        <div style="display:flex; overflow-x:auto; gap:20px; padding:10px 0 25px 0; align-items:flex-start;">
+            ${bloquesHTML || '<div style="width:100%; text-align:center; padding:50px; color:#94a3b8; background:white; border-radius:12px;">No hay movimientos con estos filtros.</div>'}
+        </div>
+    `;
 }
+
+// --- FUNCIONES DE SOPORTE ---
+window.actualizarFiltrosFlujo = function() {
+    window._filtroFlujoPeriodo = document.getElementById('fPer').value;
+    window._filtroFlujoCuenta = document.getElementById('fCta').value;
+    if (document.getElementById('fIni')) {
+        window._filtroFlujoFInicio = document.getElementById('fIni').value;
+        window._filtroFlujoFFin = document.getElementById('fFin').value;
+    }
+    renderReporteFlujo();
+};
+
+window.abrirModalGastoExtra = function() {
+    const html = `
+    <div id="mFin" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:400px;">
+            <h3 style="margin:0; color:#1e40af;">💸 Movimiento Manual</h3>
+            <label style="display:block; margin-top:15px; font-size:11px; font-weight:bold;">TIPO:</label>
+            <select id="mTipo" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;"><option value="egreso">🔴 Gasto / Salida</option><option value="ingreso">🟢 Ingreso Extra</option></select>
+            <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">CUENTA:</label>
+            <select id="mCta" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;"><option value="Efectivo">Caja (Efectivo)</option><option value="Transferencia">Banco (Transferencia)</option><option value="Tarjeta">Tarjeta (Terminal)</option></select>
+            <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">CONCEPTO:</label>
+            <input type="text" id="mCon" placeholder="Ej. Pago de luz, Comida..." style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; box-sizing:border-box;">
+            <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">MONTO ($):</label>
+            <input type="number" id="mMon" placeholder="0.00" style="width:100%; padding:12px; border-radius:8px; border:2px solid #1e40af; font-size:18px; font-weight:bold; box-sizing:border-box;">
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="guardarMovManual()" style="flex:1; padding:12px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold;">💾 Guardar</button>
+                <button onclick="document.getElementById('mFin').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.guardarMovManual = function() {
+    const t = document.getElementById('mTipo').value, c = document.getElementById('mCta').value, con = document.getElementById('mCon').value.trim(), mon = parseFloat(document.getElementById('mMon').value);
+    if (!con || isNaN(mon) || mon <= 0) return alert("❌ Datos inválidos");
+    const m = StorageService.get("movimientosManuales", []);
+    m.push({ id: Date.now(), fecha: Date.now(), tipo: t, cuenta: c, concepto: `[Manual] ${con}`, monto: mon });
+    StorageService.set("movimientosManuales", m);
+    document.getElementById('mFin').remove();
+    renderReporteFlujo();
+};
 
 function exportarReporteFlujo() {
     // --- CORRECCIÓN: Leer los datos frescos de la base de datos ---

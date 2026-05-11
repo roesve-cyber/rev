@@ -500,12 +500,12 @@ function renderCuentasXCobrar(filtroCliente = "", filtroEstado = "") {
             : '';
             
         const textoPromesa = estadoCta.promesaVigente 
-            ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${new Date(c.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</span>` 
+            ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${new Date(c.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>` 
             : '';
 
         htmlTabla += `<tr>
             <td><strong>${c.nombre}</strong><br><small style="color:#718096;">${c.folio}</small></td>
-            <td>${c.fechaVenta ? new Date(c.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</td>
+            <td>${c.fechaVenta ? new Date(c.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-'}</td>
             <td>${dinero(c.totalContadoOriginal ?? 0)}${enganche > 0 ? `<br><small style="color:#27ae60;">✅ Enganche: ${dinero(enganche)}</small>` : ''}</td>
             <td style="font-weight:bold; color:${color};">${dinero(estadoCta.saldoTotal)}</td>
             <td>${pagaresTexto}${vencidosTexto}${textoPromesa}<br><small style="color:#4b5563;">Estado: ${estadoCta.estadoGeneral}</small></td>
@@ -561,7 +561,7 @@ window.enviarRecordatorioWhatsApp = function(folio) {
     }
 
     if (estadoCta.promesaVigente && estadoCta.cuenta.promesaPago) {
-        const fechaP = new Date(estadoCta.cuenta.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+        const fechaP = new Date(estadoCta.cuenta.promesaPago.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
         mensaje += `\n\nTenemos registrada tu *promesa de pago para el día ${fechaP}*. ¡Muchas gracias por tu compromiso!`;
     }
 
@@ -948,7 +948,7 @@ function abrirModalAbonoAvanzado(folio) {
                 <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">📅 Fecha de pago:</label>
-                        <input type="date" id="fechaAbonoInput" value="${new Date().toISOString().substring(0,10)}" 
+                        <input type="date" id="fechaAbonoInput" value="${window.obtenerHoyInputMX()}" 
                             style="padding:12px; font-size:16px; border:2px solid #e2e8f0; border-radius:8px; width:100%; box-sizing:border-box;">
                     </div>
                     <div>
@@ -1631,7 +1631,7 @@ function generarTicketAbonoTermico(datosAbono) {
         const estadoCell = p.parcial ? '⚠️ PARCIAL' : '✅ PAG.';
         return `<tr class="pagare-cubierto">
                     <td>${i + 1}</td>
-                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }))}</td>
+                    <td>${esc(new Date(p.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }))}</td>
                     <td style="text-align:right;">${montoCell}</td>
                     <td>${estadoCell}</td>
                 </tr>`;
@@ -1851,7 +1851,7 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:22px; font-weight:bold; color:#1e40af;">Folio: ${esc(folio)}</div>
-                        <div style="font-size:14px; color:#64748b; margin-top:4px;">Emisión: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</div>
+                        <div style="font-size:14px; color:#64748b; margin-top:4px;">Emisión: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
                         <span style="display:inline-block; margin-top:8px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:bold; background:${estadoGeneral==='Saldado'?'#dcfce7':estadoGeneral==='Al corriente'?'#dbeafe':'#fee2e2'}; color:${estadoGeneral==='Saldado'?'#166534':estadoGeneral==='Al corriente'?'#1e40af':'#991b1b'};">${estadoGeneral.toUpperCase()}</span>
                     </div>
                 </div>
@@ -1864,7 +1864,7 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                     <div style="text-align:right;">
                         <div style="font-size:12px; color:#64748b; text-transform:uppercase; font-weight:bold; letter-spacing:1px; margin-bottom:4px;">Fecha de Venta</div>
-                        <div style="font-size:16px; font-weight:bold; color:#0f172a;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</div>
+                        <div style="font-size:16px; font-weight:bold; color:#0f172a;">${cuenta.fechaVenta ? new Date(cuenta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-'}</div>
                         <div style="font-size:13px; color:#475569; margin-top:4px;">Modalidad: ${cuenta.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</div>
                     </div>
                 </div>
@@ -2018,7 +2018,7 @@ function reimprimirTicketAbono(folio, indexAbono) {
         cliente: { nombre: cuenta.nombre, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: abono.monto || 0,
         nuevoSaldo: saldoActual,
-        fecha: abono.fecha || new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }),
+        fecha: abono.fecha || new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }),
         metodoCobro: abono.etiquetaCuenta || abono.medioPago || 'Efectivo',
         cuentaDestino: abono.cuentaDestino || abono.etiquetaCuenta || '',
         pagaresCubiertos: pagaresDelFolio.filter(p => p.estado === "Pagado"),
@@ -2047,7 +2047,7 @@ function abrirModalPromesaPago(folio) {
             
             <div style="margin-bottom:15px;">
                 <label style="font-weight:bold; font-size:13px; color:#374151;">El cliente promete pagar el día:</label>
-                <input type="date" id="promesaFecha" value="${promesaAct.fecha}" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; margin-top:5px; box-sizing:border-box;">
+                <input type="date" id="promesaFecha" value="${promesaAct.fecha ? window.obtenerHoyInputMX() : ''}" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; margin-top:5px; box-sizing:border-box;">
             </div>
             
             <div style="margin-bottom:20px;">
@@ -2130,6 +2130,418 @@ window.calcularCalificacionCliente = function(clienteId) {
     } else {
         return { estrellas: '⭐', texto: 'Moroso Crítico', color: '#b91c1c', bg: '#fee2e2' }; 
     }
+};
+
+// ============================================================================
+// 🔍 MÓDULO DE AUDITORÍA Y CORRECCIÓN DE ABONOS (VERSIÓN MÉXICO - LOCAL)
+// ============================================================================
+
+// --- HELPERS DE FORMATO MÉXICO ---
+const formatSaldosMX = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v || 0);
+const formatFechaMX = (f) => {
+    if (!f) return "—";
+    const d = new Date(f);
+    if (isNaN(d.getTime())) return f;
+    // Formato: 11/05/2026 12:40:00 p. m.
+    return d.toLocaleString('es-MX', { 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric', 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit', 
+        hour12: true 
+    });
+};
+
+window.renderAuditoriaAbonos = function() {
+    const cont = document.getElementById('auditoria-abonos');
+    if (!cont) return;
+
+    cont.innerHTML = ""; // Limpieza total
+
+    const filtroCliente = (window._filtroAbnCliente || "").toLowerCase();
+    const filtroStatus = window._filtroAbnStatus || "todas";
+    const segmentar = window._filtroAbnSegmentar === undefined ? true : window._filtroAbnSegmentar;
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+
+    // 1. FILTRADO REAL
+    let cuentasFiltradas = cuentas.filter(c => {
+        const matchCliente = (c.nombre || "").toLowerCase().includes(filtroCliente);
+        const matchStatus = filtroStatus === "todas" || c.estado === filtroStatus;
+        return matchCliente && matchStatus && c.abonos && c.abonos.length > 0;
+    });
+
+    // 2. CONTROLES (DISEÑO LIMPIO)
+    let htmlControles = `
+        <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.05); margin-bottom:20px; display:flex; flex-wrap:wrap; gap:20px; align-items:flex-end;">
+            <div style="flex:1; min-width:250px;">
+                <label style="font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:5px;">🔍 BUSCAR CLIENTE:</label>
+                <input type="text" id="searchClienteAbn" value="${window._filtroAbnCliente || ''}" 
+                    oninput="window._filtroAbnCliente=this.value; renderAuditoriaAbonos();" 
+                    placeholder="Nombre del cliente..." 
+                    style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px;">
+            </div>
+            <div>
+                <label style="font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:5px;">📉 STATUS:</label>
+                <select onchange="window._filtroAbnStatus=this.value; renderAuditoriaAbonos();" style="padding:10px; border-radius:8px; border:1px solid #cbd5e1; background:white;">
+                    <option value="todas" ${filtroStatus==='todas'?'selected':''}>Todas</option>
+                    <option value="Saldado" ${filtroStatus==='Saldado'?'selected':''}>Saldadas</option>
+                    <option value="Pendiente" ${filtroStatus==='Pendiente'?'selected':''}>Pendientes</option>
+                </select>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; padding-bottom:10px; border-left:1px solid #e2e8f0; padding-left:20px;">
+                <input type="checkbox" ${segmentar ? 'checked' : ''} onchange="window._filtroAbnSegmentar=this.checked; renderAuditoriaAbonos();">
+                <span style="font-size:12px; font-weight:bold; color:#475569;">Segmentar por Venta</span>
+            </div>
+        </div>
+    `;
+
+    // 3. CONSTRUCCIÓN DEL CUERPO
+    let htmlCuerpo = "";
+    if (segmentar) {
+        htmlCuerpo = cuentasFiltradas.map(c => {
+            let filas = c.abonos.map((ab, idx) => `
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                    <td style="padding:10px; font-size:12px;">${formatFechaMX(ab.fecha)}</td>
+                    <td style="padding:10px; font-weight:bold; color:#16a34a;">${formatSaldosMX(ab.monto)}</td>
+                    <td style="padding:10px; font-size:11px; color:#64748b;">${ab.etiquetaCuenta || ab.medioPago || 'Efectivo'}</td>
+                    <td style="padding:10px; text-align:right;">
+                        <button onclick="abrirEditorAbono('${c.folio}', ${idx})" style="padding:6px 12px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">✏️ Editar</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            return `
+                <div style="background:white; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:20px; overflow:hidden; border:1px solid #e2e8f0;">
+                    <div style="background:#0f172a; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:14px; font-weight:bold;">${c.nombre} (Folio: ${c.folio})</span>
+                        <span style="font-size:11px;">Fecha Venta: ${c.fecha || '—'} | Status: ${c.estado}</span>
+                    </div>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead style="background:#f8fafc; font-size:10px; color:#64748b; text-transform:uppercase;">
+                            <tr><th style="padding:10px; text-align:left;">Fecha Pago</th><th style="padding:10px; text-align:left;">Importe</th><th style="padding:10px; text-align:left;">Cuenta</th><th style="padding:10px; text-align:right;">Acción</th></tr>
+                        </thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>`;
+        }).join('');
+    } else {
+        // Vista Plana
+        let todos = [];
+        cuentasFiltradas.forEach(c => c.abonos.forEach((ab, idx) => {
+            todos.push({ folio: c.folio, cliente: c.nombre, abonoIdx: idx, fecha: ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo' });
+        }));
+        todos.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+        let filasPlanos = todos.map(a => `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:12px; font-size:12px;">${formatFechaMX(a.fecha)}</td>
+                <td style="padding:12px;"><b>${a.cliente}</b> <small>(Folio: ${a.folio})</small></td>
+                <td style="padding:12px; font-weight:bold; color:#16a34a;">${formatSaldosMX(a.monto)}</td>
+                <td style="padding:12px; font-size:11px;">${a.cuenta}</td>
+                <td style="padding:12px; text-align:right;">
+                    <button onclick="abrirEditorAbono('${a.folio}', ${a.abonoIdx})" style="padding:6px 12px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">✏️ Corregir</button>
+                </td>
+            </tr>`).join('');
+        htmlCuerpo = `<div style="background:white; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); overflow:hidden;"><table style="width:100%; border-collapse:collapse;"><thead style="background:#0f172a; color:white; font-size:11px;"><tr><th style="padding:15px; text-align:left;">Fecha Abono</th><th style="padding:15px; text-align:left;">Cliente</th><th style="padding:15px; text-align:left;">Importe</th><th style="padding:15px; text-align:left;">Cuenta</th><th style="padding:15px; text-align:right;">Acción</th></tr></thead><tbody>${filasPlanos}</tbody></table></div>`;
+    }
+
+    cont.innerHTML = `<div style="max-width:1200px; margin:0 auto;">${htmlControles}${htmlCuerpo}</div>`;
+};
+
+window.abrirEditorAbono = function(folio, abonoIndex) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta || !cuenta.abonos[abonoIndex]) return;
+    
+    const abono = cuenta.abonos[abonoIndex];
+
+    // --- SOLUCIÓN AL ERROR DE FECHA ---
+    // Usamos el objeto Date local para llenar el input datetime-local sin desfase
+    const d = new Date(abono.fecha);
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+
+    const cuentasConfig = StorageService.get("cuentasBancarias", []); 
+    const opcionesCuentas = [{ id: 'efectivo', nombre: 'Efectivo' }, ...cuentasConfig.map(c => ({ id: c.nombre, nombre: c.nombre }))]
+        .map(c => `<option value="${c.id}" ${abono.etiquetaCuenta === c.nombre ? 'selected' : ''}>${c.nombre}</option>`).join('');
+
+    const html = `
+    <div id="modalCorreccionAbono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:400px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h3 style="margin-top:0; color:#1e40af;">✏️ Corregir Abono</h3>
+            <p style="font-size:12px; color:#64748b;">Cliente: <b>${cuenta.nombre}</b></p>
+            
+            <label style="display:block; font-size:11px; font-weight:bold; margin-top:15px;">FECHA Y HORA:</label>
+            <input type="datetime-local" id="editFechaAbn" value="${localISOTime}" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px;">
+
+            <label style="display:block; font-size:11px; font-weight:bold; margin-top:15px;">IMPORTE ($):</label>
+            <input type="number" id="editMontoAbn" value="${abono.monto}" style="width:100%; padding:10px; border-radius:8px; border:2px solid #1e40af; margin-top:5px; font-size:18px; font-weight:bold;">
+
+            <label style="display:block; font-size:11px; font-weight:bold; margin-top:15px;">CUENTA:</label>
+            <select id="editCuentaAbn" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px;">${opcionesCuentas}</select>
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="procesarCorreccionAbono('${folio}', ${abonoIndex})" style="flex:2; padding:12px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Guardar</button>
+                <button onclick="document.getElementById('modalCorreccionAbono').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.procesarCorreccionAbono = function(folio, abonoIndex) {
+    const nuevaFechaLocal = document.getElementById('editFechaAbn').value;
+    const nuevoMonto = parseFloat(document.getElementById('editMontoAbn').value);
+    const selCta = document.getElementById('editCuentaAbn');
+
+    if (!nuevaFechaLocal || isNaN(nuevoMonto)) return alert("Datos incompletos.");
+
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    let pagares = StorageService.get("pagaresSistema", []);
+    let caja = StorageService.get("movimientosCaja", []);
+
+    let cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+
+    // --- GUARDADO SIN DESFASE ---
+    // Convertimos el valor local del input directamente a Date
+    const dObj = new Date(nuevaFechaLocal);
+    
+    // Actualizamos el abono
+    const abn = cuenta.abonos[abonoIndex];
+    abn.fecha = dObj.getTime(); // Guardamos el Timestamp para evitar errores de string
+    abn.monto = nuevoMonto;
+    abn.etiquetaCuenta = selCta.options[selCta.selectedIndex].text;
+    abn.cuentaId = selCta.value;
+
+    // Recalcular saldo y pagarés
+    const totalAbonado = cuenta.abonos.reduce((sum, a) => sum + Number(a.monto), 0);
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    const deudaTotal = (cuenta.plan && cuenta.plan.total) ? cuenta.plan.total : (cuenta.saldoOriginal || 0);
+    
+    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado);
+    cuenta.estado = cuenta.saldoActual <= 1 ? "Saldado" : "Pendiente";
+
+    // Recalcular Pagarés
+    let pagsVenta = pagares.filter(p => p.folio === folio).sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    let bolsa = totalAbonado;
+    pagsVenta.forEach(p => {
+        p.montoAbonado = 0;
+        if (bolsa >= p.monto - 0.1) { p.estado = "Pagado"; p.montoAbonado = p.monto; bolsa -= p.monto; }
+        else if (bolsa > 0.1) { p.estado = "Parcial"; p.montoAbonado = bolsa; bolsa = 0; }
+        else { p.estado = "Pendiente"; p.montoAbonado = 0; }
+    });
+
+    // Actualizar Caja (Buscamos por folio y referencia de abono)
+    caja = caja.filter(m => !(m.folio === folio && m.referencia === `ABONO-${folio}`));
+    cuenta.abonos.forEach(a => {
+        caja.push({
+            folio: folio, fecha: a.fecha, monto: a.monto, tipo: "ingreso", 
+            concepto: `Abono Corregido: ${cuenta.nombre}`, referencia: `ABONO-${folio}`, cuenta: a.cuentaId
+        });
+    });
+
+    StorageService.set("cuentasPorCobrar", cuentas);
+    StorageService.set("pagaresSistema", pagares);
+    StorageService.set("movimientosCaja", caja);
+
+    document.getElementById('modalCorreccionAbono').remove();
+    renderAuditoriaAbonos();
+    alert("✅ Corrección aplicada. Saldos y fechas sincronizados en formato México.");
+};
+
+window.abrirEditorAbono = function(folio, abonoIndex) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+    
+    const abono = cuenta.abonos[abonoIndex];
+    if (!abono) return;
+
+    // Generar selector leyendo cuentas bancarias reales de tu configuracion
+    const cuentasConfig = StorageService.get("cuentasBancarias", []); 
+    const opcionesCuentas = [
+        { id: 'efectivo', nombre: '💵 Efectivo' },
+        ...cuentasConfig.map(c => ({ id: c.nombre, nombre: `🏦 ${c.nombre}` }))
+    ].map(c => {
+        const esSeleccionada = (abono.medioPago === c.id || abono.etiquetaCuenta === c.nombre) ? 'selected' : '';
+        return `<option value="${c.id}" data-nombre="${c.nombre}" ${esSeleccionada}>${c.nombre}</option>`;
+    }).join('');
+
+    // Ajustar fecha para el input datetime-local
+    // Ajustar fecha para el input datetime-local blindado contra errores
+    let valorFechaFormato;
+    try {
+        let d = new Date(abono.fecha);
+        // Si JS no lo entiende nativamente y trae diagonales (DD/MM/YYYY)
+        if (isNaN(d.getTime()) && abono.fecha && abono.fecha.includes('/')) {
+            const partes = String(abono.fecha).split(',')[0].trim().split('/');
+            if (partes.length === 3) {
+                const dia = partes[0].padStart(2, '0');
+                const mes = partes[1].padStart(2, '0');
+                const anio = partes[2].length === 2 ? '20' + partes[2] : partes[2];
+                d = new Date(`${anio}-${mes}-${dia}T12:00:00`);
+            }
+        }
+        // Si de plano la fecha está rota o vacía, usa la de hoy
+        if (isNaN(d.getTime())) d = new Date();
+        
+        // Ajuste de zona horaria local para que se vea correcto en el input
+        const tzOffset = d.getTimezoneOffset() * 60000;
+        valorFechaFormato = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+    } catch (e) {
+        const d = new Date();
+        const tzOffset = d.getTimezoneOffset() * 60000;
+        valorFechaFormato = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+    }
+
+    const html = `
+    <div id="modalCorreccionAbono" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 5px 0; color:#1e40af;">✏️ Corrección de Abono</h3>
+            <p style="font-size:13px; color:#64748b; margin-top:0;">Venta: <b>${folio}</b> | Cliente: <b>${cuenta.nombre}</b></p>
+            
+            <div style="margin-top:20px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">FECHA DEL MOVIMIENTO:</label>
+                <input type="datetime-local" id="editFechaAbn" value="${valorFechaFormato}" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">IMPORTE DEL ABONO ($):</label>
+                <input type="number" id="editMontoAbn" value="${abono.monto}" style="width:100%; padding:12px; border-radius:8px; border:2px solid #3b82f6; margin-top:5px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#1e40af;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">CUENTA RECEPTORA:</label>
+                <select id="editCuentaAbn" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; font-size:14px;">
+                    ${opcionesCuentas}
+                </select>
+            </div>
+
+            <div style="background:#fffbeb; padding:12px; border-radius:8px; margin-top:20px; border:1px solid #fcd34d;">
+                <p style="margin:0; font-size:12px; color:#92400e;">⚠️ <b>Atención:</b> Los pagarés se resetearán y se volverán a cubrir desde el #1 con el nuevo saldo total. El movimiento en "Flujo de Caja" se corregirá automáticamente.</p>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="procesarCorreccionAbono('${folio}', ${abonoIndex})" 
+                        style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">
+                    💾 Guardar Cambios
+                </button>
+                <button onclick="document.getElementById('modalCorreccionAbono').remove()" 
+                        style="flex:1; padding:14px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.procesarCorreccionAbono = function(folio, abonoIndex) {
+    const nuevaFecha = document.getElementById('editFechaAbn').value;
+    const nuevoMonto = parseFloat(document.getElementById('editMontoAbn').value);
+    const selCuenta = document.getElementById('editCuentaAbn');
+    
+    if (isNaN(nuevoMonto) || nuevoMonto <= 0) return alert("Importe inválido.");
+
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].getAttribute('data-nombre');
+    const medioPago = cuentaId === 'efectivo' ? 'efectivo' : 'transferencia';
+
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    let pagares = StorageService.get("pagaresSistema", []);
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+
+    let cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+
+    // 1. Modificar los datos exactos del abono
+    cuenta.abonos[abonoIndex].fecha = new Date(nuevaFecha).toISOString();
+    cuenta.abonos[abonoIndex].monto = nuevoMonto;
+    cuenta.abonos[abonoIndex].cuentaId = cuentaId;
+    cuenta.abonos[abonoIndex].medioPago = medioPago;
+    cuenta.abonos[abonoIndex].etiquetaCuenta = etiqueta;
+
+    // 2. RECALCULAR SALDO DE LA CUENTA
+    const totalAbonado = cuenta.abonos.reduce((sum, a) => sum + Number(a.monto), 0);
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    
+    // Obtener la base total a pagar original
+    let deudaTotal = cuenta.totalContadoOriginal - enganche;
+    if (cuenta.plan && cuenta.plan.total) {
+        deudaTotal = cuenta.plan.total;
+    } else if (cuenta.saldoOriginal) {
+        deudaTotal = cuenta.saldoOriginal;
+    }
+
+    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado);
+    if (cuenta.saldoActual <= 0.01) {
+        cuenta.estado = "Saldado";
+        cuenta.saldoActual = 0;
+    } else if (cuenta.estado === "Saldado") {
+        cuenta.estado = "Pendiente";
+    }
+
+    // 3. RECALCULAR PAGARÉS (Mecanismo de "Bolsa de Dinero")
+    let pagaresFolio = pagares.filter(p => p.folio === folio).sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    let bolsa = totalAbonado;
+
+    pagaresFolio.forEach(p => {
+        p.montoAbonado = 0;
+        p.fechaAbono = null;
+        p.estado = "Pendiente";
+
+        if (bolsa >= p.monto - 0.01) {
+            p.estado = "Pagado";
+            p.montoAbonado = p.monto;
+            // Se le asigna la fecha del último abono registrado en la cuenta
+            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1].fecha; 
+            bolsa -= p.monto;
+        } else if (bolsa > 0.01) {
+            p.estado = "Parcial";
+            p.montoAbonado = bolsa;
+            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1].fecha;
+            bolsa = 0;
+        }
+    });
+
+    // Inyectar los pagarés corregidos al arreglo principal
+    pagares = pagares.map(p => {
+        const pMod = pagaresFolio.find(pf => pf.id === p.id);
+        return pMod ? pMod : p;
+    });
+
+    // 4. CORREGIR FLUJO DE EFECTIVO (movimientosCaja)
+    // Para evitar duplicados en la caja, borramos todos los movimientos de caja de ESTA venta que sean un "ABONO"
+    movimientosCaja = movimientosCaja.filter(m => !(m.folio === folio && m.referencia === `ABONO-${folio}`));
+    
+    // Y reescribimos los abonos exactos de la cuenta
+    cuenta.abonos.forEach((ab) => {
+        movimientosCaja.push({
+            id: Date.now() + Math.random(),
+            folio: folio,
+            fecha: ab.fecha,
+            monto: ab.monto,
+            tipo: "ingreso",
+            concepto: `Abono a ${cuenta.nombre} - ${folio}`,
+            referencia: `ABONO-${folio}`,
+            cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
+            medioPago: ab.medioPago || 'efectivo',
+            etiquetaCuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo'
+        });
+    });
+
+    // 5. GUARDADO DEFINITIVO
+    StorageService.set("cuentasPorCobrar", cuentas);
+    StorageService.set("pagaresSistema", pagares);
+    StorageService.set("movimientosCaja", movimientosCaja);
+
+    document.getElementById('modalCorreccionAbono').remove();
+    alert("✅ Abono modificado con éxito. Saldos, pagarés y flujo de caja están cuadrados.");
+    
+    renderAuditoriaAbonos();
 };
 
 window.abrirModalPromesaPago = abrirModalPromesaPago;

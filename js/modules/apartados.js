@@ -70,9 +70,9 @@ function renderApartados() {
             html += `<tr>
                 <td>${a.folio}</td>
                 <td>${a.clienteNombre}</td>
-                <td>${new Date(a.fechaApartado).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
-                <td>${a.fechaCompromiso ? new Date(a.fechaCompromiso).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) : '-'}</td>
-                <td>${dinero(abonado)}</td>
+                <td>${window.formatearFechaCortaMX(a.fechaApartado)}</td>
+                <td>${a.fechaCompromiso ? window.formatearFechaCortaMX(a.fechaCompromiso) : '-'}</td>
+                <td>${window.formatearDineroMX(abonado)}</td>
                 <td style="color:#dc2626; font-weight:bold;">${dinero(a.saldoPendiente)}</td>
                 <td>${a.estado}</td>
                 <td><button onclick="abrirModalAbonoApartado('${a.folio}')" style="padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">➕ Abonar</button></td>
@@ -151,7 +151,7 @@ function abrirHistorialAbonos(folio) {
         let html = '<table style="width:100%;font-size:14px;border-collapse:collapse;"><thead><tr style="border-bottom:2px solid #e2e8f0;"><th style="padding:8px 4px;text-align:left;">Fecha</th><th style="padding:8px 4px;text-align:right;">Monto</th><th style="padding:8px 4px;text-align:left;padding-left:15px;">Cuenta receptora</th></tr></thead><tbody>';
         ap.abonos.forEach(ab => {
             html += `<tr style="border-bottom:1px solid #f1f5f9;">
-                <td style="padding:8px 4px;">${new Date(ab.fechaAbono).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+                <td style="padding:8px 4px;">${new Date(ab.fechaAbono).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
                 <td style="padding:8px 4px;text-align:right;font-weight:bold;color:#15803d;">${dinero(ab.monto)}</td>
                 <td style="padding:8px 4px;padding-left:15px;color:#64748b;font-size:12px;">${ab.etiquetaCuenta || '💵 Efectivo'}</td>
             </tr>`;
@@ -178,7 +178,7 @@ function abrirModalAbonoApartado(folio) {
     if (!modal) return;
     document.getElementById('abonoFolioApartado').value = folio;
     document.getElementById('abonoMontoApartado').value = '';
-    document.getElementById('abonoFechaApartado').value = new Date().toISOString().substring(0,10);
+    document.getElementById('abonoFechaApartado').value = window.obtenerHoyInputMX();
     modal.style.display = 'block';
 }
 

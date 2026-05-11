@@ -72,7 +72,7 @@ function renderConciliacion() {
                     onchange="toggleConciliacionMov(${m.id}, this.checked)" 
                     style="width:18px; height:18px; cursor:pointer;">
             </td>
-            <td style="font-size:12px;">${m.fecha ? m.fecha.substring(0,10) : '-'}</td>
+            <td style="font-size:12px;">${window.formatearFechaCortaMX(m.fecha)}</td>
             <td><small style="color:#64748b; font-size:10px;">${m.referencia || ''}</small><br><b>${m.concepto}</b></td>
             <td><small>${m.etiquetaCuenta || m.cuenta}</small></td>
             <td style="text-align:right; color:#16a34a; font-weight:bold;">${esIngreso ? dinero(m.monto) : ''}</td>

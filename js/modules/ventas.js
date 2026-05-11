@@ -289,7 +289,7 @@ function renderCarrito() {
                     <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">📅 Fecha de venta</label>
                     <input type="date" id="inputFechaVenta"
                            style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold; box-sizing:border-box;"
-                           value="${new Date().toISOString().substring(0,10)}">
+                           value="${window.obtenerHoyInputMX()}">
                 </div>
 
                 <button onclick="irASeleccionCliente()"
@@ -535,7 +535,7 @@ function actualizarInterfazPago() {
     window._estadoPago.cuentaReceptora = metodo === "contado"
         ? "efectivo"
         : (document.getElementById("selCuentaReceptora")?.value || "efectivo");
-    window._estadoPago.fechaVenta = document.getElementById("inputFechaVenta")?.value || new Date().toISOString().substring(0,10);
+    window._estadoPago.fechaVenta = document.getElementById("inputFechaVenta")?.value || window.obtenerHoyInputMX();
     
     // Guardamos la caja seleccionada en nuestra libreta de estado temporal
     const selCaja = document.getElementById("cuentaReceptora_venta");
@@ -767,7 +767,7 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
             </div>
 
             <div style="display:flex; gap:10px;">
-                <button onclick="procesarVentaConInventario('${metodoPago}', ${totalConDescuento ?? totalContado}, ${enganche}, ${saldoAFinanciar})"
+                <button onclick="mostrarDialogoInventario('${metodoPago}', ${totalConDescuento ?? totalContado}, ${enganche}, ${saldoAFinanciar})"
                     style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
                     ✅ Confirmar Venta
                 </button>
@@ -789,10 +789,6 @@ function cancelarYVolverAlCarrito() {
     });
     document.querySelectorAll('[data-modal]').forEach(modal => modal.remove());
     navA('carrito');
-}
-
-function procesarVentaConInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
-    mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, _planElegidoPendiente);
 }
 
 /**
@@ -839,15 +835,35 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                         style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; width:120px;">
                 </div>`;
 
+            // 1. Obtener ubicaciones oficiales del sistema
+            const ubicacionesConfig = StorageService.get("ubicacionesConfig", [
+                { id: 1, nombre: "Piso de Ventas (General)" },
+                { id: 2, nombre: "Bodega Principal" }
+            ]);
+            
+            // 2. Armar las opciones del Combo Box con INVENTARIO DINÁMICO
+            const stockActual = parseFloat(x.prod.stock) || 0;
+            const stockEnVariantes = (x.prod.variantes || []).reduce((s, v) => s + (parseFloat(v.stock) || 0), 0);
+            const stockGeneralSinAsignar = Math.max(0, stockActual - stockEnVariantes);
+
+            let opcionesUbi = `<option value="Stock General" ${ubicacionElegida === 'Stock General' ? 'selected' : ''}>Stock General (${stockGeneralSinAsignar} disp.)</option>`;
+            
+            ubicacionesConfig.forEach(u => {
+                const varianteUbi = (x.prod.variantes || []).find(v => v.ubicacion === u.nombre);
+                const stockUbi = varianteUbi ? parseFloat(varianteUbi.stock) : 0;
+                let sel = ubicacionElegida === u.nombre ? 'selected' : '';
+                opcionesUbi += `<option value="${u.nombre}" ${sel}>${u.nombre} (${stockUbi} disp.)</option>`;
+            });
+
+            // 3. Crear el HTML del Selector
             let ubicacionSelectorHtml = `
                 <div style="margin-top:6px;">
                     <label style="font-size:11px; color:#374151;">📍 Ubicación:</label>
-                    <input type="text" value="${_escapeHtml(ubicacionElegida)}"
-                        onchange="cambiarUbicacionInventario(${idProd}, this.value)"
-                        placeholder="Ej. Bodega 1" 
-                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:120px;">
+                    <select onchange="cambiarUbicacionInventario(${idProd}, this.value)"
+                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:220px; cursor:pointer;">
+                        ${opcionesUbi}
+                    </select>
                 </div>`;
-
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
@@ -963,74 +979,29 @@ function cambiarUbicacionInventario(productoId, nuevaUbicacion) {
     decisionesInventario[productoId].ubicacion = nuevaUbicacion;
 }
 
-function confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar) {
-    let planElegido = _planElegidoPendiente;
-    if (metodoPago === "credito") {
-        if (!planElegido || !planElegido.abono || planElegido.abono === 0) {
-            const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
-            const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
-            const planIdx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
-            const safeIdx = (planIdx >= 0 && planIdx < planes.length) ? planIdx : 0;
-            planElegido = planes[safeIdx];
-            if (!planElegido || !planElegido.abono || planElegido.abono === 0) {
-                planElegido = planes.find(p => p.abono > 0) || planes[0];
-            }
-        }
-    }
-
-    let montoVentaFinal = totalContado;
-    if (metodoPago === "credito" && planElegido) {
-        montoVentaFinal = enganche + (planElegido.total || 0);
-    }
-
-    const folioVenta = "V-" + Date.now().toString().slice(-6);
-
-    const inputFechaEl = document.getElementById("inputFechaVenta");
-    const fechaGuardada = window._estadoPago?.fechaVenta;
-    let fechaVentaDate;
-    if (inputFechaEl && inputFechaEl.value) {
-        const [anio, mes, dia] = inputFechaEl.value.split("-").map(Number);
-        fechaVentaDate = new Date(anio, mes - 1, dia, 12, 0, 0);
-    } else if (fechaGuardada) {
-        const [anio, mes, dia] = fechaGuardada.split("-").map(Number);
-        fechaVentaDate = new Date(anio, mes - 1, dia, 12, 0, 0);
-    } else {
-        fechaVentaDate = new Date();
-    }
-    const fechaHoy = fechaVentaDate.toLocaleDateString("es-MX");
-    const fechaVentaIso = fechaVentaDate.toISOString();
-
-    let productosAEntregar = [];
-    let productosAPendiente = [];
+window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganche, saldoAFinanciar) {
+    let productosConStock = [];
+    let productosSinStock = [];
 
     carrito.forEach(item => {
-        const prod = productos.find(prod => String(prod.id) === String(item.id)); 
+        const prod = productos.find(p => String(p.id) === String(item.id));
         if (!prod) return;
-        const decision = decisionesInventario[item.id];
-        const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
+
+        const decision = decisionesInventario[prod.id] || { entregar: false };
         
-        if (tieneStock && decision && decision.entregar) {
-            const colorFinal = (decision.color !== undefined) ? decision.color : (item.colorElegido || '');
-            const ubicacionFinal = (decision.ubicacion !== undefined) ? decision.ubicacion : (item.ubicacionElegida || '');
-            productosAEntregar.push({ item: { ...item, colorElegido: colorFinal, ubicacionElegida: ubicacionFinal }, prod });
+        if (decision.entregar) {
+            productosConStock.push({ item, prod });
         } else {
-            productosAPendiente.push({ item, prod });
+            productosSinStock.push({ item, prod });
         }
     });
 
-    procesarVentaFinal(
-        metodoPago, 
-        montoVentaFinal, 
-        enganche, 
-        saldoAFinanciar, 
-        planElegido,
-        folioVenta, 
-        fechaHoy, 
-        fechaVentaIso, 
-        productosAEntregar, 
-        productosAPendiente
-    );
-}
+    const folioVenta = "V-" + Date.now().toString().slice(-6);
+    const fechaHoy = window.formatearFechaCortaMX(Date.now());
+    const fechaVentaIso = Date.now();
+
+    procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, _planElegidoPendiente, folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock);
+};
 
 function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock) {
@@ -1221,7 +1192,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
                     clienteId: clienteSeleccionado.id,
                     clienteDireccion: clienteSeleccionado.direccion || "",
                     fechaEmision: fechaVentaIso,
-                    fechaVencimiento: fechaPago.toISOString(),
+                    fechaVencimiento: fechaPago.getTime(),
                     monto: planElegido.abono,
                     estado: "Pendiente",
                     diasAtrasoActual: 0,
@@ -1384,7 +1355,7 @@ function generarTicketMediaHoja(datosVenta) {
     if (datosVenta.metodo === "credito") {
         pagaresDelFolio.forEach((pagar, index) => {
             const fechaPago = new Date(pagar.fechaVencimiento);
-            const fechaFmt = fechaPago.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' });
+            const fechaFmt = window.formatearFechaCortaMX(fechaPago);
             totalAPagar += pagar.monto;
             
             // SOLO NÚMERO, FECHA Y MONTO
@@ -1776,7 +1747,7 @@ function registrarMovimientoInterno(id, concepto, cant, tipo) {
         tipo: tipo,
         cantidad: cant,
         concepto: concepto,
-        fecha: new Date().toLocaleString()
+        fecha: Date.now()
     });
     StorageService.set("movimientosInventario", movs);
 }
@@ -1939,7 +1910,7 @@ function renderReimprimirVenta() {
         <tbody>`;
 
     filtrados.forEach(t => {
-        const fecha = t.fechaEmision ? new Date(t.fechaEmision).toLocaleDateString('es-MX') : '—';
+        const fecha = t.fechaEmision ? new Date(t.fechaEmision)window.formatearFechaCortaMX : '—';
         const total = t.venta?.total || 0;
         const metodo = t.venta?.metodoPago || '—';
         const folioEsc = (t.folio || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -1974,8 +1945,8 @@ function reimprimirTicketVenta(folio) {
     const datosVenta = {
         folio: ticket.folio,
         fecha: ticket.fechaEmision
-            ? new Date(ticket.fechaEmision).toLocaleDateString('es-MX')
-            : new Date().toLocaleDateString('es-MX'),
+            ? new Date(ticket.fechaEmision)window.formatearFechaCortaMX
+            : new Date()window.formatearFechaCortaMX,
         fechaIso: ticket.fechaEmision,
         cliente: ticket.cliente || {},
         metodo: ticket.venta?.metodoPago || 'contado',
@@ -2024,7 +1995,7 @@ function procesarMigracionCXC_POS() {
             const periodicidad = item.periodicidad || 'semanal';
             const fechaVentaDate = item.fechaVenta ? new Date(item.fechaVenta) : new Date();
             const fechaVentaIso = fechaVentaDate.toISOString();
-            const fechaVentaStr = fechaVentaDate.toLocaleDateString('es-MX');
+            const fechaVentaStr = fechaVentaDatewindow.formatearFechaCortaMX;
             const pagosRestantes = Number(item.pagosRestantes) || 1;
 
             let cli = clientesList.find(c => c.nombre.toLowerCase() === item.nombre.toLowerCase());
@@ -2143,8 +2114,8 @@ function procesarMigracionCXP_POS() {
                 saldoPendiente: Number(item.saldoPendiente),
                 metodo: item.metodo || 'credito_proveedor',
                 formaPagoTexto: item.formaPagoTexto || 'Migración Histórica',
-                fecha: item.fecha || new Date().toLocaleDateString('es-MX'),
-                vencimiento: item.vencimiento || new Date().toLocaleDateString('es-MX')
+                fecha: item.fecha || new Date()window.formatearFechaCortaMX,
+                vencimiento: item.vencimiento || new Date()window.formatearFechaCortaMX
             });
             agregadas++;
         });
@@ -2202,7 +2173,7 @@ function procesarMigracionMSI_POS() {
                 total: total,
                 meses: meses,
                 cuotaMensual: total / meses,
-                fechaCompra: fechaCompraDate.toLocaleDateString('es-MX'),
+                fechaCompra: fechaCompraDatewindow.formatearFechaCortaMX,
                 calendario: calendario,
                 pagosRealizados: pagosRealizados
             });
@@ -2537,11 +2508,10 @@ window.actualizarInterfazPago = actualizarInterfazPago;
 window.seleccionarPlan = seleccionarPlan;
 window.confirmarVentaFinal = confirmarVentaFinal;
 window.cancelarYVolverAlCarrito = cancelarYVolverAlCarrito;
-window.procesarVentaConInventario = procesarVentaConInventario;
 window.setDecisionInventario = setDecisionInventario;
 window.cambiarColorInventario = cambiarColorInventario;
 window.cambiarUbicacionInventario = cambiarUbicacionInventario;
-window.confirmarDecisionesInventario = confirmarDecisionesInventario;
+window.mostrarDialogoInventario = mostrarDialogoInventario;
 window.abrirDetalleEntrega = abrirDetalleEntrega;
 window.renderEntregas = renderEntregas;
 window.procesarMigracionMSI_POS = procesarMigracionMSI_POS;

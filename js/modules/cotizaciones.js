@@ -533,8 +533,8 @@ function abrirListaCotizaciones() {
         return `<tr>
           <td style="padding:10px;">${c.folio}</td>
           <td style="padding:10px;">${c.clienteNombre}</td>
-          <td style="padding:10px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
-          <td style="padding:10px;">${new Date(c.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}</td>
+          <td style="padding:10px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+          <td style="padding:10px;">${new Date(c.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
           <td style="padding:10px;text-align:right;">${dinero(c.total)}</td>
           <td style="padding:10px;text-align:center;"><span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${c.estado}</span></td>
           <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
@@ -680,7 +680,7 @@ function imprimirCotizacion(id) {
           <span>FOLIO: ${c.folio}</span>
         </div>
         <div style="font-size: 9px;">
-          FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' })}<br>
+          FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}<br>
           CLIENTE: ${c.clienteNombre.toUpperCase()}
         </div>
         <div class="separator"></div>
