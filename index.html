@@ -126,7 +126,7 @@
                 <button onclick="navA('dashboard'); renderDashboard();">📉 Dashboard Principal</button>
                 <button onclick="navA('reporte-ventas')">💰 Ventas</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
-                <button onclick="navA('reporte-flujo')">💵 Flujo de Efectivo</button>
+                <button onclick="navA('reporte-flujo'); renderReporteFlujo();">💵 Flujo de Efectivo</button>
                 <button onclick="navA('reporte-rentabilidad'); renderReporteRentabilidad();">📈 Rentabilidad Real</button>
             </div>
         </div>
@@ -138,6 +138,10 @@
         
         <button onclick="abrirAuditoriaCxC()" style="color: #b91c1c; font-weight: bold;">
             🛠️ Modificar Ventas CxC
+        </button>
+        
+        <button onclick="navA('auditoria-abonos'); renderAuditoriaAbonos();" style="color: #0f172a; font-weight: bold;">
+            💳 Corregir Abonos
         </button>
     </div>
 </div>
@@ -801,33 +805,10 @@ nombre,categoria,subcategoria,costo,precio,color,marca,modelo,imagen,caracterist
         </div>
     </div>
 
-    <!-- REPORTE FLUJO DE EFECTIVO -->
-    <div id="reporte-flujo" class="vista oculto">
-        <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <div>
-                <h2>💵 Flujo de Efectivo</h2>
-                <p style="color:#718096; margin:0;">Ingresos y egresos registrados en caja</p>
-            </div>
-            <div style="display:flex; gap:10px;">
-                <button onclick="exportarReporteFlujo()" style="padding:10px 18px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📥 Exportar CSV</button>
-                <button onclick="renderReporteFlujo()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔄 Actualizar</button>
-            </div>
-        </div>
-        <!-- Filtros -->
-        <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:20px; display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end;">
-            <div><label style="font-size:11px; font-weight:bold; color:#555;">DESDE</label><input type="date" id="rfFechaDesde" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
-            <div><label style="font-size:11px; font-weight:bold; color:#555;">HASTA</label><input type="date" id="rfFechaHasta" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
-            <button onclick="renderReporteFlujo()" style="padding:9px 18px; background:#2c3e50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔍 Filtrar</button>
-        </div>
-        <!-- KPIs -->
-        <div id="rfKpis" style="display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-bottom:20px;"></div>
-        <!-- Tabla -->
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-            <h3 style="margin:0 0 15px 0; color:#2c3e50;">📋 Movimientos de Caja</h3>
-            <div id="rfTabla" style="overflow-x:auto;"></div>
-        </div>
-    </div>
+    <div id="reporte-flujo" class="vista oculto" style="padding:20px;"></div>
 
+    <div id="auditoria-abonos" class="vista oculto" style="padding:20px;"></div>
+    
     <div id="reporte-rentabilidad" class="vista oculto">
         <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <div>
