@@ -475,7 +475,7 @@ div[style*="border-left:5px"]:hover, div[style*="border-left: 5px"]:hover {
   background: rgba(10,17,36,0.62) !important;
   backdrop-filter: blur(5px) !important; -webkit-backdrop-filter: blur(5px) !important;
   justify-content: center !important; align-items: flex-start !important;
-  z-index: 5000 !important; padding: 24px 16px !important; overflow-y: auto !important;
+  padding: 24px 16px !important; overflow-y: auto !important;
 }
 /* El JS controla display:flex/block al abrir y display:none al cerrar � no forzar aqu� */
 .modal-content, div[data-modal] > div {
