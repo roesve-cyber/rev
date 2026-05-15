@@ -599,12 +599,19 @@ function confirmarVentaFinal() {
     }
 
     let descuentoAplicado = 0;
+    let listaDescuentos = [];
+    
+    // Extraemos correctamente el monto del objeto que devuelve descuentos.js
     if (typeof aplicarDescuentosAlCarrito === "function") {
-        descuentoAplicado = aplicarDescuentosAlCarrito(carrito, clienteSeleccionado.id) || 0;
+        const resultadoDesc = aplicarDescuentosAlCarrito(carrito, clienteSeleccionado.id);
+        if (resultadoDesc) {
+            descuentoAplicado = resultadoDesc.montoDescuento || 0;
+            listaDescuentos = resultadoDesc.descuentosAplicados || [];
+        }
     }
 
     const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
-    const totalConDescuento = totalContado - descuentoAplicado; 
+    const totalConDescuento = Math.max(0, totalContado - descuentoAplicado);
 
     let enganche = window._estadoPago?.enganche ?? parseFloat(document.getElementById("numEnganche")?.value) ?? 0;
     if (enganche < 0) enganche = 0;
@@ -1315,11 +1322,21 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             fecha:      fechaHoy,
             clienteId:  clienteSeleccionado?.id || null,
             clienteNombre: clienteSeleccionado?.nombre || 'Sin nombre',
+            cliente:    clienteSeleccionado, // Guardado completo para reconstrucción de tickets
             total:      totalContado,
             enganche:   enganche || 0,
             saldoAFinanciar: saldoAFinanciar || 0,
             metodoPago: metodoPago,
-            articulos:  carrito.map(p => ({ id: p.id, nombre: p.nombre, colorElegido: p.colorElegido || '', cantidad: p.cantidad || 1, precio: p.precioContado || 0 })),
+            plan:       planElegido || null,
+            periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
+            articulos:  carrito.map(p => ({ 
+                id: p.id, 
+                nombre: p.nombre, 
+                colorElegido: p.colorElegido || '', 
+                cantidad: p.cantidad || 1, 
+                precio: p.precioContado || 0,
+                precioContado: p.precioContado || 0 
+            })),
             vendedor:   _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
         });
         if (!StorageService.set('ventasRegistradas', ventasRegistradas)) console.error('❌ Error guardando ventasRegistradas');
@@ -1578,7 +1595,8 @@ function generarTicketMediaHoja(datosVenta) {
     win.document.close();
     win.focus();
     
-    guardarTicketEnRegistro(datosVenta, folio);
+    // Desactivado para unificar la fuente de verdad en ventasRegistradas
+    // guardarTicketEnRegistro(datosVenta, folio);
 }
 
 function guardarTicketEnRegistro(datosVenta, folio) {
@@ -1886,25 +1904,42 @@ function renderReimprimirVenta() {
     const montoMin = parseFloat(document.getElementById("rvMontoMin")?.value) || 0;
     const montoMax = parseFloat(document.getElementById("rvMontoMax")?.value) || Infinity;
 
-    const registros = StorageService.get("registroTickets", []);
+    const ventasNuevas = StorageService.get("ventasRegistradas", []);
+    const ticketsViejos = StorageService.get("registroTickets", []);
+    
+    let registrosCombinados = [...ventasNuevas];
+    
+    // Concatenar registros históricos que no existan en la tabla nueva para preservar el pasado
+    ticketsViejos.forEach(tv => {
+        if (!registrosCombinados.find(v => v.folio === tv.folio)) {
+            registrosCombinados.push({
+                folio: tv.folio,
+                fechaVenta: tv.fechaEmision,
+                fecha: tv.fechaEmision ? window.formatearFechaCortaMX(tv.fechaEmision) : '',
+                clienteNombre: tv.cliente?.nombre || '',
+                total: tv.venta?.total || 0,
+                metodoPago: tv.venta?.metodoPago || 'contado'
+            });
+        }
+    });
 
-    if (registros.length === 0) {
+    if (registrosCombinados.length === 0) {
         contenedor.innerHTML = `<div style="background:#fef3c7; padding:30px; border-radius:10px; text-align:center; color:#92400e;">
-            <p style="font-size:16px;">⚠️ No hay tickets registrados aún. Los tickets se guardan automáticamente al realizar ventas.</p>
+            <p style="font-size:16px;">⚠️ No hay transacciones registradas en el sistema.</p>
         </div>`;
         return;
     }
 
-    let filtrados = registros.filter(t => {
-        const nombreCliente = (t.cliente?.nombre || "").toLowerCase();
+    let filtrados = registrosCombinados.filter(t => {
+        const nombreCliente = (t.clienteNombre || t.cliente?.nombre || "").toLowerCase();
         const folio = (t.folio || "").toLowerCase();
-        const fe = t.fechaEmision;
+        const fe = t.fechaVenta || t.fechaIso || t.fechaEmision;
         const fecha = fe
             ? (typeof fe === 'number'
                 ? window.localISO(new Date(fe)).substring(0, 10)
                 : String(fe).substring(0, 10))
             : "";
-        const total = t.venta?.total || 0;
+        const total = t.total || t.venta?.total || 0;
 
         if (folioFiltro && !folio.includes(folioFiltro)) return false;
         if (clienteFiltro && !nombreCliente.includes(clienteFiltro)) return false;
@@ -1913,16 +1948,13 @@ function renderReimprimirVenta() {
         if (total < montoMin) return false;
         if (montoMax !== Infinity && total > montoMax) return false;
         return true;
-    }).sort((a, b) => new Date(b.fechaEmision) - new Date(a.fechaEmision));
+    }).sort((a, b) => new Date(b.fechaVenta || b.fechaIso || b.fechaEmision || 0) - new Date(a.fechaVenta || a.fechaIso || a.fechaEmision || 0));
 
-    // 🧹 LIMPIEZA VISUAL: Filtramos los duplicados históricos para que no salgan en pantalla
     const foliosUnicos = new Set();
     filtrados = filtrados.filter(t => {
-        if (foliosUnicos.has(t.folio)) {
-            return false; // Ya lo vimos, lo ocultamos
-        }
+        if (foliosUnicos.has(t.folio)) return false;
         foliosUnicos.add(t.folio);
-        return true; // Es nuevo, lo mostramos
+        return true;
     });
 
     if (filtrados.length === 0) {
@@ -1944,13 +1976,13 @@ function renderReimprimirVenta() {
         <tbody>`;
 
     filtrados.forEach(t => {
-        const fecha = t.fechaEmision ? window.formatearFechaCortaMX(t.fechaEmision) : '—';
-        const total = t.venta?.total || 0;
-        const metodo = t.venta?.metodoPago || '—';
+        const fecha = t.fechaVenta ? window.formatearFechaCortaMX(t.fechaVenta) : (t.fecha || '—');
+        const total = t.total || t.venta?.total || 0;
+        const metodo = t.metodoPago || t.venta?.metodoPago || '—';
         const folioEsc = (t.folio || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         html += `<tr>
             <td><strong style="color:#1d4ed8;">${t.folio || '—'}</strong></td>
-            <td>${t.cliente?.nombre || '—'}</td>
+            <td>${t.clienteNombre || t.cliente?.nombre || '—'}</td>
             <td>${fecha}</td>
             <td><strong>${dinero(total)}</strong></td>
             <td style="text-transform: uppercase;">${metodo}</td>
@@ -1968,29 +2000,59 @@ function renderReimprimirVenta() {
 }
 
 function reimprimirTicketVenta(folio) {
-    const registros = StorageService.get("registroTickets", []);
-    const ticket = registros.find(t => t.folio === folio);
+    const ventas = StorageService.get("ventasRegistradas", []);
+    let ticket = ventas.find(t => t.folio === folio);
 
-    if (!ticket) {
-        alert(`⚠️ No se encontró el ticket con folio: ${folio}`);
-        return;
+    let datosVenta;
+
+    if (ticket) {
+        // Re-mapeo del plan y la periodicidad desde CxC en caso de ventas históricas sin datos cruzados
+        if (ticket.metodoPago === 'credito' && !ticket.plan) {
+            const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === ticket.folio);
+            if (cxc) {
+                ticket.plan = cxc.plan;
+                ticket.periodicidad = cxc.periodicidad;
+                ticket.cliente = ticket.cliente || { nombre: cxc.nombre, direccion: cxc.direccion, telefono: cxc.telefono };
+            }
+        }
+
+        datosVenta = {
+            folio: ticket.folio,
+            fecha: ticket.fecha || window.formatearFechaCortaMX(new Date(ticket.fechaVenta || Date.now())),
+            fechaIso: ticket.fechaVenta || ticket.fechaIso || window.localISO(new Date()),
+            cliente: ticket.cliente || { nombre: ticket.clienteNombre || 'Público General' },
+            metodo: ticket.metodoPago || 'contado',
+            total: ticket.total || 0,
+            enganche: ticket.enganche || 0,
+            saldoPendiente: ticket.saldoAFinanciar || 0,
+            plan: ticket.plan || null,
+            articulos: ticket.articulos || [],
+            periodicidad: ticket.periodicidad || 'semanal'
+        };
+    } else {
+        // Fallback: Si la venta es muy antigua y no está en la tabla nueva, lee el nodo histórico para no quebrar el pasado
+        const registrosViejos = StorageService.get("registroTickets", []);
+        const ticketViejo = registrosViejos.find(t => t.folio === folio);
+        
+        if (!ticketViejo) {
+            alert(`⚠️ No se encontró el ticket con folio: ${folio}`);
+            return;
+        }
+        
+        datosVenta = {
+            folio: ticketViejo.folio,
+            fecha: ticketViejo.fechaEmision ? window.formatearFechaCortaMX(typeof ticketViejo.fechaEmision === 'number' ? new Date(ticketViejo.fechaEmision) : ticketViejo.fechaEmision) : window.formatearFechaCortaMX(new Date()),
+            fechaIso: typeof ticketViejo.fechaEmision === 'number' ? window.localISO(new Date(ticketViejo.fechaEmision)) : ticketViejo.fechaEmision,
+            cliente: ticketViejo.cliente || {},
+            metodo: ticketViejo.venta?.metodoPago || 'contado',
+            total: ticketViejo.venta?.total || 0,
+            enganche: ticketViejo.venta?.enganche || 0,
+            saldoPendiente: ticketViejo.venta?.saldoPendiente || 0,
+            plan: ticketViejo.venta?.plan || null,
+            articulos: ticketViejo.venta?.articulos || [],
+            periodicidad: ticketViejo.venta?.periodicidad || 'semanal'
+        };
     }
-
-    const datosVenta = {
-        folio: ticket.folio,
-        fecha: ticket.fechaEmision
-            ? window.formatearFechaCortaMX(typeof ticket.fechaEmision === 'number' ? new Date(ticket.fechaEmision) : ticket.fechaEmision)
-            : window.formatearFechaCortaMX(new Date()),
-        fechaIso: typeof ticket.fechaEmision === 'number' ? window.localISO(new Date(ticket.fechaEmision)) : ticket.fechaEmision,
-        cliente: ticket.cliente || {},
-        metodo: ticket.venta?.metodoPago || 'contado',
-        total: ticket.venta?.total || 0,
-        enganche: ticket.venta?.enganche || 0,
-        saldoPendiente: ticket.venta?.saldoPendiente || 0,
-        plan: ticket.venta?.plan || null,
-        articulos: ticket.venta?.articulos || [],
-        periodicidad: ticket.venta?.periodicidad || 'semanal'
-    };
 
     generarTicketMediaHoja(datosVenta);
 }
