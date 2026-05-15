@@ -129,14 +129,16 @@ const StorageService = {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
         }
         
-        // Usa la lista completa declarada en onedrive-backup.js (fuente única de verdad).
-        // Si aún no está disponible (carga muy temprana), usa la lista de respaldo mínima.
-        const tablas = window.TABLAS_SISTEMA || [
-            "productos", "clientes", "categoriasData", "tarjetasConfig",
-            "cuentasPorCobrar", "pagaresSistema", "proveedores",
-            "movimientosInventario", "recepciones", "compras",
-            "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
-        ];
+        // Reemplaza el fallback de syncAll() por este:
+const tablas = window.TABLAS_SISTEMA || [
+    "productos", "categoriasData", "movimientosInventario",
+    "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
+    "ventasRegistradas", "registroTickets", "salidasPendientesVenta",
+    "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
+    "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
+    "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
+    "deudasMSI", "ubicacionesConfig", "requisicionesCompra"
+];
 
         try {
             console.log("⬇️ Descargando datos de la nube...");
@@ -162,30 +164,36 @@ const StorageService = {
         }
     },
 
-    async uploadAll() {
-        if (!window._firebaseActivo || !window._db) {
-            return Promise.reject(new Error("Firebase no está configurado o activo."));
-        }
-        
-        const tablas = window.TABLAS_SISTEMA || [
-            "productos", "clientes", "categoriasData", "tarjetasConfig",
-            "cuentasPorCobrar", "pagaresSistema", "proveedores",
-            "movimientosInventario", "recepciones", "compras",
-            "cuentasPorPagar", "deudasMSI", "movimientosCaja", "ubicacionesConfig"
-        ];
+    // Dentro de StorageService en js/services/storage.js
 
-        try {
-            console.log("⬆️ Subiendo datos a la nube...");
-            for (let tabla of tablas) {
-                const datosLocales = this.get(tabla, []);
-                await window._db.collection('posData').doc(tabla).set({ data: datosLocales });
-            }
-            return true;
-        } catch (error) {
-            console.error("❌ Error al subir a Firebase:", error);
-            throw error;
+async uploadAll() {
+    if (!window._firebaseActivo || !window._db) {
+        return Promise.reject(new Error("Firebase no está configurado o activo."));
+    }
+    
+    // Fallback blindado con la lista idéntica de 25 tablas
+    const tablas = window.TABLAS_SISTEMA || [
+        "productos", "categoriasData", "movimientosInventario",
+        "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
+        "ventasRegistradas", "registroTickets", "salidasPendientesVenta",
+        "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
+        "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
+        "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
+        "deudasMSI", "ubicacionesConfig", "requisicionesCompra"
+    ];
+
+    try {
+        console.log("⬆️ Subiendo datos a la nube...");
+        for (let tabla of tablas) {
+            const datosLocales = this.get(tabla, []);
+            await window._db.collection('posData').doc(tabla).set({ data: datosLocales });
         }
-    },
+        return true;
+    } catch (error) {
+        console.error("❌ Error al subir a Firebase:", error);
+        throw error;
+    }
+},
 
     startRealtimeSync() {
         if (window._firebaseActivo && window._db) {

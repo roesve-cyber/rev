@@ -5,12 +5,31 @@
 // js/services/onedrive-backup.js
 
 const TABLAS_SISTEMA = [
-    "productos", "categoriasData", "movimientosInventario",
-    "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
-    "ventasRegistradas", "cotizaciones", "apartados",
-    "proveedores", "compras", "gastos", "movimientosCaja",
-    "cuentasEfectivo", "tarjetasConfig", "configuracionPos",
-    "recepciones", "cuentasPorPagar", "deudasMSI", "ubicacionesConfig"
+    "productos", 
+    "categoriasData", 
+    "movimientosInventario",
+    "clientes", 
+    "clientesSistema", 
+    "cuentasPorCobrar", 
+    "pagaresSistema", 
+    "ventasRegistradas", 
+    "registroTickets",          // Añadido para asegurar consistencia en reimpresión
+    "salidasPendientesVenta",   // Añadido para el control físico de entregas en bodega
+    "puntosPorCliente",         // Añadido para el control de fidelidad
+    "gastosOperativos",         // CORREGIDO: Antes decía "gastos"
+    "cotizaciones", 
+    "apartados",
+    "proveedores", 
+    "compras", 
+    "movimientosCaja",
+    "cuentasEfectivo", 
+    "tarjetasConfig", 
+    "configuracionPos",
+    "recepciones", 
+    "cuentasPorPagar", 
+    "deudasMSI", 
+    "ubicacionesConfig",
+    "requisicionesCompra"       // Añadido para el flujo de compras pendientes
 ];
 
 window.TABLAS_SISTEMA = TABLAS_SISTEMA;
