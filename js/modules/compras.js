@@ -2790,6 +2790,54 @@ function ejecutarEliminacionOC(id, montoAFavor) {
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
 
+function cancelarOrdenCompra(id) {
+    const lista = StorageService.get('ordenesCompra', []);
+    const oc = lista.find(x => x.id === id);
+    if (!oc) return;
+    if (oc.estado === 'Cancelada') return alert('Esta orden ya está cancelada.');
+    if (oc.estado === 'Recibida' || oc.estado === 'Recibida Parcial') return alert('No se puede cancelar una orden ya recibida.');
+
+    const pagado = (oc.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
+    let mensaje = `¿Cancelar la Orden de Compra ${oc.folio}?\n\n`;
+    if (pagado > 0) {
+        mensaje += `⚠️ Esta orden tiene abonos por ${dinero(pagado)}. El monto se registrará como Saldo a Favor del proveedor ${oc.proveedorNombre}.\n\n`;
+    }
+    mensaje += "Las requisiciones vinculadas volverán a estar 'Pendientes'.\n\n¿Deseas continuar?";
+
+    if (!confirm(mensaje)) return;
+
+    // Saldo a favor si hubo pagos
+    if (pagado > 0) {
+        let saldos = StorageService.get('saldosFavorProveedores', []);
+        saldos.push({
+            id: Date.now(),
+            proveedorId: oc.proveedorId,
+            proveedorNombre: oc.proveedorNombre,
+            montoOriginal: pagado,
+            montoDisponible: pagado,
+            fecha: window.obtenerHoyInputMX(),
+            referencia: `Cancelación ${oc.folio}`
+        });
+        StorageService.set('saldosFavorProveedores', saldos);
+    }
+
+    // Revivir requisiciones vinculadas
+    let reqs = StorageService.get('requisicionesCompra', []);
+    reqs.forEach(r => {
+        if (r.estatus === `En OC (${oc.folio})`) r.estatus = 'Pendiente';
+    });
+    StorageService.set('requisicionesCompra', reqs);
+
+    // Marcar como Cancelada
+    const idx = lista.findIndex(x => x.id === id);
+    lista[idx].estado = 'Cancelada';
+    StorageService.set('ordenesCompra', lista);
+
+    alert(`✅ OC ${oc.folio} cancelada.`);
+    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+    if (typeof renderRequisiciones === 'function') renderRequisiciones();
+}
+
 // Exponer la función para que el menú HTML la encuentre
 window.renderRequisiciones = renderRequisiciones;
 window.renderProveedores = renderProveedores;
