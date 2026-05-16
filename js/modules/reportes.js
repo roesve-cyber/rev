@@ -202,15 +202,15 @@ function renderReporteFlujo() {
     let movimientos = [];
     const hashesRegistrados = new Set();
 
-    // 🛡️ Declaramos e inyectamos formalmente la función en el ámbito local
     function agregarMov(mov) {
         if (!mov) return;
         const montoSeguro = parseFloat(mov.monto) || 0;
         if (montoSeguro <= 0) return;
         
-        // Estandarizar la fecha para el Hash antiduplicados
         let fechaStr = typeof mov.fecha === 'string' ? mov.fecha.split('T')[0] : String(mov.fecha);
-        const hash = `${fechaStr}_${montoSeguro.toFixed(2)}_${mov.tipo}`;
+        
+        // 🐛 FIX 1: Hash blindado para no borrar abonos del mismo monto en el mismo día
+        const hash = mov.id ? String(mov.id) : `${fechaStr}_${montoSeguro.toFixed(2)}_${mov.tipo}_${mov.concepto}`;
         
         if (!hashesRegistrados.has(hash)) {
             hashesRegistrados.add(hash);
@@ -218,104 +218,89 @@ function renderReporteFlujo() {
         }
     }
 
-    // Cargamos los datos frescos de la base de datos local
     const ventasNuevas = StorageService.get("ventasRegistradas", []);
     const cuentasCxC = StorageService.get("cuentasPorCobrar", []);
     const comprasNuevas = StorageService.get("compras", []); 
     const cajaFisica = StorageService.get("movimientosCaja", []); 
     const manuales = StorageService.get("movimientosManuales", []);
 
-    // A) Cargar la caja física real (AQUÍ ESTÁN TUS NUEVOS ABONOS DESDE EL INTERFAZ)
+    // A) Cargar la caja física real
     cajaFisica.forEach(m => {
         agregarMov({ 
+            id: m.id, // Pasamos el ID real
             fecha: m.fecha, 
             concepto: m.concepto || m.referencia || 'Movimiento', 
             tipo: (m.tipo || 'ingreso').toLowerCase(), 
             cuenta: m.cuenta || m.medioPago || 'efectivo', 
+            etiquetaCuenta: m.etiquetaCuenta, // 🐛 FIX 2: Pasar el nombre real del banco o caja
             monto: m.monto 
         });
     });
 
-    // B) Cargar Ventas Nuevas (Leemos de la tabla segura ventasRegistradas)
+    // B) Cargar Ventas Nuevas
     ventasNuevas.forEach(v => {
         const met = v.metodoPago === 'credito' ? (v.modoEnganche || 'efectivo') : (v.metodoPago || 'efectivo');
         const monto = v.metodoPago === 'credito' ? parseFloat(v.enganche || 0) : parseFloat(v.total || 0);
-        agregarMov({ fecha: v.fechaVenta || v.fechaIso || v.fecha, concepto: `Venta: ${v.folio}`, tipo: 'ingreso', cuenta: met, monto: monto });
+        agregarMov({ id: v.folio, fecha: v.fechaVenta || v.fechaIso || v.fecha, concepto: `Venta: ${v.folio}`, tipo: 'ingreso', cuenta: met, monto: monto });
     });
 
-    // C) Cargar e Intercepta los abonos del historial del cliente (Preservando migraciones como MIG-021)
+    // C) Cargar Abonos del historial del cliente
     cuentasCxC.forEach(c => {
         if (c && c.abonos && Array.isArray(c.abonos)) {
-            c.abonos.forEach(ab => {
+            c.abonos.forEach((ab, idx) => {
                 let fechaOrigen = ab.fecha || ab.fechaAbono || ab.fechaEmision;
-                
-                // Mapear cadenas "DD-MM-YYYY" (Formato nativo de la migración) a formato seguro
                 if (typeof fechaOrigen === 'string' && fechaOrigen.includes('-') && fechaOrigen.split('-')[0].length === 2) {
                     const p = fechaOrigen.split('-');
                     fechaOrigen = `${p[2]}-${p[1]}-${p[0]}`;
                 }
-
                 const montoReal = ab.montoAbonado !== undefined ? ab.montoAbonado : (ab.monto || 0);
 
                 agregarMov({ 
+                    id: `ab_cxc_${c.folio}_${idx}`, // ID Único
                     fecha: fechaOrigen, 
                     concepto: `Abo: ${c.nombre || ab.clienteNombre || 'Cliente'} (${ab.folio || c.folio || 'MIG'})`, 
                     tipo: 'ingreso', 
                     cuenta: ab.cuentaId || ab.medioPago || 'efectivo', 
+                    etiquetaCuenta: ab.etiquetaCuenta || (ab.cuentaId === 'efectivo' ? '💵 Efectivo Principal' : ''), // 🐛 FIX 2: Etiquetas
                     monto: montoReal 
                 });
             });
         }
     });
 
-    // D) Cargar Compras desde su repositorio correspondiente
+    // D) Cargar Compras
     comprasNuevas.forEach(com => { 
-        agregarMov({ fecha: com.fechaISO || com.fecha || window.localISO(new Date()), concepto: `Prov: ${com.proveedor}`, tipo: 'egreso', cuenta: com.metodoPago || 'efectivo', monto: com.pagado }); 
+        agregarMov({ id: com.id, fecha: com.fechaISO || com.fecha || window.localISO(new Date()), concepto: `Prov: ${com.proveedor}`, tipo: 'egreso', cuenta: com.metodoPago || 'efectivo', monto: com.pagado }); 
     });
 
     // E) Cargar Movimientos Manuales
-    manuales.forEach(m => {
-        agregarMov(m);
-    });
+    manuales.forEach(m => agregarMov(m));
 
-    // 3. FILTRADO
-    // Función ultra-segura para extraer el tiempo local al mediodía sin importar guiones o diagonales
+    // 3. FILTRADO SEGURO
     const obtenerFechaLocalMediodia = (fechaInput) => {
         if (!fechaInput) return new Date(0);
-        
         if (typeof fechaInput === 'number') {
             const d = new Date(fechaInput);
             return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
         }
-        
         const str = String(fechaInput).trim();
-        
-        // Formato con diagonales (DD/MM/YYYY)
         if (str.includes('/')) {
             const p = str.split('/');
             if (p.length === 3) return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
         }
-        
-        // Formato estándar ISO (YYYY-MM-DD...)
         if (str.includes('-')) {
             const p = str.split('T')[0].split('-');
             if (p.length === 3) return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]), 12, 0, 0);
         }
-        
         const dGen = new Date(fechaInput);
-        if (!isNaN(dGen.getTime())) {
-            return new Date(dGen.getFullYear(), dGen.getMonth(), dGen.getDate(), 12, 0, 0);
-        }
+        if (!isNaN(dGen.getTime())) return new Date(dGen.getFullYear(), dGen.getMonth(), dGen.getDate(), 12, 0, 0);
         return new Date(0);
     };
 
     let movsFiltrados = movimientos.filter(m => {
         const coincideCuenta = (cuentaFiltro === 'todas' || String(m.cuenta) === String(cuentaFiltro));
-        
-        // Forzamos el objeto al mediodía local de la zona horaria del usuario
         const fMov = obtenerFechaLocalMediodia(m.fecha);
-        m._fechaObjetoSeguro = fMov; // Almacenamos el objeto Date real para la agrupación
-
+        m._fechaObjetoSeguro = fMov;
         let coincideRango = true;
         if (fDesde) coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
         if (fHasta) coincideRango = coincideRango && fMov <= new Date(fHasta + "T23:59:59");
@@ -329,11 +314,10 @@ function renderReporteFlujo() {
         let clave = "";
         let sortKey = d.getTime();
         
-        // Generamos el formato DD/MM/YYYY de forma manual para blindar la compatibilidad de texto
         const dd = String(d.getDate()).padStart(2, '0');
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const yyyy = d.getFullYear();
-        const fmtFecha = `${dd}/${mm}/${yyyy}`; // Garantiza cadenas exactas como "09/05/2026"
+        const fmtFecha = `${dd}/${mm}/${yyyy}`;
 
         if (periodoAgrupar === 'diario') clave = fmtFecha;
         else if (periodoAgrupar === 'semanal') {
@@ -344,7 +328,7 @@ function renderReporteFlujo() {
             clave = `${lunes.getDate()}/${lunes.getMonth()+1} al ${domingo.getDate()}/${domingo.getMonth()+1}`;
             sortKey = lunes.getTime();
         } else {
-            clave = fmtFecha.substring(3); // Corta perfectamente a "MM/YYYY" para la agrupación mensual
+            clave = fmtFecha.substring(3); 
             sortKey = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
         }
 
@@ -353,7 +337,7 @@ function renderReporteFlujo() {
         grupos[clave].items.push(m);
     });
 
-    // 5. RENDERIZADO CON CHECKBOXES TEMPORALES
+    // 5. RENDERIZADO VISUAL
     const dinero = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v || 0);
     const clavesOrd = Object.keys(grupos).sort((a,b) => ordenBloques === 'desc' ? grupos[b].sortKey - grupos[a].sortKey : grupos[a].sortKey - grupos[b].sortKey);
 
@@ -375,15 +359,18 @@ function renderReporteFlujo() {
                     </div>
                 </div>
                 <div style="flex:1; overflow-y:auto; padding:10px; background:#fcfcfc; border-radius:0 0 12px 12px;">
-                    ${g.items.map(i => `
+                    ${g.items.map(i => {
+                        // 🐛 FIX 3: Aquí mostramos la etiqueta correcta
+                        const nombreCaja = i.etiquetaCuenta || (i.cuenta === 'efectivo' ? '💵 Efectivo Principal' : i.cuenta);
+                        return `
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px;">
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <input type="checkbox" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af;">
-                                <div style="max-width:160px; line-height:1.2;"><b>${i.concepto}</b><br><small style="color:#94a3b8;">${i.cuenta}</small></div>
+                                <div style="max-width:160px; line-height:1.2;"><b>${i.concepto}</b><br><small style="color:#1e40af; font-weight:bold;">${nombreCaja}</small></div>
                             </div>
                             <span style="font-weight:bold; color:${i.tipo==='ingreso'?'#16a34a':'#dc2626'};">${i.tipo==='ingreso'?'+':'-'}${dinero(i.monto)}</span>
-                        </div>
-                    `).join('')}
+                        </div>`
+                    }).join('')}
                 </div>
             </div>`;
     }).join('');
@@ -430,7 +417,6 @@ function renderReporteFlujo() {
         </div>
     `;
 }
-
 // --- FUNCIONES DE SOPORTE ---
 window.actualizarFiltrosFlujo = function() {
     window._filtroFlujoPeriodo = document.getElementById('fPer').value;
