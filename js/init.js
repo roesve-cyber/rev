@@ -1,4 +1,4 @@
-// ===== INICIALIZACIÓN (VERSIÓN OFFLINE-FIRST ULTRA RÁPIDA Y AUDITADA) =====
+// ===== INICIALIZACIÓN (VERSIÓN OFFLINE-FIRST ULTRA RÁPIDA Y AUDITADA V2) =====
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.pathname.includes("catalogo.html")) {
@@ -47,6 +47,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.requisicionesCompra = StorageService.get("requisicionesCompra", []) || [];
         window.salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []) || [];
         
+        // ✨ CORRECCIÓN CRÍTICA: Despertar Cotizaciones, Gastos y Apartados omitidos
+        window.cotizaciones = StorageService.get("cotizaciones", []) || [];
+        window.apartados = StorageService.get("apartados", []) || [];
+        window.gastosOperativos = StorageService.get("gastosOperativos", []) || [];
+        window.ventasRegistradas = StorageService.get("ventasRegistradas", []) || [];
+        
         // 3. Ejecutar utilidades y migraciones locales internas
         if (typeof migrarStorageCuentasPorCobrar === 'function') migrarStorageCuentasPorCobrar();
         if (typeof inicializarNotificaciones === 'function') inicializarNotificaciones();
@@ -63,22 +69,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             StorageService.startRealtimeSync();
         }
         
-        console.log("✅ Sistema cargado en local al instante.");
-        console.log("📊 Estado actual:");
-        console.log(`   • Categorías: ${window.categoriasData.length}`);
-        console.log(`   • Bancos: ${window.tarjetasConfig.length}`);
-        console.log(`   • Productos: ${window.productos.length}`);
-        console.log(`   • Clientes: ${window.clientes.length}`);
+        console.log("✅ Sistema cargado en local al instante con Cotizaciones fijadas.");
 
         // ☁️ 5. SINCRONIZACIÓN CON FIREBASE EN SEGUNDO PLANO (Asíncrono y silencioso)
         if (window._firebaseActivo && window._db) {
             console.log("☁️ Sincronizando con la nube en segundo plano...");
             
-            // Ejecutamos la descarga sin usar 'await' para no congelar el hilo principal del DOM
             StorageService.syncAll().then(() => {
                 console.log("🔄 Nube sincronizada con éxito sin interrumpir al usuario.");
                 
-                // Una vez descargada la información fresca de la nube, actualizamos la memoria RAM activa
+                // Volvemos a sincronizar la RAM con los datos frescos descargados de la nube
                 window.productos = StorageService.get("productos", []) || [];
                 window.clientes = StorageService.get("clientes", []) || [];
                 window.cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []) || [];
@@ -93,8 +93,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 window.requisicionesCompra = StorageService.get("requisicionesCompra", []) || [];
                 window.salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []) || [];
                 
-                // DETECTOR INTELIGENTE DE RENDERIZADO VISUAL EN TIEMPO REAL
-                // Si el usuario está posicionado en una vista operativa, se actualiza el contenido sutilmente
+                // ✨ RAM Sincronizada para Cotizaciones y demás módulos
+                window.cotizaciones = StorageService.get("cotizaciones", []) || [];
+                window.apartados = StorageService.get("apartados", []) || [];
+                window.gastosOperativos = StorageService.get("gastosOperativos", []) || [];
+                window.ventasRegistradas = StorageService.get("ventasRegistradas", []) || [];
+                
+                // DETECTOR INTELIGENTE DE RENDERIZADO VISUAL EN TIEM realtime
                 const vistaActiva = document.querySelector('.vista:not(.oculto)');
                 if (vistaActiva) {
                     const idVista = vistaActiva.id;
@@ -103,12 +108,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                     else if (idVista === 'inventario' && typeof renderInventario === 'function') renderInventario();
                     else if (idVista === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') window.renderCuentasXCobrar();
                     else if (idVista === 'clientes' && typeof renderClientes === 'function') renderClientes();
+                    else if (idVista === 'apartados' && typeof renderApartados === 'function') renderApartados();
+                    // ✨ Redibujado en caliente por si el usuario está parado en el cotizador al sincronizar
+                    else if ((idVista === 'cotizaciones' || idVista === 'cotizador') && typeof renderCotizaciones === 'function') renderCotizaciones();
                 }
                 
                 if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
 
             }).catch(e => {
-                console.warn("⚠️ Trabajando Offline. La nube no respondió, pero el sistema sigue funcionando.", e);
+                console.warn("⚠️ Sincronización en segundo plano con detalles.", e);
             });
         }
         
