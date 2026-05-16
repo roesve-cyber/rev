@@ -1197,19 +1197,18 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         }
     }
 
-    // PASO 4: CREAR CUENTAS POR COBRAR
-    if (metodoPago === "credito" || metodoPago === "apartado") {
-        const saldoPendiente = metodoPago === "credito" ? planElegido.total : saldoAFinanciar;    
+    // PASO 4: CREAR CUENTAS POR COBRAR O APARTADOS
+    if (metodoPago === "credito") {
+        const saldoPendiente = planElegido.total;    
 
         let saldosPorMes = [];
-        if (planElegido && (metodoPago === "credito")) {
-            const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
-            const saldoBase = (totalContado - enganche);
-            const planesPosibles = CalculatorService.calcularCreditoConPeriodicidad
-                ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidad)
-                : CalculatorService.calcularCredito(saldoBase);
-            saldosPorMes = planesPosibles.map(p => ({ meses: p.meses, total: p.total }));
-        }
+        const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
+        const saldoBase = (totalContado - enganche);
+        const planesPosibles = CalculatorService.calcularCreditoConPeriodicidad
+            ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidad)
+            : CalculatorService.calcularCredito(saldoBase);
+        saldosPorMes = planesPosibles.map(p => ({ meses: p.meses, total: p.total }));
+        
         const cuentaNueva = {
             folio: folioVenta,
             nombre: clienteSeleccionado.nombre,
@@ -1228,7 +1227,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             abonos: [],
             articulos: JSON.parse(JSON.stringify(carrito)),
             totalMercancia: totalContado,
-            periodicidad: window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal",
+            periodicidad: periodicidad,
             vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
             vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null,
             saldosPorMes
@@ -1237,38 +1236,58 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         cuentasPorCobrar.push(cuentaNueva);
 
         // PASO 5: CREAR PAGARÉS
-        if (metodoPago === "credito" && planElegido) {
-            const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
-            let diasIntervalo = 7;
-            if (periodicidad === "quincenal") diasIntervalo = 14;
-            if (periodicidad === "mensual") diasIntervalo = 30;
-            
-            let fechaPago = new Date(fechaVentaIso);
-            const totalPagos = planElegido.pagos || Math.round(planElegido.semanas / (periodicidad === "quincenal" ? 2 : periodicidad === "mensual" ? 4 : 1));
-            
-            for (let i = 1; i <= totalPagos; i++) {
-                fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
-                pagaresSistema.push({
-                    id: Date.now() + i,
-                    folio: folioVenta,
-                    numeroPagere: `${folioVenta}-${i}/${totalPagos}`,
-                    clienteNombre: clienteSeleccionado.nombre,
-                    clienteId: clienteSeleccionado.id,
-                    clienteDireccion: clienteSeleccionado.direccion || "",
-                    fechaEmision: fechaVentaIso,
-                    fechaVencimiento: fechaPago.getTime(),
-                    monto: planElegido.abono,
-                    estado: "Pendiente",
-                    diasAtrasoActual: 0,
-                    tasaMorosidad: 2,
-                    acreedor: "Roberto Escobedo Vega",
-                    lugar: "Santiago Cuaula, Tlaxcala"
-                });
-            }
+        let diasIntervalo = 7;
+        if (periodicidad === "quincenal") diasIntervalo = 14;
+        if (periodicidad === "mensual") diasIntervalo = 30;
+        
+        let fechaPago = new Date(fechaVentaIso);
+        const totalPagos = planElegido.pagos || Math.round(planElegido.semanas / (periodicidad === "quincenal" ? 2 : periodicidad === "mensual" ? 4 : 1));
+        
+        for (let i = 1; i <= totalPagos; i++) {
+            fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+            pagaresSistema.push({
+                id: Date.now() + i,
+                folio: folioVenta,
+                numeroPagere: `${folioVenta}-${i}/${totalPagos}`,
+                clienteNombre: clienteSeleccionado.nombre,
+                clienteId: clienteSeleccionado.id,
+                clienteDireccion: clienteSeleccionado.direccion || "",
+                fechaEmision: fechaVentaIso,
+                fechaVencimiento: fechaPago.getTime(),
+                monto: planElegido.abono,
+                estado: "Pendiente",
+                diasAtrasoActual: 0,
+                tasaMorosidad: 2,
+                acreedor: "Roberto Escobedo Vega",
+                lugar: "Santiago Cuaula, Tlaxcala"
+            });
         }
 
-        if (!StorageService.set("cuentasPorCobrar", cuentasPorCobrar)) console.error("❌ Error guardando cuentas por cobrar");
+        if (!StorageService.set("cuentasPorCobrar", cuentasPorCobrar)) console.error("❌ Error guardando CxC");
         if (!StorageService.set("pagaresSistema", pagaresSistema)) console.error("❌ Error guardando pagarés");
+
+    } else if (metodoPago === "apartado") {
+        // AQUÍ VA LA LÓGICA EXCLUSIVA PARA APARTADOS
+        let apartadosBD = StorageService.get("apartados", []);
+        apartadosBD.push({
+            id: Date.now(),
+            folio: folioVenta,
+            clienteId: clienteSeleccionado.id,
+            clienteNombre: clienteSeleccionado.nombre,
+            fechaApartado: fechaVentaIso,
+            importeApartado: totalContado,
+            enganche: enganche, // Guardamos el histórico
+            saldoPendiente: saldoAFinanciar,
+            articulos: JSON.parse(JSON.stringify(carrito)),
+            abonos: [],
+            estado: 'Pendiente',
+            vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
+            vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
+        });
+        
+        if (!StorageService.set("apartados", apartadosBD)) {
+            console.error("❌ Error guardando en Apartados");
+        }
     }
 
     // GUARDAR TODO
@@ -1480,6 +1499,18 @@ function generarTicketMediaHoja(datosVenta) {
         });
     }
 
+    // LEYENDAS LEGALES DINÁMICAS (Como las grandes cadenas)
+    let textoLegal = '';
+    const tituloTicket = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CRÉDITO' : 'COMPROBANTE DE VENTA');
+
+    if (datosVenta.metodo === "credito") {
+        textoLegal = generarLeyendaPagare(datosVenta, totalAPagar, false);
+    } else if (datosVenta.metodo === "apartado") {
+        textoLegal = `<b>TÉRMINOS DE APARTADO:</b><br>El cliente ${datosVenta.cliente.nombre} entrega la cantidad de ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancía descrita. El cliente se compromete a liquidar el saldo pendiente de ${dinero(datosVenta.saldoPendiente)} en los plazos acordados. La mercancía permanecerá bajo resguardo de Mueblería Mi Pueblito y será entregada físicamente únicamente tras la liquidación total del saldo. En caso de abandono o cancelación, la empresa retendrá un porcentaje del anticipo por concepto de almacenaje y gastos administrativos.`;
+    } else {
+        textoLegal = `<b>TÉRMINOS DE VENTA:</b><br>El cliente ${datosVenta.cliente.nombre} recibe la mercancía a su entera satisfacción, liquidada en su totalidad. Toda aclaración o garantía deberá tramitarse en tienda presentando este comprobante original.`;
+    }
+
     // 4. Estructura HTML del Ticket de 80mm
     const ticketHTML = `
     <!DOCTYPE html>
@@ -1510,6 +1541,7 @@ function generarTicketMediaHoja(datosVenta) {
             <img src="img/Logo.svg" style="width:50px; height:50px; object-fit:contain;" onerror="this.style.display='none'">
             <div class="negrita" style="font-size:16px;">MUEBLERIA MI PUEBLITO</div>
             <div style="font-size:10px;">Lo mejor a los mejores precios<br>Santiago Cuaula, Tlaxcala</div>
+            <div class="negrita" style="font-size:13px; margin-top:6px; padding:3px; border:1px solid #000;">${tituloTicket}</div>
         </div>
 
         <div class="separador"></div>
@@ -1522,7 +1554,7 @@ function generarTicketMediaHoja(datosVenta) {
         </div>
 
         <div class="separador"></div>
-        <div class="centro negrita" style="font-size:10px;">DETALLE DE COMPRA</div>
+        <div class="centro negrita" style="font-size:10px;">DETALLE DE MERCANCÍA</div>
         <div style="margin-top:5px;">${listaProductos}</div>
 
         <div class="separador"></div>
@@ -1532,14 +1564,14 @@ function generarTicketMediaHoja(datosVenta) {
             <span>${dinero(datosVenta.total - (datosVenta.intereses || 0))}</span>
         </div>
         <div style="display:flex; justify-content:space-between;">
-            <span>Enganche Recibido:</span>
+            <span>Anticipo / Enganche:</span>
             <span>${dinero(datosVenta.enganche || 0)}</span>
         </div>
         
         <div class="total-box">
-            <div style="font-size:10px;">${datosVenta.metodo === 'credito' ? 'GRAN TOTAL A PAGAR' : 'TOTAL A PAGAR'}</div>
-            <div style="font-size:24px;" class="negrita">${dinero(datosVenta.metodo === 'credito' ? totalAPagar + (datosVenta.enganche || 0) : datosVenta.total)}</div>
-            ${datosVenta.metodo === 'credito' ? `<div style="font-size:9px;">(${dinero(totalAPagar)} en pagarés + ${dinero(datosVenta.enganche || 0)} enganche)</div>` : ''}
+            <div style="font-size:10px;">${datosVenta.metodo === 'credito' ? 'GRAN TOTAL A PAGAR' : (datosVenta.metodo === 'apartado' ? 'SALDO PENDIENTE' : 'TOTAL PAGADO')}</div>
+            <div style="font-size:24px;" class="negrita">${dinero(datosVenta.metodo === 'credito' ? totalAPagar + (datosVenta.enganche || 0) : (datosVenta.metodo === 'apartado' ? datosVenta.saldoPendiente : datosVenta.total))}</div>
+            ${datosVenta.metodo === 'credito' ? `<div style="font-size:9px;">(${dinero(totalAPagar)} en pagarés + enganche)</div>` : ''}
         </div>
 
         ${datosVenta.metodo === "credito" ? `
@@ -1571,7 +1603,7 @@ function generarTicketMediaHoja(datosVenta) {
         <div class="separador"></div>
 
         <div class="legal">
-            ${generarLeyendaPagare(datosVenta, totalAPagar, false)}
+            ${textoLegal}
         </div>
 
         <div style="margin-top:30px; text-align:center;">
@@ -1580,7 +1612,7 @@ function generarTicketMediaHoja(datosVenta) {
         </div>
 
         <div class="centro" style="margin-top:20px; font-size:9px;">
-            *** Gracias por su compra ***<br>
+            *** Gracias por su preferencia ***<br>
             Mueblería Mi Pueblito
         </div>
     </body>
