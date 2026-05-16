@@ -225,7 +225,20 @@ function renderReporteFlujo() {
     // 3. FILTRADO
     let movsFiltrados = movimientos.filter(m => {
         const coincideCuenta = (cuentaFiltro === 'todas' || String(m.cuenta) === String(cuentaFiltro));
-        const fMov = new Date(m.fecha);
+        
+        // 🛡️ REPARACIÓN: Parseo seguro para evitar que JS confunda el día con el mes (DD/MM vs MM/DD)
+        let fMov;
+        if (typeof m.fecha === 'number') {
+            fMov = new Date(m.fecha);
+        } else if (typeof m.fecha === 'string' && m.fecha.includes('/')) {
+            const partes = m.fecha.split('/');
+            fMov = new Date(parseInt(partes[2].substring(0,4)), parseInt(partes[1]) - 1, parseInt(partes[0]), 12, 0, 0);
+        } else {
+            fMov = new Date(m.fecha);
+        }
+        
+        m._fechaSegura = fMov; // Guardamos en memoria para no recalcular en la agrupación
+
         let coincideRango = true;
         if (fDesde) coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
         if (fHasta) coincideRango = coincideRango && fMov <= new Date(fHasta + "T23:59:59");
@@ -235,10 +248,10 @@ function renderReporteFlujo() {
     // 4. AGRUPACIÓN DINÁMICA
     const grupos = {};
     movsFiltrados.forEach(m => {
-        const d = new Date(m.fecha);
+        const d = m._fechaSegura; // Usamos la fecha corregida
         let clave = "";
         let sortKey = d.getTime();
-        const fmtFecha = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(m.fecha) : new Date(m.fecha).toLocaleDateString();
+        const fmtFecha = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString();
 
         if (periodoAgrupar === 'diario') clave = fmtFecha;
         else if (periodoAgrupar === 'semanal') {
