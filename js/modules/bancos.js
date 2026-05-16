@@ -1522,25 +1522,40 @@ window.confirmarGuardadoCaja = function(index) {
     StorageService.set("cuentasEfectivo", cajas);
     location.reload();
 };
+
 // =====================================================================
-// 📲 TRANSFERENCIAS ENTRE CUENTAS PROPIAS
+// 📲 TRANSFERENCIAS ENTRE CUENTAS PROPIAS (MOTOR UNIFICADO Y LIMPIO)
 // =====================================================================
 window.abrirModalTransferencia = function() {
+    // 1. Obtener cajas y cuentas de débito
     const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
     const tarjetas = StorageService.get("tarjetasConfig", []);
     const debito = tarjetas.filter(t => t.tipo === "debito");
 
-    // Construir opciones de selectores
-    let opciones = cajas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-    opciones += debito.map(t => `<option value="${t.banco}">🏦 ${t.banco} Débito</option>`).join('');
+    // 2. Construir opciones asegurando values únicos y válidos
+    let opcionesHTML = '';
+    cajas.forEach(c => {
+        const idValido = c.id || c.nombre.replace(/\s+/g, '_');
+        opcionesHTML += `<option value="${idValido}">${c.nombre}</option>`;
+    });
+    
+    debito.forEach(t => {
+        const idValido = t.banco || t.nombre;
+        const etiquetaVisible = t.banco || t.nombre;
+        opcionesHTML += `<option value="${idValido}">🏦 ${etiquetaVisible} Débito</option>`;
+    });
 
     const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+
+    // 3. Limpiar modales anteriores por si quedaron huérfanos en el HTML
+    document.getElementById('modalTransferenciaCuentas')?.remove();
+    document.getElementById('modalTransferenciaBancariaSegura')?.remove();
 
     const html = `
     <div id="modalTransferenciaCuentas" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
         <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:480px; box-shadow:0 20px 25px rgba(0,0,0,0.2);">
             <h3 style="margin-top:0; color:#4f46e5; display:flex; align-items:center; gap:8px;">📲 Transferir entre Cuentas</h3>
-            <p style="font-size:13px; color:#64748b; margin-bottom:20px;">Mueve dinero entre tus cajas de efectivo y tus cuentas bancarias. No afecta tus ganancias, solo el lugar donde está el dinero.</p>
+            <p style="font-size:13px; color:#64748b; margin-bottom:20px;">Mueve dinero entre tus cajas de efectivo y tus cuentas bancarias.</p>
             
             <div style="margin-bottom:15px;">
                 <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📅 Fecha de la transferencia:</label>
@@ -1550,21 +1565,21 @@ window.abrirModalTransferencia = function() {
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
                 <div>
                     <label style="display:block; font-weight:bold; font-size:12px; color:#dc2626; margin-bottom:5px;">📤 Origen (De dónde sale):</label>
-                    <select id="transfOrigen" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#fef2f2;">
-                        ${opciones}
+                    <select id="transfOrigen" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#fef2f2; font-weight:bold; color:#b91c1c;">
+                        ${opcionesHTML}
                     </select>
                 </div>
                 <div>
                     <label style="display:block; font-weight:bold; font-size:12px; color:#10b981; margin-bottom:5px;">📥 Destino (A dónde entra):</label>
-                    <select id="transfDestino" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#f0fdf4;">
-                        ${opciones}
+                    <select id="transfDestino" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#f0fdf4; font-weight:bold; color:#047857;">
+                        ${opcionesHTML}
                     </select>
                 </div>
             </div>
 
             <div style="margin-bottom:15px;">
                 <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">💰 Monto a transferir ($):</label>
-                <input type="number" id="transfMonto" placeholder="0.00" min="0.01" step="0.01" style="width:100%; padding:12px; border:2px solid #6366f1; border-radius:6px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#4f46e5;">
+                <input type="number" id="transfMonto" placeholder="0.00" min="0.01" step="0.01" style="width:100%; padding:12px; border:2px solid #6366f1; border-radius:6px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#4f46e5; text-align:center;">
             </div>
             
             <div style="margin-bottom:20px;">
@@ -1573,8 +1588,8 @@ window.abrirModalTransferencia = function() {
             </div>
 
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button onclick="ejecutarTransferenciaCuentas()" style="flex:2; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">✅ Confirmar</button>
-                <button onclick="document.getElementById('modalTransferenciaCuentas').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">Cancelar</button>
+                <button onclick="ejecutarTransferenciaCuentas()" style="flex:2; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">✅ Confirmar Transferencia</button>
+                <button onclick="document.getElementById('modalTransferenciaCuentas').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">✕ Cancelar</button>
             </div>
         </div>
     </div>`;
@@ -1582,25 +1597,29 @@ window.abrirModalTransferencia = function() {
 };
 
 window.ejecutarTransferenciaCuentas = function() {
-    const origen = document.getElementById("transfOrigen").value;
-    const destino = document.getElementById("transfDestino").value;
+    const selOrigen = document.getElementById("transfOrigen");
+    const selDestino = document.getElementById("transfDestino");
     const monto = parseFloat(document.getElementById("transfMonto").value);
     const fechaRaw = document.getElementById("transfFecha").value;
     const motivo = document.getElementById("transfMotivo").value.trim() || "Transferencia interna";
 
+    const origen = selOrigen.value;
+    const destino = selDestino.value;
+
+    if (!origen || !destino) return alert("❌ Selecciona las cuentas de origen y destino.");
     if (origen === destino) return alert("❌ La cuenta de origen y destino no pueden ser la misma.");
     if (isNaN(monto) || monto <= 0) return alert("❌ Ingresa un monto válido mayor a cero.");
     if (!fechaRaw) return alert("❌ Selecciona una fecha válida.");
 
+    const nombreOrigenFull = selOrigen.options[selOrigen.selectedIndex].text;
+    const nombreDestinoFull = selDestino.options[selDestino.selectedIndex].text;
+
+    if (!confirm(`¿Confirmas la transferencia de ${dinero(monto)} desde [${nombreOrigenFull}] hacia [${nombreDestinoFull}]?`)) return;
+
     const fechaBase = new Date(fechaRaw + 'T12:00:00');
     const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
 
-    const selOrigen = document.getElementById("transfOrigen");
-    const nombreOrigenFull = selOrigen.options[selOrigen.selectedIndex].text;
-    const nombreOrigen = nombreOrigenFull.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, ''); // Limpiar Emojis
-
-    const selDestino = document.getElementById("transfDestino");
-    const nombreDestinoFull = selDestino.options[selDestino.selectedIndex].text;
+    const nombreOrigen = nombreOrigenFull.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, ''); 
     const nombreDestino = nombreDestinoFull.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '');
 
     const idTransf = Date.now();
@@ -1640,117 +1659,7 @@ window.ejecutarTransferenciaCuentas = function() {
     if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
-// =====================================================================
-// 📲 MOTOR DE TRANSFERENCIAS BANCARIAS BLINDADO (CORRECCIÓN DE IDs)
-// =====================================================================
 
-window.abrirModalTransferencia = function() {
-    // 1. Extraemos las cuentas asegurando que el "value" sea el nombre exacto, no un ID vacío
-    let opcionesHTML = `<option value="efectivo_principal">💵 Efectivo Principal</option>`;
-    
-    const tarjetas = StorageService.get("tarjetasConfig", []);
-    tarjetas.forEach(t => {
-        // Usamos el nombre como valor único para evitar el error de "undefined === undefined"
-        const identificadorUnico = (t.banco || t.nombre || 'Cuenta_Generica').trim();
-        const etiquetaVisible = t.banco || t.nombre || 'Cuenta sin nombre';
-        opcionesHTML += `<option value="${identificadorUnico}">🏦 ${etiquetaVisible}</option>`;
-    });
-
-    // 2. Construimos la ventana
-    let modal = document.getElementById('modalTransferenciaBancariaSegura');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'modalTransferenciaBancariaSegura';
-        modal.style = 'display:flex; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);';
-        document.body.appendChild(modal);
-    }
-
-    modal.innerHTML = `
-    <div style="background:white; width:90%; max-width:420px; padding:30px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
-        <h3 style="margin-top:0; color:#1e40af; border-bottom:2px solid #e2e8f0; padding-bottom:10px;">📲 Transferir entre Cuentas</h3>
-        
-        <div style="margin-bottom:15px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #cbd5e1;">
-            <label style="font-weight:bold; font-size:12px; color:#475569;">📤 Origen (De dónde sale):</label>
-            <select id="transfBancariaOrigen" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #94a3b8; font-weight:bold; color:#1e40af;">
-                ${opcionesHTML}
-            </select>
-        </div>
-        
-        <div style="margin-bottom:15px; background:#f0fdf4; padding:15px; border-radius:8px; border:1px solid #bbf7d0;">
-            <label style="font-weight:bold; font-size:12px; color:#166534;">📥 Destino (A dónde entra):</label>
-            <select id="transfBancariaDestino" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #4ade80; font-weight:bold; color:#065f46;">
-                ${opcionesHTML}
-            </select>
-        </div>
-        
-        <div style="margin-bottom:25px;">
-            <label style="font-weight:bold; font-size:12px; color:#475569;">💰 Monto a transferir:</label>
-            <input type="number" id="transfBancariaMonto" placeholder="0.00" min="1" style="width:100%; padding:12px; margin-top:5px; border-radius:6px; border:2px solid #3b82f6; font-size:18px; font-weight:bold; text-align:center;">
-        </div>
-        
-        <div style="display:flex; gap:10px;">
-            <button onclick="ejecutarTransferenciaBancariaSegura()" style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">✅ Realizar Traspaso</button>
-            <button onclick="document.getElementById('modalTransferenciaBancariaSegura').style.display='none'" style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
-        </div>
-    </div>`;
-    modal.style.display = 'flex';
-};
-
-window.ejecutarTransferenciaBancariaSegura = function() {
-    const selOrigen = document.getElementById('transfBancariaOrigen');
-    const selDestino = document.getElementById('transfBancariaDestino');
-    
-    const idOrigen = selOrigen.value;
-    const idDestino = selDestino.value;
-    const monto = parseFloat(document.getElementById('transfBancariaMonto').value);
-
-    // Validaciones
-    if (!idOrigen || !idDestino) return alert("❌ Por favor selecciona ambas cuentas.");
-    if (idOrigen === idDestino) return alert("❌ La cuenta de origen y destino no pueden ser la misma.");
-    if (!monto || monto <= 0) return alert("❌ Ingresa un monto válido mayor a cero.");
-
-    const nombreOrigen = selOrigen.options[selOrigen.selectedIndex].text.replace('🏦 ', '').replace('💵 ', '');
-    const nombreDestino = selDestino.options[selDestino.selectedIndex].text.replace('🏦 ', '').replace('💵 ', '');
-
-    if (!confirm(`¿Confirmas el traspaso de ${dinero(monto)} desde [${nombreOrigen}] hacia [${nombreDestino}]?`)) return;
-
-    let movimientos = StorageService.get("movimientosCaja", []);
-    const fecha = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
-    const folioUnico = Date.now();
-
-    // 1. Registramos la SALIDA del dinero (Egreso)
-    movimientos.push({
-        id: folioUnico + 1,
-        fecha: fecha,
-        tipo: "egreso",
-        monto: monto,
-        concepto: `Traspaso interno enviado a ${nombreDestino}`,
-        referencia: `TRF-OUT-${folioUnico}`,
-        cuenta: idOrigen,
-        etiquetaCuenta: nombreOrigen
-    });
-
-    // 2. Registramos la ENTRADA del dinero (Ingreso)
-    movimientos.push({
-        id: folioUnico + 2,
-        fecha: fecha,
-        tipo: "ingreso",
-        monto: monto,
-        concepto: `Traspaso interno recibido desde ${nombreOrigen}`,
-        referencia: `TRF-IN-${folioUnico}`,
-        cuenta: idDestino,
-        etiquetaCuenta: nombreDestino
-    });
-
-    StorageService.set("movimientosCaja", movimientos);
-    
-    alert("✅ ¡Traspaso realizado con éxito! El dinero ya se reflejó en el flujo de caja.");
-    document.getElementById('modalTransferenciaBancariaSegura').style.display = 'none';
-    
-    // Actualizamos las gráficas y tablas que tengas abiertas
-    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
-    if (typeof renderConciliacion === 'function') renderConciliacion();
-};
 window.renderCuentasBancarias = renderCuentasBancarias;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
