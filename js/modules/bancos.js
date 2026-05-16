@@ -1524,7 +1524,7 @@ window.confirmarGuardadoCaja = function(index) {
 };
 
 // =====================================================================
-// 📲 TRANSFERENCIAS ENTRE CUENTAS PROPIAS (MOTOR UNIFICADO Y LIMPIO)
+// 📲 TRANSFERENCIAS ENTRE CUENTAS PROPIAS (MOTOR UNIFICADO BLINDADO)
 // =====================================================================
 window.abrirModalTransferencia = function() {
     // 1. Obtener cajas y cuentas de débito
@@ -1547,9 +1547,8 @@ window.abrirModalTransferencia = function() {
 
     const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
 
-    // 3. Limpiar modales anteriores por si quedaron huérfanos en el HTML
+    // 3. Limpiar modales anteriores
     document.getElementById('modalTransferenciaCuentas')?.remove();
-    document.getElementById('modalTransferenciaBancariaSegura')?.remove();
 
     const html = `
     <div id="modalTransferenciaCuentas" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
@@ -1559,19 +1558,19 @@ window.abrirModalTransferencia = function() {
             
             <div style="margin-bottom:15px;">
                 <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📅 Fecha de la transferencia:</label>
-                <input type="date" id="transfFecha" value="${fechaHoy}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                <input type="date" id="cajaTransfFecha" value="${fechaHoy}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
                 <div>
-                    <label style="display:block; font-weight:bold; font-size:12px; color:#dc2626; margin-bottom:5px;">📤 Origen (De dónde sale):</label>
-                    <select id="transfOrigen" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#fef2f2; font-weight:bold; color:#b91c1c;">
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#dc2626; margin-bottom:5px;">📤 Origen (Sale de):</label>
+                    <select id="cajaTransfOrigen" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#fef2f2; font-weight:bold; color:#b91c1c;">
                         ${opcionesHTML}
                     </select>
                 </div>
                 <div>
-                    <label style="display:block; font-weight:bold; font-size:12px; color:#10b981; margin-bottom:5px;">📥 Destino (A dónde entra):</label>
-                    <select id="transfDestino" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#f0fdf4; font-weight:bold; color:#047857;">
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#10b981; margin-bottom:5px;">📥 Destino (Entra a):</label>
+                    <select id="cajaTransfDestino" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#f0fdf4; font-weight:bold; color:#047857;">
                         ${opcionesHTML}
                     </select>
                 </div>
@@ -1579,12 +1578,12 @@ window.abrirModalTransferencia = function() {
 
             <div style="margin-bottom:15px;">
                 <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">💰 Monto a transferir ($):</label>
-                <input type="number" id="transfMonto" placeholder="0.00" min="0.01" step="0.01" style="width:100%; padding:12px; border:2px solid #6366f1; border-radius:6px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#4f46e5; text-align:center;">
+                <input type="number" id="cajaTransfMonto" placeholder="0.00" min="0.01" step="0.01" style="width:100%; padding:12px; border:2px solid #6366f1; border-radius:6px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#4f46e5; text-align:center;">
             </div>
             
             <div style="margin-bottom:20px;">
                 <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📝 Motivo / Referencia (Opcional):</label>
-                <input type="text" id="transfMotivo" placeholder="Ej: Depósito de ventas del día..." style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                <input type="text" id="cajaTransfMotivo" placeholder="Ej: Depósito de ventas del día..." style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
             </div>
 
             <div style="display:flex; gap:10px; margin-top:20px;">
@@ -1597,11 +1596,11 @@ window.abrirModalTransferencia = function() {
 };
 
 window.ejecutarTransferenciaCuentas = function() {
-    const selOrigen = document.getElementById("transfOrigen");
-    const selDestino = document.getElementById("transfDestino");
-    const monto = parseFloat(document.getElementById("transfMonto").value);
-    const fechaRaw = document.getElementById("transfFecha").value;
-    const motivo = document.getElementById("transfMotivo").value.trim() || "Transferencia interna";
+    const selOrigen = document.getElementById("cajaTransfOrigen");
+    const selDestino = document.getElementById("cajaTransfDestino");
+    const monto = parseFloat(document.getElementById("cajaTransfMonto").value);
+    const fechaRaw = document.getElementById("cajaTransfFecha").value;
+    const motivo = document.getElementById("cajaTransfMotivo").value.trim() || "Transferencia interna";
 
     const origen = selOrigen.value;
     const destino = selDestino.value;
@@ -1659,7 +1658,6 @@ window.ejecutarTransferenciaCuentas = function() {
     if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
-
 window.renderCuentasBancarias = renderCuentasBancarias;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
