@@ -198,46 +198,123 @@ function renderReporteFlujo() {
         ...tarjetas.filter(t => t.tipo === 'debito').map(t => ({ id: t.banco, nombre: `🏦 ${t.banco}` }))
     ];
 
-    // 2. CONSOLIDACIÓN DE MOVIMIENTOS
-    const tickets = StorageService.get("registroTickets", []);
+    // 2. CONSOLIDACIÓN DE MOVIMIENTOS Y BÚSQUEDA EN CAJA REAL
+    let movimientos = [];
+    const hashesRegistrados = new Set();
+
+    // 🛡️ Declaramos e inyectamos formalmente la función en el ámbito local
+    function agregarMov(mov) {
+        if (!mov) return;
+        const montoSeguro = parseFloat(mov.monto) || 0;
+        if (montoSeguro <= 0) return;
+        
+        // Estandarizar la fecha para el Hash antiduplicados
+        let fechaStr = typeof mov.fecha === 'string' ? mov.fecha.split('T')[0] : String(mov.fecha);
+        const hash = `${fechaStr}_${montoSeguro.toFixed(2)}_${mov.tipo}`;
+        
+        if (!hashesRegistrados.has(hash)) {
+            hashesRegistrados.add(hash);
+            movimientos.push(mov);
+        }
+    }
+
+    // Cargamos los datos frescos de la base de datos local
+    const ventasNuevas = StorageService.get("ventasRegistradas", []);
     const cuentasCxC = StorageService.get("cuentasPorCobrar", []);
-    const compras = StorageService.get("ordenesCompra", []);
+    const comprasNuevas = StorageService.get("compras", []); 
+    const cajaFisica = StorageService.get("movimientosCaja", []); 
     const manuales = StorageService.get("movimientosManuales", []);
 
-    let movimientos = [];
-
-    tickets.forEach(t => {
-        const met = t.venta?.cuentaReceptora || t.venta?.modoEnganche || 'efectivo';
-        const monto = (t.venta?.metodoPago === 'contado' || t.venta?.metodoPago === 'transferencia') ? parseFloat(t.venta?.total) : parseFloat(t.venta?.enganche);
-        if(monto > 0) movimientos.push({ fecha: t.fechaEmision, concepto: `Venta: ${t.folio}`, tipo: 'ingreso', cuenta: met, monto: monto });
-    });
-    
-    cuentasCxC.forEach(c => (c.abonos || []).forEach(ab => {
-        movimientos.push({ fecha: ab.fecha, concepto: `Abo: ${c.nombre}`, tipo: 'ingreso', cuenta: ab.cuentaId || ab.medioPago || 'efectivo', monto: parseFloat(ab.monto) });
-    }));
-
-    compras.forEach(com => { 
-        if (com.pagado > 0) movimientos.push({ fecha: com.fecha || (window.localISO ? window.localISO(new Date()) : new Date().toISOString()), concepto: `Prov: ${com.proveedor}`, tipo: 'egreso', cuenta: com.metodoPago || 'efectivo', monto: parseFloat(com.pagado) }); 
+    // A) Cargar la caja física real (AQUÍ ESTÁN TUS NUEVOS ABONOS DESDE EL INTERFAZ)
+    cajaFisica.forEach(m => {
+        agregarMov({ 
+            fecha: m.fecha, 
+            concepto: m.concepto || m.referencia || 'Movimiento', 
+            tipo: (m.tipo || 'ingreso').toLowerCase(), 
+            cuenta: m.cuenta || m.medioPago || 'efectivo', 
+            monto: m.monto 
+        });
     });
 
-    manuales.forEach(m => movimientos.push(m));
+    // B) Cargar Ventas Nuevas (Leemos de la tabla segura ventasRegistradas)
+    ventasNuevas.forEach(v => {
+        const met = v.metodoPago === 'credito' ? (v.modoEnganche || 'efectivo') : (v.metodoPago || 'efectivo');
+        const monto = v.metodoPago === 'credito' ? parseFloat(v.enganche || 0) : parseFloat(v.total || 0);
+        agregarMov({ fecha: v.fechaVenta || v.fechaIso || v.fecha, concepto: `Venta: ${v.folio}`, tipo: 'ingreso', cuenta: met, monto: monto });
+    });
+
+    // C) Cargar e Intercepta los abonos del historial del cliente (Preservando migraciones como MIG-021)
+    cuentasCxC.forEach(c => {
+        if (c && c.abonos && Array.isArray(c.abonos)) {
+            c.abonos.forEach(ab => {
+                let fechaOrigen = ab.fecha || ab.fechaAbono || ab.fechaEmision;
+                
+                // Mapear cadenas "DD-MM-YYYY" (Formato nativo de la migración) a formato seguro
+                if (typeof fechaOrigen === 'string' && fechaOrigen.includes('-') && fechaOrigen.split('-')[0].length === 2) {
+                    const p = fechaOrigen.split('-');
+                    fechaOrigen = `${p[2]}-${p[1]}-${p[0]}`;
+                }
+
+                const montoReal = ab.montoAbonado !== undefined ? ab.montoAbonado : (ab.monto || 0);
+
+                agregarMov({ 
+                    fecha: fechaOrigen, 
+                    concepto: `Abo: ${c.nombre || ab.clienteNombre || 'Cliente'} (${ab.folio || c.folio || 'MIG'})`, 
+                    tipo: 'ingreso', 
+                    cuenta: ab.cuentaId || ab.medioPago || 'efectivo', 
+                    monto: montoReal 
+                });
+            });
+        }
+    });
+
+    // D) Cargar Compras desde su repositorio correspondiente
+    comprasNuevas.forEach(com => { 
+        agregarMov({ fecha: com.fechaISO || com.fecha || window.localISO(new Date()), concepto: `Prov: ${com.proveedor}`, tipo: 'egreso', cuenta: com.metodoPago || 'efectivo', monto: com.pagado }); 
+    });
+
+    // E) Cargar Movimientos Manuales
+    manuales.forEach(m => {
+        agregarMov(m);
+    });
 
     // 3. FILTRADO
+    // Función ultra-segura para extraer el tiempo local al mediodía sin importar guiones o diagonales
+    const obtenerFechaLocalMediodia = (fechaInput) => {
+        if (!fechaInput) return new Date(0);
+        
+        if (typeof fechaInput === 'number') {
+            const d = new Date(fechaInput);
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
+        }
+        
+        const str = String(fechaInput).trim();
+        
+        // Formato con diagonales (DD/MM/YYYY)
+        if (str.includes('/')) {
+            const p = str.split('/');
+            if (p.length === 3) return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
+        }
+        
+        // Formato estándar ISO (YYYY-MM-DD...)
+        if (str.includes('-')) {
+            const p = str.split('T')[0].split('-');
+            if (p.length === 3) return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]), 12, 0, 0);
+        }
+        
+        const dGen = new Date(fechaInput);
+        if (!isNaN(dGen.getTime())) {
+            return new Date(dGen.getFullYear(), dGen.getMonth(), dGen.getDate(), 12, 0, 0);
+        }
+        return new Date(0);
+    };
+
     let movsFiltrados = movimientos.filter(m => {
         const coincideCuenta = (cuentaFiltro === 'todas' || String(m.cuenta) === String(cuentaFiltro));
         
-        // 🛡️ REPARACIÓN: Parseo seguro para evitar que JS confunda el día con el mes (DD/MM vs MM/DD)
-        let fMov;
-        if (typeof m.fecha === 'number') {
-            fMov = new Date(m.fecha);
-        } else if (typeof m.fecha === 'string' && m.fecha.includes('/')) {
-            const partes = m.fecha.split('/');
-            fMov = new Date(parseInt(partes[2].substring(0,4)), parseInt(partes[1]) - 1, parseInt(partes[0]), 12, 0, 0);
-        } else {
-            fMov = new Date(m.fecha);
-        }
-        
-        m._fechaSegura = fMov; // Guardamos en memoria para no recalcular en la agrupación
+        // Forzamos el objeto al mediodía local de la zona horaria del usuario
+        const fMov = obtenerFechaLocalMediodia(m.fecha);
+        m._fechaObjetoSeguro = fMov; // Almacenamos el objeto Date real para la agrupación
 
         let coincideRango = true;
         if (fDesde) coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
@@ -248,10 +325,15 @@ function renderReporteFlujo() {
     // 4. AGRUPACIÓN DINÁMICA
     const grupos = {};
     movsFiltrados.forEach(m => {
-        const d = m._fechaSegura; // Usamos la fecha corregida
+        const d = m._fechaObjetoSeguro;
         let clave = "";
         let sortKey = d.getTime();
-        const fmtFecha = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString();
+        
+        // Generamos el formato DD/MM/YYYY de forma manual para blindar la compatibilidad de texto
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const fmtFecha = `${dd}/${mm}/${yyyy}`; // Garantiza cadenas exactas como "09/05/2026"
 
         if (periodoAgrupar === 'diario') clave = fmtFecha;
         else if (periodoAgrupar === 'semanal') {
@@ -262,7 +344,7 @@ function renderReporteFlujo() {
             clave = `${lunes.getDate()}/${lunes.getMonth()+1} al ${domingo.getDate()}/${domingo.getMonth()+1}`;
             sortKey = lunes.getTime();
         } else {
-            clave = fmtFecha.substring(3);
+            clave = fmtFecha.substring(3); // Corta perfectamente a "MM/YYYY" para la agrupación mensual
             sortKey = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
         }
 

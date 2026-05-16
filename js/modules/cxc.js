@@ -669,6 +669,13 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         }
     }
 
+    // 🛡️ REPARACIÓN: Confirmación obligatoria para abonos normales que no entraron en promociones
+    if (!liquidacionPorPolitica) {
+        const confirmacionEstandar = confirm(`💰 RESUMEN DE ABONO\n\nCliente: ${cuenta.nombre}\nFolio de Venta: ${folio}\nMonto a ingresar: ${_cxcDinero(montoFinal)}\nDestino del dinero: ${etiqueta}\n\n¿Confirmas que deseas registrar este abono?`);
+        
+        if (!confirmacionEstandar) return; // Si el cajero presiona "Cancelar", detenemos la ejecución y protegemos la base de datos
+    }
+
     const _todosLosPagares = StorageService.get("pagaresSistema", []);
     let _pagaresDelFolio = _todosLosPagares
         .filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"))
@@ -990,8 +997,18 @@ function renderCobranzaEsperada() {
     cuentas.forEach(cuenta => {
         if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
             cuenta.abonos.forEach(abono => {
-                const fAbono = new Date(abono.fecha);
-                const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fAbono).substring(3) : fAbono.toLocaleDateString().substring(3);
+                // 🛡️ REPARACIÓN: Parseo seguro para esquivar el bug de DD/MM/YYYY
+                let fAbono;
+                if (typeof abono.fecha === 'string' && abono.fecha.includes('/')) {
+                    const p = abono.fecha.split('/');
+                    fAbono = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
+                } else {
+                    fAbono = new Date(abono.fecha);
+                }
+
+                if (isNaN(fAbono.getTime())) return; // Protege contra strings vacíos o corruptos
+
+                const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fAbono).substring(3) : fAbono.toLocaleDateString('es-MX').substring(3);
 
                 if (!posMeses[clave]) {
                     posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [], label: fAbono.toLocaleDateString('es-MX', { month: 'long', year: 'numeric'}) };
@@ -1243,7 +1260,19 @@ window.renderAuditoriaAbonos = function() {
         cuentasFiltradas.forEach(c => c.abonos.forEach((ab, idx) => {
             todos.push({ folio: c.folio, cliente: c.nombre, abonoIdx: idx, fecha: ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo' });
         }));
-        todos.sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+        
+        // 🛡️ REPARACIÓN: Ordenamiento seguro para evitar 'Invalid Date' y NaN
+        todos.sort((a,b) => {
+            const parseD = (f) => {
+                if (typeof f === 'string' && f.includes('/')) {
+                    const p = f.split('/');
+                    return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0).getTime();
+                }
+                return new Date(f).getTime() || 0;
+            };
+            return parseD(b.fecha) - parseD(a.fecha);
+        });
+        
         let filasPlanos = todos.map(a => `
             <tr style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:12px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : new Date(a.fecha).toLocaleDateString()}</td>

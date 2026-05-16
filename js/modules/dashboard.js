@@ -23,16 +23,26 @@ function renderDashboard() {
     });
     const totalHoy = ventasHoy.reduce((s, v) => s + (v.total || v.totalVenta || 0), 0);
 
+    // 🛡️ Helper local para parseo seguro
+    const parseSeguro = (val) => {
+        if (!val) return new Date(0);
+        if (typeof val === 'string' && val.includes('/')) {
+            const p = val.split('/');
+            if (p.length === 3) return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
+        }
+        return new Date(val);
+    };
+
     // KPI: Ventas de la semana
     const ventasSemana = ventasRegistradas.filter(v => {
-        const f = new Date((v.fechaVenta || v.fechaIso || ''));
+        const f = parseSeguro(v.fechaVenta || v.fechaIso || v.fecha);
         return f >= inicioSemana && f <= hoy;
     });
     const totalSemana = ventasSemana.reduce((s, v) => s + (v.total || v.totalVenta || 0), 0);
 
     // KPI: Ventas del mes
     const ventasMes = ventasRegistradas.filter(v => {
-        const f = new Date((v.fechaVenta || v.fechaIso || ''));
+        const f = parseSeguro(v.fechaVenta || v.fechaIso || v.fecha);
         return f >= inicioMes && f <= hoy;
     });
     const totalMes = ventasMes.reduce((s, v) => s + (v.total || v.totalVenta || 0), 0);
@@ -70,7 +80,7 @@ function renderDashboard() {
 
     // Ventas recientes: últimas 5
     const ventasRecientes = [...ventasRegistradas]
-        .sort((a, b) => new Date(b.fechaVenta || b.fechaIso || 0) - new Date(a.fechaVenta || a.fechaIso || 0))
+        .sort((a, b) => parseSeguro(b.fechaVenta || b.fechaIso || b.fecha) - parseSeguro(a.fechaVenta || a.fechaIso || a.fecha))
         .slice(0, 5);
 
     // ── Render ──────────────────────────────────────────────
