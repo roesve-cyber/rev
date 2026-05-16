@@ -74,33 +74,42 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         console.log("✅ Sistema cargado en local al instante.");
 
-        // ☁️ 5. SINCRONIZACIÓN FIREBASE EN SEGUNDO PLANO
+        // ☁️ 5. SINCRONIZACIÓN FIREBASE EN SEGUNDO PLANO (BLINDADO CONTRA RACE CONDITIONS)
         if (window._firebaseActivo && window._db) {
-            console.log("☁️ Sincronizando con la nube en segundo plano...");
+            console.log("☁️ Esperando validación de credenciales en Firebase Auth...");
             
-            StorageService.syncAll().then(() => {
-                console.log("🔄 Nube sincronizada con éxito.");
-                
-                // ✨ MAGIA: Volvemos a leer TODO (incluyendo las categorías) desde los datos frescos
-                recargarRAM();
-                
-                // REDIBUJADO INTELIGENTE (Sin errores de contexto)
-                const vistaActiva = document.querySelector('.vista:not(.oculto)');
-                if (vistaActiva) {
-                    const idVista = vistaActiva.id;
-                    if (idVista === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
-                    else if (idVista === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
-                    else if (idVista === 'inventario' && typeof renderInventario === 'function') renderInventario();
-                    else if (idVista === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
-                    else if (idVista === 'clientes' && typeof renderClientes === 'function') renderClientes();
-                    else if (idVista === 'apartados' && typeof renderApartados === 'function') renderApartados();
-                    else if ((idVista === 'cotizaciones' || idVista === 'cotizador') && typeof renderCotizaciones === 'function') renderCotizaciones();
-                }
-                
-                if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
+            // Escuchamos de forma segura a que Firebase Auth confirme la sesión activa
+            firebase.auth().onAuthStateChanged((user) => {
+                if (user) {
+                    console.log(`☁️ Sesión confirmada para el usuario: ${user.email}. Iniciando descarga...`);
+                    
+                    StorageService.syncAll().then(() => {
+                        console.log("🔄 Nube sincronizada con éxito.");
+                        
+                        // Volvemos a leer todo desde los datos frescos descargados
+                        recargarRAM();
+                        
+                        // REDIBUJADO INTELIGENTE VISUAL
+                        const vistaActiva = document.querySelector('.vista:not(.oculto)');
+                        if (vistaActiva) {
+                            const idVista = vistaActiva.id;
+                            if (idVista === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+                            else if (idVista === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
+                            else if (idVista === 'inventario' && typeof renderInventario === 'function') renderInventario();
+                            else if (idVista === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+                            else if (idVista === 'clientes' && typeof renderClientes === 'function') renderClientes();
+                            else if (idVista === 'apartados' && typeof renderApartados === 'function') renderApartados();
+                            else if ((idVista === 'cotizaciones' || idVista === 'cotizador') && typeof renderCotizaciones === 'function') renderCotizaciones();
+                        }
+                        
+                        if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
 
-            }).catch(e => {
-                console.warn("⚠️ Trabajando Offline. La nube no respondió, pero el sistema sigue funcionando.", e);
+                    }).catch(e => {
+                        console.warn("⚠️ Firestore bloqueado por el cliente o reglas restrictivas. Operando con caché local segura.", e);
+                    });
+                } else {
+                    console.warn("⚠️ No se ha detectado un usuario firmado en Firebase Auth todavía.");
+                }
             });
         }
         
