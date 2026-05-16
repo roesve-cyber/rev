@@ -174,7 +174,7 @@ function exportarReporteCompras() {
     );
 }
 
-// --- Reporte Flujo de Efectivo (Corregido con Cuentas Reales) ---
+// --- Reporte Flujo de Efectivo (LIMPIO Y SIN DUPLICADOS) ---
 
 function renderReporteFlujo() {
     const cont = document.getElementById('reporte-flujo');
@@ -188,95 +188,33 @@ function renderReporteFlujo() {
     const periodoAgrupar = window._filtroFlujoPeriodo || 'diario';
     const ordenBloques = window._filtroFlujoOrden || 'desc';
 
-    // 1. OBTENER CUENTAS REALES (Sincronizado con Bancos y Conciliación)
+    // 1. OBTENER CUENTAS REALES
     const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal" }]);
     const tarjetas = StorageService.get("tarjetasConfig", []);
     
-    // Construir lista para el selector
     const cuentasParaSelector = [
         ...cajas.map(c => ({ id: c.id, nombre: c.nombre })),
         ...tarjetas.filter(t => t.tipo === 'debito').map(t => ({ id: t.banco, nombre: `🏦 ${t.banco}` }))
     ];
 
-    // 2. CONSOLIDACIÓN DE MOVIMIENTOS Y BÚSQUEDA EN CAJA REAL
-    let movimientos = [];
-    const hashesRegistrados = new Set();
-
-    function agregarMov(mov) {
-        if (!mov) return;
-        const montoSeguro = parseFloat(mov.monto) || 0;
-        if (montoSeguro <= 0) return;
-        
-        let fechaStr = typeof mov.fecha === 'string' ? mov.fecha.split('T')[0] : String(mov.fecha);
-        
-        // 🐛 FIX 1: Hash blindado para no borrar abonos del mismo monto en el mismo día
-        const hash = mov.id ? String(mov.id) : `${fechaStr}_${montoSeguro.toFixed(2)}_${mov.tipo}_${mov.concepto}`;
-        
-        if (!hashesRegistrados.has(hash)) {
-            hashesRegistrados.add(hash);
-            movimientos.push(mov);
-        }
-    }
-
-    const ventasNuevas = StorageService.get("ventasRegistradas", []);
-    const cuentasCxC = StorageService.get("cuentasPorCobrar", []);
-    const comprasNuevas = StorageService.get("compras", []); 
-    const cajaFisica = StorageService.get("movimientosCaja", []); 
+    // 2. ÚNICA FUENTE DE VERDAD (Se eliminan las consultas a Ventas y CxC para evitar triplicar registros)
+    let movimientosCrudos = StorageService.get("movimientosCaja", []);
     const manuales = StorageService.get("movimientosManuales", []);
-
-    // A) Cargar la caja física real
-    cajaFisica.forEach(m => {
-        agregarMov({ 
-            id: m.id, // Pasamos el ID real
-            fecha: m.fecha, 
-            concepto: m.concepto || m.referencia || 'Movimiento', 
-            tipo: (m.tipo || 'ingreso').toLowerCase(), 
-            cuenta: m.cuenta || m.medioPago || 'efectivo', 
-            etiquetaCuenta: m.etiquetaCuenta, // 🐛 FIX 2: Pasar el nombre real del banco o caja
-            monto: m.monto 
+    
+    // Unificamos el libro mayor con los movimientos manuales extra
+    let todosLosMovimientos = [...movimientosCrudos];
+    manuales.forEach(m => {
+        todosLosMovimientos.push({
+            id: m.id,
+            fecha: m.fecha,
+            concepto: m.concepto || 'Movimiento Manual',
+            tipo: m.tipo,
+            cuenta: m.cuenta,
+            monto: m.monto
         });
     });
 
-    // B) Cargar Ventas Nuevas
-    ventasNuevas.forEach(v => {
-        const met = v.metodoPago === 'credito' ? (v.modoEnganche || 'efectivo') : (v.metodoPago || 'efectivo');
-        const monto = v.metodoPago === 'credito' ? parseFloat(v.enganche || 0) : parseFloat(v.total || 0);
-        agregarMov({ id: v.folio, fecha: v.fechaVenta || v.fechaIso || v.fecha, concepto: `Venta: ${v.folio}`, tipo: 'ingreso', cuenta: met, monto: monto });
-    });
-
-    // C) Cargar Abonos del historial del cliente
-    cuentasCxC.forEach(c => {
-        if (c && c.abonos && Array.isArray(c.abonos)) {
-            c.abonos.forEach((ab, idx) => {
-                let fechaOrigen = ab.fecha || ab.fechaAbono || ab.fechaEmision;
-                if (typeof fechaOrigen === 'string' && fechaOrigen.includes('-') && fechaOrigen.split('-')[0].length === 2) {
-                    const p = fechaOrigen.split('-');
-                    fechaOrigen = `${p[2]}-${p[1]}-${p[0]}`;
-                }
-                const montoReal = ab.montoAbonado !== undefined ? ab.montoAbonado : (ab.monto || 0);
-
-                agregarMov({ 
-                    id: `ab_cxc_${c.folio}_${idx}`, // ID Único
-                    fecha: fechaOrigen, 
-                    concepto: `Abo: ${c.nombre || ab.clienteNombre || 'Cliente'} (${ab.folio || c.folio || 'MIG'})`, 
-                    tipo: 'ingreso', 
-                    cuenta: ab.cuentaId || ab.medioPago || 'efectivo', 
-                    etiquetaCuenta: ab.etiquetaCuenta || (ab.cuentaId === 'efectivo' ? '💵 Efectivo Principal' : ''), // 🐛 FIX 2: Etiquetas
-                    monto: montoReal 
-                });
-            });
-        }
-    });
-
-    // D) Cargar Compras
-    comprasNuevas.forEach(com => { 
-        agregarMov({ id: com.id, fecha: com.fechaISO || com.fecha || window.localISO(new Date()), concepto: `Prov: ${com.proveedor}`, tipo: 'egreso', cuenta: com.metodoPago || 'efectivo', monto: com.pagado }); 
-    });
-
-    // E) Cargar Movimientos Manuales
-    manuales.forEach(m => agregarMov(m));
-
-    // 3. FILTRADO SEGURO
+    // 3. FILTRADO
     const obtenerFechaLocalMediodia = (fechaInput) => {
         if (!fechaInput) return new Date(0);
         if (typeof fechaInput === 'number') {
@@ -297,10 +235,15 @@ function renderReporteFlujo() {
         return new Date(0);
     };
 
-    let movsFiltrados = movimientos.filter(m => {
-        const coincideCuenta = (cuentaFiltro === 'todas' || String(m.cuenta) === String(cuentaFiltro));
+    let movsFiltrados = todosLosMovimientos.filter(m => {
+        if (!m || !m.fecha || !m.monto || parseFloat(m.monto) <= 0) return false;
+
+        const cuentaMov = m.cuenta || m.medioPago || 'efectivo';
+        const coincideCuenta = (cuentaFiltro === 'todas' || String(cuentaMov) === String(cuentaFiltro));
+        
         const fMov = obtenerFechaLocalMediodia(m.fecha);
-        m._fechaObjetoSeguro = fMov;
+        m._fechaObjetoSeguro = fMov; 
+        
         let coincideRango = true;
         if (fDesde) coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
         if (fHasta) coincideRango = coincideRango && fMov <= new Date(fHasta + "T23:59:59");
@@ -333,7 +276,13 @@ function renderReporteFlujo() {
         }
 
         if (!grupos[clave]) grupos[clave] = { ing: 0, egr: 0, items: [], sortKey };
-        if (m.tipo === 'ingreso') grupos[clave].ing += m.monto; else grupos[clave].egr += m.monto;
+        
+        const tipoMov = (m.tipo || 'ingreso').toLowerCase();
+        const montoNum = parseFloat(m.monto);
+
+        if (tipoMov === 'ingreso') grupos[clave].ing += montoNum; 
+        else grupos[clave].egr += montoNum;
+        
         grupos[clave].items.push(m);
     });
 
@@ -346,6 +295,7 @@ function renderReporteFlujo() {
         const g = grupos[clave];
         totalIng += g.ing; totalEgr += g.egr;
         const balance = g.ing - g.egr;
+        
         return `
             <div style="min-width:320px; background:white; border-radius:12px; border:1px solid #e2e8f0; display:flex; flex-direction:column; max-height:450px; box-shadow:0 4px 10px rgba(0,0,0,0.05);">
                 <div style="padding:15px; background:#1e3a8a; color:white; border-radius:12px 12px 0 0;">
@@ -359,16 +309,17 @@ function renderReporteFlujo() {
                     </div>
                 </div>
                 <div style="flex:1; overflow-y:auto; padding:10px; background:#fcfcfc; border-radius:0 0 12px 12px;">
-                    ${g.items.map(i => {
-                        // 🐛 FIX 3: Aquí mostramos la etiqueta correcta
-                        const nombreCaja = i.etiquetaCuenta || (i.cuenta === 'efectivo' ? '💵 Efectivo Principal' : i.cuenta);
+                    ${g.items.sort((a,b) => b._fechaObjetoSeguro - a._fechaObjetoSeguro).map(i => {
+                        // Aquí mostramos el nombre real de tu Efectivo One o Santander
+                        const cuentaStr = i.etiquetaCuenta || (i.cuenta === 'efectivo' ? '💵 Efectivo Principal' : i.cuenta);
+                        const tipoClase = (i.tipo || 'ingreso').toLowerCase();
                         return `
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px;">
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <input type="checkbox" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af;">
-                                <div style="max-width:160px; line-height:1.2;"><b>${i.concepto}</b><br><small style="color:#1e40af; font-weight:bold;">${nombreCaja}</small></div>
+                                <div style="max-width:160px; line-height:1.2;"><b>${i.concepto || i.referencia || 'Movimiento'}</b><br><small style="color:#1e40af; font-weight:bold;">${cuentaStr}</small></div>
                             </div>
-                            <span style="font-weight:bold; color:${i.tipo==='ingreso'?'#16a34a':'#dc2626'};">${i.tipo==='ingreso'?'+':'-'}${dinero(i.monto)}</span>
+                            <span style="font-weight:bold; color:${tipoClase==='ingreso'?'#16a34a':'#dc2626'};">${tipoClase==='ingreso'?'+':'-'}${dinero(i.monto)}</span>
                         </div>`
                     }).join('')}
                 </div>
@@ -379,7 +330,7 @@ function renderReporteFlujo() {
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <div>
                 <h2 style="margin:0; color:#1e40af;">💵 Flujo de Efectivo Horizontal</h2>
-                <p style="color:#718096; margin:0;">Movimientos reales filtrados por tus cajas y bancos.</p>
+                <p style="color:#718096; margin:0;">Movimientos consolidados sin duplicidades.</p>
             </div>
             <button onclick="abrirModalGastoExtra()" style="padding:10px 18px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">💸 Nuevo Gasto / Ingreso</button>
         </div>
@@ -417,6 +368,7 @@ function renderReporteFlujo() {
         </div>
     `;
 }
+
 // --- FUNCIONES DE SOPORTE ---
 window.actualizarFiltrosFlujo = function() {
     window._filtroFlujoPeriodo = document.getElementById('fPer').value;
