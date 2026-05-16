@@ -1640,6 +1640,117 @@ window.ejecutarTransferenciaCuentas = function() {
     if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
+// =====================================================================
+// 📲 MOTOR DE TRANSFERENCIAS BANCARIAS BLINDADO (CORRECCIÓN DE IDs)
+// =====================================================================
+
+window.abrirModalTransferencia = function() {
+    // 1. Extraemos las cuentas asegurando que el "value" sea el nombre exacto, no un ID vacío
+    let opcionesHTML = `<option value="efectivo_principal">💵 Efectivo Principal</option>`;
+    
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    tarjetas.forEach(t => {
+        // Usamos el nombre como valor único para evitar el error de "undefined === undefined"
+        const identificadorUnico = (t.banco || t.nombre || 'Cuenta_Generica').trim();
+        const etiquetaVisible = t.banco || t.nombre || 'Cuenta sin nombre';
+        opcionesHTML += `<option value="${identificadorUnico}">🏦 ${etiquetaVisible}</option>`;
+    });
+
+    // 2. Construimos la ventana
+    let modal = document.getElementById('modalTransferenciaBancariaSegura');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'modalTransferenciaBancariaSegura';
+        modal.style = 'display:flex; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(3px);';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+    <div style="background:white; width:90%; max-width:420px; padding:30px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+        <h3 style="margin-top:0; color:#1e40af; border-bottom:2px solid #e2e8f0; padding-bottom:10px;">📲 Transferir entre Cuentas</h3>
+        
+        <div style="margin-bottom:15px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #cbd5e1;">
+            <label style="font-weight:bold; font-size:12px; color:#475569;">📤 Origen (De dónde sale):</label>
+            <select id="transfBancariaOrigen" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #94a3b8; font-weight:bold; color:#1e40af;">
+                ${opcionesHTML}
+            </select>
+        </div>
+        
+        <div style="margin-bottom:15px; background:#f0fdf4; padding:15px; border-radius:8px; border:1px solid #bbf7d0;">
+            <label style="font-weight:bold; font-size:12px; color:#166534;">📥 Destino (A dónde entra):</label>
+            <select id="transfBancariaDestino" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #4ade80; font-weight:bold; color:#065f46;">
+                ${opcionesHTML}
+            </select>
+        </div>
+        
+        <div style="margin-bottom:25px;">
+            <label style="font-weight:bold; font-size:12px; color:#475569;">💰 Monto a transferir:</label>
+            <input type="number" id="transfBancariaMonto" placeholder="0.00" min="1" style="width:100%; padding:12px; margin-top:5px; border-radius:6px; border:2px solid #3b82f6; font-size:18px; font-weight:bold; text-align:center;">
+        </div>
+        
+        <div style="display:flex; gap:10px;">
+            <button onclick="ejecutarTransferenciaBancariaSegura()" style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">✅ Realizar Traspaso</button>
+            <button onclick="document.getElementById('modalTransferenciaBancariaSegura').style.display='none'" style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+        </div>
+    </div>`;
+    modal.style.display = 'flex';
+};
+
+window.ejecutarTransferenciaBancariaSegura = function() {
+    const selOrigen = document.getElementById('transfBancariaOrigen');
+    const selDestino = document.getElementById('transfBancariaDestino');
+    
+    const idOrigen = selOrigen.value;
+    const idDestino = selDestino.value;
+    const monto = parseFloat(document.getElementById('transfBancariaMonto').value);
+
+    // Validaciones
+    if (!idOrigen || !idDestino) return alert("❌ Por favor selecciona ambas cuentas.");
+    if (idOrigen === idDestino) return alert("❌ La cuenta de origen y destino no pueden ser la misma.");
+    if (!monto || monto <= 0) return alert("❌ Ingresa un monto válido mayor a cero.");
+
+    const nombreOrigen = selOrigen.options[selOrigen.selectedIndex].text.replace('🏦 ', '').replace('💵 ', '');
+    const nombreDestino = selDestino.options[selDestino.selectedIndex].text.replace('🏦 ', '').replace('💵 ', '');
+
+    if (!confirm(`¿Confirmas el traspaso de ${dinero(monto)} desde [${nombreOrigen}] hacia [${nombreDestino}]?`)) return;
+
+    let movimientos = StorageService.get("movimientosCaja", []);
+    const fecha = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    const folioUnico = Date.now();
+
+    // 1. Registramos la SALIDA del dinero (Egreso)
+    movimientos.push({
+        id: folioUnico + 1,
+        fecha: fecha,
+        tipo: "egreso",
+        monto: monto,
+        concepto: `Traspaso interno enviado a ${nombreDestino}`,
+        referencia: `TRF-OUT-${folioUnico}`,
+        cuenta: idOrigen,
+        etiquetaCuenta: nombreOrigen
+    });
+
+    // 2. Registramos la ENTRADA del dinero (Ingreso)
+    movimientos.push({
+        id: folioUnico + 2,
+        fecha: fecha,
+        tipo: "ingreso",
+        monto: monto,
+        concepto: `Traspaso interno recibido desde ${nombreOrigen}`,
+        referencia: `TRF-IN-${folioUnico}`,
+        cuenta: idDestino,
+        etiquetaCuenta: nombreDestino
+    });
+
+    StorageService.set("movimientosCaja", movimientos);
+    
+    alert("✅ ¡Traspaso realizado con éxito! El dinero ya se reflejó en el flujo de caja.");
+    document.getElementById('modalTransferenciaBancariaSegura').style.display = 'none';
+    
+    // Actualizamos las gráficas y tablas que tengas abiertas
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+    if (typeof renderConciliacion === 'function') renderConciliacion();
+};
 window.renderCuentasBancarias = renderCuentasBancarias;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
