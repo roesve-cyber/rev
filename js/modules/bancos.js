@@ -1522,6 +1522,124 @@ window.confirmarGuardadoCaja = function(index) {
     StorageService.set("cuentasEfectivo", cajas);
     location.reload();
 };
+// =====================================================================
+// 📲 TRANSFERENCIAS ENTRE CUENTAS PROPIAS
+// =====================================================================
+window.abrirModalTransferencia = function() {
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const debito = tarjetas.filter(t => t.tipo === "debito");
+
+    // Construir opciones de selectores
+    let opciones = cajas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    opciones += debito.map(t => `<option value="${t.banco}">🏦 ${t.banco} Débito</option>`).join('');
+
+    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+
+    const html = `
+    <div id="modalTransferenciaCuentas" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:480px; box-shadow:0 20px 25px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#4f46e5; display:flex; align-items:center; gap:8px;">📲 Transferir entre Cuentas</h3>
+            <p style="font-size:13px; color:#64748b; margin-bottom:20px;">Mueve dinero entre tus cajas de efectivo y tus cuentas bancarias. No afecta tus ganancias, solo el lugar donde está el dinero.</p>
+            
+            <div style="margin-bottom:15px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📅 Fecha de la transferencia:</label>
+                <input type="date" id="transfFecha" value="${fechaHoy}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div>
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#dc2626; margin-bottom:5px;">📤 Origen (De dónde sale):</label>
+                    <select id="transfOrigen" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#fef2f2;">
+                        ${opciones}
+                    </select>
+                </div>
+                <div>
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#10b981; margin-bottom:5px;">📥 Destino (A dónde entra):</label>
+                    <select id="transfDestino" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; background:#f0fdf4;">
+                        ${opciones}
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-bottom:15px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">💰 Monto a transferir ($):</label>
+                <input type="number" id="transfMonto" placeholder="0.00" min="0.01" step="0.01" style="width:100%; padding:12px; border:2px solid #6366f1; border-radius:6px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#4f46e5;">
+            </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📝 Motivo / Referencia (Opcional):</label>
+                <input type="text" id="transfMotivo" placeholder="Ej: Depósito de ventas del día..." style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="ejecutarTransferenciaCuentas()" style="flex:2; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">✅ Confirmar</button>
+                <button onclick="document.getElementById('modalTransferenciaCuentas').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.ejecutarTransferenciaCuentas = function() {
+    const origen = document.getElementById("transfOrigen").value;
+    const destino = document.getElementById("transfDestino").value;
+    const monto = parseFloat(document.getElementById("transfMonto").value);
+    const fechaRaw = document.getElementById("transfFecha").value;
+    const motivo = document.getElementById("transfMotivo").value.trim() || "Transferencia interna";
+
+    if (origen === destino) return alert("❌ La cuenta de origen y destino no pueden ser la misma.");
+    if (isNaN(monto) || monto <= 0) return alert("❌ Ingresa un monto válido mayor a cero.");
+    if (!fechaRaw) return alert("❌ Selecciona una fecha válida.");
+
+    const fechaBase = new Date(fechaRaw + 'T12:00:00');
+    const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
+
+    const selOrigen = document.getElementById("transfOrigen");
+    const nombreOrigenFull = selOrigen.options[selOrigen.selectedIndex].text;
+    const nombreOrigen = nombreOrigenFull.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, ''); // Limpiar Emojis
+
+    const selDestino = document.getElementById("transfDestino");
+    const nombreDestinoFull = selDestino.options[selDestino.selectedIndex].text;
+    const nombreDestino = nombreDestinoFull.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '');
+
+    const idTransf = Date.now();
+    const movimientos = StorageService.get("movimientosCaja", []);
+
+    // 1. Egreso (Sale de la cuenta origen)
+    movimientos.push({
+        id: idTransf + 1,
+        fecha: fechaIso,
+        monto: monto,
+        tipo: "egreso",
+        concepto: `Transferencia a: ${nombreDestino} (${motivo})`,
+        referencia: `TR-${idTransf}`,
+        cuenta: origen,
+        medioPago: "transferencia",
+        etiquetaCuenta: nombreOrigenFull
+    });
+
+    // 2. Ingreso (Entra a la cuenta destino)
+    movimientos.push({
+        id: idTransf + 2,
+        fecha: fechaIso,
+        monto: monto,
+        tipo: "ingreso",
+        concepto: `Transferencia de: ${nombreOrigen} (${motivo})`,
+        referencia: `TR-${idTransf}`,
+        cuenta: destino,
+        medioPago: "transferencia",
+        etiquetaCuenta: nombreDestinoFull
+    });
+
+    StorageService.set("movimientosCaja", movimientos);
+    document.getElementById("modalTransferenciaCuentas").remove();
+    alert(`✅ Transferencia de $${monto.toFixed(2)} registrada con éxito.`);
+    
+    // Refrescar vistas
+    if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+    if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
+};
 window.renderCuentasBancarias = renderCuentasBancarias;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
