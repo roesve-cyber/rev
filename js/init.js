@@ -68,28 +68,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (typeof verificarAlertasPagares === 'function') verificarAlertasPagares();
         }
         
-        if (typeof StorageService.startRealtimeSync === 'function') {
-            StorageService.startRealtimeSync();
-        }
+        // 🛑 (Eliminamos la llamada a startRealtimeSync que estaba suelta aquí)
         
         console.log("✅ Sistema cargado en local al instante.");
 
-        // ☁️ 5. SINCRONIZACIÓN FIREBASE EN SEGUNDO PLANO (BLINDADO CONTRA RACE CONDITIONS)
+        // ☁️ 5. SINCRONIZACIÓN FIREBASE EN SEGUNDO PLANO (BLINDADA)
         if (window._firebaseActivo && window._db) {
             console.log("☁️ Esperando validación de credenciales en Firebase Auth...");
             
-            // Escuchamos de forma segura a que Firebase Auth confirme la sesión activa
+            // Firebase Auth controla el acceso antes de disparar cualquier petición a Firestore
             firebase.auth().onAuthStateChanged((user) => {
                 if (user) {
-                    console.log(`☁️ Sesión confirmada para el usuario: ${user.email}. Iniciando descarga...`);
+                    console.log(`☁️ Sesión confirmada para: ${user.email}. Iniciando motores de red...`);
                     
+                    // 🚀 AHORA SÍ: Arrancamos el tiempo real de forma completamente autorizada
+                    if (typeof StorageService.startRealtimeSync === 'function') {
+                        StorageService.startRealtimeSync();
+                    }
+
                     StorageService.syncAll().then(() => {
                         console.log("🔄 Nube sincronizada con éxito.");
-                        
-                        // Volvemos a leer todo desde los datos frescos descargados
                         recargarRAM();
                         
-                        // REDIBUJADO INTELIGENTE VISUAL
                         const vistaActiva = document.querySelector('.vista:not(.oculto)');
                         if (vistaActiva) {
                             const idVista = vistaActiva.id;
@@ -101,14 +101,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                             else if (idVista === 'apartados' && typeof renderApartados === 'function') renderApartados();
                             else if ((idVista === 'cotizaciones' || idVista === 'cotizador') && typeof renderCotizaciones === 'function') renderCotizaciones();
                         }
-                        
                         if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
 
                     }).catch(e => {
-                        console.warn("⚠️ Firestore bloqueado por el cliente o reglas restrictivas. Operando con caché local segura.", e);
+                        console.error("⚠️ Firestore bloqueó la lectura. Revisa tus Reglas de Seguridad en Firebase.", e);
                     });
                 } else {
-                    console.warn("⚠️ No se ha detectado un usuario firmado en Firebase Auth todavía.");
+                    console.warn("⚠️ No hay sesión activa. Operando 100% Offline.");
                 }
             });
         }
