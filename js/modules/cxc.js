@@ -1656,6 +1656,178 @@ window.filtrarCuentasCobranza = function() {
     const texto = document.getElementById("filtroClienteCobranza")?.value || "";
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar(texto);
 };
+// =====================================================================
+// 🔄 CONVERSIÓN DE APARTADOS A CRÉDITO (CXC)
+// =====================================================================
+window.abrirModalConvertirApartado = function(folioApartado) {
+    // 1. Buscar el apartado en las bases de datos
+    const apartados = StorageService.get("apartados", []);
+    const ventas = StorageService.get("ventasRegistradas", []);
+    
+    let apartado = apartados.find(a => a.folio === folioApartado) || ventas.find(v => v.folio === folioApartado);
+    if (!apartado) return alert("❌ No se encontró el folio del apartado.");
+
+    // 2. Calcular los saldos reales
+    const totalVenta = parseFloat(apartado.total) || 0;
+    const engancheInicial = parseFloat(apartado.enganche) || 0;
+    
+    let totalAbonado = engancheInicial;
+    if (apartado.abonos && Array.isArray(apartado.abonos)) {
+        totalAbonado += apartado.abonos.reduce((suma, abono) => suma + (parseFloat(abono.monto) || 0), 0);
+    }
+
+    const saldoRestante = totalVenta - totalAbonado;
+    if (saldoRestante <= 0) return alert("✅ Este apartado ya está liquidado en su totalidad.");
+
+    // 3. Obtener Reglas de Crédito Globales
+    const configCredito = StorageService.get('configCreditoGlobal', {plazos: []});
+    const plazos = configCredito.plazos || [];
+    
+    if (plazos.length === 0) return alert("⚠️ No tienes plazos de crédito configurados en Ajustes.");
+
+    let opcionesPlazosHTML = plazos.map((p, index) => `<option value="${index}">${p.meses} Meses (Tasa: ${p.tasa}%)</option>`).join('');
+
+    const modalHTML = `
+    <div id="modalConvertirCredito" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h2 style="color:#1e40af; margin-top:0; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">💳 Convertir a Crédito</h2>
+            
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:13px; color:#475569;">
+                <span>Total pagado hasta hoy:</span>
+                <strong style="color:#10b981;">${_cxcDinero(totalAbonado)}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:20px; font-size:15px;">
+                <span style="font-weight:bold; color:#0f172a;">Saldo por financiar:</span>
+                <strong style="color:#dc2626;">${_cxcDinero(saldoRestante)}</strong>
+            </div>
+
+            <div style="margin-bottom:15px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
+                <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:8px;">Plazo de financiamiento:</label>
+                <select id="convPlazoSelect" onchange="calcularSimulacionConvertir(${saldoRestante})" style="width:100%; padding:12px; border-radius:6px; border:1px solid #cbd5e1; font-weight:bold; color:#1e40af; cursor:pointer;">
+                    ${opcionesPlazosHTML}
+                </select>
+            </div>
+
+            <div id="convResumenMatematico" style="margin-bottom:25px;"></div>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="ejecutarConversionCredito('${folioApartado}', ${saldoRestante}, ${totalAbonado})" style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:14px;">✅ Confirmar y Generar Pagarés</button>
+                <button onclick="document.getElementById('modalConvertirCredito').remove()" style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:14px;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    window._plazosDisponiblesConversion = plazos;
+    calcularSimulacionConvertir(saldoRestante);
+};
+
+window.calcularSimulacionConvertir = function(saldoRestante) {
+    const index = document.getElementById("convPlazoSelect").value;
+    const plazo = window._plazosDisponiblesConversion[index];
+    
+    // Matemática financiera
+    const interes = saldoRestante * (plazo.tasa / 100) * plazo.meses;
+    const totalFinanciado = saldoRestante + interes;
+    
+    // Regla estricta: 4 semanas por mes
+    const totalSemanas = plazo.meses * 4;
+    const pagoSemanal = totalFinanciado / totalSemanas;
+
+    document.getElementById("convResumenMatematico").innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
+            <span style="color:#64748b;">Interés calculado (${plazo.tasa}% x ${plazo.meses}m):</span>
+            <strong style="color:#ea580c;">+ ${_cxcDinero(interes)}</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-size:15px; border-bottom:1px dashed #cbd5e1; padding-bottom:12px;">
+            <span style="font-weight:bold; color:#0f172a;">Total Nueva Deuda:</span>
+            <strong style="color:#1e40af; font-size:18px;">${_cxcDinero(totalFinanciado)}</strong>
+        </div>
+        <div style="text-align:center; background:#eff6ff; padding:15px; border-radius:8px; border:2px solid #bfdbfe;">
+            <div style="font-size:11px; font-weight:bold; text-transform:uppercase; color:#1d4ed8; margin-bottom:4px;">Plan de Pagos Oficial</div>
+            <div style="font-size:20px; font-weight:900; color:#1e40af;">${totalSemanas} pagos de ${_cxcDinero(pagoSemanal)}</div>
+            <div style="font-size:10px; color:#60a5fa; margin-top:4px;">(Calculado a 4 semanas por mes)</div>
+        </div>
+    `;
+};
+
+window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) {
+    const index = document.getElementById("convPlazoSelect").value;
+    const plazo = window._plazosDisponiblesConversion[index];
+    
+    const interes = saldoRestante * (plazo.tasa / 100) * plazo.meses;
+    const totalFinanciado = saldoRestante + interes;
+    const totalSemanas = plazo.meses * 4;
+    const pagoSemanal = totalFinanciado / totalSemanas;
+
+    // Ventana de confirmación estricta de seguridad
+    if (!confirm(`⚠️ RESUMEN DE CONVERSIÓN A CRÉDITO\n\nFolio: ${folio}\nCapital a financiar: ${_cxcDinero(saldoRestante)}\nNuevo Total con intereses: ${_cxcDinero(totalFinanciado)}\nSe generarán ${totalSemanas} pagarés de ${_cxcDinero(pagoSemanal)}.\n\n¿Deseas confirmar la creación del crédito y migrar el saldo a CxC?`)) {
+        return;
+    }
+
+    const apartados = StorageService.get("apartados", []);
+    const ventas = StorageService.get("ventasRegistradas", []);
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+
+    // Marcar el origen como migrado
+    let refClienteNom = "Cliente Genérico";
+    let refClienteId = null;
+
+    let ap = apartados.find(a => a.folio === folio);
+    if (ap) {
+        ap.estado = "Migrado a Crédito";
+        refClienteNom = ap.clienteNombre || refClienteNom;
+        refClienteId = ap.clienteId || null;
+    }
+    
+    let vnt = ventas.find(v => v.folio === folio);
+    if (vnt) {
+        vnt.estado = "Migrado a Crédito";
+        refClienteNom = vnt.clienteNombre || refClienteNom;
+        refClienteId = vnt.clienteId || refClienteId;
+    }
+
+    // Inyectar en CxC
+    cxc.push({
+        id: Date.now(),
+        folio: folio,
+        clienteNombre: refClienteNom,
+        clienteId: refClienteId,
+        fechaVenta: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        totalContadoOriginal: saldoRestante, 
+        enganche: totalAbonado, // El historial de lo que dio mientras estuvo en apartado
+        saldoActual: totalFinanciado,
+        estado: "Al corriente",
+        abonos: [] // Inicia limpio para los abonos del crédito formal
+    });
+
+    // Inyectar Pagarés Semanales
+    let fechaVenc = new Date();
+    for (let i = 1; i <= totalSemanas; i++) {
+        fechaVenc.setDate(fechaVenc.getDate() + 7);
+        pagares.push({
+            id: Date.now() + i,
+            folio: folio,
+            numero: i,
+            monto: pagoSemanal,
+            fechaVencimiento: (window.localISO ? window.localISO(fechaVenc) : fechaVenc.toISOString()).split('T')[0],
+            estado: "Pendiente"
+        });
+    }
+
+    StorageService.set("apartados", apartados);
+    StorageService.set("ventasRegistradas", ventas);
+    StorageService.set("cuentasPorCobrar", cxc);
+    StorageService.set("pagaresSistema", pagares);
+
+    document.getElementById('modalConvertirCredito').remove();
+    alert("✅ Operación exitosa.\n\nEl apartado ha sido convertido a Crédito Formal y los pagarés semanales ya están disponibles en el Centro de Comando (CxC).");
+
+    // Actualizar pantalla activa
+    if (typeof renderApartados === 'function') renderApartados();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+};
 
 // ==========================================
 // EXPORTACIONES GLOBALES (CONEXIÓN CON EL HTML)

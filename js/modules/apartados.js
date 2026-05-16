@@ -43,19 +43,28 @@ function renderApartados() {
     if (apartados.length === 0) {
         html += '<p>No hay apartados registrados.</p>';
     } else {
-        html += `<table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Compromiso</th><th>Abonado</th><th>Pendiente</th><th>Estado</th><th>Abonos</th><th>Historial</th></tr></thead><tbody>`;
+        // Juntamos los botones en una sola columna llamada "Acciones"
+        html += `<table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Compromiso</th><th>Abonado</th><th>Pendiente</th><th>Estado</th><th style="text-align:center;">Acciones</th></tr></thead><tbody>`;
+        
         apartados.forEach(a => {
-            const abonado = a.abonos.reduce((s, ab) => s + ab.monto, a.importeApartado);
+            const abonado = a.abonos.reduce((s, ab) => s + ab.monto, a.importeApartado || 0);
             html += `<tr>
-                <td>${a.folio}</td>
+                <td><strong>${a.folio}</strong></td>
                 <td>${a.clienteNombre}</td>
                 <td>${window.formatearFechaCortaMX(a.fechaApartado)}</td>
                 <td>${a.fechaCompromiso ? window.formatearFechaCortaMX(a.fechaCompromiso) : '-'}</td>
                 <td>${dinero(abonado)}</td>
                 <td style="color:#dc2626; font-weight:bold;">${dinero(a.saldoPendiente)}</td>
                 <td>${a.estado}</td>
-                <td><button onclick="abrirModalAbonoApartado('${a.folio}')" style="padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">➕ Abonar</button></td>
-                <td><button onclick="abrirHistorialAbonos('${a.folio}')" style="padding:4px 10px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">📜 Ver</button></td>
+                <td style="text-align:center;">
+                    <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
+                        ${a.estado === 'Pendiente' ? `
+                            <button onclick="abrirModalAbonoApartado('${a.folio}')" style="padding:6px 10px; background:#10b981; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">💵 Abonar</button>
+                            <button onclick="abrirModalConvertirApartado('${a.folio}')" style="padding:6px 10px; background:#8b5cf6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">💳 Convertir</button>
+                        ` : ''}
+                        <button onclick="abrirHistorialAbonos('${a.folio}')" style="padding:6px 10px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📜 Historial</button>
+                    </div>
+                </td>
             </tr>`;
         });
         html += `</tbody></table>`;
@@ -64,7 +73,7 @@ function renderApartados() {
     const cont = document.getElementById('contenidoApartados');
     if (cont) cont.innerHTML = html;
 
-    // Crear Modales si no existen
+    // Crear Modales si no existen (Se mantiene intacto tu código original)
     if (!document.getElementById('modalHistorialAbonos')) {
         const modalHist = document.createElement('div');
         modalHist.id = 'modalHistorialAbonos';
@@ -80,24 +89,6 @@ function renderApartados() {
         modalAbono.innerHTML = `<div style="background:white;max-width:400px;margin:80px auto;padding:30px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.12);"><h3>➕ Registrar Abono</h3><div style="margin-bottom:12px;"><label>Folio:</label><input id="abonoFolioApartado" type="text" readonly style="width:100%;padding:8px;margin-top:4px;"></div><div style="margin-bottom:12px;"><label>Monto:</label><input id="abonoMontoApartado" type="number" min="1" style="width:100%;padding:8px;margin-top:4px;"></div><div style="margin-bottom:12px;"><label>Fecha:</label><input id="abonoFechaApartado" type="date" style="width:100%;padding:8px;margin-top:4px;"></div><div style="display:flex;gap:10px;"><button onclick="registrarAbonoApartadoDesdeModal()" style="flex:1;padding:10px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💾 Guardar</button><button onclick="cerrarModalAbonoApartado()" style="flex:1;padding:10px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button></div></div>`;
         document.body.appendChild(modalAbono);
     }
-}
-
-function abrirHistorialAbonos(folio) {
-    const apartados = obtenerApartados();
-    const ap = apartados.find(a => a.folio === folio);
-    const cont = document.getElementById('historialAbonosContenido');
-    if (!ap || !cont) return;
-    if (!ap.abonos.length) {
-        cont.innerHTML = '<p>No hay abonos registrados.</p>';
-    } else {
-        let html = '<table style="width:100%;font-size:14px;"><thead><tr><th>Monto</th><th>Fecha</th></tr></thead><tbody>';
-        ap.abonos.forEach(ab => {
-            html += `<tr><td>${dinero(ab.monto)}</td><td>${window.formatearFechaCortaMX(ab.fechaAbono)}</td></tr>`;
-        });
-        html += '</tbody></table>';
-        cont.innerHTML = html;
-    }
-    document.getElementById('modalHistorialAbonos').style.display = 'block';
 }
 
 function cerrarHistorialAbonos() {
