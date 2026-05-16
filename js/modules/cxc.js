@@ -1830,7 +1830,7 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
 };
 
 // =====================================================================
-// 🕰️ AUDITORÍA DE FECHAS RELACIONALES (ABONOS Y CAJA)
+// 🕰️ AUDITORÍA DE FECHAS RELACIONALES (VERSIÓN MULTI-CAJA Y DÉBITO V2)
 // =====================================================================
 window.abrirAuditoriaFechas = function() {
     const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
@@ -1844,7 +1844,7 @@ window.abrirAuditoriaFechas = function() {
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #f59e0b; padding-bottom:15px; margin-bottom:20px;">
                 <div>
                     <h2 style="margin:0; color:#b45309; font-size:24px;">🕰️ Corrección de Fechas de Ingreso</h2>
-                    <p style="margin:0; color:#64748b; font-size:14px;">Ajusta la fecha real en que recibiste el dinero (Sincroniza Flujo de Caja)</p>
+                    <p style="margin:0; color:#64748b; font-size:14px;">Ajusta la fecha real en que recibiste el dinero (Sincroniza todas las Cajas y Débito)</p>
                 </div>
                 <button onclick="document.querySelector('[data-modal=\\'auditoria-fechas\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">✕ Cerrar</button>
             </div>
@@ -1855,7 +1855,7 @@ window.abrirAuditoriaFechas = function() {
             </div>
 
             <div id="auditContenedorFechas">
-                <div style="text-align:center; padding:40px; color:#94a3b8;">Ingresa un folio de Crédito o Apartado para ver su historial de cobros.</div>
+                <div style="text-align:center; padding:40px; color:#94a3b8;">Ingresa un folio de Crédito o Apartado para auditar sus movimientos financieros.</div>
             </div>
         </div>
     </div>`;
@@ -1880,7 +1880,7 @@ window.buscarPagosAuditoria = function() {
     let registrosHtml = '';
     window._auditRegistrosFechas = []; 
 
-    // Extraer Enganche / Anticipo
+    // 1. Analizar Enganche / Anticipo Inicial
     let enganche = esApartado ? cuenta.enganche : cuenta.engancheRecibido;
     if (enganche > 0) {
         let fechaEnganche = cuenta.fechaVenta || cuenta.fechaApartado;
@@ -1902,7 +1902,7 @@ window.buscarPagosAuditoria = function() {
         </div>`;
     }
 
-    // Extraer Abonos
+    // 2. Analizar Historial de Abonos
     if (cuenta.abonos && cuenta.abonos.length > 0) {
         cuenta.abonos.forEach((ab, i) => {
             let fechaAb = ab.fechaAbono || ab.fecha;
@@ -1927,15 +1927,15 @@ window.buscarPagosAuditoria = function() {
     }
 
     if (window._auditRegistrosFechas.length === 0) {
-        registrosHtml = `<div style="padding:20px; color:#64748b; text-align:center;">Esta cuenta no tiene ingresos de dinero registrados.</div>`;
+        registrosHtml = `<div style="padding:20px; color:#64748b; text-align:center;">Esta cuenta no tiene ingresos de dinero registrados para modificar.</div>`;
     } else {
         registrosHtml += `
-        <div style="margin-top:20px; padding:15px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; font-size:12px; color:#b45309;">
-            💡 <strong>Sincronización Inteligente:</strong> Al guardar, el sistema actualizará la fecha en el estado de cuenta y buscará automáticamente este ingreso en el <b>Flujo de Caja</b> para corregirlo.
+        <div style="margin-top:20px; padding:15px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; font-size:12px; color:#166534;">
+            ✨ <b>Rastreador Inteligente Multi-Caja Activo:</b> Al guardar, el sistema buscará de forma cruzada este folio en tus cuentas de efectivo, cajas secundarias o registros de terminales de débito para corregir el Flujo.
         </div>
         <div style="text-align:right; margin-top:20px;">
             <button onclick="guardarCorreccionFechasDinero('${folio}', ${esApartado})" style="background:#059669; color:white; border:none; padding:14px 25px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(5, 150, 105, 0.2);">
-                💾 Confirmar Nuevas Fechas
+                💾 Guardar Cambios en Flujo y Cuenta
             </button>
         </div>`;
     }
@@ -1947,7 +1947,7 @@ window.buscarPagosAuditoria = function() {
 };
 
 window.guardarCorreccionFechasDinero = function(folio, esApartado) {
-    if (!confirm("¿Confirmas la corrección? Los reportes financieros de los días afectados cambiarán.")) return;
+    if (!confirm("¿Confirmas la corrección relacional? Los días financieros afectados se recalcularán en tu Flujo de Caja.")) return;
 
     let cxc = StorageService.get("cuentasPorCobrar", []);
     let apartados = StorageService.get("apartados", []);
@@ -1955,13 +1955,14 @@ window.guardarCorreccionFechasDinero = function(folio, esApartado) {
 
     let cuenta = esApartado ? apartados.find(a => String(a.folio).toUpperCase() === folio) : cxc.find(c => String(c.folio).toUpperCase() === folio);
     let cambiosRealizados = 0;
+    let movimientosCajaCorregidos = 0;
 
     window._auditRegistrosFechas.forEach(reg => {
         if (reg.fechaOriginal !== reg.nuevaFecha) {
-            // Fijar la hora al mediodía para evitar desfases de zona horaria (UTC-6)
+            // Generar fecha ISO limpia al mediodía para evitar desfases horarios
             const nuevaFechaIso = window.localISO ? window.localISO(reg.nuevaFecha + 'T12:00:00') : new Date(reg.nuevaFecha + 'T12:00:00').toISOString();
 
-            // 1. Afectar el módulo origen
+            // 1. Modificar la libreta del cliente
             if (reg.tipo === 'enganche') {
                 if (esApartado) cuenta.fechaApartado = nuevaFechaIso;
                 else cuenta.fechaVenta = nuevaFechaIso;
@@ -1970,15 +1971,46 @@ window.guardarCorreccionFechasDinero = function(folio, esApartado) {
                 if (cuenta.abonos[reg.indexAbono].fecha) cuenta.abonos[reg.indexAbono].fecha = nuevaFechaIso;
             }
 
-            // 2. Afectar Flujo de Caja (Búsqueda por folio y monto exacto)
-            let movCaja = caja.find(m => String(m.folio).toUpperCase() === folio && Number(m.monto) === Number(reg.montoOriginal));
-            if (movCaja) movCaja.fecha = nuevaFechaIso;
+            // 2. Modificar la Caja (Búsqueda Multi-Caja de Espectro Completo)
+            let movCaja = caja.find(m => {
+                // Coincidencia por Folio directo, Referencia (Cajas/Débito) o Concepto descritos en la transacción
+                const coincideIdentificador = 
+                    (m.folio && String(m.folio).toUpperCase() === folio) ||
+                    (m.referencia && String(m.referencia).toUpperCase().includes(folio)) ||
+                    (m.concepto && String(m.concepto).toUpperCase().includes(folio));
+                
+                const mismoMonto = Number(m.monto || m.importe || 0) === Number(reg.montoOriginal);
+                
+                let fechaM = m.fecha || m.fechaMovimiento || "";
+                let fechaM_corta = typeof fechaM === 'string' ? fechaM.split('T')[0] : "";
+                const mismaFechaOriginal = fechaM_corta === reg.fechaOriginal;
+
+                return coincideIdentificador && mismoMonto && mismaFechaOriginal;
+            });
+
+            // Si por alguna extraña razón no coincide la fecha exacta debido a diferencias horarias de guardado, hacemos un fallback de rescate por Folio + Monto
+            if (!movCaja) {
+                movCaja = caja.find(m => {
+                    const coincideIdentificador = 
+                        (m.folio && String(m.folio).toUpperCase() === folio) ||
+                        (m.referencia && String(m.referencia).toUpperCase().includes(folio)) ||
+                        (m.concepto && String(m.concepto).toUpperCase().includes(folio));
+                    const mismoMonto = Number(m.monto || m.importe || 0) === Number(reg.montoOriginal);
+                    return coincideIdentificador && mismoMonto;
+                });
+            }
+
+            if (movCaja) {
+                movCaja.fecha = nuevaFechaIso;
+                movimientosCajaCorregidos++;
+            }
 
             cambiosRealizados++;
         }
     });
 
     if (cambiosRealizados > 0) {
+        // Guardar de forma persistente y disparar sincronización en tiempo real a Firebase
         StorageService.set("movimientosCaja", caja);
         if (esApartado) {
             StorageService.set("apartados", apartados);
@@ -1987,12 +2019,16 @@ window.guardarCorreccionFechasDinero = function(folio, esApartado) {
             StorageService.set("cuentasPorCobrar", cxc);
             if(typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
         }
-        alert(`✅ ¡Operación Exitosa!\n\nSe corrigió la fecha de ${cambiosRealizados} movimiento(s) en la cuenta del cliente y en el Flujo de Caja general.`);
+        
+        alert(`✅ ¡Sincronización Exitosa!\n\nSe cambiaron las fechas en el perfil del cliente.\nEn el Flujo de Caja (Multi-cuentas/Débito) se localizaron y corrigieron exitosamente: ${movimientosCajaCorregidos} movimiento(s).`);
+        location.reload(); // Recargar para forzar el redibujado de la gráfica del flujo
     } else {
-        alert("ℹ️ No modificaste ninguna fecha.");
+        alert("ℹ️ No se detectó ningún cambio en las fechas.");
     }
 
-    document.querySelector('[data-modal="auditoria-fechas"]').remove();
+    if(document.querySelector('[data-modal="auditoria-fechas"]')) {
+        document.querySelector('[data-modal="auditoria-fechas"]').remove();
+    }
 };
 
 // ==========================================
