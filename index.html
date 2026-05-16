@@ -57,11 +57,6 @@
 
     <nav class="sidebar-nav">
 <!-- ===== VISTA APARTADOS ===== -->
-<div id="apartados" class="vista oculto" style="display:none;">
-    <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">
-        <div id="contenidoApartados" style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);"></div>
-    </div>
-</div>
 
                 <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-prod')">📦 PRODUCTOS <span>▾</span></button>
@@ -188,7 +183,12 @@
 
 <!-- ===== CONTENIDO PRINCIPAL ===== -->
 <main id="app-container" class="full-width">
-<!-- ===== CONSULTA DE INVENTARIO ===== -->
+
+<div id="apartados" class="vista oculto" style="display:none;">
+    <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">
+        <div id="contenidoApartados" style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);"></div>
+    </div>
+</div>
 
 <div id="conciliacion" class="vista oculto">
     <div class="vista-header" style="margin-bottom:20px;">
