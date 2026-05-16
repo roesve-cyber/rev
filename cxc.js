@@ -1,0 +1,1678 @@
+// ================================================================
+// 🧠 MÓDULO MAESTRO: CUENTAS POR COBRAR (CXC) Y AUDITORÍA
+// Consolidado: Motor de saldos, abonos avanzados, promesas y WhatsApp.
+// ================================================================
+
+// Helper local de formato de moneda
+function _cxcDinero(v) {
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
+}
+
+// ==========================================
+// 1. MOTOR CENTRAL DE SALDOS
+// ==========================================
+window._calcularEstadoCuenta = function(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    
+    if (!cuenta) return null;
+
+    const hoy = new Date();
+    const pagaresDelFolio = pagares.filter(p => p.folio === folio).sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    
+    let saldoTotal = 0;
+    let pagaresPendientes = [];
+    let pagaresVencidos = [];
+    let montoVencido = 0;
+    let diasMaxAtraso = 0;
+
+    pagaresDelFolio.forEach(p => {
+        if (p.estado === "Pendiente" || p.estado === "Parcial") {
+            pagaresPendientes.push(p);
+            const restante = (p.estado === "Parcial") ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0);
+            saldoTotal += restante;
+
+            const fechaVenc = new Date(p.fechaVencimiento);
+            if (fechaVenc < hoy) {
+                pagaresVencidos.push(p);
+                montoVencido += restante;
+                const atraso = Math.floor((hoy - fechaVenc) / (1000 * 60 * 60 * 24));
+                if (atraso > diasMaxAtraso) diasMaxAtraso = atraso;
+            }
+        }
+    });
+
+    const abonos = cuenta.abonos || [];
+    const totalAbonado = abonos.reduce((sum, a) => sum + (a.monto || 0), 0);
+
+    let estadoGeneral = "Activo";
+    let promesaVigente = false;
+
+    if (cuenta.estado === "Saldado" || saldoTotal <= 0.01) {
+        estadoGeneral = "Saldado";
+        saldoTotal = 0;
+    } else {
+        if (cuenta.promesaPago && cuenta.promesaPago.fecha) {
+            const fechaPromObj = new Date(cuenta.promesaPago.fecha + "T23:59:59");
+            if (fechaPromObj >= hoy) promesaVigente = true;
+        }
+
+        if (promesaVigente) estadoGeneral = "Promesa";
+        else if (pagaresVencidos.length === 0) estadoGeneral = "Al corriente";
+        else if (pagaresVencidos.length <= 2) estadoGeneral = "Atrasado";
+        else estadoGeneral = "Crítico";
+    }
+
+    return { cuenta, pagares: pagaresDelFolio, pagaresPendientes, pagaresVencidos, saldoTotal, montoVencido, diasMaxAtraso, estadoGeneral, promesaVigente, totalAbonado };
+};
+
+// ==========================================
+// 2. RENDERIZADO DE TABLA (CON PESTAÑAS)
+// ==========================================
+window._pestanaCobranzaActiva = 'todas';
+
+function renderCuentasXCobrar(filtroCliente = "") {
+    const contenedor = document.getElementById("tablaCuentasXCobrar");
+    if (!contenedor) return;
+
+    filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
+    
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+
+    if (cuentas.length === 0) {
+        contenedor.innerHTML = `<div style="background:#f0fdf4; padding:40px; text-align:center; border-radius:10px;"><p style="font-size:18px; color:#27ae60; font-weight:bold;">✅ ¡No hay cuentas registradas!</p></div>`;
+        return;
+    }
+
+    let htmlTabs = `
+    <div style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
+        ${['todas', 'al_corriente', 'morosos', 'promesas', 'saldadas'].map(p => {
+            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas', saldadas:'🔒 Saldadas'};
+            const bg = window._pestanaCobranzaActiva === p ? '#1e40af' : '#f3f4f6';
+            const col = window._pestanaCobranzaActiva === p ? 'white' : '#4b5563';
+            return `<button onclick="cambiarPestanaCobranza('${p}')" style="flex:1; min-width:120px; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; border:none; background:${bg}; color:${col};">${labels[p]}</button>`;
+        }).join('')}
+    </div>`;
+
+    let htmlTabla = `<div style="overflow-x:auto;"><table class="tabla-admin">
+        <thead><tr><th>Cliente / Folio</th><th>Fecha Venta</th><th>Total Venta</th><th>Saldo Actual</th><th>Pagarés</th><th>Estatus</th><th>Acciones</th></tr></thead>
+        <tbody>`;
+
+    let cuentasMostradas = 0;
+
+    cuentas.forEach(c => {
+        const estadoCta = window._calcularEstadoCuenta(c.folio);
+        if(!estadoCta) return;
+
+        let mostrar = false;
+        switch (window._pestanaCobranzaActiva) {
+            case 'todas': mostrar = estadoCta.estadoGeneral !== "Saldado"; break;
+            case 'al_corriente': mostrar = estadoCta.estadoGeneral === "Al corriente"; break;
+            case 'morosos': mostrar = (estadoCta.estadoGeneral === "Atrasado" || estadoCta.estadoGeneral === "Crítico"); break;
+            case 'promesas': mostrar = estadoCta.estadoGeneral === "Promesa"; break;
+            case 'saldadas': mostrar = estadoCta.estadoGeneral === "Saldado"; break;
+        }
+
+        if (!mostrar) return;
+        const stringBusqueda = `${c.nombre || ''} ${c.folio || ''}`.toLowerCase();
+        if (filtroCliente && !stringBusqueda.includes(filtroCliente)) return;
+
+        cuentasMostradas++;
+        const textoPromesa = estadoCta.promesaVigente ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${window.formatearFechaCortaMX(c.promesaPago.fecha)}</span>` : '';
+
+        htmlTabla += `<tr>
+            <td><strong>${c.nombre}</strong><br><small style="color:#718096;">${c.folio}</small></td>
+            <td>${c.fechaVenta ? window.formatearFechaCortaMX(c.fechaVenta) : '-'}</td>
+            <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
+            <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}</td>
+            <td>${estadoCta.pagaresPendientes.length} pendiente(s)${textoPromesa}</td>
+            <td>${c.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</td>
+            <td>
+                <div style="display:flex; gap:4px;">
+                    <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer;" title="Abonar">💰</button>
+                    <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 10px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer;" title="Promesa">📝</button>
+                    <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="padding:6px 10px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer;" title="Estado">📋</button>
+                    <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 10px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer;" title="WhatsApp">💬</button>
+                </div>
+            </td>
+        </tr>`;
+    });
+
+    contenedor.innerHTML = htmlTabs + (cuentasMostradas === 0 ? `<p style="text-align:center; padding:20px;">Sin resultados.</p>` : htmlTabla + `</tbody></table></div>`);
+}
+
+window.cambiarPestanaCobranza = function(pestana) {
+    window._pestanaCobranzaActiva = pestana;
+    renderCuentasXCobrar();
+};
+
+// ==========================================
+// 3. LOGICA DE ABONOS Y POLÍTICAS
+// ==========================================
+function _buildCuentaOrigen(idSufijo) {
+    return `
+        <div class="campo" style="margin-bottom:10px;">
+            <label style="font-weight:bold; color:#374151;">💳 Medio de pago:</label>
+            <select id="medioPago_${idSufijo}" onchange="_actualizarCuentaEspecifica('${idSufijo}')"
+                    style="padding:10px; font-size:15px; border:2px solid #27ae60; border-radius:6px; width:100%; margin-top:4px;">
+                <option value="efectivo">💵 Efectivo</option>
+                <option value="transferencia">🏦 Transferencia bancaria</option>
+                <option value="tarjeta_credito">💳 Tarjeta de crédito</option>
+            </select>
+        </div>
+        <div id="divCuentaEspecifica_${idSufijo}" style="display:none; margin-bottom:10px;">
+            <label style="font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Cuenta específica:</label>
+            <select id="cuentaEspecifica_${idSufijo}"
+                    style="padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; width:100%;">
+            </select>
+        </div>`;
+}
+
+window._actualizarCuentaEspecifica = function(idSufijo) {
+    const medio = document.getElementById('medioPago_' + idSufijo)?.value;
+    const divCuenta = document.getElementById('divCuentaEspecifica_' + idSufijo);
+    const selCuenta = document.getElementById('cuentaEspecifica_' + idSufijo);
+    if (!divCuenta || !selCuenta) return;
+    
+    const tarjetas = StorageService.get('tarjetasConfig', []);
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    
+    if (medio === 'efectivo') {
+        divCuenta.style.display = 'block'; 
+        selCuenta.innerHTML = cajas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    } else if (medio === 'transferencia') {
+        const cuentasDebito = tarjetas.filter(t => t.tipo === 'debito');
+        if (cuentasDebito.length === 0) {
+            divCuenta.style.display = 'none';
+            selCuenta.innerHTML = '<option value="">Sin cuentas débito registradas</option>';
+        } else {
+            divCuenta.style.display = 'block';
+            selCuenta.innerHTML = cuentasDebito.map(b => `<option value="${b.banco}">🏦 ${b.banco} Débito</option>`).join('');
+        }
+    } else if (medio === 'tarjeta_credito') {
+        const tarjetasCredito = tarjetas.filter(t => !t.tipo || t.tipo === 'credito');
+        if (tarjetasCredito.length === 0) {
+            divCuenta.style.display = 'none';
+            selCuenta.innerHTML = '<option value="">Sin tarjetas crédito registradas</option>';
+        } else {
+            divCuenta.style.display = 'block';
+            selCuenta.innerHTML = tarjetasCredito.map(b => `<option value="${b.banco}">💳 ${b.banco} Crédito</option>`).join('');
+        }
+    }
+};
+
+function abrirModalAbonoAvanzado(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    
+    if (!cuenta) return alert("Cuenta no encontrada.");
+
+    const hoy = new Date();
+    const todosPagares = pagares
+        .filter(p => p.folio === folio)
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    
+    const pagaresCliente = todosPagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial');
+    const saldo = pagaresCliente.reduce((s, p) => {
+        if (p.estado === "Parcial") return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+        return s + (p.monto || 0);
+    }, 0);
+    
+    let precioContadoReal = 0;
+    if (cuenta.articulos && cuenta.articulos.length > 0) {
+        precioContadoReal = cuenta.articulos.reduce((sum, art) => sum + (Number(art.precioContado || art.precio || 0) * Number(art.cantidad || 1)), 0);
+    }
+    let original = precioContadoReal > 0 ? precioContadoReal : (Number(cuenta.totalContadoOriginal || cuenta.totalMercancia || 0));
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    const montoAFinanciarContado = Math.max(0, original - enganche);
+
+    const totalAbonosRegistrados = todosPagares.reduce((s, p) => {
+        if (p.estado === 'Parcial') return s + (p.montoAbonado || 0);
+        if (p.estado === 'Pagado') return s + (p.montoAbonado || p.monto || 0);
+        return s;
+    }, 0);
+
+    const restanteContado = Math.max(0, montoAFinanciarContado - totalAbonosRegistrados);
+    const periodicidadCuenta = cuenta.periodicidad || "semanal";
+    
+    // --- NUEVO: LECTURA SEGURA DE FECHAS PARA EL MENSAJE AMARILLO ---
+   // --- LECTURA SEGURA DE FECHAS ---
+    const fStr = cuenta.fechaVenta || cuenta.fecha; // SE AGREGÓ ESTA LÍNEA
+    let fechaVentaDate = window.parseFechaMX(fStr);
+
+    if (fStr) {
+        if (fStr.includes('T')) fechaVentaDate = new Date(fStr);
+        else if (fStr.includes('/')) {
+            const p = fStr.split('/');
+            if (p.length === 3) fechaVentaDate = new Date(p[2], p[1]-1, p[0], 12, 0, 0);
+        } else {
+            fechaVentaDate = new Date(fStr);
+        }
+    }
+    if (isNaN(fechaVentaDate.getTime())) fechaVentaDate = new Date();
+
+    const diasDesdeVenta = Math.floor((hoy - fechaVentaDate) / (1000 * 60 * 60 * 24));
+    const aplicaPoliticaContado = diasDesdeVenta <= 30; 
+    const mesActualVenta = Math.floor(diasDesdeVenta / 30.44) + 1;
+
+    let montoProximoMes = null;
+    let mesesPlanMasCercano = null;
+    
+    if (!aplicaPoliticaContado) {
+        // IGNORAR cuenta.saldosPorMes (porque tiene los datos corruptos de la venta original)
+        // Recalcular los planes con el saldo base limpio y buscar respetando el mes actual
+        const planes = (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(montoAFinanciarContado, periodicidadCuenta)
+            : [];
+
+        const planesOrdenados = [...planes]
+    .filter(p => Number(p.meses || 0) >= mesActualVenta)
+    .filter(p => (Number(p.total || 0) - totalAbonosRegistrados) > 0)
+    .sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0));
+
+let mejorPlan = planesOrdenados.length > 0
+    ? planesOrdenados[0]
+    : null;
+
+        if (mejorPlan) {
+            montoProximoMes = Math.max(0, mejorPlan.total - totalAbonosRegistrados);
+            mesesPlanMasCercano = mejorPlan.meses;
+        }
+    }
+
+    const articulosHTML = (cuenta.articulos || []).length > 0 ? `
+        <div style="margin-bottom:20px;">
+            <strong style="color:#374151;">🛒 Artículos:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
+                ${cuenta.articulos.map(a => `<tr><td style="padding:4px; border-bottom:1px solid #eee;">${a.nombre}</td><td style="text-align:right; padding:4px; border-bottom:1px solid #eee;">x${a.cantidad}</td></tr>`).join('')}
+            </table>
+        </div>` : '';
+
+    const pagaresHTML = todosPagares.length > 0 ? `
+        <div style="margin-bottom:20px;">
+            <strong style="color:#374151;">📋 Pagarés:</strong>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:12px;">
+                <thead><tr style="background:#f8fafc;"><th style="padding:5px; text-align:left;">#</th><th>Vencimiento</th><th style="text-align:right;">Saldo</th><th style="text-align:center;">Estado</th></tr></thead>
+                <tbody>
+                    ${todosPagares.map((p, i) => {
+                        const esPagado = p.estado === 'Pagado' || p.estado === 'Cancelado';
+                        const fechaVenc = new Date(p.fechaVencimiento);
+                        const diasAtraso = !esPagado && fechaVenc < hoy ? Math.floor((hoy - fechaVenc) / (1000 * 60 * 60 * 24)) : 0;
+                        const esVencido = !esPagado && diasAtraso > 0;
+                        
+                        let montoDisp = esPagado ? 0 : (p.estado === 'Parcial' ? (p.monto - p.montoAbonado) : p.monto);
+                        
+                        const rowStyle = esPagado ? 'color:#9ca3af; background:#f9fafb;' : (esVencido ? 'background:#fff1f2;' : '');
+                        let badge = `<span style="padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold; ${
+                            esPagado ? 'background:#e5e7eb; color:#4b5563;' : 
+                            (esVencido ? 'background:#fee2e2; color:#b91c1c;' : 'background:#fef3c7; color:#92400e;')
+                        }">${esVencido ? 'VENCIDO' : p.estado.toUpperCase()}</span>`;
+
+                        return `<tr style="${rowStyle}">
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${i + 1}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${window.formatearFechaCortaMX(p.fechaVencimiento)} ${esVencido ? `<br><small style="color:#dc2626;">(${diasAtraso} días)</small>` : ''}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9; text-align:right;">${_cxcDinero(montoDisp)}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9; text-align:center;">${badge}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>` : '';
+
+    let selectorCuentasHTML = '';
+    if (typeof window._buildSelectorCuentas === 'function') {
+        selectorCuentasHTML = window._buildSelectorCuentas('cuentaOrigen_abono', false);
+    } else {
+        selectorCuentasHTML = `<select id="cuentaOrigen_abono" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">💵 Efectivo Principal</option></select>`;
+    }
+
+    const modalHTML = `
+        <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
+            <div style="background:white; border-radius:15px; width:100%; max-width:600px; overflow:hidden;">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:18px 24px; border-bottom:1px solid #e5e7eb; position:sticky; top:0; background:white; z-index:2;">
+                    <h2 style="margin:0;">💰 Registrar Abono — ${cuenta.nombre}</h2>
+                    <button onclick="document.querySelector('[data-modal=abono-avanzado]')?.remove()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#9ca3af;">✕</button>
+                </div>
+                <div style="padding:24px;">
+                
+                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+                    <div><small style="color:#4b5563;">Saldo Crédito</small><br><strong style="font-size:20px; color:#16a34a;">${_cxcDinero(saldo)}</strong></div>
+                    <div style="text-align:right;"><small style="color:#4b5563;">Días Venta</small><br><strong style="font-size:20px; color:#2563eb;">${diasDesdeVenta}</strong></div>
+                </div>
+
+                ${articulosHTML}
+                ${pagaresHTML}
+
+                <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">📅 Fecha de pago:</label>
+                        <input type="date" id="fechaAbonoInput" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0]}" 
+                            style="padding:12px; font-size:16px; border:2px solid #e2e8f0; border-radius:8px; width:100%; box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">Monto a abonar:</label>
+                        <input type="number" id="montoAbono" placeholder="0.00" 
+                            oninput="actualizarAvisoPoliticaAbono('${folio}', ${original}, ${enganche}, '${periodicidadCuenta}', ${aplicaPoliticaContado}, ${mesesPlanMasCercano || 'null'}, ${restanteContado}, ${montoProximoMes || 'null'})"
+                            style="padding:12px; font-size:18px; border:2px solid #3b82f6; border-radius:8px; width:100%; box-sizing:border-box;">
+                    </div>
+                </div>
+
+                <div id="avisoPoliticaAbono"></div>
+
+                <div style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
+                    <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">💳 ¿A qué caja/cuenta ingresa el dinero?</label>
+                    ${selectorCuentasHTML}
+                </div>
+
+                <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
+                    <strong style="color:#92400e;">💡 Política de pago anticipado</strong>
+                    <p style="margin:8px 0 0 0; font-size:14px; color:#78350f;">
+                        ${aplicaPoliticaContado 
+                            ? `Está dentro de los 30 días. Liquida con precio de contado: <strong>${_cxcDinero(restanteContado)}</strong>.`
+                            : (mesesPlanMasCercano 
+                                ? `Periodo de contado vencido. Puede liquidar a plan de ${mesesPlanMasCercano} meses con: <strong>${_cxcDinero(montoProximoMes)}</strong>.`
+                                : `Debe liquidar el saldo total de su crédito.`)}
+                    </p>
+                </div>
+
+                <div style="display:flex; gap:10px;">
+                    <button onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado})" 
+                            style="flex:2; padding:15px; background:#22c55e; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
+                        ✅ Procesar Abono
+                    </button>
+                    <button onclick="document.querySelector('[data-modal=&quot;abono-avanzado&quot;]')?.remove();" 
+                            style="flex:1; padding:15px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer;">
+                        Cancelar
+                    </button>
+                </div>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function actualizarAvisoPoliticaAbono(folio, original, enganche, periodicidadCuenta, aplicaPoliticaContado, mesesPlanMasCercano, restanteContado, montoProximoMes) {
+    const avisoDiv = document.getElementById("avisoPoliticaAbono");
+    if (!avisoDiv) return;
+
+    const montoAbono = parseFloat(document.getElementById("montoAbono").value) || 0;
+
+    // 1. IGNORAMOS LOS PARÁMETROS CORRUPTOS Y BUSCAMOS LA VERDAD
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+
+    // Obtenemos el saldo base real sumando los artículos (Ignora el subtotal inflado)
+    let verdaderoContado = cuenta.totalContadoOriginal || 0;
+    if (cuenta.articulos && cuenta.articulos.length > 0) {
+        verdaderoContado = cuenta.articulos.reduce((s, a) => s + ((a.precioContado || a.precio || 0) * (a.cantidad || 1)), 0);
+    }
+    const saldoBaseContado = Math.max(0, verdaderoContado - Number(cuenta.engancheRecibido || 0));
+
+    // Lectura blindada de la fecha (Evita el bug de la fecha invertida)
+    // --- LECTURA SEGURA DE FECHAS ---
+    const fStr = cuenta.fechaVenta || cuenta.fecha; // SE AGREGÓ ESTA LÍNEA
+    let fechaVentaDate = window.parseFechaMX(fStr);
+
+    if (fStr) {
+        if (fStr.includes('T')) fechaVentaDate = new Date(fStr);
+        else if (fStr.includes('/')) {
+            const p = fStr.split('/');
+            if (p.length === 3) fechaVentaDate = new Date(p[2], p[1]-1, p[0], 12, 0, 0);
+        } else {
+            fechaVentaDate = new Date(fStr);
+        }
+    }
+    if (isNaN(fechaVentaDate.getTime())) fechaVentaDate = new Date();
+    
+    const diasTranscurridos = Math.floor((new Date() - fechaVentaDate) / (1000 * 60 * 60 * 24));
+    const estaEnGracia = diasTranscurridos <= 30;
+    const mesActualVenta = Math.floor(diasTranscurridos / 30.44) + 1;
+
+    const pagares = StorageService.get("pagaresSistema", []).filter(p => p.folio === folio && p.estado !== "Cancelado");
+    const totalPagado = pagares.reduce((s, p) => s + (p.montoAbonado || (p.estado === "Pagado" ? p.monto || 0 : 0)), 0);
+
+    // ESCENARIO 1: AÚN EN PERIODO DE 30 DÍAS
+    if (estaEnGracia) {
+        const faltanteContado = Math.max(0, saldoBaseContado - totalPagado);
+        if (montoAbono >= faltanteContado - 0.01) {
+            avisoDiv.innerHTML = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #15803d;">💡 <b>¡LIQUIDACIÓN DE CONTADO!</b> Este abono cubre la totalidad sin intereses.</div>`;
+        } else {
+            const diff = faltanteContado - montoAbono;
+            avisoDiv.innerHTML = `<div style="background:#e0f2fe; color:#0369a1; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #0284c7;">💡 <b>Política 30 días:</b> Liquida sin intereses agregando <b>${_cxcDinero(diff)}</b> a este abono.</div>`;
+        }
+        return;
+    }
+
+    // ESCENARIO 2: FUERA DE GRACIA (BUSCAMOS EL PLAN INTELIGENTE)
+    const periodicidad = cuenta.periodicidad || "semanal";
+    const planes = (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+        ? CalculatorService.calcularCreditoConPeriodicidad(saldoBaseContado, periodicidad)
+        : [];
+
+    const planesOrdenados = [...planes]
+    .filter(p => Number(p.meses || 0) >= mesActualVenta)
+    .filter(p => Number(p.total || 0) > totalPagado)
+    .sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0));
+
+let proximoPlan = planesOrdenados.length > 0
+    ? planesOrdenados[0]
+    : null;
+
+    if (proximoPlan) {
+        const faltanteParaPlan = Math.max(0, proximoPlan.total - totalPagado);
+        if (montoAbono >= faltanteParaPlan - 0.01) {
+            avisoDiv.innerHTML = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #15803d;">💡 <b>¡LIQUIDACIÓN INTELIGENTE ACTIVADA!</b> Este abono liquida la cuenta en el plan de ${proximoPlan.meses} meses.</div>`;
+        } else {
+            const diff = faltanteParaPlan - montoAbono;
+            avisoDiv.innerHTML = `<div style="background:#fef3c7; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #d97706;">💡 <b>Ahorro por Liquidación:</b> El plan aplicable es de ${proximoPlan.meses} meses (${_cxcDinero(proximoPlan.total)}). Agrega <b>${_cxcDinero(diff)}</b> para liquidar hoy.</div>`;
+        }
+    } else {
+        avisoDiv.innerHTML = ``;
+    }
+}
+
+function evaluarPoliticaLiquidacion(folio, montoAbono) {
+
+    const pagares = StorageService.get("pagaresSistema", []);
+
+    const pagaresFolio = pagares.filter(p => p.folio === folio);
+
+    if (!pagaresFolio.length) return null;
+
+    const totalPagado = pagaresFolio.reduce((s, p) =>
+        s + (p.montoAbonado || (p.estado === "Pagado" ? p.monto || 0 : 0)),
+    0);
+
+    const pendientes = pagaresFolio.filter(p =>
+        p.estado !== "Pagado" &&
+        p.estado !== "Cancelado"
+    );
+
+    const saldoActual = pendientes.reduce((s, p) => {
+
+        if (p.estado === "Parcial") {
+            return s + Math.max(
+                0,
+                (p.monto || 0) - (p.montoAbonado || 0)
+            );
+        }
+
+        return s + (p.monto || 0);
+
+    }, 0);
+
+    const totalConAbono = totalPagado + montoAbono;
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+
+    const cuenta = cuentas.find(c => c.folio === folio);
+
+    if (!cuenta) return null;
+
+    // Recalcular contado real desde artículos
+    let verdaderoContado = cuenta.totalContadoOriginal || 0;
+
+    if (cuenta.articulos && cuenta.articulos.length > 0) {
+
+        verdaderoContado = cuenta.articulos.reduce((s, a) =>
+            s + (
+                (a.precioContado || a.precio || 0) *
+                (a.cantidad || 1)
+            ),
+        0);
+    }
+
+    const enganche = Number(cuenta.engancheRecibido || 0);
+
+    const saldoBaseContado = Math.max(
+        0,
+        verdaderoContado - enganche
+    );
+
+    // Fecha segura
+    const fechaVentaDate = window.parseFechaMX(
+        cuenta.fechaVenta || cuenta.fecha
+    );
+
+    const diasTranscurridos = Math.floor(
+        (new Date() - fechaVentaDate) /
+        (1000 * 60 * 60 * 24)
+    );
+
+    const mesActualVenta =
+        Math.floor(diasTranscurridos / 30.44) + 1;
+
+    const periodicidad =
+        cuenta.periodicidad || "semanal";
+
+    const planes =
+        (typeof CalculatorService !== 'undefined' &&
+        CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(
+                saldoBaseContado,
+                periodicidad
+            )
+            : [];
+
+    // Ignorar planes vencidos
+    const planesOrdenados = [...planes]
+        .filter(p =>
+            Number(p.meses || 0) >= mesActualVenta
+        )
+        .sort((a, b) =>
+            Number(a.meses || 0) -
+            Number(b.meses || 0)
+        );
+
+    let planAplicable = null;
+
+    for (let plan of planesOrdenados) {
+
+        if (
+            totalConAbono >=
+            (Number(plan.total || 0) - 1)
+        ) {
+            planAplicable = plan;
+            break;
+        }
+    }
+
+    if (!planAplicable) return null;
+
+    const montoCorrecto = Math.max(
+        0,
+        planAplicable.total - totalPagado
+    );
+
+    return {
+        aplica: true,
+        montoCorrecto,
+        ahorro: Math.max(
+            0,
+            saldoActual - montoCorrecto
+        ),
+        plan: planAplicable
+    };
+}
+
+function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado) {
+    const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
+    
+    const fechaAbonoRaw = document.getElementById("fechaAbonoInput")?.value;
+    const fechaObj = fechaAbonoRaw ? new Date(fechaAbonoRaw + "T12:00:00") : new Date();
+    const fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaObj) : fechaObj.toLocaleDateString();
+    const fechaAbonoIso = window.localISO ? window.localISO(fechaObj) : fechaObj.toISOString();
+    
+    const selCaja = document.getElementById("cuentaOrigen_abono");
+    const cuentaId = selCaja ? selCaja.value : 'efectivo';
+    const etiqueta = selCaja ? selCaja.options[selCaja.selectedIndex].text : 'Efectivo';
+    const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
+    const medioPago = isCaja ? 'efectivo' : 'transferencia';
+
+    if (isNaN(montoAbonoInput) || montoAbonoInput <= 0) {
+        alert("Ingresa un monto válido.");
+        return;
+    }
+
+    if (montoAbonoInput > (saldoActual + 0.01)) { 
+        alert("El abono no puede ser mayor al saldo.");
+        return;
+    }
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio) || {};
+
+    let montoFinal = montoAbonoInput;
+    let liquidacionPorPolitica = false;
+
+    const pagares = StorageService.get("pagaresSistema", []);
+    const pagaresFolio = pagares.filter(p => p.folio === folio);
+    
+    let precioContadoReal = 0;
+    if (cuenta.articulos && cuenta.articulos.length > 0) {
+        precioContadoReal = cuenta.articulos.reduce((sum, art) => sum + (Number(art.precioContado || art.precio || 0) * Number(art.cantidad || 1)), 0);
+    }
+    const baseContadoParaCalculo = precioContadoReal > 0 ? precioContadoReal : Number(montoOriginal);
+    
+    const totalAbonosPagados = pagaresFolio.reduce((s, p) => {
+        if (p.estado === "Pagado") return s + (p.monto || 0);
+        if (p.estado === "Parcial") return s + (p.montoAbonado || 0);
+        return s;
+    }, 0);
+
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    const saldoContadoSinInteres = Math.max(0, baseContadoParaCalculo - enganche);
+    const restanteContado = Math.max(0, saldoContadoSinInteres - totalAbonosPagados);
+
+    if (aplicaPoliticaContado && restanteContado > 0 && montoAbonoInput >= (restanteContado - 0.01)) {
+        if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\n\nPuede liquidar al precio sin interés pagando sólo: ${_cxcDinero(restanteContado)}\n\n¿Deseas aplicar esta política y condonar los intereses restantes?`)) {
+            montoFinal = restanteContado;
+            liquidacionPorPolitica = true;
+        } else {
+            montoFinal = montoAbonoInput;
+        }
+    }
+
+    if (!liquidacionPorPolitica) {
+        const evalPol = evaluarPoliticaLiquidacion(folio, montoAbonoInput);
+        if (evalPol && evalPol.aplica) {
+            if (confirm(`💡 LIQUIDACIÓN INTELIGENTE (SALTO DE PLAN)\n\nEl abono alcanza para cubrir un plan más corto. El cliente puede liquidar su cuenta con: ${_cxcDinero(evalPol.montoCorrecto)}\n(Se le ahorrarán ${_cxcDinero(evalPol.ahorro)}).\n\n¿Deseas aplicar el descuento y dar por liquidada la cuenta?`)) {
+                montoFinal = evalPol.montoCorrecto;
+                liquidacionPorPolitica = true;
+            } else {
+                montoFinal = montoAbonoInput;
+            }
+        }
+    }
+
+    // 🛡️ REPARACIÓN: Confirmación obligatoria para abonos normales que no entraron en promociones
+    if (!liquidacionPorPolitica) {
+        const confirmacionEstandar = confirm(`💰 RESUMEN DE ABONO\n\nCliente: ${cuenta.nombre}\nFolio de Venta: ${folio}\nMonto a ingresar: ${_cxcDinero(montoFinal)}\nDestino del dinero: ${etiqueta}\n\n¿Confirmas que deseas registrar este abono?`);
+        
+        if (!confirmacionEstandar) return; // Si el cajero presiona "Cancelar", detenemos la ejecución y protegemos la base de datos
+    }
+
+    const _todosLosPagares = StorageService.get("pagaresSistema", []);
+    let _pagaresDelFolio = _todosLosPagares
+        .filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"))
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    let _montoRestante = montoFinal;
+    const _pagaresCubiertos = [];
+    let _pagareParcial = null;
+
+    for (const pag of _pagaresDelFolio) {
+        const _montoNecesario = (pag.estado === 'Parcial') ? Math.max(0, pag.monto - (pag.montoAbonado || 0)) : pag.monto;
+
+        if (_montoRestante >= _montoNecesario - 0.01) {
+            _pagaresCubiertos.push({ ...pag });
+            _montoRestante -= _montoNecesario;
+        } else {
+            if (_montoRestante > 0.01) {
+                _pagareParcial = { ...pag, montoAplicado: _montoRestante };
+                _montoRestante = 0;
+            }
+            break;
+        }
+    }
+
+    let _todosActualizados = _todosLosPagares.map(p => {
+        if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
+            return { ...p, estado: "Pagado", fechaAbono: fechaAbonoStr, montoAbonado: p.monto };
+        }
+        if (_pagareParcial && p.id === _pagareParcial.id) {
+            return { ...p, estado: "Parcial", fechaAbono: fechaAbonoStr, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
+        }
+        return p;
+    });
+
+    if (liquidacionPorPolitica) {
+        _todosActualizados = _todosActualizados.map(p => {
+            if (p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")) {
+                return { ...p, estado: "Cancelado", nota: "Liquidado por política" };
+            }
+            return p;
+        });
+    }
+
+    StorageService.set("pagaresSistema", _todosActualizados);
+
+    const cuentasXCobrar = StorageService.get("cuentasPorCobrar", []);
+    const idxCuenta = cuentasXCobrar.findIndex(c => c.folio === folio);
+    let nuevoSaldoReal = 0;
+
+    if (idxCuenta !== -1) {
+        const cuentaAct = cuentasXCobrar[idxCuenta];
+        cuentaAct.abonos = cuentaAct.abonos || [];
+        
+        cuentaAct.abonos.push({
+            fecha: fechaAbonoStr,
+            monto: montoFinal,
+            cuentaId,
+            medioPago,
+            etiquetaCuenta: etiqueta,
+            vendedorId: cuentaAct.vendedorId || null
+        });
+
+        const _pagaresAct = StorageService.get("pagaresSistema", []);
+        nuevoSaldoReal = _pagaresAct
+            .filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
+            .reduce((s, p) => {
+                if (p.estado === 'Parcial') return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
+                return s + (p.monto || 0);
+            }, 0);
+
+        cuentaAct.saldoActual = nuevoSaldoReal;
+        
+        if (nuevoSaldoReal <= 0.01) { 
+            cuentaAct.estado = "Saldado";
+            cuentaAct.saldoActual = 0;
+            nuevoSaldoReal = 0;
+        }
+
+        cuentasXCobrar[idxCuenta] = cuentaAct;
+        StorageService.set("cuentasPorCobrar", cuentasXCobrar);
+
+        if (typeof window._ingresarCuenta === 'function') {
+            window._ingresarCuenta({
+                monto: montoFinal,
+                cuentaId: cuentaId,
+                etiqueta: etiqueta,
+                concepto: `Abono a ${cuentaAct.nombre} - ${folio}`,
+                referencia: `ABONO-${folio}`,
+                fecha: fechaAbonoIso 
+            });
+        } else {
+            let movimientos = StorageService.get("movimientosCaja", []);
+            movimientos.push({
+                id: Date.now(),
+                folio,
+                fecha: fechaAbonoIso,
+                monto: montoFinal,
+                tipo: "ingreso",
+                concepto: `Abono a ${cuentaAct.nombre} - ${folio}`,
+                referencia: "Abono",
+                cuenta: cuentaId,
+                medioPago,
+                etiquetaCuenta: etiqueta
+            });
+            StorageService.set("movimientosCaja", movimientos);
+        }
+    }
+
+    const _cuentaData = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    const _pagaresRestantes = _todosActualizados.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"));
+    
+    const _pagaresCubiertosTicket = [..._pagaresCubiertos];
+    if (_pagareParcial) {
+        _pagaresCubiertosTicket.push({ ..._pagareParcial, parcial: true });
+    }
+
+    generarTicketAbonoTermico({
+        folio,
+        cliente: {
+            nombre: _cuentaData?.nombre || folio,
+            telefono: _cuentaData?.telefono || '',
+            direccion: _cuentaData?.direccion || ''
+        },
+        montoAbono: montoFinal,
+        nuevoSaldo: nuevoSaldoReal,
+        fecha: fechaAbonoStr, 
+        metodoCobro: medioPago || "efectivo",
+        cuentaDestino: etiqueta || "efectivo",
+        pagaresCubiertos: _pagaresCubiertosTicket,
+        pagaresRestantes: _pagaresRestantes,
+        articulos: _cuentaData?.articulos || [],
+        totalVenta: baseContadoParaCalculo,
+        enganche: enganche
+    });
+
+    if (typeof window.registrarComisionAbono === 'function' && _cuentaData && _cuentaData.vendedorId) {
+        window.registrarComisionAbono(folio, montoFinal, _cuentaData.vendedorId);
+    }
+
+    alert(`✅ Abono registrado exitosamente por ${_cxcDinero(montoFinal)}.`);
+    document.querySelector('[data-modal="abono-avanzado"]')?.remove();
+    renderCuentasXCobrar();
+}
+
+function generarTicketAbonoTermico(datosAbono) {
+    const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
+        pagaresCubiertos, pagaresRestantes, pagaresAfectados, totalPagares, pagaresPendientes, diasAtrasoTotal,
+        etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro } = datosAbono;
+
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const dineroFmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const pagaresTicket = pagaresCubiertos || pagaresAfectados || [];
+    const restantes = pagaresRestantes || [];
+
+    const pagaresHTML = pagaresTicket.length > 0
+        ? pagaresTicket.map((p, i) => {
+            const monto = p.monto || p.abono || 0;
+            const fechaPag = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(p.fechaVencimiento || p.vencimiento || '-') : (p.fechaVencimiento || p.vencimiento || '-');
+            if (p.estado === 'Pagado' || p.cubierto || !p.parcial) {
+                return `<tr style="background:#f0fdf4;">
+                    <td style="padding:3px 5px;">#${i + 1}</td>
+                    <td style="padding:3px 5px;">${fechaPag}</td>
+                    <td style="padding:3px 5px; text-align:right; text-decoration:line-through; color:#6b7280;">${dineroFmt(monto)}</td>
+                    <td style="padding:3px 5px; text-align:center; color:#27ae60;">✓</td>
+                </tr>`;
+            } else {
+                const aplicado = p.montoAplicado || 0;
+                return `<tr style="background:#fffbeb;">
+                    <td style="padding:3px 5px;">#${i + 1}</td>
+                    <td style="padding:3px 5px;">${fechaPag}</td>
+                    <td style="padding:3px 5px; text-align:right;">${dineroFmt(monto)}</td>
+                    <td style="padding:3px 5px; text-align:center; color:#f59e0b;">~${dineroFmt(aplicado)}</td>
+                </tr>`;
+            }
+        }).join('')
+        : `<tr><td colspan="4" style="padding:5px; text-align:center; color:#6b7280;">Sin pagarés registrados</td></tr>`;
+
+    const hoy = new Date();
+    const vencidos = restantes.filter(p => new Date(p.fechaVencimiento) < hoy);
+    
+    let mensajeEstado = '';
+    let mensajeClase = 'mensaje-ok';
+    if (nuevoSaldo === 0) {
+        mensajeEstado = `🎉 ¡Cuenta liquidada! Gracias por su compromiso, ${esc(cliente.nombre)}. ¡Hasta pronto!`;
+        mensajeClase = 'mensaje-ok';
+    } else if (vencidos.length > 0) {
+        const montoVencido = vencidos.reduce((s, p) => s + p.monto, 0);
+        mensajeEstado = `Le recordamos amablemente que tiene ${vencidos.length} pago(s) con fecha vencida por un total de ${dineroFmt(montoVencido)}. Le agradecemos su pronta atención. 🙏`;
+        mensajeClase = 'mensaje-atraso';
+    } else {
+        mensajeEstado = `¡Gracias por su pago puntual! Está al corriente con sus pagos. ✅`;
+        mensajeClase = 'mensaje-ok';
+    }
+
+    const articulosHTML = (articulos || []).length > 0 ? `
+        <div class="seccion-titulo">ARTÍCULOS DE LA VENTA</div>
+        <table>
+            <thead><tr><th>Producto</th><th style="text-align:right;">Cant.</th><th style="text-align:right;">Precio</th></tr></thead>
+            <tbody>
+                ${articulos.map(a => `
+                <tr>
+                    <td>${esc(a.nombre || '-')}</td>
+                    <td style="text-align:right;">${esc(String(a.cantidad || 1))}</td>
+                    <td style="text-align:right;">${dineroFmt((a.precioContado || 0) * (a.cantidad || 1))}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>` : '';
+
+    const ticketHTML = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Recibo de Abono ${esc(folioAbono || folio)}</title>
+    <style>
+        @page { size: 80mm auto; margin: 0; }
+        body { font-family: 'Courier New', monospace; font-size: 11px; width: 72mm; margin: 4mm auto; color: #000; }
+        .centro { text-align: center; }
+        .negrita { font-weight: bold; }
+        hr { border: none; border-top: 1px dashed #333; margin: 6px 0; }
+        .monto-grande { font-size: 20px; font-weight: bold; text-align: center; margin: 8px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        th { background: #e8e8e8; padding: 3px 5px; text-align: left; }
+        .seccion-titulo { background: #000; color: #fff; padding: 3px 6px; font-weight: bold; font-size: 10px; margin: 5px 0 3px 0; }
+        .mensaje-ok { border: 1px dashed #000; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
+        .mensaje-atraso { background: #000; color: #fff; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body>
+<div id="ticket-contenido">
+    <div class="centro">
+        <img src="img/Logo.svg" style="width:60px; height:60px; object-fit:contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
+        <div class="negrita" style="font-size:14px; margin-top:4px;">MUEBLERÍA MI PUEBLITO</div>
+        <div>Santiago Cuaula, Tlaxcala</div>
+    </div>
+    <hr>
+    <div class="centro negrita" style="font-size:13px;">── RECIBO DE PAGO ──</div>
+    <div>Folio Venta: <span class="negrita">${esc(folio)}</span></div>
+    <div>Fecha: <span class="negrita">${esc(fecha)}</span></div>
+    <hr>
+    <div class="negrita">CLIENTE</div>
+    <div>${esc(cliente.nombre)}</div>
+    ${cliente.telefono ? `<div>Tel: ${esc(cliente.telefono)}</div>` : ''}
+    <hr>
+    ${articulosHTML}
+    <div class="seccion-titulo">PAGARÉS CUBIERTOS</div>
+    <table>
+        <thead><tr><th>#</th><th>Vcto.</th><th style="text-align:right;">Monto</th><th style="text-align:center;">Est.</th></tr></thead>
+        <tbody>${pagaresHTML}</tbody>
+    </table>
+    <hr>
+    <div class="negrita">ABONO RECIBIDO:</div>
+    <div class="monto-grande">${dineroFmt(montoAbono)}</div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Nuevo saldo:</span><span class="negrita">${dineroFmt(nuevoSaldo)}</span>
+    </div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Forma de pago:</span><span>${esc(cuentaDestino || etiquetaCuenta)}</span>
+    </div>
+    <hr>
+    <div class="${mensajeClase}">${mensajeEstado}</div>
+    <hr>
+    <div style="text-align:center; margin-top:10px;">
+        <div style="border-top:1px solid #333; width:70%; margin:0 auto 4px auto;"></div>
+        <div class="negrita">FIRMA DEL CLIENTE</div>
+    </div>
+    <div class="centro" style="margin-top:12px;">Gracias por su preferencia</div>
+</div>
+<div class="no-print" style="text-align:center; padding:15px; background:#f8f9fa; border-top:1px dashed #333; margin-top:10px;">
+    <button onclick="window.print()" style="margin:4px; padding:8px 14px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer;">🖨️ Imprimir</button>
+</div>
+</body>
+</html>`;
+
+    const ventana = window.open('', '_blank');
+    if (!ventana) return alert("⚠️ Habilita las ventanas emergentes.");
+    ventana.document.write(ticketHTML);
+    ventana.document.close();
+    ventana.focus();
+}
+
+function renderCobranzaEsperada() {
+    const contenedor = document.getElementById("escaleraCobranza");
+    if (!contenedor) return;
+
+    const pagares = StorageService.get("pagaresSistema", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const hoy = new Date();
+
+    let posMeses = {};
+    for (let i = 0; i < 12; i++) {
+        const fecha = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
+        const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fecha).substring(3) : fecha.toLocaleDateString().substring(3);
+        posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [], label: fecha.toLocaleDateString('es-MX', { month: 'long', year: 'numeric'}) };
+    }
+
+    pagares.forEach(p => {
+        if (p.estado === "Pendiente" || p.estado === "Parcial") {
+            const fechaPago = new Date(p.fechaVencimiento);
+            const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaPago).substring(3) : fechaPago.toLocaleDateString().substring(3);
+            
+            if (!posMeses[clave]) {
+                posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [], label: fechaPago.toLocaleDateString('es-MX', { month: 'long', year: 'numeric'}) };
+            }
+
+            const montoRestante = (p.monto || 0) - (p.montoAbonado || 0);
+
+            if (montoRestante > 0) {
+                posMeses[clave].esperado += montoRestante;
+                posMeses[clave].total += montoRestante;
+                posMeses[clave].pagaresDetalle.push(p);
+                
+                if (fechaPago < hoy) posMeses[clave].vencidos += montoRestante;
+            }
+        }
+    });
+
+    cuentas.forEach(cuenta => {
+        if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
+            cuenta.abonos.forEach(abono => {
+                // 🛡️ REPARACIÓN: Parseo seguro para esquivar el bug de DD/MM/YYYY
+                let fAbono;
+                if (typeof abono.fecha === 'string' && abono.fecha.includes('/')) {
+                    const p = abono.fecha.split('/');
+                    fAbono = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
+                } else {
+                    fAbono = new Date(abono.fecha);
+                }
+
+                if (isNaN(fAbono.getTime())) return; // Protege contra strings vacíos o corruptos
+
+                const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fAbono).substring(3) : fAbono.toLocaleDateString('es-MX').substring(3);
+
+                if (!posMeses[clave]) {
+                    posMeses[clave] = { total: 0, esperado: 0, recaudado: 0, vencidos: 0, pagaresDetalle: [], label: fAbono.toLocaleDateString('es-MX', { month: 'long', year: 'numeric'}) };
+                }
+
+                posMeses[clave].recaudado += abono.monto;
+                posMeses[clave].total += abono.monto;
+            });
+        }
+    });
+
+    let html = `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap:20px;">`;
+
+    Object.entries(posMeses).forEach(([mesClave, datos]) => {
+        if (datos.total === 0) return; 
+
+        const baseCalculo = datos.esperado + datos.recaudado;
+        const porcentajeRecaudo = baseCalculo > 0 ? (datos.recaudado / baseCalculo * 100).toFixed(1) : 0;
+        
+        const colorMes = datos.vencidos > 0 ? "#fee2e2" : "#f0fdf4";
+        const iconoMes = datos.vencidos > 0 ? "🔴" : "✅";
+        const mesEncoded = encodeURIComponent(mesClave);
+
+        html += `<div style="background:${colorMes}; padding:20px; border-radius:10px; border-left:5px solid ${datos.vencidos > 0 ? '#dc2626' : '#27ae60'}; cursor:pointer;" onclick="abrirDetalleCobranza('${mesEncoded}')">
+            <h4 style="margin:0 0 15px 0; color:#2c3e50;">${iconoMes} ${datos.label.toUpperCase()}</h4>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:15px;">
+                <div><small style="color:#718096;">Falta por Cobrar</small><br><strong style="font-size:18px; color:#2c3e50;">${_cxcDinero(datos.esperado)}</strong></div>
+                <div><small style="color:#718096;">Real Recaudado</small><br><strong style="font-size:18px; color:#27ae60;">${_cxcDinero(datos.recaudado)}</strong></div>
+            </div>
+            <div style="background:white; border-radius:8px; overflow:hidden; height:8px; margin-bottom:10px;">
+                <div style="background:#27ae60; height:100%; width:${porcentajeRecaudo > 100 ? 100 : porcentajeRecaudo}%;"></div>
+            </div>
+            <small style="color:#718096;">${porcentajeRecaudo}% del flujo captado</small>
+            ${datos.vencidos > 0 ? `<p style="color:#dc2626; font-weight:bold; margin:10px 0 0 0;">⚠️ ${_cxcDinero(datos.vencidos)} VENCIDO</p>` : ''}
+            <p style="color:#718096; font-size:12px; margin:8px 0 0 0;">👆 Clic para ver detalle</p>
+        </div>`;
+    });
+
+    html += `</div>`;
+    contenedor.innerHTML = html;
+}
+
+function abrirDetalleCobranza(mesKeyEncoded) {
+    const mesClave = decodeURIComponent(mesKeyEncoded);
+    const pagares = StorageService.get("pagaresSistema", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const hoy = new Date();
+
+    const pagaresMes = pagares.filter(p => {
+        const fechaPago = new Date(p.fechaVencimiento);
+        const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaPago).substring(3) : fechaPago.toLocaleDateString().substring(3);
+        return clave === mesClave;
+    });
+
+    if (pagaresMes.length === 0) {
+        alert("No hay pagarés para este mes.");
+        return;
+    }
+
+    let filasHtml = pagaresMes.map(p => {
+        const venc = new Date(p.fechaVencimiento);
+        const diasAtraso = p.estado !== "Pagado" && venc < hoy ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24)) : 0;
+        
+        let atrasoHtml = '';
+        if (p.estado === "Pagado") atrasoHtml = `<span style="color:#27ae60; font-weight:bold; font-size:12px;">✅ Pagado</span>`;
+        else if (diasAtraso > 0) atrasoHtml = `<span style="color:#dc2626; font-weight:bold; font-size:12px;">⚠️ Vencido (${diasAtraso}d)</span>`;
+        else atrasoHtml = `<span style="color:#92400e; font-weight:bold; font-size:12px;">⏳ Pendiente</span>`;
+
+        const cuenta = cuentas.find(c => c.folio === p.folio);
+        const clienteNombre = cuenta ? cuenta.nombre : (p.clienteNombre || p.folio || '-');
+        const articulos = cuenta ? (cuenta.articulos || []) : [];
+        const articulosHtml = articulos.length > 0
+            ? articulos.map(a => `<small>${a.nombre || a.productoNombre || '-'} ×${a.cantidad || 1}</small>`).join(', ')
+            : '<small style="color:#999;">Sin detalle</small>';
+
+        const fmtFechaVenc = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(p.fechaVencimiento) : new Date(p.fechaVencimiento).toLocaleDateString();
+
+        return `<tr style="border-bottom:1px solid #f3f4f6;">
+            <td style="padding:8px;">${p.folio || '-'}</td>
+            <td style="padding:8px;"><strong>${clienteNombre}</strong></td>
+            <td style="padding:8px;">${fmtFechaVenc}</td>
+            <td style="padding:8px; text-align:right; font-weight:bold;">${_cxcDinero(p.monto || 0)}</td>
+            <td style="padding:8px; text-align:center;">${atrasoHtml}</td>
+            <td style="padding:8px; font-size:12px; color:#4a5568;">${articulosHtml}</td>
+        </tr>`;
+    }).join('');
+
+    const modalHTML = `
+        <div data-modal="detalle-cobranza" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
+            <div style="background:white; border-radius:15px; width:100%; max-width:800px; overflow:hidden;">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:20px 30px; border-bottom:1px solid #e5e7eb; position:sticky; top:0; background:white; z-index:2;">
+                    <h2 style="margin:0;">📅 Detalle Cobranza — ${mesClave}</h2>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-cobranza&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">✕</button>
+                </div>
+                <div style="padding:20px 30px;">
+                <div style="overflow-x:auto;">
+                    <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                        <thead><tr style="background:#f3f4f6;">
+                            <th style="padding:8px; text-align:left;">Folio</th>
+                            <th style="padding:8px; text-align:left;">Cliente</th>
+                            <th style="padding:8px; text-align:left;">Vencimiento</th>
+                            <th style="padding:8px; text-align:right;">Monto</th>
+                            <th style="padding:8px; text-align:center;">Estado</th>
+                            <th style="padding:8px; text-align:left;">Productos</th>
+                        </tr></thead>
+                        <tbody>${filasHtml}</tbody>
+                    </table>
+                </div>
+                <div style="margin-top:20px; text-align:right;">
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-cobranza&quot;]')?.remove();" style="padding:10px 20px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Cerrar</button>
+                </div>
+                </div>
+            </div>
+        </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function exportarCobranzaEsperada() {
+    const pagares = StorageService.get("pagaresSistema", []);
+    const hoy = new Date();
+    let csv = "Folio,Fecha Vencimiento,Monto,Estado,Dias Atraso\n";
+    
+    pagares.forEach(p => {
+        let venc = new Date(p.fechaVencimiento);
+        const esPendiente = p.estado !== "Pagado" && p.estado !== "Cancelado";
+        const diasAtraso = esPendiente && venc < hoy ? Math.floor((hoy - venc) / (1000 * 60 * 60 * 24)) : 0;
+            
+        const fechaFormat = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(venc) : venc.toLocaleDateString();
+        csv += `${p.folio},${fechaFormat},${p.monto},${p.estado},${diasAtraso}\n`;
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.setAttribute("href", URL.createObjectURL(blob));
+    link.setAttribute("download", `cobranza_${new Date().toISOString().split('T')[0]}.csv`);
+    link.click();
+}
+
+function renderClientesMorosos() { renderCuentasXCobrar('', 'Atrasado'); }
+function exportarMorososCSV() { exportarCobranzaEsperada(); }
+function abrirHistorialAbonos(folio) { abrirEstadoCuentaFolio(folio); }
+
+function reimprimirTicketAbono(folio, indexAbono) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pagaresSistema = StorageService.get("pagaresSistema", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return alert("Cuenta no encontrada.");
+
+    const abonos = cuenta.abonos || [];
+    if (indexAbono < 0 || indexAbono >= abonos.length) return alert("Abono no encontrado.");
+
+    const abono = abonos[indexAbono];
+    const pagaresDelFolio = pagaresSistema.filter(p => p.folio === folio);
+    const pagaresPendientes = pagaresDelFolio.filter(p => p.estado !== "Pagado" && p.estado !== "Cancelado");
+    const saldoActual = pagaresPendientes.reduce((s, p) => s + (p.monto - (p.montoAbonado || 0)), 0);
+
+    generarTicketAbonoTermico({
+        folio: folio,
+        cliente: { nombre: cuenta.nombre, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
+        montoAbono: abono.monto || 0,
+        nuevoSaldo: saldoActual,
+        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fecha) : new Date(abono.fecha).toLocaleDateString(),
+        metodoCobro: abono.etiquetaCuenta || abono.medioPago || 'Efectivo',
+        cuentaDestino: abono.cuentaId || abono.etiquetaCuenta || '',
+        pagaresCubiertos: pagaresDelFolio.filter(p => p.estado === "Pagado"),
+        pagaresRestantes: pagaresPendientes,
+        articulos: cuenta.articulos || [],
+        totalVenta: Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0),
+        enganche: Number(cuenta.engancheRecibido || 0)
+    });
+}
+
+// ==========================================
+// 5. AUDITORÍA Y CORRECCIÓN DE ABONOS
+// ==========================================
+window.renderAuditoriaAbonos = function() {
+    const cont = document.getElementById('auditoria-abonos');
+    if (!cont) return;
+
+    cont.innerHTML = ""; 
+
+    const filtroCliente = (window._filtroAbnCliente || "").toLowerCase();
+    const filtroStatus = window._filtroAbnStatus || "todas";
+    const segmentar = window._filtroAbnSegmentar === undefined ? true : window._filtroAbnSegmentar;
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+
+    let cuentasFiltradas = cuentas.filter(c => {
+        const matchCliente = (c.nombre || "").toLowerCase().includes(filtroCliente);
+        const matchStatus = filtroStatus === "todas" || c.estado === filtroStatus;
+        return matchCliente && matchStatus && c.abonos && c.abonos.length > 0;
+    });
+
+    let htmlControles = `
+        <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.05); margin-bottom:20px; display:flex; flex-wrap:wrap; gap:20px; align-items:flex-end;">
+            <div style="flex:1; min-width:250px;">
+                <label style="font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:5px;">🔍 BUSCAR CLIENTE:</label>
+                <input type="text" id="searchClienteAbn" value="${window._filtroAbnCliente || ''}" 
+                    oninput="window._filtroAbnCliente=this.value; renderAuditoriaAbonos();" 
+                    placeholder="Nombre del cliente..." 
+                    style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px;">
+            </div>
+            <div>
+                <label style="font-size:11px; font-weight:bold; color:#64748b; display:block; margin-bottom:5px;">📉 STATUS:</label>
+                <select onchange="window._filtroAbnStatus=this.value; renderAuditoriaAbonos();" style="padding:10px; border-radius:8px; border:1px solid #cbd5e1; background:white;">
+                    <option value="todas" ${filtroStatus==='todas'?'selected':''}>Todas</option>
+                    <option value="Saldado" ${filtroStatus==='Saldado'?'selected':''}>Saldadas</option>
+                    <option value="Pendiente" ${filtroStatus==='Pendiente'?'selected':''}>Pendientes</option>
+                </select>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; padding-bottom:10px; border-left:1px solid #e2e8f0; padding-left:20px;">
+                <input type="checkbox" ${segmentar ? 'checked' : ''} onchange="window._filtroAbnSegmentar=this.checked; renderAuditoriaAbonos();">
+                <span style="font-size:12px; font-weight:bold; color:#475569;">Segmentar por Venta</span>
+            </div>
+        </div>
+    `;
+
+    let htmlCuerpo = "";
+    if (segmentar) {
+        htmlCuerpo = cuentasFiltradas.map(c => {
+            let filas = c.abonos.map((ab, idx) => `
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                    <td style="padding:10px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ab.fecha) : new Date(ab.fecha).toLocaleDateString()}</td>
+                    <td style="padding:10px; font-weight:bold; color:#16a34a;">${_cxcDinero(ab.monto)}</td>
+                    <td style="padding:10px; font-size:11px; color:#64748b;">${ab.etiquetaCuenta || ab.medioPago || 'Efectivo'}</td>
+                    <td style="padding:10px; text-align:right;">
+                        <button onclick="abrirEditorAbono('${c.folio}', ${idx})" style="padding:6px 12px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">✏️ Editar</button>
+                    </td>
+                </tr>
+            `).join('');
+
+            return `
+                <div style="background:white; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:20px; overflow:hidden; border:1px solid #e2e8f0;">
+                    <div style="background:#0f172a; color:white; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-size:14px; font-weight:bold;">${c.nombre} (Folio: ${c.folio})</span>
+                        <span style="font-size:11px;">Fecha Venta: ${c.fecha || '—'} | Status: ${c.estado}</span>
+                    </div>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead style="background:#f8fafc; font-size:10px; color:#64748b; text-transform:uppercase;">
+                            <tr><th style="padding:10px; text-align:left;">Fecha Pago</th><th style="padding:10px; text-align:left;">Importe</th><th style="padding:10px; text-align:left;">Cuenta</th><th style="padding:10px; text-align:right;">Acción</th></tr>
+                        </thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>`;
+        }).join('');
+    } else {
+        let todos = [];
+        cuentasFiltradas.forEach(c => c.abonos.forEach((ab, idx) => {
+            todos.push({ folio: c.folio, cliente: c.nombre, abonoIdx: idx, fecha: ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo' });
+        }));
+        
+        // 🛡️ REPARACIÓN: Ordenamiento seguro para evitar 'Invalid Date' y NaN
+        todos.sort((a,b) => {
+            const parseD = (f) => {
+                if (typeof f === 'string' && f.includes('/')) {
+                    const p = f.split('/');
+                    return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0).getTime();
+                }
+                return new Date(f).getTime() || 0;
+            };
+            return parseD(b.fecha) - parseD(a.fecha);
+        });
+        
+        let filasPlanos = todos.map(a => `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:12px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : new Date(a.fecha).toLocaleDateString()}</td>
+                <td style="padding:12px;"><b>${a.cliente}</b> <small>(Folio: ${a.folio})</small></td>
+                <td style="padding:12px; font-weight:bold; color:#16a34a;">${_cxcDinero(a.monto)}</td>
+                <td style="padding:12px; font-size:11px;">${a.cuenta}</td>
+                <td style="padding:12px; text-align:right;">
+                    <button onclick="abrirEditorAbono('${a.folio}', ${a.abonoIdx})" style="padding:6px 12px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">✏️ Corregir</button>
+                </td>
+            </tr>`).join('');
+        htmlCuerpo = `<div style="background:white; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); overflow:hidden;"><table style="width:100%; border-collapse:collapse;"><thead style="background:#0f172a; color:white; font-size:11px;"><tr><th style="padding:15px; text-align:left;">Fecha Abono</th><th style="padding:15px; text-align:left;">Cliente</th><th style="padding:15px; text-align:left;">Importe</th><th style="padding:15px; text-align:left;">Cuenta</th><th style="padding:15px; text-align:right;">Acción</th></tr></thead><tbody>${filasPlanos}</tbody></table></div>`;
+    }
+
+    cont.innerHTML = `<div style="max-width:1200px; margin:0 auto;">${htmlControles}${htmlCuerpo}</div>`;
+};
+
+window.abrirEditorAbono = function(folio, abonoIndex) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+    
+    const abono = cuenta.abonos[abonoIndex];
+    if (!abono) return;
+
+    const cuentasConfig = StorageService.get("cuentasBancarias", []); 
+    const opcionesCuentas = [
+        { id: 'efectivo', nombre: '💵 Efectivo' },
+        ...cuentasConfig.map(c => ({ id: c.nombre, nombre: `🏦 ${c.nombre}` }))
+    ].map(c => {
+        const esSeleccionada = (abono.medioPago === c.id || abono.etiquetaCuenta === c.nombre) ? 'selected' : '';
+        return `<option value="${c.id}" data-nombre="${c.nombre}" ${esSeleccionada}>${c.nombre}</option>`;
+    }).join('');
+
+    let valorFechaFormato = window.fechaParaInput ? window.fechaParaInput(new Date(abono.fecha)) : new Date(abono.fecha).toISOString().slice(0, 16);
+
+    const html = `
+    <div id="modalCorreccionAbono" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 5px 0; color:#1e40af;">✏️ Corrección de Abono</h3>
+            <p style="font-size:13px; color:#64748b; margin-top:0;">Venta: <b>${folio}</b> | Cliente: <b>${cuenta.nombre}</b></p>
+            
+            <div style="margin-top:20px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">FECHA DEL MOVIMIENTO:</label>
+                <input type="datetime-local" id="editFechaAbn" value="${valorFechaFormato}" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">IMPORTE DEL ABONO ($):</label>
+                <input type="number" id="editMontoAbn" value="${abono.monto}" style="width:100%; padding:12px; border-radius:8px; border:2px solid #3b82f6; margin-top:5px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#1e40af;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">CUENTA RECEPTORA:</label>
+                <select id="editCuentaAbn" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; font-size:14px;">
+                    ${opcionesCuentas}
+                </select>
+            </div>
+
+            <div style="background:#fffbeb; padding:12px; border-radius:8px; margin-top:20px; border:1px solid #fcd34d;">
+                <p style="margin:0; font-size:12px; color:#92400e;">⚠️ <b>Atención:</b> Los pagarés se resetearán y se volverán a cubrir desde el #1 con el nuevo saldo total. El movimiento en "Flujo de Caja" se corregirá automáticamente.</p>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="procesarCorreccionAbono('${folio}', ${abonoIndex})" 
+                        style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">
+                    💾 Guardar Cambios
+                </button>
+                <button onclick="document.getElementById('modalCorreccionAbono').remove()" 
+                        style="flex:1; padding:14px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.procesarCorreccionAbono = function(folio, abonoIndex) {
+    const nuevaFecha = document.getElementById('editFechaAbn').value;
+    const nuevoMonto = parseFloat(document.getElementById('editMontoAbn').value);
+    const selCuenta = document.getElementById('editCuentaAbn');
+    
+    if (isNaN(nuevoMonto) || nuevoMonto <= 0) return alert("Importe inválido.");
+
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].getAttribute('data-nombre');
+    const medioPago = cuentaId === 'efectivo' ? 'efectivo' : 'transferencia';
+
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    let pagares = StorageService.get("pagaresSistema", []);
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+
+    let cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return;
+
+    cuenta.abonos[abonoIndex].fecha = window.localISO ? window.localISO(new Date(nuevaFecha + 'T12:00:00')) : new Date(nuevaFecha + 'T12:00:00').toISOString();
+    cuenta.abonos[abonoIndex].monto = nuevoMonto;
+    cuenta.abonos[abonoIndex].cuentaId = cuentaId;
+    cuenta.abonos[abonoIndex].medioPago = medioPago;
+    cuenta.abonos[abonoIndex].etiquetaCuenta = etiqueta;
+
+    const totalAbonado = cuenta.abonos.reduce((sum, a) => sum + Number(a.monto), 0);
+    const enganche = Number(cuenta.engancheRecibido || 0);
+    let deudaTotal = cuenta.totalContadoOriginal - enganche;
+    if (cuenta.plan && cuenta.plan.total) deudaTotal = cuenta.plan.total;
+    else if (cuenta.saldoOriginal) deudaTotal = cuenta.saldoOriginal;
+
+    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado);
+    if (cuenta.saldoActual <= 0.01) {
+        cuenta.estado = "Saldado";
+        cuenta.saldoActual = 0;
+    } else if (cuenta.estado === "Saldado") {
+        cuenta.estado = "Pendiente";
+    }
+
+    let pagaresFolio = pagares.filter(p => p.folio === folio).sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    let bolsa = totalAbonado;
+
+    pagaresFolio.forEach(p => {
+        p.montoAbonado = 0;
+        p.fechaAbono = null;
+        p.estado = "Pendiente";
+
+        if (bolsa >= p.monto - 0.01) {
+            p.estado = "Pagado";
+            p.montoAbonado = p.monto;
+            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1].fecha; 
+            bolsa -= p.monto;
+        } else if (bolsa > 0.01) {
+            p.estado = "Parcial";
+            p.montoAbonado = bolsa;
+            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1].fecha;
+            bolsa = 0;
+        }
+    });
+
+    pagares = pagares.map(p => {
+        const pMod = pagaresFolio.find(pf => pf.id === p.id);
+        return pMod ? pMod : p;
+    });
+
+    movimientosCaja = movimientosCaja.filter(m => !(m.folio === folio && m.referencia === `ABONO-${folio}`));
+    cuenta.abonos.forEach((ab) => {
+        movimientosCaja.push({
+            id: Date.now() + Math.random(),
+            folio: folio,
+            fecha: ab.fecha,
+            monto: ab.monto,
+            tipo: "ingreso",
+            concepto: `Abono a ${cuenta.nombre} - ${folio}`,
+            referencia: `ABONO-${folio}`,
+            cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
+            medioPago: ab.medioPago || 'efectivo',
+            etiquetaCuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo'
+        });
+    });
+
+    StorageService.set("cuentasPorCobrar", cuentas);
+    StorageService.set("pagaresSistema", pagares);
+    StorageService.set("movimientosCaja", movimientosCaja);
+
+    document.getElementById('modalCorreccionAbono').remove();
+    alert("✅ Abono modificado con éxito. Saldos, pagarés y flujo de caja están cuadrados.");
+    renderAuditoriaAbonos();
+};
+
+// ==========================================
+// ESTADO DE CUENTA PROFESIONAL (CORREGIDO)
+// ==========================================
+function abrirEstadoCuentaFolio(folio) {
+    const estadoCta = window._calcularEstadoCuenta(folio);
+    if (!estadoCta) return alert("❌ Error: No se encontró información de este folio.");
+
+    const { cuenta, pagares, pagaresVencidos, montoVencido, saldoTotal, totalAbonado, estadoGeneral } = estadoCta;
+    
+    // Variables de apoyo
+    const totalVenta = Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0);
+    const enganche   = Number(cuenta.engancheRecibido || 0);
+    const abonos     = cuenta.abonos || [];
+    const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+    // 1. GENERAR TABLA DE AMORTIZACIÓN (PAGARÉS)
+    const hoy = new Date();
+    const amortizacionHTML = pagares.length > 0
+        ? pagares.map((p, i) => {
+            const fechaVenc = new Date(p.fechaVencimiento);
+            const esVencido = (p.estado === "Pendiente" || p.estado === "Parcial") && fechaVenc < hoy;
+            const rowStyle = esVencido ? 'background:#fff1f2;' : (p.estado === "Pagado" ? 'background:#f8fafc; color:#94a3b8;' : '');
+            
+            let estadoBadge = '';
+            if (p.estado === "Pagado") estadoBadge = `<span style="color:#10b981; font-weight:bold; font-size:12px;">✅ Pagado</span>`;
+            else if (esVencido) estadoBadge = `<span style="color:#e11d48; font-weight:bold; font-size:12px;">⚠️ Vencido</span>`;
+            else if (p.estado === "Cancelado") estadoBadge = `<span style="color:#64748b; font-weight:bold; font-size:12px;">✖ Cancelado</span>`;
+            else if (p.estado === "Parcial") estadoBadge = `<span style="color:#d97706; font-weight:bold; font-size:12px;">⏳ Parcial</span>`;
+            else estadoBadge = `<span style="color:#3b82f6; font-weight:bold; font-size:12px;">🗓️ Pendiente</span>`;
+
+            return `<tr style="${rowStyle} border-bottom:1px solid #e2e8f0;">
+                <td style="padding:10px 8px; text-align:center; color:#64748b;">${i + 1}</td>
+                <td style="padding:10px 8px; font-weight:500;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(p.fechaVencimiento) : new Date(p.fechaVencimiento).toLocaleDateString()}</td>
+                <td style="padding:10px 8px; text-align:right; font-weight:bold;">${_cxcDinero(p.monto || 0)}</td>
+                <td style="padding:10px 8px; text-align:center;">${estadoBadge}</td>
+                <td style="padding:10px 8px; font-size:12px;">${p.fechaAbono ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(p.fechaAbono) : new Date(p.fechaAbono).toLocaleDateString()) : '-'}</td>
+                <td style="padding:10px 8px; text-align:right; color:#10b981; font-weight:bold;">${p.montoAbonado ? _cxcDinero(p.montoAbonado) : '-'}</td>
+            </tr>`;
+        }).join('')
+        : `<tr><td colspan="6" style="padding:20px; text-align:center; color:#94a3b8; font-style:italic;">Sin pagarés registrados</td></tr>`;
+
+    // 2. GENERAR HISTORIAL DE ABONOS
+    const abonosHTML = abonos.length > 0
+        ? abonos.map(a => `
+            <tr style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:10px 8px; color:#475569;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : new Date(a.fecha).toLocaleDateString()}</td>
+                <td style="padding:10px 8px; text-align:right; font-weight:bold; color:#15803d;">+ ${_cxcDinero(a.monto || 0)}</td>
+                <td style="padding:10px 8px; color:#475569; font-size:11px;">${esc(a.etiquetaCuenta || a.medioPago || 'Efectivo')}</td>
+            </tr>`).join('')
+        : `<tr><td colspan="3" style="padding:20px; text-align:center; color:#94a3b8; font-style:italic;">Sin abonos registrados</td></tr>`;
+
+    // 3. CONSTRUCCIÓN DEL MODAL MAESTRO
+    const modalHTML = `
+        <div data-modal="estado-cuenta-folio" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(4px);">
+            <div id="estadoCuentaFolioDoc" style="background:white; padding:35px; border-radius:16px; width:100%; max-width:900px; margin:auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+                
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:25px; border-bottom:2px solid #f1f5f9; padding-bottom:20px;">
+                    <div style="display:flex; align-items:center; gap:20px;">
+                        <div style="width:70px; height:70px; background:#1e40af; border-radius:12px; display:flex; align-items:center; justify-content:center; color:white; font-size:32px;">🛋️</div>
+                        <div>
+                            <div style="font-size:24px; font-weight:900; color:#0f172a; letter-spacing:-0.5px;">MUEBLERÍA MI PUEBLITO</div>
+                            <div style="font-size:15px; color:#64748b; font-weight:500;">Estado de Cuenta Oficial</div>
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:22px; font-weight:bold; color:#1e40af;">Folio: ${esc(folio)}</div>
+                        <div style="font-size:14px; color:#64748b; margin-top:4px;">Emisión: ${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString()}</div>
+                        <span style="display:inline-block; margin-top:8px; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:bold; background:${estadoGeneral==='Saldado'?'#dcfce7':estadoGeneral==='Al corriente'?'#dbeafe':'#fee2e2'}; color:${estadoGeneral==='Saldado'?'#166534':estadoGeneral==='Al corriente'?'#1e40af':'#991b1b'};">${estadoGeneral.toUpperCase()}</span>
+                    </div>
+                </div>
+
+                <div style="background:#f8fafc; padding:20px; border-radius:12px; margin-bottom:25px; border:1px solid #e2e8f0; display:flex; justify-content:space-between;">
+                    <div>
+                        <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold; margin-bottom:4px;">Cliente</div>
+                        <div style="font-size:18px; font-weight:bold; color:#0f172a;">${esc(cuenta.nombre)}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:11px; color:#64748b; text-transform:uppercase; font-weight:bold; margin-bottom:4px;">Fecha de Venta</div>
+                        <div style="font-size:16px; font-weight:bold;">${cuenta.fechaVenta ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(cuenta.fechaVenta) : window.formatearFechaCortaMX(cuenta.fechaVenta)) : '-'}</div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px; margin-bottom:30px;">
+                    <div style="padding:15px; border-radius:12px; background:#fff; border:1px solid #e2e8f0;">
+                        <div style="font-size:11px; color:#64748b; font-weight:bold; margin-bottom:5px;">TOTAL VENTA</div>
+                        <div style="font-size:19px; font-weight:900;">${_cxcDinero(totalVenta)}</div>
+                    </div>
+                    <div style="padding:15px; border-radius:12px; background:#fff; border:1px solid #e2e8f0;">
+                        <div style="font-size:11px; color:#64748b; font-weight:bold; margin-bottom:5px;">ENGANCHE</div>
+                        <div style="font-size:19px; font-weight:900;">${_cxcDinero(enganche)}</div>
+                    </div>
+                    <div style="padding:15px; border-radius:12px; background:#f0fdf4; border:1px solid #bbf7d0;">
+                        <div style="font-size:11px; color:#166534; font-weight:bold; margin-bottom:5px;">TOTAL ABONADO</div>
+                        <div style="font-size:19px; font-weight:900; color:#15803d;">${_cxcDinero(totalAbonado)}</div>
+                    </div>
+                    <div style="padding:15px; border-radius:12px; background:${saldoTotal > 0 ? '#fff1f2' : '#f8fafc'}; border:1px solid ${saldoTotal > 0 ? '#fecdd3' : '#e2e8f0'};">
+                        <div style="font-size:11px; color:${saldoTotal > 0 ? '#e11d48' : '#64748b'}; font-weight:bold; margin-bottom:5px;">SALDO ACTUAL</div>
+                        <div style="font-size:19px; font-weight:900; color:${saldoTotal > 0 ? '#be123c' : '#0f172a'};">${_cxcDinero(saldoTotal)}</div>
+                    </div>
+                </div>
+
+                ${pagaresVencidos.length > 0 ? `
+                <div style="background:#fef2f2; border-left:4px solid #ef4444; padding:12px 20px; border-radius:8px; margin-bottom:25px; color:#b91c1c; font-weight:bold;">
+                    ⚠️ Cuenta con ${pagaresVencidos.length} pagaré(s) vencido(s) por un total de ${_cxcDinero(montoVencido)}
+                </div>` : ''}
+
+                <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:25px;">
+                    <div>
+                        <h3 style="margin:0 0 15px; font-size:15px; color:#0f172a; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">🗓️ Tabla de Amortización</h3>
+                        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                            <thead style="background:#f8fafc;">
+                                <tr><th>No.</th><th>Vencimiento</th><th style="text-align:right;">Monto</th><th>Estado</th><th>F. Pago</th><th style="text-align:right;">Abonado</th></tr>
+                            </thead>
+                            <tbody>${amortizacionHTML}</tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <h3 style="margin:0 0 15px; font-size:15px; color:#0f172a; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">💰 Historial de Abonos</h3>
+                        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                            <thead style="background:#f8fafc;">
+                                <tr><th>Fecha</th><th style="text-align:right;">Importe</th><th>Cuenta</th></tr>
+                            </thead>
+                            <tbody>${abonosHTML}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="no-print" style="margin-top:30px; padding-top:20px; border-top:1px solid #eee; display:flex; justify-content:space-between;">
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="imprimirEstadoCuentaFolio()" style="padding:10px 20px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">🖨️ Imprimir PDF</button>
+                        <button onclick="guardarImagenEstadoCuenta()" style="padding:10px 20px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">📷 Guardar Imagen</button>
+                    </div>
+                    <button onclick="document.querySelector('[data-modal=estado-cuenta-folio]').remove()" style="padding:10px 20px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Cerrar</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function guardarImagenEstadoCuenta() {
+    const el = document.getElementById('estadoCuentaFolioDoc');
+    if (!el) return;
+    if (typeof html2canvas === 'undefined') {
+        alert("Cargando motor de imagen... Reintenta en 2 segundos.");
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        document.head.appendChild(script);
+    } else {
+        html2canvas(el, { scale: 2 }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = 'Estado_Cuenta.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+    }
+}
+
+function abrirEstadoCuentaCliente(clienteId) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    
+    // Buscar la cuenta tanto por "clienteId" (ventas nuevas) como por "id" (ventas migradas del Excel)
+    const cuenta = cuentas.find(c => (String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId)) && c.estado !== 'Saldado') || 
+                   cuentas.find(c => String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId));
+                   
+    if (cuenta) {
+        abrirEstadoCuentaFolio(cuenta.folio);
+    } else {
+        alert("Este cliente no tiene cuentas activas.");
+    }
+}
+
+function imprimirEstadoCuentaFolio() {
+    window.print();
+}
+
+window.enviarRecordatorioWhatsApp = function(folio) {
+    const est = window._calcularEstadoCuenta(folio);
+    const cli = StorageService.get("clientes", []).find(x => String(x.id) === String(est.cuenta.clienteId));
+    if (!cli || !cli.telefono) return alert("El cliente no tiene teléfono registrado.");
+
+    let msj = `Hola *${cli.nombre}*, de Mueblería Mi Pueblito 🛋️. Te recordamos tu saldo de *$${est.saldoTotal.toFixed(2)}* (Folio ${folio}).`;
+    if (est.montoVencido > 0) msj += `\nTienes un vencido de *$${est.montoVencido.toFixed(2)}*.`;
+    
+    window.open(`https://api.whatsapp.com/send?phone=52${cli.telefono.replace(/\D/g,'')}&text=${encodeURIComponent(msj)}`, '_blank');
+};
+
+window.abrirModalPromesaPago = function(folio) {
+    const fechaHoy = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    const html = `
+    <div data-modal="promesa" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; padding:30px; border-radius:12px; width:350px;">
+            <h3 style="margin:0 0 15px 0;">📝 Registrar Promesa</h3>
+            <label style="font-weight:bold; font-size:12px;">Fecha de promesa de pago:</label>
+            <input type="date" id="fechaPromesa" value="${fechaHoy}" style="width:100%; padding:10px; margin:10px 0; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;">
+            <button onclick="guardarPromesaPago('${folio}')" style="width:100%; padding:12px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Guardar Promesa</button>
+            <button onclick="this.parentElement.parentElement.remove()" style="width:100%; margin-top:10px; background:#f1f5f9; border:none; padding:10px; border-radius:8px; cursor:pointer; color:#475569; font-weight:bold;">Cancelar</button>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.guardarPromesaPago = function(folio) {
+    const fecha = document.getElementById('fechaPromesa').value;
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    const idx = cuentas.findIndex(c => c.folio === folio);
+    if (idx === -1) return;
+
+    cuentas[idx].promesaPago = { fecha, fechaRegistro: window.localISO ? window.localISO(new Date()) : new Date().toISOString() };
+    StorageService.set("cuentasPorCobrar", cuentas);
+    document.querySelector('[data-modal=promesa]').remove();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+};
+
+window.filtrarCuentasCobranza = function() {
+    const texto = document.getElementById("filtroClienteCobranza")?.value || "";
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar(texto);
+};
+
+// ==========================================
+// EXPORTACIONES GLOBALES (CONEXIÓN CON EL HTML)
+// ==========================================
+window.renderCuentasXCobrar = renderCuentasXCobrar;
+window.abrirModalAbonoAvanzado = abrirModalAbonoAvanzado;
+window.actualizarAvisoPoliticaAbono = actualizarAvisoPoliticaAbono;
+window.procesarAbonoAvanzado = procesarAbonoAvanzado;
+window.generarTicketAbonoTermico = generarTicketAbonoTermico;
+window.renderCobranzaEsperada = renderCobranzaEsperada;
+window.abrirDetalleCobranza = abrirDetalleCobranza;
+window.exportarCobranzaEsperada = exportarCobranzaEsperada;
+window.exportarMorososCSV = exportarMorososCSV;
+window.renderClientesMorosos = renderClientesMorosos;
+window.abrirHistorialAbonos = abrirHistorialAbonos;
+window.reimprimirTicketAbono = reimprimirTicketAbono;
+window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
+window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
+window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
+window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
