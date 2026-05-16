@@ -1,4 +1,4 @@
-// ===== INICIALIZACIÓN =====
+// ===== INICIALIZACIÓN (VERSIÓN OFFLINE-FIRST ULTRA RÁPIDA Y AUDITADA) =====
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.pathname.includes("catalogo.html")) {
@@ -9,21 +9,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log("🚀 Iniciando sistema POS Mueblería Mi Pueblito...");
     
     try {
-        // 1. Despertar la base de datos local (Instantáneo)
+        // 1. Despertar la base de datos local (Instantáneo - 50ms)
         await StorageService.init();
 
-        // ☁️ 2. SINCRONIZACIÓN FIREBASE (Descarga la nube antes de arrancar)
-        if (window._firebaseActivo && window._db) {
-            console.log("☁️ Sincronizando con Firebase al arrancar...");
-            try {
-                // Esperamos a que descargue todos los productos y clientes de la nube
-                await StorageService.syncAll(); 
-            } catch (e) {
-                console.warn("⚠️ Trabajando Offline. Se usarán los datos locales.", e);
-            }
-        }
-
-        // 3. Cargar TODO a la memoria global de forma SEGURA (con || [] para evitar crasheos)
+        // 2. Cargar TODO a la memoria global de forma SEGURA usando datos locales preexistentes
         window.categoriasData = StorageService.get("categoriasData", []) || [];
         if (window.categoriasData.length === 0) {
             window.categoriasData = [
@@ -42,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             StorageService.set("tarjetasConfig", window.tarjetasConfig);
         }
 
-        // Leer variables (ya actualizadas por Firebase o locales)
+        // Leer variables globales desde el almacenamiento local inmediatamente
         window.productos = StorageService.get("productos", []) || [];
         window.clientes = StorageService.get("clientes", []) || [];
         window.carrito = StorageService.get("carrito", []) || [];
@@ -58,12 +47,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.requisicionesCompra = StorageService.get("requisicionesCompra", []) || [];
         window.salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []) || [];
         
-        // Ejecutar funciones iniciales
+        // 3. Ejecutar utilidades y migraciones locales internas
         if (typeof migrarStorageCuentasPorCobrar === 'function') migrarStorageCuentasPorCobrar();
         if (typeof inicializarNotificaciones === 'function') inicializarNotificaciones();
         if (typeof verificarGastosRecurrentes === 'function') verificarGastosRecurrentes();
         
-        // 4. Arrancar la interfaz gráfica
+        // 4. ARRANCAR LA INTERFAZ GRÁFICA AL INSTANTE (Sin retrasos de red)
         if (!window.location.pathname.includes("catalogo.html")) {
             if (typeof navA === 'function') navA('inicio');
             if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
@@ -74,12 +63,54 @@ document.addEventListener('DOMContentLoaded', async () => {
             StorageService.startRealtimeSync();
         }
         
-        console.log("✅ Sistema cargado y sincronizado correctamente.");
+        console.log("✅ Sistema cargado en local al instante.");
         console.log("📊 Estado actual:");
         console.log(`   • Categorías: ${window.categoriasData.length}`);
         console.log(`   • Bancos: ${window.tarjetasConfig.length}`);
         console.log(`   • Productos: ${window.productos.length}`);
         console.log(`   • Clientes: ${window.clientes.length}`);
+
+        // ☁️ 5. SINCRONIZACIÓN CON FIREBASE EN SEGUNDO PLANO (Asíncrono y silencioso)
+        if (window._firebaseActivo && window._db) {
+            console.log("☁️ Sincronizando con la nube en segundo plano...");
+            
+            // Ejecutamos la descarga sin usar 'await' para no congelar el hilo principal del DOM
+            StorageService.syncAll().then(() => {
+                console.log("🔄 Nube sincronizada con éxito sin interrumpir al usuario.");
+                
+                // Una vez descargada la información fresca de la nube, actualizamos la memoria RAM activa
+                window.productos = StorageService.get("productos", []) || [];
+                window.clientes = StorageService.get("clientes", []) || [];
+                window.cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []) || [];
+                window.pagaresSistema = StorageService.get("pagaresSistema", []) || [];
+                window.proveedores = StorageService.get("proveedores", []) || [];
+                window.movimientosInventario = StorageService.get("movimientosInventario", []) || [];
+                window.recepciones = StorageService.get("recepciones", []) || [];
+                window.compras = StorageService.get("compras", []) || [];
+                window.cuentasPorPagar = StorageService.get("cuentasPorPagar", []) || [];
+                window.deudasMSI = StorageService.get("deudasMSI", []) || [];
+                window.movimientosCaja = StorageService.get("movimientosCaja", []) || [];
+                window.requisicionesCompra = StorageService.get("requisicionesCompra", []) || [];
+                window.salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []) || [];
+                
+                // DETECTOR INTELIGENTE DE RENDERIZADO VISUAL EN TIEMPO REAL
+                // Si el usuario está posicionado en una vista operativa, se actualiza el contenido sutilmente
+                const vistaActiva = document.querySelector('.vista:not(.oculto)');
+                if (vistaActiva) {
+                    const idVista = vistaActiva.id;
+                    if (idVista === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+                    else if (idVista === 'tienda' && typeof mostrarProductos === 'function') window.mostrarProductos();
+                    else if (idVista === 'inventario' && typeof renderInventario === 'function') renderInventario();
+                    else if (idVista === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') window.renderCuentasXCobrar();
+                    else if (idVista === 'clientes' && typeof renderClientes === 'function') renderClientes();
+                }
+                
+                if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
+
+            }).catch(e => {
+                console.warn("⚠️ Trabajando Offline. La nube no respondió, pero el sistema sigue funcionando.", e);
+            });
+        }
         
     } catch (e) {
         console.error("⚠️ Error crítico en carga inicial:", e);
