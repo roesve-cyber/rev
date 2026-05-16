@@ -2793,6 +2793,152 @@ window.cancelarAuditoriaCxC = function(index, estadoAnterior) {
     dibujarFormularioAuditoria();
 };
 
+// =====================================================================
+// 🖨️ BUSCADOR UNIFICADO DE REIMPRESIÓN (CONTADO, CRÉDITO Y APARTADOS)
+// =====================================================================
+
+window.renderReimprimirVenta = function() {
+    const folioBuscado = document.getElementById('rvFolio').value.toLowerCase().trim();
+    const clienteBuscado = document.getElementById('rvCliente').value.toLowerCase().trim();
+    const fechaDesde = document.getElementById('rvFechaDesde').value;
+    const fechaHasta = document.getElementById('rvFechaHasta').value;
+    const montoMin = parseFloat(document.getElementById('rvMontoMin').value) || 0;
+    const montoMax = parseFloat(document.getElementById('rvMontoMax').value) || Infinity;
+
+    // 1. Extraer datos de las 3 bóvedas
+    const ventas = StorageService.get("ventasRegistradas", []).map(v => ({...v, _origen: 'venta'}));
+    const cxc = StorageService.get("cuentasPorCobrar", []).map(c => ({...c, _origen: 'credito'}));
+    const apartados = StorageService.get("apartados", []).map(a => ({...a, _origen: 'apartado'}));
+
+    // 2. Unificar todo en una sola lista maestra
+    let todo = [...ventas, ...cxc, ...apartados];
+
+    // 3. Aplicar Filtros de Búsqueda
+    let filtrados = todo.filter(item => {
+        const folio = String(item.folio || '').toLowerCase();
+        const cliente = String(item.cliente?.nombre || item.clienteNombre || item.nombre || '').toLowerCase();
+        const fecha = item.fechaVenta || item.fechaApartado || item.fecha || '';
+        const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
+
+        if (folioBuscado && !folio.includes(folioBuscado)) return false;
+        if (clienteBuscado && !cliente.includes(clienteBuscado)) return false;
+        if (fechaDesde && fecha.split('T')[0] < fechaDesde) return false;
+        if (fechaHasta && fecha.split('T')[0] > fechaHasta) return false;
+        if (total < montoMin) return false;
+        if (montoMax !== Infinity && total > montoMax) return false;
+
+        return true;
+    });
+
+    // 4. Ordenar de lo más reciente a lo más viejo
+    filtrados.sort((a, b) => {
+        const fa = new Date(a.fechaVenta || a.fechaApartado || a.fecha || 0);
+        const fb = new Date(b.fechaVenta || b.fechaApartado || b.fecha || 0);
+        return fb - fa;
+    });
+
+    // 5. Dibujar la Tabla
+    const cont = document.getElementById('contenidoReimprimirVenta');
+    if (filtrados.length === 0) {
+        cont.innerHTML = '<div style="padding:20px; text-align:center; color:#6b7280; background:white; border-radius:8px;">No se encontraron registros con esos filtros en ninguna categoría.</div>';
+        return;
+    }
+
+    const fmtDinero = (m) => '$' + Number(m || 0).toLocaleString('es-MX', {minimumFractionDigits:2});
+    let html = '<table class="tabla-admin" style="width:100%;"><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Total</th><th style="text-align:center;">Acción</th></tr></thead><tbody>';
+    
+    filtrados.forEach(item => {
+        const folio = item.folio || 'S/F';
+        let fechaLimpia = (item.fechaVenta || item.fechaApartado || item.fecha || '');
+        if(fechaLimpia.includes('T')) fechaLimpia = fechaLimpia.split('T')[0];
+        
+        const cliente = item.cliente?.nombre || item.clienteNombre || item.nombre || 'Desconocido';
+        const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
+        const tipo = item._origen.toUpperCase();
+        
+        let colorTipo = '#6b7280';
+        if (item._origen === 'venta') colorTipo = '#16a34a'; // Verde
+        if (item._origen === 'credito') colorTipo = '#2563eb'; // Azul
+        if (item._origen === 'apartado') colorTipo = '#7c3aed'; // Morado
+
+        html += `<tr>
+            <td><strong>${folio}</strong></td>
+            <td>${fechaLimpia}</td>
+            <td>${cliente}</td>
+            <td><span style="background:${colorTipo}; color:white; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:bold;">${tipo}</span></td>
+            <td>${fmtDinero(total)}</td>
+            <td style="text-align:center;">
+                <button onclick="reimprimirFolioUnificado('${folio}', '${item._origen}')" style="background:#475569; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    🖨️ Reimprimir
+                </button>
+            </td>
+        </tr>`;
+    });
+    
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+};
+
+window.limpiarFiltrosReimpresion = function() {
+    document.getElementById('rvFolio').value = '';
+    document.getElementById('rvCliente').value = '';
+    document.getElementById('rvFechaDesde').value = '';
+    document.getElementById('rvFechaHasta').value = '';
+    document.getElementById('rvMontoMin').value = '';
+    document.getElementById('rvMontoMax').value = '';
+    renderReimprimirVenta();
+};
+
+window.reimprimirFolioUnificado = function(folio, origen) {
+    if (origen === 'apartado') {
+        const apartados = StorageService.get("apartados", []);
+        const ap = apartados.find(a => a.folio === folio);
+        if (!ap) return alert("❌ No se encontró el apartado en la base de datos.");
+        
+        // Reconstruimos el paquete de datos para engañar y alimentar a tu generador de tickets térmicos
+        const datosVenta = {
+            folio: ap.folio,
+            fecha: ap.fechaApartado,
+            cliente: { nombre: ap.clienteNombre, id: ap.clienteId },
+            articulos: ap.articulos || [],
+            total: ap.importeApartado,
+            enganche: ap.enganche,
+            saldoPendiente: ap.saldoPendiente,
+            metodo: 'apartado', // Esto asegura que salga la leyenda legal de almacenaje
+            vendedorNombre: ap.vendedorNombre || 'N/A'
+        };
+        
+        if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(datosVenta);
+        else alert("⚠️ La función de impresión de tickets no está disponible.");
+
+    } else if (origen === 'credito') {
+        const cxc = StorageService.get("cuentasPorCobrar", []);
+        const c = cxc.find(x => x.folio === folio);
+        if (!c) return alert("❌ No se encontró el crédito.");
+        
+        const datosVenta = {
+            folio: c.folio,
+            fecha: c.fechaVenta,
+            cliente: { nombre: c.nombre, direccion: c.direccion, telefono: c.telefono, id: c.clienteId },
+            articulos: c.articulos || [],
+            total: c.totalContadoOriginal,
+            enganche: c.engancheRecibido,
+            saldoPendiente: c.saldoActual,
+            plan: c.plan,
+            periodicidad: c.periodicidad,
+            metodo: 'credito',
+            vendedorNombre: c.vendedorNombre || 'N/A'
+        };
+        if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(datosVenta);
+
+    } else { // Venta de contado
+        const ventas = StorageService.get("ventasRegistradas", []);
+        const v = ventas.find(x => x.folio === folio);
+        if (!v) return alert("❌ No se encontró la venta de contado.");
+        if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(v);
+    }
+};
+
 // Exponer la función globalmente para poder llamarla desde un botón
 window.abrirAuditoriaCxC = abrirAuditoriaCxC;
 
