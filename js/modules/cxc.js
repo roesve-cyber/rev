@@ -1829,6 +1829,172 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
 };
 
+// =====================================================================
+// 🕰️ AUDITORÍA DE FECHAS RELACIONALES (ABONOS Y CAJA)
+// =====================================================================
+window.abrirAuditoriaFechas = function() {
+    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
+    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
+        return alert("⛔ ACCESO DENEGADO: Solo Administradores.");
+    }
+
+    const modalHTML = `
+    <div data-modal="auditoria-fechas" style="position:fixed; inset:0; background:rgba(15,23,42,0.9); z-index:9999; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(5px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:700px; margin-top:20px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #f59e0b; padding-bottom:15px; margin-bottom:20px;">
+                <div>
+                    <h2 style="margin:0; color:#b45309; font-size:24px;">🕰️ Corrección de Fechas de Ingreso</h2>
+                    <p style="margin:0; color:#64748b; font-size:14px;">Ajusta la fecha real en que recibiste el dinero (Sincroniza Flujo de Caja)</p>
+                </div>
+                <button onclick="document.querySelector('[data-modal=\\'auditoria-fechas\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">✕ Cerrar</button>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-bottom:25px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
+                <input type="text" id="auditFechaFolio" placeholder="Ingresa el Folio (Ej. V-123456)" style="flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:6px; font-size:16px; text-transform:uppercase;">
+                <button onclick="buscarPagosAuditoria()" style="background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">🔍 Buscar Pagos</button>
+            </div>
+
+            <div id="auditContenedorFechas">
+                <div style="text-align:center; padding:40px; color:#94a3b8;">Ingresa un folio de Crédito o Apartado para ver su historial de cobros.</div>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.buscarPagosAuditoria = function() {
+    const folio = document.getElementById("auditFechaFolio").value.trim().toUpperCase();
+    if (!folio) return alert("Por favor ingresa un folio válido.");
+
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const apartados = StorageService.get("apartados", []);
+
+    let cuenta = cxc.find(c => String(c.folio).toUpperCase() === folio) || apartados.find(a => String(a.folio).toUpperCase() === folio);
+
+    if (!cuenta) {
+        document.getElementById("auditContenedorFechas").innerHTML = `<div style="padding:20px; background:#fef2f2; color:#b91c1c; border-radius:8px; border:1px solid #fecaca;">❌ No se encontró el folio ${folio} en Créditos ni en Apartados.</div>`;
+        return;
+    }
+
+    const esApartado = !!cuenta.importeApartado; 
+    let registrosHtml = '';
+    window._auditRegistrosFechas = []; 
+
+    // Extraer Enganche / Anticipo
+    let enganche = esApartado ? cuenta.enganche : cuenta.engancheRecibido;
+    if (enganche > 0) {
+        let fechaEnganche = cuenta.fechaVenta || cuenta.fechaApartado;
+        let fechaCorta = "";
+        try { fechaCorta = fechaEnganche.split('T')[0]; } catch(e) { fechaCorta = fechaEnganche; }
+        
+        window._auditRegistrosFechas.push({ tipo: 'enganche', montoOriginal: enganche, fechaOriginal: fechaCorta, nuevaFecha: fechaCorta });
+
+        registrosHtml += `
+        <div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:15px; margin-bottom:10px; border:1px solid #cbd5e1; border-radius:8px;">
+            <div>
+                <strong style="color:#1e40af; font-size:15px;">Enganche / Anticipo Inicial</strong><br>
+                <span style="color:#16a34a; font-weight:900; font-size:18px;">${_cxcDinero(enganche)}</span>
+            </div>
+            <div>
+                <label style="font-size:11px; color:#64748b; display:block; margin-bottom:4px;">📅 Fecha Real de Cobro:</label>
+                <input type="date" value="${fechaCorta}" onchange="window._auditRegistrosFechas[0].nuevaFecha = this.value" style="padding:10px; border:2px solid #94a3b8; border-radius:6px; font-weight:bold; cursor:pointer;">
+            </div>
+        </div>`;
+    }
+
+    // Extraer Abonos
+    if (cuenta.abonos && cuenta.abonos.length > 0) {
+        cuenta.abonos.forEach((ab, i) => {
+            let fechaAb = ab.fechaAbono || ab.fecha;
+            let fechaCorta = "";
+            try { fechaCorta = fechaAb.split('T')[0]; } catch(e) { fechaCorta = fechaAb; }
+
+            let indexMemoria = window._auditRegistrosFechas.length;
+            window._auditRegistrosFechas.push({ tipo: 'abono', indexAbono: i, montoOriginal: ab.monto, fechaOriginal: fechaCorta, nuevaFecha: fechaCorta });
+
+            registrosHtml += `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:15px; margin-bottom:10px; border:1px solid #cbd5e1; border-radius:8px;">
+                <div>
+                    <strong style="color:#0f766e; font-size:15px;">Abono #${i + 1}</strong><br>
+                    <span style="color:#16a34a; font-weight:900; font-size:18px;">${_cxcDinero(ab.monto)}</span>
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#64748b; display:block; margin-bottom:4px;">📅 Fecha Real de Cobro:</label>
+                    <input type="date" value="${fechaCorta}" onchange="window._auditRegistrosFechas[${indexMemoria}].nuevaFecha = this.value" style="padding:10px; border:2px solid #94a3b8; border-radius:6px; font-weight:bold; cursor:pointer;">
+                </div>
+            </div>`;
+        });
+    }
+
+    if (window._auditRegistrosFechas.length === 0) {
+        registrosHtml = `<div style="padding:20px; color:#64748b; text-align:center;">Esta cuenta no tiene ingresos de dinero registrados.</div>`;
+    } else {
+        registrosHtml += `
+        <div style="margin-top:20px; padding:15px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; font-size:12px; color:#b45309;">
+            💡 <strong>Sincronización Inteligente:</strong> Al guardar, el sistema actualizará la fecha en el estado de cuenta y buscará automáticamente este ingreso en el <b>Flujo de Caja</b> para corregirlo.
+        </div>
+        <div style="text-align:right; margin-top:20px;">
+            <button onclick="guardarCorreccionFechasDinero('${folio}', ${esApartado})" style="background:#059669; color:white; border:none; padding:14px 25px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(5, 150, 105, 0.2);">
+                💾 Confirmar Nuevas Fechas
+            </button>
+        </div>`;
+    }
+
+    document.getElementById("auditContenedorFechas").innerHTML = `
+        <h3 style="margin-top:0; color:#334155; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">Cliente: <span style="color:#2563eb;">${cuenta.nombre || cuenta.clienteNombre}</span></h3>
+        ${registrosHtml}
+    `;
+};
+
+window.guardarCorreccionFechasDinero = function(folio, esApartado) {
+    if (!confirm("¿Confirmas la corrección? Los reportes financieros de los días afectados cambiarán.")) return;
+
+    let cxc = StorageService.get("cuentasPorCobrar", []);
+    let apartados = StorageService.get("apartados", []);
+    let caja = StorageService.get("movimientosCaja", []);
+
+    let cuenta = esApartado ? apartados.find(a => String(a.folio).toUpperCase() === folio) : cxc.find(c => String(c.folio).toUpperCase() === folio);
+    let cambiosRealizados = 0;
+
+    window._auditRegistrosFechas.forEach(reg => {
+        if (reg.fechaOriginal !== reg.nuevaFecha) {
+            // Fijar la hora al mediodía para evitar desfases de zona horaria (UTC-6)
+            const nuevaFechaIso = window.localISO ? window.localISO(reg.nuevaFecha + 'T12:00:00') : new Date(reg.nuevaFecha + 'T12:00:00').toISOString();
+
+            // 1. Afectar el módulo origen
+            if (reg.tipo === 'enganche') {
+                if (esApartado) cuenta.fechaApartado = nuevaFechaIso;
+                else cuenta.fechaVenta = nuevaFechaIso;
+            } else if (reg.tipo === 'abono') {
+                cuenta.abonos[reg.indexAbono].fechaAbono = nuevaFechaIso;
+                if (cuenta.abonos[reg.indexAbono].fecha) cuenta.abonos[reg.indexAbono].fecha = nuevaFechaIso;
+            }
+
+            // 2. Afectar Flujo de Caja (Búsqueda por folio y monto exacto)
+            let movCaja = caja.find(m => String(m.folio).toUpperCase() === folio && Number(m.monto) === Number(reg.montoOriginal));
+            if (movCaja) movCaja.fecha = nuevaFechaIso;
+
+            cambiosRealizados++;
+        }
+    });
+
+    if (cambiosRealizados > 0) {
+        StorageService.set("movimientosCaja", caja);
+        if (esApartado) {
+            StorageService.set("apartados", apartados);
+            if(typeof renderApartados === 'function') renderApartados();
+        } else {
+            StorageService.set("cuentasPorCobrar", cxc);
+            if(typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+        }
+        alert(`✅ ¡Operación Exitosa!\n\nSe corrigió la fecha de ${cambiosRealizados} movimiento(s) en la cuenta del cliente y en el Flujo de Caja general.`);
+    } else {
+        alert("ℹ️ No modificaste ninguna fecha.");
+    }
+
+    document.querySelector('[data-modal="auditoria-fechas"]').remove();
+};
+
 // ==========================================
 // EXPORTACIONES GLOBALES (CONEXIÓN CON EL HTML)
 // ==========================================
