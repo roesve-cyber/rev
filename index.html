@@ -124,20 +124,16 @@
         </div>
 
         <div class="menu-item">
-    <button class="btn-desplegable" onclick="toggleSubmenu('sub-reportes')">📈 REPORTES <span>▾</span></button>
-    <div id="sub-reportes" class="submenu oculto-submenu">
-        <button onclick="navA('flujocaja'); renderFlujoCaja();">💵 Flujo de Caja</button>
-        <button onclick="navA('cortecaja'); renderCorteCaja();">💰 Corte de Caja</button>
-        <button onclick="navA('reportes'); renderReporteVentas();">📊 Dashboard General</button>
-        <button onclick="navA('reimprimir-venta'); renderReimprimirVenta();">🖨️ Reimprimir Venta</button>
-        <button onclick="abrirAuditoriaCxC()" style="color:#b91c1c;">🛠️ Auditoría CxC</button>
-        <button onclick="abrirAuditoriaFechas()" style="color:#b45309;">🕰️ Corrección de Fechas</button>
-        
-        <button onclick="navA('reportes'); renderAnalisisRiesgoCartera();" style="color:#1e40af; font-weight:bold; border-top:1px solid #e2e8f0; margin-top:5px; padding-top:10px;">
-            📈 ARC: Salud de Cartera
-        </button>
-    </div>
-</div>
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-reportes')">📊 REPORTES <span>▾</span></button>
+            <div id="sub-reportes" class="submenu oculto-submenu">
+                <button onclick="navA('dashboard'); renderDashboard();">📉 Dashboard Principal</button>
+                <button onclick="navA('reporte-ventas')">💰 Ventas</button>
+                <button onclick="navA('reporte-compras')">🛒 Compras</button>
+                <button onclick="navA('reporte-flujo'); renderReporteFlujo();">💵 Flujo de Efectivo</button>
+                <button onclick="navA('reporte-rentabilidad'); renderReporteRentabilidad();">📈 Rentabilidad Real</button>
+                <button onclick="navA('reportes'); renderAnalisisRiesgoCartera();" style="color:#1e40af; font-weight:bold; border-top:1px solid #e2e8f0; margin-top:5px; padding-top:10px;">📈 ARC: Salud de Cartera</button>
+            </div>
+        </div>
 
 <div class="menu-item">
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
