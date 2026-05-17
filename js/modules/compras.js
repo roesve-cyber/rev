@@ -2158,15 +2158,19 @@ function renderRequisiciones() {
     `).join('');
 
     contenedor.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
             <h2 style="margin:0; color:#1e40af;">📋 Requisiciones Pendientes</h2>
-            <div style="display:flex; gap:10px;">
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <button onclick="iniciarOrdenDesdeRequisiciones()" 
-                        style="padding:12px 20px; background:#1e40af; color:white; border:none; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer;">
-                    🛒 Compra vía OC
+                        style="padding:10px 15px; background:#1e40af; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    🛒 Nueva OC
+                </button>
+                <button onclick="abrirModalAgregarA_OC_Existente()" 
+                        style="padding:10px 15px; background:#d97706; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    📥 Añadir a OC Existente
                 </button>
                 <button onclick="iniciarCompraDirectaDesdeRequisiciones()" 
-                        style="padding:12px 20px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer;">
+                        style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                     🚀 Compra directa
                 </button>
             </div>
@@ -2837,6 +2841,107 @@ function cancelarOrdenCompra(id) {
     if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
+// ============================================================
+// AÑADIR REQUISICIONES A UNA OC EXISTENTE
+// ============================================================
+window.abrirModalAgregarA_OC_Existente = function() {
+    const seleccionados = Array.from(document.querySelectorAll('.chk-req:checked')).map(cb => cb.value);
+    if (seleccionados.length === 0) return alert("⚠️ Selecciona al menos una requisición de la lista.");
+
+    // Buscar OC's que aún se puedan editar
+    const ocs = StorageService.get('ordenesCompra', []).filter(oc => oc.estado === 'Borrador' || oc.estado === 'Enviada');
+    if (ocs.length === 0) return alert("⚠️ No tienes Órdenes de Compra abiertas (Borrador o Enviadas). Crea una nueva primero.");
+
+    let opciones = ocs.slice().reverse().map(oc => 
+        `<option value="${oc.id}">${oc.folio} — ${oc.proveedorNombre} (Total actual: ${dinero(oc.total)})</option>`
+    ).join('');
+
+    const modalHTML = `
+    <div data-modal="agregar-req-oc" style="position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(3px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:450px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#b45309; display:flex; align-items:center; gap:8px;">📥 Añadir a OC Existente</h3>
+            <p style="font-size:13px; color:#64748b; margin-bottom:20px;">Se insertarán los ${seleccionados.length} artículos seleccionados dentro de la Orden de Compra que elijas, recalculando su total automáticamente.</p>
+            
+            <label style="font-weight:bold; font-size:12px; color:#374151; display:block; margin-bottom:6px;">SELECCIONA LA ORDEN DE DESTINO</label>
+            <select id="selectReqOcDestino" style="width:100%; padding:12px; border:2px solid #fcd34d; border-radius:8px; margin-bottom:25px; font-size:14px; font-weight:bold; color:#92400e; background:#fffbeb;">
+                ${opciones}
+            </select>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="confirmarAgregarA_OC_Existente()" style="flex:2; padding:14px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px; box-shadow:0 4px 6px rgba(217, 119, 6, 0.3);">✅ Añadir Artículos</button>
+                <button onclick="document.querySelector('[data-modal=\\'agregar-req-oc\\']').remove()" style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    window._reqsTempParaOC = seleccionados; // Memoria temporal
+};
+
+window.confirmarAgregarA_OC_Existente = function() {
+    const ocId = parseInt(document.getElementById('selectReqOcDestino').value);
+    const reqIds = window._reqsTempParaOC || [];
+    if (!ocId || reqIds.length === 0) return;
+
+    let ocs = StorageService.get('ordenesCompra', []);
+    let idxOC = ocs.findIndex(o => o.id === ocId);
+    if (idxOC === -1) return alert("❌ Error: OC no encontrada.");
+    let oc = ocs[idxOC];
+
+    let reqsTotales = StorageService.get("requisicionesCompra", []);
+    let prods = StorageService.get("productos", []);
+    let agregados = 0;
+
+    reqIds.forEach(idReq => {
+        let req = reqsTotales.find(r => String(r.id) === String(idReq));
+        if (req && req.estatus === "Pendiente") {
+            const prod = prods.find(p => String(p.id) === String(req.productoId));
+            const costoUnitario = prod ? parseFloat(prod.costo) : 0;
+            const cant = parseInt(req.cantidad) || 1;
+            const caracteristicas = `Req. Venta: ${req.folioVenta}`;
+
+            // 1. Buscamos si ya existe el producto con esas características en la OC para sumar cantidad
+            let idxArt = oc.articulos.findIndex(a => String(a.productoId) === String(req.productoId) && a.caracteristicas === caracteristicas);
+            
+            if (idxArt !== -1) {
+                oc.articulos[idxArt].cantidad += cant;
+                oc.articulos[idxArt].subtotal = oc.articulos[idxArt].cantidad * oc.articulos[idxArt].costo;
+            } else {
+                // Si no, lo agregamos como fila nueva
+                oc.articulos.push({
+                    productoId: req.productoId,
+                    nombre: req.producto,
+                    costo: costoUnitario,
+                    cantidad: cant,
+                    subtotal: cant * costoUnitario,
+                    caracteristicas: caracteristicas
+                });
+            }
+
+            // 2. Marcamos la requisición como amarrada a esta OC
+            req.estatus = `En OC (${oc.folio})`;
+            agregados++;
+        }
+    });
+
+    // 3. Recalcular la matemática de la Orden de Compra
+    oc.total = oc.articulos.reduce((s, a) => s + (a.subtotal || 0), 0);
+    const anticipoPrevio = oc.anticipo_pagado || 0;
+    oc.saldoPendiente = Math.max(0, oc.total - anticipoPrevio);
+
+    // 4. Guardar cambios en las bases de datos
+    StorageService.set('ordenesCompra', ocs);
+    StorageService.set('requisicionesCompra', reqsTotales);
+    
+    document.querySelector('[data-modal="agregar-req-oc"]').remove();
+    window._reqsTempParaOC = null;
+    
+    alert(`✅ ¡Éxito! Se añadieron ${agregados} producto(s) a la OC ${oc.folio}.\nEl nuevo total de la orden es ${dinero(oc.total)}`);
+    
+    // Refrescar vistas
+    renderRequisiciones();
+    if(typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+};
 
 // Exponer la función para que el menú HTML la encuentre
 window.renderRequisiciones = renderRequisiciones;
