@@ -2030,160 +2030,92 @@ window.guardarCorreccionFechasDinero = function(folio, esApartado) {
         document.querySelector('[data-modal="auditoria-fechas"]').remove();
     }
 };
-// =====================================================================
-// 🚀 HERRAMIENTA DE MIGRACIÓN: INYECCIÓN MANUAL DE CUENTAS MSI / REZAGOS
-// =====================================================================
-window.abrirMigracionMSI = function() {
-    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
-    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
-        return alert("⛔ ACCESO DENEGADO: Solo Administradores.");
-    }
+window.ejecutarMigracionTdcMSI = function() {
+    const selector = document.getElementById("migTdcSeleccion");
+    const tarjetaNombre = selector.value;
+    const diaCorte = parseInt(selector.options[selector.selectedIndex].getAttribute("data-corte"));
+    const diaPago = parseInt(selector.options[selector.selectedIndex].getAttribute("data-pago"));
+    
+    const fechaCompra = document.getElementById("migTdcFecha").value;
+    const concepto = document.getElementById("migTdcConcepto").value.trim();
+    const montoTotal = parseFloat(document.getElementById("migTdcMonto").value);
+    const plazo = parseInt(document.getElementById("migTdcPlazo").value);
+    const yaPagadas = parseInt(document.getElementById("migTdcPagadas").value) || 0;
 
-    const html = `
-    <div data-modal="migracion-msi" style="position:fixed; inset:0; background:rgba(15,23,42,0.9); z-index:99999; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(5px);">
-        <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:600px; margin-top:20px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
-            <div style="border-bottom:2px solid #0891b2; padding-bottom:15px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
-                <div>
-                    <h2 style="margin:0; color:#164e63; font-size:22px;">🚀 Migración Manual MSI (Rezago)</h2>
-                    <p style="margin:0; color:#64748b; font-size:13px;">Inyecta una cuenta histórica al sistema generando sus pagarés restantes.</p>
-                </div>
-                <button onclick="document.querySelector('[data-modal=\\'migracion-msi\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:bold;">✕</button>
-            </div>
-
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
-                <div>
-                    <label style="font-weight:bold; font-size:12px; color:#475569;">Folio Original:</label>
-                    <input type="text" id="migFolio" placeholder="Ej. MSI-1001" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; text-transform:uppercase; font-weight:bold;">
-                </div>
-                <div>
-                    <label style="font-weight:bold; font-size:12px; color:#475569;">Fecha de Venta Original:</label>
-                    <input type="date" id="migFecha" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
-                </div>
-            </div>
-
-            <div style="margin-bottom:15px;">
-                <label style="font-weight:bold; font-size:12px; color:#475569;">Nombre del Cliente:</label>
-                <input type="text" id="migCliente" placeholder="Nombre completo" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
-            </div>
-
-            <div style="margin-bottom:15px;">
-                <label style="font-weight:bold; font-size:12px; color:#475569;">Descripción de la Mercancía:</label>
-                <input type="text" id="migArticulo" placeholder="Ej. Paquete Base y Colchón" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
-            </div>
-
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px; background:#f0fdf4; padding:15px; border-radius:8px; border:1px solid #bbf7d0;">
-                <div>
-                    <label style="font-weight:bold; font-size:12px; color:#166534;">Deuda / Saldo Actual ($):</label>
-                    <input type="number" id="migSaldo" placeholder="Lo que debe hoy" style="width:100%; padding:10px; border:2px solid #22c55e; border-radius:6px; font-weight:bold;">
-                </div>
-                <div>
-                    <label style="font-weight:bold; font-size:12px; color:#166534;">Total Original ($) (Info):</label>
-                    <input type="number" id="migTotalOrig" placeholder="Total de la venta" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
-                </div>
-            </div>
-
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px; background:#eff6ff; padding:15px; border-radius:8px; border:1px solid #bfdbfe;">
-                <div>
-                    <label style="font-weight:bold; font-size:12px; color:#1e40af;">Pagos Pendientes:</label>
-                    <input type="number" id="migPagosRestantes" placeholder="¿Cuántos pagarés faltan?" style="width:100%; padding:10px; border:2px solid #3b82f6; border-radius:6px; font-weight:bold;">
-                </div>
-                <div>
-                    <label style="font-weight:bold; font-size:12px; color:#1e40af;">Frecuencia:</label>
-                    <select id="migFrecuencia" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; font-weight:bold;">
-                        <option value="quincenal">Quincenal</option>
-                        <option value="semanal">Semanal</option>
-                        <option value="mensual">Mensual</option>
-                    </select>
-                </div>
-            </div>
-
-            <button onclick="ejecutarMigracionMSI()" style="width:100%; padding:14px; background:#0891b2; color:white; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 4px 6px rgba(8, 145, 178, 0.3);">
-                💾 Inyectar Cuenta al Sistema
-            </button>
-        </div>
-    </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-};
-
-window.ejecutarMigracionMSI = function() {
-    const folio = document.getElementById("migFolio").value.trim().toUpperCase();
-    const fecha = document.getElementById("migFecha").value;
-    const cliente = document.getElementById("migCliente").value.trim();
-    const articulo = document.getElementById("migArticulo").value.trim();
-    const saldo = parseFloat(document.getElementById("migSaldo").value);
-    const totalOrig = parseFloat(document.getElementById("migTotalOrig").value) || saldo;
-    const pagosRestantes = parseInt(document.getElementById("migPagosRestantes").value);
-    const frecuencia = document.getElementById("migFrecuencia").value;
-
-    if (!folio || !fecha || !cliente || isNaN(saldo) || saldo <= 0 || isNaN(pagosRestantes) || pagosRestantes <= 0) {
+    if (!fechaCompra || !concepto || isNaN(montoTotal) || montoTotal <= 0) {
         return alert("❌ Llena todos los campos obligatorios correctamente.");
     }
-
-    const cxc = StorageService.get("cuentasPorCobrar", []);
-    if (cxc.some(c => String(c.folio).toUpperCase() === folio)) {
-        return alert(`❌ El folio ${folio} ya existe en el sistema.`);
+    if (yaPagadas >= plazo) {
+        return alert("❌ Si ya pagaste todas las mensualidades, la deuda ya está liquidada.");
     }
 
-    if (!confirm(`¿Confirmas la inyección de la cuenta ${folio} por un saldo de $${saldo.toFixed(2)} a ${pagosRestantes} pagos?`)) return;
+    if (!confirm(`¿Confirmas registrar la compra de ${dinero(montoTotal)} a ${plazo} MSI en la tarjeta ${tarjetaNombre}?`)) return;
 
-    // 1. Crear el objeto de la cuenta
-    const enganche = totalOrig - saldo;
-    const fechaIso = window.localISO ? window.localISO(fecha + 'T12:00:00') : new Date(fecha + 'T12:00:00').toISOString();
+    // 1. Iniciar con la fecha exacta de la compra al mediodía
+    let fechaBase = new Date(fechaCompra + 'T12:00:00');
     
-    const abonoFijo = parseFloat((saldo / pagosRestantes).toFixed(2));
+    // 2. Establecer el primer corte hipotético en el MISMO MES de la compra
+    let fechaCorteActual = new Date(fechaBase.getFullYear(), fechaBase.getMonth(), diaCorte, 12, 0, 0);
 
-    const nuevaCuenta = {
-        folio: folio,
-        nombre: cliente,
-        clienteId: `MIG-${Date.now()}`, // ID genérico para migración
-        fechaVenta: fechaIso,
-        totalContadoOriginal: totalOrig,
-        engancheRecibido: enganche >= 0 ? enganche : 0,
-        saldoActual: saldo,
-        saldoOriginal: saldo,
-        metodo: "msi", // Identificador clave para tu migración
-        plan: { meses: pagosRestantes, total: saldo, abono: abonoFijo, tipo: 'MSI' },
-        estado: "Pendiente",
-        abonos: [],
-        articulos: [{ nombre: articulo, cantidad: 1, precio: totalOrig }],
-        totalMercancia: totalOrig,
-        periodicidad: frecuencia,
-        vendedorNombre: "Migración Histórica"
+    // 3. Regla Bancaria: Si compraste DESPUÉS del día de corte, el primer corte oficial brinca al mes siguiente
+    if (fechaBase.getDate() > diaCorte) {
+        fechaCorteActual.setMonth(fechaCorteActual.getMonth() + 1);
+    }
+
+    let calendarioPagos = [];
+    const abonoMensual = parseFloat((montoTotal / plazo).toFixed(2));
+    const montoYaPagado = yaPagadas * abonoMensual;
+
+    for (let i = 1; i <= plazo; i++) {
+        // Calcular el Día de Pago correspondiente a este corte
+        let fechaPagoLimite = new Date(fechaCorteActual.getFullYear(), fechaCorteActual.getMonth(), diaPago, 12, 0, 0);
+        
+        // Si el día de pago es menor al corte (Ej: Corte 15, Pago 5), el pago cae el mes que entra
+        if (diaPago <= diaCorte) {
+            fechaPagoLimite.setMonth(fechaPagoLimite.getMonth() + 1);
+        }
+
+        // 🐛 CORRECCIÓN: El Dashboard exige la fecha en formato string corto "YYYY-MM-DD"
+        const fPagoMX = window.localISO ? window.localISO(fechaPagoLimite).split('T')[0] : fechaPagoLimite.toISOString().split('T')[0];
+
+        calendarioPagos.push({
+            n: i,
+            numero: i,
+            fecha: fPagoMX,
+            monto: abonoMensual,
+            estado: i <= yaPagadas ? "Pagado" : "Pendiente"
+        });
+
+        // Avanzar el corte exactamente un mes para la siguiente iteración
+        fechaCorteActual.setMonth(fechaCorteActual.getMonth() + 1);
+    }
+
+    // 4. 🛡️ ESTRUCTURA HOMOLOGADA AL SISTEMA 🛡️
+    // Utilizamos las variables exactas que lee renderCuentasMSI() y renderDashboardMSI()
+    const nuevaDeudaMSI = {
+        id: Date.now(), // ID numérico para evitar bugs al marcar pagos
+        banco: tarjetaNombre,
+        producto: concepto,
+        total: montoTotal,
+        meses: plazo,
+        cuotaMensual: abonoMensual,
+        fechaCompra: window.localISO ? window.localISO(fechaBase).split('T')[0] : fechaBase.toISOString().split('T')[0],
+        calendario: calendarioPagos,
+        pagosRealizados: yaPagadas,
+        montoPagado: montoYaPagado
     };
 
-    cxc.push(nuevaCuenta);
+    // 5. Guardar en la caja fuerte correcta
+    let cuentasMSI = StorageService.get("cuentasMSI", []);
+    cuentasMSI.push(nuevaDeudaMSI);
+    StorageService.set("cuentasMSI", cuentasMSI);
 
-    // 2. Generar Pagarés
-    let pagaresSistema = StorageService.get("pagaresSistema", []);
-    let diasIntervalo = 14;
-    if (frecuencia === "semanal") diasIntervalo = 7;
-    if (frecuencia === "mensual") diasIntervalo = 30;
-    
-    let fechaPago = new Date(); // Empezamos a cobrar desde hoy hacia adelante
-    
-    for (let i = 1; i <= pagosRestantes; i++) {
-        fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
-        pagaresSistema.push({
-            id: Date.now() + i,
-            folio: folio,
-            numeroPagere: `${folio}-${i}/${pagosRestantes}`,
-            clienteNombre: cliente,
-            fechaEmision: fechaIso,
-            fechaVencimiento: fechaPago.getTime(),
-            monto: abonoFijo,
-            estado: "Pendiente",
-            diasAtrasoActual: 0,
-            tasaMorosidad: 0 // MSI = 0 Intereses
-        });
-    }
+    alert(`✅ Compra MSI registrada en ${tarjetaNombre}.\n\nSe estructuraron ${plazo} mensualidades. El sistema marcó como "Pagadas" las primeras ${yaPagadas}.`);
+    document.querySelector('[data-modal="migracion-msi-tarjeta"]').remove();
 
-    StorageService.set("cuentasPorCobrar", cxc);
-    StorageService.set("pagaresSistema", pagaresSistema);
-
-    alert(`✅ Cuenta MSI inyectada exitosamente. Se generaron ${pagosRestantes} pagarés de $${abonoFijo.toFixed(2)}.`);
-    document.querySelector('[data-modal="migracion-msi"]').remove();
-    
-    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    // 6. Refrescar el Dashboard de Tarjetas si está abierto en el fondo
+    if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    if (typeof renderDashboardMSI === 'function') renderDashboardMSI();
 };
 
 // ==========================================

@@ -368,6 +368,258 @@ function renderReporteFlujo() {
         </div>
     `;
 }
+// =====================================================================
+// 📈 MOTOR A.R.C. (ANÁLISIS DE RIESGO Y CARTERA HORIZONTAL)
+// =====================================================================
+
+window.renderAnalisisRiesgoCartera = function() {
+    // Tomamos el contenedor principal de los reportes
+    const contenedor = document.getElementById("reportes") || document.getElementById("reportes-contenido") || document.getElementById("dashboardContenido");
+    if (!contenedor) return alert("❌ No se encontró el contenedor para dibujar el reporte.");
+
+    // Variables de configuración de vista
+    const vistaAgrupacion = window._filtroARCAgrupacion || 'mensual'; // 'semanal' o 'mensual'
+
+    // 1. Extraer datos del sistema
+    const cxcRaw = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+    const cuentasActivas = cxcRaw.filter(c => c.saldoActual > 0 && c.estado !== 'Pagado');
+
+    if (cuentasActivas.length === 0) {
+        contenedor.innerHTML = `<div style="padding:40px; text-align:center; background:white; border-radius:10px; margin-top:20px;"><h3>✅ ¡Felicidades! No hay cartera vencida ni cuentas pendientes.</h3></div>`;
+        return;
+    }
+
+    // 2. Procesar cuentas y calcular el Algoritmo de Riesgo
+    const hoy = new Date();
+    hoy.setHours(12,0,0,0);
+    
+    let fechaMinAbono = new Date(); 
+    let fechaMaxAbono = new Date(); 
+
+    const cuentasProcesadas = cuentasActivas.map(cuenta => {
+        // A) Buscar el último pagaré para definir la fecha fin real
+        const pagaresCuenta = pagares.filter(p => p.folio === cuenta.folio);
+        let fechaVenta = cuenta.fechaVenta ? new Date(cuenta.fechaVenta) : new Date();
+        let fechaFin = new Date(fechaVenta);
+        fechaFin.setMonth(fechaFin.getMonth() + 1); // Fallback
+
+        if (pagaresCuenta.length > 0) {
+            const maxMs = Math.max(...pagaresCuenta.map(p => new Date(p.fechaVencimiento).getTime()));
+            fechaFin = new Date(maxMs);
+        }
+
+        // B) Matemáticas de Riesgo (Auditoría: Agregado % Pendiente)
+        const totalVenta = cuenta.totalContadoOriginal || cuenta.totalMercancia || 1;
+        const totalPagado = totalVenta - cuenta.saldoActual;
+        
+        const pctPagado = (totalPagado / totalVenta) * 100;
+        const pctPendiente = (cuenta.saldoActual / totalVenta) * 100;
+
+        const msTotalPlazo = fechaFin.getTime() - fechaVenta.getTime();
+        const msTranscurridos = hoy.getTime() - fechaVenta.getTime();
+        
+        let pctTiempo = msTotalPlazo > 0 ? (msTranscurridos / msTotalPlazo) * 100 : 100;
+        if (pctTiempo < 0) pctTiempo = 0;
+        
+        const tiempoCoronado = pctTiempo > 100 ? 100 : pctTiempo; 
+
+        // Diferencia de Riesgo (Lo pagado vs Lo transcurrido)
+        const diferenciaRiesgo = pctPagado - tiempoCoronado;
+
+        let nivelRiesgo = "BAJO"; let colorRiesgo = "#16a34a"; // Verde
+        if (diferenciaRiesgo < -5 && diferenciaRiesgo >= -20) { nivelRiesgo = "MEDIO"; colorRiesgo = "#d97706"; } // Ámbar
+        if (diferenciaRiesgo < -20) { nivelRiesgo = "ALTO"; colorRiesgo = "#dc2626"; } // Rojo
+
+        // C) Mapear Abonos
+        const abonosProcesados = (cuenta.abonos || []).map(ab => {
+            const fAbono = new Date(ab.fecha || ab.fechaAbono);
+            if (fAbono < fechaMinAbono) fechaMinAbono = new Date(fAbono);
+            if (fAbono > fechaMaxAbono) fechaMaxAbono = new Date(fAbono);
+            return { fecha: fAbono, monto: parseFloat(ab.monto || ab.montoAbonado || 0) };
+        });
+
+        const numPagosRealizados = (cuenta.abonos || []).length;
+        
+        // Plazo equivalente
+        let textoEquivalente = "N/A";
+        if (cuenta.plan && cuenta.plan.abono > 0) {
+            const periodosCubiertos = (totalPagado / cuenta.plan.abono).toFixed(1);
+            textoEquivalente = `${periodosCubiertos} ${cuenta.periodicidad || 'pagos'} cubiertos`;
+        }
+
+        return {
+            ...cuenta,
+            fechaFin,
+            pctPagado,
+            pctPendiente,
+            pctTiempo: tiempoCoronado,
+            diferenciaRiesgo,
+            nivelRiesgo,
+            colorRiesgo,
+            totalPagado,
+            numPagosRealizados,
+            abonosProcesados,
+            textoEquivalente
+        };
+    });
+
+    // Ordenar por mayor riesgo primero (los más rojos hasta arriba)
+    cuentasProcesadas.sort((a, b) => a.diferenciaRiesgo - b.diferenciaRiesgo);
+
+    // 3. Generar Eje de Tiempo (Columnas)
+    fechaMinAbono.setMonth(fechaMinAbono.getMonth() - 1);
+    fechaMaxAbono = hoy;
+
+    const columnasTiempo = [];
+    const getLunes = (d) => {
+        const date = new Date(d);
+        const day = date.getDay();
+        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+        return new Date(date.setDate(diff));
+    };
+
+    let cursorFecha = new Date(fechaMinAbono);
+    
+    if (vistaAgrupacion === 'mensual') {
+        cursorFecha.setDate(1); 
+        while (cursorFecha <= fechaMaxAbono) {
+            const m = cursorFecha.getMonth();
+            const y = cursorFecha.getFullYear();
+            const label = new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(cursorFecha).toUpperCase();
+            columnasTiempo.push({ key: `${y}-${m}`, label, type: 'mes', y, m });
+            cursorFecha.setMonth(cursorFecha.getMonth() + 1);
+        }
+    } else {
+        cursorFecha = getLunes(cursorFecha); 
+        while (cursorFecha <= fechaMaxAbono) {
+            const lunesStr = cursorFecha.toISOString().split('T')[0];
+            const dom = new Date(cursorFecha); dom.setDate(dom.getDate() + 6);
+            const label = `${cursorFecha.getDate()}/${cursorFecha.getMonth()+1} al ${dom.getDate()}/${dom.getMonth()+1}`;
+            columnasTiempo.push({ key: lunesStr, label, type: 'semana' });
+            cursorFecha.setDate(cursorFecha.getDate() + 7);
+        }
+    }
+
+    // 4. Construir Tabla Interactiva
+    const fmt = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v);
+    const formatDate = (d) => d.toISOString().split('T')[0];
+
+    let html = `
+    <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-bottom:30px; margin-top:20px;">
+        
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid #e2e8f0; padding-bottom:15px;">
+            <div>
+                <h2 style="margin:0; color:#0f172a; font-size:24px;">📈 ARC: Análisis de Riesgo y Cartera</h2>
+                <p style="margin:0; color:#64748b; font-size:14px;">Evaluación de saldos, % de cobertura y comportamiento de pago histórico.</p>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">VISTA DEL FLUJO:</label>
+                <select onchange="window._filtroARCAgrupacion=this.value; renderAnalisisRiesgoCartera();" style="padding:10px; border:2px solid #cbd5e1; border-radius:8px; font-weight:bold; background:#f8fafc; cursor:pointer;">
+                    <option value="mensual" ${vistaAgrupacion === 'mensual' ? 'selected' : ''}>📅 Por Meses</option>
+                    <option value="semanal" ${vistaAgrupacion === 'semanal' ? 'selected' : ''}>📆 Por Semanas</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="overflow-x:auto; overflow-y:visible; max-width:100%; padding-bottom:15px;">
+            <table style="border-collapse: separate; border-spacing: 0; width:max-content; min-width:100%;">
+                <thead>
+                    <tr>
+                        <th style="position:sticky; left:0; z-index:10; background:#f8fafc; padding:15px; border-bottom:2px solid #cbd5e1; border-right:2px solid #cbd5e1; text-align:left; min-width:400px; box-shadow: 4px 0 8px rgba(0,0,0,0.05);">
+                            <span style="color:#1e40af; font-size:15px;">📑 PERFIL DEL CRÉDITO Y ANÁLISIS DE RIESGO</span>
+                        </th>
+                        ${columnasTiempo.map(col => `<th style="padding:15px; background:#f1f5f9; border-bottom:2px solid #cbd5e1; border-right:1px solid #e2e8f0; text-align:center; color:#475569; min-width:120px; font-size:12px;">${col.label}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    cuentasProcesadas.forEach(c => {
+        const sumasPorColumna = {};
+        columnasTiempo.forEach(col => sumasPorColumna[col.key] = 0);
+
+        c.abonosProcesados.forEach(ab => {
+            if (vistaAgrupacion === 'mensual') {
+                const k = `${ab.fecha.getFullYear()}-${ab.fecha.getMonth()}`;
+                if (sumasPorColumna[k] !== undefined) sumasPorColumna[k] += ab.monto;
+            } else {
+                const l = getLunes(ab.fecha).toISOString().split('T')[0];
+                if (sumasPorColumna[l] !== undefined) sumasPorColumna[l] += ab.monto;
+            }
+        });
+
+        const nomClie = c.nombre || c.clienteNombre || 'Sin Nombre';
+        const articulosTexto = (c.articulos || []).map(a => `${a.cantidad}x ${a.nombre}`).join(', ');
+        const fechaTerminoStr = formatDate(c.fechaFin);
+
+        html += `
+            <tr style="transition:0.2s;" onmouseover="this.style.backgroundColor='#fcfcfc'" onmouseout="this.style.backgroundColor='transparent'">
+                
+                <td style="position:sticky; left:0; z-index:5; background:white; padding:15px; border-bottom:1px solid #e2e8f0; border-right:2px solid #cbd5e1; box-shadow: 4px 0 8px rgba(0,0,0,0.05); vertical-align:top;">
+                    
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                        <div style="font-weight:900; color:#0f172a; font-size:15px;">${nomClie}</div>
+                        <div style="font-size:10px; background:#eff6ff; color:#1e40af; padding:3px 6px; border-radius:4px; font-weight:bold;">${c.folio}</div>
+                    </div>
+                    
+                    <div style="font-size:11px; color:#64748b; margin-bottom:12px; line-height:1.3;">
+                        📦 <b>Mercancía:</b> ${articulosTexto || 'Sin detalle'}
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:12px;">
+                        <div>
+                            <div style="font-size:10px; color:#64748b; font-weight:bold;">Total Venta:</div>
+                            <div style="font-size:13px; color:#0f172a; font-weight:bold;">${fmt(c.totalContadoOriginal)}</div>
+                            <div style="font-size:10px; color:#16a34a; font-weight:bold; margin-top:2px;">Pagado: ${c.pctPagado.toFixed(1)}%</div>
+                        </div>
+                        <div>
+                            <div style="font-size:10px; color:#64748b; font-weight:bold;">Saldo Actual:</div>
+                            <div style="font-size:15px; color:#dc2626; font-weight:900;">${fmt(c.saldoActual)}</div>
+                            <div style="font-size:10px; color:#b91c1c; font-weight:bold; margin-top:2px;">Pendiente: ${c.pctPendiente.toFixed(1)}%</div>
+                        </div>
+                    </div>
+
+                    <div style="border-left:4px solid ${c.colorRiesgo}; padding-left:10px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                            <span style="font-size:11px; font-weight:bold; color:${c.colorRiesgo};">🔴 RIESGO: ${c.nivelRiesgo}</span>
+                            <span style="font-size:11px; font-weight:bold; color:#475569;">Vence: ${fechaTerminoStr}</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:11px; color:#64748b; margin-bottom:4px;">
+                            <span>Tiempo corrido: <b>${c.pctTiempo.toFixed(0)}%</b></span>
+                            <span>Abonos registrados: <b>${c.numPagosRealizados}</b></span>
+                        </div>
+                        <div style="font-size:11px; color:#1e40af; font-weight:bold; margin-top:6px;">
+                            ⏱️ Equivalente: ${c.textoEquivalente}
+                        </div>
+                    </div>
+
+                </td>
+
+                ${columnasTiempo.map(col => {
+                    const valor = sumasPorColumna[col.key];
+                    if (valor > 0) {
+                        return `<td style="padding:15px; border-bottom:1px solid #e2e8f0; border-right:1px dashed #e2e8f0; text-align:center; vertical-align:middle; background:#f0fdf4;">
+                            <div style="color:#16a34a; font-weight:900; font-size:14px;">+${fmt(valor)}</div>
+                        </td>`;
+                    } else {
+                        return `<td style="padding:15px; border-bottom:1px solid #e2e8f0; border-right:1px dashed #e2e8f0; text-align:center; vertical-align:middle;">
+                            <div style="color:#cbd5e1; font-size:12px;">-</div>
+                        </td>`;
+                    }
+                }).join('')}
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+
+    contenedor.innerHTML = html;
+};
 
 // --- FUNCIONES DE SOPORTE ---
 window.actualizarFiltrosFlujo = function() {
