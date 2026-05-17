@@ -2030,6 +2030,161 @@ window.guardarCorreccionFechasDinero = function(folio, esApartado) {
         document.querySelector('[data-modal="auditoria-fechas"]').remove();
     }
 };
+// =====================================================================
+// 🚀 HERRAMIENTA DE MIGRACIÓN: INYECCIÓN MANUAL DE CUENTAS MSI / REZAGOS
+// =====================================================================
+window.abrirMigracionMSI = function() {
+    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
+    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
+        return alert("⛔ ACCESO DENEGADO: Solo Administradores.");
+    }
+
+    const html = `
+    <div data-modal="migracion-msi" style="position:fixed; inset:0; background:rgba(15,23,42,0.9); z-index:99999; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(5px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:600px; margin-top:20px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div style="border-bottom:2px solid #0891b2; padding-bottom:15px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <h2 style="margin:0; color:#164e63; font-size:22px;">🚀 Migración Manual MSI (Rezago)</h2>
+                    <p style="margin:0; color:#64748b; font-size:13px;">Inyecta una cuenta histórica al sistema generando sus pagarés restantes.</p>
+                </div>
+                <button onclick="document.querySelector('[data-modal=\\'migracion-msi\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:bold;">✕</button>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#475569;">Folio Original:</label>
+                    <input type="text" id="migFolio" placeholder="Ej. MSI-1001" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; text-transform:uppercase; font-weight:bold;">
+                </div>
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#475569;">Fecha de Venta Original:</label>
+                    <input type="date" id="migFecha" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+                </div>
+            </div>
+
+            <div style="margin-bottom:15px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">Nombre del Cliente:</label>
+                <input type="text" id="migCliente" placeholder="Nombre completo" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+            </div>
+
+            <div style="margin-bottom:15px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">Descripción de la Mercancía:</label>
+                <input type="text" id="migArticulo" placeholder="Ej. Paquete Base y Colchón" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px; background:#f0fdf4; padding:15px; border-radius:8px; border:1px solid #bbf7d0;">
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#166534;">Deuda / Saldo Actual ($):</label>
+                    <input type="number" id="migSaldo" placeholder="Lo que debe hoy" style="width:100%; padding:10px; border:2px solid #22c55e; border-radius:6px; font-weight:bold;">
+                </div>
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#166534;">Total Original ($) (Info):</label>
+                    <input type="number" id="migTotalOrig" placeholder="Total de la venta" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px;">
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px; background:#eff6ff; padding:15px; border-radius:8px; border:1px solid #bfdbfe;">
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#1e40af;">Pagos Pendientes:</label>
+                    <input type="number" id="migPagosRestantes" placeholder="¿Cuántos pagarés faltan?" style="width:100%; padding:10px; border:2px solid #3b82f6; border-radius:6px; font-weight:bold;">
+                </div>
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#1e40af;">Frecuencia:</label>
+                    <select id="migFrecuencia" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; font-weight:bold;">
+                        <option value="quincenal">Quincenal</option>
+                        <option value="semanal">Semanal</option>
+                        <option value="mensual">Mensual</option>
+                    </select>
+                </div>
+            </div>
+
+            <button onclick="ejecutarMigracionMSI()" style="width:100%; padding:14px; background:#0891b2; color:white; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer; box-shadow:0 4px 6px rgba(8, 145, 178, 0.3);">
+                💾 Inyectar Cuenta al Sistema
+            </button>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.ejecutarMigracionMSI = function() {
+    const folio = document.getElementById("migFolio").value.trim().toUpperCase();
+    const fecha = document.getElementById("migFecha").value;
+    const cliente = document.getElementById("migCliente").value.trim();
+    const articulo = document.getElementById("migArticulo").value.trim();
+    const saldo = parseFloat(document.getElementById("migSaldo").value);
+    const totalOrig = parseFloat(document.getElementById("migTotalOrig").value) || saldo;
+    const pagosRestantes = parseInt(document.getElementById("migPagosRestantes").value);
+    const frecuencia = document.getElementById("migFrecuencia").value;
+
+    if (!folio || !fecha || !cliente || isNaN(saldo) || saldo <= 0 || isNaN(pagosRestantes) || pagosRestantes <= 0) {
+        return alert("❌ Llena todos los campos obligatorios correctamente.");
+    }
+
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    if (cxc.some(c => String(c.folio).toUpperCase() === folio)) {
+        return alert(`❌ El folio ${folio} ya existe en el sistema.`);
+    }
+
+    if (!confirm(`¿Confirmas la inyección de la cuenta ${folio} por un saldo de $${saldo.toFixed(2)} a ${pagosRestantes} pagos?`)) return;
+
+    // 1. Crear el objeto de la cuenta
+    const enganche = totalOrig - saldo;
+    const fechaIso = window.localISO ? window.localISO(fecha + 'T12:00:00') : new Date(fecha + 'T12:00:00').toISOString();
+    
+    const abonoFijo = parseFloat((saldo / pagosRestantes).toFixed(2));
+
+    const nuevaCuenta = {
+        folio: folio,
+        nombre: cliente,
+        clienteId: `MIG-${Date.now()}`, // ID genérico para migración
+        fechaVenta: fechaIso,
+        totalContadoOriginal: totalOrig,
+        engancheRecibido: enganche >= 0 ? enganche : 0,
+        saldoActual: saldo,
+        saldoOriginal: saldo,
+        metodo: "msi", // Identificador clave para tu migración
+        plan: { meses: pagosRestantes, total: saldo, abono: abonoFijo, tipo: 'MSI' },
+        estado: "Pendiente",
+        abonos: [],
+        articulos: [{ nombre: articulo, cantidad: 1, precio: totalOrig }],
+        totalMercancia: totalOrig,
+        periodicidad: frecuencia,
+        vendedorNombre: "Migración Histórica"
+    };
+
+    cxc.push(nuevaCuenta);
+
+    // 2. Generar Pagarés
+    let pagaresSistema = StorageService.get("pagaresSistema", []);
+    let diasIntervalo = 14;
+    if (frecuencia === "semanal") diasIntervalo = 7;
+    if (frecuencia === "mensual") diasIntervalo = 30;
+    
+    let fechaPago = new Date(); // Empezamos a cobrar desde hoy hacia adelante
+    
+    for (let i = 1; i <= pagosRestantes; i++) {
+        fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+        pagaresSistema.push({
+            id: Date.now() + i,
+            folio: folio,
+            numeroPagere: `${folio}-${i}/${pagosRestantes}`,
+            clienteNombre: cliente,
+            fechaEmision: fechaIso,
+            fechaVencimiento: fechaPago.getTime(),
+            monto: abonoFijo,
+            estado: "Pendiente",
+            diasAtrasoActual: 0,
+            tasaMorosidad: 0 // MSI = 0 Intereses
+        });
+    }
+
+    StorageService.set("cuentasPorCobrar", cxc);
+    StorageService.set("pagaresSistema", pagaresSistema);
+
+    alert(`✅ Cuenta MSI inyectada exitosamente. Se generaron ${pagosRestantes} pagarés de $${abonoFijo.toFixed(2)}.`);
+    document.querySelector('[data-modal="migracion-msi"]').remove();
+    
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+};
 
 // ==========================================
 // EXPORTACIONES GLOBALES (CONEXIÓN CON EL HTML)
