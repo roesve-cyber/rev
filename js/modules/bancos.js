@@ -1658,6 +1658,126 @@ window.ejecutarTransferenciaCuentas = function() {
     if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
+// =====================================================================
+// ⚖️ MÓDULO DE AUDITORÍA: AJUSTE DE SALDOS FÍSICOS
+// =====================================================================
+window.abrirAuditoriaSaldos = function() {
+    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
+    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
+        return alert("⛔ ACCESO DENEGADO: Solo Administradores pueden hacer ajustes de auditoría.");
+    }
+
+    // 1. Obtener cajas y cuentas de débito
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const debito = tarjetas.filter(t => t.tipo === "debito");
+
+    let opcionesHTML = '';
+    cajas.forEach(c => {
+        const idValido = c.id || c.nombre.replace(/\s+/g, '_');
+        opcionesHTML += `<option value="${idValido}">${c.nombre}</option>`;
+    });
+    debito.forEach(t => {
+        const idValido = t.banco || t.nombre;
+        opcionesHTML += `<option value="${idValido}">🏦 ${t.banco || t.nombre} Débito</option>`;
+    });
+
+    // 2. Renderizar Ventana
+    const modalHTML = `
+    <div data-modal="auditoria-saldos" style="position:fixed; inset:0; background:rgba(15,23,42,0.9); z-index:99999; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(5px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:500px; margin-top:50px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #7c3aed; padding-bottom:15px; margin-bottom:20px;">
+                <div>
+                    <h2 style="margin:0; color:#5b21b6; font-size:24px;">⚖️ Ajuste de Saldos (Auditoría)</h2>
+                    <p style="margin:0; color:#64748b; font-size:13px;">Registra faltantes o sobrantes dejando evidencia en el sistema.</p>
+                </div>
+                <button onclick="document.querySelector('[data-modal=\\'auditoria-saldos\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">✕ Cerrar</button>
+            </div>
+
+            <div style="margin-bottom:15px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">🏦 Cuenta a ajustar:</label>
+                <select id="ajusteCta" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; font-weight:bold; color:#1e40af;">
+                    ${opcionesHTML}
+                </select>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#475569;">🔄 Tipo de Ajuste:</label>
+                    <select id="ajusteTipo" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; font-weight:bold;">
+                        <option value="ingreso" style="color:#16a34a;">⬆️ Sobrante (Sumar dinero)</option>
+                        <option value="egreso" style="color:#dc2626;">⬇️ Faltante (Restar dinero)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#475569;">💰 Monto ($):</label>
+                    <input type="number" id="ajusteMonto" min="0.01" step="0.01" placeholder="0.00" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:2px solid #7c3aed; font-weight:bold; text-align:center; box-sizing:border-box; font-size:16px;">
+                </div>
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">📝 Evidencia / Motivo (Obligatorio):</label>
+                <textarea id="ajusteMotivo" placeholder="Ej: Faltante de $20 en caja principal por error en cambio. Se notificó a encargado..." style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box; resize:vertical; min-height:80px;"></textarea>
+            </div>
+
+            <div style="background:#fef2f2; border:1px solid #fca5a5; padding:12px; border-radius:8px; margin-bottom:20px; font-size:11px; color:#991b1b;">
+                ⚠️ <b>Atención:</b> Esta acción inyectará un movimiento permanente en el Flujo de Caja bajo el concepto de "AJUSTE AUDITORÍA" para cuadrar el saldo físico.
+            </div>
+
+            <button onclick="guardarAjusteAuditoria()" style="width:100%; background:#7c3aed; color:white; border:none; padding:14px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(124, 58, 237, 0.2);">
+                💾 Confirmar y Aplicar Ajuste
+            </button>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+window.guardarAjusteAuditoria = function() {
+    const cuentaSel = document.getElementById("ajusteCta");
+    const cuentaId = cuentaSel.value;
+    // Quitamos los emojis del nombre para la etiqueta
+    const cuentaNombre = cuentaSel.options[cuentaSel.selectedIndex].text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').replace(' Débito', '');
+    
+    const tipo = document.getElementById("ajusteTipo").value;
+    const monto = parseFloat(document.getElementById("ajusteMonto").value);
+    const motivo = document.getElementById("ajusteMotivo").value.trim();
+
+    if (!monto || monto <= 0) return alert("❌ Ingresa un monto válido mayor a 0.");
+    if (!motivo || motivo.length < 5) return alert("❌ Debes escribir un motivo claro (mínimo 5 caracteres) para la evidencia.");
+
+    const msj = tipo === 'ingreso' ? 'AGREGAR (Sobrante)' : 'RETIRAR (Faltante)';
+    if (!confirm(`AUDITORÍA:\n\n¿Confirmas ${msj} de ${dinero(monto)} a la cuenta [${cuentaNombre}]?\n\nMotivo: ${motivo}`)) return;
+
+    // Fijamos la hora al mediodía para evitar desfases de zona horaria
+    const fechaBase = new Date();
+    fechaBase.setHours(12, 0, 0, 0);
+    const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
+    
+    const movimientos = StorageService.get("movimientosCaja", []);
+    const idAjuste = Date.now();
+
+    movimientos.push({
+        id: idAjuste,
+        fecha: fechaIso,
+        monto: monto,
+        tipo: tipo,
+        concepto: `⚖️ AJUSTE AUDITORÍA: ${motivo}`,
+        referencia: `AUD-${idAjuste}`,
+        cuenta: cuentaId,
+        medioPago: "ajuste",
+        etiquetaCuenta: cuentaNombre
+    });
+
+    StorageService.set("movimientosCaja", movimientos);
+    document.querySelector('[data-modal="auditoria-saldos"]').remove();
+    
+    alert("✅ Ajuste aplicado con éxito. La evidencia quedó registrada permanentemente en el flujo de caja.");
+    
+    // Refrescar vistas si están abiertas de fondo
+    if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+    if (typeof window.renderReporteFlujo === 'function') window.renderReporteFlujo();
+    if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
+};
 window.renderCuentasBancarias = renderCuentasBancarias;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
