@@ -1,7 +1,6 @@
 // ===== MÓDULO EXCLUSIVO DE CONCILIACIÓN MSI POR FECHA DE CORTE =====
 
-// 1. Configuración de Fechas de Corte por Banco
-// Ajusta estos números según tus estados de cuenta reales
+// 1. Diccionario de respaldo (Restaurado de tu versión original)
 const CONFIG_CORTES = {
     "MERCADOPAGO": 5,
     "BANAMEX SIMPLI": 19,
@@ -14,24 +13,37 @@ function renderConciliacionMSI() {
     const cont = document.getElementById('contenedorConciliacion');
     if (!cont) return;
 
+    // --- Helpers Locales Blindados ---
+    const fmtDinero = v => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
+    const fmtFecha = d => {
+        const dt = new Date(d);
+        if (isNaN(dt.getTime())) return String(d);
+        return new Intl.DateTimeFormat('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).format(dt).toUpperCase();
+    };
+
     const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
     
-    // Filtros seleccionados (o por defecto)
+    // Filtros
     const bancoSeleccionado = window._filtroMSIBanco || (cuentasMSI.length > 0 ? cuentasMSI[0].banco : '');
-    const mesReferencia = window._filtroMSIMes || new Date().getMonth(); // 0-11
+    const mesReferencia = window._filtroMSIMes !== undefined ? window._filtroMSIMes : new Date().getMonth(); // 0-11
     const anioReferencia = window._filtroMSIAnio || new Date().getFullYear();
 
-    // 2. Cálculo del Periodo Bancario
-    const diaCorte = CONFIG_CORTES[bancoSeleccionado] || CONFIG_CORTES.DEFAULT;
+    // 2. Cálculo Inteligente del Periodo Bancario
+    const infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSeleccionado);
     
-    // Inicio: Día después del corte del mes anterior
-    const fechaInicio = new Date(anioReferencia, mesReferencia - 1, diaCorte + 1, 0, 0, 0);
-    // Fin: Día del corte del mes actual
+    // Prioriza la DB, si no existe usa el diccionario, si no, usa 15
+    const diaCorte = (infoTarjeta && infoTarjeta.diaCorte) 
+                     ? parseInt(infoTarjeta.diaCorte) 
+                     : (CONFIG_CORTES[bancoSeleccionado] || CONFIG_CORTES.DEFAULT);
+    
+    // Matemáticas de fecha exactas (Si el corte es el 12: del 11 del mes pasado al 12 actual)
+    const fechaInicio = new Date(anioReferencia, mesReferencia - 1, diaCorte - 1, 0, 0, 0);
     const fechaFin = new Date(anioReferencia, mesReferencia, diaCorte, 23, 59, 59);
 
-    const periodoStr = `${window.formatearFechaCortaMX(fechaInicio)} al ${window.formatearFechaCortaMX(fechaFin)}`;
+    const periodoStr = `${fmtFecha(fechaInicio)} al ${fmtFecha(fechaFin)}`;
 
-    // 3. Filtrar mensualidades que caen en este periodo
+    // 3. Filtrar mensualidades en el periodo
     let mensualidadesEnPeriodo = [];
     let totalEsperado = 0;
     let totalConciliado = 0;
@@ -72,33 +84,41 @@ function renderConciliacionMSI() {
 
     // 5. Renderizar Interfaz
     cont.innerHTML = `
-        <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
-            <div style="border-bottom: 2px solid #f1f5f9; padding-bottom:15px; margin-bottom:20px;">
-                <h2 style="margin:0; color:#1e293b;">🏦 Conciliación MSI: ${bancoSeleccionado}</h2>
-                <div style="background:#e0f2fe; color:#0369a1; padding:8px 15px; border-radius:6px; display:inline-block; margin-top:10px; font-weight:bold; font-size:14px;">
-                    📅 Periodo: ${periodoStr}
+        <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 6px rgba(0,0,0,0.05); position: relative;">
+            
+            <div style="border-bottom: 2px solid #f1f5f9; padding-bottom:15px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                    <h2 style="margin:0; color:#1e293b;">🏦 Conciliación MSI: ${bancoSeleccionado}</h2>
+                    <div style="background:#e0f2fe; color:#0369a1; padding:8px 15px; border-radius:6px; display:inline-block; margin-top:10px; font-weight:bold; font-size:14px;">
+                        📅 Periodo facturado: ${periodoStr} <span style="color:#0284c7; font-size:12px; margin-left:8px;">(Corte: Día ${diaCorte})</span>
+                    </div>
                 </div>
+                <button onclick="if(typeof abrirModalPagoTarjeta === 'function') abrirModalPagoTarjeta('${bancoSeleccionado}'); else alert('Error: La función de pago no está cargada.');" style="padding:10px 20px; background:#8b5cf6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(139, 92, 246, 0.3); font-size:15px; transition:0.2s;">
+                    💳 Aplicar Pago a Tarjeta
+                </button>
             </div>
 
-            <div style="display:flex; gap:15px; margin-bottom:25px; flex-wrap:wrap;">
+            <div style="display:flex; gap:15px; margin-bottom:15px; flex-wrap:wrap;">
                 <div style="flex:1; min-width:200px;">
                     <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">SELECCIONAR BANCO:</label>
-                    <select id="selMSIBanco" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;">${opcionesBancos}</select>
+                    <select id="selMSIBanco" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesBancos}</select>
                 </div>
                 <div style="flex:1; min-width:150px;">
                     <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">MES DE ESTADO DE CUENTA:</label>
-                    <select id="selMSIMes" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;">${opcionesMeses}</select>
+                    <select id="selMSIMes" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesMeses}</select>
                 </div>
             </div>
 
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:20px; margin-bottom:30px;">
-                <div style="background:#f8fafc; padding:20px; border-radius:12px; border-top:4px solid #6366f1;">
-                    <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">Cargos en Periodo</div>
-                    <div style="font-size:24px; font-weight:900; color:#1e293b;">${window.formatearDineroMX(totalEsperado)}</div>
-                </div>
-                <div style="background:#f0fdf4; padding:20px; border-radius:12px; border-top:4px solid #10b981;">
-                    <div style="font-size:12px; color:#166534; font-weight:bold; text-transform:uppercase;">Total Conciliado</div>
-                    <div style="font-size:24px; font-weight:900; color:#15803d;">${window.formatearDineroMX(totalConciliado)}</div>
+            <div style="position: sticky; top: 0; z-index: 10; background: white; padding: 10px 0 15px 0; margin-bottom:15px; border-bottom:1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:20px;">
+                    <div style="background:#f8fafc; padding:20px; border-radius:12px; border-top:4px solid #6366f1; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                        <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase;">Cargos en Periodo</div>
+                        <div style="font-size:26px; font-weight:900; color:#1e293b;">${fmtDinero(totalEsperado)}</div>
+                    </div>
+                    <div style="background:#f0fdf4; padding:20px; border-radius:12px; border-top:4px solid #10b981; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                        <div style="font-size:12px; color:#166534; font-weight:bold; text-transform:uppercase;">Total Conciliado</div>
+                        <div style="font-size:26px; font-weight:900; color:#15803d;">${fmtDinero(totalConciliado)}</div>
+                    </div>
                 </div>
             </div>
 
@@ -116,8 +136,8 @@ function renderConciliacionMSI() {
                     </thead>
                     <tbody>
                         ${mensualidadesEnPeriodo.map(m => `
-                            <tr style="border-bottom: 1px solid #e2e8f0; background: ${m.conciliado ? '#f0fdf4' : 'white'};">
-                                <td style="padding:12px; font-size:13px;">${window.formatearFechaCortaMX(m.fecha)}</td>
+                            <tr style="border-bottom: 1px solid #e2e8f0; background: ${m.conciliado ? '#f0fdf4' : 'white'}; transition: 0.2s;">
+                                <td style="padding:12px; font-size:13px;">${fmtFecha(m.fecha)}</td>
                                 <td style="padding:12px; font-weight:bold; color:#1e293b;">${m.concepto}</td>
                                 <td style="padding:12px;">
                                     <span style="background:#e0e7ff; color:#4338ca; padding:4px 8px; border-radius:20px; font-size:11px; font-weight:bold;">
@@ -125,7 +145,7 @@ function renderConciliacionMSI() {
                                     </span>
                                 </td>
                                 <td style="padding:12px; text-align:right; font-weight:bold; color:#ef4444;">
-                                    -${window.formatearDineroMX(m.monto)}
+                                    -${fmtDinero(m.monto)}
                                 </td>
                                 <td style="padding:12px; text-align:center;">
                                     <input type="checkbox" ${m.conciliado ? 'checked' : ''} 
@@ -146,7 +166,6 @@ function renderConciliacionMSI() {
         </div>
     `;
 
-    // Listeners para filtros
     document.getElementById('selMSIBanco').onchange = (e) => { window._filtroMSIBanco = e.target.value; renderConciliacionMSI(); };
     document.getElementById('selMSIMes').onchange = (e) => { window._filtroMSIMes = parseInt(e.target.value); renderConciliacionMSI(); };
 }
@@ -164,8 +183,6 @@ window.toggleConciliacionMSI = function(ctaId, numeroMes, valor) {
     }
     renderConciliacionMSI();
 };
-
-// --- LÓGICA DE REPROGRAMACIÓN DESDE CONCILIACIÓN ---
 
 window.abrirModalReprogramarConciliacion = function(cuentaId, indexMensualidad, fechaActual) {
     document.querySelector('[data-modal="repro-concilia"]')?.remove();
@@ -201,7 +218,6 @@ window.ejecutarReprogramacionConciliacion = function(cuentaId, indexMensualidad)
     let anioActual = fechaBase.getFullYear();
     let diaActual = fechaBase.getDate();
 
-    // Desplazamiento en cascada (+1 mes por cada cuota restante)
     for (let i = indexMensualidad; i < calendario.length; i++) {
         let fCalculada = new Date(anioActual, mesActual, diaActual, 12, 0, 0);
         let yyyy = fCalculada.getFullYear();
@@ -209,13 +225,13 @@ window.ejecutarReprogramacionConciliacion = function(cuentaId, indexMensualidad)
         let dd = String(fCalculada.getDate()).padStart(2, '0');
 
         calendario[i].fecha = `${yyyy}-${mm}-${dd}`;
-        mesActual++; // Sumamos un mes para la siguiente cuota
+        mesActual++; 
     }
 
     StorageService.set("cuentasMSI", cuentasMSI);
     document.querySelector('[data-modal="repro-concilia"]').remove();
     alert("✅ Calendario MSI actualizado en cascada correctamente.");
-    renderConciliacionMSI(); // Refrescar la tabla actual
+    renderConciliacionMSI(); 
 };
 
 window.renderConciliacion = renderConciliacionMSI;
