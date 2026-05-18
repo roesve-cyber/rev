@@ -822,44 +822,18 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
 function generarTicketAbonoTermico(datosAbono) {
     const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
-        pagaresCubiertos, pagaresRestantes, pagaresAfectados, totalPagares, pagaresPendientes, diasAtrasoTotal,
-        etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro } = datosAbono;
+        pagaresRestantes, etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro } = datosAbono;
 
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const dineroFmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    const pagaresTicket = pagaresCubiertos || pagaresAfectados || [];
     const restantes = pagaresRestantes || [];
-
-    const pagaresHTML = pagaresTicket.length > 0
-        ? pagaresTicket.map((p, i) => {
-            const monto = p.monto || p.abono || 0;
-            const fechaPag = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(p.fechaVencimiento || p.vencimiento || '-') : (p.fechaVencimiento || p.vencimiento || '-');
-            if (p.estado === 'Pagado' || p.cubierto || !p.parcial) {
-                return `<tr style="background:#f0fdf4;">
-                    <td style="padding:3px 5px;">#${i + 1}</td>
-                    <td style="padding:3px 5px;">${fechaPag}</td>
-                    <td style="padding:3px 5px; text-align:right; text-decoration:line-through; color:#6b7280;">${dineroFmt(monto)}</td>
-                    <td style="padding:3px 5px; text-align:center; color:#27ae60;">✓</td>
-                </tr>`;
-            } else {
-                const aplicado = p.montoAplicado || 0;
-                return `<tr style="background:#fffbeb;">
-                    <td style="padding:3px 5px;">#${i + 1}</td>
-                    <td style="padding:3px 5px;">${fechaPag}</td>
-                    <td style="padding:3px 5px; text-align:right;">${dineroFmt(monto)}</td>
-                    <td style="padding:3px 5px; text-align:center; color:#f59e0b;">~${dineroFmt(aplicado)}</td>
-                </tr>`;
-            }
-        }).join('')
-        : `<tr><td colspan="4" style="padding:5px; text-align:center; color:#6b7280;">Sin pagarés registrados</td></tr>`;
-
     const hoy = new Date();
     const vencidos = restantes.filter(p => new Date(p.fechaVencimiento) < hoy);
     
     let mensajeEstado = '';
     let mensajeClase = 'mensaje-ok';
-    if (nuevoSaldo === 0) {
+    if (nuevoSaldo <= 0.01) {
         mensajeEstado = `🎉 ¡Cuenta liquidada! Gracias por su compromiso, ${esc(cliente.nombre)}. ¡Hasta pronto!`;
         mensajeClase = 'mensaje-ok';
     } else if (vencidos.length > 0) {
@@ -885,14 +859,19 @@ function generarTicketAbonoTermico(datosAbono) {
             </tbody>
         </table>` : '';
 
+    // 🛡️ CORRECCIÓN 1: Extraer la URL base actual para que las imágenes relativas (el Logo) funcionen en la ventana emergente.
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+
     const ticketHTML = `<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <title>Recibo de Abono ${esc(folioAbono || folio)}</title>
+    <base href="${baseUrl}"> <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" onload="document.getElementById('btn-imagen').disabled = false;"></script>
+    
     <style>
         @page { size: 80mm auto; margin: 0; }
-        body { font-family: 'Courier New', monospace; font-size: 11px; width: 72mm; margin: 4mm auto; color: #000; }
+        body { font-family: 'Courier New', monospace; font-size: 11px; width: 72mm; margin: 4mm auto; color: #000; background: #f3f4f6; }
         .centro { text-align: center; }
         .negrita { font-weight: bold; }
         hr { border: none; border-top: 1px dashed #333; margin: 6px 0; }
@@ -902,8 +881,40 @@ function generarTicketAbonoTermico(datosAbono) {
         .seccion-titulo { background: #000; color: #fff; padding: 3px 6px; font-weight: bold; font-size: 10px; margin: 5px 0 3px 0; }
         .mensaje-ok { border: 1px dashed #000; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
         .mensaje-atraso { background: #000; color: #fff; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
-        @media print { .no-print { display: none; } }
+        #ticket-contenido { background: #ffffff; padding: 10px; padding-bottom: 20px; box-sizing: border-box; }
+        @media print { .no-print { display: none !important; } body { background: white; margin: 0; } #ticket-contenido { padding: 0; } }
     </style>
+    <script>
+        function descargarImagen() {
+            if (typeof html2canvas === 'undefined') {
+                alert('⏳ La herramienta de imagen aún se está cargando o tu internet está lento. Intenta en 2 segundos.');
+                return;
+            }
+
+            const btn = document.getElementById('btn-imagen');
+            const textoOriginal = btn.innerHTML;
+            btn.innerHTML = '⏳ Procesando...';
+            btn.disabled = true;
+            
+            // 🛡️ CORRECCIÓN 3: useCORS permite cargar imágenes externas (como SVG locales procesados) sin fallar
+            html2canvas(document.getElementById('ticket-contenido'), {
+                scale: 3,
+                useCORS: true, 
+                backgroundColor: '#ffffff'
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'Abono_${esc(folio)}.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                btn.innerHTML = textoOriginal;
+                btn.disabled = false;
+            }).catch(err => {
+                alert('❌ Hubo un error al generar la imagen. Intenta imprimirlo a PDF.');
+                btn.innerHTML = textoOriginal;
+                btn.disabled = false;
+            });
+        }
+    </script>
 </head>
 <body>
 <div id="ticket-contenido">
@@ -922,11 +933,6 @@ function generarTicketAbonoTermico(datosAbono) {
     ${cliente.telefono ? `<div>Tel: ${esc(cliente.telefono)}</div>` : ''}
     <hr>
     ${articulosHTML}
-    <div class="seccion-titulo">PAGARÉS CUBIERTOS</div>
-    <table>
-        <thead><tr><th>#</th><th>Vcto.</th><th style="text-align:right;">Monto</th><th style="text-align:center;">Est.</th></tr></thead>
-        <tbody>${pagaresHTML}</tbody>
-    </table>
     <hr>
     <div class="negrita">ABONO RECIBIDO:</div>
     <div class="monto-grande">${dineroFmt(montoAbono)}</div>
@@ -945,14 +951,15 @@ function generarTicketAbonoTermico(datosAbono) {
     </div>
     <div class="centro" style="margin-top:12px;">Gracias por su preferencia</div>
 </div>
-<div class="no-print" style="text-align:center; padding:15px; background:#f8f9fa; border-top:1px dashed #333; margin-top:10px;">
-    <button onclick="window.print()" style="margin:4px; padding:8px 14px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer;">🖨️ Imprimir</button>
+<div class="no-print" style="text-align:center; padding:15px; margin-top:10px; display:flex; justify-content:center; gap:10px;">
+    <button onclick="window.print()" style="padding:10px 15px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🖨️ Imprimir</button>
+    <button id="btn-imagen" onclick="descargarImagen()" disabled style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📷 Guardar Imagen</button>
 </div>
 </body>
 </html>`;
 
     const ventana = window.open('', '_blank');
-    if (!ventana) return alert("⚠️ Habilita las ventanas emergentes.");
+    if (!ventana) return alert("⚠️ Habilita las ventanas emergentes en tu navegador para ver el ticket.");
     ventana.document.write(ticketHTML);
     ventana.document.close();
     ventana.focus();
