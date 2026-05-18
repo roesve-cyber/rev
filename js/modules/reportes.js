@@ -369,18 +369,25 @@ function renderReporteFlujo() {
     `;
 }
 // =====================================================================
-// 📈 MOTOR A.R.C. (ANÁLISIS DE RIESGO Y CARTERA HORIZONTAL)
+// 📈 MOTOR A.R.C. V2 (AGRUPADO POR RIESGO E INCOBRABLES)
 // =====================================================================
 
+window.toggleIncobrable = function(folio) {
+    let cxc = StorageService.get("cuentasPorCobrar", []);
+    let cuenta = cxc.find(c => c.folio === folio);
+    if (cuenta) {
+        cuenta.esIncobrable = !cuenta.esIncobrable;
+        StorageService.set("cuentasPorCobrar", cxc);
+        renderAnalisisRiesgoCartera();
+    }
+};
+
 window.renderAnalisisRiesgoCartera = function() {
-    // Tomamos el contenedor principal de los reportes
     const contenedor = document.getElementById("reportes") || document.getElementById("reportes-contenido") || document.getElementById("dashboardContenido");
-    if (!contenedor) return alert("❌ No se encontró el contenedor para dibujar el reporte.");
+    if (!contenedor) return;
 
-    // Variables de configuración de vista
-    const vistaAgrupacion = window._filtroARCAgrupacion || 'mensual'; // 'semanal' o 'mensual'
+    const vistaAgrupacion = window._filtroARCAgrupacion || 'mensual';
 
-    // 1. Extraer datos del sistema
     const cxcRaw = StorageService.get("cuentasPorCobrar", []);
     const pagares = StorageService.get("pagaresSistema", []);
     const cuentasActivas = cxcRaw.filter(c => c.saldoActual > 0 && c.estado !== 'Pagado');
@@ -390,29 +397,25 @@ window.renderAnalisisRiesgoCartera = function() {
         return;
     }
 
-    // 2. Procesar cuentas y calcular el Algoritmo de Riesgo
     const hoy = new Date();
     hoy.setHours(12,0,0,0);
-    
     let fechaMinAbono = new Date(); 
     let fechaMaxAbono = new Date(); 
 
-    const cuentasProcesadas = cuentasActivas.map(cuenta => {
-        // A) Buscar el último pagaré para definir la fecha fin real
+    const grupos = { INCOBRABLE: [], ALTO: [], MEDIO: [], BAJO: [] };
+
+    cuentasActivas.forEach(cuenta => {
         const pagaresCuenta = pagares.filter(p => p.folio === cuenta.folio);
         let fechaVenta = cuenta.fechaVenta ? new Date(cuenta.fechaVenta) : new Date();
         let fechaFin = new Date(fechaVenta);
-        fechaFin.setMonth(fechaFin.getMonth() + 1); // Fallback
+        fechaFin.setMonth(fechaFin.getMonth() + 1); 
 
         if (pagaresCuenta.length > 0) {
-            const maxMs = Math.max(...pagaresCuenta.map(p => new Date(p.fechaVencimiento).getTime()));
-            fechaFin = new Date(maxMs);
+            fechaFin = new Date(Math.max(...pagaresCuenta.map(p => new Date(p.fechaVencimiento).getTime())));
         }
 
-        // B) Matemáticas de Riesgo (Auditoría: Agregado % Pendiente)
         const totalVenta = cuenta.totalContadoOriginal || cuenta.totalMercancia || 1;
         const totalPagado = totalVenta - cuenta.saldoActual;
-        
         const pctPagado = (totalPagado / totalVenta) * 100;
         const pctPendiente = (cuenta.saldoActual / totalVenta) * 100;
 
@@ -421,17 +424,19 @@ window.renderAnalisisRiesgoCartera = function() {
         
         let pctTiempo = msTotalPlazo > 0 ? (msTranscurridos / msTotalPlazo) * 100 : 100;
         if (pctTiempo < 0) pctTiempo = 0;
-        
         const tiempoCoronado = pctTiempo > 100 ? 100 : pctTiempo; 
 
-        // Diferencia de Riesgo (Lo pagado vs Lo transcurrido)
         const diferenciaRiesgo = pctPagado - tiempoCoronado;
 
-        let nivelRiesgo = "BAJO"; let colorRiesgo = "#16a34a"; // Verde
-        if (diferenciaRiesgo < -5 && diferenciaRiesgo >= -20) { nivelRiesgo = "MEDIO"; colorRiesgo = "#d97706"; } // Ámbar
-        if (diferenciaRiesgo < -20) { nivelRiesgo = "ALTO"; colorRiesgo = "#dc2626"; } // Rojo
+        let nivelRiesgo = "BAJO"; let colorRiesgo = "#16a34a";
+        if (diferenciaRiesgo < -5 && diferenciaRiesgo >= -20) { nivelRiesgo = "MEDIO"; colorRiesgo = "#d97706"; }
+        if (diferenciaRiesgo < -20) { nivelRiesgo = "ALTO"; colorRiesgo = "#dc2626"; }
+        
+        // Sobreescritura manual del usuario
+        if (cuenta.esIncobrable) {
+            nivelRiesgo = "INCOBRABLE"; colorRiesgo = "#1e293b";
+        }
 
-        // C) Mapear Abonos
         const abonosProcesados = (cuenta.abonos || []).map(ab => {
             const fAbono = new Date(ab.fecha || ab.fechaAbono);
             if (fAbono < fechaMinAbono) fechaMinAbono = new Date(fAbono);
@@ -439,82 +444,51 @@ window.renderAnalisisRiesgoCartera = function() {
             return { fecha: fAbono, monto: parseFloat(ab.monto || ab.montoAbonado || 0) };
         });
 
-        const numPagosRealizados = (cuenta.abonos || []).length;
+        const periodosCubiertos = cuenta.plan && cuenta.plan.abono > 0 ? (totalPagado / cuenta.plan.abono).toFixed(1) : 0;
         
-        // Plazo equivalente
-        let textoEquivalente = "N/A";
-        if (cuenta.plan && cuenta.plan.abono > 0) {
-            const periodosCubiertos = (totalPagado / cuenta.plan.abono).toFixed(1);
-            textoEquivalente = `${periodosCubiertos} ${cuenta.periodicidad || 'pagos'} cubiertos`;
-        }
-
-        return {
-            ...cuenta,
-            fechaFin,
-            pctPagado,
-            pctPendiente,
-            pctTiempo: tiempoCoronado,
-            diferenciaRiesgo,
-            nivelRiesgo,
-            colorRiesgo,
-            totalPagado,
-            numPagosRealizados,
-            abonosProcesados,
-            textoEquivalente
+        const cProcesada = {
+            ...cuenta, fechaFin, pctPagado, pctPendiente, pctTiempo: tiempoCoronado, 
+            diferenciaRiesgo, nivelRiesgo, colorRiesgo, totalPagado, totalVenta,
+            numPagosRealizados: (cuenta.abonos || []).length, abonosProcesados, 
+            textoEquivalente: `${periodosCubiertos} ${cuenta.periodicidad || 'pagos'} cubiertos`
         };
+
+        grupos[nivelRiesgo].push(cProcesada);
     });
 
-    // Ordenar por mayor riesgo primero (los más rojos hasta arriba)
-    cuentasProcesadas.sort((a, b) => a.diferenciaRiesgo - b.diferenciaRiesgo);
-
-    // 3. Generar Eje de Tiempo (Columnas)
+    // Generar Eje de Tiempo (Columnas)
     fechaMinAbono.setMonth(fechaMinAbono.getMonth() - 1);
     fechaMaxAbono = hoy;
-
     const columnasTiempo = [];
-    const getLunes = (d) => {
-        const date = new Date(d);
-        const day = date.getDay();
-        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-        return new Date(date.setDate(diff));
-    };
-
+    const getLunes = (d) => { const date = new Date(d); const day = date.getDay(); return new Date(date.setDate(date.getDate() - day + (day === 0 ? -6 : 1))); };
     let cursorFecha = new Date(fechaMinAbono);
     
     if (vistaAgrupacion === 'mensual') {
         cursorFecha.setDate(1); 
         while (cursorFecha <= fechaMaxAbono) {
-            const m = cursorFecha.getMonth();
-            const y = cursorFecha.getFullYear();
-            const label = new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(cursorFecha).toUpperCase();
-            columnasTiempo.push({ key: `${y}-${m}`, label, type: 'mes', y, m });
+            columnasTiempo.push({ key: `${cursorFecha.getFullYear()}-${cursorFecha.getMonth()}`, label: new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(cursorFecha).toUpperCase() });
             cursorFecha.setMonth(cursorFecha.getMonth() + 1);
         }
     } else {
         cursorFecha = getLunes(cursorFecha); 
         while (cursorFecha <= fechaMaxAbono) {
-            const lunesStr = cursorFecha.toISOString().split('T')[0];
-            const dom = new Date(cursorFecha); dom.setDate(dom.getDate() + 6);
-            const label = `${cursorFecha.getDate()}/${cursorFecha.getMonth()+1} al ${dom.getDate()}/${dom.getMonth()+1}`;
-            columnasTiempo.push({ key: lunesStr, label, type: 'semana' });
+            const d = new Date(cursorFecha); d.setDate(d.getDate() + 6);
+            columnasTiempo.push({ key: cursorFecha.toISOString().split('T')[0], label: `${cursorFecha.getDate()}/${cursorFecha.getMonth()+1} al ${d.getDate()}/${d.getMonth()+1}` });
             cursorFecha.setDate(cursorFecha.getDate() + 7);
         }
     }
 
-    // 4. Construir Tabla Interactiva
     const fmt = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v);
-    const formatDate = (d) => d.toISOString().split('T')[0];
-
+    
     let html = `
     <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-bottom:30px; margin-top:20px;">
-        
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid #e2e8f0; padding-bottom:15px;">
             <div>
                 <h2 style="margin:0; color:#0f172a; font-size:24px;">📈 ARC: Análisis de Riesgo y Cartera</h2>
-                <p style="margin:0; color:#64748b; font-size:14px;">Evaluación de saldos, % de cobertura y comportamiento de pago histórico.</p>
+                <p style="margin:0; color:#64748b; font-size:14px;">Evaluación jerárquica de saldos y clasificación de cobrabilidad.</p>
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
-                <label style="font-weight:bold; font-size:12px; color:#475569;">VISTA DEL FLUJO:</label>
+                <button onclick="renderReporteCompromisos()" style="padding:10px 15px; background:#7c3aed; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">🔮 Ver Proyección de Compromisos</button>
                 <select onchange="window._filtroARCAgrupacion=this.value; renderAnalisisRiesgoCartera();" style="padding:10px; border:2px solid #cbd5e1; border-radius:8px; font-weight:bold; background:#f8fafc; cursor:pointer;">
                     <option value="mensual" ${vistaAgrupacion === 'mensual' ? 'selected' : ''}>📅 Por Meses</option>
                     <option value="semanal" ${vistaAgrupacion === 'semanal' ? 'selected' : ''}>📆 Por Semanas</option>
@@ -535,84 +509,278 @@ window.renderAnalisisRiesgoCartera = function() {
                 <tbody>
     `;
 
-    cuentasProcesadas.forEach(c => {
-        const sumasPorColumna = {};
-        columnasTiempo.forEach(col => sumasPorColumna[col.key] = 0);
+    const ordenBloques = [
+        { id: 'INCOBRABLE', titulo: '⚫ CARTERA INCOBRABLE (Pérdida Asumida)', bg: '#f8fafc', borde: '#1e293b' },
+        { id: 'ALTO', titulo: '🔴 CARTERA DE ALTO RIESGO (Foco Rojo)', bg: '#fff1f2', borde: '#dc2626' },
+        { id: 'MEDIO', titulo: '🟠 CARTERA DE RIESGO MEDIO (Atrasos Recuperables)', bg: '#fffbeb', borde: '#d97706' },
+        { id: 'BAJO', titulo: '🟢 CARTERA SANA (Riesgo Bajo / Al corriente)', bg: '#f0fdf4', borde: '#16a34a' }
+    ];
 
-        c.abonosProcesados.forEach(ab => {
-            if (vistaAgrupacion === 'mensual') {
-                const k = `${ab.fecha.getFullYear()}-${ab.fecha.getMonth()}`;
+    ordenBloques.forEach(bloque => {
+        if (grupos[bloque.id].length === 0) return;
+        
+        html += `<tr><td colspan="${columnasTiempo.length + 1}" style="padding:10px 15px; background:${bloque.bg}; border-left:5px solid ${bloque.borde}; font-weight:900; color:${bloque.borde}; font-size:14px;">${bloque.titulo} (${grupos[bloque.id].length} cuentas)</td></tr>`;
+
+        grupos[bloque.id].sort((a,b) => a.diferenciaRiesgo - b.diferenciaRiesgo).forEach(c => {
+            const sumasPorColumna = {};
+            columnasTiempo.forEach(col => sumasPorColumna[col.key] = 0);
+
+            c.abonosProcesados.forEach(ab => {
+                const k = vistaAgrupacion === 'mensual' ? `${ab.fecha.getFullYear()}-${ab.fecha.getMonth()}` : getLunes(ab.fecha).toISOString().split('T')[0];
                 if (sumasPorColumna[k] !== undefined) sumasPorColumna[k] += ab.monto;
-            } else {
-                const l = getLunes(ab.fecha).toISOString().split('T')[0];
-                if (sumasPorColumna[l] !== undefined) sumasPorColumna[l] += ab.monto;
-            }
-        });
+            });
 
-        const nomClie = c.nombre || c.clienteNombre || 'Sin Nombre';
-        const articulosTexto = (c.articulos || []).map(a => `${a.cantidad}x ${a.nombre}`).join(', ');
-        const fechaTerminoStr = formatDate(c.fechaFin);
+            const lblBotonInco = c.esIncobrable ? 'Quitar de Incobrable' : 'Marcar Incobrable';
+            const colorBotonInco = c.esIncobrable ? '#64748b' : '#0f172a';
 
-        html += `
+            html += `
             <tr style="transition:0.2s;" onmouseover="this.style.backgroundColor='#fcfcfc'" onmouseout="this.style.backgroundColor='transparent'">
-                
                 <td style="position:sticky; left:0; z-index:5; background:white; padding:15px; border-bottom:1px solid #e2e8f0; border-right:2px solid #cbd5e1; box-shadow: 4px 0 8px rgba(0,0,0,0.05); vertical-align:top;">
-                    
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
-                        <div style="font-weight:900; color:#0f172a; font-size:15px;">${nomClie}</div>
-                        <div style="font-size:10px; background:#eff6ff; color:#1e40af; padding:3px 6px; border-radius:4px; font-weight:bold;">${c.folio}</div>
+                        <div style="font-weight:900; color:#0f172a; font-size:15px;">${c.nombre || c.clienteNombre}</div>
+                        <div style="display:flex; gap:5px;">
+                            <button onclick="toggleIncobrable('${c.folio}')" style="background:${colorBotonInco}; color:white; border:none; padding:3px 8px; border-radius:4px; font-size:10px; cursor:pointer; font-weight:bold;">${lblBotonInco}</button>
+                            <div style="font-size:10px; background:#eff6ff; color:#1e40af; padding:3px 6px; border-radius:4px; font-weight:bold;">${c.folio}</div>
+                        </div>
                     </div>
                     
-                    <div style="font-size:11px; color:#64748b; margin-bottom:12px; line-height:1.3;">
-                        📦 <b>Mercancía:</b> ${articulosTexto || 'Sin detalle'}
-                    </div>
+                    <div style="font-size:11px; color:#64748b; margin-bottom:12px; line-height:1.3;">📦 <b>Mercancía:</b> ${(c.articulos || []).map(a => `${a.cantidad}x ${a.nombre}`).join(', ')}</div>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:12px;">
                         <div>
-                            <div style="font-size:10px; color:#64748b; font-weight:bold;">Total Venta:</div>
-                            <div style="font-size:13px; color:#0f172a; font-weight:bold;">${fmt(c.totalContadoOriginal)}</div>
-                            <div style="font-size:10px; color:#16a34a; font-weight:bold; margin-top:2px;">Pagado: ${c.pctPagado.toFixed(1)}%</div>
+                            <div style="font-size:10px; color:#64748b; font-weight:bold;">Importe Cubierto (${c.pctPagado.toFixed(1)}%):</div>
+                            <div style="font-size:14px; color:#16a34a; font-weight:900;">${fmt(c.totalPagado)}</div>
+                            <div style="font-size:10px; color:#64748b; font-weight:bold; margin-top:2px;">De un total de: ${fmt(c.totalVenta)}</div>
                         </div>
                         <div>
-                            <div style="font-size:10px; color:#64748b; font-weight:bold;">Saldo Actual:</div>
+                            <div style="font-size:10px; color:#64748b; font-weight:bold;">Saldo Pendiente (${c.pctPendiente.toFixed(1)}%):</div>
                             <div style="font-size:15px; color:#dc2626; font-weight:900;">${fmt(c.saldoActual)}</div>
-                            <div style="font-size:10px; color:#b91c1c; font-weight:bold; margin-top:2px;">Pendiente: ${c.pctPendiente.toFixed(1)}%</div>
                         </div>
                     </div>
 
                     <div style="border-left:4px solid ${c.colorRiesgo}; padding-left:10px;">
                         <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                            <span style="font-size:11px; font-weight:bold; color:${c.colorRiesgo};">🔴 RIESGO: ${c.nivelRiesgo}</span>
-                            <span style="font-size:11px; font-weight:bold; color:#475569;">Vence: ${fechaTerminoStr}</span>
+                            <span style="font-size:11px; font-weight:bold; color:${c.colorRiesgo};">⚠️ RIESGO: ${c.nivelRiesgo}</span>
+                            <span style="font-size:11px; font-weight:bold; color:#475569;">Vence: ${c.fechaFin.toISOString().split('T')[0]}</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:11px; color:#64748b; margin-bottom:4px;">
                             <span>Tiempo corrido: <b>${c.pctTiempo.toFixed(0)}%</b></span>
-                            <span>Abonos registrados: <b>${c.numPagosRealizados}</b></span>
+                            <span>Pagos: <b>${c.numPagosRealizados}</b></span>
                         </div>
-                        <div style="font-size:11px; color:#1e40af; font-weight:bold; margin-top:6px;">
-                            ⏱️ Equivalente: ${c.textoEquivalente}
-                        </div>
+                        <div style="font-size:11px; color:#1e40af; font-weight:bold; margin-top:6px;">⏱️ Equivalente: ${c.textoEquivalente}</div>
                     </div>
-
                 </td>
-
                 ${columnasTiempo.map(col => {
-                    const valor = sumasPorColumna[col.key];
-                    if (valor > 0) {
-                        return `<td style="padding:15px; border-bottom:1px solid #e2e8f0; border-right:1px dashed #e2e8f0; text-align:center; vertical-align:middle; background:#f0fdf4;">
-                            <div style="color:#16a34a; font-weight:900; font-size:14px;">+${fmt(valor)}</div>
-                        </td>`;
-                    } else {
-                        return `<td style="padding:15px; border-bottom:1px solid #e2e8f0; border-right:1px dashed #e2e8f0; text-align:center; vertical-align:middle;">
-                            <div style="color:#cbd5e1; font-size:12px;">-</div>
-                        </td>`;
-                    }
+                    const v = sumasPorColumna[col.key];
+                    return `<td style="padding:15px; border-bottom:1px solid #e2e8f0; border-right:1px dashed #e2e8f0; text-align:center; vertical-align:middle; ${v > 0 ? 'background:#f0fdf4;' : ''}">
+                        <div style="color:${v > 0 ? '#16a34a; font-weight:900; font-size:14px;' : '#cbd5e1; font-size:12px;'}">${v > 0 ? '+'+fmt(v) : '-'}</div>
+                    </td>`;
                 }).join('')}
-            </tr>
-        `;
+            </tr>`;
+        });
     });
 
-    html += `
+    html += `</tbody></table></div></div>`;
+    contenedor.innerHTML = html;
+};
+
+
+// =====================================================================
+// 🔮 REPORTE DE COMPROMISOS Y PROYECCIÓN DE FLUJO
+// =====================================================================
+
+window.toggleConsignacionOC = function(idOC) {
+    let ocs = StorageService.get("ordenesCompra", []);
+    let oc = ocs.find(o => String(o.id) === String(idOC));
+    if (oc) {
+        oc.esConsignacion = !oc.esConsignacion;
+        StorageService.set("ordenesCompra", ocs);
+        renderReporteCompromisos();
+    }
+};
+
+window.renderReporteCompromisos = function() {
+    const contenedor = document.getElementById("reportes") || document.getElementById("reportes-contenido") || document.getElementById("dashboardContenido");
+    if (!contenedor) return;
+
+    const fmt = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v);
+    const hoy = new Date();
+    
+    const mesesProyeccion = [];
+    for(let i=0; i<6; i++) {
+        let d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
+        mesesProyeccion.push({
+            key: `${d.getFullYear()}-${d.getMonth()}`,
+            label: new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(d).toUpperCase(),
+            egresos: { tdc: 0, proveedores: 0, fijos: 0 },
+            ingresos: { sano: 0, medio: 0, alto: 0 }
+        });
+    }
+
+    // 1. EGRESOS
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    cuentasMSI.forEach(msi => {
+        (msi.calendario || []).forEach(pago => {
+            if (pago.estado !== 'Pagado') {
+                const fPago = new Date(pago.fecha + 'T12:00:00');
+                const key = `${fPago.getFullYear()}-${fPago.getMonth()}`;
+                let mesDestino = mesesProyeccion.find(m => m.key === key) || mesesProyeccion[0]; 
+                mesDestino.egresos.tdc += parseFloat(pago.monto || 0);
+            }
+        });
+    });
+
+    const ocs = StorageService.get("ordenesCompra", []);
+    let trProveedoresHTML = '';
+    ocs.forEach(oc => {
+        if (oc.estado !== 'Pagada' && oc.estado !== 'Cancelada' && (oc.saldoPendiente || oc.total) > 0) {
+            const saldo = oc.saldoPendiente !== undefined ? oc.saldoPendiente : oc.total;
+            trProveedoresHTML += `<div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #eee; font-size:12px;">
+                <span>${oc.proveedorNombre} (Folio: ${oc.folio})</span>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <span style="font-weight:bold; color:#dc2626;">${fmt(saldo)}</span>
+                    <button onclick="toggleConsignacionOC('${oc.id}')" style="background:${oc.esConsignacion ? '#10b981' : '#64748b'}; color:white; border:none; padding:2px 6px; border-radius:4px; font-size:10px; cursor:pointer;">${oc.esConsignacion ? '✅ Consignación' : 'Pagar Normal'}</button>
+                </div>
+            </div>`;
+            if (!oc.esConsignacion) mesesProyeccion[0].egresos.proveedores += parseFloat(saldo);
+        }
+    });
+
+    // 2. INGRESOS
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+    
+    const mapaRiesgo = {};
+    cxc.forEach(cuenta => {
+        if(cuenta.esIncobrable) { mapaRiesgo[cuenta.folio] = 'incobrable'; return; }
+        const totalVenta = cuenta.totalContadoOriginal || 1;
+        const totalPagado = totalVenta - cuenta.saldoActual;
+        const pctPagado = (totalPagado / totalVenta) * 100;
+        
+        const pags = pagares.filter(p => p.folio === cuenta.folio);
+        let fFin = new Date(cuenta.fechaVenta || hoy);
+        if(pags.length > 0) fFin = new Date(Math.max(...pags.map(p => new Date(p.fechaVencimiento).getTime())));
+        
+        const msT = hoy.getTime() - new Date(cuenta.fechaVenta || hoy).getTime();
+        const msP = fFin.getTime() - new Date(cuenta.fechaVenta || hoy).getTime();
+        let pctTiempo = msP > 0 ? (msT / msP) * 100 : 100;
+        if(pctTiempo > 100) pctTiempo = 100;
+
+        const dif = pctPagado - pctTiempo;
+        if (dif < -20) mapaRiesgo[cuenta.folio] = 'alto';
+        else if (dif < -5) mapaRiesgo[cuenta.folio] = 'medio';
+        else mapaRiesgo[cuenta.folio] = 'sano';
+    });
+
+    pagares.forEach(pago => {
+        if (pago.estado !== 'Pagado' && pago.estado !== 'Cancelado') {
+            const riesgo = mapaRiesgo[pago.folio] || 'sano';
+            if (riesgo === 'incobrable') return; 
+
+            const fVenc = new Date(pago.fechaVencimiento);
+            const key = `${fVenc.getFullYear()}-${fVenc.getMonth()}`;
+            let mesDestino = mesesProyeccion.find(m => m.key === key) || mesesProyeccion[0];
+
+            mesDestino.ingresos[riesgo] += parseFloat(pago.monto || 0);
+        }
+    });
+
+    // 3. RENDERIZAR TABLA
+    let html = `
+    <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-top:20px; margin-bottom:30px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #e2e8f0; padding-bottom:15px; margin-bottom:20px;">
+            <div>
+                <h2 style="margin:0; color:#4c1d95; font-size:24px;">🔮 Proyección de Compromisos (Cash Flow)</h2>
+                <p style="margin:0; color:#64748b; font-size:14px;">Enfrenta tus egresos obligatorios contra tus cobranzas esperadas en 3 escenarios.</p>
+            </div>
+            <button onclick="renderAnalisisRiesgoCartera()" style="padding:10px 15px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">⬅️ Volver a ARC</button>
+        </div>
+
+        <div style="margin-bottom:20px; padding:15px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px;">
+            <h4 style="margin:0 0 10px 0; color:#0f172a;">⚙️ Configuración de Deuda a Proveedores (Excluir Consignación)</h4>
+            <p style="font-size:11px; color:#64748b; margin-bottom:10px;">Marca en verde las cuentas a consignación para que el sistema NO las exija como pago este mes.</p>
+            <div style="max-height:150px; overflow-y:auto; padding-right:10px;">
+                ${trProveedoresHTML || '<div style="font-size:12px; color:#94a3b8;">No hay deudas a proveedores abiertas.</div>'}
+            </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table style="width:100%; min-width:800px; border-collapse:collapse;">
+                <thead>
+                    <tr>
+                        <th style="padding:15px; background:#f1f5f9; text-align:left; border-bottom:2px solid #cbd5e1; width:250px;">Concepto</th>
+                        ${mesesProyeccion.map(m => `<th style="padding:15px; background:#f8fafc; text-align:center; border-bottom:2px solid #cbd5e1; color:#0f172a; font-weight:900;">${m.label}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="${mesesProyeccion.length + 1}" style="background:#fff1f2; color:#be123c; font-weight:bold; padding:10px 15px; font-size:14px;">🔻 COMPROMISOS (Lo que debes pagar)</td></tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#475569; font-size:12px;">Tarjetas de Crédito MSI</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#dc2626; font-weight:bold;">${fmt(m.egresos.tdc)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #e2e8f0;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#475569; font-size:12px;">Cuentas por Pagar (Proveedores)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#dc2626; font-weight:bold;">${fmt(m.egresos.proveedores)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:2px solid #cbd5e1; background:#f8fafc;">
+                        <td style="padding:10px 15px; font-weight:900; color:#0f172a; font-size:13px;">(=) TOTAL COMPROMISOS</td>
+                        ${mesesProyeccion.map(m => {
+                            const tot = m.egresos.tdc + m.egresos.proveedores;
+                            return `<td style="padding:10px; text-align:center; color:#be123c; font-weight:900;">${fmt(tot)}</td>`;
+                        }).join('')}
+                    </tr>
+
+                    <tr><td colspan="${mesesProyeccion.length + 1}" style="background:#f0fdf4; color:#15803d; font-weight:bold; padding:10px 15px; font-size:14px; margin-top:10px;">🟢 COBRANZA ESPERADA (Según Nivel de Riesgo)</td></tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#16a34a; font-size:12px;">Cobranza Segura (Cartera Sana)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#16a34a;">${fmt(m.ingresos.sano)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#d97706; font-size:12px;">Cobranza Probable (Riesgo Medio)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#d97706;">${fmt(m.ingresos.medio)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #e2e8f0;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#dc2626; font-size:12px;">Cobranza Difícil (Alto Riesgo)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#dc2626;">${fmt(m.ingresos.alto)}</td>`).join('')}
+                    </tr>
+
+                    <tr><td colspan="${mesesProyeccion.length + 1}" style="background:#eff6ff; color:#1d4ed8; font-weight:bold; padding:10px 15px; font-size:14px;">⚖️ ESCENARIOS DE LIQUIDEZ (Con qué dinero contarás)</td></tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:15px; font-size:12px;">
+                            <b style="color:#16a34a;">Escenario Optimista</b><br>
+                            <small style="color:#64748b;">(Pagan todos: Sanos + Medios + Altos)</small>
+                        </td>
+                        ${mesesProyeccion.map(m => {
+                            const ingTot = m.ingresos.sano + m.ingresos.medio + m.ingresos.alto;
+                            const egTot = m.egresos.tdc + m.egresos.proveedores;
+                            const dif = ingTot - egTot;
+                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#16a34a' : '#dc2626'};">${fmt(dif)}</td>`;
+                        }).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #f1f5f9; background:#f8fafc;">
+                        <td style="padding:15px; font-size:12px;">
+                            <b style="color:#d97706;">Escenario Realista</b><br>
+                            <small style="color:#64748b;">(Solo te pagan los Sanos y Medios)</small>
+                        </td>
+                        ${mesesProyeccion.map(m => {
+                            const ingTot = m.ingresos.sano + m.ingresos.medio;
+                            const egTot = m.egresos.tdc + m.egresos.proveedores;
+                            const dif = ingTot - egTot;
+                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#d97706' : '#dc2626'};">${fmt(dif)}</td>`;
+                        }).join('')}
+                    </tr>
+                    <tr>
+                        <td style="padding:15px; font-size:12px;">
+                            <b style="color:#dc2626;">Escenario Conservador (Estrés)</b><br>
+                            <small style="color:#64748b;">(Solo te pagan los clientes súper Sanos)</small>
+                        </td>
+                        ${mesesProyeccion.map(m => {
+                            const ingTot = m.ingresos.sano;
+                            const egTot = m.egresos.tdc + m.egresos.proveedores;
+                            const dif = ingTot - egTot;
+                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#0f172a' : '#dc2626'}; background:${dif < 0 ? '#fff1f2' : 'transparent'};">${fmt(dif)}</td>`;
+                        }).join('')}
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -737,6 +905,308 @@ window.renderReporteRentabilidad = function() {
         </div>
       </div>
     `;
+};
+// =====================================================================
+// 🔮 REPORTE DE COMPROMISOS Y PROYECCIÓN DE FLUJO (FIFO UNIFICADO)
+// =====================================================================
+
+window.toggleConsignacionOC = function(idOC) {
+    let ocs = StorageService.get("ordenesCompra", []);
+    let oc = ocs.find(o => String(o.id) === String(idOC));
+    if (oc) {
+        oc.esConsignacion = !oc.esConsignacion;
+        StorageService.set("ordenesCompra", ocs);
+        renderReporteCompromisos();
+    }
+};
+
+window.renderReporteCompromisos = function() {
+    const contenedor = document.getElementById("reportes") || document.getElementById("reportes-contenido") || document.getElementById("dashboardContenido");
+    if (!contenedor) return;
+
+    const fmt = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v);
+    const hoy = new Date();
+    
+    const mesesProyeccion = [];
+    for(let i=0; i<6; i++) {
+        let d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
+        mesesProyeccion.push({
+            key: `${d.getFullYear()}-${d.getMonth()}`,
+            label: new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(d).toUpperCase(),
+            egresos: { tdc: 0, proveedores: 0, consignacionVendida: 0 },
+            ingresos: { sano: 0, medio: 0, alto: 0 }
+        });
+    }
+
+    // 1. EGRESOS TDC (Tarjetas MSI)
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    cuentasMSI.forEach(msi => {
+        (msi.calendario || []).forEach(pago => {
+            if (pago.estado !== 'Pagado') {
+                const fPago = new Date(pago.fecha + 'T12:00:00');
+                const key = `${fPago.getFullYear()}-${fPago.getMonth()}`;
+                let mesDestino = mesesProyeccion.find(m => m.key === key) || mesesProyeccion[0]; 
+                mesDestino.egresos.tdc += parseFloat(pago.monto || 0);
+            }
+        });
+    });
+
+    // 2. EGRESOS PROVEEDORES (FIFO UNIFICADO: Compras Directas + Órdenes de Compra)
+    const ocs = StorageService.get("ordenesCompra", []);
+    const comprasDirectas = StorageService.get("compras", []);
+    const ventas = StorageService.get("ventasRegistradas", []);
+    
+    // A) Crear Línea de Tiempo Unificada de Entradas (Todo el inventario que ha llegado)
+    let inventarioEntrante = [];
+
+    ocs.forEach(oc => {
+        if (oc.estado !== 'Cancelada') {
+            inventarioEntrante.push({
+                origen: 'OC',
+                idOriginal: oc.id,
+                folio: oc.folio,
+                proveedor: oc.proveedorNombre,
+                fechaMs: new Date(oc.fechaEmision || oc.fecha).getTime(),
+                esConsignacion: !!oc.esConsignacion,
+                articulos: oc.articulos || [],
+                total: oc.total || 0,
+                saldoPendiente: oc.saldoPendiente !== undefined ? oc.saldoPendiente : oc.total,
+                estado: oc.estado
+            });
+        }
+    });
+
+    comprasDirectas.forEach(cd => {
+        const esConsig = cd.metodoPago === 'consignacion';
+        inventarioEntrante.push({
+            origen: 'CD',
+            idOriginal: cd.id,
+            folio: cd.folio || cd.id,
+            proveedor: cd.proveedor,
+            fechaMs: new Date(cd.fechaISO || cd.fecha).getTime(),
+            esConsignacion: esConsig,
+            articulos: cd.articulos || [],
+            total: cd.total || 0,
+            saldoPendiente: (cd.total || 0) - (cd.pagado || 0),
+            estado: 'Pagada/Directa'
+        });
+    });
+
+    // Ordenar estrictamente de lo más viejo a lo más nuevo
+    inventarioEntrante.sort((a, b) => a.fechaMs - b.fechaMs);
+
+    // B) Crear Pool de Ventas Históricas
+    let ventasPorProducto = {};
+    ventas.forEach(v => {
+        if(v.estado === 'Cancelada' || v.estatus === 'Cancelada') return;
+        (v.articulos || []).forEach(art => {
+            let pid = String(art.id || art.productoId);
+            ventasPorProducto[pid] = (ventasPorProducto[pid] || 0) + (parseFloat(art.cantidad) || 1);
+        });
+    });
+
+    let trProveedoresHTML = '';
+    let trConsignacionHTML = '';
+
+    // C) Rellenar las ventas consumiendo el inventario desde el más viejo
+    inventarioEntrante.forEach(entrada => {
+        let valorVendidoDeEstaEntrada = 0;
+        
+        // Consumir el stock de esta entrada
+        entrada.articulos.forEach(art => {
+            let pid = String(art.productoId || art.id);
+            let cantComprada = parseFloat(art.cantidad) || 1;
+
+            if (ventasPorProducto[pid] && ventasPorProducto[pid] > 0) {
+                let cantTomada = Math.min(cantComprada, ventasPorProducto[pid]);
+                ventasPorProducto[pid] -= cantTomada; // Restar del pool global
+                valorVendidoDeEstaEntrada += cantTomada * (parseFloat(art.costo) || 0);
+            }
+        });
+
+        // D) Reglas Financieras según el tipo de entrada
+        const totalPagadoAEntrada = entrada.total - entrada.saldoPendiente;
+
+        if (entrada.esConsignacion) {
+            // Es consignación: ¿Ya se vendió algo que no le he pagado al proveedor?
+            let deudaRealConsignacion = valorVendidoDeEstaEntrada - totalPagadoAEntrada;
+
+            if (deudaRealConsignacion > 0 && entrada.saldoPendiente > 0) {
+                // Topear la exigencia al saldo real pendiente
+                deudaRealConsignacion = Math.min(deudaRealConsignacion, entrada.saldoPendiente);
+                
+                mesesProyeccion[0].egresos.consignacionVendida += deudaRealConsignacion;
+                trConsignacionHTML += `<div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #eee; font-size:12px;">
+                    <span style="color:#be123c;">📦 [${entrada.origen}] ${entrada.folio} (${entrada.proveedor}) - Vendida</span>
+                    <span style="font-weight:bold; color:#be123c;">${fmt(deudaRealConsignacion)}</span>
+                </div>`;
+            }
+
+            // Etiqueta UI en la configuración (Solo para las que son Órdenes de Compra y deben)
+            if (entrada.origen === 'OC' && entrada.estado !== 'Pagada') {
+                const stockEnBodega = entrada.saldoPendiente - (deudaRealConsignacion > 0 ? deudaRealConsignacion : 0);
+                trProveedoresHTML += `<div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #eee; font-size:12px; background:#ecfdf5;">
+                    <span style="color:#065f46;">${entrada.proveedor} (Folio: ${entrada.folio})</span>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <span style="font-weight:bold; color:#10b981;">En bodega: ${fmt(Math.max(0, stockEnBodega))}</span>
+                        <button onclick="toggleConsignacionOC('${entrada.idOriginal}')" style="background:#10b981; color:white; border:none; padding:2px 6px; border-radius:4px; font-size:10px; cursor:pointer;">✅ Consignación</button>
+                    </div>
+                </div>`;
+            }
+
+        } else {
+            // PROVEEDORES NORMALES O CRÉDITO DIRECTO
+            if (entrada.origen === 'OC' && entrada.estado !== 'Pagada' && entrada.saldoPendiente > 0) {
+                mesesProyeccion[0].egresos.proveedores += parseFloat(entrada.saldoPendiente);
+                trProveedoresHTML += `<div style="display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #eee; font-size:12px;">
+                    <span>${entrada.proveedor} (Folio: ${entrada.folio})</span>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <span style="font-weight:bold; color:#dc2626;">${fmt(entrada.saldoPendiente)}</span>
+                        <button onclick="toggleConsignacionOC('${entrada.idOriginal}')" style="background:#64748b; color:white; border:none; padding:2px 6px; border-radius:4px; font-size:10px; cursor:pointer;">Pagar Normal</button>
+                    </div>
+                </div>`;
+            }
+        }
+    });
+
+    // 3. INGRESOS
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const pagares = StorageService.get("pagaresSistema", []);
+    
+    const mapaRiesgo = {};
+    cxc.forEach(cuenta => {
+        if(cuenta.esIncobrable) { mapaRiesgo[cuenta.folio] = 'incobrable'; return; }
+        const totalVenta = cuenta.totalContadoOriginal || 1;
+        const totalPagado = totalVenta - cuenta.saldoActual;
+        const pctPagado = (totalPagado / totalVenta) * 100;
+        
+        const pags = pagares.filter(p => p.folio === cuenta.folio);
+        let fFin = new Date(cuenta.fechaVenta || hoy);
+        if(pags.length > 0) fFin = new Date(Math.max(...pags.map(p => new Date(p.fechaVencimiento).getTime())));
+        
+        const msT = hoy.getTime() - new Date(cuenta.fechaVenta || hoy).getTime();
+        const msP = fFin.getTime() - new Date(cuenta.fechaVenta || hoy).getTime();
+        let pctTiempo = msP > 0 ? (msT / msP) * 100 : 100;
+        if(pctTiempo > 100) pctTiempo = 100;
+
+        const dif = pctPagado - pctTiempo;
+        if (dif < -20) mapaRiesgo[cuenta.folio] = 'alto';
+        else if (dif < -5) mapaRiesgo[cuenta.folio] = 'medio';
+        else mapaRiesgo[cuenta.folio] = 'sano';
+    });
+
+    pagares.forEach(pago => {
+        if (pago.estado !== 'Pagado' && pago.estado !== 'Cancelado') {
+            const riesgo = mapaRiesgo[pago.folio] || 'sano';
+            if (riesgo === 'incobrable') return; 
+
+            const fVenc = new Date(pago.fechaVencimiento);
+            const key = `${fVenc.getFullYear()}-${fVenc.getMonth()}`;
+            let mesDestino = mesesProyeccion.find(m => m.key === key) || mesesProyeccion[0];
+
+            mesDestino.ingresos[riesgo] += parseFloat(pago.monto || 0);
+        }
+    });
+
+    // 4. RENDERIZAR TABLA
+    let html = `
+    <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.05); margin-top:20px; margin-bottom:30px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #e2e8f0; padding-bottom:15px; margin-bottom:20px;">
+            <div>
+                <h2 style="margin:0; color:#4c1d95; font-size:24px;">🔮 Proyección de Compromisos (Cash Flow)</h2>
+                <p style="margin:0; color:#64748b; font-size:14px;">Egresos (incluye mercancía de consignación ya vendida) contra ingresos esperados.</p>
+            </div>
+            <button onclick="renderAnalisisRiesgoCartera()" style="padding:10px 15px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">⬅️ Volver a ARC</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
+            <div style="padding:15px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px;">
+                <h4 style="margin:0 0 10px 0; color:#0f172a;">⚙️ Configuración de Deudas</h4>
+                <div style="max-height:120px; overflow-y:auto; padding-right:10px;">
+                    ${trProveedoresHTML || '<div style="font-size:12px; color:#94a3b8;">No hay deudas a proveedores abiertas.</div>'}
+                </div>
+            </div>
+            <div style="padding:15px; background:#fff1f2; border:1px solid #fda4af; border-radius:8px;">
+                <h4 style="margin:0 0 10px 0; color:#be123c;">🚨 Alerta: Consignación Ya Vendida (Por Pagar)</h4>
+                <p style="font-size:11px; color:#9f1239; margin-bottom:10px;">Esta mercancía ya salió de tu inventario. El sistema te la exige en los compromisos de este mes porque no se la has pagado al proveedor.</p>
+                <div style="max-height:80px; overflow-y:auto; padding-right:10px;">
+                    ${trConsignacionHTML || '<div style="font-size:12px; color:#10b981;">✅ Toda la mercancía vendida de consignación ya está pagada.</div>'}
+                </div>
+            </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table style="width:100%; min-width:800px; border-collapse:collapse;">
+                <thead>
+                    <tr>
+                        <th style="padding:15px; background:#f1f5f9; text-align:left; border-bottom:2px solid #cbd5e1; width:250px;">Concepto</th>
+                        ${mesesProyeccion.map(m => `<th style="padding:15px; background:#f8fafc; text-align:center; border-bottom:2px solid #cbd5e1; color:#0f172a; font-weight:900;">${m.label}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="${mesesProyeccion.length + 1}" style="background:#fff1f2; color:#be123c; font-weight:bold; padding:10px 15px; font-size:14px;">🔻 COMPROMISOS (Lo que debes pagar)</td></tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#475569; font-size:12px;">Tarjetas de Crédito MSI</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#dc2626; font-weight:bold;">${fmt(m.egresos.tdc)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#475569; font-size:12px;">Cuentas Proveedores (Normales)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#dc2626; font-weight:bold;">${fmt(m.egresos.proveedores)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #e2e8f0; background:#fff5f5;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#be123c; font-size:12px;">Consignación ya Vendida (Exigible)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#be123c; font-weight:bold;">${fmt(m.egresos.consignacionVendida)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:2px solid #cbd5e1; background:#f8fafc;">
+                        <td style="padding:10px 15px; font-weight:900; color:#0f172a; font-size:13px;">(=) TOTAL COMPROMISOS</td>
+                        ${mesesProyeccion.map(m => {
+                            const tot = m.egresos.tdc + m.egresos.proveedores + m.egresos.consignacionVendida;
+                            return `<td style="padding:10px; text-align:center; color:#be123c; font-weight:900;">${fmt(tot)}</td>`;
+                        }).join('')}
+                    </tr>
+
+                    <tr><td colspan="${mesesProyeccion.length + 1}" style="background:#f0fdf4; color:#15803d; font-weight:bold; padding:10px 15px; font-size:14px; margin-top:10px;">🟢 COBRANZA ESPERADA (Según Nivel de Riesgo)</td></tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#16a34a; font-size:12px;">Cobranza Segura (Cartera Sana)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#16a34a;">${fmt(m.ingresos.sano)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#d97706; font-size:12px;">Cobranza Probable (Riesgo Medio)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#d97706;">${fmt(m.ingresos.medio)}</td>`).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #e2e8f0;">
+                        <td style="padding:10px 15px; font-weight:bold; color:#dc2626; font-size:12px;">Cobranza Difícil (Alto Riesgo)</td>
+                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#dc2626;">${fmt(m.ingresos.alto)}</td>`).join('')}
+                    </tr>
+
+                    <tr><td colspan="${mesesProyeccion.length + 1}" style="background:#eff6ff; color:#1d4ed8; font-weight:bold; padding:10px 15px; font-size:14px;">⚖️ ESCENARIOS DE LIQUIDEZ (Con qué dinero contarás)</td></tr>
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:15px; font-size:12px;"><b style="color:#16a34a;">Escenario Optimista</b><br><small style="color:#64748b;">(Pagan todos: Sanos + Medios + Altos)</small></td>
+                        ${mesesProyeccion.map(m => {
+                            const dif = (m.ingresos.sano + m.ingresos.medio + m.ingresos.alto) - (m.egresos.tdc + m.egresos.proveedores + m.egresos.consignacionVendida);
+                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#16a34a' : '#dc2626'};">${fmt(dif)}</td>`;
+                        }).join('')}
+                    </tr>
+                    <tr style="border-bottom:1px solid #f1f5f9; background:#f8fafc;">
+                        <td style="padding:15px; font-size:12px;"><b style="color:#d97706;">Escenario Realista</b><br><small style="color:#64748b;">(Solo te pagan los Sanos y Medios)</small></td>
+                        ${mesesProyeccion.map(m => {
+                            const dif = (m.ingresos.sano + m.ingresos.medio) - (m.egresos.tdc + m.egresos.proveedores + m.egresos.consignacionVendida);
+                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#d97706' : '#dc2626'};">${fmt(dif)}</td>`;
+                        }).join('')}
+                    </tr>
+                    <tr>
+                        <td style="padding:15px; font-size:12px;"><b style="color:#dc2626;">Escenario Conservador (Estrés)</b><br><small style="color:#64748b;">(Solo te pagan los clientes súper Sanos)</small></td>
+                        ${mesesProyeccion.map(m => {
+                            const dif = m.ingresos.sano - (m.egresos.tdc + m.egresos.proveedores + m.egresos.consignacionVendida);
+                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#0f172a' : '#dc2626'}; background:${dif < 0 ? '#fff1f2' : 'transparent'};">${fmt(dif)}</td>`;
+                        }).join('')}
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+
+    contenedor.innerHTML = html;
 };
 
 // Expose to global scope

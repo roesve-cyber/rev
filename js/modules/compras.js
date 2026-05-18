@@ -972,12 +972,16 @@ function abrirNuevaOrdenCompra() {
 <div style="margin-top:15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
     <div>
         <label style="font-size:13px; font-weight:bold;">Método de Pago:</label>
-        <select id="ocMetodoPago" onchange="document.getElementById('divMsiOC').style.display=(this.value==='msi'?'block':'none'); document.getElementById('divCuentaOC').style.display=(this.value==='contado'?'block':'none');" 
+        <select id="ocMetodoPago" onchange="document.getElementById('divMsiOC').style.display=(this.value==='msi'?'block':'none'); document.getElementById('divCuentaOC').style.display=(this.value==='contado'?'block':'none'); document.getElementById('alertaConsignacionOC').style.display=(this.value==='consignacion'?'block':'none');" 
                 style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
             <option value="contado">Contado</option>
             <option value="credito">Crédito Proveedor</option>
             <option value="msi">Meses sin Intereses (MSI)</option>
+            <option value="consignacion" style="color:#10b981; font-weight:bold;">A Consignación</option>
         </select>
+        <div id="alertaConsignacionOC" style="display:none; background:#ecfdf5; border:1px solid #10b981; padding:8px; border-radius:6px; margin-top:8px; font-size:11px; color:#065f46;">
+            ✅ <b>Modo Consignación:</b> Esta OC no generará una deuda inmediata exigible en el flujo. Solo se pagará lo que se vaya vendiendo.
+        </div>
     </div>
 
     <div id="divCuentaOC">
@@ -1173,7 +1177,9 @@ function guardarOrdenCompra() {
         },
         anticipo_pagado: anticipo || 0,
         saldoPendiente: Math.max(0, total - (anticipo || 0)),
-        pagos: (anticipo > 0) ? [{ fecha: new Date().toISOString(), monto: anticipo, cuenta: cuentaOrigen }] : []
+        pagos: (anticipo > 0) ? [{ fecha: new Date().toISOString(), monto: anticipo, cuenta: cuentaOrigen }] : [],
+        // 👇 AÑADIMOS LA BANDERA DE CONSIGNACIÓN 👇
+        esConsignacion: metodoPago === 'consignacion'
     };
     const lista = StorageService.get('ordenesCompra', []);
     lista.push(oc);
@@ -2294,12 +2300,16 @@ function abrirModalCompraDirectaMulti() {
           
           <div>
             <label style="font-size:12px; font-weight:bold; color:#374151;">💳 MÉTODO DE PAGO</label>
-            <select id="cdMetodoPago" onchange="document.getElementById('divMsiCD').style.display=(this.value==='tarjeta_msi'?'block':'none'); document.getElementById('divCuentaCD').style.display=(this.value==='contado'?'block':'none');" 
+            <select id="cdMetodoPago" onchange="document.getElementById('divMsiCD').style.display=(this.value==='tarjeta_msi'?'block':'none'); document.getElementById('divCuentaCD').style.display=(this.value==='contado'?'block':'none'); document.getElementById('alertaConsigCD').style.display=(this.value==='consignacion'?'block':'none');" 
                     style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
                 <option value="contado">Contado</option>
                 <option value="credito_proveedor">Crédito Proveedor</option>
                 <option value="tarjeta_msi">Meses sin Intereses (MSI)</option>
+                <option value="consignacion" style="color:#10b981; font-weight:bold;">A Consignación</option>
             </select>
+            <div id="alertaConsigCD" style="display:none; background:#ecfdf5; border:1px solid #10b981; padding:8px; border-radius:6px; margin-top:8px; font-size:11px; color:#065f46;">
+                ✅ <b>Modo Consignación:</b> Esta compra entrará al inventario pero NO generará una deuda inmediata exigible.
+            </div>
           </div>
 
           <div>
@@ -2545,7 +2555,7 @@ function guardarCompraDirectaFinal() {
             monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
             concepto: `Compra Directa a ${prov.nombre}`, referencia: `COMPRA-${idCompraUnico}`
         });
-    } else if (metodoPago === "credito_proveedor") {
+    } else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
         let cuentasProv = StorageService.get("cuentasPorPagar", []);
         cuentasProv.push({
             id: idCompraUnico + 2,
@@ -2557,7 +2567,9 @@ function guardarCompraDirectaFinal() {
             metodo: metodoPago,
             formaPagoTexto: formaPagoTexto,
             fecha: fechaFormatMX,
-            vencimiento: "Revisar CXP"
+            vencimiento: metodoPago === "consignacion" ? "Al venderse" : "Revisar CXP",
+            // 👇 BANDERA DE CONSIGNACIÓN 👇
+            esConsignacion: metodoPago === "consignacion"
         });
         StorageService.set("cuentasPorPagar", cuentasProv);
     }
