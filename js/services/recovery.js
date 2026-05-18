@@ -189,7 +189,7 @@ window.recargarVariablesGlobales = async function() {
         'productos', 'clientes', 'proveedores', 'categoriasData',
         'cuentasPorCobrar', 'cuentasPorPagar', 'pagaresSistema',
         'movimientosCaja', 'movimientosInventario', 'compras',
-        'carrito', 'tarjetasConfig', 'recepciones', 'deudasMSI',
+        'carrito', 'tarjetasConfig', 'recepciones', 'cuentasMSI', // <--- ¡CORREGIDO!
         'requisicionesCompra', 'salidasPendientesVenta'
     ];
     

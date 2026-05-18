@@ -137,7 +137,8 @@ const tablas = window.TABLAS_SISTEMA || [
     "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
     "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
     "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
-    "deudasMSI", "ubicacionesConfig", "requisicionesCompra"
+    "cuentasMSI", // <--- ¡CORREGIDO AQUÍ TAMBIÉN!
+    "ubicacionesConfig", "requisicionesCompra"
 ];
 
         try {
@@ -173,14 +174,15 @@ async uploadAll() {
     
     // Fallback blindado con la lista idéntica de 25 tablas
     const tablas = window.TABLAS_SISTEMA || [
-        "productos", "categoriasData", "movimientosInventario",
-        "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
-        "ventasRegistradas", "registroTickets", "salidasPendientesVenta",
-        "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
-        "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
-        "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
-        "deudasMSI", "ubicacionesConfig", "requisicionesCompra"
-    ];
+    "productos", "categoriasData", "movimientosInventario",
+    "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
+    "ventasRegistradas", "registroTickets", "salidasPendientesVenta",
+    "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
+    "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
+    "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
+    "cuentasMSI", // <--- ¡CORREGIDO AQUÍ TAMBIÉN!
+    "ubicacionesConfig", "requisicionesCompra"
+];
 
     try {
         console.log("⬆️ Subiendo datos a la nube...");

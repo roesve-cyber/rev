@@ -27,7 +27,7 @@ const TABLAS_SISTEMA = [
     "configuracionPos",
     "recepciones", 
     "cuentasPorPagar", 
-    "deudasMSI", 
+    "cuentasMSI",
     "ubicacionesConfig",
     "requisicionesCompra"       // Añadido para el flujo de compras pendientes
 ];
