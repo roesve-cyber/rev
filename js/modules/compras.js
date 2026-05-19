@@ -2469,14 +2469,15 @@ function guardarCompraDirectaFinal() {
 
     const cuentaOrigenId = document.getElementById('cdCuentaOrigen')?.value || "efectivo";
     const cuentaOrigenNombre = document.getElementById('cdCuentaOrigen')?.options[document.getElementById('cdCuentaOrigen').selectedIndex]?.text || "Efectivo";
+    
+    // 👇 Leemos tus campos nativos de MSI 👇
     const bancoSel = document.getElementById('cdBancoMSI')?.value || "";
+    const msiMeses = parseInt(document.getElementById('cdMesesMSI')?.value) || 12;
     
-    // 👇 LEEMOS EL CHECKBOX 👇
     const ingresoInmediato = document.getElementById('cdIngresoInmediato')?.checked ?? true;
-    
     const totalCompra = arts.reduce((s, a) => s + a.subtotal, 0);
 
-    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nTotal de artículos: ${arts.length}\nTotal a pagar: ${dinero(totalCompra)}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'SE ENVÍA A RECEPCIONES ⏳'}`;
+    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nTotal de artículos: ${arts.length}\nTotal a pagar: ${dinero(totalCompra)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
     if (!confirm(msjConfirmar)) return;
 
     let comprasList = StorageService.get("compras", []);
@@ -2488,18 +2489,17 @@ function guardarCompraDirectaFinal() {
     let avisoActualizacion = "";
 
     arts.forEach((art, index) => {
-        // 1. Guardar en Historial de Costos (Esto siempre se guarda al comprar)
+        // 1. Historial de Costos
         guardarHistorialCosto({
             productoId: art.productoId, precioCompra: art.costo, fecha: fechaFormatMX,
             cantidad: art.cantidad, proveedorId: prov.id, proveedorNombre: prov.nombre, origen: 'compra directa multi'
         });
 
-        // 👇 2. INVENTARIO: SOLO SE AFECTA SI ESTÁ CHECKED 👇
+        // 2. Inventario inmediato
         if (ingresoInmediato) {
             const pidx = productos.findIndex(p => String(p.id) === String(art.productoId));
             if (pidx !== -1) {
                 let p = productos[pidx];
-                
                 if (art.costo > p.costo) {
                     let margenAplicar = 30;
                     const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(art.costo, margenAplicar);
@@ -2510,7 +2510,6 @@ function guardarCompraDirectaFinal() {
 
                 p.stock = (Number(p.stock) || 0) + art.cantidad;
                 p.variantes = p.variantes || [];
-                
                 const colFinal = art.color || 'General';
                 const ubiFinal = art.ubicacion || 'General';
                 const existente = p.variantes.find(v => (v.ubicacion || 'General').toUpperCase() === ubiFinal.toUpperCase() && (v.color || 'General').toUpperCase() === colFinal.toUpperCase());
@@ -2532,9 +2531,9 @@ function guardarCompraDirectaFinal() {
             }
         }
 
-        // 👇 3. RECEPCIONES: SE CREA UNA TARJETA INDIVIDUAL POR CADA ARTÍCULO 👇
+        // 3. Recepciones (Tarjeta individual)
         recepciones.push({
-            id: idCompraUnico + 1 + index, // IDs únicos para cada fila
+            id: idCompraUnico + 1 + index,
             compraId: idCompraUnico,
             productoId: art.productoId,
             productoNombre: art.nombre,
@@ -2565,13 +2564,15 @@ function guardarCompraDirectaFinal() {
     };
     comprasList.push(nuevaCompra);
 
-    // 5. Cuentas o Efectivo
+    // 👇 5. LÓGICA DE DISTRIBUCIÓN DE DEUDA/PAGO NATIVA 👇
+    
     if (metodoPago === "contado") {
         window._egresarCuenta({
             monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
             concepto: `Compra Directa a ${prov.nombre}`, referencia: `COMPRA-${idCompraUnico}`
         });
-    } else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
+    } 
+    else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
         let cuentasProv = StorageService.get("cuentasPorPagar", []);
         cuentasProv.push({
             id: idCompraUnico + 2,
@@ -2584,10 +2585,51 @@ function guardarCompraDirectaFinal() {
             formaPagoTexto: formaPagoTexto,
             fecha: fechaFormatMX,
             vencimiento: metodoPago === "consignacion" ? "Al venderse" : "Revisar CXP",
-            // 👇 BANDERA DE CONSIGNACIÓN 👇
             esConsignacion: metodoPago === "consignacion"
         });
         StorageService.set("cuentasPorPagar", cuentasProv);
+    }
+    else if (metodoPago === "tarjeta_msi") {
+        // 🚀 SE CREA LA DEUDA MSI EN SEGUNDO PLANO AUTOMÁTICAMENTE 🚀
+        let cuentasBancos = StorageService.get("cuentasMSI", []);
+        let calendario = [];
+        let cuotaMensual = parseFloat((totalCompra / msiMeses).toFixed(2));
+        let fechaPartes = fechaStr.split('-'); 
+        let anio = parseInt(fechaPartes[0]);
+        let mes = parseInt(fechaPartes[1]) - 1;
+        let dia = parseInt(fechaPartes[2]);
+
+        for (let i = 1; i <= msiMeses; i++) {
+            let fCalculada = new Date(anio, mes + (i - 1), dia, 12, 0, 0);
+            let yyyy = fCalculada.getFullYear();
+            let mm = String(fCalculada.getMonth() + 1).padStart(2, '0');
+            let dd = String(fCalculada.getDate()).padStart(2, '0');
+            
+            calendario.push({
+                n: i,
+                fecha: `${yyyy}-${mm}-${dd}`,
+                monto: cuotaMensual,
+                estado: "Pendiente",
+                montoAbonado: 0,
+                conciliado: false
+            });
+        }
+
+        cuentasBancos.push({
+            id: idCompraUnico + 3,
+            compraId: idCompraUnico,
+            banco: bancoSel,
+            concepto: `Compra Directa: ${prov.nombre}`,
+            producto: arts.map(a => a.nombre).join(', '),
+            total: totalCompra,
+            meses: msiMeses,
+            cuotaMensual: cuotaMensual,
+            fecha: fechaFormatMX,
+            fechaCompra: fechaStr,
+            calendario: calendario,
+            pagosRealizados: 0
+        });
+        StorageService.set("cuentasMSI", cuentasBancos);
     }
 
     if (window._requisicionesVinculadasA_CD && window._requisicionesVinculadasA_CD.length > 0) {
@@ -2607,7 +2649,7 @@ function guardarCompraDirectaFinal() {
 
     document.querySelector('[data-modal="nueva-compra-directa"]')?.remove();
     alert(`✅ Compra Directa Registrada Exitosamente.${ingresoInmediato ? '' : '\\n⏳ La mercancía fue enviada a Recepciones Pendientes.'}${avisoActualizacion}`);
-    
+
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
 
