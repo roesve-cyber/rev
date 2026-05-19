@@ -150,10 +150,16 @@ function renderConciliacionMSI() {
                                            style="width:20px; height:20px; cursor:pointer; accent-color:#10b981;">
                                 </td>
                                 <td style="padding:12px; text-align:center;">
-                                    <button onclick="abrirModalReprogramarConciliacion('${m.parent_id}', ${m.index_cal}, '${m.fecha}')" 
-                                            style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#475569;">
-                                        ✏️ Reprogramar
-                                    </button>
+                                    <div style="display:flex; gap:6px; justify-content:center;">
+    <button onclick="abrirModalReprogramarConciliacion('${m.parent_id}', ${m.index_cal}, '${m.fecha}')" 
+            style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#475569;">
+        ✏️ Reprogramar
+    </button>
+    <button onclick="window.eliminarMensualidadesEnCascada('${m.parent_id}', ${m.index_cal}, '${m.numero_ms}', '${m.concepto.replace(/'/g, "\\'")}')" 
+            style="background:#fff1f2; border:1px solid #fecdd3; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#e11d48; transition:0.2s;">
+        ❌ Eliminar
+    </button>
+</div>
                                 </td>
                             </tr>
                         `).join('') || '<tr><td colspan=\"6\" style=\"text-align:center; padding:50px; color:#94a3b8; font-style:italic;\">No hay mensualidades registradas para este banco en el periodo seleccionado.</td></tr>'}
@@ -229,6 +235,59 @@ window.ejecutarReprogramacionConciliacion = function(cuentaId, indexMensualidad)
     document.querySelector('[data-modal="repro-concilia"]').remove();
     alert("✅ Calendario MSI actualizado en cascada correctamente.");
     renderConciliacionMSI(); 
+};
+// --- MOTOR DE ELIMINACIÓN EN CASCADA DESDE CONCILIACIÓN ---
+window.eliminarMensualidadesEnCascada = function(cuentaId, indexMensualidad, numeroMes, concepto) {
+    let cuentasMSI = StorageService.get("cuentasMSI", []);
+    let cuenta = cuentasMSI.find(c => String(c.id) === String(cuentaId));
+    
+    if (!cuenta) {
+        alert("❌ Error: No se encontró el registro raíz de esta cuenta MSI.");
+        return;
+    }
+
+    let calendario = cuenta.calendario || [];
+    let totalCuotasOriginales = calendario.length;
+    
+    // Determinamos cuántas cuotas se van a borrar (desde la seleccionada hasta el final)
+    let cuotasAEliminar = totalCuotasOriginales - indexMensualidad;
+
+    // --- 📋 RESUMEN DE SEGURIDAD AUDITADO ---
+    let resumen = `⚠️ RESUMEN DE OPERACIÓN - ELIMINACIÓN EN CASCADA\n\n` +
+                  `📦 Concepto: ${concepto}\n` +
+                  `💳 Banco/Tarjeta: ${cuenta.banco}\n` +
+                  `📍 Punto de Inflexión: Mensualidad No. ${numeroMes} de ${cuenta.meses || cuenta.plazo}\n\n` +
+                  `--------------------------------------------------\n` +
+                  `✅ Se CONSERVARÁN: ${indexMensualidad} mensualidades previas.\n` +
+                  `🔥 Se ELIMINARÁN: ${cuotasAEliminar} mensualidades (esta y todas las siguientes).\n` +
+                  `--------------------------------------------------\n\n` +
+                  `¿Estás seguro de que deseas mutilar este calendario de pagos? Esta acción no se puede deshacer.`;
+
+    if (!confirm(resumen)) return;
+
+    if (indexMensualidad === 0) {
+        // Caso A: Se seleccionó la primera mensualidad de todas. Borramos TODA la cuenta MSI del sistema.
+        cuentasMSI = cuentasMSI.filter(c => String(c.id) !== String(cuentaId));
+        StorageService.set("cuentasMSI", cuentasMSI);
+        alert("🗑️ Cuenta MSI eliminada por completo del sistema ya que se purgó desde la primera cuota.");
+    } else {
+        // Caso B: Se seleccionó una cuota intermedia. Cortamos el arreglo de calendario y recalculamos totales.
+        let cuotasConservadas = calendario.slice(0, indexMensualidad);
+        
+        // Recalculamos el valor total reflejado para que los reportes de balances cuadren
+        let nuevoTotalMonto = cuotasConservadas.reduce((sum, item) => sum + (parseFloat(item.monto) || 0), 0);
+        
+        cuenta.calendario = cuotasConservadas;
+        cuenta.meses = cuotasConservadas.length;
+        if (cuenta.plazo) cuenta.plazo = cuotasConservadas.length;
+        cuenta.total = nuevoTotalMonto;
+
+        StorageService.set("cuentasMSI", cuentasMSI);
+        alert(`✅ Cascada ejecutada. Se purgaron las últimas ${cuotasAEliminar} cuotas con éxito.`);
+    }
+
+    // Refrescar la pantalla de conciliación en el acto
+    if (typeof renderConciliacionMSI === 'function') renderConciliacionMSI();
 };
 
 window.renderConciliacion = renderConciliacionMSI;
