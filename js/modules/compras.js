@@ -599,7 +599,7 @@ function renderRecepciones() {
 }
 
 function procesarRecepcionFisica(idRecepcion) {
-    // --- CORRECCIÓN: Asegurar la lectura de las bases de datos primero ---
+    // --- LECTURA FRESCA DE BASES DE DATOS ---
     let productos = StorageService.get("productos", []);
     let movimientosInventario = StorageService.get("movimientosInventario", []);
     let recs = StorageService.get("recepciones", []);
@@ -617,17 +617,19 @@ function procesarRecepcionFisica(idRecepcion) {
         return;
     }
 
-    // --- NUEVO: RESUMEN Y CONFIRMACIÓN DE RECEPCIÓN DIRECTA ---
+    // --- RESUMEN Y CONFIRMACIÓN DE RECEPCIÓN DIRECTA ---
     const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿RECIBIR MERCANCÍA?\n\nProducto: ${rec.productoNombre}\nCantidad a ingresar: ${cantidad} piezas\nBodega/Ubicación: ${rec.ubicacion || 'General'}\n\n¿Deseas registrar esta entrada en el inventario?`;
     if (!confirm(msjConf)) return;
     // --- FIN DE CONFIRMACIÓN ---
 
-const prod = productos.find(p => String(p.id) === String(rec.productoId));
-    
+    // Búsqueda robusta del producto (asegurando comparación por String)
+    const prod = productos.find(p => String(p.id) === String(rec.productoId));
     
     if (prod) {
+        // 1. Afectar Stock General
         prod.stock = (parseInt(prod.stock) || 0) + cantidad;
 
+        // 2. Afectar Variantes (Color/Ubicación)
         if (!prod.variantes) prod.variantes = [];
         const colorRecepcion = rec.color || 'General';
         const ubicacionRecepcion = rec.ubicacion || 'General';
@@ -643,25 +645,29 @@ const prod = productos.find(p => String(p.id) === String(rec.productoId));
             prod.variantes.push({ color: colorRecepcion, ubicacion: ubicacionRecepcion, stock: cantidad });
         }
         
+        // 3. Afectar KARDEX
         movimientosInventario.push({
             id: Date.now(),
-            productoId: prod.id,
+            productoId: String(prod.id),
+            productoNombre: prod.nombre,
             tipo: 'entrada',
             cantidad,
-            concepto: `Recepción - Prov: ${rec.proveedor}`,
-            fecha: window.localISO(new Date())
+            concepto: `Recepción Pendiente - Prov: ${rec.proveedor} (${colorRecepcion})`,
+            fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
         });
     } else {
         alert("Error: El producto ya no existe en la base de datos.");
         return; 
     }
 
+    // 4. Actualizar la tarjeta de Recepción
     rec.cantidadRecibida += cantidad;
     rec.cantidadPendiente -= cantidad;
     if (rec.cantidadPendiente === 0) rec.estatus = "Completado";
 
     recs[index] = rec;
     
+    // 5. Guardar todo
     if (!StorageService.set("recepciones", recs)) {
         console.error("❌ Error guardando recepciones");
         return;
@@ -675,7 +681,7 @@ const prod = productos.find(p => String(p.id) === String(rec.productoId));
         return;
     }
 
-    alert("Stock actualizado con éxito.");
+    alert("✅ Recepción procesada y Stock/Kardex actualizados con éxito.");
     renderRecepciones();
 }
 
@@ -2345,9 +2351,29 @@ function abrirModalCompraDirectaMulti() {
 
         <div id="tablaArticulosCompraDirecta" style="margin-bottom:16px;"></div>
         
+        <div style="margin-bottom:15px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color:#1e40af; font-size:13px;">
+                <input type="checkbox" id="cdIngresoInmediato" checked style="width:18px; height:18px; accent-color:#059669;">
+                📦 Ingresar mercancía al inventario de inmediato
+            </label>
+            <p style="margin:5px 0 0 26px; font-size:11px; color:#475569; line-height:1.3;">
+                Si desmarcas esta opción, se generará la cuenta por pagar/pago, pero la mercancía se irá a <b>Recepciones Pendientes</b> para darle entrada después.
+            </p>
+        </div>
+        
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px; border-top:2px solid #e2e8f0; padding-top:15px;">
           <strong>Total a Pagar: <span id="cdTotal" style="color:#059669;font-size:22px;">$0.00</span></strong>
         </div>
+
+        <div style="margin-top:8px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color:#1e40af; font-size:13px;">
+                <input type="checkbox" id="cdAfectarInventario" checked style="width:18px; height:18px; accent-color:#2563eb;">
+                📦 Ingresar mercancía al inventario de inmediato
+            </label>
+            <p style="margin:5px 0 0 26px; font-size:11px; color:#475569; line-height:1.3;">
+                Si desmarcas esta opción, el gasto y la cuenta por pagar se registrarán, pero los artículos <b>NO</b> sumarán stock en la bodega (ideal para compras en tránsito o consumibles).
+            </p>
+          </div>
 
         <div style="display:flex;gap:10px;">
           <button onclick="guardarCompraDirectaFinal()" style="flex:2;padding:14px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">✅ Guardar Compra e Ingresar Inventario</button>
