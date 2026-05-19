@@ -2365,18 +2365,8 @@ function abrirModalCompraDirectaMulti() {
           <strong>Total a Pagar: <span id="cdTotal" style="color:#059669;font-size:22px;">$0.00</span></strong>
         </div>
 
-        <div style="margin-top:8px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;">
-            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color:#1e40af; font-size:13px;">
-                <input type="checkbox" id="cdAfectarInventario" checked style="width:18px; height:18px; accent-color:#2563eb;">
-                📦 Ingresar mercancía al inventario de inmediato
-            </label>
-            <p style="margin:5px 0 0 26px; font-size:11px; color:#475569; line-height:1.3;">
-                Si desmarcas esta opción, el gasto y la cuenta por pagar se registrarán, pero los artículos <b>NO</b> sumarán stock en la bodega (ideal para compras en tránsito o consumibles).
-            </p>
-          </div>
-
         <div style="display:flex;gap:10px;">
-          <button onclick="guardarCompraDirectaFinal()" style="flex:2;padding:14px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">✅ Guardar Compra e Ingresar Inventario</button>
+          <button onclick="guardarCompraDirectaFinal()" style="flex:2;padding:14px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">✅ Guardar Compra</button>
           <button onclick="document.querySelector('[data-modal=nueva-compra-directa]')?.remove()" style="flex:1;padding:14px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
         </div>
       </div>
