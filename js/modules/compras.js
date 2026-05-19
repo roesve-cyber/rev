@@ -2590,24 +2590,46 @@ function guardarCompraDirectaFinal() {
         StorageService.set("cuentasPorPagar", cuentasProv);
     }
     else if (metodoPago === "tarjeta_msi") {
-        // 🚀 SE CREA LA DEUDA MSI EN SEGUNDO PLANO AUTOMÁTICAMENTE 🚀
+        // 🚀 MOTOR BANCARIO: MSI CON CÁLCULO DE CORTE Y PAGO 🚀
         let cuentasBancos = StorageService.get("cuentasMSI", []);
+        let tarjetasConfig = StorageService.get("tarjetasConfig", []);
+        
+        // 1. Extraemos la configuración real de tu tarjeta
+        let infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSel) || {};
+        let diaCorte = parseInt(infoTarjeta.diaCorte) || 15;
+        let diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5); // Por defecto el día 5 del siguiente mes
+
         let calendario = [];
         let cuotaMensual = parseFloat((totalCompra / msiMeses).toFixed(2));
+        
         let fechaPartes = fechaStr.split('-'); 
-        let anio = parseInt(fechaPartes[0]);
-        let mes = parseInt(fechaPartes[1]) - 1;
-        let dia = parseInt(fechaPartes[2]);
+        let anioCompra = parseInt(fechaPartes[0]);
+        let mesCompra = parseInt(fechaPartes[1]) - 1; // Mes en JS empieza en 0
+        let diaCompra = parseInt(fechaPartes[2]);
 
+        // 2. Lógica del "Brinco" Bancario
+        let mesBaseFacturacion = mesCompra;
+        
+        // Si compraste estrictamente DESPUÉS del corte, la deuda entra hasta el mes siguiente
+        if (diaCompra > diaCorte) {
+            mesBaseFacturacion++; 
+        }
+
+        // El mes de pago real siempre es el mes SIGUIENTE al cierre de la facturación
+        let mesPrimerPago = mesBaseFacturacion + 1; 
+
+        // 3. Generación del Calendario Exacto
         for (let i = 1; i <= msiMeses; i++) {
-            let fCalculada = new Date(anio, mes + (i - 1), dia, 12, 0, 0);
+            // Calculamos siempre cayendo en tu DÍA LÍMITE DE PAGO real
+            let fCalculada = new Date(anioCompra, mesPrimerPago + (i - 1), diaPago, 12, 0, 0);
+            
             let yyyy = fCalculada.getFullYear();
             let mm = String(fCalculada.getMonth() + 1).padStart(2, '0');
             let dd = String(fCalculada.getDate()).padStart(2, '0');
             
             calendario.push({
                 n: i,
-                fecha: `${yyyy}-${mm}-${dd}`,
+                fecha: `${yyyy}-${mm}-${dd}`, // Fecha en la que realmente sale el dinero
                 monto: cuotaMensual,
                 estado: "Pendiente",
                 montoAbonado: 0,
