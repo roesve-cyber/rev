@@ -2037,6 +2037,75 @@ window.guardarCorreccionFechasDinero = function(folio, esApartado) {
         document.querySelector('[data-modal="auditoria-fechas"]').remove();
     }
 };
+// =====================================================================
+// 💳 MODAL DE MIGRACIÓN/REGISTRO DE COMPRAS A MESES SIN INTERESES
+// =====================================================================
+window.abrirMigracionMSITarjeta = function() {
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
+    const tarjetasCredito = tarjetasConfig.filter(t => !t.tipo || t.tipo === "credito");
+
+    if (tarjetasCredito.length === 0) {
+        return alert("⚠️ Primero debes registrar al menos una Tarjeta de Crédito en Configuración > Bancos.");
+    }
+
+    // Dibujar las opciones leyendo directamente tu base de datos de tarjetas
+    let opcionesTarjetas = tarjetasCredito.map(t => 
+        `<option value="${t.banco}" data-corte="${t.diaCorte || 1}" data-pago="${t.diaLimite || 1}">💳 ${t.banco}</option>`
+    ).join('');
+
+    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+
+    // Limpiar si existía uno anterior
+    document.querySelector('[data-modal="migracion-msi-tarjeta"]')?.remove();
+
+    const modalHTML = `
+    <div data-modal="migracion-msi-tarjeta" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h2 style="color:#1e40af; margin-top:0; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">💳 Registrar Deuda MSI</h2>
+            <p style="font-size:13px; color:#64748b; margin-bottom:20px;">Registra una compra a Meses Sin Intereses nueva o antigua.</p>
+
+            <div style="margin-bottom:15px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:5px;">1. Selecciona la Tarjeta:</label>
+                <select id="migTdcSeleccion" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; font-weight:bold; color:#1e40af;">
+                    ${opcionesTarjetas}
+                </select>
+            </div>
+
+            <div style="margin-bottom:15px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:5px;">2. Fecha de Compra Original:</label>
+                <input type="date" id="migTdcFecha" value="${fechaHoy}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;">
+            </div>
+
+            <div style="margin-bottom:15px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:5px;">3. Concepto / Producto:</label>
+                <input type="text" id="migTdcConcepto" placeholder="Ej. Refrigerador LG Mabe" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;">
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:5px;">Monto Total ($):</label>
+                    <input type="number" id="migTdcMonto" placeholder="0.00" min="0.01" step="0.01" style="width:100%; padding:10px; border-radius:6px; border:2px solid #3b82f6; font-weight:bold; box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:5px;">Plazo (Meses):</label>
+                    <input type="number" id="migTdcPlazo" placeholder="Ej. 12" min="1" step="1" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;">
+                </div>
+            </div>
+
+            <div style="margin-bottom:25px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
+                <label style="font-weight:bold; font-size:12px; color:#d97706; display:block; margin-bottom:5px;">Mensualidades YA PAGADAS (Migración):</label>
+                <input type="number" id="migTdcPagadas" value="0" min="0" step="1" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box; font-weight:bold;">
+                <small style="color:#64748b; font-size:11px; display:block; margin-top:4px;">Deja en 0 si es una compra que acabas de hacer.</small>
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="ejecutarMigracionTdcMSI()" style="flex:2; padding:12px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:14px;">💾 Procesar Deuda</button>
+                <button onclick="document.querySelector('[data-modal=\\'migracion-msi-tarjeta\\']').remove()" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:14px;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
 window.ejecutarMigracionTdcMSI = function() {
     const selector = document.getElementById("migTdcSeleccion");
     const tarjetaNombre = selector.value;
