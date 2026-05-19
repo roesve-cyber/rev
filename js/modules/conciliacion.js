@@ -93,9 +93,6 @@ function renderConciliacionMSI() {
                         📅 Periodo facturado: ${periodoStr} <span style="color:#0284c7; font-size:12px; margin-left:8px;">(Corte: Día ${diaCorte})</span>
                     </div>
                 </div>
-                <button onclick="if(typeof abrirModalPagoTarjeta === 'function') abrirModalPagoTarjeta('${bancoSeleccionado}'); else alert('Error: La función de pago no está cargada.');" style="padding:10px 20px; background:#8b5cf6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(139, 92, 246, 0.3); font-size:15px; transition:0.2s;">
-                    💳 Aplicar Pago a Tarjeta
-                </button>
             </div>
 
             <div style="display:flex; gap:15px; margin-bottom:15px; flex-wrap:wrap;">
