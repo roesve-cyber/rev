@@ -150,13 +150,17 @@ function renderConciliacionMSI() {
                                            style="width:20px; height:20px; cursor:pointer; accent-color:#10b981;">
                                 </td>
                                 <td style="padding:12px; text-align:center;">
-                                    <div style="display:flex; gap:6px; justify-content:center;">
+                                    <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
     <button onclick="abrirModalReprogramarConciliacion('${m.parent_id}', ${m.index_cal}, '${m.fecha}')" 
             style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#475569;">
         ✏️ Reprogramar
     </button>
+    <button onclick="window.abrirModalReasignarBanco('${m.parent_id}')" 
+            style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#1d4ed8;">
+        🏦 Reasignar
+    </button>
     <button onclick="window.eliminarMensualidadesEnCascada('${m.parent_id}', ${m.index_cal}, '${m.numero_ms}')" 
-            style="background:#fff1f2; border:1px solid #fecdd3; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#e11d48; transition:0.2s;">
+            style="background:#fff1f2; border:1px solid #fecdd3; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#e11d48;">
         ❌ Eliminar
     </button>
 </div>
@@ -284,5 +288,91 @@ window.eliminarMensualidadesEnCascada = function(cuentaId, indexMensualidad, num
 
     if (typeof renderConciliacionMSI === 'function') renderConciliacionMSI();
 };
+// --- MOTOR DE REASIGNACIÓN BANCARIA (CONCILIACIÓN) ---
+window.abrirModalReasignarBanco = function(cuentaId) {
+    let cuentasMSI = StorageService.get("cuentasMSI", []);
+    let cuenta = cuentasMSI.find(c => String(c.id) === String(cuentaId));
+    if (!cuenta) {
+        alert("❌ Error: No se encontró la cuenta maestra.");
+        return;
+    }
 
+    // Extraemos dinámicamente tu catálogo real de bancos configurados
+    let tarjetasConfig = StorageService.get("tarjetasConfig", []);
+    let opcionesBancos = tarjetasConfig.map(t => `<option value="${t.banco}">${t.banco}</option>`).join('');
+    
+    // Respaldo de seguridad por si el catálogo viene vacío
+    if (!opcionesBancos) {
+        opcionesBancos = `
+            <option value="BANAMEX SIMPLI">BANAMEX SIMPLI</option>
+            <option value="SANTANDER LIKEU">SANTANDER LIKEU</option>
+            <option value="HSBC">HSBC</option>
+            <option value="MERCADOPAGO">MERCADOPAGO</option>
+        `;
+    }
+
+    let concepto = cuenta.concepto || cuenta.producto || "Compra MSI";
+
+    let html = `
+    <div id="modalReasignarBanco" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; justify-content:center; align-items:center; z-index:9999;">
+        <div style="background:#fff; padding:20px; border-radius:8px; width:320px; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-family:sans-serif;">
+            <h3 style="margin-top:0; color:#1e293b; font-size:16px;">🏦 Reasignar Banco</h3>
+            <p style="font-size:13px; color:#475569; margin-bottom:4px;">Compra: <b>${concepto}</b></p>
+            <p style="font-size:13px; color:#475569; margin-top:0;">Banco Actual: <b style="color:#e11d48;">${cuenta.banco}</b></p>
+            
+            <div style="margin-top:15px; margin-bottom:20px;">
+                <label style="display:block; font-size:12px; font-weight:bold; margin-bottom:5px; color:#334155;">Seleccionar Nuevo Banco:</label>
+                <select id="nuevoBancoMSISelect" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+                    <option value="">-- Elige un banco --</option>
+                    ${opcionesBancos}
+                </select>
+            </div>
+            
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button onclick="document.getElementById('modalReasignarBanco').remove()" 
+                        style="padding:8px 12px; background:#f1f5f9; border:none; border-radius:6px; cursor:pointer; color:#475569; font-weight:bold; font-size:12px;">
+                    Cancelar
+                </button>
+                <button onclick="window.ejecutarReasignacionBanco('${cuentaId}')" 
+                        style="padding:8px 12px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">
+                    💾 Guardar Cambio
+                </button>
+            </div>
+        </div>
+    </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.ejecutarReasignacionBanco = function(cuentaId) {
+    let nuevoBanco = document.getElementById("nuevoBancoMSISelect").value;
+    if (!nuevoBanco) {
+        alert("❌ Por favor, selecciona un banco de la lista.");
+        return;
+    }
+
+    let cuentasMSI = StorageService.get("cuentasMSI", []);
+    let cuenta = cuentasMSI.find(c => String(c.id) === String(cuentaId));
+    
+    if (cuenta) {
+        let bancoAnterior = cuenta.banco;
+        
+        if (bancoAnterior === nuevoBanco) {
+            alert("⚠️ Seleccionaste el mismo banco que ya tiene asignado.");
+            return;
+        }
+
+        // Aplicamos el cambio al registro raíz
+        cuenta.banco = nuevoBanco;
+        StorageService.set("cuentasMSI", cuentasMSI);
+        
+        document.getElementById('modalReasignarBanco').remove();
+        
+        alert(`✅ REASIGNACIÓN EXITOSA:\n\nLa compra pasó de "${bancoAnterior}" a "${nuevoBanco}".\n\nTodos los pagarés de esta compra ya reflejan el nuevo banco en el sistema.`);
+        
+        // Refrescamos la interfaz automáticamente
+        if (typeof renderConciliacionMSI === 'function') renderConciliacionMSI();
+        if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    }
+};
 window.renderConciliacion = renderConciliacionMSI;
