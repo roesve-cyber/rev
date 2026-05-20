@@ -2268,7 +2268,8 @@ function renderRequisiciones() {
                         style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                     🚀 Compra directa
                 </button>
-                <button onclick="window.marcarRequisicionResuelta('${req.id || r.id}')" style="background:#10b981; color:white; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; margin-right:5px; box-shadow:0 2px 4px rgba(16,185,129,0.3);" title="Marcar como ya obtenido para quitarlo de la lista">
+                <button onclick="window.marcarRequisicionesResueltasMasivo()" 
+        style="padding:10px 15px; background:#10b981; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);" title="Quita de la lista los artículos seleccionados">
     ✔️ Ya lo tengo
 </button>
             </div>
@@ -3144,25 +3145,29 @@ window.confirmarAgregarA_OC_Existente = function() {
     renderRequisiciones();
     if(typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
 };
-// --- MARCAR REQUISICIÓN COMO YA EN INVENTARIO (RESUELTA) ---
-window.marcarRequisicionResuelta = function(idReq) {
-    if (!confirm("¿Confirmas que ya tienes este producto o ya no necesitas comprarlo?\n\nEsto lo quitará permanentemente de la lista de pendientes.")) return;
+// --- MARCAR REQUISICIONES SELECCIONADAS COMO YA EN INVENTARIO ---
+window.marcarRequisicionesResueltasMasivo = function() {
+    const seleccionados = Array.from(document.querySelectorAll('.chk-req:checked')).map(cb => cb.value);
+    if (seleccionados.length === 0) return alert("⚠️ Selecciona al menos una requisición de la lista.");
+
+    if (!confirm(`¿Confirmas que ya tienes en físico los ${seleccionados.length} producto(s) seleccionado(s)?\n\nEsto los quitará permanentemente de la lista de pendientes por comprar.`)) return;
 
     let reqs = StorageService.get("requisicionesCompra", []);
-    const idx = reqs.findIndex(r => String(r.id) === String(idReq));
-    
-    if (idx !== -1) {
-        // Cambiamos el estatus para que ya no cumpla la condición de "Pendiente"
-        reqs[idx].estatus = "Ya en Inventario";
-        StorageService.set("requisicionesCompra", reqs);
-        
-        // Recargamos la vista automáticamente
-        if (typeof renderRequisiciones === 'function') {
-            renderRequisiciones();
+    let actualizados = 0;
+
+    seleccionados.forEach(idReq => {
+        const idx = reqs.findIndex(r => String(r.id) === String(idReq));
+        if (idx !== -1) {
+            reqs[idx].estatus = "Ya en Inventario";
+            actualizados++;
         }
-        
-    } else {
-        alert("❌ Error: No se encontró la requisición.");
+    });
+
+    if (actualizados > 0) {
+        StorageService.set("requisicionesCompra", reqs);
+        if (typeof renderRequisiciones === 'function') renderRequisiciones();
+        // Opcional: mostrar un mini aviso de éxito
+        console.log(`✅ Se limpiaron ${actualizados} requisiciones.`);
     }
 };
 
