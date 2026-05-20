@@ -29,7 +29,7 @@ function _csvDescargar(nombre, headers, filas) {
 
 // --- Reporte Ventas ---
 
-function renderReporteVentas() {function renderReporteVentas() {
+function renderReporteVentas() {
     const contenedor = document.getElementById("reportesContenido");
     if (!contenedor) return;
 

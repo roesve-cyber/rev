@@ -1034,7 +1034,7 @@ function renderCategorias() {
                     <tr style="border-bottom: 1px solid #eee; text-align: left; color: #7f8c8d;">
                         <th style="padding: 5px;">Subcategoría</th>
                         <th style="padding: 5px; text-align: center;">Margen %</th>
-                        <th style="padding: 5px;"></th>
+                        <th style="padding: 5px; text-align: right;">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>`;
@@ -1051,8 +1051,9 @@ function renderCategorias() {
                                 onchange="actualizarMargen(${indexCat}, ${indexSub}, this.value)"
                                 style="width: 55px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 2px;">
                         </td>
-                        <td style="text-align: right;">
-                            <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:none; border:none; cursor:pointer; color:#e74c3c;">✕</button>
+                        <td style="text-align: right; padding: 8px 5px; white-space: nowrap;">
+                            <button onclick="iniciarMigracion(${indexCat}, ${indexSub})" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px; padding:4px 8px; cursor:pointer; color:#1d4ed8; font-size:11px; font-weight:bold; margin-right:8px;" title="Mover a otra categoría">🚚 Migrar</button>
+                            <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:none; border:none; cursor:pointer; color:#e74c3c; font-size:14px; vertical-align:middle;" title="Eliminar">✕</button>
                         </td>
                     </tr>`;
             });
@@ -1075,7 +1076,8 @@ function guardarCategoriasConfig() {
         return;
     }
     renderCategorias();
-    actualizarCombosFiltros();
+    // Prevenir error si la función de filtros no está en este archivo
+    if (typeof actualizarCombosFiltros === 'function') actualizarCombosFiltros();
 }
 
 function nuevaCategoria() {
@@ -1117,6 +1119,74 @@ function actualizarMargen(indexCat, indexSub, nuevoValor) {
     if (!StorageService.set("categoriasData", categoriasData)) {
         console.error("❌ Error guardando categorías");
     }
+}
+
+// 🚀 NUEVA FUNCIÓN: EL MOTOR DE MIGRACIÓN NATIVA
+function iniciarMigracion(indexCat, indexSub) {
+    const catOrigen = categoriasData[indexCat].nombre;
+    const subObj = categoriasData[indexCat].subcategorias[indexSub];
+    const subOrigen = subObj.nombre;
+
+    // Resumen de las categorías existentes para guiar al usuario
+    const listaExistentes = categoriasData.map(c => c.nombre).join(" | ");
+    
+    let destinoRaw = prompt(
+        `🚚 MIGRACIÓN DE: "${subOrigen}"\n\n` +
+        `Categorías actuales:\n[ ${listaExistentes} ]\n\n` +
+        `Escribe la Categoría DESTINO (Si escribes una que no existe, se creará automáticamente):`
+    );
+
+    if (!destinoRaw || destinoRaw.trim() === "") return;
+    const catDestino = destinoRaw.trim();
+
+    if (catDestino.toUpperCase() === catOrigen.toUpperCase()) {
+        return alert("⚠️ La categoría destino es la misma que la actual. No hay nada que mover.");
+    }
+
+    if (!confirm(`¿Estás seguro de mover la subcategoría "${subOrigen}" (y TODOS sus productos) hacia "${catDestino}"?`)) return;
+
+    // 1. AFECTACIÓN EN BASE DE DATOS (PRODUCTOS)
+    let productos = StorageService.get("productos", []);
+    let modificados = 0;
+    productos.forEach(p => {
+        if ((p.categoria || "") === catOrigen && (p.subcategoria || "") === subOrigen) {
+            p.categoria = catDestino;
+            modificados++;
+        }
+    });
+
+    // 2. REESTRUCTURACIÓN DE CATEGORÍAS
+    let indexDestino = categoriasData.findIndex(c => c.nombre.toUpperCase() === catDestino.toUpperCase());
+    
+    if (indexDestino === -1) {
+        // La categoría destino no existía, la creamos y le metemos la subcategoría
+        categoriasData.push({ nombre: catDestino, subcategorias: [subObj] });
+    } else {
+        // La categoría existe, validamos que no tenga ya una subcategoría con ese nombre
+        let existeSub = categoriasData[indexDestino].subcategorias.find(s => s.nombre.toUpperCase() === subOrigen.toUpperCase());
+        if (!existeSub) {
+            categoriasData[indexDestino].subcategorias.push(subObj);
+        } else {
+            // Si ya existe, le respetamos el margen a la destino y no la duplicamos
+            alert(`Nota: La categoría "${catDestino}" ya tenía una subcategoría llamada "${subOrigen}". Los productos se fusionaron ahí.`);
+        }
+    }
+
+    // 3. ELIMINAMOS DEL ORIGEN
+    categoriasData[indexCat].subcategorias.splice(indexSub, 1);
+
+    // 4. LIMPIEZA INTELIGENTE
+    if (categoriasData[indexCat].subcategorias.length === 0) {
+        if (confirm(`La categoría "${catOrigen}" se ha quedado vacía. ¿Deseas eliminarla del sistema para mantener el orden?`)) {
+            categoriasData.splice(indexCat, 1);
+        }
+    }
+
+    // 5. GUARDADO MASIVO
+    StorageService.set("productos", productos);
+    guardarCategoriasConfig(); // Esto hace save y render automático
+    
+    alert(`✅ MIGRACIÓN EXITOSA.\n\nSe actualizaron ${modificados} producto(s) en tu inventario.\nSe movió hacia: [${catDestino}] -> [${subOrigen}]`);
 }
 
 // ===== VISOR MAESTRO =====
