@@ -29,81 +29,213 @@ function _csvDescargar(nombre, headers, filas) {
 
 // --- Reporte Ventas ---
 
-function renderReporteVentas() {
-    const desde = document.getElementById('rvFechaDesde')?.value;
-    const hasta = document.getElementById('rvFechaHasta')?.value;
-    const metodo = document.getElementById('rvMetodo')?.value || '';
+function renderReporteVentas() {function renderReporteVentas() {
+    const contenedor = document.getElementById("reportesContenido");
+    if (!contenedor) return;
 
-    const ventasRegistradas = StorageService.get("ventasRegistradas", []);
-    const cxc = StorageService.get("cuentasPorCobrar", []);
+    // 1. Obtener valores de los filtros (con valores por defecto si es la primera carga)
+    const valTiempo = document.getElementById("filtroVentasTiempo")?.value || "mes_actual";
+    const valMetodo = document.getElementById("filtroVentasMetodo")?.value || "todos";
+    const fIni = document.getElementById("fechaInicioV")?.value || "";
+    const fFin = document.getElementById("fechaFinV")?.value || "";
 
-    // Normalizar todas las ventas a un formato común
-    let todas = ventasRegistradas.map(v => {
-        // fechaVenta puede ser número (Date.now()) o string ISO
-        const fv = v.fechaVenta;
-        const fechaNorm = fv
-            ? (typeof fv === 'number' ? window.localISO(new Date(fv)).substring(0, 10) : String(fv).substring(0, 10))
-            : (v.fecha || '');
-        // Buscar saldo actual en cuentasPorCobrar
-        const cxcEntry = cxc.find(c => c.folio === v.folio);
-        const saldoActual = cxcEntry ? (cxcEntry.saldoActual || 0) : 0;
-        const estado = cxcEntry ? (cxcEntry.estado || 'Pendiente') : (v.metodoPago === 'contado' ? 'Pagado' : 'Pendiente');
-        return {
-            folio: v.folio || '-',
-            nombre: v.clienteNombre || '-',
-            fechaVenta: fechaNorm,
-            totalContadoOriginal: v.total || 0,
-            metodo: v.metodoPago || 'contado',
-            estado,
-            saldoActual
-        };
+    // 2. Extraer datos
+    let ventas = StorageService.get("ventasRegistradas", []);
+    
+    // Función auxiliar para fechas locales
+    const getHoyStr = () => {
+        const d = new Date();
+        d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+        return d.toISOString().slice(0,10);
+    };
+    const hoyStr = typeof window.obtenerHoyInputMX === 'function' ? window.obtenerHoyInputMX() : getHoyStr();
+    const hoyObj = new Date(hoyStr + "T12:00:00");
+
+    // 3. Filtrado en Tiempo Real
+    ventas = ventas.filter(v => {
+        let fStr = v.fechaVenta || v.fechaIso;
+        if (!fStr) return false;
+        fStr = typeof fStr === 'string' ? fStr.slice(0, 10) : new Date(fStr).toISOString().slice(0, 10);
+        
+        // Filtro de Tiempo
+        if (valTiempo === "mes_actual") {
+            return fStr.startsWith(hoyStr.slice(0, 7));
+        } else if (valTiempo === "mes_anterior") {
+            let mesAnt = hoyObj.getMonth() - 1;
+            let anio = hoyObj.getFullYear();
+            if (mesAnt < 0) { mesAnt = 11; anio--; }
+            let strMes = `${anio}-${String(mesAnt + 1).padStart(2, '0')}`;
+            return fStr.startsWith(strMes);
+        } else if (valTiempo === "anio_actual") {
+            return fStr.startsWith(hoyStr.slice(0, 4));
+        } else if (valTiempo === "rango") {
+            if (fIni && fStr < fIni) return false;
+            if (fFin && fStr > fFin) return false;
+            return true;
+        }
+        return true; // "historico"
     });
 
-    if (metodo) todas = todas.filter(v => v.metodo === metodo);
-    if (desde) todas = todas.filter(v => v.fechaVenta >= desde);
-    if (hasta) todas = todas.filter(v => v.fechaVenta <= hasta);
+    // Filtro por Método de Pago
+    if (valMetodo === "credito") {
+        ventas = ventas.filter(v => v.metodoPago !== "contado");
+    } else if (valMetodo === "contado") {
+        ventas = ventas.filter(v => v.metodoPago === "contado");
+    }
 
-    const totalVentas = todas.reduce((s, v) => s + Number(v.totalContadoOriginal || 0), 0);
-    const totalCobrado = todas.reduce((s, v) => s + Number((v.totalContadoOriginal || 0) - (v.saldoActual || 0)), 0);
-    const totalPendiente = todas.reduce((s, v) => s + Number(v.saldoActual || 0), 0);
+    // 4. Motores Matemáticos (Enfoque a Crédito)
+    let totalColocado = 0;
+    let totalCredito = 0;
+    let enganchesCaptados = 0;
+    let totalContado = 0;
+    let numCreditos = 0;
+    let numContados = 0;
 
-    document.getElementById('rvKpis').innerHTML =
-        _kpiCard('Total Ventas', dinero(totalVentas), '#3498db', '🛍️') +
-        _kpiCard('Cobrado', dinero(totalCobrado), '#27ae60', '✅') +
-        _kpiCard('Por Cobrar', dinero(totalPendiente), '#e74c3c', '⏳') +
-        _kpiCard('Nº Ventas', todas.length, '#9b59b6', '📋');
-
-    // Gráfica por mes
-    const porMes = {};
-    todas.forEach(v => {
-        const mes = (v.fechaVenta || '').substring(0, 7);
-        if (mes) porMes[mes] = (porMes[mes] || 0) + Number(v.totalContadoOriginal || 0);
+    ventas.forEach(v => {
+        const t = parseFloat(v.total || v.totalVenta || 0);
+        totalColocado += t;
+        
+        if (v.metodoPago !== "contado") {
+            totalCredito += t;
+            numCreditos++;
+            enganchesCaptados += parseFloat(v.enganche || 0);
+        } else {
+            totalContado += t;
+            numContados++;
+        }
     });
-    const meses = Object.keys(porMes).sort();
-    const maxVal = Math.max(...Object.values(porMes), 1);
-    document.getElementById('rvGraficaMeses').innerHTML = meses.map(m =>
-        `<div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;">
-            <div style="font-size:9px; color:#718096;">${dinero(porMes[m])}</div>
-            <div style="width:100%; height:${Math.round((porMes[m] / maxVal) * 160)}px; background:#3498db; border-radius:3px 3px 0 0; min-height:4px;"></div>
-        </div>`).join('');
-    document.getElementById('rvGraficaLabels').innerHTML = meses.map(m =>
-        `<div style="flex:1; text-align:center; font-size:9px; color:#718096;">${m}</div>`).join('');
 
-    // Tabla
-    const todas_sorted = [...todas].sort((a, b) => b.fechaVenta.localeCompare(a.fechaVenta));
-    const filas = todas_sorted.map(v => [
-        v.folio || '-',
-        v.nombre || '-',
-        v.fechaVenta ? window.formatearFechaCortaMX(v.fechaVenta + 'T12:00:00') : '-',
-        dinero(v.totalContadoOriginal || 0),
-        v.metodo || '-',
-        v.estado || '-',
-        dinero(v.saldoActual || 0)
-    ]);
-    document.getElementById('rvTabla').innerHTML = _tablaHTML(
-        ['Folio', 'Cliente', 'Fecha', 'Total', 'Método', 'Estado', 'Saldo'],
-        filas.length ? filas : [['Sin registros', '', '', '', '', '', '']]
-    );
+    const numVentas = ventas.length;
+    const ticketPromedioCredito = numCreditos > 0 ? (totalCredito / numCreditos) : 0;
+    const ticketPromedioContado = numContados > 0 ? (totalContado / numContados) : 0;
+    
+    // Porcentajes de penetración
+    const pctCredito = totalColocado > 0 ? Math.round((totalCredito / totalColocado) * 100) : 0;
+    const pctContado = totalColocado > 0 ? 100 - pctCredito : 0;
+
+    // Helper de moneda
+    const fmt = (val) => '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2 });
+
+    // 5. Interfaz Visual (HTML Inyectado)
+    let html = `
+    <div style="background:#f8fafc; padding:20px; border-radius:12px;">
+        
+        <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 4px rgba(0,0,0,0.05); margin-bottom:20px; display:flex; flex-wrap:wrap; gap:15px; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:20px;">📅</span>
+                <select id="filtroVentasTiempo" onchange="renderReporteVentas()" style="padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-weight:bold; color:#1e293b; outline:none;">
+                    <option value="mes_actual" ${valTiempo==='mes_actual'?'selected':''}>Este Mes</option>
+                    <option value="mes_anterior" ${valTiempo==='mes_anterior'?'selected':''}>Mes Anterior</option>
+                    <option value="anio_actual" ${valTiempo==='anio_actual'?'selected':''}>Este Año</option>
+                    <option value="rango" ${valTiempo==='rango'?'selected':''}>Fechas Específicas</option>
+                    <option value="historico" ${valTiempo==='historico'?'selected':''}>Histórico Completo</option>
+                </select>
+            </div>
+            
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:20px;">💳</span>
+                <select id="filtroVentasMetodo" onchange="renderReporteVentas()" style="padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-weight:bold; color:#1e293b; outline:none;">
+                    <option value="todos" ${valMetodo==='todos'?'selected':''}>Todos los Métodos</option>
+                    <option value="credito" ${valMetodo==='credito'?'selected':''}>Solo Créditos</option>
+                    <option value="contado" ${valMetodo==='contado'?'selected':''}>Solo Contado</option>
+                </select>
+            </div>
+
+            ${valTiempo === 'rango' ? `
+            <div style="display:flex; align-items:center; gap:8px; border-left:2px solid #e2e8f0; padding-left:15px;">
+                <input type="date" id="fechaInicioV" value="${fIni}" onchange="renderReporteVentas()" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;">
+                <span style="color:#64748b;">a</span>
+                <input type="date" id="fechaFinV" value="${fFin}" onchange="renderReporteVentas()" style="padding:8px; border:1px solid #cbd5e1; border-radius:6px;">
+            </div>` : ''}
+            
+            <div style="margin-left:auto;">
+                <button onclick="exportarReporteVentas()" style="padding:8px 16px; background:#10b981; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(16,185,129,0.3);">📥 Exportar Excel</button>
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+            <div style="background:linear-gradient(135deg, #1e293b, #0f172a); padding:20px; border-radius:12px; color:white; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+                <div style="font-size:12px; color:#94a3b8; font-weight:bold; text-transform:uppercase; letter-spacing:1px;">Total Colocado</div>
+                <div style="font-size:28px; font-weight:900; margin-top:5px;">${fmt(totalColocado)}</div>
+                <div style="font-size:12px; color:#cbd5e1; margin-top:5px;">En ${numVentas} operaciones</div>
+            </div>
+            
+            <div style="background:linear-gradient(135deg, #3b82f6, #2563eb); padding:20px; border-radius:12px; color:white; box-shadow:0 4px 6px rgba(59,130,246,0.2);">
+                <div style="font-size:12px; color:#bfdbfe; font-weight:bold; text-transform:uppercase; letter-spacing:1px;">Capital a Crédito (${pctCredito}%)</div>
+                <div style="font-size:28px; font-weight:900; margin-top:5px;">${fmt(totalCredito)}</div>
+                <div style="font-size:12px; color:#dbeafe; margin-top:5px;">Ticket Promedio: <b>${fmt(ticketPromedioCredito)}</b></div>
+            </div>
+
+            <div style="background:white; padding:20px; border-radius:12px; border-left:5px solid #10b981; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase; letter-spacing:1px;">Enganches Cobrados</div>
+                <div style="font-size:28px; font-weight:900; color:#0f172a; margin-top:5px;">${fmt(enganchesCaptados)}</div>
+                <div style="font-size:12px; color:#10b981; font-weight:bold; margin-top:5px;">Liquidez inmediata en caja</div>
+            </div>
+
+            <div style="background:white; padding:20px; border-radius:12px; border-left:5px solid #f59e0b; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+                <div style="font-size:12px; color:#64748b; font-weight:bold; text-transform:uppercase; letter-spacing:1px;">Venta Contado (${pctContado}%)</div>
+                <div style="font-size:28px; font-weight:900; color:#0f172a; margin-top:5px;">${fmt(totalContado)}</div>
+                <div style="font-size:12px; color:#64748b; margin-top:5px;">Ticket Promedio: <b>${fmt(ticketPromedioContado)}</b></div>
+            </div>
+        </div>
+
+        ${totalColocado > 0 ? `
+        <div style="background:white; padding:15px; border-radius:10px; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:bold; color:#475569; margin-bottom:8px;">
+                <span>Crédito (${pctCredito}%)</span>
+                <span>Contado (${pctContado}%)</span>
+            </div>
+            <div style="width:100%; height:12px; background:#f1f5f9; border-radius:6px; overflow:hidden; display:flex;">
+                <div style="width:${pctCredito}%; background:#3b82f6;"></div>
+                <div style="width:${pctContado}%; background:#f59e0b;"></div>
+            </div>
+        </div>` : ''}
+
+        <div style="background:white; border-radius:10px; overflow:hidden; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+            <table style="width:100%; border-collapse:collapse; text-align:left;">
+                <thead style="background:#f1f5f9; border-bottom:2px solid #e2e8f0;">
+                    <tr>
+                        <th style="padding:12px 15px; font-size:12px; color:#475569;">Fecha / Folio</th>
+                        <th style="padding:12px 15px; font-size:12px; color:#475569;">Cliente</th>
+                        <th style="padding:12px 15px; font-size:12px; color:#475569;">Método</th>
+                        <th style="padding:12px 15px; font-size:12px; text-align:right; color:#475569;">Enganche</th>
+                        <th style="padding:12px 15px; font-size:12px; text-align:right; color:#475569;">Total Venta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${ventas.length === 0 ? `<tr><td colspan="5" style="padding:20px; text-align:center; color:#94a3b8;">No hay ventas en este periodo.</td></tr>` : 
+                    ventas.map(v => {
+                        let fStr = v.fechaVenta || v.fechaIso || '';
+                        if (fStr.length > 10) fStr = fStr.slice(0, 10);
+                        const isCredito = v.metodoPago !== 'contado';
+                        const badgeColor = isCredito ? 'background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe;' : 'background:#fef3c7; color:#b45309; border:1px solid #fde68a;';
+                        
+                        return `
+                        <tr style="border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:12px 15px; font-size:13px;">
+                                <b>${fStr}</b><br>
+                                <span style="color:#64748b; font-size:11px;">#${v.folio || v.id}</span>
+                            </td>
+                            <td style="padding:12px 15px; font-size:13px; color:#0f172a; font-weight:bold;">
+                                ${v.clienteNombre || 'Público General'}
+                            </td>
+                            <td style="padding:12px 15px; font-size:12px;">
+                                <span style="padding:4px 8px; border-radius:4px; font-weight:bold; text-transform:uppercase; font-size:10px; ${badgeColor}">${v.metodoPago || 'Contado'}</span>
+                            </td>
+                            <td style="padding:12px 15px; font-size:13px; text-align:right; color:#10b981; font-weight:bold;">
+                                ${isCredito && v.enganche ? fmt(v.enganche) : '-'}
+                            </td>
+                            <td style="padding:12px 15px; font-size:14px; text-align:right; color:#0f172a; font-weight:900;">
+                                ${fmt(v.total || v.totalVenta)}
+                            </td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+
+    contenedor.innerHTML = html;
 }
 
 function exportarReporteVentas() {
