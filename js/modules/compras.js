@@ -774,15 +774,38 @@ window.verDetalleCompra = function(idCuenta) {
     });
     if (subtotalReal < (parseFloat(c.total) || 0)) subtotalReal = parseFloat(c.total);
 
-    // 4. Construir historial de movimientos para el estado de cuenta
-    const abonos = Array.isArray(c.abonos) ? c.abonos : [];
-    const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
-    const saldoPendiente = parseFloat(c.saldoPendiente) || 0;
+    // 4. MOTOR DE FUSIÓN Y AUDITORÍA (Cura la Billetera Rota)
+    let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
+    
+    // Rescatar abonos perdidos que se hicieron desde la pantalla de Órdenes de Compra
+    if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
+        compraOriginal.pagos.forEach(pagoOC => {
+            const yaExiste = abonos.find(a => a.fecha === pagoOC.fecha && a.monto === pagoOC.monto);
+            if (!yaExiste) abonos.push(pagoOC);
+        });
+    }
 
-    // Pago inicial al momento de compra (si hay diferencia entre total y deuda original)
-    // La deuda original es total - lo que ya pagó al registrar. Si no hay abonos registrados
-    // pero el saldo < total, significa que hubo un anticipo al registrar.
-    const anticipoInicial = subtotalReal - totalAbonado - saldoPendiente;
+    const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
+    
+    // Rescatar el anticipo real directo de la fuente
+    let anticipoInicial = 0;
+    if (compraOriginal && compraOriginal.anticipo_pagado) {
+        anticipoInicial = parseFloat(compraOriginal.anticipo_pagado);
+    } else {
+        anticipoInicial = Math.max(0, subtotalReal - totalAbonado - (parseFloat(c.saldoPendiente) || 0));
+    }
+
+    // Recalcular la verdad matemática absoluta
+    const saldoPendienteVerdadero = Math.max(0, subtotalReal - anticipoInicial - totalAbonado);
+
+    // Auto-Reparación silenciosa en la base de datos (Si estaban desincronizados, los arregla)
+    if (Math.abs((parseFloat(c.saldoPendiente) || 0) - saldoPendienteVerdadero) > 0.01 || c.abonos?.length !== abonos.length) {
+        c.saldoPendiente = saldoPendienteVerdadero;
+        c.abonos = abonos;
+        StorageService.set("cuentasPorPagar", cuentas);
+    }
+
+    const saldoPendiente = saldoPendienteVerdadero;
 
     let movimientosHTML = '';
 
@@ -959,10 +982,9 @@ window.registrarAbonoProveedor = function(idCuenta) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 };
 
-function confirmarAbonoProveedor(idCuenta) {
-    // 👇 AHORA SÍ LEE EL ID CORRECTO 👇
+window.confirmarAbonoProveedor = function(idCuenta) {
     const fechaInput = document.getElementById("fechaAbonoProv").value;
-    if (!fechaInput) return alert("❌ Error de Auditoría: Debes especificar la fecha del pago.");
+    if (!fechaInput) return alert("❌ Error: Debes especificar la fecha del pago.");
     const fechaPagoFinal = `${fechaInput}T12:00:00.000`;
     
     const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor")?.value);
@@ -971,38 +993,51 @@ function confirmarAbonoProveedor(idCuenta) {
     if (index === -1) return;
     const cuenta = cuentas[index];
 
-    const validacion = ValidatorService.validarMonto(montoAbono, cuenta.saldoPendiente);
-    if (!validacion.valid) { alert("⚠️ " + validacion.error); return; }
+    // Sustituimos ValidatorService por una validación nativa a prueba de balas
+    if (isNaN(montoAbono) || montoAbono <= 0) return alert("⚠️ Ingresa un monto válido mayor a $0.");
+    if (montoAbono > cuenta.saldoPendiente + 0.01) return alert(`⚠️ El monto excede el saldo pendiente (${dinero(cuenta.saldoPendiente)}).`);
 
     const { medioPago, cuentaId, etiqueta } = _getCuentaSeleccionada('proveedor');
-
-    const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
-    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿ABONAR A PROVEEDOR?\n\nProveedor: ${cuenta.proveedor}\nMonto a abonar: ${formatoDinero(montoAbono)}\nOrigen del dinero: ${etiqueta}\n\n¿Deseas continuar?`;
+    
+    const msjConf = `¿CONFIRMAR PAGO A PROVEEDOR?\n\nProveedor: ${cuenta.proveedor}\nMonto a abonar: ${dinero(montoAbono)}\nOrigen del dinero: ${etiqueta}\n\n¿Deseas continuar?`;
     if (!confirm(msjConf)) return;
 
-    _egresarCuenta({
+    // 1. Descontar el dinero del banco o caja
+    window._egresarCuenta({
         monto: montoAbono,
         cuentaId,
         etiqueta,
         concepto: `Pago a proveedor ${cuenta.proveedor}${cuenta.producto ? ' - ' + cuenta.producto : ''}`,
         referencia: `ABONO-PROV-${idCuenta}`,
-        fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
+        fecha: fechaPagoFinal 
     });
 
+    // 2. Registrar abono en Cuenta Por Pagar
     cuenta.saldoPendiente -= montoAbono;
-
     if (!Array.isArray(cuenta.abonos)) cuenta.abonos = [];
     cuenta.abonos.push({
         fecha: fechaPagoFinal,
         monto: montoAbono,
         cuenta: etiqueta || 'No especificada'
     });
-
     StorageService.set("cuentasPorPagar", cuentas);
-    alert("✅ Pago registrado correctamente.");
+
+    // 3. SINCRONIZACIÓN BARRERA: Si esta deuda viene de una Orden de Compra, actualizar la OC también
+    if (cuenta.compraId) {
+        let ordenes = StorageService.get("ordenesCompra", []);
+        let idxOC = ordenes.findIndex(o => String(o.id) === String(cuenta.compraId));
+        if (idxOC !== -1) {
+            ordenes[idxOC].saldoPendiente = Math.max(0, (ordenes[idxOC].saldoPendiente || 0) - montoAbono);
+            if (!Array.isArray(ordenes[idxOC].pagos)) ordenes[idxOC].pagos = [];
+            ordenes[idxOC].pagos.push({ fecha: fechaPagoFinal, monto: montoAbono, cuenta: etiqueta });
+            StorageService.set("ordenesCompra", ordenes);
+        }
+    }
+
+    alert("✅ Pago registrado y sincronizado correctamente en todos los módulos.");
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
-    renderCuentasPorPagar();
-}
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+};
 window.confirmarAbonoProveedor = confirmarAbonoProveedor;
 
 // ===== ÓRDENES DE COMPRA =====
