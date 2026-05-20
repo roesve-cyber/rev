@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -126,18 +125,20 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-reportes')">📊 REPORTES <span>▾</span></button>
             <div id="sub-reportes" class="submenu oculto-submenu">
-                <button onclick="navA('dashboard'); renderDashboard();">📉 Dashboard Principal</button>
                 <button onclick="navA('reporte-ventas')">💰 Ventas</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
                 <button onclick="navA('reporte-flujo'); renderReporteFlujo();">💵 Flujo de Efectivo</button>
                 <button onclick="navA('reporte-rentabilidad'); renderReporteRentabilidad();">📈 Rentabilidad Real</button>
-                <button onclick="navA('reportes'); renderAnalisisRiesgoCartera();" style="color:#1e40af; font-weight:bold; border-top:1px solid #e2e8f0; margin-top:5px; padding-top:10px;">📈 ARC: Salud de Cartera</button>
-                <button onclick="navA('reportes'); renderReporteCompromisos();" style="color:#7c3aed; font-weight:bold;">🔮 Proyección de Compromisos
+                <button onclick="navA('reportes'); renderARC_v3();" style="color:#1e40af; font-weight:bold; border-top:1px solid #e2e8f0; margin-top:5px; padding-top:10px;">📈 ARC v3: Salud de Cartera</button>
+                <button onclick="navA('reportes'); renderComportamiento();" style="color:#7c3aed; font-weight:bold;">🧬 Comportamiento de Pago</button>
+                <button onclick="navA('reportes'); renderCobranzaMensual();" style="color:#0369a1; font-weight:bold;">📅 Cobranza Mensual</button>
+                <button onclick="navA('reportes'); renderConcentracion();" style="color:#0f766e; font-weight:bold;">🎯 Concentración de Cartera</button>
+                <button onclick="navA('reportes'); renderReporteCompromisos();" style="color:#7c3aed; font-weight:bold;">🔮 Proyección de Compromisos</button>
             </div>
         </div>
 
-<div class="menu-item">
-    <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
+        <div class="menu-item">
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
     <div id="sub-auditoria" class="submenu oculto-submenu">
         <button onclick="navA('auditoria-productos')">📦 Productos</button>
         <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
@@ -1173,6 +1174,7 @@
 <script src="js/modules/compras.js?v=5"></script>
 <script src="js/modules/bancos.js?v=5"></script>
 <script src="js/modules/reportes.js?v=5"></script>
+<script src="js/modules/reportes-credito.js"></script>
 <script src="js/modules/dashboard.js"></script>
 <script src="js/modules/cotizaciones.js?v=3"></script>
 <script src="js/modules/puntos.js"></script>
