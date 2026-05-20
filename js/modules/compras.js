@@ -2268,6 +2268,9 @@ function renderRequisiciones() {
                         style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                     🚀 Compra directa
                 </button>
+                <button onclick="window.marcarRequisicionResuelta('${req.id || r.id}')" style="background:#10b981; color:white; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; margin-right:5px; box-shadow:0 2px 4px rgba(16,185,129,0.3);" title="Marcar como ya obtenido para quitarlo de la lista">
+    ✔️ Ya lo tengo
+</button>
             </div>
         </div>
 
@@ -3089,23 +3092,25 @@ window.confirmarAgregarA_OC_Existente = function() {
             const prod = prods.find(p => String(p.id) === String(req.productoId));
             const costoUnitario = prod ? parseFloat(prod.costo) : 0;
             const cant = parseInt(req.cantidad) || 1;
-            const caracteristicas = `Req. Venta: ${req.folioVenta}`;
+            const caracteristicas = req.folioVenta ? `Req. Venta: ${req.folioVenta}` : "Req. Venta: S/F";
 
             // 1. Buscamos si ya existe el producto con esas características en la OC para sumar cantidad
             let idxArt = oc.articulos.findIndex(a => String(a.productoId) === String(req.productoId) && a.caracteristicas === caracteristicas);
             
             if (idxArt !== -1) {
-                oc.articulos[idxArt].cantidad += cant;
+                oc.articulos[idxArt].cantidad = (parseInt(oc.articulos[idxArt].cantidad) || 0) + cant;
+                oc.articulos[idxArt].costo = parseFloat(oc.articulos[idxArt].costo) || 0;
                 oc.articulos[idxArt].subtotal = oc.articulos[idxArt].cantidad * oc.articulos[idxArt].costo;
             } else {
-                // Si no, lo agregamos como fila nueva
+                // Si no, lo agregamos como fila nueva (100% SANITIZADA)
                 oc.articulos.push({
-                    productoId: req.productoId,
-                    nombre: req.producto,
-                    costo: costoUnitario,
-                    cantidad: cant,
-                    subtotal: cant * costoUnitario,
-                    caracteristicas: caracteristicas
+                    productoId: req.productoId || null,
+                    nombre: req.producto || "Mercancía sin nombre",
+                    costo: costoUnitario || 0,
+                    cantidad: cant || 1,
+                    subtotal: (cant * costoUnitario) || 0,
+                    caracteristicas: caracteristicas,
+                    yaEnInventario: false // 🔥 Evita el undefined que reventaba Firebase
                 });
             }
 
@@ -3116,11 +3121,17 @@ window.confirmarAgregarA_OC_Existente = function() {
     });
 
     // 3. Recalcular la matemática de la Orden de Compra
-    oc.total = oc.articulos.reduce((s, a) => s + (a.subtotal || 0), 0);
-    const anticipoPrevio = oc.anticipo_pagado || 0;
-    oc.saldoPendiente = Math.max(0, oc.total - anticipoPrevio);
+    oc.total = oc.articulos.reduce((s, a) => s + (parseFloat(a.subtotal) || 0), 0) || 0;
+    const anticipoPrevio = parseFloat(oc.anticipo_pagado) || 0;
+    oc.saldoPendiente = Math.max(0, oc.total - anticipoPrevio) || 0;
 
-    // 4. Guardar cambios en las bases de datos
+    // 🧹 4. LIMPIEZA EXTREMA PARA FIREBASE: Destruir cualquier undefined residual
+    Object.keys(oc).forEach(k => (oc[k] === undefined) && delete oc[k]);
+    oc.articulos.forEach(art => {
+        Object.keys(art).forEach(k => (art[k] === undefined) && delete art[k]);
+    });
+
+    // 5. Guardar cambios en las bases de datos
     StorageService.set('ordenesCompra', ocs);
     StorageService.set('requisicionesCompra', reqsTotales);
     
@@ -3132,6 +3143,27 @@ window.confirmarAgregarA_OC_Existente = function() {
     // Refrescar vistas
     renderRequisiciones();
     if(typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+};
+// --- MARCAR REQUISICIÓN COMO YA EN INVENTARIO (RESUELTA) ---
+window.marcarRequisicionResuelta = function(idReq) {
+    if (!confirm("¿Confirmas que ya tienes este producto o ya no necesitas comprarlo?\n\nEsto lo quitará permanentemente de la lista de pendientes.")) return;
+
+    let reqs = StorageService.get("requisicionesCompra", []);
+    const idx = reqs.findIndex(r => String(r.id) === String(idReq));
+    
+    if (idx !== -1) {
+        // Cambiamos el estatus para que ya no cumpla la condición de "Pendiente"
+        reqs[idx].estatus = "Ya en Inventario";
+        StorageService.set("requisicionesCompra", reqs);
+        
+        // Recargamos la vista automáticamente
+        if (typeof renderRequisiciones === 'function') {
+            renderRequisiciones();
+        }
+        
+    } else {
+        alert("❌ Error: No se encontró la requisición.");
+    }
 };
 
 // Exponer la función para que el menú HTML la encuentre
