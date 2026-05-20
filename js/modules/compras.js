@@ -2184,28 +2184,55 @@ function _renderEditTablaOC() {
 function guardarEdicionOC(id) {
     const arts = window._editArticulosOC || [];
     if (arts.length === 0) return alert('⚠️ Agrega al menos un artículo.');
+    
     const provId       = document.getElementById('editOcProveedor')?.value;
     const fechaEntrega = document.getElementById('editOcFechaEntrega')?.value;
     const notas        = document.getElementById('editOcNotas')?.value.trim() || '';
-    const provs        = StorageService.get('proveedores', []);
-    const prov         = provs.find(p => String(p.id) === String(provId));
-    const lista        = StorageService.get('ordenesCompra', []);
-    const idx          = lista.findIndex(x => x.id === id);
+    
+    const provs = StorageService.get('proveedores', []);
+    const prov  = provs.find(p => String(p.id) === String(provId));
+    
+    const lista = StorageService.get('ordenesCompra', []);
+    const idx   = lista.findIndex(x => x.id === id);
     if (idx === -1) return;
+
+    // 1. SANITIZACIÓN DE ARTÍCULOS (Filtro anti-undefined para Firebase)
+    const articulosLimpios = arts.map(a => ({
+        productoId: a.productoId || null,
+        nombre: a.nombre || "Sin nombre",
+        costo: parseFloat(a.costo) || 0,
+        cantidad: parseInt(a.cantidad) || 0,
+        subtotal: parseFloat(a.subtotal) || 0,
+        caracteristicas: a.caracteristicas || "",
+        yaEnInventario: Boolean(a.yaEnInventario)
+    }));
+
+    // 2. MATEMÁTICAS ESTRICTAS (La cura al Saldo Fantasma)
+    const totalVerdadero = articulosLimpios.reduce((s, a) => s + a.subtotal, 0);
+    const anticipoPrevio = parseFloat(lista[idx].anticipo_pagado) || 0;
+    const saldoVerdadero = Math.max(0, totalVerdadero - anticipoPrevio);
+
+    // 3. ACTUALIZACIÓN DEL OBJETO
     lista[idx] = {
         ...lista[idx],
-        proveedorId:           provId || lista[idx].proveedorId,
-        proveedorNombre:       prov ? prov.nombre : lista[idx].proveedorNombre,
-        articulos:             arts,
-        total:                 arts.reduce((s, a) => s + a.subtotal, 0),
+        proveedorId:           provId || lista[idx].proveedorId || null,
+        proveedorNombre:       prov ? prov.nombre : (lista[idx].proveedorNombre || "General"),
+        articulos:             articulosLimpios,
+        total:                 totalVerdadero,
+        saldoPendiente:        saldoVerdadero, // <- Ahora el saldo camina de la mano del total
         fechaEntregaEstimada:  fechaEntrega || null,
-        notas,
-        fechaModificacion:     window.localISO(new Date())
+        notas:                 notas || "",
+        fechaModificacion:     typeof window.localISO === 'function' ? window.localISO(new Date()) : new Date().toISOString()
     };
+
+    // 4. DESTRUCTOR DE UNDEFINED (Última línea de defensa)
+    Object.keys(lista[idx]).forEach(k => (lista[idx][k] === undefined) && delete lista[idx][k]);
+
     StorageService.set('ordenesCompra', lista);
     document.querySelector('[data-modal="editar-oc"]')?.remove();
-    alert('✅ Orden de compra actualizada.');
-    renderListaOrdenesCompra();
+    alert('✅ Orden de compra actualizada y balanceada matemáticamente.');
+    
+    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
 }
 // Función auxiliar para listar tus cuentas de débito
 function _generarOpcionesCuentasDebito() {

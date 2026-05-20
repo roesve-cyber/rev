@@ -1734,13 +1734,29 @@ window.abrirAuditoriaSaldos = function() {
 
 window.guardarAjusteAuditoria = function() {
     const cuentaSel = document.getElementById("ajusteCta");
+    if (!cuentaSel) return alert("❌ Error de interfaz: No se encontró el selector de cuenta.");
+    
     const cuentaId = cuentaSel.value;
     // Quitamos los emojis del nombre para la etiqueta
     const cuentaNombre = cuentaSel.options[cuentaSel.selectedIndex].text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').replace(' Débito', '');
     
     const tipo = document.getElementById("ajusteTipo").value;
     const monto = parseFloat(document.getElementById("ajusteMonto").value);
-    const motivo = document.getElementById("ajusteMotivo").value.trim();
+
+    // 🔍 REPARACIÓN QUIRÚRGICA: Localizar el motivo de forma segura dentro del modal activo
+    const modal = document.querySelector('[data-modal="auditoria-saldos"]');
+    let motivo = "";
+    
+    if (modal) {
+        // Busca cualquier textarea o input de texto que sirva para el motivo dentro del modal
+        const campoMotivo = modal.querySelector('textarea, input[id="ajusteMotivo"], input[type="text"]');
+        if (campoMotivo) {
+            motivo = campoMotivo.value.trim();
+        }
+    } else {
+        // Fallback por si el modal no tiene la propiedad data-modal
+        motivo = document.getElementById("ajusteMotivo")?.value.trim() || "";
+    }
 
     if (!monto || monto <= 0) return alert("❌ Ingresa un monto válido mayor a 0.");
     if (!motivo || motivo.length < 5) return alert("❌ Debes escribir un motivo claro (mínimo 5 caracteres) para la evidencia.");
@@ -1769,7 +1785,12 @@ window.guardarAjusteAuditoria = function() {
     });
 
     StorageService.set("movimientosCaja", movimientos);
-    document.querySelector('[data-modal="auditoria-saldos"]').remove();
+    
+    if (modal) {
+        modal.remove();
+    } else {
+        document.querySelector('[data-modal="auditoria-saldos"]')?.remove();
+    }
     
     alert("✅ Ajuste aplicado con éxito. La evidencia quedó registrada permanentemente en el flujo de caja.");
     
