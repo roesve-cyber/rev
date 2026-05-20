@@ -180,7 +180,7 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
 };
 
-window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia }) {
+window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha }) {
     // Detectar si el ID es de una caja de efectivo
     const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
     
@@ -204,8 +204,9 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         tipo: 'egreso',
         concepto,
         monto,
-        fecha: window.localISO(new Date()),
-        cuenta: cuentaId,
+        // 👇 AHORA TOMA LA FECHA QUE ELIJAS 👇
+        fecha: fecha || window.localISO(new Date()),
+        cuenta: cuentaId,
         etiquetaCuenta: etiqueta || cuentaId,
         medioPago: isCaja ? 'efectivo' : 'transferencia',
         referencia
@@ -501,6 +502,7 @@ function registrarCompra() {
                 id: Date.now() + 3,
                 compraId: nuevaCompra.id,
                 banco: bancoSel,
+                concepto: `Compra: ${producto.nombre} (Prov: ${prov.nombre})`, // 🔥 INYECCIÓN DE AUDITORÍA
                 producto: producto.nombre,
                 total: totalCompra,
                 meses: numMeses,
@@ -598,31 +600,82 @@ function renderRecepciones() {
     contenedor.innerHTML = html + "</tbody></table>";
 }
 
+// --- MOTOR DE RECEPCIÓN FÍSICA MULTI-BODEGA ---
 function procesarRecepcionFisica(idRecepcion) {
-    // --- LECTURA FRESCA DE BASES DE DATOS ---
-    let productos = StorageService.get("productos", []);
-    let movimientosInventario = StorageService.get("movimientosInventario", []);
     let recs = StorageService.get("recepciones", []);
-    // ---------------------------------------------------------------------
-
     const index = recs.findIndex(r => r.id == idRecepcion);
-    if (index === -1) return;
-
+    if (index === -1) return alert("❌ Error: Recepción no encontrada.");
     const rec = recs[index];
-    const cantInput = prompt(`¿Cuánto llegó de ${rec.productoNombre}?\nFaltan: ${rec.cantidadPendiente}`);
-    const cantidad = parseInt(cantInput);
 
-    if (isNaN(cantidad) || cantidad <= 0 || cantidad > rec.cantidadPendiente) {
-        alert("Cantidad no válida.");
-        return;
+    // Extraer catálogo real de ubicaciones
+    const ubicacionesConfig = StorageService.get("ubicacionesConfig", [{nombre: "Piso de Ventas"}, {nombre: "Bodega Principal"}]);
+    let opcionesUbi = '<option value="General">-- Elige la Bodega / Ubicación --</option>';
+    ubicacionesConfig.forEach(u => {
+        const isSelected = (rec.ubicacion === u.nombre) ? 'selected' : '';
+        opcionesUbi += `<option value="${u.nombre}" ${isSelected}>${u.nombre}</option>`;
+    });
+
+    // Remover modal previo si existe
+    document.querySelector('[data-modal="recepcion-fisica"]')?.remove();
+
+    const html = `
+    <div data-modal="recepcion-fisica" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
+        <div style="background:white;border-radius:12px;width:380px;padding:24px;box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0;color:#1e40af;margin-bottom:15px;">📥 Ingreso al Inventario</h3>
+            
+            <div style="background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:15px;border:1px solid #e2e8f0;">
+                <p style="margin:0;font-size:13px;color:#475569;">Producto: <b>${rec.productoNombre}</b></p>
+                <p style="margin:5px 0 0;font-size:13px;color:#dc2626;font-weight:bold;">Pendiente por recibir: ${rec.cantidadPendiente}</p>
+            </div>
+            
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#374151;">Cantidad a ingresar:</label>
+                <input type="number" id="rfCantidad" value="${rec.cantidadPendiente}" min="1" max="${rec.cantidadPendiente}" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:16px;font-weight:bold;text-align:center;">
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#374151;">Color / Variante:</label>
+                <input type="text" id="rfColor" value="${rec.color || 'General'}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;">
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#374151;">Bodega / Ubicación de destino:</label>
+                <select id="rfUbicacion" style="width:100%;padding:10px;border:2px solid #10b981;border-radius:6px;font-size:14px;background:#f0fdf4;">
+                    ${opcionesUbi}
+                </select>
+            </div>
+
+            <div style="display:flex;gap:10px;">
+                <button onclick="ejecutarRecepcionFisica(${idRecepcion})" style="flex:1;padding:12px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;cursor:pointer;">✅ Recibir Mercancía</button>
+                <button onclick="document.querySelector('[data-modal=\\'recepcion-fisica\\']').remove()" style="padding:12px 16px;background:#94a3b8;color:white;border:none;border-radius:6px;cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// Lógica de ejecución atada al botón del modal
+window.ejecutarRecepcionFisica = function(idRecepcion) {
+    const cantidad = parseInt(document.getElementById('rfCantidad').value);
+    const colorRecepcion = document.getElementById('rfColor').value.trim() || 'General';
+    const ubicacionRecepcion = document.getElementById('rfUbicacion').value;
+
+    if (!ubicacionRecepcion || ubicacionRecepcion === "General") {
+        alert("❌ BLOQUEO DE AUDITORÍA: Está estrictamente prohibido ingresar mercancía sin declarar la bodega física de destino. Selecciona una ubicación válida.");
+        return; // El return aquí "mata" la función, no guarda nada y no deja avanzar.
     }
 
-    // --- RESUMEN Y CONFIRMACIÓN DE RECEPCIÓN DIRECTA ---
-    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿RECIBIR MERCANCÍA?\n\nProducto: ${rec.productoNombre}\nCantidad a ingresar: ${cantidad} piezas\nBodega/Ubicación: ${rec.ubicacion || 'General'}\n\n¿Deseas registrar esta entrada en el inventario?`;
-    if (!confirm(msjConf)) return;
-    // --- FIN DE CONFIRMACIÓN ---
+    let recs = StorageService.get("recepciones", []);
+    const index = recs.findIndex(r => r.id == idRecepcion);
+    if (index === -1) return;
+    const rec = recs[index];
 
-    // Búsqueda robusta del producto (asegurando comparación por String)
+    if (isNaN(cantidad) || cantidad <= 0 || cantidad > rec.cantidadPendiente) {
+        return alert("⚠️ Cantidad no válida o mayor a lo pendiente.");
+    }
+
+    let productos = StorageService.get("productos", []);
+    let movimientosInventario = StorageService.get("movimientosInventario", []);
     const prod = productos.find(p => String(p.id) === String(rec.productoId));
     
     if (prod) {
@@ -631,8 +684,6 @@ function procesarRecepcionFisica(idRecepcion) {
 
         // 2. Afectar Variantes (Color/Ubicación)
         if (!prod.variantes) prod.variantes = [];
-        const colorRecepcion = rec.color || 'General';
-        const ubicacionRecepcion = rec.ubicacion || 'General';
         
         const varExistente = prod.variantes.find(v => 
             (v.color || "General").toUpperCase() === colorRecepcion.toUpperCase() && 
@@ -645,45 +696,37 @@ function procesarRecepcionFisica(idRecepcion) {
             prod.variantes.push({ color: colorRecepcion, ubicacion: ubicacionRecepcion, stock: cantidad });
         }
         
-        // 3. Afectar KARDEX
+        // 3. Afectar KARDEX detallado
         movimientosInventario.push({
             id: Date.now(),
             productoId: String(prod.id),
             productoNombre: prod.nombre,
             tipo: 'entrada',
             cantidad,
-            concepto: `Recepción Pendiente - Prov: ${rec.proveedor} (${colorRecepcion})`,
+            concepto: `Recepción Pendiente - Prov: ${rec.proveedor} (${colorRecepcion}) -> Ingresado a [${ubicacionRecepcion}]`,
             fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
         });
     } else {
-        alert("Error: El producto ya no existe en la base de datos.");
-        return; 
+        return alert("❌ Error: El producto ya no existe en la base de datos.");
     }
 
     // 4. Actualizar la tarjeta de Recepción
     rec.cantidadRecibida += cantidad;
     rec.cantidadPendiente -= cantidad;
     if (rec.cantidadPendiente === 0) rec.estatus = "Completado";
+    rec.ubicacion = ubicacionRecepcion;
+    rec.color = colorRecepcion;
 
     recs[index] = rec;
     
-    // 5. Guardar todo
-    if (!StorageService.set("recepciones", recs)) {
-        console.error("❌ Error guardando recepciones");
-        return;
-    }
-    if (!StorageService.set("productos", productos)) {
-        console.error("❌ Error guardando productos");
-        return;
-    }
-    if (!StorageService.set("movimientosInventario", movimientosInventario)) {
-        console.error("❌ Error guardando movimientos");
-        return;
-    }
+    StorageService.set("recepciones", recs);
+    StorageService.set("productos", productos);
+    StorageService.set("movimientosInventario", movimientosInventario);
 
-    alert("✅ Recepción procesada y Stock/Kardex actualizados con éxito.");
+    document.querySelector('[data-modal="recepcion-fisica"]').remove();
+    alert(`✅ Recepción procesada exitosamente.\nInventario sumado a la bodega: [${ubicacionRecepcion}].`);
     renderRecepciones();
-}
+};
 
 window.verDetalleCompra = function(idCuenta) {
     const cuentas = StorageService.get("cuentasPorPagar", []);
@@ -872,6 +915,10 @@ window.registrarAbonoProveedor = function(idCuenta) {
     if (index === -1) { console.error("No se encontró la cuenta para abonar"); return; }
     const cuenta = cuentas[index];
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
+    
+    // Generar fecha hoy
+    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+
     const modalHTML = `
     <div data-modal="abono-proveedor" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:6000;display:flex;justify-content:center;align-items:center;">
         <div style="background:white;padding:30px;border-radius:15px;width:90%;max-width:550px;max-height:90vh;overflow-y:auto;">
@@ -882,6 +929,12 @@ window.registrarAbonoProveedor = function(idCuenta) {
                     <div><small style="color:#718096;">Saldo Pendiente</small><br><strong style="color:#e74c3c;font-size:20px;">${dinero(cuenta.saldoPendiente)}</strong></div>
                 </div>
             </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold;display:block;margin-bottom:8px;">Fecha del Pago:</label>
+                <input type="date" id="fechaAbonoProv" value="${fechaHoy}" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:6px;">
+            </div>
+
             <div style="margin-bottom:20px;">
                 <label style="font-weight:bold;display:block;margin-bottom:8px;">Monto del pago ($):</label>
                 <input type="number" id="montoAbonoProveedor" placeholder="0.00" min="0" max="${cuenta.saldoPendiente}"
@@ -907,9 +960,14 @@ window.registrarAbonoProveedor = function(idCuenta) {
 };
 
 function confirmarAbonoProveedor(idCuenta) {
+    // 👇 AHORA SÍ LEE EL ID CORRECTO 👇
+    const fechaInput = document.getElementById("fechaAbonoProv").value;
+    if (!fechaInput) return alert("❌ Error de Auditoría: Debes especificar la fecha del pago.");
+    const fechaPagoFinal = `${fechaInput}T12:00:00.000`;
+    
     const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor")?.value);
     let cuentas = StorageService.get("cuentasPorPagar", []);
-    const index = cuentas.findIndex(c => String(c.id) === String(idCuenta)); // FIX: era c.id === idCuenta (number vs string)
+    const index = cuentas.findIndex(c => String(c.id) === String(idCuenta));
     if (index === -1) return;
     const cuenta = cuentas[index];
 
@@ -918,26 +976,24 @@ function confirmarAbonoProveedor(idCuenta) {
 
     const { medioPago, cuentaId, etiqueta } = _getCuentaSeleccionada('proveedor');
 
-    // --- NUEVO: RESUMEN Y CONFIRMACIÓN ---
     const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
     const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿ABONAR A PROVEEDOR?\n\nProveedor: ${cuenta.proveedor}\nMonto a abonar: ${formatoDinero(montoAbono)}\nOrigen del dinero: ${etiqueta}\n\n¿Deseas continuar?`;
     if (!confirm(msjConf)) return;
-    // --- FIN DE CONFIRMACIÓN ---
 
     _egresarCuenta({
         monto: montoAbono,
         cuentaId,
         etiqueta,
         concepto: `Pago a proveedor ${cuenta.proveedor}${cuenta.producto ? ' - ' + cuenta.producto : ''}`,
-        referencia: `ABONO-PROV-${idCuenta}`
+        referencia: `ABONO-PROV-${idCuenta}`,
+        fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
     });
 
     cuenta.saldoPendiente -= montoAbono;
 
-    // Registrar el abono en el historial de la deuda
     if (!Array.isArray(cuenta.abonos)) cuenta.abonos = [];
     cuenta.abonos.push({
-        fecha: window.localISO(new Date()),
+        fecha: fechaPagoFinal,
         monto: montoAbono,
         cuenta: etiqueta || 'No especificada'
     });
@@ -2279,7 +2335,8 @@ function abrirModalCompraDirectaMulti() {
     const selProvs = provs.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
     
     const ubicaciones = StorageService.get("ubicacionesConfig", []);
-    let selUbi = '<option value="General">General</option>';
+    // Al dejar el value="" vacío, el sistema sabe que no hay respuesta aún
+    let selUbi = '<option value="">-- 🛑 OBLIGATORIO: Elige Bodega --</option>';
     ubicaciones.forEach(u => {
         if(u.nombre !== 'General') selUbi += `<option value="${u.nombre}">${u.nombre}</option>`;
     });
@@ -2462,6 +2519,15 @@ function guardarCompraDirectaFinal() {
 
     const fechaStr = document.getElementById('cdFecha').value;
     const fechaFormatMX = fechaStr.split('-').reverse().join('/');
+
+    let selectsBodega = document.querySelectorAll("select[id^='cdUbicacion_']");
+    for (let i = 0; i < selectsBodega.length; i++) {
+        let valorBodega = selectsBodega[i].value;
+        if (!valorBodega || valorBodega === "" || valorBodega === "General") {
+            alert(`❌ BLOQUEO DE AUDITORÍA: No has seleccionado la bodega de destino para el artículo en la fila ${i + 1}.\n\nRevisa la tabla y asigna una ubicación antes de guardar.`);
+            return; // Aborta todo el proceso de guardado inmediatamente
+        }
+    }
     
     const metodoPago = document.getElementById('cdMetodoPago').value;
     const comboPago = document.getElementById("cdMetodoPago");
@@ -2566,10 +2632,15 @@ function guardarCompraDirectaFinal() {
 
     // 👇 5. LÓGICA DE DISTRIBUCIÓN DE DEUDA/PAGO NATIVA 👇
     
+    // Extraemos todos los nombres de los productos separados por comas
+    const nombresProductos = arts.map(a => a.nombre).join(', ');
+    // Creamos la etiqueta perfecta para tu conciliación
+    const conceptoCombinado = `Compra: ${nombresProductos} (Prov: ${prov.nombre})`;
+
     if (metodoPago === "contado") {
         window._egresarCuenta({
             monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
-            concepto: `Compra Directa a ${prov.nombre}`, referencia: `COMPRA-${idCompraUnico}`
+            concepto: conceptoCombinado, referencia: `COMPRA-${idCompraUnico}`
         });
     } 
     else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
@@ -2578,7 +2649,7 @@ function guardarCompraDirectaFinal() {
             id: idCompraUnico + 2,
             compraId: idCompraUnico,
             proveedor: prov.nombre,
-            producto: "Varios",
+            producto: nombresProductos, // 🔥 Antes decía "Varios"
             total: totalCompra,
             saldoPendiente: totalCompra,
             metodo: metodoPago,
@@ -2590,46 +2661,35 @@ function guardarCompraDirectaFinal() {
         StorageService.set("cuentasPorPagar", cuentasProv);
     }
     else if (metodoPago === "tarjeta_msi") {
-        // 🚀 MOTOR BANCARIO: MSI CON CÁLCULO DE CORTE Y PAGO 🚀
+        // 🚀 MOTOR BANCARIO: MSI CON CÁLCULO UNIVERSAL DE CORTE Y PAGO 🚀
         let cuentasBancos = StorageService.get("cuentasMSI", []);
         let tarjetasConfig = StorageService.get("tarjetasConfig", []);
         
-        // 1. Extraemos la configuración real de tu tarjeta
         let infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSel) || {};
         let diaCorte = parseInt(infoTarjeta.diaCorte) || 15;
-        let diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5); // Por defecto el día 5 del siguiente mes
+        let diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5);
 
         let calendario = [];
         let cuotaMensual = parseFloat((totalCompra / msiMeses).toFixed(2));
         
         let fechaPartes = fechaStr.split('-'); 
         let anioCompra = parseInt(fechaPartes[0]);
-        let mesCompra = parseInt(fechaPartes[1]) - 1; // Mes en JS empieza en 0
+        let mesCompra = parseInt(fechaPartes[1]) - 1; 
         let diaCompra = parseInt(fechaPartes[2]);
 
-        // 2. Lógica del "Brinco" Bancario
-        let mesBaseFacturacion = mesCompra;
-        
-        // Si compraste estrictamente DESPUÉS del corte, la deuda entra hasta el mes siguiente
-        if (diaCompra > diaCorte) {
-            mesBaseFacturacion++; 
-        }
+        let brincoCorte = (diaCompra > diaCorte) ? 1 : 0;
+        let brincoPago = (diaCorte > diaPago) ? 1 : 0;
+        let mesPrimerPago = mesCompra + brincoCorte + brincoPago;
 
-        // El mes de pago real siempre es el mes SIGUIENTE al cierre de la facturación
-        let mesPrimerPago = mesBaseFacturacion + 1; 
-
-        // 3. Generación del Calendario Exacto
         for (let i = 1; i <= msiMeses; i++) {
-            // Calculamos siempre cayendo en tu DÍA LÍMITE DE PAGO real
             let fCalculada = new Date(anioCompra, mesPrimerPago + (i - 1), diaPago, 12, 0, 0);
-            
             let yyyy = fCalculada.getFullYear();
             let mm = String(fCalculada.getMonth() + 1).padStart(2, '0');
             let dd = String(fCalculada.getDate()).padStart(2, '0');
             
             calendario.push({
                 n: i,
-                fecha: `${yyyy}-${mm}-${dd}`, // Fecha en la que realmente sale el dinero
+                fecha: `${yyyy}-${mm}-${dd}`,
                 monto: cuotaMensual,
                 estado: "Pendiente",
                 montoAbonado: 0,
@@ -2641,8 +2701,8 @@ function guardarCompraDirectaFinal() {
             id: idCompraUnico + 3,
             compraId: idCompraUnico,
             banco: bancoSel,
-            concepto: `Compra Directa: ${prov.nombre}`,
-            producto: arts.map(a => a.nombre).join(', '),
+            concepto: conceptoCombinado, // 🔥 Etiqueta combinada en lugar de "Compra Directa"
+            producto: nombresProductos,
             total: totalCompra,
             meses: msiMeses,
             cuotaMensual: cuotaMensual,
@@ -2745,6 +2805,7 @@ function renderCuentasPorPagar() {
 
 window.abrirModalAbonoOC = function(idOC) {
     const ordenes = StorageService.get("ordenesCompra", []);
+    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
     const oc = ordenes.find(o => o.id === idOC);
     if (!oc) return;
 
@@ -2757,6 +2818,11 @@ window.abrirModalAbonoOC = function(idOC) {
             <h3 style="margin-top:0; color:#1e40af;">💰 Abonar a OC: ${oc.folio}</h3>
             <p style="color:#6b7280; font-size:14px; margin-bottom: 15px;">Saldo pendiente: <b style="color:#dc2626;">${dinero(saldoPendiente)}</b></p>
             
+            <div style="margin-bottom:15px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:5px;color:#334155;">Fecha del Pago:</label>
+                <input type="date" id="fechaAbonoOC" value="${fechaHoy}" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-family:sans-serif;">
+             </div>
+
             <div style="margin-bottom:15px;">
                 <label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">MONTO DEL ABONO</label>
                 <input type="number" id="montoAbonoOC" max="${saldoPendiente}" placeholder="Ej: 500" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; font-size:16px;">
@@ -2782,6 +2848,11 @@ window.confirmarAbonoOC = function(idOC) {
     const idx = ordenes.findIndex(o => o.id === idOC);
     if (idx === -1) return;
 
+    // 👇 LEEMOS EL CALENDARIO 👇
+    const fechaInput = document.getElementById("fechaAbonoOC").value;
+    if (!fechaInput) return alert("❌ Error de Auditoría: Debes especificar la fecha del pago.");
+    const fechaPagoFinal = `${fechaInput}T12:00:00.000`;
+
     const monto = parseFloat(document.getElementById('montoAbonoOC').value) || 0;
     const selectCuenta = document.getElementById('cuentaAbonoOC');
     const cuentaId = selectCuenta.value;
@@ -2792,20 +2863,21 @@ window.confirmarAbonoOC = function(idOC) {
 
     if (monto <= 0 || monto > saldoPendiente) return alert("⚠️ Monto inválido. Verifica el saldo pendiente.");
 
-    // 1. Registrar el egreso en el flujo de caja
+    // 1. Registrar el egreso en el flujo de caja (mandando la fecha)
     window._egresarCuenta({
         monto: monto,
         cuentaId: cuentaId,
         etiqueta: cuentaNombre,
         concepto: `Abono a Orden de Compra ${ordenes[idx].folio}`,
-        referencia: ordenes[idx].folio
+        referencia: ordenes[idx].folio,
+        fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
     });
 
     // 2. Actualizar la OC
     ordenes[idx].pagos = ordenes[idx].pagos || [];
-    ordenes[idx].pagos.push({ fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(), monto: monto, cuenta: cuentaNombre });
+    ordenes[idx].pagos.push({ fecha: fechaPagoFinal, monto: monto, cuenta: cuentaNombre });
     ordenes[idx].saldoPendiente = saldoPendiente - monto;
-    ordenes[idx].anticipo_pagado = anticipoPrevio + monto; // Actualizamos para que coincida
+    ordenes[idx].anticipo_pagado = anticipoPrevio + monto; 
 
     StorageService.set("ordenesCompra", ordenes);
     document.querySelector('[data-modal=abono-oc]').remove();
