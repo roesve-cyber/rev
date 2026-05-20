@@ -75,6 +75,9 @@ window.renderConsultaInventario = function() {
         return coincideCat && coincideSub && coincideStock && coincidePedido && coincideUbi;
     });
 
+    // 🚀 ORDENAR ANTES DE DIBUJAR LA TABLA PRO
+    productosFiltrados = window.aplicarOrdenamientoInteligente(productosFiltrados, sub);
+
     // 4. Renderizado de Estructura de Tabla
     let html = `
     <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:12px;">
@@ -244,13 +247,31 @@ window.initConsultaInventario = function() {
     }
 
     let cats = [...new Set((window.productos||[]).map(p=>p.categoria).filter(Boolean))];
-    catSel.innerHTML = '<option value="todos">Todas las categorías</option>' + cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+    // Ordenar categorías por posición
+    const categoriasOrdenadas = (window.categoriasData || [])
+        .filter(c => cats.includes(c.nombre))
+        .sort((a, b) => (a.posicion || 999) - (b.posicion || 999))
+        .map(c => c.nombre);
+    const catsOrdenadas = [...categoriasOrdenadas, ...cats.filter(c => !categoriasOrdenadas.includes(c)).sort()];
+    
+    catSel.innerHTML = '<option value="todos">Todas las categorías</option>' + catsOrdenadas.map(c=>`<option value="${c}">${c}</option>`).join('');
     
     catSel.onchange = function() {
         const cat = catSel.value;
         let subs = (window.productos||[]).filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
         subs = [...new Set(subs)];
-        subSel.innerHTML = '<option value="todos">Todas las subcategorías</option>' + subs.map(s=>`<option value="${s}">${s}</option>`).join('');
+        
+        // Ordenar subcategorías por posición
+        const catData = (window.categoriasData || []).find(c => c.nombre === cat);
+        const subsOrdenadas = catData && catData.subcategorias 
+            ? catData.subcategorias
+                .filter(s => subs.includes(s.nombre))
+                .sort((a, b) => (a.posicion || 999) - (b.posicion || 999))
+                .map(s => s.nombre)
+            : [];
+        const subsFinales = [...subsOrdenadas, ...subs.filter(s => !subsOrdenadas.includes(s)).sort()];
+        
+        subSel.innerHTML = '<option value="todos">Todas las subcategorías</option>' + subsFinales.map(s=>`<option value="${s}">${s}</option>`).join('');
         subSel.value = 'todos';
         renderConsultaInventario();
     };
@@ -423,12 +444,15 @@ function aplicarFiltros() {
     const subFiltro = document.getElementById("filtroSubcategoria").value;
     const busqueda = document.getElementById("busquedaProducto").value.toLowerCase();
 
-    const filtrados = window.productos.filter(p => {
+    let filtrados = window.productos.filter(p => {
         const coincideCat = (catFiltro === "todos" || p.categoria === catFiltro);
         const coincideSub = (subFiltro === "todos" || p.subcategoria === subFiltro);
         const coincideNombre = p.nombre.toLowerCase().includes(busqueda);
         return coincideCat && coincideSub && coincideNombre;
     });
+
+    // 🚀 PASAR POR EL MOTOR ANTES DE RENDERIZAR
+    filtrados = window.aplicarOrdenamientoInteligente(filtrados, subFiltro);
 
     renderInventario(filtrados);
 }
@@ -466,7 +490,9 @@ function actualizarCombosFiltros() {
     const subPrevia = filtroSub ? filtroSub.value : "todos";
 
     let htmlCat = '<option value="todos">-- Todas las Categorías --</option>';
-    categoriasData.forEach(cat => {
+    // Ordenar categorías por posición
+    const categoriasOrdenadas = [...categoriasData].sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+    categoriasOrdenadas.forEach(cat => {
         htmlCat += `<option value="${cat.nombre}">${cat.nombre}</option>`;
     });
     filtroCat.innerHTML = htmlCat;
@@ -477,7 +503,9 @@ function actualizarCombosFiltros() {
         if (filtroCat.value !== "todos") {
             const catInfo = categoriasData.find(c => c.nombre === filtroCat.value);
             if (catInfo && catInfo.subcategorias) {
-                catInfo.subcategorias.forEach(sub => {
+                // Ordenar subcategorías por posición
+                const subcatOrdenadas = [...catInfo.subcategorias].sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+                subcatOrdenadas.forEach(sub => {
                     htmlSub += `<option value="${sub.nombre}">${sub.nombre}</option>`;
                 });
             }
@@ -515,9 +543,6 @@ function renderInventario(listaAMostrar = window.productos) {
             const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
             html += `
                 <tr>
-                    <td style="max-width:120px;overflow-x:auto;">
-                        <span style="display:inline-block;min-width:60px;max-width:110px;overflow-x:auto;">${p.id}</span>
-                    </td>
                     <td>
                         <b>${p.nombre}</b><br>
                         <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
@@ -537,77 +562,11 @@ function renderInventario(listaAMostrar = window.productos) {
                                 style="padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;">
                             🗑️ Eliminar
                         </button>
-                        <button onclick="abrirModalEditarId('${String(p.id)}')" style="padding:6px 10px;background:#f59e42;color:white;border:none;border-radius:4px;font-weight:bold;">Editar ID</button>
+                        <!-- Editar ID eliminado por requerimiento -->
                     </td>
                 </tr>`;
         });
     }
-
-
-// Modal para editar ID
-window.abrirModalEditarId = function(id) {
-        const p = window.productos.find(prod => String(prod.id) === String(id));
-    if (!p) return;
-    // Contar cuántas veces aparece ese ID en la base local
-        const repeticiones = window.productos.filter(prod => String(prod.id) === String(id)).length;
-    // Modal básico
-    let modal = document.getElementById('modalEditarId');
-    if (modal) modal.remove();
-    modal = document.createElement('div');
-    modal.id = 'modalEditarId';
-    modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.35);z-index:100000;display:flex;align-items:center;justify-content:center;';
-    modal.innerHTML = `
-      <div style="background:white;padding:32px 28px;border-radius:12px;min-width:320px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);text-align:center;">
-        <h2 style=\"margin-bottom:18px;color:#1e40af;font-size:20px;\">Editar ID de producto</h2>
-        <div style=\"margin-bottom:12px;\"><b>Producto:</b> ${p.nombre}</div>
-        <div style=\"margin-bottom:12px;\"><b>ID actual:</b> <span style=\"color:#1e40af;font-weight:bold;\">${p.id}</span></div>
-        <div style=\"margin-bottom:12px;\"><b>Veces que aparece este ID:</b> <span style=\"color:#e67e22;font-weight:bold;\">${repeticiones}</span></div>
-        <input type=\"text\" id=\"inputNuevoId\" value=\"${p.id}\" style=\"width:120px;text-align:center;font-size:18px;padding:7px 10px;margin-bottom:18px;border:2px solid #e5e7eb;border-radius:7px;\"><br>
-        <button onclick=\"guardarNuevoIdModal(${p.id})\" style=\"padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;\">Guardar</button>
-        <button onclick=\"cerrarModalEditarId()\" style=\"padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;\">Cancelar</button>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    setTimeout(() => { document.getElementById('inputNuevoId')?.focus(); }, 100);
-}
-
-window.cerrarModalEditarId = function() {
-    document.getElementById('modalEditarId')?.remove();
-}
-
-window.guardarNuevoIdModal = async function(idActual) {
-    const input = document.getElementById('inputNuevoId');
-    if (!input) return;
-    const nuevoId = String(input.value).trim();
-    if (!nuevoId) {
-        alert('El ID no puede estar vacío.');
-        return;
-    }
-    if (window.productos.some(p => String(p.id) === nuevoId && String(p.id) !== String(idActual))) {
-        alert('Ya existe un producto con ese ID.');
-        return;
-    }
-    const idx = window.productos.findIndex(p => String(p.id) === String(idActual));
-    if (idx !== -1) {
-        window.productos[idx].id = nuevoId;
-        if (typeof StorageService?.set === 'function') StorageService.set('productos', window.productos);
-        if (window._firebaseActivo && window._db) {
-            try {
-                const docRef = window._db.collection('productos').doc(String(idActual));
-                const docSnap = await docRef.get();
-                if (docSnap.exists) {
-                    const data = docSnap.data();
-                    await window._db.collection('productos').doc(String(nuevoId)).set(data);
-                    await docRef.delete();
-                }
-            } catch (e) {
-                alert('Error actualizando ID en Firestore: ' + (e.message || e));
-            }
-        }
-        cerrarModalEditarId();
-        renderInventario();
-    }
-}
 
     html += `</tbody></table>`;
     cont.innerHTML = html;
@@ -993,67 +952,100 @@ function renderCategorias() {
     if (!contenedor) return;
     contenedor.innerHTML = "";
 
-    // 🛡️ REPARACIÓN FINAL: Usar la variable global directa sin "window."
     if (typeof categoriasData === 'undefined' || !categoriasData) return;
     
     let necesitaGuardar = false;
 
-    // Migración automática de formatos viejos a objetos con margen
-    categoriasData.forEach(cat => {
+    // Migración automática: Agregamos las propiedades 'orden' y 'posicion'
+    categoriasData.forEach((cat, idxCat) => {
+        // Asegurar posición de categoría
+        if (!cat.posicion) {
+            cat.posicion = idxCat + 1;
+            necesitaGuardar = true;
+        }
+        
         if (!cat.subcategorias || !Array.isArray(cat.subcategorias)) {
             cat.subcategorias = [];
             necesitaGuardar = true;
         } else {
-            cat.subcategorias = cat.subcategorias.map(sub => {
-                // Si la subcategoría es un texto viejo, la convertimos
-                if (typeof sub === 'string') {
+            cat.subcategorias = cat.subcategorias.map((sub, idxSub) => {
+                let s = typeof sub === 'string' ? { nombre: sub, margen: 30 } : sub;
+                if (!s.orden) {
+                    s.orden = 'nombre_asc'; // Orden por defecto: Nombre A-Z
                     necesitaGuardar = true;
-                    return { nombre: sub, margen: 30 }; // Le ponemos 30% por defecto
                 }
-                return sub;
+                if (!s.posicion) {
+                    s.posicion = idxSub + 1;
+                    necesitaGuardar = true;
+                }
+                return s;
             });
         }
     });
 
-    // Guardamos la migración si hubo cambios
     if (necesitaGuardar && typeof StorageService !== 'undefined') {
         StorageService.set("categoriasData", categoriasData);
     }
 
     categoriasData.forEach((cat, indexCat) => {
         let card = document.createElement("div");
-        card.style = "background: white; border-radius: 10px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-top: 5px solid #3498db; margin-bottom: 15px;";
+        card.style = "background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 5px solid #3498db; margin-bottom: 20px;";
 
         let html = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <h3 style="margin:0; color:#2c3e50;">${cat.nombre || 'Sin nombre'}</h3>
-                <button onclick="eliminarCategoria(${indexCat})" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:18px;" title="Eliminar categoría">🗑️</button>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #f0f0f0;">
+                <div style="flex: 1;">
+                    <h3 style="margin:0 0 5px 0; color:#2c3e50; font-size:16px; font-weight:600;">
+                        ${cat.nombre || 'Sin nombre'}
+                    </h3>
+                    <div style="display: flex; gap: 6px; margin-top: 8px;">
+                        <button onclick="editarNombreCategoria(${indexCat})" style="background:#3498db; border:none; color:white; cursor:pointer; padding:6px 12px; border-radius:5px; font-size:12px; font-weight:bold;" title="Editar nombre">✏️ Editar</button>
+                        <button onclick="moverCategoriaArriba(${indexCat})" ${indexCat === 0 ? 'disabled' : ''} style="background:#e3f2fd; border:1px solid #bbdefb; border-radius:5px; padding:6px 12px; cursor:${indexCat === 0 ? 'default' : 'pointer'}; color:#1976d2; font-size:12px; font-weight:bold; ${indexCat === 0 ? 'opacity:0.4;' : ''}" title="Mover arriba">↑ Arriba</button>
+                        <button onclick="moverCategoriaAbajo(${indexCat})" ${indexCat === categoriasData.length - 1 ? 'disabled' : ''} style="background:#e3f2fd; border:1px solid #bbdefb; border-radius:5px; padding:6px 12px; cursor:${indexCat === categoriasData.length - 1 ? 'default' : 'pointer'}; color:#1976d2; font-size:12px; font-weight:bold; ${indexCat === categoriasData.length - 1 ? 'opacity:0.4;' : ''}" title="Mover abajo">↓ Abajo</button>
+                    </div>
+                </div>
+                <button onclick="eliminarCategoria(${indexCat})" style="background:#fee; border:none; color:#e74c3c; cursor:pointer; padding:8px 14px; border-radius:5px; font-size:13px; font-weight:bold;" title="Eliminar">🗑️ Eliminar</button>
             </div>
             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                 <thead>
-                    <tr style="border-bottom: 1px solid #eee; text-align: left; color: #7f8c8d;">
-                        <th style="padding: 5px;">Subcategoría</th>
-                        <th style="padding: 5px; text-align: center;">Margen %</th>
-                        <th style="padding: 5px; text-align: right;">Acciones</th>
+                    <tr style="background:#f8f9fa; border-bottom: 2px solid #e0e0e0; text-align: left; color: #555; font-weight:600;">
+                        <th style="padding: 10px 8px;">Subcategoría</th>
+                        <th style="padding: 10px 8px; text-align: center;">Margen %</th>
+                        <th style="padding: 10px 8px; text-align: center;">Orden</th>
+                        <th style="padding: 10px 8px; text-align: center;">Posición</th>
+                        <th style="padding: 10px 8px; text-align: right;">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>`;
 
         if (cat.subcategorias.length === 0) {
-            html += `<tr><td colspan="3" style="text-align:center; padding:10px; color:#aaa; font-style:italic;">Sin subcategorías</td></tr>`;
+            html += `<tr><td colspan="5" style="text-align:center; padding:20px; color:#999; font-style:italic;">Sin subcategorías</td></tr>`;
         } else {
             cat.subcategorias.forEach((sub, indexSub) => {
+                let ord = sub.orden || 'nombre_asc';
                 html += `
-                    <tr style="border-bottom: 1px solid #fafafa;">
-                        <td style="padding: 8px 5px;">${sub.nombre || '---'}</td>
-                        <td style="padding: 8px 5px; text-align: center;">
+                    <tr style="border-bottom: 1px solid #f0f0f0; padding: 8px 0;">
+                        <td style="padding: 12px 8px; font-weight:600; color:#2c3e50;">${sub.nombre || '---'}</td>
+                        <td style="padding: 12px 8px; text-align: center;">
                             <input type="number" value="${sub.margen || 30}"
                                 onchange="actualizarMargen(${indexCat}, ${indexSub}, this.value)"
-                                style="width: 55px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 2px;">
+                                style="width: 80px; min-width:70px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 6px 8px; font-size:13px; box-sizing:border-box;">
                         </td>
-                        <td style="text-align: right; padding: 8px 5px; white-space: nowrap;">
-                            <button onclick="iniciarMigracion(${indexCat}, ${indexSub})" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px; padding:4px 8px; cursor:pointer; color:#1d4ed8; font-size:11px; font-weight:bold; margin-right:8px;" title="Mover a otra categoría">🚚 Migrar</button>
-                            <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:none; border:none; cursor:pointer; color:#e74c3c; font-size:14px; vertical-align:middle;" title="Eliminar">✕</button>
+                        <td style="padding: 12px 8px; text-align: center;">
+                            <select onchange="actualizarOrdenSub(${indexCat}, ${indexSub}, this.value)" style="padding:6px; border:1px solid #cbd5e1; border-radius:4px; font-size:11px; min-width:140px;">
+                                <option value="nombre_asc" ${ord==='nombre_asc'?'selected':''}>A-Z</option>
+                                <option value="nombre_desc" ${ord==='nombre_desc'?'selected':''}>Z-A</option>
+                                <option value="precio_desc" ${ord==='precio_desc'?'selected':''}>Mayor precio</option>
+                                <option value="precio_asc" ${ord==='precio_asc'?'selected':''}>Menor precio</option>
+                                <option value="stock_desc" ${ord==='stock_desc'?'selected':''}>Más stock</option>
+                            </select>
+                        </td>
+                        <td style="padding: 12px 8px; text-align: center;">
+                            <button onclick="moverSubcategoriaArriba(${indexCat}, ${indexSub})" ${indexSub === 0 ? 'disabled' : ''} style="background:#e3f2fd; border:1px solid #bbdefb; border-radius:4px; padding:5px 8px; cursor:${indexSub === 0 ? 'default' : 'pointer'}; color:#1976d2; font-size:11px; font-weight:bold; ${indexSub === 0 ? 'opacity:0.3;' : ''}" title="Mover arriba">↑</button>
+                            <button onclick="moverSubcategoriaAbajo(${indexCat}, ${indexSub})" ${indexSub === cat.subcategorias.length - 1 ? 'disabled' : ''} style="background:#e3f2fd; border:1px solid #bbdefb; border-radius:4px; padding:5px 8px; cursor:${indexSub === cat.subcategorias.length - 1 ? 'default' : 'pointer'}; color:#1976d2; font-size:11px; font-weight:bold; ${indexSub === cat.subcategorias.length - 1 ? 'opacity:0.3;' : ''}" title="Mover abajo">↓</button>
+                        </td>
+                        <td style="text-align: right; padding: 12px 8px; white-space: nowrap;">
+                            <button onclick="typeof iniciarMigracion === 'function' ? iniciarMigracion(${indexCat}, ${indexSub}) : null" style="background:#f0f4ff; border:1px solid #c7d9f7; border-radius:4px; padding:5px 10px; cursor:pointer; color:#1d4ed8; font-size:11px; font-weight:bold; margin-right:6px;">🚚</button>
+                            <button onclick="eliminarSubcategoria(${indexCat}, ${indexSub})" style="background:#ffebee; border:1px solid #ffcdd2; color:#e74c3c; cursor:pointer; padding:5px 10px; border-radius:4px; font-size:11px; font-weight:bold;">✕</button>
                         </td>
                     </tr>`;
             });
@@ -1062,7 +1054,7 @@ function renderCategorias() {
         html += `
                 </tbody>
             </table>
-            <button onclick="agregarSubcategoria(${indexCat})" style="margin-top: 15px; width: 100%; padding: 8px; background: #f8f9fa; border: 1px dashed #cbd5e0; border-radius: 5px; cursor: pointer; font-size: 12px; color: #3498db; font-weight:bold;">+ Añadir Subcategoría</button>
+            <button onclick="agregarSubcategoria(${indexCat})" style="margin-top: 15px; width: 100%; padding: 12px; background: #f0f7ff; border: 2px dashed #3498db; border-radius: 5px; cursor: pointer; font-size: 13px; color: #3498db; font-weight:bold;">+ Agregar Subcategoría</button>
         `;
 
         card.innerHTML = html;
@@ -1071,17 +1063,13 @@ function renderCategorias() {
 }
 
 function guardarCategoriasConfig() {
-    if (!StorageService.set("categoriasData", categoriasData)) {
-        console.error("❌ Error guardando categorías");
-        return;
-    }
+    if (!StorageService.set("categoriasData", categoriasData)) return console.error("❌ Error guardando");
     renderCategorias();
-    // Prevenir error si la función de filtros no está en este archivo
     if (typeof actualizarCombosFiltros === 'function') actualizarCombosFiltros();
 }
 
 function nuevaCategoria() {
-    const nombre = prompt("Nombre de la nueva categoría (Ej: Comedores, Oficinas):");
+    const nombre = prompt("Nombre de la nueva categoría:");
     if (nombre && nombre.trim()) {
         categoriasData.push({ nombre: nombre.trim(), subcategorias: [] });
         guardarCategoriasConfig();
@@ -1094,7 +1082,8 @@ function agregarSubcategoria(indexCat) {
     if (nombre && margen) {
         categoriasData[indexCat].subcategorias.push({
             nombre: nombre.trim(),
-            margen: parseFloat(margen)
+            margen: parseFloat(margen),
+            orden: 'nombre_asc' // Asignamos regla por defecto al crear
         });
         guardarCategoriasConfig();
     }
@@ -1116,8 +1105,115 @@ function eliminarCategoria(index) {
 
 function actualizarMargen(indexCat, indexSub, nuevoValor) {
     categoriasData[indexCat].subcategorias[indexSub].margen = parseFloat(nuevoValor);
-    if (!StorageService.set("categoriasData", categoriasData)) {
-        console.error("❌ Error guardando categorías");
+    StorageService.set("categoriasData", categoriasData);
+}
+
+// NUEVA FUNCIÓN: Guarda el orden seleccionado
+window.actualizarOrdenSub = function(indexCat, indexSub, nuevoOrden) {
+    categoriasData[indexCat].subcategorias[indexSub].orden = nuevoOrden;
+    StorageService.set("categoriasData", categoriasData);
+}
+// --- MOTOR UNIVERSAL DE ORDENAMIENTO ---
+window.aplicarOrdenamientoInteligente = function(productosArray, subcatSeleccionada) {
+    let regla = 'nombre_asc'; // Regla por defecto
+
+    // Si seleccionó una subcategoría específica, buscamos su regla
+    if (subcatSeleccionada && subcatSeleccionada !== 'todos') {
+        const catData = window.categoriasData || (typeof StorageService !== 'undefined' ? StorageService.get("categoriasData", []) : []);
+        for (let cat of catData) {
+            let sub = (cat.subcategorias || []).find(s => s.nombre === subcatSeleccionada);
+            if (sub && sub.orden) {
+                regla = sub.orden;
+                break;
+            }
+        }
+    }
+
+    // Clonamos el array para no mutar el original en memoria y ordenamos
+    return [...productosArray].sort((a, b) => {
+        if (regla === 'nombre_asc') return (a.nombre || '').localeCompare(b.nombre || '');
+        if (regla === 'nombre_desc') return (b.nombre || '').localeCompare(a.nombre || '');
+        if (regla === 'precio_asc') return (parseFloat(a.precio) || 0) - (parseFloat(b.precio) || 0);
+        if (regla === 'precio_desc') return (parseFloat(b.precio) || 0) - (parseFloat(a.precio) || 0);
+        if (regla === 'stock_desc') return (parseFloat(b.stock) || 0) - (parseFloat(a.stock) || 0);
+        return 0; // Fallback
+    });
+};
+
+// ===== FUNCIONES DE REORDENAMIENTO DE CATEGORÍAS Y SUBCATEGORÍAS =====
+window.moverCategoriaArriba = function(index) {
+    if (index <= 0) return;
+    const temp = categoriasData[index];
+    categoriasData[index] = categoriasData[index - 1];
+    categoriasData[index - 1] = temp;
+    
+    // Actualizar posiciones
+    categoriasData[index].posicion = index + 1;
+    categoriasData[index - 1].posicion = index;
+    
+    guardarCategoriasConfig();
+};
+
+window.moverCategoriaAbajo = function(index) {
+    if (index >= categoriasData.length - 1) return;
+    const temp = categoriasData[index];
+    categoriasData[index] = categoriasData[index + 1];
+    categoriasData[index + 1] = temp;
+    
+    // Actualizar posiciones
+    categoriasData[index].posicion = index + 1;
+    categoriasData[index + 1].posicion = index + 2;
+    
+    guardarCategoriasConfig();
+};
+
+window.moverSubcategoriaArriba = function(indexCat, indexSub) {
+    if (indexSub <= 0) return;
+    const temp = categoriasData[indexCat].subcategorias[indexSub];
+    categoriasData[indexCat].subcategorias[indexSub] = categoriasData[indexCat].subcategorias[indexSub - 1];
+    categoriasData[indexCat].subcategorias[indexSub - 1] = temp;
+    
+    // Actualizar posiciones
+    categoriasData[indexCat].subcategorias[indexSub].posicion = indexSub + 1;
+    categoriasData[indexCat].subcategorias[indexSub - 1].posicion = indexSub;
+    
+    guardarCategoriasConfig();
+};
+
+window.moverSubcategoriaAbajo = function(indexCat, indexSub) {
+    if (indexSub >= categoriasData[indexCat].subcategorias.length - 1) return;
+    const temp = categoriasData[indexCat].subcategorias[indexSub];
+    categoriasData[indexCat].subcategorias[indexSub] = categoriasData[indexCat].subcategorias[indexSub + 1];
+    categoriasData[indexCat].subcategorias[indexSub + 1] = temp;
+    
+    // Actualizar posiciones
+    categoriasData[indexCat].subcategorias[indexSub].posicion = indexSub + 1;
+    categoriasData[indexCat].subcategorias[indexSub + 1].posicion = indexSub + 2;
+    
+    guardarCategoriasConfig();
+};
+
+window.editarNombreCategoria = function(index) {
+    const cat = categoriasData[index];
+    const nuevoNombre = prompt(`Editar nombre de la categoría "${cat.nombre}":`, cat.nombre);
+    
+    if (nuevoNombre && nuevoNombre.trim() !== "" && nuevoNombre !== cat.nombre) {
+        const nombreAnterior = cat.nombre;
+        cat.nombre = nuevoNombre.trim();
+        
+        // 🚀 MIGRACIÓN SILENCIOSA: Actualizar todos los productos existentes
+        let productos = StorageService.get("productos", []);
+        let actualizados = 0;
+        productos.forEach(p => {
+            if (p.categoria === nombreAnterior) {
+                p.categoria = cat.nombre;
+                actualizados++;
+            }
+        });
+        
+        StorageService.set("productos", productos);
+        guardarCategoriasConfig();
+        alert(`✅ Categoría renombrada. Se actualizaron ${actualizados} productos en el inventario.`);
     }
 }
 
@@ -1127,66 +1223,102 @@ function iniciarMigracion(indexCat, indexSub) {
     const subObj = categoriasData[indexCat].subcategorias[indexSub];
     const subOrigen = subObj.nombre;
 
-    // Resumen de las categorías existentes para guiar al usuario
-    const listaExistentes = categoriasData.map(c => c.nombre).join(" | ");
-    
-    let destinoRaw = prompt(
-        `🚚 MIGRACIÓN DE: "${subOrigen}"\n\n` +
-        `Categorías actuales:\n[ ${listaExistentes} ]\n\n` +
-        `Escribe la Categoría DESTINO (Si escribes una que no existe, se creará automáticamente):`
-    );
+    // Construir modal de selección
+    const overlay = document.createElement('div');
+    overlay.id = 'modalMigracionCat';
+    overlay.style = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:100000;';
 
-    if (!destinoRaw || destinoRaw.trim() === "") return;
-    const catDestino = destinoRaw.trim();
+    const catOptions = categoriasData.map(c => `<option value="${c.nombre}">${c.nombre}</option>`).join('');
 
-    if (catDestino.toUpperCase() === catOrigen.toUpperCase()) {
-        return alert("⚠️ La categoría destino es la misma que la actual. No hay nada que mover.");
-    }
+    overlay.innerHTML = `
+        <div style="width:420px; max-width:92%; background:white; border-radius:8px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 8px 0; font-size:16px;">🚚 Migrar subcategoría</h3>
+            <div style="color:#555; margin-bottom:12px; font-size:13px;">Subcategoría: <strong>${subOrigen}</strong><br>Categoría origen: <strong>${catOrigen}</strong></div>
+            <label style="display:block; font-size:13px; margin-bottom:6px;">Selecciona la categoría destino</label>
+            <select id="migSelectCat" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:8px;">
+                <option value="">-- Selecciona --</option>
+                ${catOptions}
+                <option value="__new__">+ Crear nueva categoría...</option>
+            </select>
+            <div id="migNewWrap" style="display:none; margin-bottom:8px;">
+                <input id="migNewName" placeholder="Nombre de la nueva categoría" style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;" />
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+                <button id="migCancel" style="background:#f3f4f6;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;">Cancelar</button>
+                <button id="migConfirm" style="background:#2563eb;color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:600;">Mover</button>
+            </div>
+        </div>
+    `;
 
-    if (!confirm(`¿Estás seguro de mover la subcategoría "${subOrigen}" (y TODOS sus productos) hacia "${catDestino}"?`)) return;
+    document.body.appendChild(overlay);
 
-    // 1. AFECTACIÓN EN BASE DE DATOS (PRODUCTOS)
-    let productos = StorageService.get("productos", []);
-    let modificados = 0;
-    productos.forEach(p => {
-        if ((p.categoria || "") === catOrigen && (p.subcategoria || "") === subOrigen) {
-            p.categoria = catDestino;
-            modificados++;
-        }
-    });
+    const sel = document.getElementById('migSelectCat');
+    const newWrap = document.getElementById('migNewWrap');
+    const newName = document.getElementById('migNewName');
+    const btnCancel = document.getElementById('migCancel');
+    const btnConfirm = document.getElementById('migConfirm');
 
-    // 2. REESTRUCTURACIÓN DE CATEGORÍAS
-    let indexDestino = categoriasData.findIndex(c => c.nombre.toUpperCase() === catDestino.toUpperCase());
-    
-    if (indexDestino === -1) {
-        // La categoría destino no existía, la creamos y le metemos la subcategoría
-        categoriasData.push({ nombre: catDestino, subcategorias: [subObj] });
-    } else {
-        // La categoría existe, validamos que no tenga ya una subcategoría con ese nombre
-        let existeSub = categoriasData[indexDestino].subcategorias.find(s => s.nombre.toUpperCase() === subOrigen.toUpperCase());
-        if (!existeSub) {
-            categoriasData[indexDestino].subcategorias.push(subObj);
+    sel.onchange = function() {
+        if (this.value === '__new__') newWrap.style.display = 'block'; else newWrap.style.display = 'none';
+    };
+
+    btnCancel.onclick = function() { overlay.remove(); };
+
+    btnConfirm.onclick = function() {
+        let catDestino = sel.value === '__new__' ? (newName.value || '').trim() : sel.value;
+        if (!catDestino) return alert('Ingresa o selecciona la categoría destino.');
+        if (catDestino.toUpperCase() === catOrigen.toUpperCase()) return alert('⚠️ La categoría destino es la misma que la actual. No hay nada que mover.');
+        if (!confirm(`¿Estás seguro de mover la subcategoría "${subOrigen}" (y TODOS sus productos) hacia "${catDestino}"?`)) return;
+
+        // 1. AFECTACIÓN EN BASE DE DATOS (PRODUCTOS)
+        let productos = StorageService.get('productos', []);
+        let modificados = 0;
+        productos.forEach(p => {
+            if ((p.categoria || '') === catOrigen && (p.subcategoria || '') === subOrigen) {
+                p.categoria = catDestino;
+                modificados++;
+            }
+        });
+
+        // 2. REESTRUCTURACIÓN DE CATEGORÍAS
+        let indexDestino = categoriasData.findIndex(c => c.nombre.toUpperCase() === catDestino.toUpperCase());
+        if (indexDestino === -1) {
+            // crear nueva categoría y asignar posición al final
+            const nueva = { nombre: catDestino, subcategorias: [], posicion: (categoriasData.length || 0) + 1 };
+            // asegurar que subObj sea clonado para no perder referencias
+            const subClone = (typeof subObj === 'object') ? JSON.parse(JSON.stringify(subObj)) : { nombre: subObj };
+            subClone.posicion = 1;
+            nueva.subcategorias.push(subClone);
+            categoriasData.push(nueva);
         } else {
-            // Si ya existe, le respetamos el margen a la destino y no la duplicamos
-            alert(`Nota: La categoría "${catDestino}" ya tenía una subcategoría llamada "${subOrigen}". Los productos se fusionaron ahí.`);
+            const catDestObj = categoriasData[indexDestino];
+            const existeSub = catDestObj.subcategorias.find(s => s.nombre.toUpperCase() === subOrigen.toUpperCase());
+            if (!existeSub) {
+                const subClone = (typeof subObj === 'object') ? JSON.parse(JSON.stringify(subObj)) : { nombre: subObj };
+                subClone.posicion = (catDestObj.subcategorias.length || 0) + 1;
+                catDestObj.subcategorias.push(subClone);
+            } else {
+                alert(`Nota: La categoría "${catDestino}" ya tenía una subcategoría llamada "${subOrigen}". Los productos se fusionaron ahí.`);
+            }
         }
-    }
 
-    // 3. ELIMINAMOS DEL ORIGEN
-    categoriasData[indexCat].subcategorias.splice(indexSub, 1);
+        // 3. ELIMINAMOS DEL ORIGEN
+        categoriasData[indexCat].subcategorias.splice(indexSub, 1);
 
-    // 4. LIMPIEZA INTELIGENTE
-    if (categoriasData[indexCat].subcategorias.length === 0) {
-        if (confirm(`La categoría "${catOrigen}" se ha quedado vacía. ¿Deseas eliminarla del sistema para mantener el orden?`)) {
-            categoriasData.splice(indexCat, 1);
+        // 4. LIMPIEZA INTELIGENTE
+        if (categoriasData[indexCat].subcategorias.length === 0) {
+            if (confirm(`La categoría "${catOrigen}" se ha quedado vacía. ¿Deseas eliminarla del sistema para mantener el orden?`)) {
+                categoriasData.splice(indexCat, 1);
+            }
         }
-    }
 
-    // 5. GUARDADO MASIVO
-    StorageService.set("productos", productos);
-    guardarCategoriasConfig(); // Esto hace save y render automático
-    
-    alert(`✅ MIGRACIÓN EXITOSA.\n\nSe actualizaron ${modificados} producto(s) en tu inventario.\nSe movió hacia: [${catDestino}] -> [${subOrigen}]`);
+        // 5. GUARDADO MASIVO
+        StorageService.set('productos', productos);
+        guardarCategoriasConfig(); // save + render
+
+        alert(`✅ MIGRACIÓN EXITOSA.\n\nSe actualizaron ${modificados} producto(s) en tu inventario.\nSe movió hacia: [${catDestino}] -> [${subOrigen}]`);
+        overlay.remove();
+    };
 }
 
 // ===== VISOR MAESTRO =====
