@@ -1164,6 +1164,9 @@ function _renderTablaArticulosOC() {
     const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
         const rows = arts.map((a, i) => {
                 total += a.subtotal;
+                // Iniciamos la bandera para evitar undefineds
+                if (typeof a.yaEnInventario === 'undefined') a.yaEnInventario = false;
+                
                 return `<tr>
                         <td style="padding:8px;">${a.nombre}</td>
                         <td style="padding:8px;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
@@ -1171,6 +1174,9 @@ function _renderTablaArticulosOC() {
                                 <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
                         </td>
                         <td style="padding:8px;text-align:center;">${a.cantidad}</td>
+                        <td style="padding:8px;text-align:center;">
+                            <input type="checkbox" ${a.yaEnInventario ? 'checked' : ''} onchange="window._articulosOC[${i}].yaEnInventario = this.checked;">
+                        </td>
                         <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
                         <td style="padding:8px;text-align:center;"><button onclick="window._articulosOC.splice(${i},1);_renderTablaArticulosOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
                 </tr>`;
@@ -1181,6 +1187,7 @@ function _renderTablaArticulosOC() {
                 <th style="padding:8px;">Características</th>
                 <th style="padding:8px;text-align:center;">Costo Unit.</th>
                 <th style="padding:8px;text-align:center;">Cant.</th>
+                <th style="padding:8px;text-align:center;" title="Marcar si ya tienes este producto de esta requisición">Ya en Inventario</th>
                 <th style="padding:8px;text-align:right;">Subtotal</th>
                 <th></th>
             </tr></thead>
@@ -1221,28 +1228,44 @@ function guardarOrdenCompra() {
     }
     const meses = document.getElementById('ocMeses')?.value || '';
     const total = arts.reduce((s, a) => s + a.subtotal, 0);
+    
+    // --- SANITIZACIÓN PARA FIREBASE ---
+    // Obligamos a que todos los artículos tengan datos limpios y sin undefined
+    const articulosLimpios = arts.map(a => ({
+        productoId: a.productoId || null,
+        nombre: a.nombre || "Sin nombre",
+        costo: parseFloat(a.costo) || 0,
+        cantidad: parseInt(a.cantidad) || 0,
+        subtotal: parseFloat(a.subtotal) || 0,
+        caracteristicas: a.caracteristicas || "",
+        yaEnInventario: Boolean(a.yaEnInventario)
+    }));
+
     const oc = {
         id: Date.now(),
         folio: _foliosOC(),
         proveedorId: provId || null,
-        proveedorNombre: provNombre,
-        articulos: arts,
-        total,
+        proveedorNombre: provNombre || "General",
+        articulos: articulosLimpios,
+        total: parseFloat(total) || 0,
         fechaEmision: Date.now(),
         fechaEntregaEstimada: fechaEntrega || null,
         estado: borrador ? 'Borrador' : 'Enviada',
-        notas,
+        notas: notas || "",
         condicionesComerciales: {
-            metodoPago,
-            cuentaOrigen,
-            meses
+            metodoPago: metodoPago || "contado",
+            cuentaOrigen: cuentaOrigen || null,
+            meses: meses || 0
         },
-        anticipo_pagado: anticipo || 0,
-        saldoPendiente: Math.max(0, total - (anticipo || 0)),
-        pagos: (anticipo > 0) ? [{ fecha: new Date().toISOString(), monto: anticipo, cuenta: cuentaOrigen }] : [],
-        // 👇 AÑADIMOS LA BANDERA DE CONSIGNACIÓN 👇
+        anticipo_pagado: parseFloat(anticipo) || 0,
+        saldoPendiente: Math.max(0, parseFloat(total) - (parseFloat(anticipo) || 0)),
+        pagos: (anticipo > 0) ? [{ fecha: new Date().toISOString(), monto: parseFloat(anticipo), cuenta: cuentaOrigen }] : [],
         esConsignacion: metodoPago === 'consignacion'
     };
+    
+    // Eliminamos cualquier campo nulo que pueda molestar a Firestore
+    Object.keys(oc).forEach(k => (oc[k] == null || oc[k] === undefined) && delete oc[k]);
+
     const lista = StorageService.get('ordenesCompra', []);
     lista.push(oc);
     // --- MARCAR REQUISICIONES COMO EN ORDEN ---
@@ -1685,10 +1708,14 @@ function confirmarRecepcionOC(ocId) {
     // --- FIN DE CONFIRMACIÓN ---
 
     // ── 1. Actualizar inventario ───────────────────────────────
-
-    // ── 1. Actualizar inventario ───────────────────────────────
 const prods = StorageService.get('productos', []);
 itemsRecibidos.forEach(art => {
+    // Si fue marcado como que ya estaba en inventario en la OC, saltamos la suma
+    if (art.yaEnInventario === true) {
+        console.log(`El artículo ${art.nombre} fue marcado como 'Ya en inventario' en la Requisición. No se sumará al stock general.`);
+        return; 
+    }
+
     const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
     if (pidx !== -1) {
         prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
