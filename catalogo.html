@@ -173,6 +173,27 @@ let catActiva = 'todos';
 let subActiva = 'todos';
 let prodSeleccionado = null;
 
+// --- MOTOR DE ORDENAMIENTO PARA EL CATÁLOGO ---
+function ordenarProductosCatalogo(productosArray, subcatSeleccionada) {
+    let regla = 'nombre_asc';
+    try {
+        const catData = JSON.parse(localStorage.getItem("categoriasData")) || [];
+        for (let cat of catData) {
+            let sub = (cat.subcategorias || []).find(s => s.nombre === subcatSeleccionada);
+            if (sub && sub.orden) { regla = sub.orden; break; }
+        }
+    } catch(e) {}
+
+    return [...productosArray].sort((a, b) => {
+        if (regla === 'nombre_asc') return (a.nombre || '').localeCompare(b.nombre || '');
+        if (regla === 'nombre_desc') return (b.nombre || '').localeCompare(a.nombre || '');
+        if (regla === 'precio_asc') return (parseFloat(a.precio) || 0) - (parseFloat(b.precio) || 0);
+        if (regla === 'precio_desc') return (parseFloat(b.precio) || 0) - (parseFloat(a.precio) || 0);
+        if (regla === 'stock_desc') return (parseFloat(b.stock) || 0) - (parseFloat(a.stock) || 0);
+        return 0;
+    });
+}
+
 // FORMATEO FORZADO A PESOS MEXICANOS
 const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
@@ -314,12 +335,18 @@ function setSub(s, pill) {
 
 function render() {
   const grid = document.getElementById('grid');
-  const filtrados = productos.filter(p => {
+  
+  // 1. Filtrar por categoría y subcategoría
+  let filtrados = productos.filter(p => {
     const matchCat = catActiva === 'todos' || p.categoria === catActiva;
     const matchSub = subActiva === 'todos' || p.subcategoria === subActiva;
     return matchCat && matchSub;
   });
   
+  // 2. Aplicar ordenamiento inteligente antes de dibujar
+  filtrados = ordenarProductosCatalogo(filtrados, subActiva);
+  
+  // 3. Dibujar tarjetas
   grid.innerHTML = filtrados.map(p => `
     <div class="card" onclick="abrirModal('${p.id}')">
       <div class="card-img"><img src="${p.imagen}" loading="lazy"></div>
