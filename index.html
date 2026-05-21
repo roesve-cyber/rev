@@ -80,13 +80,14 @@
         </div>
 
         <div class="menu-item">
-            <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas')">💳 VENTAS <span>▾</span></button>
+            <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas')">⚙️ OPERACION <span>▾</span></button>
             <div id="sub-ventas" class="submenu oculto-submenu">
+                <button onclick="navA('cuentasxcobrar')">💰 Saldos crédito y abonos</button>
                 <button onclick="navA('tienda'); mostrarProductos();">🖼️ Catálogo</button>
-                <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
                 <button onclick="navA('apartados'); renderApartados();">📦 Mis Apartados</button> 
                 <button onclick="navA('entregas')">🚚 Entregas</button>
                 <button onclick="navA('cotizaciones')">📄 Cotizaciones</button>
+                <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
                 <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
                 <button onclick="navA('garantias')">🛡️ Garantías</button>
             </div>
@@ -95,8 +96,6 @@
         <div class="menu-item">
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
-        <!-- Le cambiamos el nombre para que se note la mejora -->
-        <button onclick="navA('cuentasxcobrar')">🎯 Centro de Comando</button> 
         <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
         <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
@@ -140,6 +139,9 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-auditoria')">🕵️ AUDITORÍA <span>▾</span></button>
     <div id="sub-auditoria" class="submenu oculto-submenu">
+        <button onclick="navA('autorizaciones'); if(typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();" style="color: #d97706; font-weight: bold;">
+            🛡️ Bóveda de Autorizaciones
+        </button>
         <button onclick="navA('auditoria-productos')">📦 Productos</button>
         <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
         <button onclick="abrirAuditoriaCxC()" style="color: #b91c1c; font-weight: bold;">
@@ -192,6 +194,9 @@
 
 <!-- ===== CONTENIDO PRINCIPAL ===== -->
 <main id="app-container" class="full-width">
+
+<div id="autorizaciones" class="vista oculto">
+    </div>
 
 <div id="apartados" class="vista oculto" style="display:none;">
     <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">

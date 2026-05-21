@@ -296,21 +296,19 @@ function generarMenuCategorias() {
     if (catsEnProductos.indexOf(cat) === -1) catsEnProductos.push(cat);
   }
   
-  // Leer categoriasData para obtener posiciones
-  var categoriasData = [];
+  // Leer categoriasData y crear mapa posicion: nombre -> posicion
+  var posiciones = {};
   try {
-    categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
+    var cd = JSON.parse(localStorage.getItem("categoriasData")) || [];
+    for (var k = 0; k < cd.length; k++) {
+      posiciones[cd[k].nombre] = cd[k].posicion || 999;
+    }
   } catch(e) {}
   
-  // Ordenar catsEnProductos según posicion de categoriasData
+  // Ordenar catsEnProductos por posicion (o 999 si no existe)
   catsEnProductos.sort(function(a, b) {
-    var catA = null, catB = null;
-    for (var i = 0; i < categoriasData.length; i++) {
-      if (categoriasData[i].nombre.toLowerCase() === a.toLowerCase()) catA = categoriasData[i];
-      if (categoriasData[i].nombre.toLowerCase() === b.toLowerCase()) catB = categoriasData[i];
-    }
-    var posA = (catA && catA.posicion) ? catA.posicion : 999;
-    var posB = (catB && catB.posicion) ? catB.posicion : 999;
+    var posA = posiciones[a] !== undefined ? posiciones[a] : 999;
+    var posB = posiciones[b] !== undefined ? posiciones[b] : 999;
     return posA - posB;
   });
   
@@ -342,31 +340,23 @@ function setCategoria(c, btn) {
       }
     }
     
-    // Leer categoriasData para obtener posiciones de subcategorías
-    var categoriasData = [];
+    // Leer categoriasData y crear mapa de posiciones de subcategorías
+    var subPosiciones = {};
     try {
-      categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
-    } catch(e) {}
-    
-    var catObj = null;
-    for (var idx = 0; idx < categoriasData.length; idx++) {
-      if (categoriasData[idx].nombre.toLowerCase() === c.toLowerCase()) {
-        catObj = categoriasData[idx];
-        break;
-      }
-    }
-    
-    // Ordenar subs según posicion de categoriasData
-    subs.sort(function(a, b) {
-      var subA = null, subB = null;
-      if (catObj && catObj.subcategorias) {
-        for (var i = 0; i < catObj.subcategorias.length; i++) {
-          if (catObj.subcategorias[i].nombre.toLowerCase() === a.toLowerCase()) subA = catObj.subcategorias[i];
-          if (catObj.subcategorias[i].nombre.toLowerCase() === b.toLowerCase()) subB = catObj.subcategorias[i];
+      var cd = JSON.parse(localStorage.getItem("categoriasData")) || [];
+      for (var k = 0; k < cd.length; k++) {
+        if (cd[k].nombre === c && cd[k].subcategorias) {
+          for (var s = 0; s < cd[k].subcategorias.length; s++) {
+            subPosiciones[cd[k].subcategorias[s].nombre] = cd[k].subcategorias[s].posicion || 999;
+          }
         }
       }
-      var posA = (subA && subA.posicion) ? subA.posicion : 999;
-      var posB = (subB && subB.posicion) ? subB.posicion : 999;
+    } catch(e) {}
+    
+    // Ordenar subs por posicion
+    subs.sort(function(a, b) {
+      var posA = subPosiciones[a] !== undefined ? subPosiciones[a] : 999;
+      var posB = subPosiciones[b] !== undefined ? subPosiciones[b] : 999;
       return posA - posB;
     });
     
