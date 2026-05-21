@@ -1,7 +1,7 @@
 // Variables globales
 var categoriasData = StorageService.get("categoriasData", [
-    { nombre: "Recámaras", subcategorias: [{ nombre: "Roperos", margen: 35 }, { nombre: "Bases", margen: 30 }] },
-    { nombre: "Salas", subcategorias: [{ nombre: "Sofás", margen: 40 }] }
+    { nombre: "Recámaras", subcategorias: [{ nombre: "Roperos", margen: 35 }, { nombre: "Bases", margen: 30 }], posicion: 1 },
+    { nombre: "Salas", subcategorias: [{ nombre: "Sofás", margen: 40 }], posicion: 2 }
 ]);
 
 var tarjetasConfig = StorageService.get("tarjetasConfig", [

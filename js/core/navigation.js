@@ -34,6 +34,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'requisiciones' && typeof renderRequisiciones === 'function') renderRequisiciones();
         if (vistaId === 'cuentasporpagar' && typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
         if (vistaId === 'compras' && typeof prepararVistaCompras === 'function') prepararVistaCompras();
+        if (vistaId === 'cotizaciones' && typeof renderCotizaciones === 'function') renderCotizaciones();
         
         // 🛡️ REPARACIÓN: Aquí está el "ligue" que faltaba para las categorías
         if (vistaId === 'configcategorias' && typeof renderCategorias === 'function') renderCategorias();
