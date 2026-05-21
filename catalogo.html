@@ -308,34 +308,28 @@ function setCategoria(c, btn) {
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   
-  const subnav = document.getElementById('subnav');
+  var subnav = document.getElementById('subnav');
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
-    var subnav = document.getElementById('subnav');
-    if (c === 'todos') {
-      subnav.classList.remove('visible');
-    } else {
-      var subs = [];
-      for (var i = 0; i < productos.length; i++) {
-        if (productos[i].categoria === c) {
-          var sub = productos[i].subcategoria;
-          if (sub && subs.indexOf(sub) === -1) subs.push(sub);
-        }
-      }
-      if (subs.length > 0) {
-        var html = '<div class="sub-pill active" onclick="setSub(\'todos\', this)">Ver Todo</div>';
-        subs.sort();
-        for (var j = 0; j < subs.length; j++) {
-          html += '<div class="sub-pill" onclick="setSub(\'' + subs[j] + '\', this)">' + subs[j] + '</div>';
-        }
-        subnav.innerHTML = html;
-        subnav.classList.add('visible');
-      } else {
-        subnav.classList.remove('visible');
+    var subs = [];
+    for (var i = 0; i < productos.length; i++) {
+      if (productos[i].categoria === c) {
+        var sub = productos[i].subcategoria;
+        if (sub && subs.indexOf(sub) === -1) subs.push(sub);
       }
     }
-    render();
+    if (subs.length > 0) {
+      var html = '<div class="sub-pill active" onclick="setSub(\'todos\', this)">Ver Todo</div>';
+      subs.sort();
+      for (var j = 0; j < subs.length; j++) {
+        html += '<div class="sub-pill" onclick="setSub(\'' + subs[j] + '\', this)">' + subs[j] + '</div>';
+      }
+      subnav.innerHTML = html;
+      subnav.classList.add('visible');
+    } else {
+      subnav.classList.remove('visible');
+    }
   }
   render();
 }
