@@ -813,13 +813,12 @@ window.verDetalleCompra = function(idCuenta) {
         // no agregar fila de anticipo ni sumarlo al total.
     }
 
-    // Saldo verdadero: usar el valor guardado en BD (ya está correcto) y solo
-    // recalcular si no existe o si hay un anticipo genuino extra.
+    // Saldo verdadero: siempre recalcular desde cero para corregir cualquier
+    // valor mal guardado por el bug del doble conteo anterior.
+    // Solo se suma anticipoInicial si es un pago genuino no representado en abonos.
     const saldoPendienteVerdadero = Math.max(
         0,
-        parseFloat(c.saldoPendiente) > 0
-            ? parseFloat(c.saldoPendiente)
-            : subtotalReal - anticipoInicial - totalAbonado
+        subtotalReal - totalAbonado - (mostrarFilaAnticipo ? anticipoInicial : 0)
     );
 
     // Auto-Reparación silenciosa en la base de datos (Si estaban desincronizados, los arregla)
