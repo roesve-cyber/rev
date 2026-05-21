@@ -281,21 +281,34 @@ async function inicializar() {
 
 function generarMenuCategorias() {
   const nav = document.getElementById('categoriasNav');
-  nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
+  nav.innerHTML = '';
+  nav.appendChild(Object.assign(document.createElement('button'), {
+    className: 'cat-btn active',
+    textContent: 'Todos los productos',
+    onclick: function() { setCategoria('todos', this); }
+  }));
 
-  // Leer categoriasData de localStorage y filtrar solo las que tengan productos activos
+  // Obtener categorías únicas desde productos
+  let catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
+
+  // Si existe categoriasData, ordenar catsEnData según 'posicion'
   let categoriasData = [];
   try {
     categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
   } catch(e) {}
+  if (categoriasData.length > 0) {
+    catsEnData.sort((a, b) => {
+      const ca = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (a || '').toLowerCase().trim());
+      const cb = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (b || '').toLowerCase().trim());
+      return ((ca?.posicion ?? 999) - (cb?.posicion ?? 999));
+    });
+  }
 
-  // Mostrar todas las categorías de categoriasData, sin filtrar por productos activos
-  categoriasData.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
-  categoriasData.forEach(cat => {
+  catsEnData.forEach(c => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
-    btn.textContent = cat.nombre;
-    btn.onclick = () => setCategoria(cat.nombre, btn);
+    btn.textContent = c;
+    btn.onclick = function() { setCategoria(c, btn); };
     nav.appendChild(btn);
   });
 }
@@ -310,21 +323,25 @@ function setCategoria(c, btn) {
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
-    // Leer categoriasData de localStorage para obtener subcategorías ordenadas
+    // Obtener subcategorías únicas desde productos
+    let subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
+
+    // Si existe categoriasData, ordenar subs según 'posicion'
     let categoriasData = [];
     try {
       categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
     } catch(e) {}
     const catObj = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (c || '').toLowerCase().trim());
-    let subs = [];
     if (catObj && Array.isArray(catObj.subcategorias)) {
-      // Mostrar todas las subcategorías, sin filtrar por productos activos
-      subs = [...catObj.subcategorias];
-      subs.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+      subs.sort((a, b) => {
+        const sa = catObj.subcategorias.find(sub => (sub.nombre || '').toLowerCase().trim() === (a || '').toLowerCase().trim());
+        const sb = catObj.subcategorias.find(sub => (sub.nombre || '').toLowerCase().trim() === (b || '').toLowerCase().trim());
+        return ((sa?.posicion ?? 999) - (sb?.posicion ?? 999));
+      });
     }
     if(subs.length > 0) {
       subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
-        subs.map(sub => `<div class="sub-pill" onclick="setSub('${sub.nombre}', this)">${sub.nombre}</div>`).join('');
+        subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
       subnav.classList.add('visible');
     } else {
       subnav.classList.remove('visible');
