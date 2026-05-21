@@ -1015,6 +1015,7 @@ function abrirModalPagoTarjeta(banco) {
     const deudas = StorageService.get("cuentasMSI", []);
     let totalAdeudado = 0, vencidoYMesActual = 0;
     const hoy = new Date();
+    const fechaHoyCorta = hoy.toISOString().split('T')[0];
     const mesActualClave = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
 
     deudas.filter(d => d.banco === banco).forEach(deuda => {
@@ -1053,9 +1054,13 @@ function abrirModalPagoTarjeta(banco) {
                     <label>Monto a abonar:</label>
                     <input type="number" id="montoPagoTarjeta" value="${vencidoYMesActual.toFixed(2)}" max="${totalAdeudado.toFixed(2)}" style="width:100%; padding:12px; font-size:18px; border:2px solid #10b981; border-radius:6px;">
                 </div>
-                <div style="margin-bottom:25px;">
+                <div style="margin-bottom:15px;">
                     <label>¿De dónde sale el dinero?</label>
                     <select id="cuentaOrigenPagoTC" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px;">${opcionesCuenta}</select>
+                </div>
+                <div style="margin-bottom:15px; background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:6px;">
+                    <label style="font-weight:bold; color:#15803d;">📅 Fecha de Aplicación del Abono:</label>
+                    <input type="date" id="fechaAbonoTarjeta" value="${fechaHoyCorta}" style="width:100%; padding:10px; border:1px solid #22c55e; border-radius:6px; margin-top:6px; font-weight:bold;">
                 </div>
                 <div style="display:flex; gap:10px;">
                     <button onclick="procesarPagoTarjetaGlobal('${banco}')" style="flex:1; padding:14px; background:#8b5cf6; color:white; border:none; border-radius:6px; font-weight:bold;">✅ Pagar</button>
@@ -1331,12 +1336,13 @@ function procesarPagoTarjetaGlobal(banco) {
     const montoAbono = parseFloat(document.getElementById("montoPagoTarjeta").value);
     const cuentaOrigen = document.getElementById("cuentaOrigenPagoTC").value;
     const cuentaOrigenEtiqueta = document.getElementById("cuentaOrigenPagoTC").options[document.getElementById("cuentaOrigenPagoTC").selectedIndex].text;
+    const fechaAbonoStr = document.getElementById("fechaAbonoTarjeta").value;
 
     if (isNaN(montoAbono) || montoAbono <= 0) return alert("⚠️ Ingresa un monto válido mayor a 0.");
 
     // --- NUEVO: RESUMEN Y CONFIRMACIÓN ---
     const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
-    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿PAGAR A TARJETA?\n\nDestino: Tarjeta ${banco}\nMonto: ${formatoDinero(montoAbono)}\nOrigen del dinero: ${cuentaOrigenEtiqueta}\n\n¿Deseas descontar este dinero y registrar el pago?`;
+    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿PAGAR A TARJETA?\n\nDestino: Tarjeta ${banco}\nMonto: ${formatoDinero(montoAbono)}\nOrigen del dinero: ${cuentaOrigenEtiqueta}\nFecha de Aplicación: ${fechaAbonoStr}\n\n¿Deseas descontar este dinero y registrar el pago?`;
     if (!confirm(msjConf)) return;
     // --- FIN DE CONFIRMACIÓN ---
 
@@ -1427,15 +1433,16 @@ function procesarPagoTarjetaGlobal(banco) {
     StorageService.set("cuentasMSI", cuentasMSI);
 
     // =========================================================================
-    // 5. REGISTROS DE CAJA Y FÍSICOS (Intactos)
+    // 5. REGISTROS DE CAJA Y FÍSICOS (Intactos) - CON FECHA AUDITORÍA
     // =========================================================================
+    const fechaAbonoIso = window.localISO ? window.localISO(fechaAbonoStr + 'T12:00:00') : new Date(fechaAbonoStr + 'T12:00:00').toISOString();
     const movs = StorageService.get("movimientosCaja", []);
     movs.push({
         id: Date.now(),
         tipo: "egreso",
         concepto: `Pago a Corte Mensual Tarjeta de Crédito — ${banco}`,
         monto: montoAbono,
-        fecha: window.localISO(new Date()),
+        fecha: fechaAbonoIso,
         cuenta: cuentaOrigen,
         etiquetaCuenta: cuentaOrigenEtiqueta,
         medioPago: cuentaOrigen === "efectivo" || cuentaOrigen.startsWith("caja_") ? "efectivo" : "transferencia",
@@ -1756,6 +1763,12 @@ window.abrirAuditoriaSaldos = function() {
                 </div>
             </div>
 
+            <div style="margin-bottom:15px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">📅 Fecha de aplicación:</label>
+                <input type="date" id="ajusteFecha" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;" value="${new Date().toISOString().split('T')[0]}">
+                <small style="color:#64748b; font-size:11px;">Puedes ajustar la fecha del movimiento si el descuadre se detectó después.</small>
+            </div>
+
             <div style="margin-bottom:20px;">
                 <label style="font-weight:bold; font-size:12px; color:#475569;">📝 Evidencia / Motivo (Obligatorio):</label>
                 <textarea id="ajusteMotivo" placeholder="Ej: Faltante de $20 en caja principal por error en cambio. Se notificó a encargado..." style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box; resize:vertical; min-height:80px;"></textarea>
@@ -1806,8 +1819,8 @@ window.guardarAjusteAuditoria = function() {
     if (!confirm(`AUDITORÍA:\n\n¿Confirmas ${msj} de ${dinero(monto)} a la cuenta [${cuentaNombre}]?\n\nMotivo: ${motivo}`)) return;
 
     // Fijamos la hora al mediodía para evitar desfases de zona horaria
-    const fechaBase = new Date();
-    fechaBase.setHours(12, 0, 0, 0);
+    const fechaStr = document.getElementById("ajusteFecha")?.value || new Date().toISOString().split('T')[0];
+    const fechaBase = new Date(fechaStr + 'T12:00:00');
     const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
     
     const movimientos = StorageService.get("movimientosCaja", []);

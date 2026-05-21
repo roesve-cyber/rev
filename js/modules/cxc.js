@@ -599,9 +599,9 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
     };
 }
 
+// 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado) {
     const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
-    
     const fechaAbonoRaw = document.getElementById("fechaAbonoInput")?.value;
     const fechaObj = fechaAbonoRaw ? new Date(fechaAbonoRaw + "T12:00:00") : new Date();
     const fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaObj) : fechaObj.toLocaleDateString();
@@ -613,108 +613,131 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
     const medioPago = isCaja ? 'efectivo' : 'transferencia';
 
-    if (isNaN(montoAbonoInput) || montoAbonoInput <= 0) {
-        alert("Ingresa un monto válido.");
-        return;
-    }
-
-    if (montoAbonoInput > (saldoActual + 0.01)) { 
-        alert("El abono no puede ser mayor al saldo.");
-        return;
-    }
+    if (isNaN(montoAbonoInput) || montoAbonoInput <= 0) return alert("Ingresa un monto válido.");
+    if (montoAbonoInput > (saldoActual + 0.01)) return alert("El abono no puede ser mayor al saldo.");
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const cuenta = cuentas.find(c => c.folio === folio) || {};
-
     let montoFinal = montoAbonoInput;
     let liquidacionPorPolitica = false;
 
+    // Políticas de liquidación (misma matemática que tu original)
     const pagares = StorageService.get("pagaresSistema", []);
     const pagaresFolio = pagares.filter(p => p.folio === folio);
-    
-    let precioContadoReal = 0;
-    if (cuenta.articulos && cuenta.articulos.length > 0) {
-        precioContadoReal = cuenta.articulos.reduce((sum, art) => sum + (Number(art.precioContado || art.precio || 0) * Number(art.cantidad || 1)), 0);
-    }
-    const baseContadoParaCalculo = precioContadoReal > 0 ? precioContadoReal : Number(montoOriginal);
-    
     const totalAbonosPagados = pagaresFolio.reduce((s, p) => {
         if (p.estado === "Pagado") return s + (p.monto || 0);
         if (p.estado === "Parcial") return s + (p.montoAbonado || 0);
         return s;
     }, 0);
 
-    const enganche = Number(cuenta.engancheRecibido || 0);
-    const saldoContadoSinInteres = Math.max(0, baseContadoParaCalculo - enganche);
-    const restanteContado = Math.max(0, saldoContadoSinInteres - totalAbonosPagados);
+    let precioContadoReal = cuenta.articulos?.reduce((s, a) => s + ((a.precioContado || a.precio || 0) * (a.cantidad || 1)), 0) || Number(montoOriginal);
+    const restanteContado = Math.max(0, Math.max(0, precioContadoReal - Number(cuenta.engancheRecibido || 0)) - totalAbonosPagados);
 
     if (aplicaPoliticaContado && restanteContado > 0 && montoAbonoInput >= (restanteContado - 0.01)) {
-        if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\n\nPuede liquidar al precio sin interés pagando sólo: ${_cxcDinero(restanteContado)}\n\n¿Deseas aplicar esta política y condonar los intereses restantes?`)) {
+        if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\\nPuede liquidar al precio sin interés pagando sólo: ${_cxcDinero(restanteContado)}\\n¿Aplicar política?`)) {
             montoFinal = restanteContado;
             liquidacionPorPolitica = true;
-        } else {
-            montoFinal = montoAbonoInput;
         }
     }
-
     if (!liquidacionPorPolitica) {
         const evalPol = evaluarPoliticaLiquidacion(folio, montoAbonoInput);
         if (evalPol && evalPol.aplica) {
-            if (confirm(`💡 LIQUIDACIÓN INTELIGENTE (SALTO DE PLAN)\n\nEl abono alcanza para cubrir un plan más corto. El cliente puede liquidar su cuenta con: ${_cxcDinero(evalPol.montoCorrecto)}\n(Se le ahorrarán ${_cxcDinero(evalPol.ahorro)}).\n\n¿Deseas aplicar el descuento y dar por liquidada la cuenta?`)) {
+            if (confirm(`💡 LIQUIDACIÓN INTELIGENTE ACTIVADA\\nEl abono alcanza para liquidar.\\n¿Aplicar descuento y liquidar cuenta por ${_cxcDinero(evalPol.montoCorrecto)}?`)) {
                 montoFinal = evalPol.montoCorrecto;
                 liquidacionPorPolitica = true;
-            } else {
-                montoFinal = montoAbonoInput;
             }
         }
     }
-
-    // 🛡️ REPARACIÓN: Confirmación obligatoria para abonos normales que no entraron en promociones
     if (!liquidacionPorPolitica) {
-        const confirmacionEstandar = confirm(`💰 RESUMEN DE ABONO\n\nCliente: ${cuenta.nombre}\nFolio de Venta: ${folio}\nMonto a ingresar: ${_cxcDinero(montoFinal)}\nDestino del dinero: ${etiqueta}\n\n¿Confirmas que deseas registrar este abono?`);
-        
-        if (!confirmacionEstandar) return; // Si el cajero presiona "Cancelar", detenemos la ejecución y protegemos la base de datos
+        if (!confirm(`💰 RESUMEN DE ABONO\\n\\nCliente: ${cuenta.nombre}\\nFolio: ${folio}\\nMonto: ${_cxcDinero(montoFinal)}\\nDestino: ${etiqueta}\\n\\n¿Confirmas el abono?`)) return;
     }
 
-    const _todosLosPagares = StorageService.get("pagaresSistema", []);
-    let _pagaresDelFolio = _todosLosPagares
-        .filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"))
-        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    // 🚀 BÓVEDA DE CUARENTENA PARA ABONO
+    const cuarentena = {
+        folioCXC: folio,
+        fechaCaptura: new Date().toLocaleString('es-MX'),
+        montoAbonado: montoFinal,
+        montoAbonoInput: montoAbonoInput,
+        fechaAbonoRaw: fechaAbonoRaw,
+        cuentaId: cuentaId,
+        etiquetaCuenta: etiqueta,
+        medioPago: medioPago,
+        liquidacionPorPolitica: liquidacionPorPolitica,
+        fechaAbonoIso: fechaAbonoIso,
+        fechaAbonoStr: fechaAbonoStr,
+        vendedorId: cuenta.vendedorId
+    };
 
+    let abonosP = StorageService.get("abonosPendientes", []);
+    abonosP.push(cuarentena);
+    StorageService.set("abonosPendientes", abonosP);
+
+    // SIMULAMOS EN MEMORIA PARA EL TICKET PROVISIONAL
+    let _pagaresDelFolio = pagares.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")).sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
     let _montoRestante = montoFinal;
     const _pagaresCubiertos = [];
     let _pagareParcial = null;
 
     for (const pag of _pagaresDelFolio) {
-        const _montoNecesario = (pag.estado === 'Parcial') ? Math.max(0, pag.monto - (pag.montoAbonado || 0)) : pag.monto;
+        const _n = (pag.estado === 'Parcial') ? Math.max(0, pag.monto - (pag.montoAbonado || 0)) : pag.monto;
+        if (_montoRestante >= _n - 0.01) { _pagaresCubiertos.push({ ...pag }); _montoRestante -= _n; } 
+        else { if (_montoRestante > 0.01) { _pagareParcial = { ...pag, montoAplicado: _montoRestante }; } break; }
+    }
+    let nuevoSaldoReal = pagares.filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado||0)) : p.monto), 0) - montoFinal;
+    if (liquidacionPorPolitica) nuevoSaldoReal = 0;
 
-        if (_montoRestante >= _montoNecesario - 0.01) {
-            _pagaresCubiertos.push({ ...pag });
-            _montoRestante -= _montoNecesario;
-        } else {
-            if (_montoRestante > 0.01) {
-                _pagareParcial = { ...pag, montoAplicado: _montoRestante };
-                _montoRestante = 0;
-            }
-            break;
-        }
+    const _pagaresRestantes = pagares.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")).map(p => {
+        if (_pagaresCubiertos.find(pc => pc.id === p.id) || liquidacionPorPolitica) return { ...p, estado: "Pagado" };
+        if (_pagareParcial && p.id === _pagareParcial.id) return { ...p, estado: "Parcial" };
+        return p;
+    }).filter(p => p.estado !== "Pagado");
+
+    const _pagaresCubiertosTicket = [..._pagaresCubiertos];
+    if (_pagareParcial) _pagaresCubiertosTicket.push({ ..._pagareParcial, parcial: true });
+
+    generarTicketAbonoTermico({
+        folio,
+        cliente: { nombre: cuenta.nombre || folio, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
+        montoAbono: montoFinal,
+        nuevoSaldo: Math.max(0, nuevoSaldoReal),
+        fecha: fechaAbonoStr, 
+        metodoCobro: medioPago,
+        cuentaDestino: etiqueta + " (Pendiente Aut.)",
+        pagaresCubiertos: _pagaresCubiertosTicket,
+        pagaresRestantes: _pagaresRestantes,
+        articulos: cuenta.articulos || [],
+        totalVenta: precioContadoReal,
+        enganche: Number(cuenta.engancheRecibido || 0)
+    });
+
+    document.querySelector('[data-modal="abono-avanzado"]')?.remove();
+    alert(`⏳ ABONO EN CUARENTENA\\n\\nEl ticket provisional se emitió, pero el ingreso a caja requiere Autorización de un Administrador.`);
+}
+
+// 🚀 EJECUTOR REAL: Llamado desde el Panel de Autorizaciones
+window.ejecutarAbonoAutorizadoReal = function(a) {
+    const _todosLosPagares = StorageService.get("pagaresSistema", []);
+    let _pagaresDelFolio = _todosLosPagares.filter(p => p.folio === a.folioCXC && (p.estado === "Pendiente" || p.estado === "Parcial")).sort((x, y) => new Date(x.fechaVencimiento) - new Date(y.fechaVencimiento));
+
+    let _montoRestante = a.montoAbonado;
+    const _pagaresCubiertos = [];
+    let _pagareParcial = null;
+
+    for (const pag of _pagaresDelFolio) {
+        const _montoNecesario = (pag.estado === 'Parcial') ? Math.max(0, pag.monto - (pag.montoAbonado || 0)) : pag.monto;
+        if (_montoRestante >= _montoNecesario - 0.01) { _pagaresCubiertos.push({ ...pag }); _montoRestante -= _montoNecesario; } 
+        else { if (_montoRestante > 0.01) { _pagareParcial = { ...pag, montoAplicado: _montoRestante }; _montoRestante = 0; } break; }
     }
 
     let _todosActualizados = _todosLosPagares.map(p => {
-        if (_pagaresCubiertos.find(pc => pc.id === p.id)) {
-            return { ...p, estado: "Pagado", fechaAbono: fechaAbonoStr, montoAbonado: p.monto };
-        }
-        if (_pagareParcial && p.id === _pagareParcial.id) {
-            return { ...p, estado: "Parcial", fechaAbono: fechaAbonoStr, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
-        }
+        if (_pagaresCubiertos.find(pc => pc.id === p.id)) return { ...p, estado: "Pagado", fechaAbono: a.fechaAbonoStr, montoAbonado: p.monto };
+        if (_pagareParcial && p.id === _pagareParcial.id) return { ...p, estado: "Parcial", fechaAbono: a.fechaAbonoStr, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
         return p;
     });
 
-    if (liquidacionPorPolitica) {
+    if (a.liquidacionPorPolitica) {
         _todosActualizados = _todosActualizados.map(p => {
-            if (p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")) {
-                return { ...p, estado: "Cancelado", nota: "Liquidado por política" };
-            }
+            if (p.folio === a.folioCXC && (p.estado === "Pendiente" || p.estado === "Parcial")) return { ...p, estado: "Cancelado", nota: "Liquidado por política" };
             return p;
         });
     }
@@ -722,103 +745,29 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     StorageService.set("pagaresSistema", _todosActualizados);
 
     const cuentasXCobrar = StorageService.get("cuentasPorCobrar", []);
-    const idxCuenta = cuentasXCobrar.findIndex(c => c.folio === folio);
-    let nuevoSaldoReal = 0;
-
+    const idxCuenta = cuentasXCobrar.findIndex(c => c.folio === a.folioCXC);
     if (idxCuenta !== -1) {
         const cuentaAct = cuentasXCobrar[idxCuenta];
         cuentaAct.abonos = cuentaAct.abonos || [];
-        
-        cuentaAct.abonos.push({
-            fecha: fechaAbonoStr,
-            monto: montoFinal,
-            cuentaId,
-            medioPago,
-            etiquetaCuenta: etiqueta,
-            vendedorId: cuentaAct.vendedorId || null
-        });
+        cuentaAct.abonos.push({ fecha: a.fechaAbonoStr, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, vendedorId: a.vendedorId || null });
 
         const _pagaresAct = StorageService.get("pagaresSistema", []);
-        nuevoSaldoReal = _pagaresAct
-            .filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
-            .reduce((s, p) => {
-                if (p.estado === 'Parcial') return s + Math.max(0, (p.monto || 0) - (p.montoAbonado || 0));
-                return s + (p.monto || 0);
-            }, 0);
+        let nuevoSaldoReal = _pagaresAct.filter(p => p.folio === a.folioCXC && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
 
         cuentaAct.saldoActual = nuevoSaldoReal;
-        
-        if (nuevoSaldoReal <= 0.01) { 
-            cuentaAct.estado = "Saldado";
-            cuentaAct.saldoActual = 0;
-            nuevoSaldoReal = 0;
-        }
-
+        if (nuevoSaldoReal <= 0.01) { cuentaAct.estado = "Saldado"; cuentaAct.saldoActual = 0; }
         cuentasXCobrar[idxCuenta] = cuentaAct;
         StorageService.set("cuentasPorCobrar", cuentasXCobrar);
 
         if (typeof window._ingresarCuenta === 'function') {
-            window._ingresarCuenta({
-                monto: montoFinal,
-                cuentaId: cuentaId,
-                etiqueta: etiqueta,
-                concepto: `Abono a ${cuentaAct.nombre} - ${folio}`,
-                referencia: `ABONO-${folio}`,
-                fecha: fechaAbonoIso 
-            });
-        } else {
-            let movimientos = StorageService.get("movimientosCaja", []);
-            movimientos.push({
-                id: Date.now(),
-                folio,
-                fecha: fechaAbonoIso,
-                monto: montoFinal,
-                tipo: "ingreso",
-                concepto: `Abono a ${cuentaAct.nombre} - ${folio}`,
-                referencia: "Abono",
-                cuenta: cuentaId,
-                medioPago,
-                etiquetaCuenta: etiqueta
-            });
-            StorageService.set("movimientosCaja", movimientos);
+            window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso });
         }
     }
 
-    const _cuentaData = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
-    const _pagaresRestantes = _todosActualizados.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial"));
-    
-    const _pagaresCubiertosTicket = [..._pagaresCubiertos];
-    if (_pagareParcial) {
-        _pagaresCubiertosTicket.push({ ..._pagareParcial, parcial: true });
+    if (typeof window.registrarComisionAbono === 'function' && a.vendedorId) {
+        window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId);
     }
-
-    generarTicketAbonoTermico({
-        folio,
-        cliente: {
-            nombre: _cuentaData?.nombre || folio,
-            telefono: _cuentaData?.telefono || '',
-            direccion: _cuentaData?.direccion || ''
-        },
-        montoAbono: montoFinal,
-        nuevoSaldo: nuevoSaldoReal,
-        fecha: fechaAbonoStr, 
-        metodoCobro: medioPago || "efectivo",
-        cuentaDestino: etiqueta || "efectivo",
-        pagaresCubiertos: _pagaresCubiertosTicket,
-        pagaresRestantes: _pagaresRestantes,
-        articulos: _cuentaData?.articulos || [],
-        totalVenta: baseContadoParaCalculo,
-        enganche: enganche
-    });
-
-    if (typeof window.registrarComisionAbono === 'function' && _cuentaData && _cuentaData.vendedorId) {
-        window.registrarComisionAbono(folio, montoFinal, _cuentaData.vendedorId);
-    }
-
-    alert(`✅ Abono registrado exitosamente por ${_cxcDinero(montoFinal)}.`);
-    document.querySelector('[data-modal="abono-avanzado"]')?.remove();
-    renderCuentasXCobrar();
-}
+};
 
 function generarTicketAbonoTermico(datosAbono) {
     const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
@@ -2125,63 +2074,57 @@ window.ejecutarMigracionTdcMSI = function() {
         return alert("❌ Si ya pagaste todas las mensualidades, la deuda ya está liquidada.");
     }
 
-    if (!confirm(`¿Confirmas registrar la compra de ${dinero(montoTotal)} a ${plazo} MSI en la tarjeta ${tarjetaNombre}?`)) return;
+    if (!confirm(`¿Confirmas registrar la compra de ${_cxcDinero(montoTotal)} a ${plazo} MSI en la tarjeta ${tarjetaNombre}?`)) return;
 
-    // 1. Iniciar con la fecha exacta de la compra al mediodía
-    let fechaBase = new Date(fechaCompra + 'T12:00:00');
-    
-    // 2. Establecer el primer corte hipotético en el MISMO MES de la compra
-    let fechaCorteActual = new Date(fechaBase.getFullYear(), fechaBase.getMonth(), diaCorte, 12, 0, 0);
+    // 🚀 ECUACIÓN MAESTRA UNIVERSAL Y BLINDADA 🚀
+    let fechaPartes = fechaCompra.split('-');
+    let anioCompra = parseInt(fechaPartes[0]);
+    let mesCompra = parseInt(fechaPartes[1]) - 1; // Enero es 0 en JavaScript
+    let diaCompra = parseInt(fechaPartes[2]);
 
-    // 3. Regla Bancaria: Si compraste DESPUÉS del día de corte, el primer corte oficial brinca al mes siguiente
-    if (fechaBase.getDate() > diaCorte) {
-        fechaCorteActual.setMonth(fechaCorteActual.getMonth() + 1);
-    }
+    // Evaluación de los "Brincos"
+    let brincoCorte = (diaCompra > diaCorte) ? 1 : 0;
+    let brincoPago = (diaCorte > diaPago) ? 1 : 0;
+    let mesPrimerPago = mesCompra + brincoCorte + brincoPago;
 
-    let calendarioPagos = [];
     const abonoMensual = parseFloat((montoTotal / plazo).toFixed(2));
     const montoYaPagado = yaPagadas * abonoMensual;
+    let calendarioPagos = [];
 
     for (let i = 1; i <= plazo; i++) {
-        // Calcular el Día de Pago correspondiente a este corte
-        let fechaPagoLimite = new Date(fechaCorteActual.getFullYear(), fechaCorteActual.getMonth(), diaPago, 12, 0, 0);
+        // Generamos la fecha forzando la matemática independiente de los meses, evitando bugs del día 31
+        let fechaPagoLimite = new Date(anioCompra, mesPrimerPago + (i - 1), diaPago, 12, 0, 0);
         
-        // Si el día de pago es menor al corte (Ej: Corte 15, Pago 5), el pago cae el mes que entra
-        if (diaPago <= diaCorte) {
-            fechaPagoLimite.setMonth(fechaPagoLimite.getMonth() + 1);
-        }
-
-        // 🐛 CORRECCIÓN: El Dashboard exige la fecha en formato string corto "YYYY-MM-DD"
-        const fPagoMX = window.localISO ? window.localISO(fechaPagoLimite).split('T')[0] : fechaPagoLimite.toISOString().split('T')[0];
+        let yyyy = fechaPagoLimite.getFullYear();
+        let mm = String(fechaPagoLimite.getMonth() + 1).padStart(2, '0');
+        let dd = String(fechaPagoLimite.getDate()).padStart(2, '0');
 
         calendarioPagos.push({
             n: i,
             numero: i,
-            fecha: fPagoMX,
+            fecha: `${yyyy}-${mm}-${dd}`,
             monto: abonoMensual,
-            estado: i <= yaPagadas ? "Pagado" : "Pendiente"
+            estado: i <= yaPagadas ? "Pagado" : "Pendiente",
+            montoAbonado: i <= yaPagadas ? abonoMensual : 0,
+            conciliado: i <= yaPagadas
         });
-
-        // Avanzar el corte exactamente un mes para la siguiente iteración
-        fechaCorteActual.setMonth(fechaCorteActual.getMonth() + 1);
     }
 
-    // 4. 🛡️ ESTRUCTURA HOMOLOGADA AL SISTEMA 🛡️
-    // Utilizamos las variables exactas que lee renderCuentasMSI() y renderDashboardMSI()
+    // 🛡️ ESTRUCTURA HOMOLOGADA
+    let fechaBaseStr = new Date(anioCompra, mesCompra, diaCompra, 12, 0, 0);
     const nuevaDeudaMSI = {
-        id: Date.now(), // ID numérico para evitar bugs al marcar pagos
+        id: Date.now(),
         banco: tarjetaNombre,
         producto: concepto,
         total: montoTotal,
         meses: plazo,
         cuotaMensual: abonoMensual,
-        fechaCompra: window.localISO ? window.localISO(fechaBase).split('T')[0] : fechaBase.toISOString().split('T')[0],
+        fechaCompra: window.localISO ? window.localISO(fechaBaseStr).split('T')[0] : fechaBaseStr.toISOString().split('T')[0],
         calendario: calendarioPagos,
         pagosRealizados: yaPagadas,
         montoPagado: montoYaPagado
     };
 
-    // 5. Guardar en la caja fuerte correcta
     let cuentasMSI = StorageService.get("cuentasMSI", []);
     cuentasMSI.push(nuevaDeudaMSI);
     StorageService.set("cuentasMSI", cuentasMSI);
@@ -2189,7 +2132,6 @@ window.ejecutarMigracionTdcMSI = function() {
     alert(`✅ Compra MSI registrada en ${tarjetaNombre}.\n\nSe estructuraron ${plazo} mensualidades. El sistema marcó como "Pagadas" las primeras ${yaPagadas}.`);
     document.querySelector('[data-modal="migracion-msi-tarjeta"]').remove();
 
-    // 6. Refrescar el Dashboard de Tarjetas si está abierto en el fondo
     if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
     if (typeof renderDashboardMSI === 'function') renderDashboardMSI();
 };

@@ -1,5 +1,25 @@
 // ===== COTIZACIONES (DUAL: VENTAS Y AUDITORÍA MULTI-PLAZO) =====
 
+// Función principal que renderiza la vista de cotizaciones
+function renderCotizaciones() {
+    const cont = document.getElementById('cotizaciones');
+    if (!cont) return;
+    
+    cont.innerHTML = `
+        <div class="vista-header">
+            <h2>📄 Cotizaciones</h2>
+            <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button onclick="abrirCotizador()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">➕ Nueva Cotización (Simple)</button>
+                <button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>
+            </div>
+        </div>
+        <div id="listaCotizaciones" style="background:white; padding:20px; border-radius:8px; margin-top:20px;"></div>
+    `;
+    
+    abrirListaCotizaciones();
+}
+
 function _foliosCot() {
     const hoy = new Date();
     const ymd = hoy.getFullYear().toString() +
@@ -793,6 +813,7 @@ function eliminarCotizacion(id) {
 
 window.abrirCotizador = abrirCotizador;
 window.abrirCotizadorAuditoria = abrirCotizadorAuditoria;
+window.renderCotizaciones = renderCotizaciones;
 window._onCotProductoChange = _onCotProductoChange;
 window._actualizarPrecioSugerido = _actualizarPrecioSugerido;
 window._toggleEngancheCot = _toggleEngancheCot;

@@ -1067,6 +1067,7 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
     );
 };
 
+// 🛡️ INTERCEPTOR MAKER-CHECKER: Pone la venta en cuarentena y emite ticket provisional
 function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock) {
 
@@ -1074,247 +1075,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
     }
 
-    let requisicionesCompra = StorageService.get("requisicionesCompra", []);
-    let movimientosCaja = StorageService.get("movimientosCaja", []);
-    let cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
-    let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
-    let pagaresSistema = StorageService.get("pagaresSistema", []);
-
-    let entregasPendientes = [];
-
-    // PASO 1: ACTUALIZAR STOCK 
-    // PASO 1: ACTUALIZAR STOCK 
-    productosConStock.forEach(x => {
-        const cantRequerida = x.item.cantidad || 1;
-        const stockActual = x.prod.stock || 0;
-        const colorElegido = x.item.colorElegido || '';
-        const ubicacionElegida = x.item.ubicacionElegida || ''; 
-
-        if (stockActual >= cantRequerida) {
-            
-            // --- INICIO DE LA CORRECCIÓN (PUNTO 5) ---
-            // Descontar de la variante específica por color Y UBICACIÓN
-            if (x.prod.variantes && x.prod.variantes.length > 0) {
-                let restante = cantRequerida;
-                
-                // Intento 1: Buscar coincidencia exacta
-                x.prod.variantes.forEach(v => {
-                    const coincideColor = !colorElegido || (v.color && v.color.toUpperCase() === colorElegido.toUpperCase());
-                    const coincideUbicacion = !ubicacionElegida || (v.ubicacion && v.ubicacion.toUpperCase() === ubicacionElegida.toUpperCase());
-
-                    if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
-                        const deducir = Math.min(Number(v.stock), restante);
-                        v.stock -= deducir;
-                        restante -= deducir;
-                    }
-                });
-
-                // Intento 2: Si hubo un error de dedo y quedó restante, descontar de donde haya (para no descuadrar)
-                if (restante > 0) {
-                    x.prod.variantes.forEach(v => {
-                        if (restante > 0 && Number(v.stock) > 0) {
-                            const deducir = Math.min(Number(v.stock), restante);
-                            v.stock -= deducir;
-                            restante -= deducir;
-                        }
-                    });
-                }
-            }
-            // --- FIN DE LA CORRECCIÓN ---
-
-            x.prod.stock = stockActual - cantRequerida;
-            const concepto = colorElegido
-                ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})`
-                : `Venta - ${folioVenta}`;
-            if (typeof registrarMovimiento === 'function') registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
-        }
-    });
-
-    // PASO 2: CREAR ENTREGAS PENDIENTES Y REQUISICIONES (SIN STOCK)
-    productosSinStock.forEach(x => {
-        const cantidadSolicitada = x.item.cantidad || 1;
-        const colorElegido = x.item.colorElegido || '';
-        
-        const nombreConColor = colorElegido ? `${x.prod.nombre} (Color: ${colorElegido})` : x.prod.nombre;
-
-        entregasPendientes.push({
-            id: Date.now() + Math.random(),
-            folioVenta,
-            productoId: x.prod.id,
-            nombre: nombreConColor,
-            cantidad: cantidadSolicitada,
-            motivo: "Sin stock en almacén"
-        });
-
-        requisicionesCompra.push({
-            id: Date.now() + Math.random(),
-            fecha: fechaHoy,
-            producto: nombreConColor, 
-            folioVenta,
-            cantidad: cantidadSolicitada,
-            motivo: "Venta sin stock disponible",
-            estatus: "Pendiente"
-        });
-    });
-
-    // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
-    let montoIngresoHoy = 0;
-    let tituloConcepto = "";
-    
-    if (metodoPago === "contado" || metodoPago === "transferencia") {
-        montoIngresoHoy = totalContado;
-        tituloConcepto = "Venta";
-    } else if (enganche > 0) {
-        montoIngresoHoy = enganche;
-        tituloConcepto = "Enganche";
-    }
-
-    if (montoIngresoHoy > 0) {
-        const cuentaId = window._estadoPago.cuentaReceptora || 'efectivo';
-        const etiqueta = window._estadoPago.etiquetaCuenta || 'Efectivo';
-
-        if (typeof window._ingresarCuenta === 'function') {
-            window._ingresarCuenta({
-                monto: montoIngresoHoy,
-                cuentaId: cuentaId,
-                etiqueta: etiqueta,
-                concepto: `${tituloConcepto} ${metodoPago} - ${clienteSeleccionado.nombre} (Folio: ${folioVenta})`,
-                referencia: `VENTA-${folioVenta}`
-            });
-        } else {
-            movimientosCaja.push({
-                id: Date.now(),
-                folio: folioVenta,
-                fecha: fechaHoy,
-                tipo: "ingreso",
-                monto: montoIngresoHoy,
-                concepto: `${tituloConcepto} ${metodoPago} - ${clienteSeleccionado.nombre}`,
-                referencia: `VENTA-${folioVenta}`,
-                cuenta: cuentaId,
-                etiquetaCuenta: etiqueta
-            });
-            StorageService.set("movimientosCaja", movimientosCaja);
-        }
-    }
-
-    // PASO 4: CREAR CUENTAS POR COBRAR O APARTADOS
-    if (metodoPago === "credito") {
-        const saldoPendiente = planElegido.total;    
-
-        let saldosPorMes = [];
-        const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
-        const saldoBase = (totalContado - enganche);
-        const planesPosibles = CalculatorService.calcularCreditoConPeriodicidad
-            ? CalculatorService.calcularCreditoConPeriodicidad(saldoBase, periodicidad)
-            : CalculatorService.calcularCredito(saldoBase);
-        saldosPorMes = planesPosibles.map(p => ({ meses: p.meses, total: p.total }));
-        
-        const cuentaNueva = {
-            folio: folioVenta,
-            nombre: clienteSeleccionado.nombre,
-            clienteId: clienteSeleccionado.id,
-            direccion: clienteSeleccionado.direccion || "",
-            referencia: clienteSeleccionado.referencia || "",
-            telefono: clienteSeleccionado.telefono || "",
-            fechaVenta: fechaVentaIso,
-            totalContadoOriginal: totalContado,
-            engancheRecibido: enganche,
-            saldoActual: saldoPendiente,
-            saldoOriginal: saldoPendiente,
-            metodo: metodoPago,
-            plan: planElegido,
-            estado: "Pendiente",
-            abonos: [],
-            articulos: JSON.parse(JSON.stringify(carrito)),
-            totalMercancia: totalContado,
-            periodicidad: periodicidad,
-            vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
-            vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null,
-            saldosPorMes
-        };
-
-        cuentasPorCobrar.push(cuentaNueva);
-
-        // PASO 5: CREAR PAGARÉS
-        let diasIntervalo = 7;
-        if (periodicidad === "quincenal") diasIntervalo = 14;
-        if (periodicidad === "mensual") diasIntervalo = 30;
-        
-        let fechaPago = new Date(fechaVentaIso);
-        const totalPagos = planElegido.pagos || Math.round(planElegido.semanas / (periodicidad === "quincenal" ? 2 : periodicidad === "mensual" ? 4 : 1));
-        
-        for (let i = 1; i <= totalPagos; i++) {
-            fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
-            pagaresSistema.push({
-                id: Date.now() + i,
-                folio: folioVenta,
-                numeroPagere: `${folioVenta}-${i}/${totalPagos}`,
-                clienteNombre: clienteSeleccionado.nombre,
-                clienteId: clienteSeleccionado.id,
-                clienteDireccion: clienteSeleccionado.direccion || "",
-                fechaEmision: fechaVentaIso,
-                fechaVencimiento: fechaPago.getTime(),
-                monto: planElegido.abono,
-                estado: "Pendiente",
-                diasAtrasoActual: 0,
-                tasaMorosidad: 2,
-                acreedor: "Roberto Escobedo Vega",
-                lugar: "Santiago Cuaula, Tlaxcala"
-            });
-        }
-
-        if (!StorageService.set("cuentasPorCobrar", cuentasPorCobrar)) console.error("❌ Error guardando CxC");
-        if (!StorageService.set("pagaresSistema", pagaresSistema)) console.error("❌ Error guardando pagarés");
-
-    } else if (metodoPago === "apartado") {
-        // AQUÍ VA LA LÓGICA EXCLUSIVA PARA APARTADOS
-        let apartadosBD = StorageService.get("apartados", []);
-        apartadosBD.push({
-            id: Date.now(),
-            folio: folioVenta,
-            clienteId: clienteSeleccionado.id,
-            clienteNombre: clienteSeleccionado.nombre,
-            fechaApartado: fechaVentaIso,
-            importeApartado: totalContado,
-            enganche: enganche, // Guardamos el histórico
-            saldoPendiente: saldoAFinanciar,
-            articulos: JSON.parse(JSON.stringify(carrito)),
-            abonos: [],
-            estado: 'Pendiente',
-            vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
-            vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
-        });
-        
-        if (!StorageService.set("apartados", apartadosBD)) {
-            console.error("❌ Error guardando en Apartados");
-        }
-    }
-
-    // GUARDAR TODO
-    if (!StorageService.set("productos", productos)) console.error("❌ Error guardando productos");
-    if (!StorageService.set("movimientosCaja", movimientosCaja)) console.error("❌ Error guardando movimientos de caja");
-    // NOTA: movimientosInventario NO se re-guarda aquí.
-    // registrarMovimiento() ya escribe en IDB internamente.
-    // Volver a guardar la copia local sobreescribiría esos movimientos.
-    if (!StorageService.set("requisicionesCompra", requisicionesCompra)) console.error("❌ Error guardando requisiciones");
-
-    if (entregasPendientes.length > 0) {
-        salidasPendientesVenta.push({
-            id: Date.now(),
-            folioVenta,
-            fecha: fechaHoy,
-            fechaIso: fechaVentaIso,
-            clienteId: clienteSeleccionado.id,
-            clienteNombre: clienteSeleccionado.nombre,
-            clienteDireccion: clienteSeleccionado.direccion || "",
-            metodoPago,
-            items: entregasPendientes,
-            estatus: "Pendiente"
-        });
-        if (!StorageService.set("salidasPendientesVenta", salidasPendientesVenta)) console.error("❌ Error guardando salidas pendientes");
-    }
-
-    // GENERAR TICKET Y REGISTRAR
+    // 1. Armar los datos para el Ticket Provisional
     const datosVenta = {
         folio: folioVenta,
         fecha: fechaHoy,
@@ -1326,105 +1087,167 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         saldoPendiente: metodoPago === "credito" ? planElegido.total : (metodoPago === "apartado" ? saldoAFinanciar : 0),
         plan: planElegido,
         articulos: [...carrito],
-        tipoComprobante: metodoPago === "apartado" ? "recibo_apartado" : metodoPago === "credito" ? "pagare" : "factura",
+        tipoComprobante: "Ticket Provisional (Requiere Autorización)",
         periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
         acreedor: "Roberto Escobedo Vega",
         lugar: "Santiago Cuaula, Tlaxcala",
         tasaMorosidad: 2
     };
 
-    try {
-        const ventasRegistradas = StorageService.get('ventasRegistradas', []);
-        ventasRegistradas.push({
-            folio:      folioVenta,
-            fechaVenta: fechaVentaIso,
-            fecha:      fechaHoy,
-            clienteId:  clienteSeleccionado?.id || null,
-            clienteNombre: clienteSeleccionado?.nombre || 'Sin nombre',
-            cliente:    clienteSeleccionado, // Guardado completo para reconstrucción de tickets
-            total:      totalContado,
-            enganche:   enganche || 0,
-            saldoAFinanciar: saldoAFinanciar || 0,
-            metodoPago: metodoPago,
-            plan:       planElegido || null,
-            periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
-            articulos:  carrito.map(p => ({ 
-                id: p.id, 
-                nombre: p.nombre, 
-                colorElegido: p.colorElegido || '', 
-                cantidad: p.cantidad || 1, 
-                precio: p.precioContado || 0,
-                precioContado: p.precioContado || 0 
-            })),
-            vendedor:   _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null
-        });
-        if (!StorageService.set('ventasRegistradas', ventasRegistradas)) console.error('❌ Error guardando ventasRegistradas');
-    } catch(e) {
-        console.warn('⚠️ Error registrando en ventasRegistradas:', e.message);
-    }
+    // 2. Empaquetar todo en la Bóveda de Cuarentena
+    const cuarentena = {
+        idCuarentena: Date.now(),
+        fechaCaptura: new Date().toLocaleString('es-MX'),
+        clienteNombre: clienteSeleccionado.nombre,
+        totalVenta: totalContado,
+        args: [metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock],
+        datosVenta: datosVenta,
+        vendedorSeleccionado: window._vendedorSeleccionado
+    };
 
+    let pendientes = StorageService.get("ventasPendientes", []);
+    pendientes.push(cuarentena);
+    StorageService.set("ventasPendientes", pendientes);
+
+    // 3. Emitir el Ticket y Vale Provisional al Cajero
     generarTicketMediaHoja(datosVenta);
 
-    // 🛡️ REPARACIÓN: Generar Vale de Entrega SOLO para mercancía marcada con "✅ Entregar"
     if (productosConStock && productosConStock.length > 0) {
         const articulosParaVale = productosConStock.map(x => ({
             nombre: x.prod.nombre,
             colorElegido: x.item.colorElegido || '',
             cantidad: x.item.cantidad || 1
         }));
-
         setTimeout(() => {
-            generarValeEntrega({
-                folio: datosVenta.folio, 
-                fecha: datosVenta.fecha,
-                cliente: { nombre: datosVenta.cliente.nombre }
-            }, articulosParaVale);
+            generarValeEntrega({ folio: datosVenta.folio + " (PROVISIONAL)", fecha: datosVenta.fecha, cliente: { nombre: datosVenta.cliente.nombre } }, articulosParaVale);
         }, 1000);
     }
 
-    if (_vendedorSeleccionado) {
-        window._ultimaVentaMetodo = metodoPago;
-        registrarComisionVenta(folioVenta, totalContado, _vendedorSeleccionado.id);
-        setTimeout(() => { window._ultimaVentaMetodo = undefined; }, 1000);
-    }
-
-    document.querySelectorAll('[data-modal]').forEach(m => m.remove());
-    document.querySelectorAll('.modal').forEach(m => {
-        m.classList.add('oculto');
-        m.style.display = 'none';
-    });
-
-    // Guardar referencias antes de limpiar el estado
-    const _clienteParaPuntos = clienteSeleccionado;
-    const _folioParaPuntos   = folioVenta;
-    const _totalParaPuntos   = totalContado;
-
-    // 🛡️ REPARACIÓN AUDITORÍA: Dar puntos solo por dinero real ingresado ANTES de limpiar variables
-    if (typeof window.acumularPuntosCliente === "function" && clienteSeleccionado) {
-        let montoIngresoHoy = 0;
-        
-        if (metodoPago === "contado" || metodoPago === "transferencia") {
-            montoIngresoHoy = totalContado;
-        } else if (metodoPago === "credito" || metodoPago === "apartado") {
-            montoIngresoHoy = enganche || 0; // Solo da puntos por el enganche real
-        }
-        
-        if (montoIngresoHoy > 0) {
-            window.acumularPuntosCliente(clienteSeleccionado.id, montoIngresoHoy);
-        }
-    }
-
-    // AHORA SÍ limpiamos el carrito y las variables de sesión
+    // 4. Limpiar interfaz (sin afectar DB real)
     carrito = [];
     clienteSeleccionado = null;
     plazoSeleccionado = null;
-    _vendedorSeleccionado = null;
+    window._vendedorSeleccionado = null;
     if (!StorageService.set("carrito", carrito)) console.error("❌ Error limpiando carrito");
     actualizarContadorCarrito();
 
-    alert(`✅ VENTA REGISTRADA\n\nFolio: ${folioVenta}\nCliente: ${datosVenta.cliente.nombre}\nTotal: ${window.formatearDineroMX(datosVenta.total)}`);
+    document.querySelectorAll('[data-modal]').forEach(m => m.remove());
+    document.querySelectorAll('.modal').forEach(m => { m.classList.add('oculto'); m.style.display = 'none'; });
+
+    alert(`⏳ VENTA EN CUARENTENA\\n\\nFolio: ${folioVenta}\\nLa nota fue emitida y el proceso en caja finalizó, pero el inventario y flujo de caja oficial esperan la autorización del Administrador.`);
     navA('tienda');
 }
+
+// 🚀 EJECUTOR REAL: Esta es la función original que escribe a la Base de Datos
+window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
+                            folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock, datosVentaP) {
+
+    let requisicionesCompra = StorageService.get("requisicionesCompra", []);
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    let cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+    let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
+    let pagaresSistema = StorageService.get("pagaresSistema", []);
+    let entregasPendientes = [];
+
+    // PASO 1: ACTUALIZAR STOCK 
+    productosConStock.forEach(x => {
+        const cantRequerida = x.item.cantidad || 1;
+        const stockActual = x.prod.stock || 0;
+        const colorElegido = x.item.colorElegido || '';
+        const ubicacionElegida = x.item.ubicacionElegida || ''; 
+
+        if (stockActual >= cantRequerida) {
+            if (x.prod.variantes && x.prod.variantes.length > 0) {
+                let restante = cantRequerida;
+                x.prod.variantes.forEach(v => {
+                    const coincideColor = !colorElegido || (v.color && v.color.toUpperCase() === colorElegido.toUpperCase());
+                    const coincideUbicacion = !ubicacionElegida || (v.ubicacion && v.ubicacion.toUpperCase() === ubicacionElegida.toUpperCase());
+                    if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
+                        const deducir = Math.min(Number(v.stock), restante);
+                        v.stock -= deducir;
+                        restante -= deducir;
+                    }
+                });
+                if (restante > 0) {
+                    x.prod.variantes.forEach(v => {
+                        if (restante > 0 && Number(v.stock) > 0) {
+                            const deducir = Math.min(Number(v.stock), restante);
+                            v.stock -= deducir;
+                            restante -= deducir;
+                        }
+                    });
+                }
+            }
+            x.prod.stock = stockActual - cantRequerida;
+            const concepto = colorElegido ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})` : `Venta - ${folioVenta}`;
+            if (typeof registrarMovimiento === 'function') registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
+        }
+    });
+
+    // PASO 2: CREAR ENTREGAS PENDIENTES Y REQUISICIONES
+    productosSinStock.forEach(x => {
+        const cantidadSolicitada = x.item.cantidad || 1;
+        const colorElegido = x.item.colorElegido || '';
+        const nombreConColor = colorElegido ? `${x.prod.nombre} (Color: ${colorElegido})` : x.prod.nombre;
+
+        entregasPendientes.push({ id: Date.now() + Math.random(), folioVenta, productoId: x.prod.id, nombre: nombreConColor, cantidad: cantidadSolicitada, motivo: "Sin stock en almacén" });
+        requisicionesCompra.push({ id: Date.now() + Math.random(), fecha: fechaHoy, producto: nombreConColor, folioVenta, cantidad: cantidadSolicitada, motivo: "Venta sin stock disponible", estatus: "Pendiente" });
+    });
+
+    // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
+    let montoIngresoHoy = (metodoPago === "contado" || metodoPago === "transferencia") ? totalContado : enganche;
+    let tituloConcepto = (metodoPago === "contado" || metodoPago === "transferencia") ? "Venta" : "Enganche";
+
+    if (montoIngresoHoy > 0) {
+        const cuentaId = window._estadoPago?.cuentaReceptora || 'efectivo';
+        const etiqueta = window._estadoPago?.etiquetaCuenta || 'Efectivo';
+
+        if (typeof window._ingresarCuenta === 'function') {
+            window._ingresarCuenta({ monto: montoIngresoHoy, cuentaId: cuentaId, etiqueta: etiqueta, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre} (Folio: ${folioVenta})`, referencia: `VENTA-${folioVenta}`, fecha: fechaVentaIso });
+        } else {
+            movimientosCaja.push({ id: Date.now(), folio: folioVenta, fecha: fechaVentaIso, tipo: "ingreso", monto: montoIngresoHoy, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre}`, referencia: `VENTA-${folioVenta}`, cuenta: cuentaId, etiquetaCuenta: etiqueta });
+            StorageService.set("movimientosCaja", movimientosCaja);
+        }
+    }
+
+    // PASO 4: CREAR CUENTAS POR COBRAR O APARTADOS
+    if (metodoPago === "credito") {
+        let saldosPorMes = CalculatorService.calcularCreditoConPeriodicidad ? CalculatorService.calcularCreditoConPeriodicidad((totalContado - enganche), datosVentaP.periodicidad).map(p => ({ meses: p.meses, total: p.total })) : [];
+        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalContado, engancheRecibido: enganche, saldoActual: planElegido.total, saldoOriginal: planElegido.total, metodo: metodoPago, plan: planElegido, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalContado, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes });
+
+        let diasIntervalo = datosVentaP.periodicidad === "quincenal" ? 14 : datosVentaP.periodicidad === "mensual" ? 30 : 7;
+        let fechaPago = new Date(fechaVentaIso);
+        const totalPagos = planElegido.pagos || Math.round(planElegido.semanas / (diasIntervalo/7));
+        
+        for (let i = 1; i <= totalPagos; i++) {
+            fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+            pagaresSistema.push({ id: Date.now() + i, folio: folioVenta, numeroPagere: `${folioVenta}-${i}/${totalPagos}`, clienteNombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, fechaEmision: fechaVentaIso, fechaVencimiento: fechaPago.getTime(), monto: planElegido.abono, estado: "Pendiente", diasAtrasoActual: 0 });
+        }
+        StorageService.set("cuentasPorCobrar", cuentasPorCobrar);
+        StorageService.set("pagaresSistema", pagaresSistema);
+
+    } else if (metodoPago === "apartado") {
+        let apartadosBD = StorageService.get("apartados", []);
+        apartadosBD.push({ id: Date.now(), folio: folioVenta, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, fechaApartado: fechaVentaIso, importeApartado: totalContado, enganche: enganche, saldoPendiente: saldoAFinanciar, articulos: datosVentaP.articulos, abonos: [], estado: 'Pendiente', vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null });
+        StorageService.set("apartados", apartadosBD);
+    }
+
+    StorageService.set("productos", productos);
+    StorageService.set("requisicionesCompra", requisicionesCompra);
+
+    if (entregasPendientes.length > 0) {
+        salidasPendientesVenta.push({ id: Date.now(), folioVenta, fecha: fechaHoy, fechaIso: fechaVentaIso, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, metodoPago, items: entregasPendientes, estatus: "Pendiente" });
+        StorageService.set("salidasPendientesVenta", salidasPendientesVenta);
+    }
+
+    const ventasRegistradas = StorageService.get('ventasRegistradas', []);
+    ventasRegistradas.push({ folio: folioVenta, fechaVenta: fechaVentaIso, fecha: fechaHoy, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, cliente: datosVentaP.cliente, total: totalContado, enganche: enganche, saldoAFinanciar: saldoAFinanciar, metodoPago: metodoPago, plan: planElegido, periodicidad: datosVentaP.periodicidad, articulos: datosVentaP.articulos, vendedor: window._vendedorSeleccionado?.nombre || null });
+    StorageService.set('ventasRegistradas', ventasRegistradas);
+
+    if (typeof window.acumularPuntosCliente === "function" && montoIngresoHoy > 0) {
+        window.acumularPuntosCliente(datosVentaP.cliente.id, montoIngresoHoy);
+    }
+};
 
 function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
     const cliente = datosVenta.cliente.nombre || "________________";
@@ -2937,6 +2760,378 @@ window.reimprimirFolioUnificado = function(folio, origen) {
         if (!v) return alert("❌ No se encontró la venta de contado.");
         if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(v);
     }
+};
+
+// ===============================================================
+// 🛡️ BÓVEDA DE AUTORIZACIONES (MAKER-CHECKER) - MOTOR REPARADO V2
+// ===============================================================
+
+// 1. PANEL PRINCIPAL DE LA VISTA (Mantiene tu estructura limpia)
+window.renderPanelAutorizaciones = function() {
+    const cont = document.getElementById("autorizaciones"); 
+    if (!cont) return;
+    
+    const ventasP = StorageService.get("ventasPendientes", []);
+    const abonosP = StorageService.get("abonosPendientes", []);
+
+    let html = `
+    <div style="padding: 20px;">
+        <h2 style="color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; margin-top:0;">🛡️ Bóveda de Autorizaciones (Pendientes)</h2>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+            
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="color: #d97706; margin-top: 0;">🛒 Ventas Provisionales (${ventasP.length})</h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <tr style="background: #fef3c7; text-align: left;">
+                        <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Fecha Captura</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Cliente</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Total</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Acción</th>
+                    </tr>
+                    ${ventasP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al día. No hay ventas pendientes.</td></tr>' : ''}
+                    ${ventasP.map((v, i) => `
+                    <tr style="border-bottom: 1px solid #f3f4f6;">
+                        <td style="padding: 8px;">${v.fechaCaptura || '-'}</td>
+                        <td style="padding: 8px;">${v.clienteNombre || 'Público General'}</td>
+                        <td style="padding: 8px; font-weight: bold;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v.totalVenta || 0)}</td>
+                        <td style="padding: 8px;">
+                            <button onclick="revisarVentaPendiente(${i})" style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar 🔍</button>
+                        </td>
+                    </tr>
+                    `).join('')}
+                </table>
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="color: #059669; margin-top: 0;">💵 Abonos Provisionales (${abonosP.length})</h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <tr style="background: #d1fae5; text-align: left;">
+                        <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Fecha Captura</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Folio Deuda</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Monto</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Acción</th>
+                    </tr>
+                    ${abonosP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al día. No hay abonos pendientes.</td></tr>' : ''}
+                    ${abonosP.map((a, i) => `
+                    <tr style="border-bottom: 1px solid #f3f4f6;">
+                        <td style="padding: 8px;">${a.fechaCaptura || '-'}</td>
+                        <td style="padding: 8px; color: #475569;">${a.folioCXC}</td>
+                        <td style="padding: 8px; font-weight: bold; color: #059669;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado || 0)}</td>
+                        <td style="padding: 8px;">
+                            <button onclick="revisarAbonoPendiente(${i})" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar 🔍</button>
+                        </td>
+                    </tr>
+                    `).join('')}
+                </table>
+            </div>
+
+        </div>
+    </div>`;
+    cont.innerHTML = html;
+};
+
+// 2. VENTANA DE REVISIÓN AVANZADA Y EDICIÓN DE VENTAS
+window.revisarVentaPendiente = function(index) {
+    const ventasP = StorageService.get("ventasPendientes", []);
+    const v = ventasP[index];
+    if (!v) return;
+
+    const fechaActualIso = v.args[7] || new Date().toISOString();
+    const fechaCorta = fechaActualIso.split('T')[0];
+
+    // Extraer condiciones de venta desde el paquete de datos
+    const metodoPago = v.args[0];
+    const totalVenta = parseFloat(v.totalVenta || v.args[1] || 0);
+    const engancheActual = parseFloat(v.args[2] || 0);
+    const saldoFinanciado = parseFloat(v.args[3] || 0);
+    const plan = v.args[4] || {};
+    
+    // Lógica para mostrar detalles de crédito si existen (EDITABLES)
+    let detalleCreditoHTML = "";
+    if (metodoPago === "credito") {
+        // Extraer plazo del plan o usar fallback
+        let plazo = 0;
+        let abonoSemanal = 0;
+        let periodicidad = 'semanal';
+        let valorPagareDisplay = 0;
+        
+        if (plan && (plan.plazo || plan.pagos)) {
+            plazo = plan.plazo || plan.pagos || 0;
+            abonoSemanal = plan.abono || (saldoFinanciado / plazo) || 0;
+            periodicidad = plan.periodicidad || 'semanal';
+            valorPagareDisplay = plan.valorPagare || (abonoSemanal * plazo + engancheActual);
+        } else {
+            // Si no hay plan, mostrar campos vacíos pero editables
+            plazo = 0;
+            abonoSemanal = 0;
+            valorPagareDisplay = engancheActual;
+        }
+        
+        if (plazo > 0 || saldoFinanciado > 0) {
+            detalleCreditoHTML = `
+                <div style="background:#fffbeb; border:1px solid #fcd34d; padding:12px; border-radius:8px; margin-bottom:15px; font-size:12px;">
+                    <label style="font-weight:bold; display:block; margin-bottom:8px; color:#92400e;">⚙️ AJUSTAR TÉRMINOS DEL CRÉDITO (Editable):</label>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                        <div>
+                            <label style="font-size:11px; color:#92400e;">Plazo (Pagos):</label>
+                            <input type="number" id="authPlazoCreditoAjuste" value="${plazo || 0}" min="1" max="52" step="1" style="width:100%; padding:6px; border:1px solid #fde68a; border-radius:4px; font-weight:bold;">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#92400e;">Abono por Período ($):</label>
+                            <input type="number" id="authAbonoPeriodoAjuste" value="${abonoSemanal.toFixed(2)}" min="0" step="0.01" style="width:100%; padding:6px; border:1px solid #fde68a; border-radius:4px; font-weight:bold;">
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; background:#fef3c7; padding:8px; border-radius:4px; font-weight:bold; color:#92400e;">
+                        <span>Período:</span>
+                        <span>${periodicidad}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; background:#fef3c7; padding:8px; border-radius:4px; margin-top:4px; font-weight:bold; color:#92400e;">
+                        <span>Valor Pagaré:</span>
+                        <span id="authValorPagareRecalc">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(valorPagareDisplay)}</span>
+                    </div>
+                </div>`;
+        }
+    }
+
+    // Determinar cuánto efectivo real entrará a caja/banco hoy
+    const importeEfectivoCaja = (metodoPago === "contado" || metodoPago === "transferencia") ? totalVenta : engancheActual;
+
+    // Construir tabla de productos del carrito provisional
+    const articulos = v.datosVenta?.articulos || [];
+    let tablaProductosHTML = "";
+    articulos.forEach(art => {
+        tablaProductosHTML += `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding:6px 0;">• ${art.nombre} ${art.colorElegido ? `(${art.colorElegido})` : ''}</td>
+                <td style="padding:6px 0; text-align:center;">${art.cantidad || 1}</td>
+                <td style="padding:6px 0; text-align:right;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(art.precioContado || art.precio || 0)}</td>
+            </tr>`;
+    });
+
+    const html = `
+    <div data-modal="auth-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; padding:20px;">
+        <div style="background:white; padding:25px; border-radius:12px; width:100%; max-width:500px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); max-height:90vh; overflow-y:auto;">
+            <h3 style="color:#d97706; margin-top:0; border-bottom:2px solid #fde68a; padding-bottom:8px;">🛒 Auditoría de Venta Provisional</h3>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:13px; margin-bottom:15px; background:#f8fafc; padding:10px; border-radius:8px;">
+                <div><strong>Folio:</strong> ${v.args[5]}</div>
+                <div><strong>Método:</strong> <span style="text-transform:uppercase; font-weight:bold; color:#1e3a8a;">${metodoPago}</span></div>
+                <div style="grid-column: span 2;"><strong>Cliente:</strong> ${v.clienteNombre}</div>
+            </div>
+            
+            ${detalleCreditoHTML}
+
+            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">📦 Productos en la Nota:</label>
+            <div style="margin-bottom:15px; border-bottom:1px dashed #cbd5e1; padding-bottom:10px;">
+                <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                    <thead>
+                        <tr style="color:#64748b; text-align:left; border-bottom:1px solid #e2e8f0;">
+                            <th>Descripción</th>
+                            <th style="text-align:center;">Cant</th>
+                            <th style="text-align:right;">Precio</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tablaProductosHTML}</tbody>
+                </table>
+            </div>
+
+            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">💰 Condiciones de Venta (Editables):</label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:5px; margin-bottom:15px;">
+                <div>
+                    <label style="font-size:11px; color:#64748b;">Total de la Venta ($):</label>
+                    <input type="number" id="authTotalVenta" value="${totalVenta}" style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:6px;">
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#64748b;">Enganche / Anticipo ($):</label>
+                    <input type="number" id="authEngancheVenta" value="${engancheActual}" ${metodoPago === 'contado' ? 'disabled style="background:#f1f5f9; width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:6px;"' : 'style="width:100%; padding:6px; border:1px solid #cbd5e1; border-radius:6px;"'}>
+                </div>
+            </div>
+
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:10px; border-radius:8px; margin-bottom:15px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:#166534; font-weight:bold;">💵 Importe neto que ingresa a Caja:</span>
+                <strong style="color:#15803d; font-size:15px;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(importeEfectivoCaja)}</strong>
+            </div>
+            
+            <label style="display:block; font-weight:bold; font-size:12px; color:#475569;">📅 Fecha de Aplicación Oficial:</label>
+            <input type="date" id="authFechaVenta" value="${fechaCorta}" style="width:100%; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box; margin-bottom:20px;">
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">✅ Autorizar a DB</button>
+                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">🗑️ Anular Movimiento</button>
+                <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    
+    // Agregar listener para recalcular Valor Pagaré cuando se edite plazo o abono (CRÉDITO)
+    if (metodoPago === "credito") {
+        setTimeout(() => {
+            const plazoInput = document.getElementById('authPlazoCreditoAjuste');
+            const abonoInput = document.getElementById('authAbonoPeriodoAjuste');
+            const valorPagareDisplay = document.getElementById('authValorPagareRecalc');
+            
+            if (plazoInput && abonoInput && valorPagareDisplay) {
+                const recalcularValorPagare = () => {
+                    const plazo = parseInt(plazoInput.value) || 1;
+                    const abono = parseFloat(abonoInput.value) || 0;
+                    const enganche = engancheActual;
+                    const valorPagare = (abono * plazo) + enganche;
+                    valorPagareDisplay.textContent = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(valorPagare);
+                };
+                plazoInput.addEventListener('input', recalcularValorPagare);
+                abonoInput.addEventListener('input', recalcularValorPagare);
+            }
+        }, 100);
+    }
+};
+
+// 3. PROCESADOR DE APROBACIONES (MODO SILENCIOSO)
+window.aprobarVentaCuarentena = function(index) {
+    const ventasP = StorageService.get("ventasPendientes", []);
+    const v = ventasP[index];
+    if (!v) return;
+    
+    // 1. Capturar las correcciones hechas por el Admin en la ventana
+    const nuevoTotal = parseFloat(document.getElementById('authTotalVenta').value) || 0;
+    const nuevoEnganche = parseFloat(document.getElementById('authEngancheVenta').value) || 0;
+    const nuevaFechaCorta = document.getElementById('authFechaVenta').value;
+    const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
+    
+    // NUEVOS CAMPOS: Capturar ajustes de crédito si aplica
+    const nuevoPlazoCreditoInput = document.getElementById('authPlazoCreditoAjuste');
+    const nuevoAbonoPeriodoInput = document.getElementById('authAbonoPeriodoAjuste');
+    
+    if (nuevoTotal <= 0) return alert("❌ El total de la venta debe ser mayor a 0.");
+
+    // 2. Modificar dinámicamente los argumentos antes de inyectar a la base de datos real
+    v.totalVenta = nuevoTotal;
+    v.args[1] = nuevoTotal; // totalContado original
+    v.args[2] = nuevoEnganche; // enganche original
+    
+    // Si es crédito, recalcular el saldo pendiente financiero CON LA MATEMÁTICA CORRECTA
+    if (v.args[0] === "credito" && v.args[4]) {
+        const saldoFinanciado = nuevoTotal - nuevoEnganche;
+        v.args[3] = saldoFinanciado; 
+        
+        // AJUSTAR PLAZO Y ABONO SI SE MODIFICARON
+        if (nuevoPlazoCreditoInput) {
+            const nuevoPlazoCreditoValor = parseInt(nuevoPlazoCreditoInput.value) || (v.args[4].plazo || v.args[4].pagos || 1);
+            const nuevoAbonoPeriodo = parseFloat(nuevoAbonoPeriodoInput.value) || (saldoFinanciado / nuevoPlazoCreditoValor);
+            
+            // 🛡️ CORRECCIÓN: La deuda real en el sistema es la suma de los pagarés.
+            const totalDeudaFinanciera = parseFloat((nuevoAbonoPeriodo * nuevoPlazoCreditoValor).toFixed(2));
+
+            v.args[4].plazo = nuevoPlazoCreditoValor;
+            v.args[4].pagos = nuevoPlazoCreditoValor;
+            v.args[4].abono = parseFloat(nuevoAbonoPeriodo.toFixed(2));
+            v.args[4].total = totalDeudaFinanciera; // Matemática blindada
+            
+            // Recalcular valor pagaré visual 
+            v.args[4].valorPagare = parseFloat((totalDeudaFinanciera + nuevoEnganche).toFixed(2));
+        } else {
+            v.args[4].total = saldoFinanciado;
+        }
+    } 
+    // Si es un apartado, actualizar el saldo que resta liquidar
+    else if (v.args[0] === "apartado") {
+        v.args[3] = nuevoTotal - nuevoEnganche; 
+    }
+
+    // Actualizar las marcas de tiempo oficiales de auditoría
+    v.args[6] = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta; 
+    v.args[7] = nuevaFechaIso; 
+
+    // Actualizar el espejo del objeto de impresión para futuras reimpresiones
+    v.datosVenta.total = nuevoTotal;
+    v.datosVenta.enganche = nuevoEnganche;
+    v.datosVenta.fecha = v.args[6];
+    v.datosVenta.fechaIso = nuevaFechaIso;
+    v.datosVenta.saldoPendiente = v.args[3];
+    v.datosVenta.tipoComprobante = "Ticket de Venta Oficial (Autorizado)";
+    if (v.args[0] === "credito" && v.args[4]) {
+        v.datosVenta.planCredito = v.args[4];
+    }
+
+    // 3. Ejecutar el motor de transacciones del POS original (GUARDA SILENCIOSAMENTE EN DB)
+    window._vendedorSeleccionado = v.vendedorSeleccionado;
+    window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
+    
+    // 4. Limpiar de la cuarentena
+    ventasP.splice(index, 1);
+    StorageService.set("ventasPendientes", ventasP);
+    document.querySelector('[data-modal=auth-venta]').remove();
+    
+    alert("✅ Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
+
+window.rechazarVentaCuarentena = function(index) {
+    if (!confirm("¿Deseas eliminar permanentemente esta venta provisional sin afectar el inventario ni la caja?")) return;
+    const ventasP = StorageService.get("ventasPendientes", []);
+    ventasP.splice(index, 1);
+    StorageService.set("ventasPendientes", ventasP);
+    document.querySelector('[data-modal=auth-venta]').remove();
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
+
+// 3. DETALLE DE ABONOS PENDIENTES (MODAL)
+window.revisarAbonoPendiente = function(index) {
+    const abonosP = StorageService.get("abonosPendientes", []);
+    const a = abonosP[index];
+    if (!a) return;
+
+    const fechaCorta = a.fechaAbonoIso.split('T')[0];
+
+    const html = `
+    <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
+            <h3 style="color:#059669; margin-top:0;">💵 Autorizar Abono Provisional</h3>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Folio Crédito:</strong> ${a.folioCXC}</p>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
+            
+            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px; color:#475569;">Fecha de Ingreso Oficial (Auditoría):</label>
+            <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
+
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Ingresar a Caja</button>
+                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">🗑️ Eliminar</button>
+                <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.aprobarAbonoCuarentena = function(index) {
+    const abonosP = StorageService.get("abonosPendientes", []);
+    const a = abonosP[index];
+    if (!a) return;
+    
+    const nuevaFechaCorta = document.getElementById('authFechaAbono').value;
+    const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
+    
+    a.fechaAbonoIso = nuevaFechaIso;
+    a.fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta;
+
+    window.ejecutarAbonoAutorizadoReal(a);
+    
+    abonosP.splice(index, 1);
+    StorageService.set("abonosPendientes", abonosP);
+    document.querySelector('[data-modal=auth-abono]').remove();
+    alert("✅ Abono aprobado y registrado en flujo de caja.");
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
+
+window.rechazarAbonoCuarentena = function(index) {
+    if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
+    const abonosP = StorageService.get("abonosPendientes", []);
+    abonosP.splice(index, 1);
+    StorageService.set("abonosPendientes", abonosP);
+    document.querySelector('[data-modal=auth-abono]').remove();
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 };
 
 // Exponer la función globalmente para poder llamarla desde un botón

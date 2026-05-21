@@ -37,14 +37,14 @@ window.mostrarProductos = function() {
                     <label style="display: block; font-weight: bold; color: rgba(255,255,255,0.9); margin-bottom: 8px; font-size: 13px;">🗂️ Categoría</label>
                     <select id="filtroCatalogoCategoria" onchange="window.filtrarTiendaCategoria(this.value)" style="width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px; color: #333; box-sizing: border-box; background: white;">
                         <option value="todas">-- Todas --</option>
-                        ${[...new Set(prods.map(p => p.categoria).filter(Boolean))].sort().map(c => `<option value="${c}" ${filtroCat === c ? 'selected' : ''}>${c}</option>`).join('')}
+                        ${window._obtenerCategoriasOrdenadas().map(c => `<option value="${c}" ${filtroCat === c ? 'selected' : ''}>${c}</option>`).join('')}
                     </select>
                 </div>
                 <div>
                     <label style="display: block; font-weight: bold; color: rgba(255,255,255,0.9); margin-bottom: 8px; font-size: 13px;">🏷️ Subcategoría</label>
                     <select id="filtroCatalogoSubcategoria" onchange="window.filtrarTiendaSubcategoria(this.value)" ${!filtroCat ? 'disabled' : ''} style="width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px; color: #333; box-sizing: border-box; background: white;">
                         <option value="todas">-- Todas --</option>
-                        ${filtroCat ? [...new Set(prods.filter(p => p.categoria === filtroCat).map(p => p.subcategoria).filter(Boolean))].sort().map(s => `<option value="${s}" ${filtroSub === s ? 'selected' : ''}>${s}</option>`).join('') : ''}
+                        ${filtroCat ? window._obtenerSubcategoriasOrdenadas(filtroCat).map(s => `<option value="${s}" ${filtroSub === s ? 'selected' : ''}>${s}</option>`).join('') : ''}
                     </select>
                 </div>
                 <button onclick="window.limpiarFiltrosCatalogo()" style="padding: 10px 15px; background: rgba(255,255,255,0.2); color: white; border: 2px solid white; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; height: 38px;">🔄</button>
@@ -103,8 +103,8 @@ window.renderProductosCatalogo = function(listaProductos) {
         if (!planes || planes.length === 0) planes = [{meses: 1, total: grupo.precioMin, abono: grupo.precioMin}];
         const plan6 = planes[5] || planes[planes.length - 1] || planes[0];
 
-        const colorStock = grupo.stockTotal > 0 ? '#10b981' : '#f43f5e';
-        const badgeStock = grupo.stockTotal > 0 ? `STOCK: ${grupo.stockTotal}` : `AGOTADO`;
+        const colorStock = grupo.stockTotal > 0 ? '#10b981' : '#0011fd';
+        const badgeStock = grupo.stockTotal > 0 ? `STOCK: ${grupo.stockTotal}` : `Sobre pedido`;
 
         tarjetasHTML += `
             <div style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; display: flex; flex-direction: column; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; box-sizing: border-box;">
@@ -378,6 +378,36 @@ window.filtrarTiendaCategoria = function(cat) { window._filtroTiendaCategoria = 
 window.filtrarTiendaSubcategoria = function(sub) { window._filtroTiendaSubcategoria = sub === 'todas' ? '' : sub; window.filtrarCatalogo(); };
 window.limpiarFiltrosCatalogo = function() { window._filtroTiendaBuscador = ''; window._filtroTiendaCategoria = ''; window._filtroTiendaSubcategoria = ''; window.mostrarProductos(); };
 window.verDetalle = function(id) { window.verProductoAgrupado(id); };
+
+// Función para obtener categorías ordenadas por posición
+window._obtenerCategoriasOrdenadas = function() {
+    const prods = StorageService.get("productos", []) || window.productos || [];
+    const categoriasEnProductos = [...new Set(prods.map(p => p.categoria).filter(Boolean))];
+    const categoriasData = window.categoriasData || [];
+    
+    // Ordena por posición, las que no tengan posición van al final
+    const conPosicion = categoriasData.filter(c => categoriasEnProductos.includes(c.nombre)).sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+    const nombres = conPosicion.map(c => c.nombre);
+    const sinOrden = categoriasEnProductos.filter(c => !nombres.includes(c));
+    
+    return [...nombres, ...sinOrden.sort()];
+};
+
+// Función para obtener subcategorías ordenadas por posición
+window._obtenerSubcategoriasOrdenadas = function(categoriaSeleccionada) {
+    const prods = StorageService.get("productos", []) || window.productos || [];
+    const subcategoriesEnProductos = [...new Set(prods.filter(p => p.categoria === categoriaSeleccionada).map(p => p.subcategoria).filter(Boolean))];
+    const categoriasData = window.categoriasData || [];
+    const catData = categoriasData.find(c => c.nombre === categoriaSeleccionada);
+    
+    if (catData && catData.subcategorias) {
+        const conPosicion = catData.subcategorias.filter(s => subcategoriesEnProductos.includes(s.nombre)).sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+        const nombres = conPosicion.map(s => s.nombre);
+        const sinOrden = subcategoriesEnProductos.filter(s => !nombres.includes(s));
+        return [...nombres, ...sinOrden.sort()];
+    }
+    return subcategoriesEnProductos.sort();
+};
 
 if (window._filtroTiendaBuscador === undefined) window._filtroTiendaBuscador = '';
 if (window._filtroTiendaCategoria === undefined) window._filtroTiendaCategoria = '';
