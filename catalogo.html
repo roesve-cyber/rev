@@ -289,36 +289,37 @@ function generarMenuCategorias() {
   var nav = document.getElementById('categoriasNav');
   nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
   
+  // Obtener categorías únicas de los productos
+  var catsEnProductos = [];
+  for (var i = 0; i < productos.length; i++) {
+    var cat = productos[i].categoria || "Varios";
+    if (catsEnProductos.indexOf(cat) === -1) catsEnProductos.push(cat);
+  }
+  
+  // Leer categoriasData para obtener posiciones
   var categoriasData = [];
   try {
     categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
   } catch(e) {}
   
-  // Filtrar solo categorías que tengan productos
-  var catsConProductos = [];
-  for (var i = 0; i < categoriasData.length; i++) {
-    var cat = categoriasData[i];
-    var tieneProducto = false;
-    for (var p = 0; p < productos.length; p++) {
-      if ((productos[p].categoria || "").toLowerCase() === cat.nombre.toLowerCase()) {
-        tieneProducto = true;
-        break;
-      }
+  // Ordenar catsEnProductos según posicion de categoriasData
+  catsEnProductos.sort(function(a, b) {
+    var catA = null, catB = null;
+    for (var i = 0; i < categoriasData.length; i++) {
+      if (categoriasData[i].nombre.toLowerCase() === a.toLowerCase()) catA = categoriasData[i];
+      if (categoriasData[i].nombre.toLowerCase() === b.toLowerCase()) catB = categoriasData[i];
     }
-    if (tieneProducto) {
-      catsConProductos.push(cat);
-    }
-  }
+    var posA = (catA && catA.posicion) ? catA.posicion : 999;
+    var posB = (catB && catB.posicion) ? catB.posicion : 999;
+    return posA - posB;
+  });
   
-  // Ordenar por posicion
-  catsConProductos.sort(function(a, b) { return (a.posicion || 999) - (b.posicion || 999); });
-  
-  // Agregar botones en orden
-  for (var j = 0; j < catsConProductos.length; j++) {
+  // Agregar botones
+  for (var j = 0; j < catsEnProductos.length; j++) {
     var btn = document.createElement('button');
     btn.className = 'cat-btn';
-    btn.textContent = catsConProductos[j].nombre;
-    btn.onclick = (function(cat) { return function() { setCategoria(cat.nombre, btn); }; })(catsConProductos[j]);
+    btn.textContent = catsEnProductos[j];
+    btn.onclick = (function(c) { return function() { setCategoria(c, btn); }; })(catsEnProductos[j]);
     nav.appendChild(btn);
   }
 }
@@ -333,45 +334,45 @@ function setCategoria(c, btn) {
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
+    var subs = [];
+    for (var i = 0; i < productos.length; i++) {
+      if (productos[i].categoria === c) {
+        var sub = productos[i].subcategoria;
+        if (sub && subs.indexOf(sub) === -1) subs.push(sub);
+      }
+    }
+    
+    // Leer categoriasData para obtener posiciones de subcategorías
     var categoriasData = [];
     try {
       categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
     } catch(e) {}
     
     var catObj = null;
-    for (var i = 0; i < categoriasData.length; i++) {
-      if (categoriasData[i].nombre.toLowerCase() === c.toLowerCase()) {
-        catObj = categoriasData[i];
+    for (var idx = 0; idx < categoriasData.length; idx++) {
+      if (categoriasData[idx].nombre.toLowerCase() === c.toLowerCase()) {
+        catObj = categoriasData[idx];
         break;
       }
     }
     
-    var subsConProductos = [];
-    if (catObj && catObj.subcategorias && Array.isArray(catObj.subcategorias)) {
-      for (var s = 0; s < catObj.subcategorias.length; s++) {
-        var sub = catObj.subcategorias[s];
-        var tieneProducto = false;
-        for (var p = 0; p < productos.length; p++) {
-          if ((productos[p].categoria || "").toLowerCase() === c.toLowerCase() && 
-              (productos[p].subcategoria || "").toLowerCase() === sub.nombre.toLowerCase()) {
-            tieneProducto = true;
-            break;
-          }
-        }
-        if (tieneProducto) {
-          subsConProductos.push(sub);
+    // Ordenar subs según posicion de categoriasData
+    subs.sort(function(a, b) {
+      var subA = null, subB = null;
+      if (catObj && catObj.subcategorias) {
+        for (var i = 0; i < catObj.subcategorias.length; i++) {
+          if (catObj.subcategorias[i].nombre.toLowerCase() === a.toLowerCase()) subA = catObj.subcategorias[i];
+          if (catObj.subcategorias[i].nombre.toLowerCase() === b.toLowerCase()) subB = catObj.subcategorias[i];
         }
       }
-    }
+      var posA = (subA && subA.posicion) ? subA.posicion : 999;
+      var posB = (subB && subB.posicion) ? subB.posicion : 999;
+      return posA - posB;
+    });
     
-    subsConProductos.sort(function(a, b) { return (a.posicion || 999) - (b.posicion || 999); });
-    
-    if (subsConProductos.length > 0) {
-      var html = '<div class="sub-pill active" onclick="setSub(\'todos\', this)">Ver Todo</div>';
-      for (var j = 0; j < subsConProductos.length; j++) {
-        html += '<div class="sub-pill" onclick="setSub(\'' + subsConProductos[j].nombre + '\', this)">' + subsConProductos[j].nombre + '</div>';
-      }
-      subnav.innerHTML = html;
+    if(subs.length > 0) {
+      subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
+        subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
       subnav.classList.add('visible');
     } else {
       subnav.classList.remove('visible');
