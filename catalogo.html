@@ -281,25 +281,27 @@ async function inicializar() {
 
 function generarMenuCategorias() {
   const nav = document.getElementById('categoriasNav');
-  const catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
-  
-  // ORDEN ESPECÍFICO SOLICITADO
-  const ordenDeseado = ["muebles", "colchones", "linea blanca", "electronica"];
-  
-  catsEnData.sort((a, b) => {
-    let ia = ordenDeseado.indexOf(a.toLowerCase());
-    let ib = ordenDeseado.indexOf(b.toLowerCase());
-    if (ia !== -1 && ib !== -1) return ia - ib;
-    if (ia !== -1) return -1;
-    if (ib !== -1) return 1;
-    return a.localeCompare(b);
-  });
+  nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
 
-  catsEnData.forEach(c => {
+  // Leer categoriasData de localStorage y filtrar solo las que tengan productos activos
+  let categoriasData = [];
+  try {
+    categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
+  } catch(e) {}
+
+  // Filtrar categorías que tengan al menos un producto activo
+  const catsConProductos = categoriasData.filter(cat => 
+    productos.some(p => (p.categoria || "Varios") === cat.nombre)
+  );
+
+  // Ordenar por 'posicion' (o 999 si no existe)
+  catsConProductos.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+
+  catsConProductos.forEach(cat => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
-    btn.textContent = c;
-    btn.onclick = () => setCategoria(c, btn);
+    btn.textContent = cat.nombre;
+    btn.onclick = () => setCategoria(cat.nombre, btn);
     nav.appendChild(btn);
   });
 }
@@ -314,10 +316,24 @@ function setCategoria(c, btn) {
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
-    const subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
+    // Leer categoriasData de localStorage para obtener subcategorías ordenadas
+    let categoriasData = [];
+    try {
+      categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
+    } catch(e) {}
+    const catObj = categoriasData.find(cat => cat.nombre === c);
+    let subs = [];
+    if (catObj && Array.isArray(catObj.subcategorias)) {
+      // Filtrar solo subcategorías con productos activos
+      subs = catObj.subcategorias.filter(sub => 
+        productos.some(p => p.categoria === c && p.subcategoria === sub.nombre)
+      );
+      // Ordenar por 'posicion' (o 999 si no existe)
+      subs.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+    }
     if(subs.length > 0) {
       subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
-        subs.sort().map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
+        subs.map(sub => `<div class="sub-pill" onclick="setSub('${sub.nombre}', this)">${sub.nombre}</div>`).join('');
       subnav.classList.add('visible');
     } else {
       subnav.classList.remove('visible');
