@@ -287,19 +287,40 @@ async function inicializar() {
 
 function generarMenuCategorias() {
   var nav = document.getElementById('categoriasNav');
-    nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
-    var catsEnData = [];
-    for (var i = 0; i < productos.length; i++) {
-      var cat = productos[i].categoria || "Varios";
-      if (catsEnData.indexOf(cat) === -1) catsEnData.push(cat);
+  nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
+  
+  var categoriasData = [];
+  try {
+    categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
+  } catch(e) {}
+  
+  var catsConProductos = [];
+  for (var i = 0; i < categoriasData.length; i++) {
+    var catNombre = categoriasData[i].nombre;
+    var tieneProducto = false;
+    for (var k = 0; k < productos.length; k++) {
+      if (normalizarNombre(productos[k].categoria || "Varios") === normalizarNombre(catNombre)) {
+        tieneProducto = true;
+        break;
+      }
     }
-    for (var j = 0; j < catsEnData.length; j++) {
-      var btn = document.createElement('button');
-      btn.className = 'cat-btn';
-      btn.textContent = catsEnData[j];
-      btn.onclick = (function(c) { return function() { setCategoria(c, btn); }; })(catsEnData[j]);
-      nav.appendChild(btn);
+    if (tieneProducto) {
+      catsConProductos.push({
+        nombre: catNombre,
+        posicion: categoriasData[i].posicion || 999
+      });
     }
+  }
+  
+  catsConProductos.sort(function(a, b) { return a.posicion - b.posicion; });
+  
+  for (var j = 0; j < catsConProductos.length; j++) {
+    var btn = document.createElement('button');
+    btn.className = 'cat-btn';
+    btn.textContent = catsConProductos[j].nombre;
+    btn.onclick = (function(c) { return function() { setCategoria(c, btn); }; })(catsConProductos[j].nombre);
+    nav.appendChild(btn);
+  }
 }
 
 function setCategoria(c, btn) {
@@ -312,18 +333,46 @@ function setCategoria(c, btn) {
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
-    var subs = [];
-    for (var i = 0; i < productos.length; i++) {
-      if (productos[i].categoria === c) {
-        var sub = productos[i].subcategoria;
-        if (sub && subs.indexOf(sub) === -1) subs.push(sub);
+    var categoriasData = [];
+    try {
+      categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
+    } catch(e) {}
+    
+    var catObj = null;
+    for (var i = 0; i < categoriasData.length; i++) {
+      if (normalizarNombre(categoriasData[i].nombre) === normalizarNombre(c)) {
+        catObj = categoriasData[i];
+        break;
       }
     }
-    if (subs.length > 0) {
+    
+    var subsConProductos = [];
+    if (catObj && catObj.subcategorias) {
+      for (var s = 0; s < catObj.subcategorias.length; s++) {
+        var subNombre = catObj.subcategorias[s].nombre;
+        var tieneProducto = false;
+        for (var p = 0; p < productos.length; p++) {
+          if (normalizarNombre(productos[p].categoria || "Varios") === normalizarNombre(c) && 
+              normalizarNombre(productos[p].subcategoria) === normalizarNombre(subNombre)) {
+            tieneProducto = true;
+            break;
+          }
+        }
+        if (tieneProducto) {
+          subsConProductos.push({
+            nombre: subNombre,
+            posicion: catObj.subcategorias[s].posicion || 999
+          });
+        }
+      }
+    }
+    
+    subsConProductos.sort(function(a, b) { return a.posicion - b.posicion; });
+    
+    if (subsConProductos.length > 0) {
       var html = '<div class="sub-pill active" onclick="setSub(\'todos\', this)">Ver Todo</div>';
-      subs.sort();
-      for (var j = 0; j < subs.length; j++) {
-        html += '<div class="sub-pill" onclick="setSub(\'' + subs[j] + '\', this)">' + subs[j] + '</div>';
+      for (var j = 0; j < subsConProductos.length; j++) {
+        html += '<div class="sub-pill" onclick="setSub(\'' + subsConProductos[j].nombre + '\', this)">' + subsConProductos[j].nombre + '</div>';
       }
       subnav.innerHTML = html;
       subnav.classList.add('visible');
