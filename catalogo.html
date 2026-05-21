@@ -5,6 +5,12 @@ function normalizarNombre(str) {
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<script>
+// Normaliza cadenas para comparar nombres de categorías/subcategorías (sin tildes, mayúsculas ni espacios)
+function normalizarNombre(str) {
+  return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
+}
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MUEBLERIA MI PUEBLITO</title>
@@ -285,34 +291,14 @@ async function inicializar() {
 
 function generarMenuCategorias() {
   const nav = document.getElementById('categoriasNav');
-  nav.innerHTML = '';
-  nav.appendChild(Object.assign(document.createElement('button'), {
-    className: 'cat-btn active',
-    textContent: 'Todos los productos',
-    onclick: function() { setCategoria('todos', this); }
-  }));
-
-  // Obtener categorías únicas desde productos
-  let catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
-
-  // Si existe categoriasData, ordenar catsEnData según 'posicion'
-  let categoriasData = [];
-  try {
-    categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
-  } catch(e) {}
-  if (categoriasData.length > 0) {
-    catsEnData.sort((a, b) => {
-      const ca = categoriasData.find(cat => normalizarNombre(cat.nombre) === normalizarNombre(a));
-      const cb = categoriasData.find(cat => normalizarNombre(cat.nombre) === normalizarNombre(b));
-      return ((ca?.posicion ?? 999) - (cb?.posicion ?? 999));
-    });
-  }
-
+  const nav = document.getElementById('categoriasNav');
+  nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
+  const catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
   catsEnData.forEach(c => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = c;
-    btn.onclick = function() { setCategoria(c, btn); };
+    btn.onclick = () => setCategoria(c, btn);
     nav.appendChild(btn);
   });
 }
@@ -327,29 +313,20 @@ function setCategoria(c, btn) {
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
-    // Obtener subcategorías únicas desde productos
-    let subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
-
-    // Si existe categoriasData, ordenar subs según 'posicion'
-    let categoriasData = [];
-    try {
-      categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
-    } catch(e) {}
-    const catObj = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (c || '').toLowerCase().trim());
-    if (catObj && Array.isArray(catObj.subcategorias)) {
-      subs.sort((a, b) => {
-        const sa = catObj.subcategorias.find(sub => normalizarNombre(sub.nombre) === normalizarNombre(a));
-        const sb = catObj.subcategorias.find(sub => normalizarNombre(sub.nombre) === normalizarNombre(b));
-        return ((sa?.posicion ?? 999) - (sb?.posicion ?? 999));
-      });
-    }
-    if(subs.length > 0) {
-      subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
-        subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
-      subnav.classList.add('visible');
-    } else {
+    const subnav = document.getElementById('subnav');
+    if (c === 'todos') {
       subnav.classList.remove('visible');
+    } else {
+      const subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
+      if(subs.length > 0) {
+        subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
+          subs.sort().map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
+        subnav.classList.add('visible');
+      } else {
+        subnav.classList.remove('visible');
+      }
     }
+    render();
   }
   render();
 }
