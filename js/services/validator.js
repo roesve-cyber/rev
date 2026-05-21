@@ -180,6 +180,123 @@ const ValidatorService = {
     return { valid: true, error: '' };
   }
 };
+// ===============================================================
+// 🛡️ BÓVEDA DE AUTORIZACIONES (MAKER-CHECKER)
+// ===============================================================
+window.revisarVentaPendiente = function(index) {
+    const ventasP = StorageService.get("ventasPendientes", []);
+    const v = ventasP[index];
+    if (!v) return;
+
+    // v.args: [metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, folioVenta, fechaHoy, fechaVentaIso...]
+    const fechaActualIso = v.args[7];
+    const fechaCorta = fechaActualIso.split('T')[0];
+
+    const html = `
+    <div data-modal="auth-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; padding:25px; border-radius:12px; width:400px;">
+            <h3 style="color:#d97706; margin-top:0;">🛒 Autorizar Venta Provisional</h3>
+            <p><strong>Folio:</strong> ${v.args[5]}</p>
+            <p><strong>Cliente:</strong> ${v.clienteNombre}</p>
+            <p><strong>Total:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v.totalVenta)}</p>
+            
+            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px;">Fecha de Aplicación Oficial (Auditoría):</label>
+            <input type="date" id="authFechaVenta" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; margin-top:5px;">
+
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Autorizar a DB</button>
+                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">🗑️ Eliminar</button>
+                <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.aprobarVentaCuarentena = function(index) {
+    const ventasP = StorageService.get("ventasPendientes", []);
+    const v = ventasP[index];
+    const nuevaFechaCorta = document.getElementById('authFechaVenta').value;
+    const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
+    
+    // Inyectar la nueva fecha aprobada por el Admin
+    v.args[6] = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta; 
+    v.args[7] = nuevaFechaIso; 
+
+    // Ejecutar el motor real
+    window._vendedorSeleccionado = v.vendedorSeleccionado;
+    window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
+    
+    ventasP.splice(index, 1);
+    StorageService.set("ventasPendientes", ventasP);
+    document.querySelector('[data-modal=auth-venta]').remove();
+    alert("✅ Venta autorizada e ingresada al sistema financiero oficial.");
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
+
+window.rechazarVentaCuarentena = function(index) {
+    if (!confirm("¿Deseas eliminar permanentemente esta venta provisional sin afectar el sistema?")) return;
+    const ventasP = StorageService.get("ventasPendientes", []);
+    ventasP.splice(index, 1);
+    StorageService.set("ventasPendientes", ventasP);
+    document.querySelector('[data-modal=auth-venta]').remove();
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
+
+window.revisarAbonoPendiente = function(index) {
+    const abonosP = StorageService.get("abonosPendientes", []);
+    const a = abonosP[index];
+    if (!a) return;
+
+    const fechaCorta = a.fechaAbonoIso.split('T')[0];
+
+    const html = `
+    <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; padding:25px; border-radius:12px; width:400px;">
+            <h3 style="color:#059669; margin-top:0;">💵 Autorizar Abono Provisional</h3>
+            <p><strong>Folio Crédito:</strong> ${a.folioCXC}</p>
+            <p><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
+            <p><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
+            
+            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px;">Fecha de Ingreso Oficial (Auditoría):</label>
+            <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; margin-top:5px;">
+
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Ingresar a Caja</button>
+                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">🗑️ Eliminar</button>
+                <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.aprobarAbonoCuarentena = function(index) {
+    const abonosP = StorageService.get("abonosPendientes", []);
+    const a = abonosP[index];
+    const nuevaFechaCorta = document.getElementById('authFechaAbono').value;
+    const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
+    
+    a.fechaAbonoIso = nuevaFechaIso;
+    a.fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta;
+
+    window.ejecutarAbonoAutorizadoReal(a);
+    
+    abonosP.splice(index, 1);
+    StorageService.set("abonosPendientes", abonosP);
+    document.querySelector('[data-modal=auth-abono]').remove();
+    alert("✅ Abono aprobado y registrado en flujo de caja.");
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
+
+window.rechazarAbonoCuarentena = function(index) {
+    if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
+    const abonosP = StorageService.get("abonosPendientes", []);
+    abonosP.splice(index, 1);
+    StorageService.set("abonosPendientes", abonosP);
+    document.querySelector('[data-modal=auth-abono]').remove();
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+};
 
 // 🛡️ Alias global para módulos que usen la versión corta
 window.dinero = window.formatearDineroMX;
