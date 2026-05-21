@@ -1,3 +1,7 @@
+// Normaliza cadenas para comparar nombres de categorías/subcategorías (sin tildes, mayúsculas ni espacios)
+function normalizarNombre(str) {
+  return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
+}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -298,8 +302,8 @@ function generarMenuCategorias() {
   } catch(e) {}
   if (categoriasData.length > 0) {
     catsEnData.sort((a, b) => {
-      const ca = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (a || '').toLowerCase().trim());
-      const cb = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (b || '').toLowerCase().trim());
+      const ca = categoriasData.find(cat => normalizarNombre(cat.nombre) === normalizarNombre(a));
+      const cb = categoriasData.find(cat => normalizarNombre(cat.nombre) === normalizarNombre(b));
       return ((ca?.posicion ?? 999) - (cb?.posicion ?? 999));
     });
   }
@@ -334,8 +338,8 @@ function setCategoria(c, btn) {
     const catObj = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (c || '').toLowerCase().trim());
     if (catObj && Array.isArray(catObj.subcategorias)) {
       subs.sort((a, b) => {
-        const sa = catObj.subcategorias.find(sub => (sub.nombre || '').toLowerCase().trim() === (a || '').toLowerCase().trim());
-        const sb = catObj.subcategorias.find(sub => (sub.nombre || '').toLowerCase().trim() === (b || '').toLowerCase().trim());
+        const sa = catObj.subcategorias.find(sub => normalizarNombre(sub.nombre) === normalizarNombre(a));
+        const sb = catObj.subcategorias.find(sub => normalizarNombre(sub.nombre) === normalizarNombre(b));
         return ((sa?.posicion ?? 999) - (sb?.posicion ?? 999));
       });
     }
