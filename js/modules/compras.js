@@ -1827,7 +1827,9 @@ movimientosInventario = kardex;   // ✅ sincronizar global
     }
 
     // ── 3. Si queda saldo sin pagar → Cuenta por Pagar ─────────
-    const saldoRestante = totalRecibido - montoPagado;
+    // 🔥 AUDITORÍA: Descontamos lo pagado hoy y el anticipo histórico
+    const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipo);
+    
     if (saldoRestante > 0.01) {
         const fechaVenc = new Date();
         fechaVenc.setDate(fechaVenc.getDate() + 30);
@@ -1837,8 +1839,8 @@ movimientosInventario = kardex;   // ✅ sincronizar global
             compraId: oc.id,
             proveedor: oc.proveedorNombre,
             producto: itemsRecibidos.map(a => a.nombre).join(', '),
-            total: saldoRestante,
-            saldoPendiente: saldoRestante,
+            total: totalRecibido, // 🔥 El total de la deuda debe ser el valor de la mercancía, no el saldo
+            saldoPendiente: saldoRestante, // 🔥 El saldo real tras matemáticas estrictas
             metodo: 'credito_proveedor',
             formaPagoTexto: `Saldo OC ${oc.folio}`,
             plazo: 30,
@@ -2659,8 +2661,33 @@ function guardarCompraDirectaFinal() {
     const ingresoInmediato = document.getElementById('cdIngresoInmediato')?.checked ?? true;
     const totalCompra = arts.reduce((s, a) => s + a.subtotal, 0);
 
-    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nTotal de artículos: ${arts.length}\nTotal a pagar: ${dinero(totalCompra)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
+    // 🚀 AUDITORÍA: INTERCEPTOR DE SALDO A FAVOR 🚀
+    let saldosFavor = StorageService.get("saldosFavorProveedores", []);
+    let saldoProv = saldosFavor.find(s => String(s.proveedorId) === String(provId) && s.montoDisponible > 0);
+    
+    let montoUsadoDelSaldo = 0;
+    let totalAPagarReal = totalCompra;
+
+    if (saldoProv) {
+        if (confirm(`💰 ¡ATENCIÓN!\nTienes un saldo a favor de ${dinero(saldoProv.montoDisponible)} con ${prov.nombre}.\n\n¿Deseas utilizar este saldo para pagar total o parcialmente esta nueva compra?`)) {
+            if (saldoProv.montoDisponible >= totalCompra) {
+                montoUsadoDelSaldo = totalCompra;
+                totalAPagarReal = 0;
+            } else {
+                montoUsadoDelSaldo = saldoProv.montoDisponible;
+                totalAPagarReal = totalCompra - montoUsadoDelSaldo;
+            }
+        }
+    }
+
+    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nCosto Total: ${dinero(totalCompra)}\n${montoUsadoDelSaldo > 0 ? 'Saldo a favor aplicado: -' + dinero(montoUsadoDelSaldo) + '\n' : ''}Total a pagar: ${dinero(totalAPagarReal)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
     if (!confirm(msjConfirmar)) return;
+
+    // Si usó el saldo, lo descontamos de la base de datos
+    if (montoUsadoDelSaldo > 0) {
+        saldoProv.montoDisponible -= montoUsadoDelSaldo;
+        StorageService.set("saldosFavorProveedores", saldosFavor);
+    }
 
     let comprasList = StorageService.get("compras", []);
     let recepciones = StorageService.get("recepciones", []);
@@ -2754,10 +2781,12 @@ function guardarCompraDirectaFinal() {
     const conceptoCombinado = `Compra: ${nombresProductos} (Prov: ${prov.nombre})`;
 
     if (metodoPago === "contado") {
-        window._egresarCuenta({
-            monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
-            concepto: conceptoCombinado, referencia: `COMPRA-${idCompraUnico}`
-        });
+        if (totalAPagarReal > 0) {
+            window._egresarCuenta({
+                monto: totalAPagarReal, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
+                concepto: conceptoCombinado, referencia: `COMPRA-${idCompraUnico}`
+            });
+        }
     } 
     else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
         let cuentasProv = StorageService.get("cuentasPorPagar", []);
@@ -2765,19 +2794,20 @@ function guardarCompraDirectaFinal() {
             id: idCompraUnico + 2,
             compraId: idCompraUnico,
             proveedor: prov.nombre,
-            producto: nombresProductos, // 🔥 Antes decía "Varios"
+            producto: nombresProductos,
             total: totalCompra,
-            saldoPendiente: totalCompra,
+            saldoPendiente: totalAPagarReal, // <-- Solo debe lo que sobró tras el descuento
             metodo: metodoPago,
             formaPagoTexto: formaPagoTexto,
             fecha: fechaFormatMX,
             vencimiento: metodoPago === "consignacion" ? "Al venderse" : "Revisar CXP",
-            esConsignacion: metodoPago === "consignacion"
+            esConsignacion: metodoPago === "consignacion",
+            // Dejamos evidencia contable del abono invisible
+            abonos: montoUsadoDelSaldo > 0 ? [{fecha: fechaStr+"T12:00:00.000", monto: montoUsadoDelSaldo, cuenta: "Saldo a Favor"}] : [] 
         });
         StorageService.set("cuentasPorPagar", cuentasProv);
     }
     else if (metodoPago === "tarjeta_msi") {
-        // 🚀 MOTOR BANCARIO: MSI CON CÁLCULO UNIVERSAL DE CORTE Y PAGO 🚀
         let cuentasBancos = StorageService.get("cuentasMSI", []);
         let tarjetasConfig = StorageService.get("tarjetasConfig", []);
         
@@ -2786,7 +2816,8 @@ function guardarCompraDirectaFinal() {
         let diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5);
 
         let calendario = [];
-        let cuotaMensual = parseFloat((totalCompra / msiMeses).toFixed(2));
+        // Se calculan las mensualidades con el total real descontado
+        let cuotaMensual = totalAPagarReal > 0 ? parseFloat((totalAPagarReal / msiMeses).toFixed(2)) : 0;
         
         let fechaPartes = fechaStr.split('-'); 
         let anioCompra = parseInt(fechaPartes[0]);
@@ -2851,7 +2882,53 @@ function guardarCompraDirectaFinal() {
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
 
-// ===== CUENTAS POR PAGAR =====
+// 🚀 MOTOR DE REEMBOLSO DE SALDOS A FAVOR 🚀
+window.reembolsarSaldoFavor = function(idSaldo) {
+    let saldos = StorageService.get("saldosFavorProveedores", []);
+    const saldo = saldos.find(s => s.id === idSaldo);
+    if (!saldo) return;
+    const html = `
+    <div data-modal="reembolso-favor" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;">
+        <div style="background:white;padding:25px;border-radius:10px;width:350px;">
+            <h3 style="margin-top:0;color:#065f46;">💸 Reembolso de Proveedor</h3>
+            <p style="font-size:13px;color:#475569;">Proveedor: <b>${saldo.proveedorNombre}</b></p>
+            <p style="font-size:13px;color:#475569;">Monto a devolver: <b style="color:#059669;font-size:16px;">${dinero(saldo.montoDisponible)}</b></p>
+            <label style="display:block;margin-top:15px;margin-bottom:5px;font-size:12px;font-weight:bold;">¿A qué cuenta ingresará el dinero?</label>
+            ${_buildSelectorCuentas('cuentaReembolso', false)}
+            <div style="display:flex;gap:10px;margin-top:20px;">
+                <button onclick="ejecutarReembolsoFavor(${saldo.id})" style="flex:1;background:#059669;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;">✅ Confirmar</button>
+                <button onclick="document.querySelector('[data-modal=reembolso-favor]').remove()" style="flex:1;background:#64748b;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.ejecutarReembolsoFavor = function(idSaldo) {
+    let saldos = StorageService.get("saldosFavorProveedores", []);
+    const idx = saldos.findIndex(s => s.id === idSaldo);
+    if (idx === -1) return;
+    const saldo = saldos[idx];
+    const select = document.getElementById('cuentaReembolso');
+    
+    // El dinero entra a tu caja o banco
+    window._ingresarCuenta({
+        monto: saldo.montoDisponible,
+        cuentaId: select.value,
+        etiqueta: select.options[select.selectedIndex].text,
+        concepto: `Reembolso de saldo a favor - ${saldo.proveedorNombre}`,
+        referencia: `REEMBOLSO-${saldo.id}`,
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+    });
+    
+    const montoRegresado = saldo.montoDisponible;
+    saldo.montoDisponible = 0; // Se agota el saldo
+    StorageService.set("saldosFavorProveedores", saldos);
+    document.querySelector('[data-modal=reembolso-favor]').remove();
+    alert(`✅ Reembolso completado. Se ingresaron ${dinero(montoRegresado)} a ${select.options[select.selectedIndex].text}.`);
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+};
+
 function renderCuentasPorPagar() {
     const contenedor = document.getElementById("listaCuentasPorPagar");
     if (!contenedor) return;
@@ -2864,9 +2941,12 @@ function renderCuentasPorPagar() {
             <h4 style="margin:0 0 10px; color:#065f46;">💰 SALDOS A FAVOR DISPONIBLES</h4>
             <table style="width:100%; font-size:13px;">
                 ${saldosFavor.map(s => `<tr>
-                    <td><b>${s.proveedorNombre}</b></td>
-                    <td>Ref: ${s.referencia}</td>
-                    <td style="text-align:right; color:#059669; font-weight:bold;">${dinero(s.montoDisponible)}</td>
+                    <td style="padding:5px 0;"><b>${s.proveedorNombre}</b></td>
+                    <td style="padding:5px 0;">Ref: ${s.referencia}</td>
+                    <td style="text-align:right; color:#059669; font-weight:bold; padding:5px 10px;">${dinero(s.montoDisponible)}</td>
+                    <td style="text-align:right; width:110px; padding:5px 0;">
+                        <button onclick="reembolsarSaldoFavor(${s.id})" style="background:#059669; color:white; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">💸 Reembolsar</button>
+                    </td>
                 </tr>`).join('')}
             </table>
         </div>`;
@@ -2875,10 +2955,12 @@ function renderCuentasPorPagar() {
     let cuentas = StorageService.get("cuentasPorPagar", []) || [];
 
     // ── Reparar saldos con bug de doble conteo antes de renderizar ──
-    const comprasAll = StorageService.get("comprasRegistradas", []);
+    const comprasList = StorageService.get("compras", []);
+    const ordenesList = StorageService.get("ordenesCompra", []);
     let huboCambios = false;
     cuentas.forEach(c => {
-        const compraOriginal = comprasAll.find(x => String(x.id) === String(c.compraId || c.id));
+        const compraOriginal = comprasList.find(x => String(x.id) === String(c.compraId || c.id)) || 
+                               ordenesList.find(o => String(o.id) === String(c.compraId || c.id));
         const subtotalReal = parseFloat(c.total) || 0;
         let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
         if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
