@@ -291,16 +291,20 @@ async function inicializar() {
 
 function generarMenuCategorias() {
   const nav = document.getElementById('categoriasNav');
-  var nav = document.getElementById('categoriasNav');
-  nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
-  var catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
-  catsEnData.forEach(function(c) {
-    var btn = document.createElement('button');
-    btn.className = 'cat-btn';
-    btn.textContent = c;
-    btn.onclick = function() { setCategoria(c, btn); };
-    nav.appendChild(btn);
-  });
+    var nav = document.getElementById('categoriasNav');
+    nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
+    var catsEnData = [];
+    for (var i = 0; i < productos.length; i++) {
+      var cat = productos[i].categoria || "Varios";
+      if (catsEnData.indexOf(cat) === -1) catsEnData.push(cat);
+    }
+    for (var j = 0; j < catsEnData.length; j++) {
+      var btn = document.createElement('button');
+      btn.className = 'cat-btn';
+      btn.textContent = catsEnData[j];
+      btn.onclick = (function(c) { return function() { setCategoria(c, btn); }; })(catsEnData[j]);
+      nav.appendChild(btn);
+    }
 }
 
 function setCategoria(c, btn) {
@@ -313,14 +317,24 @@ function setCategoria(c, btn) {
   if (c === 'todos') {
     subnav.classList.remove('visible');
   } else {
-    const subnav = document.getElementById('subnav');
+    var subnav = document.getElementById('subnav');
     if (c === 'todos') {
       subnav.classList.remove('visible');
     } else {
-      const subs = [...new Set(productos.filter(p => p.categoria === c).map(p => p.subcategoria).filter(s => s))];
-      if(subs.length > 0) {
-        subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
-          subs.sort().map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
+      var subs = [];
+      for (var i = 0; i < productos.length; i++) {
+        if (productos[i].categoria === c) {
+          var sub = productos[i].subcategoria;
+          if (sub && subs.indexOf(sub) === -1) subs.push(sub);
+        }
+      }
+      if (subs.length > 0) {
+        var html = '<div class="sub-pill active" onclick="setSub(\'todos\', this)">Ver Todo</div>';
+        subs.sort();
+        for (var j = 0; j < subs.length; j++) {
+          html += '<div class="sub-pill" onclick="setSub(\'' + subs[j] + '\', this)">' + subs[j] + '</div>';
+        }
+        subnav.innerHTML = html;
         subnav.classList.add('visible');
       } else {
         subnav.classList.remove('visible');
