@@ -829,8 +829,10 @@ function renderFlujoCaja() {
 }
 // ===== CUENTAS BANCARIAS DASHBOARD (LIQUIDEZ) =====
 
-// Variable global para recordar la cuenta de débito seleccionada en el filtro
-window._filtroCuentaLiquidez = 'Todos';
+// Variables globales para los filtros de liquidez
+window._filtroCuentaLiquidez = window._filtroCuentaLiquidez || 'Todos';
+window._filtroLiquidezDesde = window._filtroLiquidezDesde || '';
+window._filtroLiquidezHasta = window._filtroLiquidezHasta || '';
 
 function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (cuentaSeleccionada !== null) { window._filtroCuentaLiquidez = cuentaSeleccionada; }
@@ -856,7 +858,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
         const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
         const monto = parseFloat(m.monto) || 0;
         
-        // Sumar/restar a Cajas (Verificamos si el ID existe en nuestras cajas)
+        // Sumar/restar a Cajas
         if (saldosCajas[m.cuenta] !== undefined || m.cuenta === "efectivo" || m.cuenta === "caja") {
             const idCajaAfectada = (m.cuenta === "efectivo" || m.cuenta === "caja") ? "efectivo" : m.cuenta;
             if(saldosCajas[idCajaAfectada] !== undefined) {
@@ -908,8 +910,10 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     });
     leftPanelHTML += `</div>`;
 
-    // PANEL DERECHO (Filtros de movimientos)
+    // PANEL DERECHO (Filtros de movimientos y Rango de Fechas)
     let movimientosFiltrados = movimientos.slice().reverse();
+    
+    // 1. Filtro por Cuenta
     if (window._filtroCuentaLiquidez !== 'Todos') {
         movimientosFiltrados = movimientosFiltrados.filter(m => {
             if (m.cuenta === window._filtroCuentaLiquidez) return true;
@@ -918,34 +922,71 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
         });
     }
 
+    // 2. Filtro por Fechas
+    if (window._filtroLiquidezDesde) {
+        movimientosFiltrados = movimientosFiltrados.filter(m => m.fecha >= window._filtroLiquidezDesde + "T00:00:00");
+    }
+    if (window._filtroLiquidezHasta) {
+        movimientosFiltrados = movimientosFiltrados.filter(m => m.fecha <= window._filtroLiquidezHasta + "T23:59:59");
+    }
+
     let rightPanelHTML = `
         <div style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:15px;">
-                <h3 style="margin:0; color:#374151;">📋 MOVIMIENTOS RECIENTES</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0; color:#374151;">📋 MOVIMIENTOS</h3>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <input type="date" value="${window._filtroLiquidezDesde}" onchange="window._filtroLiquidezDesde=this.value; renderCuentasBancarias();" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;" title="Fecha Desde">
+                    <span style="color:#64748b; font-size:12px; font-weight:bold;">al</span>
+                    <input type="date" value="${window._filtroLiquidezHasta}" onchange="window._filtroLiquidezHasta=this.value; renderCuentasBancarias();" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;" title="Fecha Hasta">
+                    <button onclick="window._filtroLiquidezDesde=''; window._filtroLiquidezHasta=''; renderCuentasBancarias();" style="padding:6px 10px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:12px;" title="Mostrar Todo">🔄 Reset</button>
+                </div>
             </div>
             <div style="overflow-x:auto; max-height:450px;">
                 <table style="width:100%; border-collapse:collapse; font-size:13px;">
                     <thead><tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
-                        <th style="padding:10px; text-align:left;">Fecha</th><th style="padding:10px; text-align:left;">Concepto</th><th style="padding:10px; text-align:left;">Cuenta</th><th style="padding:10px; text-align:right;">Monto</th>
+                        <th style="padding:10px; text-align:left; position:sticky; top:0; background:#f8fafc;">Fecha</th>
+                        <th style="padding:10px; text-align:left; position:sticky; top:0; background:#f8fafc;">Concepto</th>
+                        <th style="padding:10px; text-align:left; position:sticky; top:0; background:#f8fafc;">Cuenta</th>
+                        <th style="padding:10px; text-align:right; position:sticky; top:0; background:#f8fafc;">Monto</th>
                     </tr></thead>
                     <tbody>`;
 
     if (movimientosFiltrados.length === 0) {
-        rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No hay movimientos registrados.</td></tr>`;
+        rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No hay movimientos en este periodo o cuenta.</td></tr>`;
     } else {
-        movimientosFiltrados.slice(0, 30).forEach(m => {
+        // Si hay filtros de fecha, mostramos todos los resultados. Si no hay filtros, limitamos a 50 para no saturar.
+        const limite = (window._filtroLiquidezDesde || window._filtroLiquidezHasta) ? movimientosFiltrados.length : 50;
+        
+        movimientosFiltrados.slice(0, limite).forEach(m => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
             const color = esIngreso ? "#16a34a" : "#dc2626";
             const icon = esIngreso ? "⬆️" : "⬇️";
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
+            
+            // 🧹 LIMPIEZA INTELIGENTE DE CONCEPTO SATURADO
+            let conceptoLimpio = m.concepto || "";
+            if (conceptoLimpio.startsWith("Pago a proveedor")) {
+                conceptoLimpio = conceptoLimpio.split(" - ")[0]; // Quita la lista de productos
+            } else if (conceptoLimpio.startsWith("Compra: ") && conceptoLimpio.includes("(Prov:")) {
+                const provMatch = conceptoLimpio.match(/\(Prov:\s*(.*?)\)/);
+                if (provMatch) conceptoLimpio = `Compra a proveedor ${provMatch[1]}`;
+            }
+            
+            // Acortador extra por seguridad (si sigue midiendo más de 65 caracteres)
+            if (conceptoLimpio.length > 65) conceptoLimpio = conceptoLimpio.substring(0, 65) + '...';
+
             rightPanelHTML += `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:10px;">${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
-                    <td style="padding:10px;">${m.concepto || ""}</td>
+                    <td style="padding:10px; white-space:nowrap;">${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
+                    <td style="padding:10px;" title="${m.concepto}">${conceptoLimpio}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
-                    <td style="padding:10px; text-align:right; font-weight:bold; color:${color};">${icon} ${dinero(m.monto)}</td>
+                    <td style="padding:10px; text-align:right; font-weight:bold; color:${color}; white-space:nowrap;">${icon} ${dinero(m.monto)}</td>
                 </tr>`;
         });
+        
+        if (!window._filtroLiquidezDesde && !window._filtroLiquidezHasta && movimientosFiltrados.length > 50) {
+            rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:15px; color:#64748b; font-size:12px; background:#f8fafc;">Mostrando los últimos 50 movimientos. Usa el filtro de fechas para ver el historial completo.</td></tr>`;
+        }
     }
     rightPanelHTML += `</tbody></table></div></div>`;
 
