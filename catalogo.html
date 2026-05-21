@@ -294,31 +294,31 @@ function generarMenuCategorias() {
     categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
   } catch(e) {}
   
+  // Filtrar solo categorías que tengan productos
   var catsConProductos = [];
   for (var i = 0; i < categoriasData.length; i++) {
-    var catNombre = categoriasData[i].nombre;
+    var cat = categoriasData[i];
     var tieneProducto = false;
-    for (var k = 0; k < productos.length; k++) {
-      if (normalizarNombre(productos[k].categoria || "Varios") === normalizarNombre(catNombre)) {
+    for (var p = 0; p < productos.length; p++) {
+      if ((productos[p].categoria || "").toLowerCase() === cat.nombre.toLowerCase()) {
         tieneProducto = true;
         break;
       }
     }
     if (tieneProducto) {
-      catsConProductos.push({
-        nombre: catNombre,
-        posicion: categoriasData[i].posicion || 999
-      });
+      catsConProductos.push(cat);
     }
   }
   
-  catsConProductos.sort(function(a, b) { return a.posicion - b.posicion; });
+  // Ordenar por posicion
+  catsConProductos.sort(function(a, b) { return (a.posicion || 999) - (b.posicion || 999); });
   
+  // Agregar botones en orden
   for (var j = 0; j < catsConProductos.length; j++) {
     var btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = catsConProductos[j].nombre;
-    btn.onclick = (function(c) { return function() { setCategoria(c, btn); }; })(catsConProductos[j].nombre);
+    btn.onclick = (function(cat) { return function() { setCategoria(cat.nombre, btn); }; })(catsConProductos[j]);
     nav.appendChild(btn);
   }
 }
@@ -340,34 +340,31 @@ function setCategoria(c, btn) {
     
     var catObj = null;
     for (var i = 0; i < categoriasData.length; i++) {
-      if (normalizarNombre(categoriasData[i].nombre) === normalizarNombre(c)) {
+      if (categoriasData[i].nombre.toLowerCase() === c.toLowerCase()) {
         catObj = categoriasData[i];
         break;
       }
     }
     
     var subsConProductos = [];
-    if (catObj && catObj.subcategorias) {
+    if (catObj && catObj.subcategorias && Array.isArray(catObj.subcategorias)) {
       for (var s = 0; s < catObj.subcategorias.length; s++) {
-        var subNombre = catObj.subcategorias[s].nombre;
+        var sub = catObj.subcategorias[s];
         var tieneProducto = false;
         for (var p = 0; p < productos.length; p++) {
-          if (normalizarNombre(productos[p].categoria || "Varios") === normalizarNombre(c) && 
-              normalizarNombre(productos[p].subcategoria) === normalizarNombre(subNombre)) {
+          if ((productos[p].categoria || "").toLowerCase() === c.toLowerCase() && 
+              (productos[p].subcategoria || "").toLowerCase() === sub.nombre.toLowerCase()) {
             tieneProducto = true;
             break;
           }
         }
         if (tieneProducto) {
-          subsConProductos.push({
-            nombre: subNombre,
-            posicion: catObj.subcategorias[s].posicion || 999
-          });
+          subsConProductos.push(sub);
         }
       }
     }
     
-    subsConProductos.sort(function(a, b) { return a.posicion - b.posicion; });
+    subsConProductos.sort(function(a, b) { return (a.posicion || 999) - (b.posicion || 999); });
     
     if (subsConProductos.length > 0) {
       var html = '<div class="sub-pill active" onclick="setSub(\'todos\', this)">Ver Todo</div>';
