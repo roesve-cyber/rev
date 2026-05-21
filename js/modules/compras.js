@@ -786,17 +786,41 @@ window.verDetalleCompra = function(idCuenta) {
     }
 
     const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
-    
-    // Rescatar el anticipo real directo de la fuente
+
+    // Determinar si hay un anticipo REAL que NO esté ya representado en c.abonos.
+    // Cuando los pagos de la Orden de Compra se fusionan en abonos (líneas ~781-786),
+    // el campo anticipo_pagado queda igual a la suma de esos abonos → si se mostrara
+    // la fila de anticipo Y los abonos individuales se estaría duplicando el monto.
     let anticipoInicial = 0;
-    if (compraOriginal && compraOriginal.anticipo_pagado) {
-        anticipoInicial = parseFloat(compraOriginal.anticipo_pagado);
-    } else {
-        anticipoInicial = Math.max(0, subtotalReal - totalAbonado - (parseFloat(c.saldoPendiente) || 0));
+    let mostrarFilaAnticipo = false;
+
+    if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01) {
+        const ap = parseFloat(compraOriginal.anticipo_pagado);
+        // Verificar si los pagos de la OC ya fueron absorbidos por c.abonos
+        const pagosOC = Array.isArray(compraOriginal.pagos) ? compraOriginal.pagos : [];
+        const pagosYaEnAbonos = pagosOC.length > 0 && pagosOC.every(p =>
+            abonos.some(a =>
+                a.fecha === p.fecha &&
+                Math.abs((parseFloat(a.monto) || 0) - (parseFloat(p.monto) || 0)) < 0.01
+            )
+        );
+        if (!pagosYaEnAbonos) {
+            // Anticipo genuino que no está en los abonos individuales → mostrarlo
+            anticipoInicial = ap;
+            mostrarFilaAnticipo = true;
+        }
+        // Si pagosYaEnAbonos === true: los abonos individuales YA muestran esos pagos,
+        // no agregar fila de anticipo ni sumarlo al total.
     }
 
-    // Recalcular la verdad matemática absoluta
-    const saldoPendienteVerdadero = Math.max(0, subtotalReal - anticipoInicial - totalAbonado);
+    // Saldo verdadero: usar el valor guardado en BD (ya está correcto) y solo
+    // recalcular si no existe o si hay un anticipo genuino extra.
+    const saldoPendienteVerdadero = Math.max(
+        0,
+        parseFloat(c.saldoPendiente) > 0
+            ? parseFloat(c.saldoPendiente)
+            : subtotalReal - anticipoInicial - totalAbonado
+    );
 
     // Auto-Reparación silenciosa en la base de datos (Si estaban desincronizados, los arregla)
     if (Math.abs((parseFloat(c.saldoPendiente) || 0) - saldoPendienteVerdadero) > 0.01 || c.abonos?.length !== abonos.length) {
@@ -819,9 +843,9 @@ window.verDetalleCompra = function(idCuenta) {
             <td style="padding:10px;text-align:right;font-weight:bold;color:#dc2626;">${dinero(subtotalReal)}</td>
         </tr>`;
 
-    // Anticipo al registrar (si aplica)
+    // Anticipo al registrar (solo si es un pago genuino no representado en los abonos)
     let saldoCorriente = subtotalReal;
-    if (anticipoInicial > 0.01) {
+    if (mostrarFilaAnticipo) {
         saldoCorriente -= anticipoInicial;
         movimientosHTML += `
             <tr style="border-bottom:1px solid #e2e8f0; background:#f0fdf4;">
@@ -914,7 +938,7 @@ window.verDetalleCompra = function(idCuenta) {
                         </div>
                         <div style="display:flex;justify-content:space-between;margin-bottom:8px;color:#16a34a;">
                             <span style="font-size:13px;">Total abonado:</span>
-                            <strong>− ${dinero(totalAbonado + (anticipoInicial > 0.01 ? anticipoInicial : 0))}</strong>
+                            <strong>− ${dinero(totalAbonado + (mostrarFilaAnticipo ? anticipoInicial : 0))}</strong>
                         </div>
                         <div style="display:flex;justify-content:space-between;border-top:2px solid #cbd5e1;padding-top:10px;font-size:16px;color:#dc2626;">
                             <strong>SALDO A PAGAR:</strong>
