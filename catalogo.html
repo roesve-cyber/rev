@@ -286,8 +286,7 @@ async function inicializar() {
 }
 
 function generarMenuCategorias() {
-  const nav = document.getElementById('categoriasNav');
-    var nav = document.getElementById('categoriasNav');
+  var nav = document.getElementById('categoriasNav');
     nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
     var catsEnData = [];
     for (var i = 0; i < productos.length; i++) {
