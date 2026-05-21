@@ -291,14 +291,14 @@ async function inicializar() {
 
 function generarMenuCategorias() {
   const nav = document.getElementById('categoriasNav');
-  const nav = document.getElementById('categoriasNav');
+  var nav = document.getElementById('categoriasNav');
   nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
-  const catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
-  catsEnData.forEach(c => {
-    const btn = document.createElement('button');
+  var catsEnData = [...new Set(productos.map(p => p.categoria || "Varios"))];
+  catsEnData.forEach(function(c) {
+    var btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = c;
-    btn.onclick = () => setCategoria(c, btn);
+    btn.onclick = function() { setCategoria(c, btn); };
     nav.appendChild(btn);
   });
 }
