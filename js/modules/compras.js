@@ -2873,7 +2873,40 @@ function renderCuentasPorPagar() {
     }
 
     let cuentas = StorageService.get("cuentasPorPagar", []) || [];
-    
+
+    // ── Reparar saldos con bug de doble conteo antes de renderizar ──
+    const comprasAll = StorageService.get("comprasRegistradas", []);
+    let huboCambios = false;
+    cuentas.forEach(c => {
+        const compraOriginal = comprasAll.find(x => String(x.id) === String(c.compraId || c.id));
+        const subtotalReal = parseFloat(c.total) || 0;
+        let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
+        if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
+            compraOriginal.pagos.forEach(p => {
+                if (!abonos.some(a => a.fecha === p.fecha && Math.abs((parseFloat(a.monto)||0)-(parseFloat(p.monto)||0)) < 0.01))
+                    abonos.push(p);
+            });
+        }
+        const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
+        let anticipoExtra = 0;
+        if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01) {
+            const ap = parseFloat(compraOriginal.anticipo_pagado);
+            const pagosOC = Array.isArray(compraOriginal.pagos) ? compraOriginal.pagos : [];
+            const pagosYaEnAbonos = pagosOC.length > 0 && pagosOC.every(p =>
+                abonos.some(a => a.fecha === p.fecha && Math.abs((parseFloat(a.monto)||0)-(parseFloat(p.monto)||0)) < 0.01)
+            );
+            if (!pagosYaEnAbonos) anticipoExtra = ap;
+        }
+        const saldoCorrecto = Math.max(0, subtotalReal - totalAbonado - anticipoExtra);
+        if (Math.abs((parseFloat(c.saldoPendiente) || 0) - saldoCorrecto) > 0.01) {
+            c.saldoPendiente = saldoCorrecto;
+            c.abonos = abonos;
+            huboCambios = true;
+        }
+    });
+    if (huboCambios) StorageService.set("cuentasPorPagar", cuentas);
+    // ────────────────────────────────────────────────────────────────
+
     // Filtro blindado contra valores vacíos
     let deudas = cuentas.filter(c => parseFloat(c.saldoPendiente || 0) > 0);
 
