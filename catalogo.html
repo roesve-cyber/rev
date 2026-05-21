@@ -289,15 +289,9 @@ function generarMenuCategorias() {
     categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
   } catch(e) {}
 
-  // Filtrar categorías que tengan al menos un producto activo
-  const catsConProductos = categoriasData.filter(cat => 
-    productos.some(p => (p.categoria || "Varios") === cat.nombre)
-  );
-
-  // Ordenar por 'posicion' (o 999 si no existe)
-  catsConProductos.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
-
-  catsConProductos.forEach(cat => {
+  // Mostrar todas las categorías de categoriasData, sin filtrar por productos activos
+  categoriasData.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
+  categoriasData.forEach(cat => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.textContent = cat.nombre;
@@ -321,14 +315,11 @@ function setCategoria(c, btn) {
     try {
       categoriasData = JSON.parse(localStorage.getItem("categoriasData")) || [];
     } catch(e) {}
-    const catObj = categoriasData.find(cat => cat.nombre === c);
+    const catObj = categoriasData.find(cat => (cat.nombre || '').toLowerCase().trim() === (c || '').toLowerCase().trim());
     let subs = [];
     if (catObj && Array.isArray(catObj.subcategorias)) {
-      // Filtrar solo subcategorías con productos activos
-      subs = catObj.subcategorias.filter(sub => 
-        productos.some(p => p.categoria === c && p.subcategoria === sub.nombre)
-      );
-      // Ordenar por 'posicion' (o 999 si no existe)
+      // Mostrar todas las subcategorías, sin filtrar por productos activos
+      subs = [...catObj.subcategorias];
       subs.sort((a, b) => (a.posicion || 999) - (b.posicion || 999));
     }
     if(subs.length > 0) {
