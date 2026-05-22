@@ -1,8 +1,116 @@
 // ===== STORAGE SERVICE (BLINDADO IDB + FIREBASE SYNC) =====
 const StorageService = {
-    _cache: {}, 
+        _cache: {}, 
     _isReady: false,
-    _usandoLocalForage: true, 
+    _usandoLocalForage: true,
+
+    // Claves que NO deben considerarse tablas de base de datos
+    _clavesIgnoradas: new Set([
+        '_migradoIDB',
+        '_prueba',
+        'carrito'
+    ]),
+
+    // Decide si una clave puede tratarse como tabla real del sistema
+    _esTablaValida(key, value) {
+        if (!key || typeof key !== 'string') return false;
+
+        // No respaldar claves internas
+        if (key.startsWith('_')) return false;
+
+        // No respaldar temporales
+        if (this._clavesIgnoradas.has(key)) return false;
+
+        // No respaldar claves técnicas externas
+        if (key.startsWith('firebase:')) return false;
+        if (key.startsWith('msal.')) return false;
+        if (key.includes('msal')) return false;
+        if (key.includes('firebase')) return false;
+        if (key.includes('Auth')) return false;
+        if (key.toLowerCase().includes('token')) return false;
+
+        // No respaldar valores inválidos
+        if (value === undefined) return false;
+        if (typeof value === 'function') return false;
+
+        return true;
+    },
+
+    // Obtiene dinámicamente todas las tablas reales guardadas
+    async getTablasDinamicas() {
+        const tablas = new Set();
+
+        // 1. Leer desde caché RAM
+        Object.keys(this._cache || {}).forEach(key => {
+            const value = this._cache[key];
+            if (this._esTablaValida(key, value)) {
+                tablas.add(key);
+            }
+        });
+
+        // 2. Mantener compatibilidad con TABLAS_SISTEMA si todavía existe
+        if (Array.isArray(window.TABLAS_SISTEMA)) {
+            window.TABLAS_SISTEMA.forEach(key => {
+                const value = this.get(key, null);
+                if (this._esTablaValida(key, value)) {
+                    tablas.add(key);
+                }
+            });
+        }
+
+        // 3. Leer directamente desde IndexedDB/localforage
+        if (this._usandoLocalForage && typeof localforage !== 'undefined') {
+            try {
+                const keys = await localforage.keys();
+
+                for (const key of keys) {
+                    const value = this._cache[key] !== undefined
+                        ? this._cache[key]
+                        : await localforage.getItem(key);
+
+                    if (this._esTablaValida(key, value)) {
+                        tablas.add(key);
+                    }
+                }
+            } catch (e) {
+                console.warn("⚠️ No se pudieron leer claves dinámicas desde IndexedDB:", e);
+            }
+        } else {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                let value = null;
+
+                try {
+                    value = JSON.parse(localStorage.getItem(key));
+                } catch(e) {
+                    value = localStorage.getItem(key);
+                }
+
+                if (this._esTablaValida(key, value)) {
+                    tablas.add(key);
+                }
+            }
+        }
+
+        return Array.from(tablas).sort();
+    },
+
+    // Actualiza cualquier variable global que tenga el mismo nombre de la tabla
+    _actualizarVariableGlobal(key, value) {
+        window[key] = value;
+    },
+
+    // Guarda localmente sin volver a disparar sincronización Firebase
+    async _guardarLocalDirecto(key, value) {
+        this._cache[key] = value;
+        this._actualizarVariableGlobal(key, value);
+
+        if (this._usandoLocalForage) {
+            await localforage.setItem(key, value);
+        } else {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
+    },
 
     async init() {
         try {
@@ -86,30 +194,39 @@ const StorageService = {
         return defaultValue;
     },
 
-    set(key, value) {
+        set(key, value) {
         // 1. Guardar en RAM al instante
         this._cache[key] = value;
+
+        // 2. Actualizar variable global dinámica
+        this._actualizarVariableGlobal(key, value);
         
-        // 2. Actualizar variables globales
-        if (key === 'productos') window.productos = value;
-        if (key === 'carrito') window.carrito = value;
-        if (key === 'categoriasData') window.categoriasData = value;
-        
-        // 3. Guardado físico local (AHORA RETORNA LA PROMESA)
+        // 3. Guardado físico local
         let dbPromise = Promise.resolve();
+
         if (this._usandoLocalForage) {
-            dbPromise = localforage.setItem(key, value).catch(err => console.error("Error guardando local:", err));
+            dbPromise = localforage
+                .setItem(key, value)
+                .catch(err => console.error("Error guardando local:", err));
         } else {
             localStorage.setItem(key, JSON.stringify(value));
         }
 
-        // ☁️ 4. AUTO-GUARDADO EN FIREBASE
-        if (window._firebaseActivo && window._db) {
-            window._db.collection('posData').doc(key).set({ data: value })
-                .catch(e => console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red."));
+        // 4. Auto-guardado en Firebase solo si es tabla válida
+        if (
+            window._firebaseActivo &&
+            window._db &&
+            this._esTablaValida(key, value)
+        ) {
+            window._db.collection('posData').doc(key).set({
+                data: value,
+                _updatedAt: Date.now()
+            }).catch(e => {
+                console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.");
+            });
         }
 
-        return dbPromise; // <-- Clave para poder usar await
+        return dbPromise;
     },
 
     remove(key) {
@@ -124,41 +241,37 @@ const StorageService = {
     },
 
     // ☁️ FUNCIONES DE NUBE (Ahora sí conectadas a Firestore)
-    async syncAll() {
+        async syncAll() {
         if (!window._firebaseActivo || !window._db) {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
         }
-        
-        // Reemplaza el fallback de syncAll() por este:
-const tablas = window.TABLAS_SISTEMA || [
-    "productos", "categoriasData", "movimientosInventario",
-    "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
-    "ventasRegistradas", "registroTickets", "salidasPendientesVenta",
-    "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
-    "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
-    "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
-    "cuentasMSI", // <--- ¡CORREGIDO AQUÍ TAMBIÉN!
-    "ubicacionesConfig", "requisicionesCompra"
-];
 
         try {
-            console.log("⬇️ Descargando datos de la nube...");
-            for (let tabla of tablas) {
-                const doc = await window._db.collection('posData').doc(tabla).get();
-                if (doc.exists) {
-                    const datosNube = doc.data().data || [];
-                    
-                    // Actualizar memoria RAM y Locales usando nuestra propia función set (evitando enviar de regreso a Firebase innecesariamente)
-                    this._cache[tabla] = datosNube;
-                    if (tabla === 'productos') window.productos = datosNube;
-                    if (tabla === 'categoriasData') window.categoriasData = datosNube;
-                    if (tabla === 'clientes') window.clientes = datosNube;
-                    
-                    if (this._usandoLocalForage) await localforage.setItem(tabla, datosNube);
-                    else localStorage.setItem(tabla, JSON.stringify(datosNube));
+            console.log("⬇️ Descargando datos dinámicos de Firebase...");
+
+            const snapshot = await window._db.collection('posData').get();
+            let descargadas = 0;
+
+            for (const doc of snapshot.docs) {
+                const tabla = doc.id;
+                const payload = doc.data();
+
+                const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
+                    ? payload.data
+                    : payload;
+
+                if (!this._esTablaValida(tabla, datosNube)) {
+                    console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
+                    continue;
                 }
+
+                await this._guardarLocalDirecto(tabla, datosNube);
+                descargadas++;
             }
+
+            console.log(`✅ Sincronización dinámica completada. Tablas descargadas: ${descargadas}`);
             return true;
+
         } catch (error) {
             console.error("❌ Error al descargar de Firebase:", error);
             throw error;
@@ -167,35 +280,41 @@ const tablas = window.TABLAS_SISTEMA || [
 
     // Dentro de StorageService en js/services/storage.js
 
-async uploadAll() {
-    if (!window._firebaseActivo || !window._db) {
-        return Promise.reject(new Error("Firebase no está configurado o activo."));
-    }
-    
-    // Fallback blindado con la lista idéntica de 25 tablas
-    const tablas = window.TABLAS_SISTEMA || [
-    "productos", "categoriasData", "movimientosInventario",
-    "clientes", "clientesSistema", "cuentasPorCobrar", "pagaresSistema", 
-    "ventasRegistradas", "registroTickets", "salidasPendientesVenta",
-    "puntosPorCliente", "gastosOperativos", "cotizaciones", "apartados",
-    "proveedores", "compras", "movimientosCaja", "cuentasEfectivo", 
-    "tarjetasConfig", "configuracionPos", "recepciones", "cuentasPorPagar", 
-    "cuentasMSI", // <--- ¡CORREGIDO AQUÍ TAMBIÉN!
-    "ubicacionesConfig", "requisicionesCompra"
-];
-
-    try {
-        console.log("⬆️ Subiendo datos a la nube...");
-        for (let tabla of tablas) {
-            const datosLocales = this.get(tabla, []);
-            await window._db.collection('posData').doc(tabla).set({ data: datosLocales });
+    async uploadAll() {
+        if (!window._firebaseActivo || !window._db) {
+            return Promise.reject(new Error("Firebase no está configurado o activo."));
         }
-        return true;
-    } catch (error) {
-        console.error("❌ Error al subir a Firebase:", error);
-        throw error;
-    }
-},
+
+        try {
+            console.log("⬆️ Subiendo datos dinámicos a Firebase...");
+
+            const tablas = await this.getTablasDinamicas();
+            let subidas = 0;
+
+            for (let tabla of tablas) {
+                const datosLocales = this.get(tabla, null);
+
+                if (!this._esTablaValida(tabla, datosLocales)) {
+                    console.warn(`⏭️ Tabla ignorada al subir: ${tabla}`);
+                    continue;
+                }
+
+                await window._db.collection('posData').doc(tabla).set({
+                    data: datosLocales,
+                    _updatedAt: Date.now()
+                });
+
+                subidas++;
+            }
+
+            console.log(`✅ Subida dinámica completada. Tablas subidas: ${subidas}`);
+            return true;
+
+        } catch (error) {
+            console.error("❌ Error al subir a Firebase:", error);
+            throw error;
+        }
+    },
 
     startRealtimeSync() {
         if (window._firebaseActivo && window._db) {

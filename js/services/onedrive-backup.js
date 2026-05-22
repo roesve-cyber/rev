@@ -36,93 +36,122 @@ window.TABLAS_SISTEMA = TABLAS_SISTEMA;
 
 const BACKUP_VERSION = 2;
 
-// ── Construye el objeto de backup leyendo de StorageService ─────────────────
-function _construirBackup() {
+// ── Construye el objeto de backup leyendo tablas dinámicas desde StorageService ──
+async function _construirBackup() {
     const datos = {};
     let tablasCon = 0;
-    for (const tabla of TABLAS_SISTEMA) {
+
+    const tablas = await StorageService.getTablasDinamicas();
+
+    for (const tabla of tablas) {
         const valor = StorageService.get(tabla, null);
-        if (valor !== null) {
+
+        if (StorageService._esTablaValida(tabla, valor)) {
             datos[tabla] = valor;
             tablasCon++;
         }
     }
+
     return {
         _version: BACKUP_VERSION,
-        _fecha:   window.localISO(new Date()),
+        _fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
         _sistema: "REV POS — Mueblería Mi Pueblito",
-        _tablas:  tablasCon,
+        _modo: "dinamico",
+        _tablas: tablasCon,
         datos,
     };
 }
 
-// --- EXPORTAR TODO (Corregido para IndexedDB/StorageService) ---
-window.exportarBackupJSON = function() {
-    const backup = { 
-        _fecha: Date.now(), 
-        _version: "2.0",
-        datos: {} 
-    };
+// --- EXPORTAR TODO dinámicamente desde StorageService ---
+window.exportarBackupJSON = async function() {
+    try {
+        const backup = await _construirBackup();
 
-    // En lugar de recorrer localStorage, recorremos nuestras tablas oficiales
-    TABLAS_SISTEMA.forEach(tabla => {
-        const data = StorageService.get(tabla, null);
-        if (data) {
-            backup.datos[tabla] = data;
-        }
-    });
+        const blob = new Blob([JSON.stringify(backup, null, 2)], {
+            type: 'application/json'
+        });
 
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `REV-POS-BACKUP-${window.getFechaLocalMX()}.json`;
-    a.click();
-    console.log("💾 Respaldo generado desde StorageService.");
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+
+        const fecha = window.getFechaLocalMX
+            ? window.getFechaLocalMX()
+            : new Date().toISOString().slice(0, 10);
+
+        a.download = `REV-POS-BACKUP-${fecha}.json`;
+        a.click();
+
+        console.log(`💾 Respaldo dinámico generado: ${backup._tablas} tabla(s).`);
+
+    } catch (err) {
+        console.error("❌ Error generando respaldo dinámico:", err);
+        alert(`❌ Error generando respaldo: ${err.message}`);
+    }
 };
 
-// --- IMPORTAR TODO (Corregido) ---
+// --- IMPORTAR TODO dinámicamente ---
 window.importarBackupJSON = function(event) {
     const archivo = event.target.files[0];
-    if (!archivo || !confirm('⚠️ Se borrarán los datos actuales. ¿Continuar?')) return;
+
+    if (!archivo || !confirm('⚠️ Se reemplazarán los datos actuales con el respaldo seleccionado. ¿Continuar?')) {
+        return;
+    }
     
     const lector = new FileReader();
+
     lector.onload = async (e) => { 
         try {
             const json = JSON.parse(e.target.result);
             const datos = json.datos || json;
 
-            // 1. Guardar en la base de datos local (IndexedDB)
-            await Promise.all(Object.entries(datos).map(([key, value]) => {
+            if (!datos || typeof datos !== 'object' || Array.isArray(datos)) {
+                throw new Error("El archivo no contiene una estructura válida de respaldo.");
+            }
+
+            let importadas = 0;
+            let ignoradas = 0;
+
+            for (const [key, value] of Object.entries(datos)) {
                 let valorCorregido = value;
+
                 if (typeof value === 'string') {
-                try { valorCorregido = JSON.parse(value); } catch(e) {}
+                    try {
+                        valorCorregido = JSON.parse(value);
+                    } catch(e) {
+                        valorCorregido = value;
                     }
-                return StorageService.set(key, valorCorregido); // <-- Cambiamos 'value' por 'valorCorregido'
-            }));
+                }
 
-            // 2. REPARACIÓN: Sincronizar las variables globales con los nuevos datos
-            // Esto es necesario para que las funciones de 'render' vean los cambios
-            if (datos.productos) window.productos = datos.productos;
-            if (datos.categoriasData) window.categoriasData = datos.categoriasData;
-            if (datos.movimientosInventario) window.movimientosInventario = datos.movimientosInventario;
+                if (!StorageService._esTablaValida(key, valorCorregido)) {
+                    console.warn(`⏭️ Clave ignorada al importar: ${key}`);
+                    ignoradas++;
+                    continue;
+                }
 
-            // 3. Renderizado seguro
-            // Ahora, si estás en la vista de inventario, se actualizará.
-            // Si estás en configuración, renderCategorias() simplemente no hará nada (gracias al paso 1).
+                await StorageService.set(key, valorCorregido);
+                importadas++;
+            }
+
+            console.log(`✅ Importación dinámica completada. Importadas: ${importadas}, ignoradas: ${ignoradas}`);
+
+            // Renderizados seguros si existen
             if (typeof renderCategorias === 'function') renderCategorias();
             if (typeof actualizarCombosFiltros === 'function') actualizarCombosFiltros();
-            
-            alert('✅ Respaldo restaurado con éxito.');
-            
-            // Si quieres que todo el sistema se refresque por completo:
-            location.reload();
+            if (typeof renderInventario === 'function') renderInventario();
+            if (typeof renderClientes === 'function') renderClientes();
+            if (typeof renderProveedores === 'function') renderProveedores();
+            if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
 
+            alert(`✅ Respaldo restaurado con éxito.\n\nTablas importadas: ${importadas}\nClaves ignoradas: ${ignoradas}`);
+
+            location.reload();
 
         } catch (err) { 
             console.error("Error detallado:", err);
             alert(`❌ Error al importar: ${err.message}`); 
         }
     };
+
     lector.readAsText(archivo);
 };
 
@@ -157,7 +186,7 @@ window.subirBackupOneDrive = async function () {
     const token = window._msalToken || (await window.conectarOneDrive());
     if (!token) return false;
     try {
-        const backup = _construirBackup();   // ← usa StorageService, no localStorage
+        const backup = await _construirBackup();   // ← usa StorageService dinámico, no localStorage
         const json   = JSON.stringify(backup, null, 2);
         const fecha  = window.getFechaLocalMX();
         const nombre = `REV-BACKUP-v${BACKUP_VERSION}-${fecha}.json`;

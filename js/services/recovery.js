@@ -181,22 +181,18 @@ window.diagnosticarAlmacenamiento = async function() {
     };
 };
 
-// 🔄 Función para forzar recarga de variables globales
+// 🔄 Función para forzar recarga dinámica de variables globales
 window.recargarVariablesGlobales = async function() {
-    console.log("🔄 Recargando variables globales desde StorageService...");
-    
-    const tablas = [
-        'productos', 'clientes', 'proveedores', 'categoriasData',
-        'cuentasPorCobrar', 'cuentasPorPagar', 'pagaresSistema',
-        'movimientosCaja', 'movimientosInventario', 'compras',
-        'carrito', 'tarjetasConfig', 'recepciones', 'cuentasMSI', // <--- ¡CORREGIDO!
-        'requisicionesCompra', 'salidasPendientesVenta'
-    ];
+    console.log("🔄 Recargando variables globales dinámicamente desde StorageService...");
+
+    const tablas = await StorageService.getTablasDinamicas();
     
     let recargadas = 0;
+
     for (let tabla of tablas) {
-        const datos = StorageService.get(tabla, []);
-        if (datos) {
+        const datos = StorageService.get(tabla, null);
+
+        if (StorageService._esTablaValida(tabla, datos)) {
             window[tabla] = datos;
             console.log(`✓ ${tabla}: ${Array.isArray(datos) ? datos.length + ' registros' : typeof datos}`);
             recargadas++;
@@ -204,12 +200,15 @@ window.recargarVariablesGlobales = async function() {
     }
     
     console.log(`✅ ${recargadas} variable(s) global(es) recargada(s)`);
-    
+
     // Renderizar vistas si están disponibles
     if (typeof renderInventario === 'function') renderInventario();
     if (typeof renderProveedores === 'function') renderProveedores();
     if (typeof renderClientes === 'function') renderClientes();
     if (typeof mostrarProductos === 'function') mostrarProductos();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderCategorias === 'function') renderCategorias();
+    if (typeof actualizarCombosFiltros === 'function') actualizarCombosFiltros();
     
     return { recargadas };
 };
