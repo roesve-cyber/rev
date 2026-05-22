@@ -1826,29 +1826,45 @@ movimientosInventario = kardex;   // ✅ sincronizar global
         });
     }
 
-    // ── 3. Si queda saldo sin pagar → Cuenta por Pagar ─────────
-    // 🔥 AUDITORÍA: Descontamos lo pagado hoy y el anticipo histórico
+    // ── 3. Si queda saldo sin pagar → Cuenta por Pagar o Consignación ─────────
     const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipo);
     
     if (saldoRestante > 0.01) {
-        const fechaVenc = new Date();
-        fechaVenc.setDate(fechaVenc.getDate() + 30);
-        let cxp = StorageService.get('cuentasPorPagar', []);
-        cxp.push({
-            id: Date.now() + 7,
-            compraId: oc.id,
-            proveedor: oc.proveedorNombre,
-            producto: itemsRecibidos.map(a => a.nombre).join(', '),
-            total: totalRecibido, // 🔥 El total de la deuda debe ser el valor de la mercancía, no el saldo
-            saldoPendiente: saldoRestante, // 🔥 El saldo real tras matemáticas estrictas
-            metodo: 'credito_proveedor',
-            formaPagoTexto: `Saldo OC ${oc.folio}`,
-            plazo: 30,
-            fecha: fechaStr,
-            vencimiento: window.formatearFechaCortaMX(fechaVenc),
-            vencimientoIso: window.localISO(fechaVenc)
-        });
-        StorageService.set('cuentasPorPagar', cxp);
+        if (oc.condicionesComerciales?.metodoPago === 'consignacion') {
+            let consig = StorageService.get("consignacionesActivas", []);
+            const cantRecibidaTotal = itemsRecibidos.reduce((s, a) => s + a.cantidadRec, 0);
+            consig.push({
+                id: Date.now() + 7,
+                compraId: oc.id,
+                proveedor: oc.proveedorNombre,
+                producto: itemsRecibidos.map(a => a.nombre).join(', '),
+                total: saldoRestante,
+                cantidadTotal: cantRecibidaTotal,
+                cantidadPendiente: cantRecibidaTotal,
+                costoUnitario: saldoRestante / cantRecibidaTotal,
+                fecha: window.formatearFechaCortaMX(fechaRec)
+            });
+            StorageService.set("consignacionesActivas", consig);
+        } else {
+            const fechaVenc = new Date();
+            fechaVenc.setDate(fechaVenc.getDate() + 30);
+            let cxp = StorageService.get('cuentasPorPagar', []);
+            cxp.push({
+                id: Date.now() + 7,
+                compraId: oc.id,
+                proveedor: oc.proveedorNombre,
+                producto: itemsRecibidos.map(a => a.nombre).join(', '),
+                total: totalRecibido, 
+                saldoPendiente: saldoRestante, 
+                metodo: 'credito_proveedor',
+                formaPagoTexto: `Saldo OC ${oc.folio}`,
+                plazo: 30,
+                fecha: fechaStr,
+                vencimiento: window.formatearFechaCortaMX(fechaVenc),
+                vencimientoIso: window.localISO(fechaVenc)
+            });
+            StorageService.set('cuentasPorPagar', cxp);
+        }
     }
 
     // ── 4. Back order: nueva OC en Borrador con referencia a OC padre ──
@@ -2789,23 +2805,38 @@ function guardarCompraDirectaFinal() {
         }
     } 
     else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
-        let cuentasProv = StorageService.get("cuentasPorPagar", []);
-        cuentasProv.push({
-            id: idCompraUnico + 2,
-            compraId: idCompraUnico,
-            proveedor: prov.nombre,
-            producto: nombresProductos,
-            total: totalCompra,
-            saldoPendiente: totalAPagarReal, // <-- Solo debe lo que sobró tras el descuento
-            metodo: metodoPago,
-            formaPagoTexto: formaPagoTexto,
-            fecha: fechaFormatMX,
-            vencimiento: metodoPago === "consignacion" ? "Al venderse" : "Revisar CXP",
-            esConsignacion: metodoPago === "consignacion",
-            // Dejamos evidencia contable del abono invisible
-            abonos: montoUsadoDelSaldo > 0 ? [{fecha: fechaStr+"T12:00:00.000", monto: montoUsadoDelSaldo, cuenta: "Saldo a Favor"}] : [] 
-        });
-        StorageService.set("cuentasPorPagar", cuentasProv);
+        if (metodoPago === "consignacion") {
+            let consig = StorageService.get("consignacionesActivas", []);
+            consig.push({
+                id: Date.now(),
+                compraId: idCompraUnico,
+                proveedor: prov.nombre,
+                producto: nombresProductos,
+                total: totalCompra,
+                cantidadTotal: arts.reduce((s, a) => s + a.cantidad, 0),
+                cantidadPendiente: arts.reduce((s, a) => s + a.cantidad, 0),
+                costoUnitario: totalCompra / arts.reduce((s, a) => s + a.cantidad, 0),
+                fecha: fechaFormatMX
+            });
+            StorageService.set("consignacionesActivas", consig);
+        } else {
+            let cuentasProv = StorageService.get("cuentasPorPagar", []);
+            cuentasProv.push({
+                id: idCompraUnico + 2,
+                compraId: idCompraUnico,
+                proveedor: prov.nombre,
+                producto: nombresProductos,
+                total: totalCompra,
+                saldoPendiente: totalAPagarReal,
+                metodo: metodoPago,
+                formaPagoTexto: formaPagoTexto,
+                fecha: fechaFormatMX,
+                vencimiento: "Revisar CXP",
+                esConsignacion: false,
+                abonos: montoUsadoDelSaldo > 0 ? [{fecha: fechaStr+"T12:00:00.000", monto: montoUsadoDelSaldo, cuenta: "Saldo a Favor"}] : [] 
+            });
+            StorageService.set("cuentasPorPagar", cuentasProv);
+        }
     }
     else if (metodoPago === "tarjeta_msi") {
         let cuentasBancos = StorageService.get("cuentasMSI", []);
@@ -3369,6 +3400,95 @@ window.marcarRequisicionesResueltasMasivo = function() {
         // Opcional: mostrar un mini aviso de éxito
         console.log(`✅ Se limpiaron ${actualizados} requisiciones.`);
     }
+};
+// ============================================================
+// GESTOR DE CONSIGNACIONES (TIPO LIVERPOOL)
+// ============================================================
+window.abrirGestorConsignaciones = function() {
+    const consignaciones = StorageService.get("consignacionesActivas", []).filter(c => c.cantidadPendiente > 0);
+    
+    let filas = consignaciones.map(c => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px;">${c.fecha}</td>
+            <td style="padding:10px; font-weight:bold; color:#1e40af;">${c.proveedor}</td>
+            <td style="padding:10px;">${c.producto}</td>
+            <td style="padding:10px; text-align:center;"><span style="background:#fef3c7; color:#d97706; padding:4px 8px; border-radius:4px; font-weight:bold;">${c.cantidadPendiente} pzas</span></td>
+            <td style="padding:10px; text-align:right;">${dinero(c.costoUnitario)}</td>
+            <td style="padding:10px; text-align:center;">
+                <button onclick="marcarConsignacionVendida(${c.id})" style="padding:8px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Reportar Venta</button>
+            </td>
+        </tr>
+    `).join('');
+
+    if (consignaciones.length === 0) filas = `<tr><td colspan="6" style="padding:20px; text-align:center; color:#64748b;">No hay mercancía a consignación pendiente de vender.</td></tr>`;
+
+    const html = `
+    <div data-modal="gestor-consignaciones" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; border-radius:12px; width:95%; max-width:900px; padding:25px; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2 style="margin:0; color:#065f46;">📦 Gestor de Consignaciones</h2>
+                <button onclick="document.querySelector('[data-modal=gestor-consignaciones]').remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">✕</button>
+            </div>
+            <p style="color:#475569; font-size:14px; margin-bottom:15px;">Aquí se muestran los productos que tienes físicamente pero que no has pagado. Al reportar una venta, la deuda se transferirá a tus <b>Cuentas por Pagar</b>.</p>
+            <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                <thead style="background:#f1f5f9;">
+                    <tr>
+                        <th style="padding:10px; text-align:left;">Ingreso</th>
+                        <th style="padding:10px; text-align:left;">Proveedor</th>
+                        <th style="padding:10px; text-align:left;">Producto(s)</th>
+                        <th style="padding:10px; text-align:center;">Stock Pendiente</th>
+                        <th style="padding:10px; text-align:right;">Costo Unit.</th>
+                        <th style="padding:10px; text-align:center;">Acción</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.marcarConsignacionVendida = function(idConsig) {
+    let consigArr = StorageService.get("consignacionesActivas", []);
+    const idx = consigArr.findIndex(c => c.id === idConsig);
+    if (idx === -1) return;
+    const c = consigArr[idx];
+
+    const cantidadAVender = parseInt(prompt(`¿Cuántas piezas de "${c.producto}" vendiste?\n\nStock disponible: ${c.cantidadPendiente}`));
+    if (isNaN(cantidadAVender) || cantidadAVender <= 0 || cantidadAVender > c.cantidadPendiente) {
+        return alert("❌ Cantidad inválida.");
+    }
+
+    const fechaPagoInput = prompt("📅 ¿En qué fecha tienes que liquidarle esto al proveedor? (Formato: YYYY-MM-DD)", window.obtenerHoyInputMX());
+    if (!fechaPagoInput) return alert("❌ Operación cancelada. Debes fijar una fecha de pago.");
+
+    const montoDeuda = cantidadAVender * c.costoUnitario;
+    
+    // Generar la Cuenta por Pagar
+    let cxp = StorageService.get("cuentasPorPagar", []);
+    cxp.push({
+        id: Date.now(),
+        compraId: c.compraId,
+        proveedor: c.proveedor,
+        producto: `[Vendido de Consignación] - ${c.producto} (${cantidadAVender} pzas)`,
+        total: montoDeuda,
+        saldoPendiente: montoDeuda,
+        metodo: "credito_proveedor",
+        formaPagoTexto: "Liquidación de Consignación",
+        fecha: window.formatearFechaCortaMX(new Date()),
+        vencimiento: window.formatearFechaCortaMX(fechaPagoInput + "T12:00:00"),
+        vencimientoIso: window.localISO(fechaPagoInput + "T12:00:00"),
+        esConsignacion: false 
+    });
+    StorageService.set("cuentasPorPagar", cxp);
+
+    // Descontar inventario pendiente
+    consigArr[idx].cantidadPendiente -= cantidadAVender;
+    StorageService.set("consignacionesActivas", consigArr);
+
+    document.querySelector('[data-modal="gestor-consignaciones"]').remove();
+    alert(`✅ ¡Listo! La deuda por ${dinero(montoDeuda)} ha sido transferida a Cuentas por Pagar con vencimiento el ${fechaPagoInput}.`);
+    abrirGestorConsignaciones(); // Refresca la ventana
 };
 
 // Exponer la función para que el menú HTML la encuentre
