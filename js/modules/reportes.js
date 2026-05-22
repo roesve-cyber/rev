@@ -437,11 +437,452 @@ window.renderReporteLiquidezCortoPlazo = function() {
     </div>`;
     contenedor.innerHTML = html;
 };
+// ─── REPORTE DE FLUJO DE EFECTIVO HORIZONTAL ─────────────────────────
+window.renderReporteFlujo = function() {
+    const cont = document.getElementById('reporte-flujo') 
+              || document.getElementById('reportes') 
+              || document.getElementById('dashboardContenido');
+
+    if (!cont) {
+        console.warn("⚠️ No se encontró contenedor para renderReporteFlujo. Se esperaba #reporte-flujo, #reportes o #dashboardContenido.");
+        return;
+    }
+
+    cont.innerHTML = "";
+
+    const fDesde = window._filtroFlujoFInicio || '';
+    const fHasta = window._filtroFlujoFFin || '';
+    const cuentaFiltro = window._filtroFlujoCuenta || 'todas';
+    const periodoAgrupar = window._filtroFlujoPeriodo || 'diario';
+    const ordenBloques = window._filtroFlujoOrden || 'desc';
+
+    const dineroFlujo = (v) => new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN'
+    }).format(v || 0);
+
+    // 1. OBTENER CUENTAS REALES
+    const cajas = StorageService.get("cuentasEfectivo", [
+        { id: "efectivo", nombre: "💵 Efectivo Principal" }
+    ]);
+
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+
+    const cuentasParaSelector = [
+        ...cajas.map(c => ({
+            id: c.id || c.nombre || 'efectivo',
+            nombre: c.nombre || c.id || 'Efectivo'
+        })),
+        ...tarjetas
+            .filter(t => t.tipo === 'debito')
+            .map(t => ({
+                id: t.banco,
+                nombre: `🏦 ${t.banco}`
+            }))
+    ];
+
+    // 2. CONSOLIDACIÓN DE MOVIMIENTOS
+    const tickets = StorageService.get("registroTickets", []);
+    const cuentasCxC = StorageService.get("cuentasPorCobrar", []);
+    const ordenesCompra = StorageService.get("ordenesCompra", []);
+    const comprasDirectas = StorageService.get("compras", []);
+    const movimientosCaja = StorageService.get("movimientosCaja", []);
+    const manuales = StorageService.get("movimientosManuales", []);
+
+    let movimientos = [];
+
+    // Ventas desde tickets
+    tickets.forEach(t => {
+        const venta = t.venta || {};
+        const met = venta.cuentaReceptora || venta.modoEnganche || venta.metodoPago || 'efectivo';
+
+        const monto = (
+            venta.metodoPago === 'contado' ||
+            venta.metodoPago === 'transferencia'
+        )
+            ? parseFloat(venta.total || 0)
+            : parseFloat(venta.enganche || 0);
+
+        if (monto > 0) {
+            movimientos.push({
+                fecha: t.fechaEmision || t.fecha || venta.fecha || Date.now(),
+                concepto: `Venta: ${t.folio || venta.folio || '-'}`,
+                tipo: 'ingreso',
+                cuenta: met,
+                monto
+            });
+        }
+    });
+
+    // Abonos de cuentas por cobrar
+    cuentasCxC.forEach(c => {
+        (c.abonos || []).forEach(ab => {
+            const monto = parseFloat(ab.monto || 0);
+
+            if (monto > 0) {
+                movimientos.push({
+                    fecha: ab.fecha || Date.now(),
+                    concepto: `Abo: ${c.nombre || c.clienteNombre || c.folio || '-'}`,
+                    tipo: 'ingreso',
+                    cuenta: ab.cuentaId || ab.medioPago || ab.metodoPago || 'efectivo',
+                    monto
+                });
+            }
+        });
+    });
+
+    // Órdenes de compra pagadas
+    ordenesCompra.forEach(com => {
+        const pagado = parseFloat(com.pagado || com.montoPagado || 0);
+
+        if (pagado > 0) {
+            movimientos.push({
+                fecha: com.fecha || com.fechaEmision || Date.now(),
+                concepto: `Prov: ${com.proveedor || com.proveedorNombre || '-'}`,
+                tipo: 'egreso',
+                cuenta: com.metodoPago || com.cuentaPago || 'efectivo',
+                monto: pagado
+            });
+        }
+    });
+
+    // Compras directas pagadas
+    comprasDirectas.forEach(com => {
+        const pagado = parseFloat(com.pagado || com.total || 0);
+
+        if (pagado > 0) {
+            movimientos.push({
+                fecha: com.fechaISO || com.fecha || Date.now(),
+                concepto: `Compra: ${com.proveedor || com.proveedorNombre || com.id || '-'}`,
+                tipo: 'egreso',
+                cuenta: com.metodoPago || com.cuentaPago || 'efectivo',
+                monto: pagado
+            });
+        }
+    });
+
+    // Movimientos de caja ya registrados
+    movimientosCaja.forEach(m => {
+        const monto = parseFloat(m.monto || 0);
+        if (monto <= 0) return;
+
+        movimientos.push({
+            fecha: m.fecha || Date.now(),
+            concepto: m.concepto || m.referencia || m.folio || 'Movimiento de caja',
+            tipo: String(m.tipo || '').toLowerCase() === 'egreso' ? 'egreso' : 'ingreso',
+            cuenta: m.cuenta || m.cuentaId || m.metodoPago || 'efectivo',
+            monto
+        });
+    });
+
+    // Movimientos manuales
+    manuales.forEach(m => {
+        const monto = parseFloat(m.monto || 0);
+        if (monto <= 0) return;
+
+        movimientos.push({
+            fecha: m.fecha || Date.now(),
+            concepto: m.concepto || 'Movimiento manual',
+            tipo: String(m.tipo || '').toLowerCase() === 'ingreso' ? 'ingreso' : 'egreso',
+            cuenta: m.cuenta || 'efectivo',
+            monto
+        });
+    });
+
+    // 3. FILTRADO
+    let movsFiltrados = movimientos.filter(m => {
+        const coincideCuenta =
+            cuentaFiltro === 'todas' ||
+            String(m.cuenta) === String(cuentaFiltro);
+
+        const fMov = new Date(m.fecha);
+
+        if (isNaN(fMov.getTime())) return false;
+
+        let coincideRango = true;
+
+        if (fDesde) {
+            coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
+        }
+
+        if (fHasta) {
+            coincideRango = coincideRango && fMov <= new Date(fHasta + "T23:59:59");
+        }
+
+        return coincideCuenta && coincideRango;
+    });
+
+    // 4. AGRUPACIÓN
+    const grupos = {};
+
+    movsFiltrados.forEach(m => {
+        const d = new Date(m.fecha);
+        let clave = "";
+        let sortKey = d.getTime();
+
+        const fmtFecha = window.formatearFechaCortaMX
+            ? window.formatearFechaCortaMX(m.fecha)
+            : d.toLocaleDateString('es-MX');
+
+        if (periodoAgrupar === 'diario') {
+            clave = fmtFecha;
+        } else if (periodoAgrupar === 'semanal') {
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            const lunes = new Date(new Date(d).setDate(diff));
+            const domingo = new Date(new Date(lunes).setDate(lunes.getDate() + 6));
+
+            clave = `${lunes.getDate()}/${lunes.getMonth() + 1} al ${domingo.getDate()}/${domingo.getMonth() + 1}`;
+            sortKey = lunes.getTime();
+        } else {
+            clave = `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+            sortKey = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+        }
+
+        if (!grupos[clave]) {
+            grupos[clave] = {
+                ing: 0,
+                egr: 0,
+                items: [],
+                sortKey
+            };
+        }
+
+        if (m.tipo === 'ingreso') {
+            grupos[clave].ing += Number(m.monto || 0);
+        } else {
+            grupos[clave].egr += Number(m.monto || 0);
+        }
+
+        grupos[clave].items.push(m);
+    });
+
+    const clavesOrd = Object.keys(grupos).sort((a, b) => {
+        return ordenBloques === 'desc'
+            ? grupos[b].sortKey - grupos[a].sortKey
+            : grupos[a].sortKey - grupos[b].sortKey;
+    });
+
+    let totalIng = 0;
+    let totalEgr = 0;
+
+    const bloquesHTML = clavesOrd.map(clave => {
+        const g = grupos[clave];
+        totalIng += g.ing;
+        totalEgr += g.egr;
+
+        const balance = g.ing - g.egr;
+
+        return `
+            <div style="min-width:320px; background:white; border-radius:12px; border:1px solid #e2e8f0; display:flex; flex-direction:column; max-height:450px; box-shadow:0 4px 10px rgba(0,0,0,0.05);">
+                <div style="padding:15px; background:#1e3a8a; color:white; border-radius:12px 12px 0 0;">
+                    <div style="font-weight:bold; font-size:14px;">${clave.toUpperCase()}</div>
+                    <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:12px;">
+                        <span style="color:#4ade80;">+ ${dineroFlujo(g.ing)}</span>
+                        <span style="color:#f87171;">- ${dineroFlujo(g.egr)}</span>
+                    </div>
+                    <div style="margin-top:8px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.3); text-align:right; font-weight:bold;">
+                        Neto: ${dineroFlujo(balance)}
+                    </div>
+                </div>
+
+                <div style="flex:1; overflow-y:auto; padding:10px; background:#fcfcfc; border-radius:0 0 12px 12px;">
+                    ${g.items.map(i => `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <input type="checkbox" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af;">
+                                <div style="max-width:160px; line-height:1.2;">
+                                    <b>${i.concepto}</b><br>
+                                    <small style="color:#94a3b8;">${i.cuenta}</small>
+                                </div>
+                            </div>
+                            <span style="font-weight:bold; color:${i.tipo === 'ingreso' ? '#16a34a' : '#dc2626'};">
+                                ${i.tipo === 'ingreso' ? '+' : '-'}${dineroFlujo(i.monto)}
+                            </span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>`;
+    }).join('');
+
+    cont.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div>
+                <h2 style="margin:0; color:#1e40af;">💵 Flujo de Efectivo Horizontal</h2>
+                <p style="color:#718096; margin:0;">Movimientos reales filtrados por tus cajas y bancos.</p>
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="window.exportarReporteFlujo()" style="padding:10px 18px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                    📊 Exportar CSV
+                </button>
+                <button onclick="window.abrirModalGastoExtra()" style="padding:10px 18px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">
+                    💸 Nuevo Gasto / Ingreso
+                </button>
+            </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:15px; background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:25px; align-items:end;">
+            <div>
+                <label style="font-size:10px; font-weight:bold; color:#64748b;">CUENTA:</label>
+                <select onchange="window._filtroFlujoCuenta=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="todas" ${cuentaFiltro === 'todas' ? 'selected' : ''}>🌍 Ver Todas</option>
+                    ${cuentasParaSelector.map(c => `
+                        <option value="${c.id}" ${cuentaFiltro === String(c.id) ? 'selected' : ''}>${c.nombre}</option>
+                    `).join('')}
+                </select>
+            </div>
+
+            <div>
+                <label style="font-size:10px; font-weight:bold; color:#64748b;">AGRUPAR:</label>
+                <select onchange="window._filtroFlujoPeriodo=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="diario" ${periodoAgrupar === 'diario' ? 'selected' : ''}>Diario</option>
+                    <option value="semanal" ${periodoAgrupar === 'semanal' ? 'selected' : ''}>Semanal (Lun-Dom)</option>
+                    <option value="mensual" ${periodoAgrupar === 'mensual' ? 'selected' : ''}>Mensual</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="font-size:10px; font-weight:bold; color:#64748b;">DESDE:</label>
+                <input type="date" value="${fDesde}" onchange="window._filtroFlujoFInicio=this.value; window.renderReporteFlujo();" style="display:block; padding:7px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+            </div>
+
+            <div>
+                <label style="font-size:10px; font-weight:bold; color:#64748b;">HASTA:</label>
+                <input type="date" value="${fHasta}" onchange="window._filtroFlujoFFin=this.value; window.renderReporteFlujo();" style="display:block; padding:7px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+            </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px; margin-bottom:25px;">
+            <div style="background:#f0fdf4; border-left:5px solid #16a34a; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <small style="color:#166534; font-weight:bold;">INGRESOS DEL FILTRO</small><br>
+                <strong style="font-size:22px; color:#15803d;">${dineroFlujo(totalIng)}</strong>
+            </div>
+
+            <div style="background:#fff1f2; border-left:5px solid #dc2626; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <small style="color:#991b1b; font-weight:bold;">EGRESOS DEL FILTRO</small><br>
+                <strong style="font-size:22px; color:#b91c1c;">${dineroFlujo(totalEgr)}</strong>
+            </div>
+
+            <div style="background:#eff6ff; border-left:5px solid #1e40af; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <small style="color:#1e3a8a; font-weight:bold;">BALANCE NETO</small><br>
+                <strong style="font-size:22px; color:#1e40af;">${dineroFlujo(totalIng - totalEgr)}</strong>
+            </div>
+        </div>
+
+        <div style="display:flex; overflow-x:auto; gap:20px; padding:10px 0 25px 0; align-items:flex-start;">
+            ${bloquesHTML || '<div style="width:100%; text-align:center; padding:50px; color:#94a3b8; background:white; border-radius:12px;">No hay movimientos con estos filtros.</div>'}
+        </div>
+    `;
+};
+
+// --- SOPORTE PARA REPORTE DE FLUJO ---
+window.actualizarFiltrosFlujo = function() {
+    const fPer = document.getElementById('fPer');
+    const fCta = document.getElementById('fCta');
+    const fIni = document.getElementById('fIni');
+    const fFin = document.getElementById('fFin');
+
+    if (fPer) window._filtroFlujoPeriodo = fPer.value;
+    if (fCta) window._filtroFlujoCuenta = fCta.value;
+    if (fIni) window._filtroFlujoFInicio = fIni.value;
+    if (fFin) window._filtroFlujoFFin = fFin.value;
+
+    window.renderReporteFlujo();
+};
+
+window.abrirModalGastoExtra = function() {
+    const html = `
+    <div id="mFin" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:400px;">
+            <h3 style="margin:0; color:#1e40af;">💸 Movimiento Manual</h3>
+
+            <label style="display:block; margin-top:15px; font-size:11px; font-weight:bold;">TIPO:</label>
+            <select id="mTipo" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;">
+                <option value="egreso">🔴 Gasto / Salida</option>
+                <option value="ingreso">🟢 Ingreso Extra</option>
+            </select>
+
+            <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">CUENTA:</label>
+            <select id="mCta" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;">
+                <option value="efectivo">Caja / Efectivo</option>
+                <option value="transferencia">Banco / Transferencia</option>
+                <option value="tarjeta">Tarjeta / Terminal</option>
+            </select>
+
+            <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">CONCEPTO:</label>
+            <input type="text" id="mCon" placeholder="Ej. Pago de luz, comida, ajuste..." style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; box-sizing:border-box;">
+
+            <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">MONTO ($):</label>
+            <input type="number" id="mMon" placeholder="0.00" style="width:100%; padding:12px; border-radius:8px; border:2px solid #1e40af; font-size:18px; font-weight:bold; box-sizing:border-box;">
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="window.guardarMovManual()" style="flex:1; padding:12px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold;">💾 Guardar</button>
+                <button onclick="document.getElementById('mFin').remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.guardarMovManual = function() {
+    const tipo = document.getElementById('mTipo')?.value;
+    const cuenta = document.getElementById('mCta')?.value;
+    const concepto = document.getElementById('mCon')?.value.trim();
+    const monto = parseFloat(document.getElementById('mMon')?.value);
+
+    if (!concepto || isNaN(monto) || monto <= 0) {
+        return alert("❌ Datos inválidos");
+    }
+
+    const movimientos = StorageService.get("movimientosManuales", []);
+
+    movimientos.push({
+        id: Date.now(),
+        fecha: Date.now(),
+        tipo,
+        cuenta,
+        concepto: `[Manual] ${concepto}`,
+        monto
+    });
+
+    StorageService.set("movimientosManuales", movimientos);
+
+    const modal = document.getElementById('mFin');
+    if (modal) modal.remove();
+
+    window.renderReporteFlujo();
+};
+
+window.exportarReporteFlujo = function() {
+    const movimientosCaja = StorageService.get("movimientosCaja", []);
+
+    if (typeof _csvDescargar !== 'function') {
+        alert("❌ No está disponible la función de exportación CSV.");
+        return;
+    }
+
+    _csvDescargar(
+        'reporte-flujo.csv',
+        ['Folio', 'Fecha', 'Tipo', 'Monto', 'Concepto', 'Referencia'],
+        movimientosCaja.map(m => [
+            m.folio || '-',
+            m.fecha || '-',
+            m.tipo || '-',
+            m.monto || 0,
+            m.concepto || '-',
+            m.referencia || '-'
+        ])
+    );
+};
 
 // --- Registro Global de Funciones ---
-window.renderReporteVentas = renderReporteVentas;
-window.exportarReporteVentas = exportarReporteVentas;
-window.renderReporteCompras = renderReporteCompras;
-window.exportarReporteCompras = exportarReporteCompras;
-window.renderReporteCompromisos = renderReporteCompromisos;
-window.renderReporteLiquidezCortoPlazo = renderReporteLiquidezCortoPlazo;
+window.renderReporteVentas = window.renderReporteVentas;
+window.exportarReporteVentas = window.exportarReporteVentas;
+window.renderReporteCompras = window.renderReporteCompras;
+window.exportarReporteCompras = window.exportarReporteCompras;
+window.renderReporteCompromisos = window.renderReporteCompromisos;
+window.renderReporteLiquidezCortoPlazo = window.renderReporteLiquidezCortoPlazo;
+window.renderReporteFlujo = window.renderReporteFlujo;
+window.exportarReporteFlujo = window.exportarReporteFlujo;

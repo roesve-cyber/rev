@@ -180,7 +180,7 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
 };
 
-window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia }) {
+window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha }) {
     // Detectar si el ID es de una caja de efectivo
     const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
     
@@ -204,8 +204,9 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         tipo: 'egreso',
         concepto,
         monto,
-        fecha: window.localISO(new Date()),
-        cuenta: cuentaId,
+        // 👇 AHORA TOMA LA FECHA QUE ELIJAS 👇
+        fecha: fecha || window.localISO(new Date()),
+        cuenta: cuentaId,
         etiquetaCuenta: etiqueta || cuentaId,
         medioPago: isCaja ? 'efectivo' : 'transferencia',
         referencia
@@ -501,6 +502,7 @@ function registrarCompra() {
                 id: Date.now() + 3,
                 compraId: nuevaCompra.id,
                 banco: bancoSel,
+                concepto: `Compra: ${producto.nombre} (Prov: ${prov.nombre})`, // 🔥 INYECCIÓN DE AUDITORÍA
                 producto: producto.nombre,
                 total: totalCompra,
                 meses: numMeses,
@@ -598,39 +600,90 @@ function renderRecepciones() {
     contenedor.innerHTML = html + "</tbody></table>";
 }
 
+// --- MOTOR DE RECEPCIÓN FÍSICA MULTI-BODEGA ---
 function procesarRecepcionFisica(idRecepcion) {
-    // --- CORRECCIÓN: Asegurar la lectura de las bases de datos primero ---
-    let productos = StorageService.get("productos", []);
-    let movimientosInventario = StorageService.get("movimientosInventario", []);
     let recs = StorageService.get("recepciones", []);
-    // ---------------------------------------------------------------------
-
     const index = recs.findIndex(r => r.id == idRecepcion);
-    if (index === -1) return;
-
+    if (index === -1) return alert("❌ Error: Recepción no encontrada.");
     const rec = recs[index];
-    const cantInput = prompt(`¿Cuánto llegó de ${rec.productoNombre}?\nFaltan: ${rec.cantidadPendiente}`);
-    const cantidad = parseInt(cantInput);
 
-    if (isNaN(cantidad) || cantidad <= 0 || cantidad > rec.cantidadPendiente) {
-        alert("Cantidad no válida.");
-        return;
+    // Extraer catálogo real de ubicaciones
+    const ubicacionesConfig = StorageService.get("ubicacionesConfig", [{nombre: "Piso de Ventas"}, {nombre: "Bodega Principal"}]);
+    let opcionesUbi = '<option value="General">-- Elige la Bodega / Ubicación --</option>';
+    ubicacionesConfig.forEach(u => {
+        const isSelected = (rec.ubicacion === u.nombre) ? 'selected' : '';
+        opcionesUbi += `<option value="${u.nombre}" ${isSelected}>${u.nombre}</option>`;
+    });
+
+    // Remover modal previo si existe
+    document.querySelector('[data-modal="recepcion-fisica"]')?.remove();
+
+    const html = `
+    <div data-modal="recepcion-fisica" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;">
+        <div style="background:white;border-radius:12px;width:380px;padding:24px;box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+            <h3 style="margin-top:0;color:#1e40af;margin-bottom:15px;">📥 Ingreso al Inventario</h3>
+            
+            <div style="background:#f8fafc;padding:12px;border-radius:8px;margin-bottom:15px;border:1px solid #e2e8f0;">
+                <p style="margin:0;font-size:13px;color:#475569;">Producto: <b>${rec.productoNombre}</b></p>
+                <p style="margin:5px 0 0;font-size:13px;color:#dc2626;font-weight:bold;">Pendiente por recibir: ${rec.cantidadPendiente}</p>
+            </div>
+            
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#374151;">Cantidad a ingresar:</label>
+                <input type="number" id="rfCantidad" value="${rec.cantidadPendiente}" min="1" max="${rec.cantidadPendiente}" style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:16px;font-weight:bold;text-align:center;">
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#374151;">Color / Variante:</label>
+                <input type="text" id="rfColor" value="${rec.color || 'General'}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;">
+            </div>
+
+            <div style="margin-bottom:20px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#374151;">Bodega / Ubicación de destino:</label>
+                <select id="rfUbicacion" style="width:100%;padding:10px;border:2px solid #10b981;border-radius:6px;font-size:14px;background:#f0fdf4;">
+                    ${opcionesUbi}
+                </select>
+            </div>
+
+            <div style="display:flex;gap:10px;">
+                <button onclick="ejecutarRecepcionFisica(${idRecepcion})" style="flex:1;padding:12px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;cursor:pointer;">✅ Recibir Mercancía</button>
+                <button onclick="document.querySelector('[data-modal=\\'recepcion-fisica\\']').remove()" style="padding:12px 16px;background:#94a3b8;color:white;border:none;border-radius:6px;cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+// Lógica de ejecución atada al botón del modal
+window.ejecutarRecepcionFisica = function(idRecepcion) {
+    const cantidad = parseInt(document.getElementById('rfCantidad').value);
+    const colorRecepcion = document.getElementById('rfColor').value.trim() || 'General';
+    const ubicacionRecepcion = document.getElementById('rfUbicacion').value;
+
+    if (!ubicacionRecepcion || ubicacionRecepcion === "General") {
+        alert("❌ BLOQUEO DE AUDITORÍA: Está estrictamente prohibido ingresar mercancía sin declarar la bodega física de destino. Selecciona una ubicación válida.");
+        return; // El return aquí "mata" la función, no guarda nada y no deja avanzar.
     }
 
-    // --- NUEVO: RESUMEN Y CONFIRMACIÓN DE RECEPCIÓN DIRECTA ---
-    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿RECIBIR MERCANCÍA?\n\nProducto: ${rec.productoNombre}\nCantidad a ingresar: ${cantidad} piezas\nBodega/Ubicación: ${rec.ubicacion || 'General'}\n\n¿Deseas registrar esta entrada en el inventario?`;
-    if (!confirm(msjConf)) return;
-    // --- FIN DE CONFIRMACIÓN ---
+    let recs = StorageService.get("recepciones", []);
+    const index = recs.findIndex(r => r.id == idRecepcion);
+    if (index === -1) return;
+    const rec = recs[index];
 
-const prod = productos.find(p => String(p.id) === String(rec.productoId));
-    
+    if (isNaN(cantidad) || cantidad <= 0 || cantidad > rec.cantidadPendiente) {
+        return alert("⚠️ Cantidad no válida o mayor a lo pendiente.");
+    }
+
+    let productos = StorageService.get("productos", []);
+    let movimientosInventario = StorageService.get("movimientosInventario", []);
+    const prod = productos.find(p => String(p.id) === String(rec.productoId));
     
     if (prod) {
+        // 1. Afectar Stock General
         prod.stock = (parseInt(prod.stock) || 0) + cantidad;
 
+        // 2. Afectar Variantes (Color/Ubicación)
         if (!prod.variantes) prod.variantes = [];
-        const colorRecepcion = rec.color || 'General';
-        const ubicacionRecepcion = rec.ubicacion || 'General';
         
         const varExistente = prod.variantes.find(v => 
             (v.color || "General").toUpperCase() === colorRecepcion.toUpperCase() && 
@@ -643,83 +696,37 @@ const prod = productos.find(p => String(p.id) === String(rec.productoId));
             prod.variantes.push({ color: colorRecepcion, ubicacion: ubicacionRecepcion, stock: cantidad });
         }
         
+        // 3. Afectar KARDEX detallado
         movimientosInventario.push({
             id: Date.now(),
-            productoId: prod.id,
+            productoId: String(prod.id),
+            productoNombre: prod.nombre,
             tipo: 'entrada',
             cantidad,
-            concepto: `Recepción - Prov: ${rec.proveedor}`,
-            fecha: window.localISO(new Date())
+            concepto: `Recepción Pendiente - Prov: ${rec.proveedor} (${colorRecepcion}) -> Ingresado a [${ubicacionRecepcion}]`,
+            fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
         });
     } else {
-        alert("Error: El producto ya no existe en la base de datos.");
-        return; 
+        return alert("❌ Error: El producto ya no existe en la base de datos.");
     }
 
+    // 4. Actualizar la tarjeta de Recepción
     rec.cantidadRecibida += cantidad;
     rec.cantidadPendiente -= cantidad;
     if (rec.cantidadPendiente === 0) rec.estatus = "Completado";
+    rec.ubicacion = ubicacionRecepcion;
+    rec.color = colorRecepcion;
 
     recs[index] = rec;
     
-    if (!StorageService.set("recepciones", recs)) {
-        console.error("❌ Error guardando recepciones");
-        return;
-    }
-    if (!StorageService.set("productos", productos)) {
-        console.error("❌ Error guardando productos");
-        return;
-    }
-    if (!StorageService.set("movimientosInventario", movimientosInventario)) {
-        console.error("❌ Error guardando movimientos");
-        return;
-    }
+    StorageService.set("recepciones", recs);
+    StorageService.set("productos", productos);
+    StorageService.set("movimientosInventario", movimientosInventario);
 
-    alert("Stock actualizado con éxito.");
+    document.querySelector('[data-modal="recepcion-fisica"]').remove();
+    alert(`✅ Recepción procesada exitosamente.\nInventario sumado a la bodega: [${ubicacionRecepcion}].`);
     renderRecepciones();
-}
-
-// ===== CUENTAS POR PAGAR =====
-function renderCuentasPorPagar() {
-    const contenedor = document.getElementById("listaCuentasPorPagar");
-    if (!contenedor) return;
-
-    let cuentas = StorageService.get("cuentasPorPagar", []);
-    let deudas = cuentas.filter(c => c.saldoPendiente > 0);
-
-    if (deudas.length === 0) {
-        contenedor.innerHTML = "<p style='text-align:center; padding:20px;'>✅ ¡No tienes deudas pendientes!</p>";
-        return;
-    }
-
-    let html = `
-        <table class="tabla-admin">
-            <thead><tr>
-                <th>Fecha / Proveedor</th>
-                <th>Método</th>
-                <th>Total</th>
-                <th>Saldo Pendiente</th>
-                <th>Acción</th>
-            </tr></thead>
-            <tbody>`;
-
-    deudas.forEach(c => {
-        html += `
-            <tr>
-                <td>${c.fecha}<br><strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="verDetalleCompra(${c.id})">${c.proveedor}</strong></td>
-                <td><small>${c.metodo || c.formaPagoTexto || '-'}</small></td>
-                <td>${dinero(c.total)}</td>
-                <td style="color:red; font-weight:bold;">${dinero(c.saldoPendiente)}</td>
-                <td>
-                    <button onclick="registrarAbonoProveedor(${c.id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:5px; cursor:pointer;">
-                        💵 Abonar
-                    </button>
-                </td>
-            </tr>`;
-    });
-
-    contenedor.innerHTML = html + "</tbody></table>";
-}
+};
 
 window.verDetalleCompra = function(idCuenta) {
     const cuentas = StorageService.get("cuentasPorPagar", []);
@@ -767,15 +774,61 @@ window.verDetalleCompra = function(idCuenta) {
     });
     if (subtotalReal < (parseFloat(c.total) || 0)) subtotalReal = parseFloat(c.total);
 
-    // 4. Construir historial de movimientos para el estado de cuenta
-    const abonos = Array.isArray(c.abonos) ? c.abonos : [];
-    const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
-    const saldoPendiente = parseFloat(c.saldoPendiente) || 0;
+    // 4. MOTOR DE FUSIÓN Y AUDITORÍA (Cura la Billetera Rota)
+    let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
+    
+    // Rescatar abonos perdidos que se hicieron desde la pantalla de Órdenes de Compra
+    if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
+        compraOriginal.pagos.forEach(pagoOC => {
+            const yaExiste = abonos.find(a => a.fecha === pagoOC.fecha && a.monto === pagoOC.monto);
+            if (!yaExiste) abonos.push(pagoOC);
+        });
+    }
 
-    // Pago inicial al momento de compra (si hay diferencia entre total y deuda original)
-    // La deuda original es total - lo que ya pagó al registrar. Si no hay abonos registrados
-    // pero el saldo < total, significa que hubo un anticipo al registrar.
-    const anticipoInicial = subtotalReal - totalAbonado - saldoPendiente;
+    const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
+
+    // Determinar si hay un anticipo REAL que NO esté ya representado en c.abonos.
+    // Cuando los pagos de la Orden de Compra se fusionan en abonos (líneas ~781-786),
+    // el campo anticipo_pagado queda igual a la suma de esos abonos → si se mostrara
+    // la fila de anticipo Y los abonos individuales se estaría duplicando el monto.
+    let anticipoInicial = 0;
+    let mostrarFilaAnticipo = false;
+
+    if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01) {
+        const ap = parseFloat(compraOriginal.anticipo_pagado);
+        // Verificar si los pagos de la OC ya fueron absorbidos por c.abonos
+        const pagosOC = Array.isArray(compraOriginal.pagos) ? compraOriginal.pagos : [];
+        const pagosYaEnAbonos = pagosOC.length > 0 && pagosOC.every(p =>
+            abonos.some(a =>
+                a.fecha === p.fecha &&
+                Math.abs((parseFloat(a.monto) || 0) - (parseFloat(p.monto) || 0)) < 0.01
+            )
+        );
+        if (!pagosYaEnAbonos) {
+            // Anticipo genuino que no está en los abonos individuales → mostrarlo
+            anticipoInicial = ap;
+            mostrarFilaAnticipo = true;
+        }
+        // Si pagosYaEnAbonos === true: los abonos individuales YA muestran esos pagos,
+        // no agregar fila de anticipo ni sumarlo al total.
+    }
+
+    // Saldo verdadero: siempre recalcular desde cero para corregir cualquier
+    // valor mal guardado por el bug del doble conteo anterior.
+    // Solo se suma anticipoInicial si es un pago genuino no representado en abonos.
+    const saldoPendienteVerdadero = Math.max(
+        0,
+        subtotalReal - totalAbonado - (mostrarFilaAnticipo ? anticipoInicial : 0)
+    );
+
+    // Auto-Reparación silenciosa en la base de datos (Si estaban desincronizados, los arregla)
+    if (Math.abs((parseFloat(c.saldoPendiente) || 0) - saldoPendienteVerdadero) > 0.01 || c.abonos?.length !== abonos.length) {
+        c.saldoPendiente = saldoPendienteVerdadero;
+        c.abonos = abonos;
+        StorageService.set("cuentasPorPagar", cuentas);
+    }
+
+    const saldoPendiente = saldoPendienteVerdadero;
 
     let movimientosHTML = '';
 
@@ -789,9 +842,9 @@ window.verDetalleCompra = function(idCuenta) {
             <td style="padding:10px;text-align:right;font-weight:bold;color:#dc2626;">${dinero(subtotalReal)}</td>
         </tr>`;
 
-    // Anticipo al registrar (si aplica)
+    // Anticipo al registrar (solo si es un pago genuino no representado en los abonos)
     let saldoCorriente = subtotalReal;
-    if (anticipoInicial > 0.01) {
+    if (mostrarFilaAnticipo) {
         saldoCorriente -= anticipoInicial;
         movimientosHTML += `
             <tr style="border-bottom:1px solid #e2e8f0; background:#f0fdf4;">
@@ -884,7 +937,7 @@ window.verDetalleCompra = function(idCuenta) {
                         </div>
                         <div style="display:flex;justify-content:space-between;margin-bottom:8px;color:#16a34a;">
                             <span style="font-size:13px;">Total abonado:</span>
-                            <strong>− ${dinero(totalAbonado + (anticipoInicial > 0.01 ? anticipoInicial : 0))}</strong>
+                            <strong>− ${dinero(totalAbonado + (mostrarFilaAnticipo ? anticipoInicial : 0))}</strong>
                         </div>
                         <div style="display:flex;justify-content:space-between;border-top:2px solid #cbd5e1;padding-top:10px;font-size:16px;color:#dc2626;">
                             <strong>SALDO A PAGAR:</strong>
@@ -908,6 +961,10 @@ window.registrarAbonoProveedor = function(idCuenta) {
     if (index === -1) { console.error("No se encontró la cuenta para abonar"); return; }
     const cuenta = cuentas[index];
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
+    
+    // Generar fecha hoy
+    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+
     const modalHTML = `
     <div data-modal="abono-proveedor" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:6000;display:flex;justify-content:center;align-items:center;">
         <div style="background:white;padding:30px;border-radius:15px;width:90%;max-width:550px;max-height:90vh;overflow-y:auto;">
@@ -918,6 +975,12 @@ window.registrarAbonoProveedor = function(idCuenta) {
                     <div><small style="color:#718096;">Saldo Pendiente</small><br><strong style="color:#e74c3c;font-size:20px;">${dinero(cuenta.saldoPendiente)}</strong></div>
                 </div>
             </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold;display:block;margin-bottom:8px;">Fecha del Pago:</label>
+                <input type="date" id="fechaAbonoProv" value="${fechaHoy}" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:6px;">
+            </div>
+
             <div style="margin-bottom:20px;">
                 <label style="font-weight:bold;display:block;margin-bottom:8px;">Monto del pago ($):</label>
                 <input type="number" id="montoAbonoProveedor" placeholder="0.00" min="0" max="${cuenta.saldoPendiente}"
@@ -942,47 +1005,62 @@ window.registrarAbonoProveedor = function(idCuenta) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 };
 
-function confirmarAbonoProveedor(idCuenta) {
+window.confirmarAbonoProveedor = function(idCuenta) {
+    const fechaInput = document.getElementById("fechaAbonoProv").value;
+    if (!fechaInput) return alert("❌ Error: Debes especificar la fecha del pago.");
+    const fechaPagoFinal = `${fechaInput}T12:00:00.000`;
+    
     const montoAbono = parseFloat(document.getElementById("montoAbonoProveedor")?.value);
     let cuentas = StorageService.get("cuentasPorPagar", []);
-    const index = cuentas.findIndex(c => String(c.id) === String(idCuenta)); // FIX: era c.id === idCuenta (number vs string)
+    const index = cuentas.findIndex(c => String(c.id) === String(idCuenta));
     if (index === -1) return;
     const cuenta = cuentas[index];
 
-    const validacion = ValidatorService.validarMonto(montoAbono, cuenta.saldoPendiente);
-    if (!validacion.valid) { alert("⚠️ " + validacion.error); return; }
+    // Sustituimos ValidatorService por una validación nativa a prueba de balas
+    if (isNaN(montoAbono) || montoAbono <= 0) return alert("⚠️ Ingresa un monto válido mayor a $0.");
+    if (montoAbono > cuenta.saldoPendiente + 0.01) return alert(`⚠️ El monto excede el saldo pendiente (${dinero(cuenta.saldoPendiente)}).`);
 
     const { medioPago, cuentaId, etiqueta } = _getCuentaSeleccionada('proveedor');
-
-    // --- NUEVO: RESUMEN Y CONFIRMACIÓN ---
-    const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
-    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿ABONAR A PROVEEDOR?\n\nProveedor: ${cuenta.proveedor}\nMonto a abonar: ${formatoDinero(montoAbono)}\nOrigen del dinero: ${etiqueta}\n\n¿Deseas continuar?`;
+    
+    const msjConf = `¿CONFIRMAR PAGO A PROVEEDOR?\n\nProveedor: ${cuenta.proveedor}\nMonto a abonar: ${dinero(montoAbono)}\nOrigen del dinero: ${etiqueta}\n\n¿Deseas continuar?`;
     if (!confirm(msjConf)) return;
-    // --- FIN DE CONFIRMACIÓN ---
 
-    _egresarCuenta({
+    // 1. Descontar el dinero del banco o caja
+    window._egresarCuenta({
         monto: montoAbono,
         cuentaId,
         etiqueta,
         concepto: `Pago a proveedor ${cuenta.proveedor}${cuenta.producto ? ' - ' + cuenta.producto : ''}`,
-        referencia: `ABONO-PROV-${idCuenta}`
+        referencia: `ABONO-PROV-${idCuenta}`,
+        fecha: fechaPagoFinal 
     });
 
+    // 2. Registrar abono en Cuenta Por Pagar
     cuenta.saldoPendiente -= montoAbono;
-
-    // Registrar el abono en el historial de la deuda
     if (!Array.isArray(cuenta.abonos)) cuenta.abonos = [];
     cuenta.abonos.push({
-        fecha: window.localISO(new Date()),
+        fecha: fechaPagoFinal,
         monto: montoAbono,
         cuenta: etiqueta || 'No especificada'
     });
-
     StorageService.set("cuentasPorPagar", cuentas);
-    alert("✅ Pago registrado correctamente.");
+
+    // 3. SINCRONIZACIÓN BARRERA: Si esta deuda viene de una Orden de Compra, actualizar la OC también
+    if (cuenta.compraId) {
+        let ordenes = StorageService.get("ordenesCompra", []);
+        let idxOC = ordenes.findIndex(o => String(o.id) === String(cuenta.compraId));
+        if (idxOC !== -1) {
+            ordenes[idxOC].saldoPendiente = Math.max(0, (ordenes[idxOC].saldoPendiente || 0) - montoAbono);
+            if (!Array.isArray(ordenes[idxOC].pagos)) ordenes[idxOC].pagos = [];
+            ordenes[idxOC].pagos.push({ fecha: fechaPagoFinal, monto: montoAbono, cuenta: etiqueta });
+            StorageService.set("ordenesCompra", ordenes);
+        }
+    }
+
+    alert("✅ Pago registrado y sincronizado correctamente en todos los módulos.");
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
-    renderCuentasPorPagar();
-}
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+};
 window.confirmarAbonoProveedor = confirmarAbonoProveedor;
 
 // ===== ÓRDENES DE COMPRA =====
@@ -1014,12 +1092,16 @@ function abrirNuevaOrdenCompra() {
 <div style="margin-top:15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
     <div>
         <label style="font-size:13px; font-weight:bold;">Método de Pago:</label>
-        <select id="ocMetodoPago" onchange="document.getElementById('divMsiOC').style.display=(this.value==='msi'?'block':'none'); document.getElementById('divCuentaOC').style.display=(this.value==='contado'?'block':'none');" 
+        <select id="ocMetodoPago" onchange="document.getElementById('divMsiOC').style.display=(this.value==='msi'?'block':'none'); document.getElementById('divCuentaOC').style.display=(this.value==='contado'?'block':'none'); document.getElementById('alertaConsignacionOC').style.display=(this.value==='consignacion'?'block':'none');" 
                 style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
             <option value="contado">Contado</option>
             <option value="credito">Crédito Proveedor</option>
             <option value="msi">Meses sin Intereses (MSI)</option>
+            <option value="consignacion" style="color:#10b981; font-weight:bold;">A Consignación</option>
         </select>
+        <div id="alertaConsignacionOC" style="display:none; background:#ecfdf5; border:1px solid #10b981; padding:8px; border-radius:6px; margin-top:8px; font-size:11px; color:#065f46;">
+            ✅ <b>Modo Consignación:</b> Esta OC no generará una deuda inmediata exigible en el flujo. Solo se pagará lo que se vaya vendiendo.
+        </div>
     </div>
 
     <div id="divCuentaOC">
@@ -1140,6 +1222,9 @@ function _renderTablaArticulosOC() {
     const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
         const rows = arts.map((a, i) => {
                 total += a.subtotal;
+                // Iniciamos la bandera para evitar undefineds
+                if (typeof a.yaEnInventario === 'undefined') a.yaEnInventario = false;
+                
                 return `<tr>
                         <td style="padding:8px;">${a.nombre}</td>
                         <td style="padding:8px;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
@@ -1147,6 +1232,9 @@ function _renderTablaArticulosOC() {
                                 <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
                         </td>
                         <td style="padding:8px;text-align:center;">${a.cantidad}</td>
+                        <td style="padding:8px;text-align:center;">
+                            <input type="checkbox" ${a.yaEnInventario ? 'checked' : ''} onchange="window._articulosOC[${i}].yaEnInventario = this.checked;">
+                        </td>
                         <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
                         <td style="padding:8px;text-align:center;"><button onclick="window._articulosOC.splice(${i},1);_renderTablaArticulosOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
                 </tr>`;
@@ -1157,6 +1245,7 @@ function _renderTablaArticulosOC() {
                 <th style="padding:8px;">Características</th>
                 <th style="padding:8px;text-align:center;">Costo Unit.</th>
                 <th style="padding:8px;text-align:center;">Cant.</th>
+                <th style="padding:8px;text-align:center;" title="Marcar si ya tienes este producto de esta requisición">Ya en Inventario</th>
                 <th style="padding:8px;text-align:right;">Subtotal</th>
                 <th></th>
             </tr></thead>
@@ -1197,24 +1286,44 @@ function guardarOrdenCompra() {
     }
     const meses = document.getElementById('ocMeses')?.value || '';
     const total = arts.reduce((s, a) => s + a.subtotal, 0);
+    
+    // --- SANITIZACIÓN PARA FIREBASE ---
+    // Obligamos a que todos los artículos tengan datos limpios y sin undefined
+    const articulosLimpios = arts.map(a => ({
+        productoId: a.productoId || null,
+        nombre: a.nombre || "Sin nombre",
+        costo: parseFloat(a.costo) || 0,
+        cantidad: parseInt(a.cantidad) || 0,
+        subtotal: parseFloat(a.subtotal) || 0,
+        caracteristicas: a.caracteristicas || "",
+        yaEnInventario: Boolean(a.yaEnInventario)
+    }));
+
     const oc = {
         id: Date.now(),
         folio: _foliosOC(),
         proveedorId: provId || null,
-        proveedorNombre: provNombre,
-        articulos: arts,
-        total,
+        proveedorNombre: provNombre || "General",
+        articulos: articulosLimpios,
+        total: parseFloat(total) || 0,
         fechaEmision: Date.now(),
         fechaEntregaEstimada: fechaEntrega || null,
         estado: borrador ? 'Borrador' : 'Enviada',
-        notas,
+        notas: notas || "",
         condicionesComerciales: {
-            metodoPago,
-            cuentaOrigen,
-            meses
+            metodoPago: metodoPago || "contado",
+            cuentaOrigen: cuentaOrigen || null,
+            meses: meses || 0
         },
-        anticipo_pagado: anticipo || 0
+        anticipo_pagado: parseFloat(anticipo) || 0,
+        saldoPendiente: Math.max(0, parseFloat(total) - (parseFloat(anticipo) || 0)),
+        pagos: (anticipo > 0) ? [{ fecha: new Date().toISOString(), monto: parseFloat(anticipo), cuenta: cuentaOrigen }] : [],
+        esConsignacion: metodoPago === 'consignacion'
     };
+    
+    // Eliminamos cualquier campo nulo que pueda molestar a Firestore
+    Object.keys(oc).forEach(k => (oc[k] == null || oc[k] === undefined) && delete oc[k]);
+
     const lista = StorageService.get('ordenesCompra', []);
     lista.push(oc);
     // --- MARCAR REQUISICIONES COMO EN ORDEN ---
@@ -1255,7 +1364,7 @@ function imprimirOrdenCompra(id) {
     <style>body{font-family:Arial,sans-serif;padding:32px;color:#111;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:8px;text-align:left;}@media print{button{display:none!important;}}</style>
     </head><body>
     <div style="text-align:center;margin-bottom:24px;">
-      <img src="img/logo.png" style="height:70px;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
+      <img src="img/Logo.svg" style="height:70px;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
       <h2 style="margin:8px 0;">${empresa}</h2>
     </div>
     <hr>
@@ -1657,10 +1766,14 @@ function confirmarRecepcionOC(ocId) {
     // --- FIN DE CONFIRMACIÓN ---
 
     // ── 1. Actualizar inventario ───────────────────────────────
-
-    // ── 1. Actualizar inventario ───────────────────────────────
 const prods = StorageService.get('productos', []);
 itemsRecibidos.forEach(art => {
+    // Si fue marcado como que ya estaba en inventario en la OC, saltamos la suma
+    if (art.yaEnInventario === true) {
+        console.log(`El artículo ${art.nombre} fue marcado como 'Ya en inventario' en la Requisición. No se sumará al stock general.`);
+        return; 
+    }
+
     const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
     if (pidx !== -1) {
         prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
@@ -1713,27 +1826,46 @@ movimientosInventario = kardex;   // ✅ sincronizar global
         });
     }
 
-    // ── 3. Si queda saldo sin pagar → Cuenta por Pagar ─────────
-    const saldoRestante = totalRecibido - montoPagado;
+    // ── 3. Si queda saldo sin pagar → Cuenta por Pagar o Consignación ─────────
+    const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipo);
+    
     if (saldoRestante > 0.01) {
-        const fechaVenc = new Date();
-        fechaVenc.setDate(fechaVenc.getDate() + 30);
-        let cxp = StorageService.get('cuentasPorPagar', []);
-        cxp.push({
-            id: Date.now() + 7,
-            compraId: oc.id,
-            proveedor: oc.proveedorNombre,
-            producto: itemsRecibidos.map(a => a.nombre).join(', '),
-            total: saldoRestante,
-            saldoPendiente: saldoRestante,
-            metodo: 'credito_proveedor',
-            formaPagoTexto: `Saldo OC ${oc.folio}`,
-            plazo: 30,
-            fecha: fechaStr,
-            vencimiento: window.formatearFechaCortaMX(fechaVenc),
-            vencimientoIso: window.localISO(fechaVenc)
-        });
-        StorageService.set('cuentasPorPagar', cxp);
+        if (oc.condicionesComerciales?.metodoPago === 'consignacion') {
+            let consig = StorageService.get("consignacionesActivas", []);
+            const cantRecibidaTotal = itemsRecibidos.reduce((s, a) => s + a.cantidadRec, 0);
+            consig.push({
+                id: Date.now() + 7,
+                compraId: oc.id,
+                proveedor: oc.proveedorNombre,
+                producto: itemsRecibidos.map(a => a.nombre).join(', '),
+                total: saldoRestante,
+                cantidadTotal: cantRecibidaTotal,
+                cantidadPendiente: cantRecibidaTotal,
+                costoUnitario: saldoRestante / cantRecibidaTotal,
+                fecha: window.formatearFechaCortaMX(fechaRec)
+            });
+            StorageService.set("consignacionesActivas", consig);
+        } else {
+            const fechaVenc = new Date();
+            fechaVenc.setDate(fechaVenc.getDate() + 30);
+            let cxp = StorageService.get('cuentasPorPagar', []);
+            cxp.push({
+                id: Date.now() + 7,
+                compraId: oc.id,
+                proveedor: oc.proveedorNombre,
+                producto: itemsRecibidos.map(a => a.nombre).join(', '),
+                articulos: itemsRecibidos,
+                total: totalRecibido, 
+                saldoPendiente: saldoRestante, 
+                metodo: 'credito_proveedor',
+                formaPagoTexto: `Saldo OC ${oc.folio}`,
+                plazo: 30,
+                fecha: fechaStr,
+                vencimiento: window.formatearFechaCortaMX(fechaVenc),
+                vencimientoIso: window.localISO(fechaVenc)
+            });
+            StorageService.set('cuentasPorPagar', cxp);
+        }
     }
 
     // ── 4. Back order: nueva OC en Borrador con referencia a OC padre ──
@@ -1832,7 +1964,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     <!-- ENCABEZADO -->
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #1e40af;">
         <div>
-            <img src="img/logo.png" style="height:56px;" onerror="this.outerHTML='<span style=\\'font-size:28px;\\'>🏛️</span>'">
+            <img src="img/Logo.svg" style="height:56px;" onerror="this.outerHTML='<span style=\\'font-size:28px;\\'>🏛️</span>'">
             <div style="font-size:18px;font-weight:bold;color:#1e40af;margin-top:4px;">${empresa}</div>
         </div>
         <div style="text-align:right;">
@@ -1960,22 +2092,30 @@ function renderListaOrdenesCompra() {
                 const boVinculo = oc.ocPadre ? `<br><span style="font-size:11px;color:#d97706;">BO de <b>${(lista.find(x=>x.id===oc.ocPadre)?.folio)||''}</b></span>` : '';
                 // Mostrar vínculo a back order si existe
                 const boHijo = oc.backOrderId ? `<br><span style="font-size:11px;color:#d97706;">→ BO: <b>${(lista.find(x=>x.id===oc.backOrderId)?.folio)||''}</b></span>` : '';
+                
+                // Calcular saldo pendiente (compatible con OCs viejas y nuevas)
+                const anticipoPrevio = oc.anticipo_pagado || 0;
+                let saldoPendiente = oc.saldoPendiente !== undefined ? oc.saldoPendiente : Math.max(0, oc.total - anticipoPrevio);
+
                 return `<tr style="border-bottom:1px solid #f3f4f6;">
                     <td style="padding:10px;font-weight:bold;">${oc.folio}${boVinculo}${boHijo}</td>
                     <td style="padding:10px;">${oc.proveedorNombre}</td>
                     <td style="padding:10px;">${window.formatearFechaCortaMX(oc.fechaEmision)}</td>
                     <td style="padding:10px;">${oc.fechaEntregaEstimada ? window.formatearFechaCortaMX(oc.fechaEntregaEstimada) : '—'}</td>
-                    <td style="padding:10px;text-align:right;font-weight:bold;">${dinero(oc.total)}</td>
+                    <td style="padding:10px;text-align:right;">
+                        <strong style="color:#1e40af;">${dinero(oc.total)}</strong><br>
+                        <span style="font-size:11px;color:#dc2626;">Saldo: ${dinero(saldoPendiente)}</span>
+                    </td>
                     <td style="padding:10px;text-align:center;">
                         <span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${oc.estado}</span>
                     </td>
                     <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
-                            <button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Imprimir">🖨️</button>
+                            <button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>
+                            <button onclick="abrirModalAbonoOC(${oc.id})" title="Abonar a OC" style="background:none;border:none;cursor:pointer;font-size:17px; opacity:${saldoPendiente <= 0 ? '0.3' : '1'};" ${saldoPendiente <= 0 ? 'disabled' : ''}>💰</button>
                             ${esActiva ? `<button onclick="recibirOrdenCompra(${oc.id})" title="Recibir mercancía" style="background:none;border:none;cursor:pointer;font-size:17px;">📦</button>` : ''}
                             ${(oc.estado === 'Borrador' || oc.estado === 'Enviada') ? `<button onclick="editarOrdenCompra(${oc.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:17px;">✏️</button>` : ''}
-                            ${oc.estado === 'Borrador' ? `<button onclick="cancelarOrdenCompra(${oc.id})" title="Cancelar" style="background:none;border:none;cursor:pointer;font-size:17px;">❌</button>` : ''}
-                        </div>
+                            ${(oc.estado === 'Borrador' || oc.estado === 'Enviada') ? `<button onclick="confirmarEliminarOC(${oc.id})" title="Cancelar y Revertir Orden" style="background:none;border:none;cursor:pointer;font-size:17px;">🗑️</button>` : ''}
                     </td>
                 </tr>`;
         }).join('');
@@ -2121,38 +2261,55 @@ function _renderEditTablaOC() {
 function guardarEdicionOC(id) {
     const arts = window._editArticulosOC || [];
     if (arts.length === 0) return alert('⚠️ Agrega al menos un artículo.');
+    
     const provId       = document.getElementById('editOcProveedor')?.value;
     const fechaEntrega = document.getElementById('editOcFechaEntrega')?.value;
     const notas        = document.getElementById('editOcNotas')?.value.trim() || '';
-    const provs        = StorageService.get('proveedores', []);
-    const prov         = provs.find(p => String(p.id) === String(provId));
-    const lista        = StorageService.get('ordenesCompra', []);
-    const idx          = lista.findIndex(x => x.id === id);
+    
+    const provs = StorageService.get('proveedores', []);
+    const prov  = provs.find(p => String(p.id) === String(provId));
+    
+    const lista = StorageService.get('ordenesCompra', []);
+    const idx   = lista.findIndex(x => x.id === id);
     if (idx === -1) return;
+
+    // 1. SANITIZACIÓN DE ARTÍCULOS (Filtro anti-undefined para Firebase)
+    const articulosLimpios = arts.map(a => ({
+        productoId: a.productoId || null,
+        nombre: a.nombre || "Sin nombre",
+        costo: parseFloat(a.costo) || 0,
+        cantidad: parseInt(a.cantidad) || 0,
+        subtotal: parseFloat(a.subtotal) || 0,
+        caracteristicas: a.caracteristicas || "",
+        yaEnInventario: Boolean(a.yaEnInventario)
+    }));
+
+    // 2. MATEMÁTICAS ESTRICTAS (La cura al Saldo Fantasma)
+    const totalVerdadero = articulosLimpios.reduce((s, a) => s + a.subtotal, 0);
+    const anticipoPrevio = parseFloat(lista[idx].anticipo_pagado) || 0;
+    const saldoVerdadero = Math.max(0, totalVerdadero - anticipoPrevio);
+
+    // 3. ACTUALIZACIÓN DEL OBJETO
     lista[idx] = {
         ...lista[idx],
-        proveedorId:           provId || lista[idx].proveedorId,
-        proveedorNombre:       prov ? prov.nombre : lista[idx].proveedorNombre,
-        articulos:             arts,
-        total:                 arts.reduce((s, a) => s + a.subtotal, 0),
+        proveedorId:           provId || lista[idx].proveedorId || null,
+        proveedorNombre:       prov ? prov.nombre : (lista[idx].proveedorNombre || "General"),
+        articulos:             articulosLimpios,
+        total:                 totalVerdadero,
+        saldoPendiente:        saldoVerdadero, // <- Ahora el saldo camina de la mano del total
         fechaEntregaEstimada:  fechaEntrega || null,
-        notas,
-        fechaModificacion:     window.localISO(new Date())
+        notas:                 notas || "",
+        fechaModificacion:     typeof window.localISO === 'function' ? window.localISO(new Date()) : new Date().toISOString()
     };
+
+    // 4. DESTRUCTOR DE UNDEFINED (Última línea de defensa)
+    Object.keys(lista[idx]).forEach(k => (lista[idx][k] === undefined) && delete lista[idx][k]);
+
     StorageService.set('ordenesCompra', lista);
     document.querySelector('[data-modal="editar-oc"]')?.remove();
-    alert('✅ Orden de compra actualizada.');
-    renderListaOrdenesCompra();
-}
-
-function cancelarOrdenCompra(id) {
-    if (!confirm('¿Cancelar esta orden de compra?')) return;
-    const lista = StorageService.get('ordenesCompra', []);
-    const idx = lista.findIndex(x => x.id === id);
-    if (idx === -1) return;
-    lista[idx].estado = 'Cancelada';
-    StorageService.set('ordenesCompra', lista);
-    renderListaOrdenesCompra();
+    alert('✅ Orden de compra actualizada y balanceada matemáticamente.');
+    
+    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
 }
 // Función auxiliar para listar tus cuentas de débito
 function _generarOpcionesCuentasDebito() {
@@ -2200,17 +2357,25 @@ function renderRequisiciones() {
     `).join('');
 
     contenedor.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
             <h2 style="margin:0; color:#1e40af;">📋 Requisiciones Pendientes</h2>
-            <div style="display:flex; gap:10px;">
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <button onclick="iniciarOrdenDesdeRequisiciones()" 
-                        style="padding:12px 20px; background:#1e40af; color:white; border:none; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer;">
-                    🛒 Compra vía OC
+                        style="padding:10px 15px; background:#1e40af; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    🛒 Nueva OC
+                </button>
+                <button onclick="abrirModalAgregarA_OC_Existente()" 
+                        style="padding:10px 15px; background:#d97706; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    📥 Añadir a OC Existente
                 </button>
                 <button onclick="iniciarCompraDirectaDesdeRequisiciones()" 
-                        style="padding:12px 20px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; font-size:14px; cursor:pointer;">
+                        style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
                     🚀 Compra directa
                 </button>
+                <button onclick="window.marcarRequisicionesResueltasMasivo()" 
+        style="padding:10px 15px; background:#10b981; color:white; border:none; border-radius:6px; font-weight:bold; font-size:13px; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1);" title="Quita de la lista los artículos seleccionados">
+    ✔️ Ya lo tengo
+</button>
             </div>
         </div>
 
@@ -2305,7 +2470,8 @@ function abrirModalCompraDirectaMulti() {
     const selProvs = provs.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('');
     
     const ubicaciones = StorageService.get("ubicacionesConfig", []);
-    let selUbi = '<option value="General">General</option>';
+    // Al dejar el value="" vacío, el sistema sabe que no hay respuesta aún
+    let selUbi = '<option value="">-- 🛑 OBLIGATORIO: Elige Bodega --</option>';
     ubicaciones.forEach(u => {
         if(u.nombre !== 'General') selUbi += `<option value="${u.nombre}">${u.nombre}</option>`;
     });
@@ -2332,12 +2498,16 @@ function abrirModalCompraDirectaMulti() {
           
           <div>
             <label style="font-size:12px; font-weight:bold; color:#374151;">💳 MÉTODO DE PAGO</label>
-            <select id="cdMetodoPago" onchange="document.getElementById('divMsiCD').style.display=(this.value==='tarjeta_msi'?'block':'none'); document.getElementById('divCuentaCD').style.display=(this.value==='contado'?'block':'none');" 
+            <select id="cdMetodoPago" onchange="document.getElementById('divMsiCD').style.display=(this.value==='tarjeta_msi'?'block':'none'); document.getElementById('divCuentaCD').style.display=(this.value==='contado'?'block':'none'); document.getElementById('alertaConsigCD').style.display=(this.value==='consignacion'?'block':'none');" 
                     style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
                 <option value="contado">Contado</option>
                 <option value="credito_proveedor">Crédito Proveedor</option>
                 <option value="tarjeta_msi">Meses sin Intereses (MSI)</option>
+                <option value="consignacion" style="color:#10b981; font-weight:bold;">A Consignación</option>
             </select>
+            <div id="alertaConsigCD" style="display:none; background:#ecfdf5; border:1px solid #10b981; padding:8px; border-radius:6px; margin-top:8px; font-size:11px; color:#065f46;">
+                ✅ <b>Modo Consignación:</b> Esta compra entrará al inventario pero NO generará una deuda inmediata exigible.
+            </div>
           </div>
 
           <div>
@@ -2373,12 +2543,22 @@ function abrirModalCompraDirectaMulti() {
 
         <div id="tablaArticulosCompraDirecta" style="margin-bottom:16px;"></div>
         
+        <div style="margin-bottom:15px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:bold; color:#1e40af; font-size:13px;">
+                <input type="checkbox" id="cdIngresoInmediato" checked style="width:18px; height:18px; accent-color:#059669;">
+                📦 Ingresar mercancía al inventario de inmediato
+            </label>
+            <p style="margin:5px 0 0 26px; font-size:11px; color:#475569; line-height:1.3;">
+                Si desmarcas esta opción, se generará la cuenta por pagar/pago, pero la mercancía se irá a <b>Recepciones Pendientes</b> para darle entrada después.
+            </p>
+        </div>
+        
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px; border-top:2px solid #e2e8f0; padding-top:15px;">
           <strong>Total a Pagar: <span id="cdTotal" style="color:#059669;font-size:22px;">$0.00</span></strong>
         </div>
 
         <div style="display:flex;gap:10px;">
-          <button onclick="guardarCompraDirectaFinal()" style="flex:2;padding:14px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">✅ Guardar Compra e Ingresar Inventario</button>
+          <button onclick="guardarCompraDirectaFinal()" style="flex:2;padding:14px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:16px;">✅ Guardar Compra</button>
           <button onclick="document.querySelector('[data-modal=nueva-compra-directa]')?.remove()" style="flex:1;padding:14px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
         </div>
       </div>
@@ -2474,6 +2654,15 @@ function guardarCompraDirectaFinal() {
 
     const fechaStr = document.getElementById('cdFecha').value;
     const fechaFormatMX = fechaStr.split('-').reverse().join('/');
+
+    let selectsBodega = document.querySelectorAll("select[id^='cdUbicacion_']");
+    for (let i = 0; i < selectsBodega.length; i++) {
+        let valorBodega = selectsBodega[i].value;
+        if (!valorBodega || valorBodega === "" || valorBodega === "General") {
+            alert(`❌ BLOQUEO DE AUDITORÍA: No has seleccionado la bodega de destino para el artículo en la fila ${i + 1}.\n\nRevisa la tabla y asigna una ubicación antes de guardar.`);
+            return; // Aborta todo el proceso de guardado inmediatamente
+        }
+    }
     
     const metodoPago = document.getElementById('cdMetodoPago').value;
     const comboPago = document.getElementById("cdMetodoPago");
@@ -2481,15 +2670,41 @@ function guardarCompraDirectaFinal() {
 
     const cuentaOrigenId = document.getElementById('cdCuentaOrigen')?.value || "efectivo";
     const cuentaOrigenNombre = document.getElementById('cdCuentaOrigen')?.options[document.getElementById('cdCuentaOrigen').selectedIndex]?.text || "Efectivo";
+    
+    // 👇 Leemos tus campos nativos de MSI 👇
     const bancoSel = document.getElementById('cdBancoMSI')?.value || "";
+    const msiMeses = parseInt(document.getElementById('cdMesesMSI')?.value) || 12;
     
-    // 👇 LEEMOS EL CHECKBOX 👇
     const ingresoInmediato = document.getElementById('cdIngresoInmediato')?.checked ?? true;
-    
     const totalCompra = arts.reduce((s, a) => s + a.subtotal, 0);
 
-    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nTotal de artículos: ${arts.length}\nTotal a pagar: ${dinero(totalCompra)}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'SE ENVÍA A RECEPCIONES ⏳'}`;
+    // 🚀 AUDITORÍA: INTERCEPTOR DE SALDO A FAVOR 🚀
+    let saldosFavor = StorageService.get("saldosFavorProveedores", []);
+    let saldoProv = saldosFavor.find(s => String(s.proveedorId) === String(provId) && s.montoDisponible > 0);
+    
+    let montoUsadoDelSaldo = 0;
+    let totalAPagarReal = totalCompra;
+
+    if (saldoProv) {
+        if (confirm(`💰 ¡ATENCIÓN!\nTienes un saldo a favor de ${dinero(saldoProv.montoDisponible)} con ${prov.nombre}.\n\n¿Deseas utilizar este saldo para pagar total o parcialmente esta nueva compra?`)) {
+            if (saldoProv.montoDisponible >= totalCompra) {
+                montoUsadoDelSaldo = totalCompra;
+                totalAPagarReal = 0;
+            } else {
+                montoUsadoDelSaldo = saldoProv.montoDisponible;
+                totalAPagarReal = totalCompra - montoUsadoDelSaldo;
+            }
+        }
+    }
+
+    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nCosto Total: ${dinero(totalCompra)}\n${montoUsadoDelSaldo > 0 ? 'Saldo a favor aplicado: -' + dinero(montoUsadoDelSaldo) + '\n' : ''}Total a pagar: ${dinero(totalAPagarReal)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
     if (!confirm(msjConfirmar)) return;
+
+    // Si usó el saldo, lo descontamos de la base de datos
+    if (montoUsadoDelSaldo > 0) {
+        saldoProv.montoDisponible -= montoUsadoDelSaldo;
+        StorageService.set("saldosFavorProveedores", saldosFavor);
+    }
 
     let comprasList = StorageService.get("compras", []);
     let recepciones = StorageService.get("recepciones", []);
@@ -2500,18 +2715,17 @@ function guardarCompraDirectaFinal() {
     let avisoActualizacion = "";
 
     arts.forEach((art, index) => {
-        // 1. Guardar en Historial de Costos (Esto siempre se guarda al comprar)
+        // 1. Historial de Costos
         guardarHistorialCosto({
             productoId: art.productoId, precioCompra: art.costo, fecha: fechaFormatMX,
             cantidad: art.cantidad, proveedorId: prov.id, proveedorNombre: prov.nombre, origen: 'compra directa multi'
         });
 
-        // 👇 2. INVENTARIO: SOLO SE AFECTA SI ESTÁ CHECKED 👇
+        // 2. Inventario inmediato
         if (ingresoInmediato) {
             const pidx = productos.findIndex(p => String(p.id) === String(art.productoId));
             if (pidx !== -1) {
                 let p = productos[pidx];
-                
                 if (art.costo > p.costo) {
                     let margenAplicar = 30;
                     const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(art.costo, margenAplicar);
@@ -2522,7 +2736,6 @@ function guardarCompraDirectaFinal() {
 
                 p.stock = (Number(p.stock) || 0) + art.cantidad;
                 p.variantes = p.variantes || [];
-                
                 const colFinal = art.color || 'General';
                 const ubiFinal = art.ubicacion || 'General';
                 const existente = p.variantes.find(v => (v.ubicacion || 'General').toUpperCase() === ubiFinal.toUpperCase() && (v.color || 'General').toUpperCase() === colFinal.toUpperCase());
@@ -2544,9 +2757,9 @@ function guardarCompraDirectaFinal() {
             }
         }
 
-        // 👇 3. RECEPCIONES: SE CREA UNA TARJETA INDIVIDUAL POR CADA ARTÍCULO 👇
+        // 3. Recepciones (Tarjeta individual)
         recepciones.push({
-            id: idCompraUnico + 1 + index, // IDs únicos para cada fila
+            id: idCompraUnico + 1 + index,
             compraId: idCompraUnico,
             productoId: art.productoId,
             productoNombre: art.nombre,
@@ -2577,27 +2790,108 @@ function guardarCompraDirectaFinal() {
     };
     comprasList.push(nuevaCompra);
 
-    // 5. Cuentas o Efectivo
+    // 👇 5. LÓGICA DE DISTRIBUCIÓN DE DEUDA/PAGO NATIVA 👇
+    
+    // Extraemos todos los nombres de los productos separados por comas
+    const nombresProductos = arts.map(a => a.nombre).join(', ');
+    // Creamos la etiqueta perfecta para tu conciliación
+    const conceptoCombinado = `Compra: ${nombresProductos} (Prov: ${prov.nombre})`;
+
     if (metodoPago === "contado") {
-        window._egresarCuenta({
-            monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
-            concepto: `Compra Directa a ${prov.nombre}`, referencia: `COMPRA-${idCompraUnico}`
-        });
-    } else if (metodoPago === "credito_proveedor") {
-        let cuentasProv = StorageService.get("cuentasPorPagar", []);
-        cuentasProv.push({
-            id: idCompraUnico + 2,
+        if (totalAPagarReal > 0) {
+            window._egresarCuenta({
+                monto: totalAPagarReal, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
+                concepto: conceptoCombinado, referencia: `COMPRA-${idCompraUnico}`
+            });
+        }
+    } 
+    else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
+        if (metodoPago === "consignacion") {
+            let consig = StorageService.get("consignacionesActivas", []);
+            consig.push({
+                id: Date.now(),
+                compraId: idCompraUnico,
+                proveedor: prov.nombre,
+                producto: nombresProductos,
+                total: totalCompra,
+                cantidadTotal: arts.reduce((s, a) => s + a.cantidad, 0),
+                cantidadPendiente: arts.reduce((s, a) => s + a.cantidad, 0),
+                costoUnitario: totalCompra / arts.reduce((s, a) => s + a.cantidad, 0),
+                fecha: fechaFormatMX
+            });
+            StorageService.set("consignacionesActivas", consig);
+        } else {
+            let cuentasProv = StorageService.get("cuentasPorPagar", []);
+            cuentasProv.push({
+                id: idCompraUnico + 2,
+                compraId: idCompraUnico,
+                proveedor: prov.nombre,
+                producto: nombresProductos,
+                articulos: arts,
+                total: totalCompra,
+                saldoPendiente: totalAPagarReal,
+                metodo: metodoPago,
+                formaPagoTexto: formaPagoTexto,
+                fecha: fechaFormatMX,
+                vencimiento: "Revisar CXP",
+                esConsignacion: false,
+                abonos: montoUsadoDelSaldo > 0 ? [{fecha: fechaStr+"T12:00:00.000", monto: montoUsadoDelSaldo, cuenta: "Saldo a Favor"}] : [] 
+            });
+            StorageService.set("cuentasPorPagar", cuentasProv);
+        }
+    }
+    else if (metodoPago === "tarjeta_msi") {
+        let cuentasBancos = StorageService.get("cuentasMSI", []);
+        let tarjetasConfig = StorageService.get("tarjetasConfig", []);
+        
+        let infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSel) || {};
+        let diaCorte = parseInt(infoTarjeta.diaCorte) || 15;
+        let diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5);
+
+        let calendario = [];
+        // Se calculan las mensualidades con el total real descontado
+        let cuotaMensual = totalAPagarReal > 0 ? parseFloat((totalAPagarReal / msiMeses).toFixed(2)) : 0;
+        
+        let fechaPartes = fechaStr.split('-'); 
+        let anioCompra = parseInt(fechaPartes[0]);
+        let mesCompra = parseInt(fechaPartes[1]) - 1; 
+        let diaCompra = parseInt(fechaPartes[2]);
+
+        let brincoCorte = (diaCompra > diaCorte) ? 1 : 0;
+        let brincoPago = (diaCorte > diaPago) ? 1 : 0;
+        let mesPrimerPago = mesCompra + brincoCorte + brincoPago;
+
+        for (let i = 1; i <= msiMeses; i++) {
+            let fCalculada = new Date(anioCompra, mesPrimerPago + (i - 1), diaPago, 12, 0, 0);
+            let yyyy = fCalculada.getFullYear();
+            let mm = String(fCalculada.getMonth() + 1).padStart(2, '0');
+            let dd = String(fCalculada.getDate()).padStart(2, '0');
+            
+            calendario.push({
+                n: i,
+                fecha: `${yyyy}-${mm}-${dd}`,
+                monto: cuotaMensual,
+                estado: "Pendiente",
+                montoAbonado: 0,
+                conciliado: false
+            });
+        }
+
+        cuentasBancos.push({
+            id: idCompraUnico + 3,
             compraId: idCompraUnico,
-            proveedor: prov.nombre,
-            producto: "Varios",
+            banco: bancoSel,
+            concepto: conceptoCombinado, // 🔥 Etiqueta combinada en lugar de "Compra Directa"
+            producto: nombresProductos,
             total: totalCompra,
-            saldoPendiente: totalCompra,
-            metodo: metodoPago,
-            formaPagoTexto: formaPagoTexto,
+            meses: msiMeses,
+            cuotaMensual: cuotaMensual,
             fecha: fechaFormatMX,
-            vencimiento: "Revisar CXP"
+            fechaCompra: fechaStr,
+            calendario: calendario,
+            pagosRealizados: 0
         });
-        StorageService.set("cuentasPorPagar", cuentasProv);
+        StorageService.set("cuentasMSI", cuentasBancos);
     }
 
     if (window._requisicionesVinculadasA_CD && window._requisicionesVinculadasA_CD.length > 0) {
@@ -2617,20 +2911,122 @@ function guardarCompraDirectaFinal() {
 
     document.querySelector('[data-modal="nueva-compra-directa"]')?.remove();
     alert(`✅ Compra Directa Registrada Exitosamente.${ingresoInmediato ? '' : '\\n⏳ La mercancía fue enviada a Recepciones Pendientes.'}${avisoActualizacion}`);
-    
+
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
-window.renderCuentasPorPagar = function() {
+
+// 🚀 MOTOR DE REEMBOLSO DE SALDOS A FAVOR 🚀
+window.reembolsarSaldoFavor = function(idSaldo) {
+    let saldos = StorageService.get("saldosFavorProveedores", []);
+    const saldo = saldos.find(s => s.id === idSaldo);
+    if (!saldo) return;
+    const html = `
+    <div data-modal="reembolso-favor" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;">
+        <div style="background:white;padding:25px;border-radius:10px;width:350px;">
+            <h3 style="margin-top:0;color:#065f46;">💸 Reembolso de Proveedor</h3>
+            <p style="font-size:13px;color:#475569;">Proveedor: <b>${saldo.proveedorNombre}</b></p>
+            <p style="font-size:13px;color:#475569;">Monto a devolver: <b style="color:#059669;font-size:16px;">${dinero(saldo.montoDisponible)}</b></p>
+            <label style="display:block;margin-top:15px;margin-bottom:5px;font-size:12px;font-weight:bold;">¿A qué cuenta ingresará el dinero?</label>
+            ${_buildSelectorCuentas('cuentaReembolso', false)}
+            <div style="display:flex;gap:10px;margin-top:20px;">
+                <button onclick="ejecutarReembolsoFavor(${saldo.id})" style="flex:1;background:#059669;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;">✅ Confirmar</button>
+                <button onclick="document.querySelector('[data-modal=reembolso-favor]').remove()" style="flex:1;background:#64748b;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.ejecutarReembolsoFavor = function(idSaldo) {
+    let saldos = StorageService.get("saldosFavorProveedores", []);
+    const idx = saldos.findIndex(s => s.id === idSaldo);
+    if (idx === -1) return;
+    const saldo = saldos[idx];
+    const select = document.getElementById('cuentaReembolso');
+    
+    // El dinero entra a tu caja o banco
+    window._ingresarCuenta({
+        monto: saldo.montoDisponible,
+        cuentaId: select.value,
+        etiqueta: select.options[select.selectedIndex].text,
+        concepto: `Reembolso de saldo a favor - ${saldo.proveedorNombre}`,
+        referencia: `REEMBOLSO-${saldo.id}`,
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+    });
+    
+    const montoRegresado = saldo.montoDisponible;
+    saldo.montoDisponible = 0; // Se agota el saldo
+    StorageService.set("saldosFavorProveedores", saldos);
+    document.querySelector('[data-modal=reembolso-favor]').remove();
+    alert(`✅ Reembolso completado. Se ingresaron ${dinero(montoRegresado)} a ${select.options[select.selectedIndex].text}.`);
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+};
+
+function renderCuentasPorPagar() {
     const contenedor = document.getElementById("listaCuentasPorPagar");
     if (!contenedor) return;
 
+    // Bloque para mostrar Saldos a Favor al inicio de CXP
+    const saldosFavor = StorageService.get("saldosFavorProveedores", []).filter(s => s.montoDisponible > 0);
+    let htmlSaldos = "";
+    if (saldosFavor.length > 0) {
+        htmlSaldos = `<div style="background:#ecfdf5; border:1px solid #10b981; padding:15px; border-radius:10px; margin-bottom:20px;">
+            <h4 style="margin:0 0 10px; color:#065f46;">💰 SALDOS A FAVOR DISPONIBLES</h4>
+            <table style="width:100%; font-size:13px;">
+                ${saldosFavor.map(s => `<tr>
+                    <td style="padding:5px 0;"><b>${s.proveedorNombre}</b></td>
+                    <td style="padding:5px 0;">Ref: ${s.referencia}</td>
+                    <td style="text-align:right; color:#059669; font-weight:bold; padding:5px 10px;">${dinero(s.montoDisponible)}</td>
+                    <td style="text-align:right; width:110px; padding:5px 0;">
+                        <button onclick="reembolsarSaldoFavor(${s.id})" style="background:#059669; color:white; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">💸 Reembolsar</button>
+                    </td>
+                </tr>`).join('')}
+            </table>
+        </div>`;
+    }
+
     let cuentas = StorageService.get("cuentasPorPagar", []) || [];
-    
+
+    // ── Reparar saldos con bug de doble conteo antes de renderizar ──
+    const comprasList = StorageService.get("compras", []);
+    const ordenesList = StorageService.get("ordenesCompra", []);
+    let huboCambios = false;
+    cuentas.forEach(c => {
+        const compraOriginal = comprasList.find(x => String(x.id) === String(c.compraId || c.id)) || 
+                               ordenesList.find(o => String(o.id) === String(c.compraId || c.id));
+        const subtotalReal = parseFloat(c.total) || 0;
+        let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
+        if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
+            compraOriginal.pagos.forEach(p => {
+                if (!abonos.some(a => a.fecha === p.fecha && Math.abs((parseFloat(a.monto)||0)-(parseFloat(p.monto)||0)) < 0.01))
+                    abonos.push(p);
+            });
+        }
+        const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
+        let anticipoExtra = 0;
+        if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01) {
+            const ap = parseFloat(compraOriginal.anticipo_pagado);
+            const pagosOC = Array.isArray(compraOriginal.pagos) ? compraOriginal.pagos : [];
+            const pagosYaEnAbonos = pagosOC.length > 0 && pagosOC.every(p =>
+                abonos.some(a => a.fecha === p.fecha && Math.abs((parseFloat(a.monto)||0)-(parseFloat(p.monto)||0)) < 0.01)
+            );
+            if (!pagosYaEnAbonos) anticipoExtra = ap;
+        }
+        const saldoCorrecto = Math.max(0, subtotalReal - totalAbonado - anticipoExtra);
+        if (Math.abs((parseFloat(c.saldoPendiente) || 0) - saldoCorrecto) > 0.01) {
+            c.saldoPendiente = saldoCorrecto;
+            c.abonos = abonos;
+            huboCambios = true;
+        }
+    });
+    if (huboCambios) StorageService.set("cuentasPorPagar", cuentas);
+    // ────────────────────────────────────────────────────────────────
+
     // Filtro blindado contra valores vacíos
     let deudas = cuentas.filter(c => parseFloat(c.saldoPendiente || 0) > 0);
 
     if (deudas.length === 0) {
-        contenedor.innerHTML = "<p style='text-align:center; padding:20px; color:#10b981; font-weight:bold;'>✅ ¡No tienes deudas pendientes con proveedores!</p>";
+        contenedor.innerHTML = htmlSaldos + "<p style='text-align:center; padding:20px; color:#10b981; font-weight:bold;'>✅ ¡No tienes deudas pendientes con proveedores!</p>";
         return;
     }
 
@@ -2668,7 +3064,89 @@ window.renderCuentasPorPagar = function() {
             </tr>`;
     });
 
-    contenedor.innerHTML = html + "</tbody></table>";
+    contenedor.innerHTML = htmlSaldos + html + "</tbody></table>";
+}
+
+window.abrirModalAbonoOC = function(idOC) {
+    const ordenes = StorageService.get("ordenesCompra", []);
+    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+    const oc = ordenes.find(o => o.id === idOC);
+    if (!oc) return;
+
+    const anticipoPrevio = oc.anticipo_pagado || 0;
+    const saldoPendiente = oc.saldoPendiente !== undefined ? oc.saldoPendiente : Math.max(0, oc.total - anticipoPrevio);
+
+    const html = `
+    <div data-modal="abono-oc" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center;">
+        <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#1e40af;">💰 Abonar a OC: ${oc.folio}</h3>
+            <p style="color:#6b7280; font-size:14px; margin-bottom: 15px;">Saldo pendiente: <b style="color:#dc2626;">${dinero(saldoPendiente)}</b></p>
+            
+            <div style="margin-bottom:15px;">
+                <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:5px;color:#334155;">Fecha del Pago:</label>
+                <input type="date" id="fechaAbonoOC" value="${fechaHoy}" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-family:sans-serif;">
+             </div>
+
+            <div style="margin-bottom:15px;">
+                <label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">MONTO DEL ABONO</label>
+                <input type="number" id="montoAbonoOC" max="${saldoPendiente}" placeholder="Ej: 500" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; font-size:16px;">
+            </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-size:12px; font-weight:bold; margin-bottom:4px;">PAGAR DESDE (DÉBITO O EFECTIVO)</label>
+                ${_buildSelectorCuentas('cuentaAbonoOC', false)}
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="confirmarAbonoOC(${oc.id})" style="flex:2; padding:12px; background:#059669; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">Registrar Pago</button>
+                <button onclick="document.querySelector('[data-modal=abono-oc]').remove()" style="flex:1; padding:12px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.confirmarAbonoOC = function(idOC) {
+    const ordenes = StorageService.get("ordenesCompra", []);
+    const idx = ordenes.findIndex(o => o.id === idOC);
+    if (idx === -1) return;
+
+    // 👇 LEEMOS EL CALENDARIO 👇
+    const fechaInput = document.getElementById("fechaAbonoOC").value;
+    if (!fechaInput) return alert("❌ Error de Auditoría: Debes especificar la fecha del pago.");
+    const fechaPagoFinal = `${fechaInput}T12:00:00.000`;
+
+    const monto = parseFloat(document.getElementById('montoAbonoOC').value) || 0;
+    const selectCuenta = document.getElementById('cuentaAbonoOC');
+    const cuentaId = selectCuenta.value;
+    const cuentaNombre = selectCuenta.options[selectCuenta.selectedIndex].text;
+
+    const anticipoPrevio = ordenes[idx].anticipo_pagado || 0;
+    const saldoPendiente = ordenes[idx].saldoPendiente !== undefined ? ordenes[idx].saldoPendiente : Math.max(0, ordenes[idx].total - anticipoPrevio);
+
+    if (monto <= 0 || monto > saldoPendiente) return alert("⚠️ Monto inválido. Verifica el saldo pendiente.");
+
+    // 1. Registrar el egreso en el flujo de caja (mandando la fecha)
+    window._egresarCuenta({
+        monto: monto,
+        cuentaId: cuentaId,
+        etiqueta: cuentaNombre,
+        concepto: `Abono a Orden de Compra ${ordenes[idx].folio}`,
+        referencia: ordenes[idx].folio,
+        fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
+    });
+
+    // 2. Actualizar la OC
+    ordenes[idx].pagos = ordenes[idx].pagos || [];
+    ordenes[idx].pagos.push({ fecha: fechaPagoFinal, monto: monto, cuenta: cuentaNombre });
+    ordenes[idx].saldoPendiente = saldoPendiente - monto;
+    ordenes[idx].anticipo_pagado = anticipoPrevio + monto; 
+
+    StorageService.set("ordenesCompra", ordenes);
+    document.querySelector('[data-modal=abono-oc]').remove();
+    alert("✅ Abono registrado exitosamente y retirado de la cuenta " + cuentaNombre);
+    if(window.renderListaOrdenesCompra) renderListaOrdenesCompra();
 };
 window.abrirNuevaCompraDirectaBlanco = function() {
     // 1. Limpiamos la memoria para que sea una compra completamente nueva y vacía
@@ -2681,6 +3159,339 @@ window.abrirNuevaCompraDirectaBlanco = function() {
     } else {
         alert("⚠️ El módulo de compra múltiple no está cargado.");
     }
+};
+
+window.confirmarEliminarOC = function(id) {
+    const lista = StorageService.get('ordenesCompra', []);
+    const oc = lista.find(x => x.id === id);
+    if (!oc) return;
+
+    // Calculamos cuánto se ha pagado ya
+    const pagado = (oc.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
+    
+    let mensaje = `¿Estás seguro de eliminar la Orden de Compra ${oc.folio}?\n\n`;
+    
+    if (pagado > 0) {
+        mensaje += `⚠️ AVISO: Esta orden tiene abonos por ${dinero(pagado)}. Al eliminarla, el dinero se guardará como 'SALDO A FAVOR' para el proveedor ${oc.proveedorNombre} y podrás usarlo en futuras compras.\n\n`;
+    }
+    
+    mensaje += "Las requisiciones vinculadas volverán a estar 'Pendientes'.\n\n¿Deseas continuar?";
+
+    if (confirm(mensaje)) {
+        ejecutarEliminacionOC(id, pagado);
+    }
+};
+
+function ejecutarEliminacionOC(id, montoAFavor) {
+    let lista = StorageService.get('ordenesCompra', []);
+    const idx = lista.findIndex(x => x.id === id);
+    if (idx === -1) return;
+
+    const oc = lista[idx];
+
+    // 1. Si hubo pagos, generamos el Saldo a Favor
+    if (montoAFavor > 0) {
+        let saldos = StorageService.get("saldosFavorProveedores", []);
+        saldos.push({
+            id: Date.now(),
+            proveedorId: oc.proveedorId,
+            proveedorNombre: oc.proveedorNombre,
+            montoOriginal: montoAFavor,
+            montoDisponible: montoAFavor,
+            fecha: window.obtenerHoyInputMX(),
+            referencia: `Cancelación ${oc.folio}`
+        });
+        StorageService.set("saldosFavorProveedores", saldos);
+    }
+
+    // 2. "Revivir" Requisiciones (Buscamos las que digan "En OC (FOLIO)")
+    let reqsTotales = StorageService.get("requisicionesCompra", []);
+    reqsTotales.forEach(r => {
+        if (r.estatus === `En OC (${oc.folio})`) {
+            r.estatus = "Pendiente";
+        }
+    });
+    StorageService.set("requisicionesCompra", reqsTotales);
+
+    // 3. Cambiamos el estado de la OC a "Eliminada" para que desaparezca de la lista activa
+    lista[idx].estado = 'Eliminada';
+    StorageService.set('ordenesCompra', lista);
+
+    alert(`✅ OC ${oc.folio} eliminada. Las requisiciones han sido reactivadas.`);
+    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+    if (typeof renderRequisiciones === 'function') renderRequisiciones();
+}
+
+function cancelarOrdenCompra(id) {
+    const lista = StorageService.get('ordenesCompra', []);
+    const oc = lista.find(x => x.id === id);
+    if (!oc) return;
+    if (oc.estado === 'Cancelada') return alert('Esta orden ya está cancelada.');
+    if (oc.estado === 'Recibida' || oc.estado === 'Recibida Parcial') return alert('No se puede cancelar una orden ya recibida.');
+
+    const pagado = (oc.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
+    let mensaje = `¿Cancelar la Orden de Compra ${oc.folio}?\n\n`;
+    if (pagado > 0) {
+        mensaje += `⚠️ Esta orden tiene abonos por ${dinero(pagado)}. El monto se registrará como Saldo a Favor del proveedor ${oc.proveedorNombre}.\n\n`;
+    }
+    mensaje += "Las requisiciones vinculadas volverán a estar 'Pendientes'.\n\n¿Deseas continuar?";
+
+    if (!confirm(mensaje)) return;
+
+    // Saldo a favor si hubo pagos
+    if (pagado > 0) {
+        let saldos = StorageService.get('saldosFavorProveedores', []);
+        saldos.push({
+            id: Date.now(),
+            proveedorId: oc.proveedorId,
+            proveedorNombre: oc.proveedorNombre,
+            montoOriginal: pagado,
+            montoDisponible: pagado,
+            fecha: window.obtenerHoyInputMX(),
+            referencia: `Cancelación ${oc.folio}`
+        });
+        StorageService.set('saldosFavorProveedores', saldos);
+    }
+
+    // Revivir requisiciones vinculadas
+    let reqs = StorageService.get('requisicionesCompra', []);
+    reqs.forEach(r => {
+        if (r.estatus === `En OC (${oc.folio})`) r.estatus = 'Pendiente';
+    });
+    StorageService.set('requisicionesCompra', reqs);
+
+    // Marcar como Cancelada
+    const idx = lista.findIndex(x => x.id === id);
+    lista[idx].estado = 'Cancelada';
+    StorageService.set('ordenesCompra', lista);
+
+    alert(`✅ OC ${oc.folio} cancelada.`);
+    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+    if (typeof renderRequisiciones === 'function') renderRequisiciones();
+}
+// ============================================================
+// AÑADIR REQUISICIONES A UNA OC EXISTENTE
+// ============================================================
+window.abrirModalAgregarA_OC_Existente = function() {
+    const seleccionados = Array.from(document.querySelectorAll('.chk-req:checked')).map(cb => cb.value);
+    if (seleccionados.length === 0) return alert("⚠️ Selecciona al menos una requisición de la lista.");
+
+    // Buscar OC's que aún se puedan editar
+    const ocs = StorageService.get('ordenesCompra', []).filter(oc => oc.estado === 'Borrador' || oc.estado === 'Enviada');
+    if (ocs.length === 0) return alert("⚠️ No tienes Órdenes de Compra abiertas (Borrador o Enviadas). Crea una nueva primero.");
+
+    let opciones = ocs.slice().reverse().map(oc => 
+        `<option value="${oc.id}">${oc.folio} — ${oc.proveedorNombre} (Total actual: ${dinero(oc.total)})</option>`
+    ).join('');
+
+    const modalHTML = `
+    <div data-modal="agregar-req-oc" style="position:fixed; inset:0; background:rgba(15,23,42,0.7); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(3px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:450px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#b45309; display:flex; align-items:center; gap:8px;">📥 Añadir a OC Existente</h3>
+            <p style="font-size:13px; color:#64748b; margin-bottom:20px;">Se insertarán los ${seleccionados.length} artículos seleccionados dentro de la Orden de Compra que elijas, recalculando su total automáticamente.</p>
+            
+            <label style="font-weight:bold; font-size:12px; color:#374151; display:block; margin-bottom:6px;">SELECCIONA LA ORDEN DE DESTINO</label>
+            <select id="selectReqOcDestino" style="width:100%; padding:12px; border:2px solid #fcd34d; border-radius:8px; margin-bottom:25px; font-size:14px; font-weight:bold; color:#92400e; background:#fffbeb;">
+                ${opciones}
+            </select>
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="confirmarAgregarA_OC_Existente()" style="flex:2; padding:14px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px; box-shadow:0 4px 6px rgba(217, 119, 6, 0.3);">✅ Añadir Artículos</button>
+                <button onclick="document.querySelector('[data-modal=\\'agregar-req-oc\\']').remove()" style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    window._reqsTempParaOC = seleccionados; // Memoria temporal
+};
+
+window.confirmarAgregarA_OC_Existente = function() {
+    const ocId = parseInt(document.getElementById('selectReqOcDestino').value);
+    const reqIds = window._reqsTempParaOC || [];
+    if (!ocId || reqIds.length === 0) return;
+
+    let ocs = StorageService.get('ordenesCompra', []);
+    let idxOC = ocs.findIndex(o => o.id === ocId);
+    if (idxOC === -1) return alert("❌ Error: OC no encontrada.");
+    let oc = ocs[idxOC];
+
+    let reqsTotales = StorageService.get("requisicionesCompra", []);
+    let prods = StorageService.get("productos", []);
+    let agregados = 0;
+
+    reqIds.forEach(idReq => {
+        let req = reqsTotales.find(r => String(r.id) === String(idReq));
+        if (req && req.estatus === "Pendiente") {
+            const prod = prods.find(p => String(p.id) === String(req.productoId));
+            const costoUnitario = prod ? parseFloat(prod.costo) : 0;
+            const cant = parseInt(req.cantidad) || 1;
+            const caracteristicas = req.folioVenta ? `Req. Venta: ${req.folioVenta}` : "Req. Venta: S/F";
+
+            // 1. Buscamos si ya existe el producto con esas características en la OC para sumar cantidad
+            let idxArt = oc.articulos.findIndex(a => String(a.productoId) === String(req.productoId) && a.caracteristicas === caracteristicas);
+            
+            if (idxArt !== -1) {
+                oc.articulos[idxArt].cantidad = (parseInt(oc.articulos[idxArt].cantidad) || 0) + cant;
+                oc.articulos[idxArt].costo = parseFloat(oc.articulos[idxArt].costo) || 0;
+                oc.articulos[idxArt].subtotal = oc.articulos[idxArt].cantidad * oc.articulos[idxArt].costo;
+            } else {
+                // Si no, lo agregamos como fila nueva (100% SANITIZADA)
+                oc.articulos.push({
+                    productoId: req.productoId || null,
+                    nombre: req.producto || "Mercancía sin nombre",
+                    costo: costoUnitario || 0,
+                    cantidad: cant || 1,
+                    subtotal: (cant * costoUnitario) || 0,
+                    caracteristicas: caracteristicas,
+                    yaEnInventario: false // 🔥 Evita el undefined que reventaba Firebase
+                });
+            }
+
+            // 2. Marcamos la requisición como amarrada a esta OC
+            req.estatus = `En OC (${oc.folio})`;
+            agregados++;
+        }
+    });
+
+    // 3. Recalcular la matemática de la Orden de Compra
+    oc.total = oc.articulos.reduce((s, a) => s + (parseFloat(a.subtotal) || 0), 0) || 0;
+    const anticipoPrevio = parseFloat(oc.anticipo_pagado) || 0;
+    oc.saldoPendiente = Math.max(0, oc.total - anticipoPrevio) || 0;
+
+    // 🧹 4. LIMPIEZA EXTREMA PARA FIREBASE: Destruir cualquier undefined residual
+    Object.keys(oc).forEach(k => (oc[k] === undefined) && delete oc[k]);
+    oc.articulos.forEach(art => {
+        Object.keys(art).forEach(k => (art[k] === undefined) && delete art[k]);
+    });
+
+    // 5. Guardar cambios en las bases de datos
+    StorageService.set('ordenesCompra', ocs);
+    StorageService.set('requisicionesCompra', reqsTotales);
+    
+    document.querySelector('[data-modal="agregar-req-oc"]').remove();
+    window._reqsTempParaOC = null;
+    
+    alert(`✅ ¡Éxito! Se añadieron ${agregados} producto(s) a la OC ${oc.folio}.\nEl nuevo total de la orden es ${dinero(oc.total)}`);
+    
+    // Refrescar vistas
+    renderRequisiciones();
+    if(typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+};
+// --- MARCAR REQUISICIONES SELECCIONADAS COMO YA EN INVENTARIO ---
+window.marcarRequisicionesResueltasMasivo = function() {
+    const seleccionados = Array.from(document.querySelectorAll('.chk-req:checked')).map(cb => cb.value);
+    if (seleccionados.length === 0) return alert("⚠️ Selecciona al menos una requisición de la lista.");
+
+    if (!confirm(`¿Confirmas que ya tienes en físico los ${seleccionados.length} producto(s) seleccionado(s)?\n\nEsto los quitará permanentemente de la lista de pendientes por comprar.`)) return;
+
+    let reqs = StorageService.get("requisicionesCompra", []);
+    let actualizados = 0;
+
+    seleccionados.forEach(idReq => {
+        const idx = reqs.findIndex(r => String(r.id) === String(idReq));
+        if (idx !== -1) {
+            reqs[idx].estatus = "Ya en Inventario";
+            actualizados++;
+        }
+    });
+
+    if (actualizados > 0) {
+        StorageService.set("requisicionesCompra", reqs);
+        if (typeof renderRequisiciones === 'function') renderRequisiciones();
+        // Opcional: mostrar un mini aviso de éxito
+        console.log(`✅ Se limpiaron ${actualizados} requisiciones.`);
+    }
+};
+// ============================================================
+// GESTOR DE CONSIGNACIONES (TIPO LIVERPOOL)
+// ============================================================
+window.abrirGestorConsignaciones = function() {
+    const consignaciones = StorageService.get("consignacionesActivas", []).filter(c => c.cantidadPendiente > 0);
+    
+    let filas = consignaciones.map(c => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px;">${c.fecha}</td>
+            <td style="padding:10px; font-weight:bold; color:#1e40af;">${c.proveedor}</td>
+            <td style="padding:10px;">${c.producto}</td>
+            <td style="padding:10px; text-align:center;"><span style="background:#fef3c7; color:#d97706; padding:4px 8px; border-radius:4px; font-weight:bold;">${c.cantidadPendiente} pzas</span></td>
+            <td style="padding:10px; text-align:right;">${dinero(c.costoUnitario)}</td>
+            <td style="padding:10px; text-align:center;">
+                <button onclick="marcarConsignacionVendida(${c.id})" style="padding:8px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Reportar Venta</button>
+            </td>
+        </tr>
+    `).join('');
+
+    if (consignaciones.length === 0) filas = `<tr><td colspan="6" style="padding:20px; text-align:center; color:#64748b;">No hay mercancía a consignación pendiente de vender.</td></tr>`;
+
+    const html = `
+    <div data-modal="gestor-consignaciones" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; border-radius:12px; width:95%; max-width:900px; padding:25px; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2 style="margin:0; color:#065f46;">📦 Gestor de Consignaciones</h2>
+                <button onclick="document.querySelector('[data-modal=gestor-consignaciones]').remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">✕</button>
+            </div>
+            <p style="color:#475569; font-size:14px; margin-bottom:15px;">Aquí se muestran los productos que tienes físicamente pero que no has pagado. Al reportar una venta, la deuda se transferirá a tus <b>Cuentas por Pagar</b>.</p>
+            <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                <thead style="background:#f1f5f9;">
+                    <tr>
+                        <th style="padding:10px; text-align:left;">Ingreso</th>
+                        <th style="padding:10px; text-align:left;">Proveedor</th>
+                        <th style="padding:10px; text-align:left;">Producto(s)</th>
+                        <th style="padding:10px; text-align:center;">Stock Pendiente</th>
+                        <th style="padding:10px; text-align:right;">Costo Unit.</th>
+                        <th style="padding:10px; text-align:center;">Acción</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.marcarConsignacionVendida = function(idConsig) {
+    let consigArr = StorageService.get("consignacionesActivas", []);
+    const idx = consigArr.findIndex(c => c.id === idConsig);
+    if (idx === -1) return;
+    const c = consigArr[idx];
+
+    const cantidadAVender = parseInt(prompt(`¿Cuántas piezas de "${c.producto}" vendiste?\n\nStock disponible: ${c.cantidadPendiente}`));
+    if (isNaN(cantidadAVender) || cantidadAVender <= 0 || cantidadAVender > c.cantidadPendiente) {
+        return alert("❌ Cantidad inválida.");
+    }
+
+    const fechaPagoInput = prompt("📅 ¿En qué fecha tienes que liquidarle esto al proveedor? (Formato: YYYY-MM-DD)", window.obtenerHoyInputMX());
+    if (!fechaPagoInput) return alert("❌ Operación cancelada. Debes fijar una fecha de pago.");
+
+    const montoDeuda = cantidadAVender * c.costoUnitario;
+    
+    // Generar la Cuenta por Pagar
+    let cxp = StorageService.get("cuentasPorPagar", []);
+    cxp.push({
+        id: Date.now(),
+        compraId: c.compraId,
+        proveedor: c.proveedor,
+        producto: `[Vendido de Consignación] - ${c.producto} (${cantidadAVender} pzas)`,
+        articulos: [{ nombre: c.producto, cantidad: cantidadAVender, costo: c.costoUnitario, subtotal: montoDeuda }],
+        total: montoDeuda,
+        saldoPendiente: montoDeuda,
+        metodo: "credito_proveedor",
+        formaPagoTexto: "Liquidación de Consignación",
+        fecha: window.formatearFechaCortaMX(new Date()),
+        vencimiento: window.formatearFechaCortaMX(fechaPagoInput + "T12:00:00"),
+        vencimientoIso: window.localISO(fechaPagoInput + "T12:00:00"),
+        esConsignacion: false 
+    });
+    StorageService.set("cuentasPorPagar", cxp);
+
+    // Descontar inventario pendiente
+    consigArr[idx].cantidadPendiente -= cantidadAVender;
+    StorageService.set("consignacionesActivas", consigArr);
+
+    document.querySelector('[data-modal="gestor-consignaciones"]').remove();
+    alert(`✅ ¡Listo! La deuda por ${dinero(montoDeuda)} ha sido transferida a Cuentas por Pagar con vencimiento el ${fechaPagoInput}.`);
+    abrirGestorConsignaciones(); // Refresca la ventana
 };
 
 // Exponer la función para que el menú HTML la encuentre
@@ -2718,5 +3529,7 @@ window.iniciarCompraDirectaDesdeRequisiciones = iniciarCompraDirectaDesdeRequisi
 window.abrirModalCompraDirectaMulti = abrirModalCompraDirectaMulti;
 window.agregarArticuloCompraDirecta = agregarArticuloCompraDirecta;
 window.guardarCompraDirectaFinal = guardarCompraDirectaFinal;
+window.abrirModalAbonoOC = abrirModalAbonoOC;
+window.confirmarAbonoOC = confirmarAbonoOC;
 
 console.log('✅ compras.js cargado correctamente');
