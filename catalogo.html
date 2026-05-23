@@ -1,165 +1,1000 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<script>
-// Normaliza cadenas para comparar nombres de categorías/subcategorías (sin tildes, mayúsculas ni espacios)
-function normalizarNombre(str) {
-  return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
-}
-</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MUEBLERIA MI PUEBLITO</title>
+<title>Catalogo | Muebleria Mi Pueblito</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@700;800;900&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 :root {
-  --primary: #1a2a27; --accent: #b8842a; --bg-cream: #faf7f2; --white: #ffffff;
-  --font-main: 'Inter', sans-serif; --font-title: 'Montserrat', sans-serif;
+  --ink: #13211f;
+  --muted: #647067;
+  --paper: #fffaf2;
+  --surface: #ffffff;
+  --line: #e8dfd1;
+  --brand: #17443d;
+  --brand-2: #236b61;
+  --gold: #c28a2c;
+  --gold-2: #f3c66d;
+  --green: #1f9d66;
+  --blue: #2563eb;
+  --danger: #c2410c;
+  --shadow: 0 18px 50px rgba(32, 24, 12, 0.12);
+  --soft-shadow: 0 10px 28px rgba(32, 24, 12, 0.08);
+  --font: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --title: "Montserrat", var(--font);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--font-main); background-color: var(--bg-cream); color: #1a1a1a; -webkit-tap-highlight-color: transparent; }
-
-/* HEADER & HERO */
-.site-header {
-  background: var(--white); padding: 12px 20px; display: flex;
-  justify-content: space-between; align-items: center; border-bottom: 1px solid #eee;
-  position: sticky; top: 0; z-index: 1000;
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(243,198,109,0.20), transparent 30%),
+    linear-gradient(180deg, #fffdf8 0%, var(--paper) 48%, #f5efe5 100%);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
-.brand h1 { font-family: var(--font-title); font-size: 16px; color: var(--primary); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+img { display: block; }
 
-.hero-slim {
-  padding: 25px 15px; background: #111; color: white; text-align: center;
-  background-image: linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.6)), url('https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=1500');
-  background-size: cover; background-position: center;
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 clamp(16px, 3vw, 38px);
+  background: rgba(255, 250, 242, 0.88);
+  border-bottom: 1px solid rgba(232, 223, 209, 0.9);
+  backdrop-filter: blur(16px);
 }
-.hero-slim h2 { font-family: var(--font-title); font-size: 22px; margin-bottom: 5px; }
-.hero-slim p { font-size: 14px; opacity: 0.9; }
-
-/* FILTROS */
-.filter-section { padding: 15px 10px; max-width: 1400px; margin: 0 auto; text-align: center; }
-.cat-container { display: flex; gap: 8px; overflow-x: auto; padding: 5px 0 15px; scrollbar-width: none; }
-.cat-container::-webkit-scrollbar { display: none; }
-
-.cat-btn {
-  padding: 8px 18px; border-radius: 50px; border: 1px solid #ddd;
-  background: white; cursor: pointer; font-weight: 600; font-size: 13px;
-  white-space: nowrap; transition: 0.3s; flex-shrink: 0;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
-.cat-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
-
-.subnav { 
-  display: none; justify-content: flex-start; overflow-x: auto; gap: 8px; 
-  margin-top: 5px; padding: 10px 0; border-top: 1px solid #eee;
+.brand img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  border-radius: 8px;
 }
-.subnav.visible { display: flex; }
-.sub-pill {
-  padding: 6px 14px; background: #eee; border-radius: 20px; font-size: 11px;
-  cursor: pointer; font-weight: 500; white-space: nowrap; flex-shrink: 0;
+.brand-text {
+  min-width: 0;
 }
-.sub-pill.active { background: var(--accent); color: white; }
-
-/* CATALOGO */
-.catalog-container { max-width: 1400px; margin: 0 auto; padding: 0 15px 60px; }
-.grid { 
-  display: grid; 
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); 
-  gap: 20px; 
+.brand-title {
+  font-family: var(--title);
+  font-size: clamp(15px, 2.4vw, 21px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.brand-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--brand);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(20, 40, 34, 0.06);
+}
+.wa-top {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 15px;
+  border-radius: 8px;
+  border: 0;
+  background: var(--brand);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
 }
 
-.card { background: white; border-radius: 15px; overflow: hidden; border: 1px solid #eee; transition: 0.3s; cursor: pointer; display: flex; flex-direction: column; }
-.card-img { width: 100%; height: 260px; padding: 15px; display: flex; align-items: center; justify-content: center; background: #fff; }
-.card-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.card-body { padding: 15px; flex-grow: 1; border-top: 1px solid #f5f5f5; }
-.card-body h3 { font-size: 15px; color: #333; margin-bottom: 8px; line-height: 1.4; font-weight: 600; word-wrap: break-word; }
-.card-price { font-size: 18px; font-weight: 800; color: var(--primary); }
+.hero {
+  min-height: clamp(430px, 68vh, 660px);
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+  gap: clamp(24px, 4vw, 58px);
+  align-items: center;
+  padding: clamp(28px, 5vw, 64px) clamp(16px, 4vw, 58px) clamp(18px, 4vw, 46px);
+  overflow: hidden;
+}
+.hero-copy {
+  max-width: 660px;
+}
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  margin-bottom: 18px;
+}
+.eyebrow::before {
+  content: "";
+  width: 32px;
+  height: 2px;
+  background: var(--gold);
+}
+.hero h1 {
+  font-family: var(--title);
+  font-size: clamp(40px, 6.4vw, 88px);
+  line-height: 0.95;
+  letter-spacing: 0;
+  max-width: 720px;
+}
+.hero p {
+  margin-top: 18px;
+  max-width: 560px;
+  color: #41514b;
+  font-size: clamp(16px, 2vw, 20px);
+  line-height: 1.55;
+  font-weight: 500;
+}
+.hero-tools {
+  margin-top: 26px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.search-box {
+  flex: 1 1 270px;
+  max-width: 430px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.92);
+  box-shadow: var(--soft-shadow);
+}
+.search-box span { color: var(--gold); font-weight: 900; }
+.search-box input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 700;
+}
+.primary-link {
+  height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  color: #2b1b05;
+  font-weight: 900;
+  text-decoration: none;
+  box-shadow: 0 12px 24px rgba(194, 138, 44, 0.22);
+}
+.hero-stage {
+  position: relative;
+  min-height: 430px;
+  display: grid;
+  place-items: center;
+}
+.hero-product {
+  position: relative;
+  width: min(100%, 690px);
+  aspect-ratio: 1.28;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.78), rgba(255,255,255,0.92)),
+    linear-gradient(180deg, #eee0cd, #fffaf2);
+  border: 1px solid rgba(232, 223, 209, 0.9);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.hero-product.is-changing img,
+.hero-product.is-changing .hero-card {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.hero-product::before {
+  content: "";
+  position: absolute;
+  left: 9%;
+  right: 9%;
+  bottom: 11%;
+  height: 20%;
+  border-radius: 50%;
+  background: rgba(36, 27, 16, 0.12);
+  filter: blur(18px);
+}
+.hero-product img {
+  position: absolute;
+  inset: 7%;
+  width: 86%;
+  height: 78%;
+  object-fit: contain;
+  margin: auto;
+  transform: translateY(-2%);
+  opacity: 1;
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+.hero-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.hero-card {
+  position: absolute;
+  left: 4%;
+  bottom: 5%;
+  right: 4%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+  padding: 16px;
+  border-radius: 8px;
+  background: rgba(19, 33, 31, 0.88);
+  color: white;
+  backdrop-filter: blur(12px);
+  z-index: 3;
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+.hero-card strong {
+  display: block;
+  font-size: clamp(13px, 1.7vw, 18px);
+  line-height: 1.25;
+  max-height: 46px;
+  overflow: hidden;
+}
+.hero-card span {
+  display: block;
+  margin-top: 6px;
+  color: #dce8e3;
+  font-size: 12px;
+  font-weight: 700;
+}
+.hero-price {
+  color: var(--gold-2);
+  font-size: clamp(18px, 2.3vw, 28px);
+  font-weight: 900;
+  white-space: nowrap;
+}
+.hero-controls {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 14px;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.hero-arrow {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(232, 223, 209, 0.9);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.86);
+  color: var(--brand);
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 8px 22px rgba(20,40,34,0.10);
+  pointer-events: auto;
+}
+.hero-dots {
+  position: absolute;
+  left: 50%;
+  top: 30px;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+.hero-dot {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.72);
+  box-shadow: 0 1px 8px rgba(0,0,0,0.18);
+}
+.hero-dot.active {
+  width: 22px;
+  background: var(--gold-2);
+}
 
-/* MODAL */
+.catalog-shell {
+  padding: 0 clamp(12px, 3vw, 36px) 80px;
+}
+.controls {
+  position: sticky;
+  top: 66px;
+  z-index: 40;
+  max-width: 1480px;
+  margin: 0 auto 18px;
+  padding: 14px 0;
+  background: linear-gradient(180deg, rgba(255,250,242,0.96), rgba(255,250,242,0.86));
+  backdrop-filter: blur(12px);
+}
+.category-row,
+.subcategory-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 2px 10px;
+}
+.category-row::-webkit-scrollbar,
+.subcategory-row::-webkit-scrollbar { display: none; }
+.cat-btn,
+.sub-btn {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 900;
+  padding: 0 16px;
+  box-shadow: 0 2px 10px rgba(20, 40, 34, 0.04);
+  transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+.sub-btn {
+  min-height: 34px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 13px;
+}
+.cat-btn:hover,
+.sub-btn:hover { transform: translateY(-1px); }
+.cat-btn.active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+.sub-btn.active {
+  background: #f3eadb;
+  color: #7a5016;
+  border-color: #e0c68e;
+}
+.catalog-meta {
+  max-width: 1480px;
+  margin: 0 auto 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: end;
+  color: var(--muted);
+}
+.catalog-meta h2 {
+  font-family: var(--title);
+  color: var(--ink);
+  font-size: clamp(22px, 3vw, 36px);
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+.catalog-meta p {
+  margin-top: 5px;
+  font-weight: 600;
+}
+.sort-note {
+  text-align: right;
+  font-size: 12px;
+  font-weight: 800;
+  color: #8a6a3b;
+}
+.grid {
+  max-width: 1480px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(255px, 1fr));
+  gap: 16px;
+}
+.product-card {
+  position: relative;
+  min-width: 0;
+  border: 1px solid rgba(232, 223, 209, 0.92);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.94);
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(32, 24, 12, 0.07);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+.product-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(194, 138, 44, 0.55);
+  box-shadow: 0 20px 42px rgba(32, 24, 12, 0.13);
+}
+.product-media {
+  position: relative;
+  aspect-ratio: 1.04;
+  background:
+    linear-gradient(180deg, #fff 0%, #f8f1e7 100%);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.product-media img {
+  width: 92%;
+  height: 86%;
+  object-fit: contain;
+  transition: transform 0.28s ease;
+}
+.product-card:hover .product-media img { transform: scale(1.04); }
+.badge {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: rgba(23, 68, 61, 0.92);
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
+}
+.badge.order { left: auto; right: 12px; background: rgba(255,255,255,0.90); color: #7a5016; border: 1px solid rgba(224,198,142,0.8); }
+.product-body {
+  padding: 14px;
+}
+.product-kicker {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.product-name {
+  min-height: 42px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 900;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.product-facts {
+  min-height: 21px;
+  margin-top: 8px;
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.price-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0e7d8;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+.price-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.price {
+  margin-top: 3px;
+  color: var(--green);
+  font-size: 21px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.weekly {
+  color: var(--blue);
+  text-align: right;
+  font-size: 12px;
+  font-weight: 900;
+}
+.card-actions {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 8px;
+}
+.detail-btn,
+.mini-wa {
+  min-height: 42px;
+  border-radius: 8px;
+  border: 0;
+  font-weight: 900;
+}
+.detail-btn {
+  background: var(--ink);
+  color: #fff;
+}
+.mini-wa {
+  background: #25d366;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.state {
+  max-width: 900px;
+  margin: 30px auto;
+  padding: 38px 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.86);
+  text-align: center;
+  box-shadow: var(--soft-shadow);
+}
+.state h3 { font-family: var(--title); font-size: 24px; }
+.state p { margin-top: 8px; color: var(--muted); font-weight: 600; }
+
 .modal {
-  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); 
-  z-index: 2000; align-items: center; justify-content: center;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(10, 16, 15, 0.72);
+  backdrop-filter: blur(10px);
 }
 .modal.open { display: flex; }
-.modal-content {
-  background: white; width: 100%; max-width: 950px; border-radius: 0; 
-  display: flex; flex-direction: column; overflow-y: auto; position: relative; height: 100%;
+.modal-dialog {
+  position: relative;
+  width: min(1080px, 100%);
+  max-height: 92vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(330px, 0.92fr);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 40px 90px rgba(0,0,0,0.34);
 }
-.modal-left { width: 100%; background: #fff; height: 350px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
-.modal-left img { max-width: 90%; max-height: 90%; transition: transform 0.1s ease; }
-.modal-right { padding: 25px; }
+.modal-media {
+  min-height: 520px;
+  background: linear-gradient(180deg, #fff 0%, #f6ecdd 100%);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.modal-media img {
+  width: 92%;
+  height: 90%;
+  object-fit: contain;
+  transition: transform 0.12s ease;
+}
+.modal-info {
+  padding: clamp(20px, 3vw, 34px);
+  overflow-y: auto;
+  max-height: 92vh;
+}
+.close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255,255,255,0.55);
+  border-radius: 8px;
+  background: rgba(19, 33, 31, 0.82);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+}
+.modal-category {
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.modal-title {
+  font-family: var(--title);
+  font-size: clamp(25px, 3.5vw, 42px);
+  line-height: 1.03;
+  letter-spacing: 0;
+}
+.modal-price {
+  margin-top: 14px;
+  color: var(--green);
+  font-size: 34px;
+  font-weight: 900;
+}
+.features {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f8f2e8;
+  color: #4d5a53;
+  line-height: 1.55;
+  font-weight: 600;
+}
+.pay-card {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pay-head {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  background: #fffbf3;
+  border-bottom: 1px solid var(--line);
+}
+.pay-head strong {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+.pay-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.pay-head select,
+.down-payment input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 10px;
+  font-weight: 900;
+  outline: none;
+}
+.down-payment {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.down-payment label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.down-payment small {
+  display: block;
+  margin-top: 5px;
+  color: #8a6a3b;
+  font-weight: 700;
+}
+.plans {
+  padding: 8px 14px 14px;
+}
+.plan-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #f1e8da;
+}
+.plan-row:last-child { border-bottom: 0; }
+.plan-main {
+  color: var(--ink);
+  font-weight: 900;
+}
+.plan-main span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.plan-total {
+  text-align: right;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 900;
+}
+.modal-actions {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.modal-wa,
+.modal-close {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 0;
+  font-weight: 900;
+  text-decoration: none;
+}
+.modal-wa { background: #25d366; color: white; }
+.modal-close { background: #eee6da; color: var(--ink); }
+.mobile-filter {
+  display: none;
+}
 
-.periodicidad-select {
-  width: 100%; padding: 12px; margin: 15px 0; border-radius: 8px; border: 1px solid #ddd; font-size: 16px;
-}
-.plazo-row {
-  display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee;
+@media (max-width: 900px) {
+  .topbar { height: 62px; }
+  .brand-subtitle, .wa-top { display: none; }
+  .hero {
+    min-height: auto;
+    grid-template-columns: 1fr;
+    padding: 18px 14px 12px;
+    gap: 16px;
+  }
+  .hero-copy { max-width: none; }
+  .hero-stage {
+    min-height: auto;
+    order: -1;
+  }
+  .hero-product {
+    width: min(100%, 540px);
+    aspect-ratio: 1.06;
+    box-shadow: 0 12px 32px rgba(32,24,12,0.10);
+  }
+  .hero-product img {
+    inset: 4% 5% 16%;
+    width: 90%;
+    height: 72%;
+  }
+  .hero-card {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    padding: 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .hero-card strong {
+    font-size: 13px;
+    max-height: 36px;
+  }
+  .hero-card span {
+    font-size: 10px;
+  }
+  .hero-arrow {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+  }
+  .hero-dots {
+    top: 30px;
+  }
+  .controls { top: 62px; }
+  .modal {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .modal-dialog {
+    max-height: 96vh;
+    grid-template-columns: 1fr;
+    border-radius: 8px 8px 0 0;
+    overflow-y: auto;
+  }
+  .modal-media {
+    min-height: 310px;
+    max-height: 42vh;
+  }
+  .modal-info {
+    max-height: none;
+  }
 }
 
-.btn-wa {
-  display: block; width: 100%; background: #25d366; color: white; text-align: center;
-  padding: 16px; border-radius: 12px; text-decoration: none; font-weight: 700; margin-top: 20px; font-size: 16px;
-}
-
-@media (max-width: 600px) {
-  .grid { grid-template-columns: 1fr; }
-  .card-img { height: 320px; }
-  .modal-content { height: 100%; max-height: 100%; border-radius: 0; }
-}
-
-@media (min-width: 900px) {
-  .modal-content { flex-direction: row; height: auto; max-height: 90vh; border-radius: 20px; }
-  .modal-left { width: 55%; height: auto; min-height: 500px; }
-  .modal-right { width: 45%; }
+@media (max-width: 620px) {
+  .top-actions { gap: 6px; }
+  .icon-btn { width: 38px; height: 38px; }
+  .brand img { width: 36px; height: 36px; }
+  .brand-title {
+    font-size: 13px;
+    white-space: normal;
+    line-height: 1.1;
+  }
+  .eyebrow { margin-bottom: 10px; font-size: 11px; }
+  .hero h1 { font-size: 34px; line-height: 1; }
+  .hero p { margin-top: 12px; font-size: 14px; line-height: 1.45; }
+  .hero-tools { display: block; }
+  .search-box { max-width: none; height: 46px; }
+  .primary-link { width: 100%; margin-top: 10px; }
+  .catalog-shell { padding-left: 10px; padding-right: 10px; }
+  .controls {
+    margin-bottom: 10px;
+    padding: 10px 0;
+  }
+  .cat-btn { min-height: 38px; padding: 0 13px; font-size: 13px; }
+  .sub-btn { min-height: 32px; padding: 0 11px; }
+  .catalog-meta {
+    display: block;
+    margin-bottom: 10px;
+  }
+  .sort-note {
+    margin-top: 6px;
+    text-align: left;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .product-media {
+    aspect-ratio: 1.18;
+  }
+  .product-body { padding: 12px; }
+  .product-name { min-height: auto; font-size: 15px; }
+  .price { font-size: 20px; }
+  .modal-title { font-size: 26px; }
+  .modal-price { font-size: 28px; }
+  .modal-media {
+    min-height: 280px;
+    max-height: 38vh;
+  }
+  .pay-head,
+  .down-payment,
+  .modal-actions {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 </head>
 <body>
-
-<header class="site-header">
-  <div class="brand"><h1>MUEBLERIA MI PUEBLITO</h1></div>
+<header class="topbar">
+  <div class="brand">
+    <img src="img/Logo.svg" alt="Mi Pueblito" onerror="this.style.display='none'">
+    <div class="brand-text">
+      <div class="brand-title">Muebleria Mi Pueblito</div>
+      <div class="brand-subtitle">Catalogo actualizado</div>
+    </div>
+  </div>
+  <div class="top-actions">
+    <button class="icon-btn" type="button" onclick="scrollToCatalog()" title="Ver catalogo" aria-label="Ver catalogo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <a class="wa-top" href="https://wa.me/522411081657" target="_blank" rel="noopener">WhatsApp</a>
+  </div>
 </header>
 
-<section class="hero-slim">
-  <h2>Tu hogar, tu estilo.</h2>
-  <p>Encuentra los mejores muebles con abonos que sí puedes.</p>
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">Catalogo para tu hogar</div>
+    <h1>Muebles que se ven, se sienten y se pagan facil.</h1>
+    <p>Explora productos disponibles, precios de contado y planes de abono. Elige una categoria y comparte directo por WhatsApp el mueble que te gusto.</p>
+    <div class="hero-tools">
+      <label class="search-box" for="searchInput">
+        <span>Buscar</span>
+        <input id="searchInput" type="search" placeholder="Sala, comedor, ropero..." autocomplete="off" oninput="setBusqueda(this.value)">
+      </label>
+      <button class="primary-link" type="button" onclick="scrollToCatalog()">Ver productos</button>
+    </div>
+  </div>
+  <div class="hero-stage">
+    <div id="heroProduct" class="hero-product">
+      <img id="heroImg" src="img/Logo.svg" alt="">
+      <button id="heroHit" class="hero-hit" type="button" onclick="abrirHeroActual()" aria-label="Ver producto destacado"></button>
+      <div class="hero-controls">
+        <button class="hero-arrow" type="button" onclick="cambiarHero(-1)" aria-label="Producto anterior">&lsaquo;</button>
+        <button class="hero-arrow" type="button" onclick="cambiarHero(1)" aria-label="Producto siguiente">&rsaquo;</button>
+      </div>
+      <div class="hero-card">
+        <div>
+          <strong id="heroName">Cargando catalogo...</strong>
+          <span id="heroMeta">Muebleria Mi Pueblito</span>
+        </div>
+        <div id="heroPrice" class="hero-price"></div>
+      </div>
+      <div id="heroDots" class="hero-dots"></div>
+    </div>
+  </div>
 </section>
 
-<div class="filter-section">
-  <div id="categoriasNav" class="cat-container">
-    <button class="cat-btn active" onclick="setCategoria('todos', this)">Todos los productos</button>
+<section id="catalogo" class="catalog-shell">
+  <div class="controls">
+    <div id="categoriasNav" class="category-row"></div>
+    <div id="subnav" class="subcategory-row"></div>
   </div>
-  <div id="subnav" class="subnav"></div>
-</div>
-
-<main class="catalog-container">
-  <div id="grid" class="grid"></div>
-</main>
-
-<div class="modal" id="modal" onclick="if(event.target==this) cerrarModal()">
-  <div class="modal-content">
-    <button onclick="cerrarModal()" style="position:absolute; top:15px; right:15px; border:none; background:rgba(0,0,0,0.1); width:36px; height:36px; border-radius:50%; cursor:pointer; z-index:10; font-weight:bold; font-size:18px;">✕</button>
-    <div class="modal-left" id="zoomC" onmousemove="zoom(event)" onmouseleave="resetZoom()" ontouchmove="zoom(event)">
-      <img id="mImg" src="">
+  <div class="catalog-meta">
+    <div>
+      <h2 id="catalogTitle">Todos los productos</h2>
+      <p id="catalogCount">Preparando catalogo...</p>
     </div>
-    <div class="modal-right">
-      <h2 id="mTitle" style="font-family:var(--font-title); font-size: 20px; line-height: 1.2;"></h2>
-      <div id="mPrice" style="font-size:22px; font-weight:800; color:var(--primary); margin:10px 0;"></div>
-      <div id="mCaracteristicas" style="margin: 15px 0; color: #555; font-size: 15px;"></div>
-      <button id="btnCaracteristicas" type="button" style="display:none;margin-bottom:15px;width:100%;padding:12px 0;background:var(--accent);color:#fff;font-weight:700;font-size:16px;border:none;border-radius:8px;" onclick="window.mostrarBurbujaCaracteristicas()">Características</button>
-      <div id="burbujaCaracteristicas" style="display:none;position:fixed;z-index:3000;left:0;right:0;bottom:0;margin:auto;max-width:95vw;background:#fff9e6;padding:18px 16px 18px 16px;border-radius:18px 18px 0 0;box-shadow:0 -2px 16px #0002;font-size:16px;color:#444;line-height:1.7;"></div>
-      
-      <div style="font-size:11px; font-weight:700; color:#666;">ELIGE TU FORMA DE PAGO:</div>
-      <select id="periodoSelect" class="periodicidad-select" onchange="actualizarPlazos()">
-        <option value="semanal">Abono Semanal</option>
-        <option value="quincenal">Abono Quincenal</option>
-        <option value="mensual">Abono Mensual</option>
-      </select>
+    <div id="sortNote" class="sort-note">Ordenado por tu configuracion de inventario</div>
+  </div>
+  <main id="grid" class="grid"></main>
+  <div id="state" class="state" style="display:none;"></div>
+</section>
 
-      <div id="plazosLista"></div>
-      <a id="btnWA" href="#" target="_blank" class="btn-wa">Consultar por WhatsApp</a>
+<div id="modal" class="modal" onclick="if(event.target === this) cerrarModal()">
+  <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <button class="close-btn" type="button" onclick="cerrarModal()" aria-label="Cerrar">&times;</button>
+    <div id="zoomC" class="modal-media" onmousemove="zoom(event)" onmouseleave="resetZoom()" ontouchmove="zoom(event)">
+      <img id="mImg" src="" alt="">
+    </div>
+    <div class="modal-info">
+      <div id="mCategory" class="modal-category"></div>
+      <h2 id="modalTitle" class="modal-title"></h2>
+      <div id="mPrice" class="modal-price"></div>
+      <div id="mFacts" class="product-facts"></div>
+      <div id="mCaracteristicas" class="features"></div>
+
+      <div class="pay-card">
+        <div class="pay-head">
+          <div>
+            <strong>Simula tu abono</strong>
+            <span>Elige periodicidad y enganche.</span>
+          </div>
+          <select id="periodoSelect" onchange="actualizarPlazos()">
+            <option value="semanal">Semanal</option>
+            <option value="quincenal">Quincenal</option>
+            <option value="mensual">Mensual</option>
+          </select>
+        </div>
+        <div class="down-payment">
+          <div>
+            <label for="inputEnganche">Enganche</label>
+            <small id="engancheMinimo"></small>
+          </div>
+          <input id="inputEnganche" type="number" min="0" step="10" onchange="actualizarPlazos()">
+        </div>
+        <div id="plazosLista" class="plans"></div>
+      </div>
+
+      <div class="modal-actions">
+        <a id="btnWA" class="modal-wa" href="#" target="_blank" rel="noopener">Consultar por WhatsApp</a>
+        <button class="modal-close" type="button" onclick="cerrarModal()">Seguir viendo</button>
+      </div>
     </div>
   </div>
 </div>
@@ -174,320 +1009,572 @@ const firebaseConfig = {
   appId: "1:32950655624:web:42a8657431319f9a25dd3d"
 };
 
+const WHATSAPP = "522411081657";
 let productos = [];
-let catActiva = 'todos';
-let subActiva = 'todos';
+let categoriasData = [];
+let catActiva = "todos";
+let subActiva = "todos";
+let busquedaActiva = "";
 let prodSeleccionado = null;
+let heroDestacados = [];
+let heroIndex = 0;
+let heroTimer = null;
 
-// --- MOTOR DE ORDENAMIENTO PARA EL CATÁLOGO ---
-function ordenarProductosCatalogo(productosArray, subcatSeleccionada) {
-    let regla = 'nombre_asc';
-    try {
-        const catData = JSON.parse(localStorage.getItem("categoriasData")) || [];
-        for (let cat of catData) {
-            let sub = (cat.subcategorias || []).find(s => s.nombre === subcatSeleccionada);
-            if (sub && sub.orden) { regla = sub.orden; break; }
-        }
-    } catch(e) {}
-
-    return [...productosArray].sort((a, b) => {
-        if (regla === 'nombre_asc') return (a.nombre || '').localeCompare(b.nombre || '');
-        if (regla === 'nombre_desc') return (b.nombre || '').localeCompare(a.nombre || '');
-        if (regla === 'precio_asc') return (parseFloat(a.precio) || 0) - (parseFloat(b.precio) || 0);
-        if (regla === 'precio_desc') return (parseFloat(b.precio) || 0) - (parseFloat(a.precio) || 0);
-        if (regla === 'stock_desc') return (parseFloat(b.stock) || 0) - (parseFloat(a.stock) || 0);
-        return 0;
-    });
+function normalizarNombre(str) {
+  return String(str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-// FORMATEO FORZADO A PESOS MEXICANOS
-const fmt = (n) => parseFloat(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function fmt(n) {
+  return Number(n || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
+}
+
+function getDocData(doc) {
+  if (!doc || !doc.exists) return null;
+  const payload = doc.data();
+  return payload && Object.prototype.hasOwnProperty.call(payload, "data") ? payload.data : payload;
+}
+
+function getCategoriasData() {
+  if (Array.isArray(categoriasData) && categoriasData.length) return categoriasData;
+  try {
+    const local = JSON.parse(localStorage.getItem("categoriasData") || "[]");
+    return Array.isArray(local) ? local : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function categoriaConfig(nombre) {
+  const key = normalizarNombre(nombre);
+  return getCategoriasData().find(c => normalizarNombre(c.nombre) === key) || null;
+}
+
+function subcategoriaConfig(categoria, subcategoria) {
+  const cat = categoriaConfig(categoria);
+  const key = normalizarNombre(subcategoria);
+  return cat && Array.isArray(cat.subcategorias)
+    ? cat.subcategorias.find(s => normalizarNombre(s.nombre) === key) || null
+    : null;
+}
+
+function posicionCategoria(nombre) {
+  const cat = categoriaConfig(nombre);
+  return Number(cat && cat.posicion) || 9999;
+}
+
+function posicionSubcategoria(categoria, subcategoria) {
+  const sub = subcategoriaConfig(categoria, subcategoria);
+  return Number(sub && sub.posicion) || 9999;
+}
+
+function reglaSubcategoria(categoria, subcategoria) {
+  const sub = subcategoriaConfig(categoria, subcategoria);
+  return (sub && sub.orden) || "nombre_asc";
+}
+
+function compararPorRegla(a, b, regla) {
+  const nombreA = normalizarNombre(a.nombre);
+  const nombreB = normalizarNombre(b.nombre);
+  if (regla === "nombre_desc") return nombreB.localeCompare(nombreA, "es-MX");
+  if (regla === "precio_asc") return (Number(a.precio) || 0) - (Number(b.precio) || 0);
+  if (regla === "precio_desc") return (Number(b.precio) || 0) - (Number(a.precio) || 0);
+  if (regla === "stock_desc") return (Number(b.stock) || 0) - (Number(a.stock) || 0) || nombreA.localeCompare(nombreB, "es-MX");
+  return nombreA.localeCompare(nombreB, "es-MX");
+}
+
+function ordenarProductosCatalogo(lista) {
+  return [...lista].sort((a, b) => {
+    const catCmp = posicionCategoria(a.categoria) - posicionCategoria(b.categoria)
+      || normalizarNombre(a.categoria).localeCompare(normalizarNombre(b.categoria), "es-MX");
+    if (catCmp !== 0) return catCmp;
+
+    const subCmp = posicionSubcategoria(a.categoria, a.subcategoria) - posicionSubcategoria(b.categoria, b.subcategoria)
+      || normalizarNombre(a.subcategoria).localeCompare(normalizarNombre(b.subcategoria), "es-MX");
+    if (subCmp !== 0) return subCmp;
+
+    return compararPorRegla(a, b, reglaSubcategoria(a.categoria, a.subcategoria));
+  });
+}
 
 const LogicaCredito = {
-    calcularCredito(precioContado, enganchePersonalizado = null) {
-      const engancheBase = precioContado * 0.10;
-      const engancheRedondeado = Math.ceil(engancheBase / 10) * 10;
-      const enganche = (typeof enganchePersonalizado === 'number' && enganchePersonalizado >= engancheRedondeado) ? enganchePersonalizado : engancheRedondeado;
-      const saldoAFinanciar = precioContado - enganche;
+  calcularCredito(precioContado, enganchePersonalizado = null) {
+    const precio = Number(precioContado) || 0;
+    const engancheBase = Math.ceil((precio * 0.10) / 10) * 10;
+    const enganche = (typeof enganchePersonalizado === "number" && enganchePersonalizado >= engancheBase)
+      ? enganchePersonalizado
+      : engancheBase;
+    const saldoAFinanciar = Math.max(0, precio - enganche);
+    let config = null;
+    try { config = JSON.parse(localStorage.getItem("configCreditoGlobal") || "null"); } catch (e) {}
 
-      // 1. LEER CONFIGURACIÓN GLOBAL
-      let config = null;
-      try { config = JSON.parse(localStorage.getItem('configCreditoGlobal')); } catch(e){}
-
-      let plazosConfig = [];
-      if (!config || !config.plazos || config.plazos.length === 0) {
-          for (let i = 1; i <= 6; i++) plazosConfig.push({ meses: i, tasa: (i <= 3) ? 2 : 2.5 });
-      } else {
-          plazosConfig = config.plazos;
-      }
-      plazosConfig.sort((a, b) => a.meses - b.meses);
-
-      // 2. LEER REGLA ESPECÍFICA DEL PRODUCTO (Si aplica)
-      if (typeof prodSeleccionado !== 'undefined' && prodSeleccionado && prodSeleccionado.configCredito && prodSeleccionado.configCredito.usaReglaGlobal === false) {
-          if (prodSeleccionado.configCredito.permitirCredito === false) return []; // Bloqueado para crédito
-          plazosConfig = prodSeleccionado.configCredito.plazos || [];
-          plazosConfig.sort((a, b) => a.meses - b.meses);
-      }
-
-      let resultados = [];
-      let totalAnterior = 0;
-
-      // 3. CÁLCULO
-      plazosConfig.forEach(plazoObj => {
-        let m = plazoObj.meses;
-        let tasaDecimal = plazoObj.tasa / 100;
-        let totalBase = saldoAFinanciar * (1 + (tasaDecimal * m));
-        let semanas = m * 4;
-        let pagoSemanal = totalBase / semanas;
-        
-        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
-        let totalFinal = (pagoSemanal * semanas) + enganche;
-
-        let intentos = 0;
-        while (totalFinal <= totalAnterior && intentos++ < 100) {
-          pagoSemanal += 5;
-          totalFinal = (pagoSemanal * semanas) + enganche;
-        }
-        if (intentos >= 100) return;
-        
-        totalAnterior = totalFinal;
-        resultados.push({ 
-          meses: m, 
-          semanas, 
-          abono: pagoSemanal, 
-          total: totalFinal,
-          enganche
-        });
-      });
-      return resultados;
-    },
-
-    calcularConPeriodicidad(precio, periodicidad = 'semanal', enganchePersonalizado = null) {
-      const planes = this.calcularCredito(precio, enganchePersonalizado);
-      let mult = 1;
-      if (periodicidad === 'quincenal') mult = 2;
-      if (periodicidad === 'mensual') mult = 4;
-      return planes.map(plan => ({
-        meses: plan.meses,
-        pagos: Math.round(plan.semanas / mult),
-        abono: plan.abono * mult,
-        enganche: plan.enganche
-      }));
+    let plazosConfig = [];
+    if (!config || !Array.isArray(config.plazos) || config.plazos.length === 0) {
+      for (let i = 1; i <= 6; i++) plazosConfig.push({ meses: i, tasa: i <= 3 ? 2 : 2.5 });
+    } else {
+      plazosConfig = config.plazos;
     }
+
+    if (prodSeleccionado && prodSeleccionado.configCredito && prodSeleccionado.configCredito.usaReglaGlobal === false) {
+      if (prodSeleccionado.configCredito.permitirCredito === false) return [];
+      plazosConfig = Array.isArray(prodSeleccionado.configCredito.plazos) ? prodSeleccionado.configCredito.plazos : [];
+    }
+
+    plazosConfig.sort((a, b) => (Number(a.meses) || 0) - (Number(b.meses) || 0));
+    const resultados = [];
+    let totalAnterior = 0;
+
+    plazosConfig.forEach(plazoObj => {
+      const meses = Number(plazoObj.meses) || 1;
+      const tasa = (Number(plazoObj.tasa) || 0) / 100;
+      const semanas = meses * 4;
+      let abono = Math.ceil((saldoAFinanciar * (1 + tasa * meses) / semanas) / 10) * 10;
+      let total = abono * semanas + enganche;
+      let intentos = 0;
+      while (total <= totalAnterior && intentos++ < 100) {
+        abono += 5;
+        total = abono * semanas + enganche;
+      }
+      if (intentos < 100) {
+        totalAnterior = total;
+        resultados.push({ meses, semanas, abono, total, enganche });
+      }
+    });
+
+    return resultados;
+  },
+
+  calcularConPeriodicidad(precio, periodicidad = "semanal", enganchePersonalizado = null) {
+    const planes = this.calcularCredito(precio, enganchePersonalizado);
+    let mult = 1;
+    if (periodicidad === "quincenal") mult = 2;
+    if (periodicidad === "mensual") mult = 4;
+    return planes.map(plan => ({
+      meses: plan.meses,
+      pagos: Math.max(1, Math.round(plan.semanas / mult)),
+      abono: plan.abono * mult,
+      total: plan.total,
+      enganche: plan.enganche
+    }));
+  }
 };
 
-async function inicializar() {
+async function cargarDatos() {
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-  const doc = await firebase.firestore().collection('posData').doc('productos').get();
-  productos = (doc.data().data || []).filter(p => p.Activo != 0);
-  
-  generarMenuCategorias();
-  render();
+  if (firebase.auth) {
+    try {
+      if (!firebase.auth().currentUser) await firebase.auth().signInAnonymously();
+    } catch (e) {
+      console.info("Catalogo sin sesion anonima. Se intentara leer con reglas publicas.", e && e.message ? e.message : e);
+    }
+  }
+  const db = firebase.firestore();
+  const leerTabla = async (tabla, fallback) => {
+    try {
+      const doc = await db.collection("posData").doc(tabla).get();
+      const datos = getDocData(doc);
+      if (datos !== null && datos !== undefined) return datos;
+    } catch (e) {
+      console.info(`No se pudo leer ${tabla} desde Firebase.`, e && e.message ? e.message : e);
+    }
+    try {
+      const local = localStorage.getItem(tabla);
+      return local ? JSON.parse(local) : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  };
+
+  const [prods, cats, credito] = await Promise.all([
+    leerTabla("productos", []),
+    leerTabla("categoriasData", []),
+    leerTabla("configCreditoGlobal", null)
+  ]);
+
+  productos = Array.isArray(prods)
+    ? prods.filter(p => p && p.Activo !== 0 && p.activo !== false)
+    : [];
+  categoriasData = Array.isArray(cats) ? cats : [];
+
+  try {
+    localStorage.setItem("categoriasData", JSON.stringify(categoriasData));
+    if (credito) localStorage.setItem("configCreditoGlobal", JSON.stringify(credito));
+  } catch (e) {}
+
+  if (!productos.length) {
+    throw new Error("Catalogo sin productos disponibles o sin permisos de lectura.");
+  }
+}
+
+async function inicializar() {
+  mostrarEstado("Cargando catalogo", "Estamos trayendo los productos mas recientes.");
+  try {
+    await cargarDatos();
+    generarMenuCategorias();
+    prepararHero();
+    render();
+  } catch (error) {
+    console.error(error);
+    mostrarEstado("No pudimos cargar el catalogo", "Intenta actualizar la pagina o escribirnos por WhatsApp.");
+  }
+}
+
+function mostrarEstado(titulo, texto) {
+  const state = document.getElementById("state");
+  const grid = document.getElementById("grid");
+  state.style.display = "block";
+  grid.style.display = "none";
+  state.innerHTML = `<h3>${escapeHtml(titulo)}</h3><p>${escapeHtml(texto)}</p>`;
+}
+
+function ocultarEstado() {
+  document.getElementById("state").style.display = "none";
+  document.getElementById("grid").style.display = "grid";
+}
+
+function categoriasEnProductos() {
+  const mapa = new Map();
+  productos.forEach(p => {
+    const nombre = p.categoria || "Varios";
+    const key = normalizarNombre(nombre);
+    if (!mapa.has(key)) mapa.set(key, nombre);
+  });
+  return [...mapa.values()].sort((a, b) =>
+    posicionCategoria(a) - posicionCategoria(b)
+    || normalizarNombre(a).localeCompare(normalizarNombre(b), "es-MX")
+  );
+}
+
+function subcategoriasEnCategoria(categoria) {
+  const mapa = new Map();
+  const catKey = normalizarNombre(categoria);
+  productos.forEach(p => {
+    if (normalizarNombre(p.categoria) !== catKey) return;
+    const nombre = p.subcategoria || "Sin subcategoria";
+    const key = normalizarNombre(nombre);
+    if (!mapa.has(key)) mapa.set(key, nombre);
+  });
+  return [...mapa.values()].sort((a, b) =>
+    posicionSubcategoria(categoria, a) - posicionSubcategoria(categoria, b)
+    || normalizarNombre(a).localeCompare(normalizarNombre(b), "es-MX")
+  );
 }
 
 function generarMenuCategorias() {
-  var nav = document.getElementById('categoriasNav');
-  nav.innerHTML = '<button class="cat-btn active" onclick="setCategoria(\'todos\', this)">Todos los productos</button>';
-  
-  // Obtener categorías únicas de los productos
-  var catsEnProductos = [];
-  for (var i = 0; i < productos.length; i++) {
-    var cat = productos[i].categoria || "Varios";
-    if (catsEnProductos.indexOf(cat) === -1) catsEnProductos.push(cat);
-  }
-  
-  // Leer categoriasData y crear mapa posicion: nombre -> posicion
-  var posiciones = {};
-  try {
-    var cd = JSON.parse(localStorage.getItem("categoriasData")) || [];
-    for (var k = 0; k < cd.length; k++) {
-      posiciones[cd[k].nombre] = cd[k].posicion || 999;
-    }
-  } catch(e) {}
-  
-  // Ordenar catsEnProductos por posicion (o 999 si no existe)
-  catsEnProductos.sort(function(a, b) {
-    var posA = posiciones[a] !== undefined ? posiciones[a] : 999;
-    var posB = posiciones[b] !== undefined ? posiciones[b] : 999;
-    return posA - posB;
+  const nav = document.getElementById("categoriasNav");
+  const categorias = categoriasEnProductos();
+  nav.innerHTML = "";
+  nav.appendChild(crearBotonCategoria("todos", "Todos", true));
+  categorias.forEach(cat => nav.appendChild(crearBotonCategoria(cat, cat, false)));
+  actualizarSubnav();
+}
+
+function crearBotonCategoria(valor, texto, activo) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `cat-btn${activo ? " active" : ""}`;
+  btn.textContent = texto;
+  btn.onclick = () => setCategoria(valor);
+  return btn;
+}
+
+function crearBotonSubcategoria(valor, texto, activo) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `sub-btn${activo ? " active" : ""}`;
+  btn.textContent = texto;
+  btn.onclick = () => setSub(valor);
+  return btn;
+}
+
+function setCategoria(categoria) {
+  catActiva = categoria;
+  subActiva = "todos";
+  document.querySelectorAll(".cat-btn").forEach(btn => {
+    btn.classList.toggle("active", normalizarNombre(btn.textContent) === normalizarNombre(categoria) || (categoria === "todos" && btn.textContent === "Todos"));
   });
-  
-  // Agregar botones
-  for (var j = 0; j < catsEnProductos.length; j++) {
-    var btn = document.createElement('button');
-    btn.className = 'cat-btn';
-    btn.textContent = catsEnProductos[j];
-    btn.onclick = (function(c) { return function() { setCategoria(c, btn); }; })(catsEnProductos[j]);
-    nav.appendChild(btn);
-  }
-}
-
-function setCategoria(c, btn) {
-  catActiva = c;
-  subActiva = 'todos';
-  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  var subnav = document.getElementById('subnav');
-  if (c === 'todos') {
-    subnav.classList.remove('visible');
-  } else {
-    var subs = [];
-    for (var i = 0; i < productos.length; i++) {
-      if (productos[i].categoria === c) {
-        var sub = productos[i].subcategoria;
-        if (sub && subs.indexOf(sub) === -1) subs.push(sub);
-      }
-    }
-    
-    // Leer categoriasData y crear mapa de posiciones de subcategorías
-    var subPosiciones = {};
-    try {
-      var cd = JSON.parse(localStorage.getItem("categoriasData")) || [];
-      for (var k = 0; k < cd.length; k++) {
-        if (cd[k].nombre === c && cd[k].subcategorias) {
-          for (var s = 0; s < cd[k].subcategorias.length; s++) {
-            subPosiciones[cd[k].subcategorias[s].nombre] = cd[k].subcategorias[s].posicion || 999;
-          }
-        }
-      }
-    } catch(e) {}
-    
-    // Ordenar subs por posicion
-    subs.sort(function(a, b) {
-      var posA = subPosiciones[a] !== undefined ? subPosiciones[a] : 999;
-      var posB = subPosiciones[b] !== undefined ? subPosiciones[b] : 999;
-      return posA - posB;
-    });
-    
-    if(subs.length > 0) {
-      subnav.innerHTML = `<div class="sub-pill active" onclick="setSub('todos', this)">Ver Todo</div>` + 
-        subs.map(s => `<div class="sub-pill" onclick="setSub('${s}', this)">${s}</div>`).join('');
-      subnav.classList.add('visible');
-    } else {
-      subnav.classList.remove('visible');
-    }
-  }
+  actualizarSubnav();
   render();
 }
 
-function setSub(s, pill) {
-  subActiva = s;
-  document.querySelectorAll('.sub-pill').forEach(p => p.classList.remove('active'));
-  pill.classList.add('active');
+function actualizarSubnav() {
+  const subnav = document.getElementById("subnav");
+  subnav.innerHTML = "";
+  if (catActiva === "todos") return;
+  const subs = subcategoriasEnCategoria(catActiva);
+  subnav.appendChild(crearBotonSubcategoria("todos", "Todo en " + catActiva, true));
+  subs.forEach(sub => subnav.appendChild(crearBotonSubcategoria(sub, sub, false)));
+}
+
+function setSub(subcategoria) {
+  subActiva = subcategoria;
+  document.querySelectorAll(".sub-btn").forEach(btn => {
+    btn.classList.toggle("active", normalizarNombre(btn.textContent) === normalizarNombre(subcategoria) || (subcategoria === "todos" && btn.textContent.startsWith("Todo en")));
+  });
   render();
+}
+
+function setBusqueda(valor) {
+  busquedaActiva = normalizarNombre(valor);
+  render();
+}
+
+function productoCoincide(p) {
+  const matchCat = catActiva === "todos" || normalizarNombre(p.categoria) === normalizarNombre(catActiva);
+  const matchSub = subActiva === "todos" || normalizarNombre(p.subcategoria) === normalizarNombre(subActiva);
+  const texto = normalizarNombre(`${p.nombre || ""} ${p.marca || ""} ${p.modelo || ""} ${p.color || ""} ${p.categoria || ""} ${p.subcategoria || ""}`);
+  const matchBusqueda = !busquedaActiva || texto.includes(busquedaActiva);
+  return matchCat && matchSub && matchBusqueda;
 }
 
 function render() {
-  const grid = document.getElementById('grid');
-  
-  // 1. Filtrar por categoría y subcategoría
-  let filtrados = productos.filter(p => {
-    const matchCat = catActiva === 'todos' || p.categoria === catActiva;
-    const matchSub = subActiva === 'todos' || p.subcategoria === subActiva;
-    return matchCat && matchSub;
-  });
-  
-  // 2. Aplicar ordenamiento inteligente antes de dibujar
-  filtrados = ordenarProductosCatalogo(filtrados, subActiva);
-  
-  // 3. Dibujar tarjetas
-  grid.innerHTML = filtrados.map(p => `
-    <div class="card" onclick="abrirModal('${p.id}')">
-      <div class="card-img"><img src="${p.imagen}" loading="lazy"></div>
-      <div class="card-body">
-        <h3>${p.nombre}</h3>
-        <div class="card-price">${fmt(p.precio)} <span style="font-size:10px; color:#999; font-weight:400;">MXN CONTADO</span></div>
+  const filtrados = ordenarProductosCatalogo(productos.filter(productoCoincide));
+  const grid = document.getElementById("grid");
+  const title = document.getElementById("catalogTitle");
+  const count = document.getElementById("catalogCount");
+  const sortNote = document.getElementById("sortNote");
+
+  title.textContent = subActiva !== "todos" ? subActiva : (catActiva === "todos" ? "Todos los productos" : catActiva);
+  count.textContent = `${filtrados.length} producto${filtrados.length === 1 ? "" : "s"} para explorar`;
+  sortNote.textContent = subActiva !== "todos"
+    ? `Orden: ${etiquetaOrden(reglaSubcategoria(catActiva, subActiva))}`
+    : "Categorias y subcategorias segun inventario";
+
+  if (!filtrados.length) {
+    mostrarEstado("No encontramos productos", "Prueba otra categoria o busca con menos palabras.");
+    return;
+  }
+
+  ocultarEstado();
+  grid.innerHTML = filtrados.map((p, index) => tarjetaProducto(p, index)).join("");
+}
+
+function etiquetaOrden(regla) {
+  const etiquetas = {
+    nombre_asc: "A-Z",
+    nombre_desc: "Z-A",
+    precio_asc: "Menor precio",
+    precio_desc: "Mayor precio",
+    stock_desc: "Mas stock"
+  };
+  return etiquetas[regla] || "A-Z";
+}
+
+function tarjetaProducto(p, index) {
+  const planes = LogicaCredito.calcularCredito(Number(p.precio) || 0);
+  const plan = planes[5] || planes[planes.length - 1] || null;
+  const stock = Number(p.stock) || 0;
+  const badge = stock > 0 ? `${stock} disp.` : "Sobre pedido";
+  const facts = [p.color, p.marca].filter(Boolean).slice(0, 2);
+  const img = p.imagen || "img/Logo.svg";
+  const msg = encodeURIComponent(`Hola, me interesa ${p.nombre || "este producto"} (${fmt(p.precio)}).`);
+  return `
+    <article class="product-card">
+      <div class="product-media" onclick="abrirModal('${escapeHtml(p.id)}')">
+        <span class="badge">${escapeHtml(badge)}</span>
+        <span class="badge order">#${index + 1}</span>
+        <img src="${escapeHtml(img)}" alt="${escapeHtml(p.nombre || "Producto")}" loading="lazy" onerror="this.src='img/Logo.svg'">
       </div>
-    </div>
-  `).join('');
+      <div class="product-body">
+        <div class="product-kicker">${escapeHtml(p.categoria || "Catalogo")} / ${escapeHtml(p.subcategoria || "General")}</div>
+        <h3 class="product-name">${escapeHtml(p.nombre || "Producto sin nombre")}</h3>
+        <div class="product-facts">${facts.map(f => `<span>${escapeHtml(f)}</span>`).join("")}</div>
+        <div class="price-row">
+          <div>
+            <div class="price-label">Contado</div>
+            <div class="price">${fmt(p.precio)}</div>
+          </div>
+          <div class="weekly">${plan ? `${fmt(plan.abono)}<br><span>semanal</span>` : "Pregunta<br><span>plan</span>"}</div>
+        </div>
+        <div class="card-actions">
+          <button class="detail-btn" type="button" onclick="abrirModal('${escapeHtml(p.id)}')">Ver detalle</button>
+          <a class="mini-wa" href="https://wa.me/${WHATSAPP}?text=${msg}" target="_blank" rel="noopener" aria-label="Consultar por WhatsApp">WA</a>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function prepararHero() {
+  const marcados = productos
+    .filter(p => p.destacadoCatalogo && p.imagen)
+    .sort((a, b) => {
+      const orden = (Number(a.ordenDestacadoCatalogo) || 999) - (Number(b.ordenDestacadoCatalogo) || 999);
+      if (orden !== 0) return orden;
+      return ordenarProductosCatalogo([a, b])[0] === a ? -1 : 1;
+    });
+  heroDestacados = marcados.length
+    ? marcados
+    : ordenarProductosCatalogo(productos.filter(p => p.imagen)).slice(0, 5);
+
+  if (!heroDestacados.length && productos.length) heroDestacados = [productos[0]];
+  heroIndex = 0;
+  pintarHero();
+  iniciarHeroAuto();
+}
+
+function pintarHero() {
+  const hero = heroDestacados[heroIndex];
+  if (!hero) return;
+
+  const box = document.getElementById("heroProduct");
+  box.classList.add("is-changing");
+  window.setTimeout(() => {
+    document.getElementById("heroImg").src = hero.imagen || "img/Logo.svg";
+    document.getElementById("heroImg").alt = hero.nombre || "Producto destacado";
+    document.getElementById("heroName").textContent = hero.nombre || "Muebleria Mi Pueblito";
+    document.getElementById("heroMeta").textContent = `${hero.categoria || "Catalogo"}${hero.subcategoria ? " / " + hero.subcategoria : ""}`;
+    document.getElementById("heroPrice").textContent = fmt(hero.precio);
+    document.getElementById("heroDots").innerHTML = heroDestacados.map((_, idx) =>
+      `<button class="hero-dot${idx === heroIndex ? " active" : ""}" type="button" onclick="irHero(${idx})" aria-label="Ver destacado ${idx + 1}"></button>`
+    ).join("");
+    box.classList.remove("is-changing");
+  }, 120);
+}
+
+function cambiarHero(delta) {
+  if (!heroDestacados.length) return;
+  heroIndex = (heroIndex + delta + heroDestacados.length) % heroDestacados.length;
+  pintarHero();
+  iniciarHeroAuto();
+}
+
+function irHero(index) {
+  if (index < 0 || index >= heroDestacados.length) return;
+  heroIndex = index;
+  pintarHero();
+  iniciarHeroAuto();
+}
+
+function abrirHeroActual() {
+  const hero = heroDestacados[heroIndex];
+  if (hero) abrirModal(hero.id);
+}
+
+function iniciarHeroAuto() {
+  if (heroTimer) window.clearInterval(heroTimer);
+  if (heroDestacados.length <= 1) return;
+  heroTimer = window.setInterval(() => {
+    heroIndex = (heroIndex + 1) % heroDestacados.length;
+    pintarHero();
+  }, 5200);
 }
 
 function abrirModal(id) {
-  prodSeleccionado = productos.find(x => x.id == id);
-  document.getElementById('mImg').src = prodSeleccionado.imagen;
-  document.getElementById('mTitle').textContent = prodSeleccionado.nombre;
-  document.getElementById('mPrice').textContent = fmt(prodSeleccionado.precio) + " de contado";
-  document.getElementById('periodoSelect').value = 'semanal';
-  // Mostrar características si existen, con formato destacado
-  // Mostrar características según dispositivo
-  const esMovil = window.matchMedia('(max-width: 600px)').matches;
-  const mCar = document.getElementById('mCaracteristicas');
-  const btnCar = document.getElementById('btnCaracteristicas');
-  const burbuja = document.getElementById('burbujaCaracteristicas');
+  prodSeleccionado = productos.find(p => String(p.id) === String(id));
+  if (!prodSeleccionado) return;
+
+  document.getElementById("mImg").src = prodSeleccionado.imagen || "img/Logo.svg";
+  document.getElementById("mImg").alt = prodSeleccionado.nombre || "Producto";
+  document.getElementById("mCategory").textContent = `${prodSeleccionado.categoria || "Catalogo"}${prodSeleccionado.subcategoria ? " / " + prodSeleccionado.subcategoria : ""}`;
+  document.getElementById("modalTitle").textContent = prodSeleccionado.nombre || "Producto";
+  document.getElementById("mPrice").textContent = `${fmt(prodSeleccionado.precio)} contado`;
+
+  const facts = [prodSeleccionado.color, prodSeleccionado.marca, prodSeleccionado.modelo, prodSeleccionado.ubicacion].filter(Boolean);
+  document.getElementById("mFacts").innerHTML = facts.map(f => `<span>${escapeHtml(f)}</span>`).join("");
+
+  const caracteristicas = document.getElementById("mCaracteristicas");
   if (prodSeleccionado.caracteristicas) {
-    if (esMovil) {
-      mCar.style.display = 'none';
-      btnCar.style.display = 'block';
-      burbuja.style.display = 'none';
-      burbuja.innerHTML = `<b>Características:</b><br>${prodSeleccionado.caracteristicas}<br><button onclick='window.ocultarBurbujaCaracteristicas()' style='margin-top:18px;padding:8px 18px;border-radius:8px;border:none;background:var(--primary);color:#fff;font-weight:700;font-size:15px;'>Cerrar</button>`;
-    } else {
-      mCar.style.display = '';
-      btnCar.style.display = 'none';
-      burbuja.style.display = 'none';
-      mCar.innerHTML = `<div style='background:#f8fafc;padding:12px 15px;border-radius:8px;line-height:1.6;'>${prodSeleccionado.caracteristicas}</div>`;
-    }
+    caracteristicas.style.display = "block";
+    caracteristicas.textContent = prodSeleccionado.caracteristicas;
   } else {
-    mCar.style.display = 'none';
-    btnCar.style.display = 'none';
-    burbuja.style.display = 'none';
+    caracteristicas.style.display = "none";
+    caracteristicas.textContent = "";
   }
-  window.mostrarBurbujaCaracteristicas = function() {
-    document.getElementById('burbujaCaracteristicas').style.display = '';
-  }
-  window.ocultarBurbujaCaracteristicas = function() {
-    document.getElementById('burbujaCaracteristicas').style.display = 'none';
-  }
+
+  document.getElementById("periodoSelect").value = "semanal";
+  const planes = LogicaCredito.calcularCredito(Number(prodSeleccionado.precio) || 0);
+  const enganche = planes[0] ? planes[0].enganche : Math.ceil(((Number(prodSeleccionado.precio) || 0) * 0.10) / 10) * 10;
+  const input = document.getElementById("inputEnganche");
+  input.min = enganche;
+  input.value = enganche;
   actualizarPlazos();
-  
-  const msg = encodeURIComponent(`Hola! Me interesa: ${prodSeleccionado.nombre} (${fmt(prodSeleccionado.precio)})`);
-  document.getElementById('btnWA').href = `https://wa.me/522411081657?text=${msg}`;
-  document.getElementById('modal').classList.add('open');
-  document.body.style.overflow = 'hidden';
+
+  const msg = encodeURIComponent(`Hola, me interesa ${prodSeleccionado.nombre || "este producto"} (${fmt(prodSeleccionado.precio)}). ¿Me compartes disponibilidad y opciones de pago?`);
+  document.getElementById("btnWA").href = `https://wa.me/${WHATSAPP}?text=${msg}`;
+  document.getElementById("modal").classList.add("open");
+  document.body.style.overflow = "hidden";
 }
 
 function actualizarPlazos() {
-    const periodicidad = document.getElementById('periodoSelect').value;
-    const precio = parseFloat(prodSeleccionado.precio);
-    // Tomar el enganche editado si existe
-    let engancheEdit = parseFloat(document.getElementById('inputEnganche')?.value);
-    if (isNaN(engancheEdit)) engancheEdit = undefined;
-    const plazos = LogicaCredito.calcularConPeriodicidad(precio, periodicidad, engancheEdit);
-    const engancheBase = plazos[0].enganche;
-    // Si el input fue menor al mínimo, forzar el mínimo
-    if (engancheEdit !== undefined && engancheEdit < engancheBase) engancheEdit = engancheBase;
+  if (!prodSeleccionado) return;
+  const periodicidad = document.getElementById("periodoSelect").value;
+  const precio = Number(prodSeleccionado.precio) || 0;
+  let enganche = Number(document.getElementById("inputEnganche").value);
+  const base = Math.ceil((precio * 0.10) / 10) * 10;
+  if (!Number.isFinite(enganche) || enganche < base) enganche = base;
+  if (enganche > precio) enganche = precio;
+  document.getElementById("inputEnganche").value = enganche;
+  document.getElementById("engancheMinimo").textContent = `Minimo sugerido: ${fmt(base)}`;
 
-    document.getElementById('plazosLista').innerHTML = `
-    <div style="background: #fff9e6; padding: 12px; border-radius: 8px; border: 1px dashed var(--accent); margin-bottom: 15px; text-align: center;">
-      <span style="font-size: 12px; color: #666; display: block; text-transform: uppercase; font-weight: 700;">Pago Inicial (Enganche)</span>
-      <input id="inputEnganche" type="number" min="${engancheBase}" value="${engancheEdit ?? engancheBase}" style="font-size:22px;font-weight:800;color:var(--primary);text-align:center;width:120px;padding:4px 8px;border:2px solid var(--accent);border-radius:8px;margin:8px 0 0 0;outline:none;" onchange="if(parseFloat(this.value)<${engancheBase}){this.value=${engancheBase};alert('El enganche no puede ser menor a ${fmt(engancheBase)}');} actualizarPlazos();">
-      <div style="font-size:12px;color:#b8842a;margin-top:4px;">Mínimo: ${fmt(engancheBase)}</div>
+  const plazos = LogicaCredito.calcularConPeriodicidad(precio, periodicidad, enganche);
+  const cont = document.getElementById("plazosLista");
+  if (!plazos.length) {
+    cont.innerHTML = `<div class="plan-row"><div class="plan-main">Credito no disponible<br><span>Consulta alternativas con tienda.</span></div></div>`;
+    return;
+  }
+  cont.innerHTML = plazos.map(pl => `
+    <div class="plan-row">
+      <div class="plan-main">${pl.pagos} pagos de ${fmt(pl.abono)}<br><span>${pl.meses} mes${pl.meses === 1 ? "" : "es"}</span></div>
+      <div class="plan-total">Total<br>${fmt(pl.total)}</div>
     </div>
-    <div style="font-size:11px; font-weight:700; color:#666; display:block; margin-bottom:8px;">PLANES DISPONIBLES:</div>
-    ${plazos.map(pl => `
-      <div class="plazo-row">
-        <span><strong>${pl.pagos}</strong> pagos de <strong>${fmt(pl.abono)}</strong></span>
-        <span style="font-size:11px; color:var(--accent); font-weight:700;">${pl.meses} MESES</span>
-      </div>
-    `).join('')}
-    `;
+  `).join("");
 }
 
-function cerrarModal() { 
-  document.getElementById('modal').classList.remove('open'); 
-  document.body.style.overflow = 'auto';
+function cerrarModal() {
+  document.getElementById("modal").classList.remove("open");
+  document.body.style.overflow = "";
+  resetZoom();
 }
 
 function zoom(e) {
-  const container = document.getElementById('zoomC');
-  const img = document.getElementById('mImg');
+  const container = document.getElementById("zoomC");
+  const img = document.getElementById("mImg");
+  if (!container || !img || window.innerWidth < 900) return;
   const rect = container.getBoundingClientRect();
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  img.style.transformOrigin = `${((clientX - rect.left)/rect.width)*100}% ${((clientY - rect.top)/rect.height)*100}%`;
-  img.style.transform = "scale(2)";
+  img.style.transformOrigin = `${((clientX - rect.left) / rect.width) * 100}% ${((clientY - rect.top) / rect.height) * 100}%`;
+  img.style.transform = "scale(1.85)";
 }
-function resetZoom() { document.getElementById('mImg').style.transform = "scale(1)"; }
+
+function resetZoom() {
+  const img = document.getElementById("mImg");
+  if (img) {
+    img.style.transform = "scale(1)";
+    img.style.transformOrigin = "center";
+  }
+}
+
+function scrollToCatalog() {
+  document.getElementById("catalogo").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+window.cambiarHero = cambiarHero;
+window.irHero = irHero;
+window.abrirHeroActual = abrirHeroActual;
+window.setBusqueda = setBusqueda;
+window.scrollToCatalog = scrollToCatalog;
+window.abrirModal = abrirModal;
+window.cerrarModal = cerrarModal;
+window.actualizarPlazos = actualizarPlazos;
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") cerrarModal();
+});
 
 inicializar();
 </script>

@@ -1039,6 +1039,16 @@
     		<label>Características</label>
    		<textarea id="pCaracteristicas" placeholder="Ej: Estructura acero, tela antimanchas, patas desmontables"></textarea>
 	   </div>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px;">
+                <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin:0;">
+                    <input type="checkbox" id="pDestacadoCatalogo" style="width:20px; height:20px; accent-color:#d97706;">
+                    <span style="font-size:14px; font-weight:bold; color:#374151;">Mostrar en imagen interactiva del catálogo</span>
+                </label>
+                <div class="campo" style="margin-top:12px;">
+                    <label>Orden en vitrina</label>
+                    <input type="number" id="pOrdenDestacadoCatalogo" min="1" step="1" placeholder="Ej: 1">
+                </div>
+            </div>
         </div>
         <!-- NUEVA PESTAÑA: REGLAS DE CRÉDITO DEL PRODUCTO -->
             <div style="margin-top:25px; border-top:2px solid #f1f5f9; padding-top:20px;">
@@ -1165,6 +1175,7 @@
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 <script src="js/services/storage.js"></script>
+<script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js"></script>
 <script src="js/services/calculator.js"></script>
 <script src="js/services/onedrive-backup.js"></script>

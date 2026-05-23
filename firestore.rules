@@ -1,6 +1,78 @@
-	"1"	"3"	"93610"	"INDEPENDENCIA"	"MARTÍNEZ DE LA TORRE"	
-"T00289141"	"BEATRIZ RIVERA VICUÑA"	"HUATUSCO"	"VERACRUZ"			"RIVB740210TJ5"	"2"	"13"	"94100"	"CENTRO"	"HUATUSCO"	
-"T00289170"	"AGUSTIN NUÑEZ GARCIA"	"MINATITLÁN"	"VERACRUZ"			"NUGA810120B29"	"2"	"9"	"96729"	"LA FUENTE"	"MINATITLÁN"	
-"T00289219"	"BIANCA CELESTE RAMOS NUCAMENDI"	"TUXTLA GUTIÉRREZ"	"CHIAPAS"		"CDTZ"	"RANB910205"	"1"	"3"	"29049"	"SAN CAYETANO"	"TUXTLA GUTIÉRREZ"	
-"T00289221"	"LAURA PATRICIA ROMERO CASAS"	"XALAPA ENRÍQUEZ"	"VERACRUZ"		"CDTZ"	"ROCL870918"	"1"	"2"	"91100"	"REVOLUCIÓN"	"XALAPA"	
-"T00289258"	"SARAI CUENCA HUERTA"	"CÓRDOBA"	"VERACRUZ"		"CDTZ"	"
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/usuarios/$(request.auth.uid);
+    }
+
+    function hasUserProfile() {
+      return signedIn() && exists(userPath());
+    }
+
+    function userProfile() {
+      return get(userPath()).data;
+    }
+
+    function activeUser() {
+      return hasUserProfile() && userProfile().activo == true;
+    }
+
+    function isAdmin() {
+      return activeUser() && userProfile().rol == 'admin';
+    }
+
+    function publicCatalogDoc(tabla) {
+      return tabla in [
+        'productos',
+        'categoriasData',
+        'configCreditoGlobal'
+      ];
+    }
+
+    match /usuarios/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+
+      // Compatibilidad con la app actual: al crear usuarios desde el cliente,
+      // Firebase Auth cambia la sesion al usuario recien creado y ese usuario
+      // guarda su propio perfil en /usuarios/{uid}.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          'nombre',
+          'rol',
+          'email',
+          'creadoEn',
+          'activo'
+        ])
+        && request.resource.data.rol in ['admin', 'vendedor']
+        && request.resource.data.activo is bool;
+
+      allow update, delete: if isAdmin();
+    }
+
+    match /posData/{tabla} {
+      // Catalogo publico. Ojo: Firestore no filtra campos por regla; estos
+      // documentos deben contener solo datos que aceptas exponer al cliente.
+      allow get: if publicCatalogDoc(tabla) || activeUser();
+
+      // La app privada usa StorageService.syncAll(), que lista toda la coleccion.
+      allow list: if activeUser();
+
+      // Admin y vendedor activos pueden sincronizar datos operativos.
+      // Los permisos finos por rol se aplican hoy en la UI.
+      allow create, update: if activeUser();
+      allow delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
