@@ -647,6 +647,9 @@ function abrirProductoForm(id = null) {
     const inputModelo = document.getElementById("pModelo");
     const inputImagen = document.getElementById("pImagen");
     const inputSub    = document.getElementById("pSubcategoria");
+    const inputCaracteristicas = document.getElementById("pCaracteristicas");
+    const inputDestacadoCatalogo = document.getElementById("pDestacadoCatalogo");
+    const inputOrdenDestacadoCatalogo = document.getElementById("pOrdenDestacadoCatalogo");
 
     let p = null; // <--- CORRECCIÓN: Declaramos 'p' aquí para que exista en toda la función
 
@@ -663,6 +666,9 @@ function abrirProductoForm(id = null) {
         inputModelo.value = p.modelo || '';
         inputImagen.value = p.imagen || '';
         inputSub.value    = p.subcategoria || '';
+        if (inputCaracteristicas) inputCaracteristicas.value = p.caracteristicas || '';
+        if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = !!p.destacadoCatalogo;
+        if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = p.ordenDestacadoCatalogo || '';
     } else {
         productoEditando = null;
         document.getElementById("tituloModalProducto").innerText = "📦 Nuevo Producto";
@@ -673,6 +679,9 @@ function abrirProductoForm(id = null) {
         inputMarca.value = "";
         inputModelo.value = "";
         inputImagen.value = "";
+        if (inputCaracteristicas) inputCaracteristicas.value = "";
+        if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = false;
+        if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = "";
     }
     
     // --- LÓGICA FINANCIERA DEL PRODUCTO ---
@@ -705,6 +714,11 @@ function guardarProductoDB() {
     const imagen = document.getElementById("pImagen").value.trim();
     const subcatNombre = document.getElementById("pSubcategoria").value;
     const caracteristicas = document.getElementById("pCaracteristicas")?.value.trim() || "";
+    const destacadoCatalogo = document.getElementById("pDestacadoCatalogo")?.checked || false;
+    const ordenDestacadoCatalogoRaw = parseInt(document.getElementById("pOrdenDestacadoCatalogo")?.value, 10);
+    const ordenDestacadoCatalogo = Number.isFinite(ordenDestacadoCatalogoRaw) && ordenDestacadoCatalogoRaw > 0
+        ? ordenDestacadoCatalogoRaw
+        : 999;
 
     const validacion = ValidatorService.validarProducto({ nombre, costo, precio: precioManual });
     if (!validacion.valid) return alert("⚠️ " + validacion.errores.join("\n"));
@@ -731,6 +745,8 @@ function guardarProductoDB() {
         categoria: categoriaPadre,
         subcategoria: subcatNombre,
         caracteristicas,
+        destacadoCatalogo,
+        ordenDestacadoCatalogo,
         configCredito, // <----- ESTA ES LA LÍNEA MÁGICA
         variantes: productoEditando ? (window.productos.find(p => String(p.id) === String(productoEditando))?.variantes || []) : []
     };
