@@ -461,34 +461,11 @@ window.renderReporteFlujo = function() {
         currency: 'MXN'
     }).format(v || 0);
 
-    // 1. OBTENER CUENTAS REALES
-    const cajas = StorageService.get("cuentasEfectivo", [
-        { id: "efectivo", nombre: "💵 Efectivo Principal" }
-    ]);
-
-    const tarjetas = StorageService.get("tarjetasConfig", []);
-
-    const cuentasParaSelector = [
-        ...cajas.map(c => ({
-            id: c.id || c.nombre || 'efectivo',
-            nombre: c.nombre || c.id || 'Efectivo'
-        })),
-        ...tarjetas
-            .filter(t => t.tipo === 'debito')
-            .map(t => ({
-                id: t.banco,
-                nombre: `🏦 ${t.banco}`
-            }))
-    ];
-
-    // 2. CONSOLIDACIÓN DE MOVIMIENTOS
-        const asegurarArray = (valor) => {
+    const asegurarArray = (valor) => {
         if (Array.isArray(valor)) return valor;
 
-        // Por si viene envuelto desde Firebase como { data: [...] }
         if (valor && Array.isArray(valor.data)) return valor.data;
 
-        // Por si viene como objeto tipo { id1: {...}, id2: {...} }
         if (valor && typeof valor === 'object') {
             return Object.values(valor).filter(v => v && typeof v === 'object');
         }
@@ -496,118 +473,365 @@ window.renderReporteFlujo = function() {
         return [];
     };
 
+    const normalizarCuentaId = (valor) => {
+        let c = String(valor || '').trim();
+
+        if (!c) return 'efectivo';
+
+        const lower = c.toLowerCase();
+
+        if (
+            lower === 'efectivo' ||
+            lower === 'caja' ||
+            lower === 'cash' ||
+            lower.includes('efectivo principal') ||
+            lower.includes('caja principal')
+        ) {
+            return 'efectivo';
+        }
+
+        if (
+            lower === 'transferencia' ||
+            lower === 'banco' ||
+            lower.includes('transfer')
+        ) {
+            return 'transferencia';
+        }
+
+        if (
+            lower === 'tarjeta' ||
+            lower === 'terminal' ||
+            lower.includes('tarjeta') ||
+            lower.includes('terminal')
+        ) {
+            return 'tarjeta';
+        }
+
+        return c;
+    };
+
+    const nombreCuenta = (id) => {
+        const key = normalizarCuentaId(id);
+
+        if (key === 'efectivo') return '💵 Efectivo Principal';
+        if (key === 'transferencia') return '🏦 Transferencia / Banco';
+        if (key === 'tarjeta') return '💳 Tarjeta / Terminal';
+
+        return String(id || key);
+    };
+
+    const normalizarTipo = (tipo) => {
+        const t = String(tipo || '').toLowerCase();
+
+        if (
+            t === 'egreso' ||
+            t === 'salida' ||
+            t === 'gasto' ||
+            t === 'pago'
+        ) {
+            return 'egreso';
+        }
+
+        return 'ingreso';
+    };
+
+    const normalizarFecha = (fecha) => {
+        if (!fecha) return Date.now();
+
+        if (typeof fecha === 'number') return fecha;
+
+        const d = new Date(fecha);
+        if (!isNaN(d.getTime())) return fecha;
+
+        if (window.parseFechaMX) {
+            const mx = window.parseFechaMX(fecha);
+            if (mx && !isNaN(mx.getTime())) return mx.toISOString();
+        }
+
+        return Date.now();
+    };
+
+    const crearMovimiento = ({
+        id,
+        fecha,
+        concepto,
+        tipo,
+        cuenta,
+        monto,
+        origen,
+        referencia
+    }) => {
+        const montoNum = parseFloat(monto || 0);
+
+        if (!montoNum || montoNum <= 0) return null;
+
+        const cuentaId = normalizarCuentaId(cuenta);
+
+        return {
+            id: id || `${origen || 'mov'}-${referencia || concepto || ''}-${fecha || ''}-${montoNum}`,
+            fecha: normalizarFecha(fecha),
+            concepto: concepto || 'Movimiento',
+            tipo: normalizarTipo(tipo),
+            cuenta: cuentaId,
+            cuentaNombre: nombreCuenta(cuentaId),
+            monto: montoNum,
+            origen: origen || 'sin_origen',
+            referencia: referencia || ''
+        };
+    };
+
+    // ======================================================
+    // FUENTES DE DATOS
+    // ======================================================
+    const movimientosCaja = asegurarArray(StorageService.get("movimientosCaja", []));
+    const manuales = asegurarArray(StorageService.get("movimientosManuales", []));
+
     const tickets = asegurarArray(StorageService.get("registroTickets", []));
     const cuentasCxC = asegurarArray(StorageService.get("cuentasPorCobrar", []));
     const ordenesCompra = asegurarArray(StorageService.get("ordenesCompra", []));
     const comprasDirectas = asegurarArray(StorageService.get("compras", []));
-    const movimientosCaja = asegurarArray(StorageService.get("movimientosCaja", []));
-    const manuales = asegurarArray(StorageService.get("movimientosManuales", []));
 
     let movimientos = [];
 
-    // Ventas desde tickets
-    tickets.forEach(t => {
-        const venta = t.venta || {};
-        const met = venta.cuentaReceptora || venta.modoEnganche || venta.metodoPago || 'efectivo';
+    // ======================================================
+    // 1. FUENTE PRINCIPAL: movimientosCaja
+    // Evita duplicar ventas/abonos/compras que ya están registradas aquí.
+    // ======================================================
+    movimientosCaja.forEach(m => {
+        const mov = crearMovimiento({
+            id: m.id || m.folio || m.referencia,
+            fecha: m.fecha || m.fechaISO || m.createdAt,
+            concepto: m.concepto || m.descripcion || m.referencia || m.folio || 'Movimiento de caja',
+            tipo: m.tipo,
+            cuenta: m.cuenta || m.cuentaId || m.metodoPago || m.medioPago || m.origen || 'efectivo',
+            monto: m.monto,
+            origen: 'movimientosCaja',
+            referencia: m.folio || m.referencia || m.id
+        });
 
-        const monto = (
-            venta.metodoPago === 'contado' ||
-            venta.metodoPago === 'transferencia'
-        )
-            ? parseFloat(venta.total || 0)
-            : parseFloat(venta.enganche || 0);
-
-        if (monto > 0) {
-            movimientos.push({
-                fecha: t.fechaEmision || t.fecha || venta.fecha || Date.now(),
-                concepto: `Venta: ${t.folio || venta.folio || '-'}`,
-                tipo: 'ingreso',
-                cuenta: met,
-                monto
-            });
-        }
+        if (mov) movimientos.push(mov);
     });
 
-    // Abonos de cuentas por cobrar
-    cuentasCxC.forEach(c => {
-        (c.abonos || []).forEach(ab => {
-            const monto = parseFloat(ab.monto || 0);
+    // ======================================================
+    // 2. MOVIMIENTOS MANUALES
+    // Estos sí se agregan aparte.
+    // ======================================================
+    manuales.forEach(m => {
+        const mov = crearMovimiento({
+            id: m.id,
+            fecha: m.fecha,
+            concepto: m.concepto || 'Movimiento manual',
+            tipo: m.tipo,
+            cuenta: m.cuenta || 'efectivo',
+            monto: m.monto,
+            origen: 'manual',
+            referencia: m.id
+        });
 
-            if (monto > 0) {
-                movimientos.push({
-                    fecha: ab.fecha || Date.now(),
+        if (mov) movimientos.push(mov);
+    });
+
+    // ======================================================
+    // 3. RESPALDO: si NO hay movimientosCaja, reconstruir desde módulos
+    // Esto evita duplicados cuando movimientosCaja ya existe.
+    // ======================================================
+    if (movimientosCaja.length === 0) {
+        console.warn("⚠️ No hay movimientosCaja. Reconstruyendo flujo desde tickets, CxC y compras como respaldo.");
+
+        tickets.forEach(t => {
+            const venta = t.venta || {};
+            const metodo = venta.cuentaReceptora || venta.modoEnganche || venta.metodoPago || 'efectivo';
+
+            const monto = (
+                venta.metodoPago === 'contado' ||
+                venta.metodoPago === 'transferencia'
+            )
+                ? parseFloat(venta.total || 0)
+                : parseFloat(venta.enganche || 0);
+
+            const mov = crearMovimiento({
+                id: t.id || t.folio || venta.folio,
+                fecha: t.fechaEmision || t.fecha || venta.fecha || venta.fechaVenta,
+                concepto: `Venta: ${t.folio || venta.folio || '-'}`,
+                tipo: 'ingreso',
+                cuenta: metodo,
+                monto,
+                origen: 'ticket',
+                referencia: t.folio || venta.folio
+            });
+
+            if (mov) movimientos.push(mov);
+        });
+
+        cuentasCxC.forEach(c => {
+            (c.abonos || []).forEach(ab => {
+                const mov = crearMovimiento({
+                    id: ab.id || `${c.folio || c.id}-${ab.fecha}-${ab.monto}`,
+                    fecha: ab.fecha,
                     concepto: `Abo: ${c.nombre || c.clienteNombre || c.folio || '-'}`,
                     tipo: 'ingreso',
                     cuenta: ab.cuentaId || ab.medioPago || ab.metodoPago || 'efectivo',
-                    monto
+                    monto: ab.monto,
+                    origen: 'abonoCxC',
+                    referencia: c.folio || c.id
                 });
-            }
+
+                if (mov) movimientos.push(mov);
+            });
         });
-    });
 
-    // Órdenes de compra pagadas
-    ordenesCompra.forEach(com => {
-        const pagado = parseFloat(com.pagado || com.montoPagado || 0);
+        ordenesCompra.forEach(com => {
+            const pagado = parseFloat(com.pagado || com.montoPagado || 0);
 
-        if (pagado > 0) {
-            movimientos.push({
-                fecha: com.fecha || com.fechaEmision || Date.now(),
+            const mov = crearMovimiento({
+                id: com.id || com.folio,
+                fecha: com.fecha || com.fechaEmision,
                 concepto: `Prov: ${com.proveedor || com.proveedorNombre || '-'}`,
                 tipo: 'egreso',
                 cuenta: com.metodoPago || com.cuentaPago || 'efectivo',
-                monto: pagado
+                monto: pagado,
+                origen: 'ordenCompra',
+                referencia: com.folio || com.id
             });
-        }
-    });
 
-    // Compras directas pagadas
-    comprasDirectas.forEach(com => {
-        const pagado = parseFloat(com.pagado || com.total || 0);
+            if (mov) movimientos.push(mov);
+        });
 
-        if (pagado > 0) {
-            movimientos.push({
-                fecha: com.fechaISO || com.fecha || Date.now(),
-                concepto: `Compra: ${com.proveedor || com.proveedorNombre || com.id || '-'}`,
+                comprasDirectas.forEach(com => {
+            // IMPORTANTE:
+            // El flujo de efectivo SOLO debe mostrar dinero realmente pagado.
+            // Si una compra/recepción se fue a cuentas por pagar, NO debe salir aquí.
+            const pagado = parseFloat(
+                com.pagado ||
+                com.montoPagado ||
+                com.totalPagado ||
+                com.anticipo ||
+                0
+            );
+
+            const metodo = String(
+                com.metodoPago ||
+                com.formaPago ||
+                com.tipoPago ||
+                ''
+            ).toLowerCase();
+
+            const esCreditoProveedor =
+                metodo.includes('credito') ||
+                metodo.includes('crédito') ||
+                metodo.includes('cuenta por pagar') ||
+                metodo.includes('cxp') ||
+                metodo.includes('proveedor') ||
+                com.esCredito === true ||
+                com.esCuentaPorPagar === true ||
+                com.generaCXP === true ||
+                com.cuentaPorPagar === true ||
+                com.estadoPago === 'pendiente' ||
+                com.estadoPago === 'Pendiente';
+
+            // Si no hubo pago real, no entra al flujo.
+            if (pagado <= 0) return;
+
+            // Si es crédito/CXP, solo entra si realmente trae un pago parcial/anticipo.
+            // Nunca usar com.total como si fuera efectivo.
+            const mov = crearMovimiento({
+                id: com.id || com.folio,
+                fecha: com.fechaPago || com.fechaISO || com.fecha,
+                concepto: `Pago compra: ${com.proveedor || com.proveedorNombre || com.id || '-'}`,
                 tipo: 'egreso',
-                cuenta: com.metodoPago || com.cuentaPago || 'efectivo',
-                monto: pagado
+                cuenta: com.cuentaPago || com.cuenta || com.metodoPago || 'efectivo',
+                monto: pagado,
+                origen: esCreditoProveedor ? 'anticipoCompraCXP' : 'compraDirectaPagada',
+                referencia: com.folio || com.id
             });
+
+            if (mov) movimientos.push(mov);
+        });
+    }
+
+    // ======================================================
+    // 4. DEDUPLICACIÓN DE SEGURIDAD
+    // Si por alguna razón llega repetido el mismo movimiento, se queda uno.
+    // ======================================================
+    const vistos = new Set();
+
+    movimientos = movimientos.filter(m => {
+        const fechaKey = new Date(m.fecha).toISOString().slice(0, 10);
+        const key = [
+            m.tipo,
+            fechaKey,
+            m.cuenta,
+            Number(m.monto || 0).toFixed(2),
+            String(m.referencia || m.concepto || '').toLowerCase().trim()
+        ].join('|');
+
+        if (vistos.has(key)) {
+            console.warn("⏭️ Movimiento duplicado ignorado:", m);
+            return false;
+        }
+
+        vistos.add(key);
+        return true;
+    });
+
+    // ======================================================
+    // 5. ARMAR COMBO CUENTA
+    // Cuentas configuradas + cuentas detectadas en movimientos
+    // ======================================================
+    const cajas = asegurarArray(StorageService.get("cuentasEfectivo", [
+        { id: "efectivo", nombre: "💵 Efectivo Principal" }
+    ]));
+
+    const tarjetas = asegurarArray(StorageService.get("tarjetasConfig", []));
+
+    const mapaCuentas = new Map();
+
+    mapaCuentas.set('efectivo', '💵 Efectivo Principal');
+    mapaCuentas.set('transferencia', '🏦 Transferencia / Banco');
+    mapaCuentas.set('tarjeta', '💳 Tarjeta / Terminal');
+
+    cajas.forEach(c => {
+        const id = normalizarCuentaId(c.id || c.nombre || 'efectivo');
+        mapaCuentas.set(id, c.nombre || nombreCuenta(id));
+    });
+
+    tarjetas.forEach(t => {
+        const id = normalizarCuentaId(t.id || t.banco || t.nombre);
+
+        if (t.tipo === 'debito') {
+            mapaCuentas.set(id, `🏦 ${t.banco || t.nombre || id}`);
+        } else if (t.tipo === 'credito') {
+            mapaCuentas.set(id, `💳 ${t.banco || t.nombre || id}`);
         }
     });
 
-    // Movimientos de caja ya registrados
-    movimientosCaja.forEach(m => {
-        const monto = parseFloat(m.monto || 0);
-        if (monto <= 0) return;
-
-        movimientos.push({
-            fecha: m.fecha || Date.now(),
-            concepto: m.concepto || m.referencia || m.folio || 'Movimiento de caja',
-            tipo: String(m.tipo || '').toLowerCase() === 'egreso' ? 'egreso' : 'ingreso',
-            cuenta: m.cuenta || m.cuentaId || m.metodoPago || 'efectivo',
-            monto
-        });
+    movimientos.forEach(m => {
+        const id = normalizarCuentaId(m.cuenta);
+        if (!mapaCuentas.has(id)) {
+            mapaCuentas.set(id, nombreCuenta(id));
+        }
     });
 
-    // Movimientos manuales
-    manuales.forEach(m => {
-        const monto = parseFloat(m.monto || 0);
-        if (monto <= 0) return;
+    const cuentasParaSelector = Array.from(mapaCuentas.entries()).map(([id, nombre]) => ({
+        id,
+        nombre
+    }));
 
-        movimientos.push({
-            fecha: m.fecha || Date.now(),
-            concepto: m.concepto || 'Movimiento manual',
-            tipo: String(m.tipo || '').toLowerCase() === 'ingreso' ? 'ingreso' : 'egreso',
-            cuenta: m.cuenta || 'efectivo',
-            monto
-        });
-    });
+    // Si el filtro actual ya no existe, regresar a todas
+    const cuentasIds = cuentasParaSelector.map(c => String(c.id));
+    if (cuentaFiltro !== 'todas' && !cuentasIds.includes(String(cuentaFiltro))) {
+        window._filtroFlujoCuenta = 'todas';
+    }
 
-    // 3. FILTRADO
+    const cuentaFiltroFinal = window._filtroFlujoCuenta || 'todas';
+
+    // ======================================================
+    // 6. FILTRADO
+    // ======================================================
     let movsFiltrados = movimientos.filter(m => {
         const coincideCuenta =
-            cuentaFiltro === 'todas' ||
-            String(m.cuenta) === String(cuentaFiltro);
+            cuentaFiltroFinal === 'todas' ||
+            String(normalizarCuentaId(m.cuenta)) === String(cuentaFiltroFinal);
 
         const fMov = new Date(m.fecha);
 
@@ -626,7 +850,9 @@ window.renderReporteFlujo = function() {
         return coincideCuenta && coincideRango;
     });
 
-    // 4. AGRUPACIÓN
+    // ======================================================
+    // 7. AGRUPACIÓN
+    // ======================================================
     const grupos = {};
 
     movsFiltrados.forEach(m => {
@@ -705,9 +931,10 @@ window.renderReporteFlujo = function() {
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px;">
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <input type="checkbox" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af;">
-                                <div style="max-width:160px; line-height:1.2;">
+                                <div style="max-width:180px; line-height:1.2;">
                                     <b>${i.concepto}</b><br>
-                                    <small style="color:#94a3b8;">${i.cuenta}</small>
+                                    <small style="color:#64748b;">${i.cuentaNombre}</small><br>
+                                    <small style="color:#94a3b8;">Origen: ${i.origen}</small>
                                 </div>
                             </div>
                             <span style="font-weight:bold; color:${i.tipo === 'ingreso' ? '#16a34a' : '#dc2626'};">
@@ -723,7 +950,7 @@ window.renderReporteFlujo = function() {
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <div>
                 <h2 style="margin:0; color:#1e40af;">💵 Flujo de Efectivo Horizontal</h2>
-                <p style="color:#718096; margin:0;">Movimientos reales filtrados por tus cajas y bancos.</p>
+                <p style="color:#718096; margin:0;">Movimientos reales filtrados por cajas, bancos y origen normalizado.</p>
             </div>
 
             <div style="display:flex; gap:10px;">
@@ -739,10 +966,10 @@ window.renderReporteFlujo = function() {
         <div style="display:flex; flex-wrap:wrap; gap:15px; background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:25px; align-items:end;">
             <div>
                 <label style="font-size:10px; font-weight:bold; color:#64748b;">CUENTA:</label>
-                <select onchange="window._filtroFlujoCuenta=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
-                    <option value="todas" ${cuentaFiltro === 'todas' ? 'selected' : ''}>🌍 Ver Todas</option>
+                <select onchange="window._filtroFlujoCuenta=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px; min-width:220px;">
+                    <option value="todas" ${cuentaFiltroFinal === 'todas' ? 'selected' : ''}>🌍 Ver Todas</option>
                     ${cuentasParaSelector.map(c => `
-                        <option value="${c.id}" ${cuentaFiltro === String(c.id) ? 'selected' : ''}>${c.nombre}</option>
+                        <option value="${c.id}" ${cuentaFiltroFinal === String(c.id) ? 'selected' : ''}>${c.nombre}</option>
                     `).join('')}
                 </select>
             </div>
@@ -781,6 +1008,11 @@ window.renderReporteFlujo = function() {
             <div style="background:#eff6ff; border-left:5px solid #1e40af; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <small style="color:#1e3a8a; font-weight:bold;">BALANCE NETO</small><br>
                 <strong style="font-size:22px; color:#1e40af;">${dineroFlujo(totalIng - totalEgr)}</strong>
+            </div>
+
+            <div style="background:#f8fafc; border-left:5px solid #64748b; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <small style="color:#475569; font-weight:bold;">MOVIMIENTOS MOSTRADOS</small><br>
+                <strong style="font-size:22px; color:#334155;">${movsFiltrados.length}</strong>
             </div>
         </div>
 
@@ -842,7 +1074,7 @@ window.abrirModalGastoExtra = function() {
 
 window.guardarMovManual = function() {
     const tipo = document.getElementById('mTipo')?.value;
-    const cuenta = document.getElementById('mCta')?.value;
+    const cuentaRaw = document.getElementById('mCta')?.value;
     const concepto = document.getElementById('mCon')?.value.trim();
     const monto = parseFloat(document.getElementById('mMon')?.value);
 
@@ -850,13 +1082,26 @@ window.guardarMovManual = function() {
         return alert("❌ Datos inválidos");
     }
 
-    const movimientos = StorageService.get("movimientosManuales", []);
+    const normalizarCuentaManual = (valor) => {
+        const c = String(valor || '').toLowerCase().trim();
+
+        if (c === 'caja' || c === 'efectivo') return 'efectivo';
+        if (c === 'banco' || c === 'transferencia') return 'transferencia';
+        if (c === 'terminal' || c === 'tarjeta') return 'tarjeta';
+
+        return valor || 'efectivo';
+    };
+
+    const movimientosRaw = StorageService.get("movimientosManuales", []);
+    const movimientos = Array.isArray(movimientosRaw)
+        ? movimientosRaw
+        : [];
 
     movimientos.push({
         id: Date.now(),
         fecha: Date.now(),
         tipo,
-        cuenta,
+        cuenta: normalizarCuentaManual(cuentaRaw),
         concepto: `[Manual] ${concepto}`,
         monto
     });
