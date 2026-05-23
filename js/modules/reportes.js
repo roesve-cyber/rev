@@ -482,12 +482,26 @@ window.renderReporteFlujo = function() {
     ];
 
     // 2. CONSOLIDACIÓN DE MOVIMIENTOS
-    const tickets = StorageService.get("registroTickets", []);
-    const cuentasCxC = StorageService.get("cuentasPorCobrar", []);
-    const ordenesCompra = StorageService.get("ordenesCompra", []);
-    const comprasDirectas = StorageService.get("compras", []);
-    const movimientosCaja = StorageService.get("movimientosCaja", []);
-    const manuales = StorageService.get("movimientosManuales", []);
+        const asegurarArray = (valor) => {
+        if (Array.isArray(valor)) return valor;
+
+        // Por si viene envuelto desde Firebase como { data: [...] }
+        if (valor && Array.isArray(valor.data)) return valor.data;
+
+        // Por si viene como objeto tipo { id1: {...}, id2: {...} }
+        if (valor && typeof valor === 'object') {
+            return Object.values(valor).filter(v => v && typeof v === 'object');
+        }
+
+        return [];
+    };
+
+    const tickets = asegurarArray(StorageService.get("registroTickets", []));
+    const cuentasCxC = asegurarArray(StorageService.get("cuentasPorCobrar", []));
+    const ordenesCompra = asegurarArray(StorageService.get("ordenesCompra", []));
+    const comprasDirectas = asegurarArray(StorageService.get("compras", []));
+    const movimientosCaja = asegurarArray(StorageService.get("movimientosCaja", []));
+    const manuales = asegurarArray(StorageService.get("movimientosManuales", []));
 
     let movimientos = [];
 
