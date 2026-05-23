@@ -36,6 +36,28 @@ const StorageService = {
         return true;
     },
 
+    _limpiarParaFirestore(value) {
+        if (value === undefined) return null;
+        if (value === null) return null;
+        if (value instanceof Date) return value;
+        if (typeof value === 'function') return null;
+
+        if (Array.isArray(value)) {
+            return value.map(item => this._limpiarParaFirestore(item));
+        }
+
+        if (typeof value === 'object') {
+            const limpio = {};
+            Object.entries(value).forEach(([k, v]) => {
+                if (v === undefined || typeof v === 'function') return;
+                limpio[k] = this._limpiarParaFirestore(v);
+            });
+            return limpio;
+        }
+
+        return value;
+    },
+
     // Obtiene dinámicamente todas las tablas reales guardadas
     async getTablasDinamicas() {
         const tablas = new Set();
@@ -218,8 +240,9 @@ const StorageService = {
             window._db &&
             this._esTablaValida(key, value)
         ) {
+            const valorFirestore = this._limpiarParaFirestore(value);
             window._db.collection('posData').doc(key).set({
-                data: value,
+                data: valorFirestore,
                 _updatedAt: Date.now()
             }).catch(e => {
                 console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.");
@@ -299,8 +322,10 @@ const StorageService = {
                     continue;
                 }
 
+                const datosFirestore = this._limpiarParaFirestore(datosLocales);
+
                 await window._db.collection('posData').doc(tabla).set({
-                    data: datosLocales,
+                    data: datosFirestore,
                     _updatedAt: Date.now()
                 });
 
