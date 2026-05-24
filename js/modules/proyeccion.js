@@ -8,9 +8,33 @@ function renderProyeccionFlujo() {
     const mesesSel = parseInt(document.getElementById('proyMeses')?.value) || 6;
     const hoy = new Date();
     
-    // 1. OBTENER RECURSOS ACTUALES (Saldo en mano)
+    // 1. OBTENER RECURSOS ACTUALES (misma base que "Mis Cuentas")
     const movimientosCaja = StorageService.get("movimientosCaja", []);
-    const saldoActual = movimientosCaja.reduce((s, m) => s + ((m.tipo === 'ingreso' || m.tipo === 'Ingreso') ? (m.monto || 0) : -(m.monto || 0)), 0);
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "Efectivo Principal", saldo: 0 }]);
+    const cuentasDebito = StorageService.get("tarjetasConfig", []).filter(t => String(t.tipo || '').toLowerCase() === "debito");
+    const saldosLiquidez = {};
+
+    cajas.forEach(c => {
+        saldosLiquidez[String(c.id || "efectivo")] = 0;
+    });
+
+    cuentasDebito.forEach(t => {
+        const id = String(t.banco || t.id || "");
+        if (id) saldosLiquidez[id] = parseFloat(t.saldoInicial) || 0;
+    });
+
+    movimientosCaja.forEach(m => {
+        const esIngreso = String(m.tipo || '').toLowerCase() === "ingreso";
+        const monto = parseFloat(m.monto) || 0;
+        const cuentaMov = String(m.cuenta || m.cuentaId || '');
+        const cuenta = (cuentaMov === "efectivo" || cuentaMov === "caja") ? "efectivo" : cuentaMov;
+
+        if (saldosLiquidez[cuenta] !== undefined) {
+            saldosLiquidez[cuenta] += esIngreso ? monto : -monto;
+        }
+    });
+
+    const saldoActual = Object.values(saldosLiquidez).reduce((s, saldo) => s + saldo, 0);
 
     // 2. OBTENER COMPROMISOS (Deudas)
     const pagares = StorageService.get('pagaresSistema', []);

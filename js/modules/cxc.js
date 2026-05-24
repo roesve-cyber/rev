@@ -8,6 +8,10 @@ function _cxcDinero(v) {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
 }
 
+function _cxcEscHTML(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ==========================================
 // 1. MOTOR CENTRAL DE SALDOS
 // ==========================================
@@ -84,7 +88,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
         contenedor.innerHTML = `<div style="background:#f0fdf4; padding:40px; text-align:center; border-radius:10px;"><p style="font-size:18px; color:#27ae60; font-weight:bold;">✅ ¡No hay cuentas registradas!</p></div>`;
         return;
     }
-
     let htmlTabs = `
     <div style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
         ${['todas', 'al_corriente', 'morosos', 'promesas', 'saldadas'].map(p => {
@@ -115,14 +118,15 @@ function renderCuentasXCobrar(filtroCliente = "") {
         }
 
         if (!mostrar) return;
-        const stringBusqueda = `${c.nombre || ''} ${c.folio || ''}`.toLowerCase();
+        const nombreCliente = c.nombre || c.clienteNombre || 'Cliente';
+        const stringBusqueda = `${nombreCliente} ${c.folio || ''}`.toLowerCase();
         if (filtroCliente && !stringBusqueda.includes(filtroCliente)) return;
 
         cuentasMostradas++;
         const textoPromesa = estadoCta.promesaVigente ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${window.formatearFechaCortaMX(c.promesaPago.fecha)}</span>` : '';
 
         htmlTabla += `<tr>
-            <td><strong>${c.nombre}</strong><br><small style="color:#718096;">${c.folio}</small></td>
+            <td><strong>${nombreCliente}</strong><br><small style="color:#718096;">${c.folio}</small></td>
             <td>${c.fechaVenta ? window.formatearFechaCortaMX(c.fechaVenta) : '-'}</td>
             <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
             <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}</td>
@@ -140,6 +144,55 @@ function renderCuentasXCobrar(filtroCliente = "") {
     });
 
     contenedor.innerHTML = htmlTabs + (cuentasMostradas === 0 ? `<p style="text-align:center; padding:20px;">Sin resultados.</p>` : htmlTabla + `</tbody></table></div>`);
+}
+
+function renderAbonosDirectos(filtroCliente = "") {
+    const contenedor = document.getElementById("tablaAbonosDirectos");
+    if (!contenedor) return;
+
+    filtroCliente = (filtroCliente || document.getElementById("filtroClienteAbonoDirecto")?.value || "").trim().toLowerCase();
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const filas = cuentas
+        .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
+        .filter(x => x.estado && x.estado.saldoTotal > 0.01)
+        .filter(x => {
+            const texto = `${x.cuenta.nombre || x.cuenta.clienteNombre || ''} ${x.cuenta.folio || ''}`.toLowerCase();
+            return !filtroCliente || texto.includes(filtroCliente);
+        })
+        .sort((a, b) => String(a.cuenta.nombre || a.cuenta.clienteNombre || '').localeCompare(String(b.cuenta.nombre || b.cuenta.clienteNombre || ''), 'es'));
+
+    if (filas.length === 0) {
+        contenedor.innerHTML = `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b;">Sin cuentas con saldo para abono directo.</div>`;
+        return;
+    }
+
+    contenedor.innerHTML = `
+        <div style="overflow-x:auto; background:white; border:1px solid #e5e7eb; border-radius:10px;">
+            <table class="tabla-admin" style="margin:0;">
+                <thead>
+                    <tr>
+                        <th>Cliente / Folio</th>
+                        <th>Saldo</th>
+                        <th>Pagares</th>
+                        <th>Estado</th>
+                        <th style="text-align:right;">Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filas.map(({ cuenta, estado }) => `
+                        <tr>
+                            <td><strong>${_cxcEscHTML(cuenta.nombre || cuenta.clienteNombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
+                            <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}</td>
+                            <td>${estado.pagaresPendientes.length} pendiente(s)</td>
+                            <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2'}; color:${estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b'}; font-weight:bold; font-size:12px;">${_cxcEscHTML(estado.estadoGeneral)}</span></td>
+                            <td style="text-align:right;">
+                                <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: 'directo' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">Aplicar</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>`;
 }
 
 window.cambiarPestanaCobranza = function(pestana) {
@@ -202,12 +255,14 @@ window._actualizarCuentaEspecifica = function(idSufijo) {
     }
 };
 
-function abrirModalAbonoAvanzado(folio) {
+function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const pagares = StorageService.get("pagaresSistema", []);
     const cuenta = cuentas.find(c => c.folio === folio);
     
     if (!cuenta) return alert("Cuenta no encontrada.");
+    const modoAplicacion = opciones.modo === 'directo' ? 'directo' : 'pendiente';
+    const esDirecto = modoAplicacion === 'directo';
 
     const hoy = new Date();
     const todosPagares = pagares
@@ -225,7 +280,7 @@ function abrirModalAbonoAvanzado(folio) {
         precioContadoReal = cuenta.articulos.reduce((sum, art) => sum + (Number(art.precioContado || art.precio || 0) * Number(art.cantidad || 1)), 0);
     }
     let original = precioContadoReal > 0 ? precioContadoReal : (Number(cuenta.totalContadoOriginal || cuenta.totalMercancia || 0));
-    const enganche = Number(cuenta.engancheRecibido || 0);
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
     const montoAFinanciarContado = Math.max(0, original - enganche);
 
     const totalAbonosRegistrados = todosPagares.reduce((s, p) => {
@@ -332,7 +387,7 @@ let mejorPlan = planesOrdenados.length > 0
         <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
             <div style="background:white; border-radius:15px; width:100%; max-width:600px; overflow:hidden;">
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:18px 24px; border-bottom:1px solid #e5e7eb; position:sticky; top:0; background:white; z-index:2;">
-                    <h2 style="margin:0;">💰 Registrar Abono — ${cuenta.nombre}</h2>
+                    <h2 style="margin:0;">${esDirecto ? 'Abono Directo' : 'Registrar Abono'} - ${cuenta.nombre}</h2>
                     <button onclick="document.querySelector('[data-modal=abono-avanzado]')?.remove()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#9ca3af;">✕</button>
                 </div>
                 <div style="padding:24px;">
@@ -344,6 +399,15 @@ let mejorPlan = planesOrdenados.length > 0
 
                 ${articulosHTML}
                 ${pagaresHTML}
+
+                <div style="background:${esDirecto ? '#ecfdf5' : '#fffbeb'}; padding:14px 15px; border-radius:8px; border-left:5px solid ${esDirecto ? '#10b981' : '#f59e0b'}; margin-bottom:18px;">
+                    <strong style="color:${esDirecto ? '#065f46' : '#92400e'};">${esDirecto ? 'Aplicacion directa' : 'Pendiente de autorizacion'}</strong>
+                    <p style="margin:6px 0 0 0; font-size:13px; color:${esDirecto ? '#047857' : '#78350f'};">
+                        ${esDirecto
+                            ? 'El abono se ingresara a caja y cartera al confirmar. Se emitira ticket al momento.'
+                            : 'El abono quedara en auditoria para aprobacion de un administrador. Se emitira ticket provisional.'}
+                    </p>
+                </div>
 
                 <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
                     <div>
@@ -378,9 +442,9 @@ let mejorPlan = planesOrdenados.length > 0
                 </div>
 
                 <div style="display:flex; gap:10px;">
-                    <button onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado})" 
-                            style="flex:2; padding:15px; background:#22c55e; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
-                        ✅ Procesar Abono
+                    <button onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado}, '${modoAplicacion}')" 
+                            style="flex:2; padding:15px; background:${esDirecto ? '#0f766e' : '#22c55e'}; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
+                        ${esDirecto ? 'Aplicar Abono Directo' : 'Enviar a Autorizacion'}
                     </button>
                     <button onclick="document.querySelector('[data-modal=&quot;abono-avanzado&quot;]')?.remove();" 
                             style="flex:1; padding:15px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer;">
@@ -600,7 +664,7 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 }
 
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
-function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado) {
+function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
     const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
     const fechaAbonoRaw = document.getElementById("fechaAbonoInput")?.value;
     const fechaObj = fechaAbonoRaw ? new Date(fechaAbonoRaw + "T12:00:00") : new Date();
@@ -631,7 +695,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     }, 0);
 
     let precioContadoReal = cuenta.articulos?.reduce((s, a) => s + ((a.precioContado || a.precio || 0) * (a.cantidad || 1)), 0) || Number(montoOriginal);
-    const restanteContado = Math.max(0, Math.max(0, precioContadoReal - Number(cuenta.engancheRecibido || 0)) - totalAbonosPagados);
+    const restanteContado = Math.max(0, Math.max(0, precioContadoReal - Number(cuenta.engancheRecibido || cuenta.enganche || 0)) - totalAbonosPagados);
 
     if (aplicaPoliticaContado && restanteContado > 0 && montoAbonoInput >= (restanteContado - 0.01)) {
         if (confirm(`💡 EL CLIENTE ESTÁ EN PERIODO DE GRACIA (30 DÍAS)\\nPuede liquidar al precio sin interés pagando sólo: ${_cxcDinero(restanteContado)}\\n¿Aplicar política?`)) {
@@ -649,7 +713,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         }
     }
     if (!liquidacionPorPolitica) {
-        if (!confirm(`💰 RESUMEN DE ABONO\\n\\nCliente: ${cuenta.nombre}\\nFolio: ${folio}\\nMonto: ${_cxcDinero(montoFinal)}\\nDestino: ${etiqueta}\\n\\n¿Confirmas el abono?`)) return;
+        if (!confirm(`💰 RESUMEN DE ABONO\\n\\nCliente: ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'}\\nFolio: ${folio}\\nMonto: ${_cxcDinero(montoFinal)}\\nDestino: ${etiqueta}\\n\\n¿Confirmas el abono?`)) return;
     }
 
     // 🚀 BÓVEDA DE CUARENTENA PARA ABONO
@@ -665,12 +729,15 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         liquidacionPorPolitica: liquidacionPorPolitica,
         fechaAbonoIso: fechaAbonoIso,
         fechaAbonoStr: fechaAbonoStr,
-        vendedorId: cuenta.vendedorId
+        vendedorId: cuenta.vendedorId || null
     };
 
-    let abonosP = StorageService.get("abonosPendientes", []);
-    abonosP.push(cuarentena);
-    StorageService.set("abonosPendientes", abonosP);
+    const esDirecto = modoAplicacion === 'directo';
+    if (!esDirecto) {
+        let abonosP = StorageService.get("abonosPendientes", []);
+        abonosP.push(cuarentena);
+        StorageService.set("abonosPendientes", abonosP);
+    }
 
     // SIMULAMOS EN MEMORIA PARA EL TICKET PROVISIONAL
     let _pagaresDelFolio = pagares.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")).sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
@@ -695,27 +762,73 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     const _pagaresCubiertosTicket = [..._pagaresCubiertos];
     if (_pagareParcial) _pagaresCubiertosTicket.push({ ..._pagareParcial, parcial: true });
 
-    generarTicketAbonoTermico({
+    let procesoOk = true;
+    let ticketEmitido = false;
+    try {
+        if (esDirecto) window.ejecutarAbonoAutorizadoReal(cuarentena);
+
+        ticketEmitido = generarTicketAbonoTermico({
         folio,
-        cliente: { nombre: cuenta.nombre || folio, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
+        cliente: { nombre: cuenta.nombre || cuenta.clienteNombre || folio, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: montoFinal,
         nuevoSaldo: Math.max(0, nuevoSaldoReal),
         fecha: fechaAbonoStr, 
         metodoCobro: medioPago,
-        cuentaDestino: etiqueta + " (Pendiente Aut.)",
+        cuentaDestino: esDirecto ? etiqueta : etiqueta + " (Pendiente Aut.)",
         pagaresCubiertos: _pagaresCubiertosTicket,
         pagaresRestantes: _pagaresRestantes,
         articulos: cuenta.articulos || [],
         totalVenta: precioContadoReal,
-        enganche: Number(cuenta.engancheRecibido || 0)
-    });
+        enganche: Number(cuenta.engancheRecibido || cuenta.enganche || 0)
+        });
+    } catch (err) {
+        procesoOk = false;
+        console.error("Error procesando/ticket de abono:", err);
+        alert("Hubo un problema durante el proceso del abono o al emitir el ticket. Revisa el estado de cuenta antes de repetirlo.");
+    }
 
     document.querySelector('[data-modal="abono-avanzado"]')?.remove();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    if (!procesoOk) return;
+    if (!ticketEmitido) {
+        alert(esDirecto
+            ? "Abono directo aplicado correctamente, pero el navegador bloqueo el ticket. Habilita ventanas emergentes y reimprimelo desde el estado de cuenta."
+            : "Abono enviado a autorizacion, pero el navegador bloqueo el ticket provisional. Habilita ventanas emergentes y reimprimelo desde el estado de cuenta.");
+        return;
+    }
+    if (esDirecto) {
+        if (procesoOk) alert("Abono directo aplicado correctamente. El ticket fue emitido.");
+        return;
+    }
     alert(`⏳ ABONO EN CUARENTENA\\n\\nEl ticket provisional se emitió, pero el ingreso a caja requiere Autorización de un Administrador.`);
 }
 
 // 🚀 EJECUTOR REAL: Llamado desde el Panel de Autorizaciones
 window.ejecutarAbonoAutorizadoReal = function(a) {
+    if (a && (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado)) {
+        const folioApartado = a.folioApartado || a.folioCXC;
+        if (typeof window.registrarAbonoApartado === 'function') {
+            const aplicado = window.registrarAbonoApartado(
+                folioApartado,
+                a.montoAbonado,
+                a.fechaAbonoIso,
+                a.cuentaId,
+                a.etiquetaCuenta,
+                { imprimir: false, silencioso: true }
+            );
+            if (!aplicado) {
+                alert("No se pudo aplicar el abono del apartado. Revisa que el apartado exista y que el monto no exceda el saldo pendiente.");
+                return false;
+            }
+            return true;
+        }
+
+        alert("No está disponible el módulo de Apartados para aplicar este abono.");
+        return false;
+    }
+
     const _todosLosPagares = StorageService.get("pagaresSistema", []);
     let _pagaresDelFolio = _todosLosPagares.filter(p => p.folio === a.folioCXC && (p.estado === "Pendiente" || p.estado === "Parcial")).sort((x, y) => new Date(x.fechaVencimiento) - new Date(y.fechaVencimiento));
 
@@ -908,10 +1021,14 @@ function generarTicketAbonoTermico(datosAbono) {
 </html>`;
 
     const ventana = window.open('', '_blank');
-    if (!ventana) return alert("⚠️ Habilita las ventanas emergentes en tu navegador para ver el ticket.");
+    if (!ventana) {
+        alert("Habilita las ventanas emergentes en tu navegador para ver el ticket.");
+        return false;
+    }
     ventana.document.write(ticketHTML);
     ventana.document.close();
     ventana.focus();
+    return true;
 }
 
 function renderCobranzaEsperada() {
@@ -1034,7 +1151,7 @@ function abrirDetalleCobranza(mesKeyEncoded) {
         else atrasoHtml = `<span style="color:#92400e; font-weight:bold; font-size:12px;">⏳ Pendiente</span>`;
 
         const cuenta = cuentas.find(c => c.folio === p.folio);
-        const clienteNombre = cuenta ? cuenta.nombre : (p.clienteNombre || p.folio || '-');
+        const clienteNombre = cuenta ? (cuenta.nombre || cuenta.clienteNombre) : (p.clienteNombre || p.folio || '-');
         const articulos = cuenta ? (cuenta.articulos || []) : [];
         const articulosHtml = articulos.length > 0
             ? articulos.map(a => `<small>${a.nombre || a.productoNombre || '-'} ×${a.cantidad || 1}</small>`).join(', ')
@@ -1615,6 +1732,51 @@ window.filtrarCuentasCobranza = function() {
 // =====================================================================
 // 🔄 CONVERSIÓN DE APARTADOS A CRÉDITO (CXC)
 // =====================================================================
+function _planesConversionApartado(saldoRestante, periodicidad = "semanal") {
+    if (typeof CalculatorService === 'undefined' || !CalculatorService.calcularCreditoConPeriodicidad) return [];
+    return CalculatorService.calcularCreditoConPeriodicidad(Number(saldoRestante) || 0, periodicidad)
+        .filter(p => Number(p.total || 0) > 0 && Number(p.abono || 0) > 0);
+}
+
+function _pagaresPreviewConversion(folio, cliente, fechaBaseIso, plan, periodicidad) {
+    const diasIntervalo = periodicidad === "quincenal" ? 14 : periodicidad === "mensual" ? 30 : 7;
+    const totalPagos = Number(plan.pagos || Math.round((plan.semanas || (plan.meses * 4)) / (diasIntervalo / 7)) || 0);
+    const fechaPago = new Date(fechaBaseIso);
+    const pagares = [];
+    for (let i = 1; i <= totalPagos; i++) {
+        fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+        pagares.push({
+            id: Date.now() + i,
+            folio,
+            numeroPagere: `${folio}-${i}/${totalPagos}`,
+            clienteNombre: cliente.nombre,
+            clienteId: cliente.id || null,
+            fechaEmision: fechaBaseIso,
+            fechaVencimiento: fechaPago.getTime(),
+            monto: Number(plan.abono) || 0,
+            estado: "Pendiente",
+            diasAtrasoActual: 0
+        });
+    }
+    return pagares;
+}
+
+function actualizarPlanesConvertir(saldoRestante) {
+    const periodicidad = document.getElementById("convPeriodicidadSelect")?.value || "semanal";
+    const planes = _planesConversionApartado(saldoRestante, periodicidad);
+    const selPlan = document.getElementById("convPlazoSelect");
+    if (!selPlan) return;
+
+    window._planesDisponiblesConversion = planes;
+    window._periodicidadConversion = periodicidad;
+
+    selPlan.innerHTML = planes.length === 0
+        ? '<option value="">Sin planes disponibles</option>'
+        : planes.map((p, index) => `<option value="${index}">${p.meses} meses - ${p.pagos} pagos de ${_cxcDinero(p.abono)}</option>`).join('');
+
+    calcularSimulacionConvertir(saldoRestante);
+}
+
 window.abrirModalConvertirApartado = function(folioApartado) {
     // 1. Buscar el apartado en las bases de datos
     const apartados = StorageService.get("apartados", []);
@@ -1624,7 +1786,7 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     if (!apartado) return alert("❌ No se encontró el folio del apartado.");
 
     // 2. Calcular los saldos reales
-    const totalVenta = parseFloat(apartado.total) || 0;
+    const totalVenta = parseFloat(apartado.importeApartado || apartado.total || apartado.totalContadoOriginal || 0);
     const engancheInicial = parseFloat(apartado.enganche) || 0;
     
     let totalAbonado = engancheInicial;
@@ -1635,13 +1797,11 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     const saldoRestante = totalVenta - totalAbonado;
     if (saldoRestante <= 0) return alert("✅ Este apartado ya está liquidado en su totalidad.");
 
-    // 3. Obtener Reglas de Crédito Globales
-    const configCredito = StorageService.get('configCreditoGlobal', {plazos: []});
-    const plazos = configCredito.plazos || [];
-    
-    if (plazos.length === 0) return alert("⚠️ No tienes plazos de crédito configurados en Ajustes.");
+    const periodicidadInicial = "semanal";
+    const planes = _planesConversionApartado(saldoRestante, periodicidadInicial);
+    if (planes.length === 0) return alert("⚠️ No tienes planes de crédito disponibles para este saldo. Revisa la configuración global de crédito.");
 
-    let opcionesPlazosHTML = plazos.map((p, index) => `<option value="${index}">${p.meses} Meses (Tasa: ${p.tasa}%)</option>`).join('');
+    let opcionesPlazosHTML = planes.map((p, index) => `<option value="${index}">${p.meses} meses - ${p.pagos} pagos de ${_cxcDinero(p.abono)}</option>`).join('');
 
     const modalHTML = `
     <div id="modalConvertirCredito" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
@@ -1658,6 +1818,12 @@ window.abrirModalConvertirApartado = function(folioApartado) {
             </div>
 
             <div style="margin-bottom:15px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
+                <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:8px;">Periodicidad:</label>
+                <select id="convPeriodicidadSelect" onchange="actualizarPlanesConvertir(${saldoRestante})" style="width:100%; padding:12px; border-radius:6px; border:1px solid #cbd5e1; font-weight:bold; color:#1e40af; cursor:pointer; margin-bottom:10px;">
+                    <option value="semanal">Semanal</option>
+                    <option value="quincenal">Quincenal</option>
+                    <option value="mensual">Mensual</option>
+                </select>
                 <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:8px;">Plazo de financiamiento:</label>
                 <select id="convPlazoSelect" onchange="calcularSimulacionConvertir(${saldoRestante})" style="width:100%; padding:12px; border-radius:6px; border:1px solid #cbd5e1; font-weight:bold; color:#1e40af; cursor:pointer;">
                     ${opcionesPlazosHTML}
@@ -1674,25 +1840,29 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     </div>`;
     
     document.body.insertAdjacentHTML('beforeend', modalHTML);
-    window._plazosDisponiblesConversion = plazos;
+    window._planesDisponiblesConversion = planes;
+    window._periodicidadConversion = periodicidadInicial;
     calcularSimulacionConvertir(saldoRestante);
 };
 
 window.calcularSimulacionConvertir = function(saldoRestante) {
-    const index = document.getElementById("convPlazoSelect").value;
-    const plazo = window._plazosDisponiblesConversion[index];
-    
-    // Matemática financiera
-    const interes = saldoRestante * (plazo.tasa / 100) * plazo.meses;
-    const totalFinanciado = saldoRestante + interes;
-    
-    // Regla estricta: 4 semanas por mes
-    const totalSemanas = plazo.meses * 4;
-    const pagoSemanal = totalFinanciado / totalSemanas;
+    const resumen = document.getElementById("convResumenMatematico");
+    const index = document.getElementById("convPlazoSelect")?.value;
+    const plan = (window._planesDisponiblesConversion || [])[index];
+    if (!resumen || !plan) {
+        if (resumen) resumen.innerHTML = `<div style="color:#991b1b; background:#fee2e2; padding:12px; border-radius:8px;">No hay plan seleccionado.</div>`;
+        return;
+    }
 
-    document.getElementById("convResumenMatematico").innerHTML = `
+    const totalFinanciado = Number(plan.total) || 0;
+    const interes = Math.max(0, totalFinanciado - (Number(saldoRestante) || 0));
+    const totalPagos = Number(plan.pagos || 0);
+    const pagoPeriodo = Number(plan.abono || 0);
+    const periodicidadTxt = { semanal: "semanales", quincenal: "quincenales", mensual: "mensuales" }[window._periodicidadConversion || "semanal"] || "semanales";
+
+    resumen.innerHTML = `
         <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:13px;">
-            <span style="color:#64748b;">Interés calculado (${plazo.tasa}% x ${plazo.meses}m):</span>
+            <span style="color:#64748b;">Interés total según reglas vigentes:</span>
             <strong style="color:#ea580c;">+ ${_cxcDinero(interes)}</strong>
         </div>
         <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-size:15px; border-bottom:1px dashed #cbd5e1; padding-bottom:12px;">
@@ -1701,88 +1871,112 @@ window.calcularSimulacionConvertir = function(saldoRestante) {
         </div>
         <div style="text-align:center; background:#eff6ff; padding:15px; border-radius:8px; border:2px solid #bfdbfe;">
             <div style="font-size:11px; font-weight:bold; text-transform:uppercase; color:#1d4ed8; margin-bottom:4px;">Plan de Pagos Oficial</div>
-            <div style="font-size:20px; font-weight:900; color:#1e40af;">${totalSemanas} pagos de ${_cxcDinero(pagoSemanal)}</div>
-            <div style="font-size:10px; color:#60a5fa; margin-top:4px;">(Calculado a 4 semanas por mes)</div>
+            <div style="font-size:20px; font-weight:900; color:#1e40af;">${totalPagos} pagos ${periodicidadTxt} de ${_cxcDinero(pagoPeriodo)}</div>
+            <div style="font-size:10px; color:#60a5fa; margin-top:4px;">Misma regla de crédito tradicional</div>
         </div>
     `;
 };
 
 window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) {
-    const index = document.getElementById("convPlazoSelect").value;
-    const plazo = window._plazosDisponiblesConversion[index];
-    
-    const interes = saldoRestante * (plazo.tasa / 100) * plazo.meses;
-    const totalFinanciado = saldoRestante + interes;
-    const totalSemanas = plazo.meses * 4;
-    const pagoSemanal = totalFinanciado / totalSemanas;
+    const index = document.getElementById("convPlazoSelect")?.value;
+    const periodicidad = document.getElementById("convPeriodicidadSelect")?.value || window._periodicidadConversion || "semanal";
+    const planElegido = (window._planesDisponiblesConversion || [])[index];
+    if (!planElegido) return alert("Selecciona un plan de crédito válido.");
+
+    const totalFinanciado = Number(planElegido.total) || 0;
+    const totalPagos = Number(planElegido.pagos || 0);
+    const pagoPeriodo = Number(planElegido.abono || 0);
 
     // Ventana de confirmación estricta de seguridad
-    if (!confirm(`⚠️ RESUMEN DE CONVERSIÓN A CRÉDITO\n\nFolio: ${folio}\nCapital a financiar: ${_cxcDinero(saldoRestante)}\nNuevo Total con intereses: ${_cxcDinero(totalFinanciado)}\nSe generarán ${totalSemanas} pagarés de ${_cxcDinero(pagoSemanal)}.\n\n¿Deseas confirmar la creación del crédito y migrar el saldo a CxC?`)) {
+    if (!confirm(`⚠️ RESUMEN DE CONVERSIÓN A CRÉDITO\n\nFolio: ${folio}\nAnticipos que quedan como enganche: ${_cxcDinero(totalAbonado)}\nCapital a financiar: ${_cxcDinero(saldoRestante)}\nNuevo total financiado: ${_cxcDinero(totalFinanciado)}\nSe generarán ${totalPagos} pagarés de ${_cxcDinero(pagoPeriodo)}.\n\nLa conversión quedará en Bóveda de Autorizaciones y se emitirá ticket provisional de crédito.\n\n¿Deseas continuar?`)) {
         return;
     }
 
     const apartados = StorageService.get("apartados", []);
     const ventas = StorageService.get("ventasRegistradas", []);
-    const cxc = StorageService.get("cuentasPorCobrar", []);
-    const pagares = StorageService.get("pagaresSistema", []);
-
-    // Marcar el origen como migrado
-    let refClienteNom = "Cliente Genérico";
-    let refClienteId = null;
 
     let ap = apartados.find(a => a.folio === folio);
-    if (ap) {
-        ap.estado = "Migrado a Crédito";
-        refClienteNom = ap.clienteNombre || refClienteNom;
-        refClienteId = ap.clienteId || null;
-    }
-    
     let vnt = ventas.find(v => v.folio === folio);
-    if (vnt) {
-        vnt.estado = "Migrado a Crédito";
-        refClienteNom = vnt.clienteNombre || refClienteNom;
-        refClienteId = vnt.clienteId || refClienteId;
-    }
+    const origen = ap || vnt;
+    if (!origen) return alert("❌ No se encontró el folio origen para convertir.");
 
-    // Inyectar en CxC
-    cxc.push({
-        id: Date.now(),
-        folio: folio,
-        clienteNombre: refClienteNom,
-        clienteId: refClienteId,
-        fechaVenta: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
-        totalContadoOriginal: saldoRestante, 
-        enganche: totalAbonado, // El historial de lo que dio mientras estuvo en apartado
-        saldoActual: totalFinanciado,
-        estado: "Al corriente",
-        abonos: [] // Inicia limpio para los abonos del crédito formal
+    const clientes = StorageService.get("clientes", []);
+    const clienteId = origen.clienteId || origen.cliente?.id || null;
+    const clienteBase = (clienteId ? clientes.find(c => String(c.id) === String(clienteId)) : null) || origen.cliente || {};
+    const cliente = {
+        id: clienteId,
+        nombre: origen.clienteNombre || clienteBase.nombre || "Cliente Genérico",
+        telefono: clienteBase.telefono || origen.telefono || "",
+        direccion: clienteBase.direccion || origen.direccion || "",
+        referencia: clienteBase.referencia || ""
+    };
+
+    const fechaObj = new Date();
+    const fechaVentaIso = window.localISO ? window.localISO(fechaObj) : fechaObj.toISOString();
+    const fechaHoy = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaObj) : fechaObj.toLocaleDateString("es-MX");
+    const totalContado = Number(origen.importeApartado || origen.total || origen.totalContadoOriginal || (Number(saldoRestante) + Number(totalAbonado))) || 0;
+    const articulos = (origen.articulos || []).map(a => {
+        const cantidad = Number(a.cantidad || 1) || 1;
+        const precioUnitario = Number(a.precioContado || a.precio || 0) || (Number(a.subtotal || 0) / cantidad) || 0;
+        return { ...a, precioContado: precioUnitario, cantidad };
     });
+    const pagaresPreview = _pagaresPreviewConversion(folio, cliente, fechaVentaIso, planElegido, periodicidad);
 
-    // Inyectar Pagarés Semanales
-    let fechaVenc = new Date();
-    for (let i = 1; i <= totalSemanas; i++) {
-        fechaVenc.setDate(fechaVenc.getDate() + 7);
-        pagares.push({
-            id: Date.now() + i,
-            folio: folio,
-            numero: i,
-            monto: pagoSemanal,
-            fechaVencimiento: (window.localISO ? window.localISO(fechaVenc) : fechaVenc.toISOString()).split('T')[0],
-            estado: "Pendiente"
-        });
+    const datosVenta = {
+        folio,
+        fecha: fechaHoy,
+        fechaIso: fechaVentaIso,
+        cliente,
+        metodo: "credito",
+        total: totalContado,
+        enganche: Number(totalAbonado) || 0,
+        saldoPendiente: totalFinanciado,
+        plan: planElegido,
+        planCredito: planElegido,
+        articulos,
+        tipoComprobante: "CRÉDITO PROVISIONAL POR APARTADO",
+        periodicidad,
+        pagaresPreview,
+        origenApartadoFolio: folio,
+        engancheYaRegistrado: true,
+        acreedor: "Roberto Escobedo Vega",
+        lugar: "Santiago Cuaula, Tlaxcala",
+        tasaMorosidad: 2
+    };
+
+    const cuarentena = {
+        idCuarentena: Date.now(),
+        tipo: "conversion_apartado_credito",
+        origenApartadoFolio: folio,
+        fechaCaptura: new Date().toLocaleString('es-MX'),
+        clienteNombre: cliente.nombre,
+        totalVenta: totalContado,
+        args: ["credito", totalContado, Number(totalAbonado) || 0, Number(saldoRestante) || 0, planElegido, folio, fechaHoy, fechaVentaIso, [], []],
+        datosVenta,
+        vendedorSeleccionado: origen.vendedorId ? { id: origen.vendedorId, nombre: origen.vendedorNombre || "" } : null
+    };
+
+    const pendientes = StorageService.get("ventasPendientes", []);
+    if (pendientes.some(p => p.origenApartadoFolio === folio || p.args?.[5] === folio)) {
+        return alert("⚠️ Ya existe una conversión/venta pendiente para este folio en la Bóveda de Autorizaciones.");
     }
+    pendientes.push(cuarentena);
+    StorageService.set("ventasPendientes", pendientes);
 
+    if (ap) ap.estado = "Conversión a Crédito Pendiente";
+    if (vnt) vnt.estado = "Conversión a Crédito Pendiente";
     StorageService.set("apartados", apartados);
     StorageService.set("ventasRegistradas", ventas);
-    StorageService.set("cuentasPorCobrar", cxc);
-    StorageService.set("pagaresSistema", pagares);
+
+    if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(datosVenta);
 
     document.getElementById('modalConvertirCredito').remove();
-    alert("✅ Operación exitosa.\n\nEl apartado ha sido convertido a Crédito Formal y los pagarés semanales ya están disponibles en el Centro de Comando (CxC).");
+    alert("⏳ Conversión enviada a Bóveda de Autorizaciones.\n\nSe emitió el ticket provisional de venta a crédito con los anticipos como enganche. CxC y pagarés se crearán cuando Auditoría autorice la operación.");
 
     // Actualizar pantalla activa
     if (typeof renderApartados === 'function') renderApartados();
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 };
 
 // =====================================================================
@@ -2140,6 +2334,8 @@ window.ejecutarMigracionTdcMSI = function() {
 // EXPORTACIONES GLOBALES (CONEXIÓN CON EL HTML)
 // ==========================================
 window.renderCuentasXCobrar = renderCuentasXCobrar;
+window.renderAbonosDirectos = renderAbonosDirectos;
+window.actualizarPlanesConvertir = actualizarPlanesConvertir;
 window.abrirModalAbonoAvanzado = abrirModalAbonoAvanzado;
 window.actualizarAvisoPoliticaAbono = actualizarAvisoPoliticaAbono;
 window.procesarAbonoAvanzado = procesarAbonoAvanzado;

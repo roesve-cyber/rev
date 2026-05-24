@@ -8,11 +8,83 @@ window._estadoPago = window._estadoPago || {
     modoEnganche: "efectivo",
     cuentaReceptora: "efectivo",
     planIndex: null,
-    plan: null          // objeto completo del plan elegido
+    plan: null,          // objeto completo del plan elegido
+    apartadoFechaCompromiso: "",
+    apartadoCondiciones: ""
 };
 
 function _escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _fechaInputDesdeHoy(dias = 30) {
+    const d = new Date();
+    d.setDate(d.getDate() + dias);
+    return d.toISOString().slice(0, 10);
+}
+
+function _condicionesApartadoDefault() {
+    return [
+        "Liquidar el saldo dentro del plazo comprometido.",
+        "La mercancía se entrega únicamente cuando el apartado esté liquidado al 100%.",
+        "Presentar este recibo e identificación para recoger la mercancía.",
+        "La cancelación por causa del cliente puede generar cargo administrativo y/o almacenaje.",
+        "Colores, medidas y piezas quedan sujetos al detalle descrito en este comprobante."
+    ].join("\n");
+}
+
+function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
+    const productosActuales = StorageService.get("productos", []);
+    const entregados = [];
+
+    (productosConStock || []).forEach(x => {
+        if (x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada) return;
+        const item = x.item || {};
+        const prod = productosActuales.find(p => String(p.id) === String(x.prod?.id || item.id || item.productoId));
+        if (!prod) return;
+
+        const cant = Number(item.cantidad || 1);
+        const colorElegido = item.colorElegido || '';
+        const ubicacionElegida = item.ubicacionElegida || '';
+        if ((Number(prod.stock) || 0) < cant) return;
+
+        if (Array.isArray(prod.variantes) && prod.variantes.length > 0) {
+            let restante = cant;
+            prod.variantes.forEach(v => {
+                const coincideColor = !colorElegido || String(v.color || '').toUpperCase() === String(colorElegido).toUpperCase();
+                const coincideUbicacion = !ubicacionElegida || String(v.ubicacion || '').toUpperCase() === String(ubicacionElegida).toUpperCase();
+                if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
+                    const deducir = Math.min(Number(v.stock), restante);
+                    v.stock -= deducir;
+                    restante -= deducir;
+                }
+            });
+            if (restante > 0) {
+                prod.variantes.forEach(v => {
+                    if (restante > 0 && Number(v.stock) > 0) {
+                        const deducir = Math.min(Number(v.stock), restante);
+                        v.stock -= deducir;
+                        restante -= deducir;
+                    }
+                });
+            }
+        }
+
+        prod.stock = Math.max(0, (Number(prod.stock) || 0) - cant);
+        if (typeof window.registrarMovimiento === 'function') {
+            window.registrarMovimiento(prod.id, `Salida operativa por venta en cuarentena - Folio ${folioVenta}`, cant, "salida");
+        }
+        x.salidaOperativaAplicada = true;
+        if (x.item) x.item.salidaOperativaAplicada = true;
+        entregados.push({ productoId: prod.id, nombre: prod.nombre, colorElegido, ubicacionElegida, cantidad: cant });
+    });
+
+    if (entregados.length > 0) {
+        StorageService.set("productos", productosActuales);
+        productos = productosActuales;
+        window.productos = productosActuales;
+    }
+    return entregados;
 }
 
 function _esAdmin() {
@@ -258,6 +330,17 @@ function renderCarrito() {
                     <div style="font-size:11px; color:#92400e; margin-top:3px;">Monto que paga el cliente hoy</div>
                 </div>
 
+                <div id="divCondicionesApartado" class="oculto" style="margin-bottom:12px; padding:12px; background:#fffbeb; border:1px solid #fcd34d; border-radius:8px;">
+                    <label style="font-size:12px; font-weight:bold; color:#92400e; display:block; margin-bottom:4px;">📅 Fecha compromiso de liquidación</label>
+                    <input type="date" id="fechaCompromisoApartado"
+                           onchange="actualizarInterfazPago()"
+                           style="width:100%; padding:9px; border:1px solid #f59e0b; border-radius:6px; font-size:14px; box-sizing:border-box; margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:bold; color:#92400e; display:block; margin-bottom:4px;">Condiciones que acepta el cliente</label>
+                    <textarea id="condicionesApartado"
+                              oninput="actualizarInterfazPago()"
+                              style="width:100%; min-height:110px; padding:9px; border:1px solid #f59e0b; border-radius:6px; font-size:12px; box-sizing:border-box; resize:vertical;"></textarea>
+                </div>
+
                 <!-- PERIODICIDAD (solo crédito) -->
                 <div id="divPeriodicidad" class="oculto" style="margin-bottom:12px;">
                     <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">📅 Periodicidad de abonos</label>
@@ -310,9 +393,15 @@ function renderCarrito() {
         modoEnganche: "efectivo",
         cuentaReceptora: "efectivo",
         planIndex: null,
-        plan: null
+        plan: null,
+        apartadoFechaCompromiso: _fechaInputDesdeHoy(30),
+        apartadoCondiciones: _condicionesApartadoDefault()
     };
     plazoSeleccionado = null;
+    const fechaCompromisoEl = document.getElementById("fechaCompromisoApartado");
+    if (fechaCompromisoEl) fechaCompromisoEl.value = window._estadoPago.apartadoFechaCompromiso;
+    const condicionesEl = document.getElementById("condicionesApartado");
+    if (condicionesEl) condicionesEl.value = window._estadoPago.apartadoCondiciones;
     setTimeout(() => actualizarInterfazPago(), 30);
 }
 
@@ -430,6 +519,7 @@ function actualizarInterfazPago() {
     const metodo = document.getElementById("selMetodoPago")?.value;
     const divEnganche = document.getElementById("divEnganche");
     const divPeriodicidad = document.getElementById("divPeriodicidad");
+    const divCondicionesApartado = document.getElementById("divCondicionesApartado");
     const resultados = document.getElementById("resultadosPago");
 
     if (!metodo || !resultados) return;
@@ -448,6 +538,16 @@ function actualizarInterfazPago() {
         divPeriodicidad?.classList.remove("oculto");
     } else {
         divPeriodicidad?.classList.add("oculto");
+    }
+
+    if (metodo === "apartado") {
+        divCondicionesApartado?.classList.remove("oculto");
+        const fechaCompromisoEl = document.getElementById("fechaCompromisoApartado");
+        const condicionesEl = document.getElementById("condicionesApartado");
+        if (fechaCompromisoEl && !fechaCompromisoEl.value) fechaCompromisoEl.value = window._estadoPago.apartadoFechaCompromiso || _fechaInputDesdeHoy(30);
+        if (condicionesEl && !condicionesEl.value) condicionesEl.value = window._estadoPago.apartadoCondiciones || _condicionesApartadoDefault();
+    } else {
+        divCondicionesApartado?.classList.add("oculto");
     }
 
     // ── CUENTA RECEPTORA / MODO DE COBRO (NUEVO MOTOR) ───────────────────────
@@ -544,6 +644,8 @@ function actualizarInterfazPago() {
     const selCaja = document.getElementById("cuentaReceptora_venta");
     window._estadoPago.cuentaReceptora = selCaja ? selCaja.value : "efectivo";
     window._estadoPago.etiquetaCuenta = selCaja && selCaja.selectedIndex >= 0 ? selCaja.options[selCaja.selectedIndex].text : "Efectivo";
+    window._estadoPago.apartadoFechaCompromiso = document.getElementById("fechaCompromisoApartado")?.value || window._estadoPago.apartadoFechaCompromiso || "";
+    window._estadoPago.apartadoCondiciones = document.getElementById("condicionesApartado")?.value || window._estadoPago.apartadoCondiciones || "";
 }
 
 function seleccionarPlan(index) {
@@ -624,6 +726,27 @@ function confirmarVentaFinal() {
     const saldoAFinanciar = totalConDescuento - enganche;
     let planElegido = null;
 
+    if (metodoPago === "apartado") {
+        const fechaCompromiso = window._estadoPago?.apartadoFechaCompromiso || document.getElementById("fechaCompromisoApartado")?.value;
+        const condicionesApartado = (window._estadoPago?.apartadoCondiciones || document.getElementById("condicionesApartado")?.value || "").trim();
+
+        if (enganche <= 0) {
+            alert("⚠️ Para registrar un apartado debes capturar un anticipo.");
+            return;
+        }
+        if (!fechaCompromiso) {
+            alert("⚠️ Captura la fecha compromiso de liquidación del apartado.");
+            return;
+        }
+        if (!condicionesApartado) {
+            alert("⚠️ Captura las condiciones del apartado para que aparezcan en el recibo.");
+            return;
+        }
+
+        window._estadoPago.apartadoFechaCompromiso = fechaCompromiso;
+        window._estadoPago.apartadoCondiciones = condicionesApartado;
+    }
+
     if (metodoPago === "credito") {
         const periodicidad = window._estadoPago?.periodicidad || document.getElementById("selPeriodicidad")?.value || "semanal";
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldoAFinanciar, periodicidad);
@@ -666,11 +789,15 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     } else if (metodoPago === "transferencia") {
         detalleMetodo = `<p style="color:#2b6cb0;"><strong>🏦 TRANSFERENCIA / DEPÓSITO</strong></p>`;
     } else if (metodoPago === "apartado") {
+        const fechaCompromiso = window._estadoPago?.apartadoFechaCompromiso || document.getElementById("fechaCompromisoApartado")?.value || "";
+        const condicionesApartado = window._estadoPago?.apartadoCondiciones || document.getElementById("condicionesApartado")?.value || "";
         detalleMetodo = `
             <p><strong>📦 APARTADO</strong></p>
             <div style="background:#fffbeb; padding:10px; border-radius:5px;">
                 <p style="margin:5px 0;">💵 Enganche: <strong>${dinero(enganche)}</strong></p>
                 <p style="margin:5px 0;">📦 Pendiente: <strong>${dinero(saldoAFinanciar)}</strong></p>
+                <p style="margin:5px 0;">📅 Liquidar antes de: <strong>${fechaCompromiso || 'Sin fecha'}</strong></p>
+                <div style="margin-top:8px; font-size:12px; color:#78350f; white-space:pre-line;">${_escapeHtml(condicionesApartado)}</div>
             </div>
         `;
     } else if (metodoPago === "credito") {
@@ -878,15 +1005,11 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                         ${opcionesUbi}
                     </select>
                 </div>`;
-            htmlProductos += `
-                <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <strong>${x.prod.nombre}</strong><br>
-                        <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${cantRequerida}</small>
-                        ${colorSelectorHtml}
-                        ${ubicacionSelectorHtml}
-                    </div>
-                    <div style="display:flex; gap:8px;">
+            const accionesInventario = metodoPago === "apartado"
+                ? `<div style="padding:8px 12px; background:#fffbeb; color:#92400e; border:1px solid #fcd34d; border-radius:6px; font-size:12px; max-width:220px;">
+                        Apartado: queda en resguardo. No se descuenta inventario ni se emite entrega hasta liquidar.
+                   </div>`
+                : `<div style="display:flex; gap:8px;">
                         <button onclick="setDecisionInventario(${idProd}, true)" 
                                 id="btn-si-${idProd}"
                                 style="padding:8px 16px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
@@ -897,7 +1020,17 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                                 style="padding:8px 16px; background:#f59e0b; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
                             ⏳ Pendiente
                         </button>
+                   </div>`;
+
+            htmlProductos += `
+                <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <strong>${x.prod.nombre}</strong><br>
+                        <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${cantRequerida}</small>
+                        ${colorSelectorHtml}
+                        ${ubicacionSelectorHtml}
                     </div>
+                    ${accionesInventario}
                 </div>
             `;
         });
@@ -1044,12 +1177,22 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
         const decision = decisionesInventario[item.id];
         const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
         
-        if (tieneStock && decision && decision.entregar) {
+        const puedeEntregarAhora = metodoPago !== "apartado" && tieneStock && decision && decision.entregar;
+
+        if (puedeEntregarAhora) {
             const colorFinal = (decision.color !== undefined) ? decision.color : (item.colorElegido || '');
             const ubicacionFinal = (decision.ubicacion !== undefined) ? decision.ubicacion : (item.ubicacionElegida || '');
             productosAEntregar.push({ item: { ...item, colorElegido: colorFinal, ubicacionElegida: ubicacionFinal }, prod });
         } else {
-            productosAPendiente.push({ item, prod });
+            productosAPendiente.push({
+                item,
+                prod,
+                requiereCompra: !tieneStock,
+                generarEntregaPendiente: metodoPago !== "apartado",
+                motivo: metodoPago === "apartado"
+                    ? "Apartado en resguardo hasta liquidación"
+                    : (tieneStock ? "Entrega diferida por decisión de venta" : "Sin stock en almacén")
+            });
         }
     });
 
@@ -1089,6 +1232,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         articulos: [...carrito],
         tipoComprobante: "Ticket Provisional (Requiere Autorización)",
         periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
+        apartadoFechaCompromiso: window._estadoPago?.apartadoFechaCompromiso || null,
+        apartadoCondiciones: window._estadoPago?.apartadoCondiciones || null,
         acreedor: "Roberto Escobedo Vega",
         lugar: "Santiago Cuaula, Tlaxcala",
         tasaMorosidad: 2
@@ -1109,18 +1254,29 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     pendientes.push(cuarentena);
     StorageService.set("ventasPendientes", pendientes);
 
-    // 3. Emitir el Ticket y Vale Provisional al Cajero
+    // 3. Emitir documentos operativos aunque la venta quede en cuarentena.
+    // La cuarentena es administrativa; no debe detener caja ni entrega.
     generarTicketMediaHoja(datosVenta);
 
-    if (productosConStock && productosConStock.length > 0) {
-        const articulosParaVale = productosConStock.map(x => ({
-            nombre: x.prod.nombre,
-            colorElegido: x.item.colorElegido || '',
-            cantidad: x.item.cantidad || 1
-        }));
-        setTimeout(() => {
-            generarValeEntrega({ folio: datosVenta.folio + " (PROVISIONAL)", fecha: datosVenta.fecha, cliente: { nombre: datosVenta.cliente.nombre } }, articulosParaVale);
-        }, 1000);
+    if (productosConStock && productosConStock.length > 0 && metodoPago !== "apartado" && typeof window.generarValeEntrega === "function") {
+        const clienteEntrega = { ...(clienteSeleccionado || {}) };
+        const articulosParaEntrega = _aplicarSalidaInventarioOperativa(folioVenta, productosConStock);
+
+        if (articulosParaEntrega.length > 0) {
+            window.generarValeEntrega({
+                folio: folioVenta,
+                fecha: fechaHoy,
+                fechaIso: fechaVentaIso,
+                metodoPago,
+                cliente: clienteEntrega,
+                estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total"
+            }, articulosParaEntrega, {
+                origen: "salida_operativa_venta_cuarentena",
+                registrar: true,
+                estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total",
+                observaciones: "Documento operativo emitido al ejecutar la venta. Su registro administrativo queda sujeto a autorización."
+            });
+        }
     }
 
     // 4. Limpiar interfaz (sin afectar DB real)
@@ -1134,7 +1290,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     document.querySelectorAll('[data-modal]').forEach(m => m.remove());
     document.querySelectorAll('.modal').forEach(m => { m.classList.add('oculto'); m.style.display = 'none'; });
 
-    alert(`⏳ VENTA EN CUARENTENA\\n\\nFolio: ${folioVenta}\\nLa nota fue emitida y el proceso en caja finalizó, pero el inventario y flujo de caja oficial esperan la autorización del Administrador.`);
+    alert(`⏳ VENTA EN CUARENTENA\\n\\nFolio: ${folioVenta}\\nLa nota fue emitida y el proceso en caja finalizó. Si marcaste mercancía para entrega, también se generó su comprobante operativo.\\n\\nEl registro financiero e inventario oficial quedan pendientes de autorización del Administrador.`);
     navA('tienda');
 }
 
@@ -1148,9 +1304,11 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     let salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
     let pagaresSistema = StorageService.get("pagaresSistema", []);
     let entregasPendientes = [];
+    let entregadosAhora = [];
 
     // PASO 1: ACTUALIZAR STOCK 
     productosConStock.forEach(x => {
+        if (x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada) return;
         const cantRequerida = x.item.cantidad || 1;
         const stockActual = x.prod.stock || 0;
         const colorElegido = x.item.colorElegido || '';
@@ -1181,6 +1339,13 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
             x.prod.stock = stockActual - cantRequerida;
             const concepto = colorElegido ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})` : `Venta - ${folioVenta}`;
             if (typeof registrarMovimiento === 'function') registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
+            entregadosAhora.push({
+                productoId: x.prod.id,
+                nombre: x.prod.nombre,
+                colorElegido,
+                ubicacionElegida,
+                cantidad: cantRequerida
+            });
         }
     });
 
@@ -1190,12 +1355,26 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
         const colorElegido = x.item.colorElegido || '';
         const nombreConColor = colorElegido ? `${x.prod.nombre} (Color: ${colorElegido})` : x.prod.nombre;
 
-        entregasPendientes.push({ id: Date.now() + Math.random(), folioVenta, productoId: x.prod.id, nombre: nombreConColor, cantidad: cantidadSolicitada, motivo: "Sin stock en almacén" });
-        requisicionesCompra.push({ id: Date.now() + Math.random(), fecha: fechaHoy, producto: nombreConColor, folioVenta, cantidad: cantidadSolicitada, motivo: "Venta sin stock disponible", estatus: "Pendiente" });
+        if (x.generarEntregaPendiente !== false) {
+            entregasPendientes.push({
+                id: Date.now() + Math.random(),
+                folioVenta,
+                productoId: x.prod.id,
+                nombre: nombreConColor,
+                cantidad: cantidadSolicitada,
+                colorElegido,
+                motivo: x.motivo || "Entrega pendiente"
+            });
+        }
+
+        if (x.requiereCompra !== false) {
+            requisicionesCompra.push({ id: Date.now() + Math.random(), fecha: fechaHoy, producto: nombreConColor, folioVenta, cantidad: cantidadSolicitada, motivo: "Venta sin stock disponible", estatus: "Pendiente" });
+        }
     });
 
     // PASO 3: REGISTRAR MOVIMIENTOS DE CAJA
     let montoIngresoHoy = (metodoPago === "contado" || metodoPago === "transferencia") ? totalContado : enganche;
+    if (datosVentaP.engancheYaRegistrado) montoIngresoHoy = 0;
     let tituloConcepto = (metodoPago === "contado" || metodoPago === "transferencia") ? "Venta" : "Enganche";
 
     if (montoIngresoHoy > 0) {
@@ -1228,21 +1407,82 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
 
     } else if (metodoPago === "apartado") {
         let apartadosBD = StorageService.get("apartados", []);
-        apartadosBD.push({ id: Date.now(), folio: folioVenta, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, fechaApartado: fechaVentaIso, importeApartado: totalContado, enganche: enganche, saldoPendiente: saldoAFinanciar, articulos: datosVentaP.articulos, abonos: [], estado: 'Pendiente', vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null });
+        apartadosBD.push({
+            id: Date.now(),
+            folio: folioVenta,
+            clienteId: datosVentaP.cliente.id,
+            clienteNombre: datosVentaP.cliente.nombre,
+            fechaApartado: fechaVentaIso,
+            fechaCompromiso: datosVentaP.apartadoFechaCompromiso || window._estadoPago?.apartadoFechaCompromiso || null,
+            condiciones: datosVentaP.apartadoCondiciones || window._estadoPago?.apartadoCondiciones || _condicionesApartadoDefault(),
+            importeApartado: totalContado,
+            enganche: enganche,
+            saldoPendiente: saldoAFinanciar,
+            articulos: datosVentaP.articulos,
+            abonos: [],
+            estado: 'Pendiente',
+            vendedorId: window._vendedorSeleccionado?.id || null,
+            vendedorNombre: window._vendedorSeleccionado?.nombre || null
+        });
         StorageService.set("apartados", apartadosBD);
+    }
+
+    if (metodoPago === "credito" && datosVentaP.origenApartadoFolio) {
+        const apartadosBD = StorageService.get("apartados", []);
+        const idxApartado = apartadosBD.findIndex(a => a.folio === datosVentaP.origenApartadoFolio);
+        if (idxApartado !== -1) {
+            apartadosBD[idxApartado] = {
+                ...apartadosBD[idxApartado],
+                estado: "Migrado a Crédito",
+                folioCredito: folioVenta,
+                fechaConversionCredito: fechaVentaIso,
+                saldoPendiente: 0
+            };
+            StorageService.set("apartados", apartadosBD);
+        }
     }
 
     StorageService.set("productos", productos);
     StorageService.set("requisicionesCompra", requisicionesCompra);
 
     if (entregasPendientes.length > 0) {
-        salidasPendientesVenta.push({ id: Date.now(), folioVenta, fecha: fechaHoy, fechaIso: fechaVentaIso, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, metodoPago, items: entregasPendientes, estatus: "Pendiente" });
+        salidasPendientesVenta.push({
+            id: Date.now(),
+            folioVenta,
+            fecha: fechaHoy,
+            fechaIso: fechaVentaIso,
+            clienteId: datosVentaP.cliente.id,
+            clienteNombre: datosVentaP.cliente.nombre,
+            clienteDireccion: datosVentaP.cliente.direccion || "",
+            clienteTelefono: datosVentaP.cliente.telefono || "",
+            metodoPago,
+            items: entregasPendientes,
+            estatus: "Pendiente"
+        });
         StorageService.set("salidasPendientesVenta", salidasPendientesVenta);
     }
 
     const ventasRegistradas = StorageService.get('ventasRegistradas', []);
-    ventasRegistradas.push({ folio: folioVenta, fechaVenta: fechaVentaIso, fecha: fechaHoy, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, cliente: datosVentaP.cliente, total: totalContado, enganche: enganche, saldoAFinanciar: saldoAFinanciar, metodoPago: metodoPago, plan: planElegido, periodicidad: datosVentaP.periodicidad, articulos: datosVentaP.articulos, vendedor: window._vendedorSeleccionado?.nombre || null });
+    ventasRegistradas.push({ folio: folioVenta, fechaVenta: fechaVentaIso, fecha: fechaHoy, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, cliente: datosVentaP.cliente, total: totalContado, enganche: enganche, saldoAFinanciar: saldoAFinanciar, metodoPago: metodoPago, plan: planElegido, periodicidad: datosVentaP.periodicidad, articulos: datosVentaP.articulos, apartadoFechaCompromiso: datosVentaP.apartadoFechaCompromiso || null, apartadoCondiciones: datosVentaP.apartadoCondiciones || null, vendedor: window._vendedorSeleccionado?.nombre || null });
     StorageService.set('ventasRegistradas', ventasRegistradas);
+
+    const entregaYaDocumentada = StorageService.get("documentosEntrega", [])
+        .some(d => d.folioVenta === folioVenta && d.origen === "salida_operativa_venta_cuarentena");
+
+    if (entregadosAhora.length > 0 && !entregaYaDocumentada && typeof window.generarValeEntrega === 'function') {
+        window.generarValeEntrega({
+            folio: folioVenta,
+            fecha: fechaHoy,
+            fechaIso: fechaVentaIso,
+            metodoPago,
+            cliente: datosVentaP.cliente,
+            estatusEntrega: entregasPendientes.length > 0 ? "Parcial" : "Total"
+        }, entregadosAhora, {
+            origen: "salida_inventario_venta",
+            registrar: true,
+            estatusEntrega: entregasPendientes.length > 0 ? "Parcial" : "Total"
+        });
+    }
 
     if (typeof window.acumularPuntosCliente === "function" && montoIngresoHoy > 0) {
         window.acumularPuntosCliente(datosVentaP.cliente.id, montoIngresoHoy);
@@ -1269,7 +1509,8 @@ function generarTicketMediaHoja(datosVenta) {
     let totalAPagar = 0;
     let tablaPagares = '';
     const pagares = StorageService.get("pagaresSistema", []);
-    const pagaresDelFolio = pagares.filter(p => p.folio === folio);
+    const pagaresOficiales = pagares.filter(p => p.folio === folio);
+    const pagaresDelFolio = pagaresOficiales.length > 0 ? pagaresOficiales : (datosVenta.pagaresPreview || []);
 
     if (datosVenta.metodo === "credito") {
         pagaresDelFolio.forEach((pagar, index) => {
@@ -1324,12 +1565,20 @@ function generarTicketMediaHoja(datosVenta) {
 
     // LEYENDAS LEGALES DINÁMICAS (Como las grandes cadenas)
     let textoLegal = '';
-    const tituloTicket = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CRÉDITO' : 'COMPROBANTE DE VENTA');
+    const tituloTicketBase = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CRÉDITO' : 'COMPROBANTE DE VENTA');
+    const tituloTicket = datosVenta.tipoComprobante || tituloTicketBase;
+    const condicionesApartado = datosVenta.apartadoCondiciones || datosVenta.condiciones || _condicionesApartadoDefault();
+    const fechaCompromisoApartado = datosVenta.apartadoFechaCompromiso || datosVenta.fechaCompromiso || "";
+    const condicionesApartadoHtml = String(condicionesApartado || "")
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map(c => `<li>${_escapeHtml(c)}</li>`)
+        .join("");
 
     if (datosVenta.metodo === "credito") {
         textoLegal = generarLeyendaPagare(datosVenta, totalAPagar, false);
     } else if (datosVenta.metodo === "apartado") {
-        textoLegal = `<b>TÉRMINOS DE APARTADO:</b><br>El cliente ${datosVenta.cliente.nombre} entrega la cantidad de ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancía descrita. El cliente se compromete a liquidar el saldo pendiente de ${dinero(datosVenta.saldoPendiente)} en los plazos acordados. La mercancía permanecerá bajo resguardo de Mueblería Mi Pueblito y será entregada físicamente únicamente tras la liquidación total del saldo. En caso de abandono o cancelación, la empresa retendrá un porcentaje del anticipo por concepto de almacenaje y gastos administrativos.`;
+        textoLegal = `<b>TÉRMINOS DE APARTADO:</b><br>El cliente ${_escapeHtml(datosVenta.cliente.nombre)} entrega ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancía descrita. El saldo pendiente es ${dinero(datosVenta.saldoPendiente)}${fechaCompromisoApartado ? ` y deberá liquidarse a más tardar el ${_escapeHtml(fechaCompromisoApartado)}` : ""}. La mercancía queda bajo resguardo de Mueblería Mi Pueblito y se entrega únicamente tras liquidación total. El cliente acepta las condiciones impresas en este comprobante.`;
     } else {
         textoLegal = `<b>TÉRMINOS DE VENTA:</b><br>El cliente ${datosVenta.cliente.nombre} recibe la mercancía a su entera satisfacción, liquidada en su totalidad. Toda aclaración o garantía deberá tramitarse en tienda presentando este comprobante original.`;
     }
@@ -1390,6 +1639,11 @@ function generarTicketMediaHoja(datosVenta) {
             <span>Anticipo / Enganche:</span>
             <span>${dinero(datosVenta.enganche || 0)}</span>
         </div>
+        ${datosVenta.metodo === 'apartado' && fechaCompromisoApartado ? `
+        <div style="display:flex; justify-content:space-between;">
+            <span>Fecha límite:</span>
+            <span>${_escapeHtml(fechaCompromisoApartado)}</span>
+        </div>` : ''}
         
         <div class="total-box">
             <div style="font-size:10px;">${datosVenta.metodo === 'credito' ? 'GRAN TOTAL A PAGAR' : (datosVenta.metodo === 'apartado' ? 'SALDO PENDIENTE' : 'TOTAL PAGADO')}</div>
@@ -1421,6 +1675,12 @@ function generarTicketMediaHoja(datosVenta) {
                 </thead>
                 <tbody>${tablaPagares}</tbody>
             </table>
+        ` : ''}
+
+        ${datosVenta.metodo === "apartado" ? `
+            <div class="separador"></div>
+            <div class="centro negrita" style="background:#000; color:#fff; padding:4px; font-size:10px; margin-bottom:5px;">CONDICIONES DEL APARTADO</div>
+            <ol style="font-size:9.5px; margin:0 0 8px 16px; padding:0; line-height:1.35;">${condicionesApartadoHtml}</ol>
         ` : ''}
 
         <div class="separador"></div>
@@ -1477,7 +1737,9 @@ function guardarTicketEnRegistro(datosVenta, folio) {
             metodoPago: datosVenta.metodo,
             plan: datosVenta.plan,
             articulos: datosVenta.articulos,
-            periodicidad: datosVenta.periodicidad || 'semanal'
+            periodicidad: datosVenta.periodicidad || 'semanal',
+            apartadoFechaCompromiso: datosVenta.apartadoFechaCompromiso || null,
+            apartadoCondiciones: datosVenta.apartadoCondiciones || null
         },
         pagares: pagaresDelFolio.map(p => ({
             numeroPagere: p.numeroPagere,
@@ -1519,7 +1781,7 @@ function renderEntregas() {
     if (!contenedor) return;
 
     salidasPendientesVenta = StorageService.get("salidasPendientesVenta", []);
-    const pendientes = salidasPendientesVenta.filter(s => s.estatus === "Pendiente");
+    const pendientes = salidasPendientesVenta.filter(s => s.estatus === "Pendiente" || s.estatus === "Parcial");
 
     if (pendientes.length === 0) {
         contenedor.innerHTML = "<p style='color:#718096; padding:20px; background:white; border-radius:8px;'>✅ No hay entregas pendientes.</p>";
@@ -1613,6 +1875,21 @@ function abrirDetalleEntrega(idSalida) {
                     </tr></thead>
                     <tbody>${itemsHtml}</tbody>
                 </table>
+
+                <div style="display:grid; gap:10px; margin-bottom:18px; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
+                    <div>
+                        <label style="font-size:11px; font-weight:bold; color:#475569;">RECIBE MERCANCÍA</label>
+                        <input id="entregaReceptor-${s.id}" type="text" value="${_escapeHtml(s.clienteNombre || '')}" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px; font-weight:bold; color:#475569;">IDENTIFICACIÓN / REFERENCIA</label>
+                        <input id="entregaIdentificacion-${s.id}" type="text" placeholder="INE, familiar autorizado, teléfono, etc." style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px; font-weight:bold; color:#475569;">OBSERVACIONES DE ENTREGA</label>
+                        <textarea id="entregaObservaciones-${s.id}" placeholder="Sin observaciones" style="width:100%; min-height:58px; padding:8px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;"></textarea>
+                    </div>
+                </div>
                 
                 <div style="display:flex; gap:10px;">
                     <button onclick="aplicarSalidaPendienteVentas('${s.id}')"
@@ -1725,6 +2002,9 @@ function aplicarSalidaPendienteVentas(idSalida) {
     // ========================================================
     s.estatus = quedanPendientes ? "Parcial" : "Entregado";
     s.fechaUltimaEntrega = window.formatearFechaCortaMX(new Date());
+    const receptorEntrega = document.getElementById(`entregaReceptor-${s.id}`)?.value || s.clienteNombre || "";
+    const identificacionEntrega = document.getElementById(`entregaIdentificacion-${s.id}`)?.value || "";
+    const observacionesEntrega = document.getElementById(`entregaObservaciones-${s.id}`)?.value || "";
 
     StorageService.set("salidasPendientesVenta", salidas);
     StorageService.set("productos", productosActuales);
@@ -1736,12 +2016,26 @@ function aplicarSalidaPendienteVentas(idSalida) {
     // 4. EMITIR VALE DE ENTREGA (Solo lo entregado hoy)
     // ========================================================
     const datosParaVale = {
-        cliente: { nombre: s.clienteNombre || 'Público General' },
+        cliente: {
+            id: s.clienteId || null,
+            nombre: s.clienteNombre || 'Público General',
+            direccion: s.clienteDireccion || '',
+            telefono: s.clienteTelefono || ''
+        },
         folio: s.folioVenta || s.folioSalida,
-        fecha: window.formatearFechaCortaMX(new Date())
+        fecha: window.formatearFechaCortaMX(new Date()),
+        metodoPago: s.metodoPago || "",
+        estatusEntrega: quedanPendientes ? "Parcial" : "Total"
     };
 
-    window.generarValeEntrega(datosParaVale, entregadosHoy);
+    window.generarValeEntrega(datosParaVale, entregadosHoy, {
+        origen: "salida_inventario_venta",
+        registrar: true,
+        estatusEntrega: quedanPendientes ? "Parcial" : "Total",
+        receptorNombre: receptorEntrega,
+        identificacionReceptor: identificacionEntrega,
+        observaciones: observacionesEntrega
+    });
 }
 
 // Función auxiliar para mantener limpio el historial
@@ -1882,7 +2176,9 @@ function reimprimirTicketVenta(folio) {
             saldoPendiente: ticket.saldoAFinanciar || 0,
             plan: ticket.plan || null,
             articulos: ticket.articulos || [],
-            periodicidad: ticket.periodicidad || 'semanal'
+            periodicidad: ticket.periodicidad || 'semanal',
+            apartadoFechaCompromiso: ticket.apartadoFechaCompromiso || null,
+            apartadoCondiciones: ticket.apartadoCondiciones || null
         };
     } else {
         // Fallback: Si la venta es muy antigua y no está en la tabla nueva, lee el nodo histórico para no quebrar el pasado
@@ -1905,7 +2201,9 @@ function reimprimirTicketVenta(folio) {
             saldoPendiente: ticketViejo.venta?.saldoPendiente || 0,
             plan: ticketViejo.venta?.plan || null,
             articulos: ticketViejo.venta?.articulos || [],
-            periodicidad: ticketViejo.venta?.periodicidad || 'semanal'
+            periodicidad: ticketViejo.venta?.periodicidad || 'semanal',
+            apartadoFechaCompromiso: ticketViejo.venta?.apartadoFechaCompromiso || null,
+            apartadoCondiciones: ticketViejo.venta?.apartadoCondiciones || null
         };
     }
 
@@ -1917,6 +2215,8 @@ function limpiarFiltrosReimpresion() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
+    const tipoDoc = document.getElementById('rvTipoDoc');
+    if (tipoDoc) tipoDoc.value = 'todos';
     renderReimprimirVenta();
 }
 
@@ -2355,19 +2655,72 @@ function guardarAuditoriaDefinitiva() {
     document.querySelector('[data-modal="auditoria-cxc"]').remove();
     if(typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
 }
-// ===== GENERADOR DE VALE DE ENTREGA (PARA ENTREGAS TOTALES O PARCIALES) =====
-function generarValeEntrega(datosVenta, articulosAEntregar) {
-    const folio = datosVenta.folio;
-    const fechaEntrega = window.formatearFechaMX(new Date());
+// ===== GENERADOR DE DOCUMENTO DE ENTREGA (SOLO CON SALIDA REAL DE INVENTARIO) =====
+function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
+    if (!articulosAEntregar || articulosAEntregar.length === 0) {
+        alert("⚠️ No hay mercancía para documentar en esta entrega.");
+        return null;
+    }
+
+    const folioVenta = datosVenta.folio || datosVenta.folioVenta || datosVenta.folioSalida || "S/F";
+    const fechaIso = opciones.fechaIso || datosVenta.fechaIso || window.localISO?.(new Date()) || new Date().toISOString();
+    const fechaEntrega = opciones.fechaEntrega || datosVenta.fecha || (window.formatearFechaMX ? window.formatearFechaMX(new Date(fechaIso)) : new Date(fechaIso).toLocaleString("es-MX"));
+    const folioDocumento = opciones.folioDocumento || datosVenta.folioDocumento || `ENT-${Date.now().toString().slice(-8)}`;
+    const cliente = datosVenta.cliente || {};
+    const receptorNombre = opciones.receptorNombre || datosVenta.receptorNombre || cliente.nombre || "";
+    const identificacionReceptor = opciones.identificacionReceptor || datosVenta.identificacionReceptor || "";
+    const observaciones = opciones.observaciones || datosVenta.observaciones || "";
+    const entregadoPor = opciones.entregadoPor || datosVenta.entregadoPor || window._vendedorSeleccionado?.nombre || "";
+    const estatusEntrega = opciones.estatusEntrega || datosVenta.estatusEntrega || "Entrega";
+
+    const articulosDoc = articulosAEntregar.map(art => ({
+        productoId: art.productoId || art.id || null,
+        nombre: art.nombre || "Producto",
+        colorElegido: art.colorElegido || art.color || "",
+        ubicacionElegida: art.ubicacionElegida || art.ubicacion || "",
+        cantidad: Number(art.cantidad || 1)
+    }));
+
+    const documento = {
+        id: opciones.id || Date.now(),
+        tipoDocumento: "entrega_mcia",
+        origen: opciones.origen || "salida_inventario_venta",
+        folioDocumento,
+        folioVenta,
+        fechaEmision: fechaIso,
+        fecha: fechaEntrega,
+        cliente: {
+            id: cliente.id || datosVenta.clienteId || null,
+            nombre: cliente.nombre || datosVenta.clienteNombre || "Público General",
+            telefono: cliente.telefono || datosVenta.clienteTelefono || "",
+            direccion: cliente.direccion || datosVenta.clienteDireccion || "Entrega en tienda"
+        },
+        metodoPago: datosVenta.metodoPago || datosVenta.metodo || "",
+        estatusEntrega,
+        receptorNombre,
+        identificacionReceptor,
+        observaciones,
+        entregadoPor,
+        articulos: articulosDoc
+    };
+
+    if (opciones.registrar !== false) {
+        const documentos = StorageService.get("documentosEntrega", []);
+        const idx = documentos.findIndex(d => d.folioDocumento === documento.folioDocumento);
+        if (idx >= 0) documentos[idx] = documento;
+        else documentos.push(documento);
+        StorageService.set("documentosEntrega", documentos);
+    }
 
     let listaEntregada = '';
-    articulosAEntregar.forEach(art => {
+    articulosDoc.forEach(art => {
         listaEntregada += `
             <div style="border-bottom: 1px solid #eee; padding: 5px 0;">
                 <div style="display:flex; justify-content:space-between; font-size: 13px;">
-                    <span><b>${art.cantidad || 1}x</b> ${art.nombre}</span>
+                    <span><b>${art.cantidad}x</b> ${_escapeHtml(art.nombre)}</span>
                 </div>
-                ${art.colorElegido ? `<small style="color:#555;">🎨 Color: ${art.colorElegido}</small>` : ''}
+                ${art.colorElegido ? `<small style="color:#555;">Color: ${_escapeHtml(art.colorElegido)}</small>` : ''}
+                ${art.ubicacionElegida ? `<small style="color:#555; display:block;">Ubicación salida: ${_escapeHtml(art.ubicacionElegida)}</small>` : ''}
             </div>`;
     });
 
@@ -2387,6 +2740,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar) {
         .negrita { font-weight: bold; }
         .separador { border-top: 1px dashed #000; margin: 10px 0; }
         .caja-conformidad { border: 1px solid #000; padding: 8px; margin: 15px 0; font-size: 10px; text-align: justify; }
+        .bloque { font-size: 10.5px; line-height: 1.35; }
         .no-print { background: #f0f0f0; padding: 10px; text-align: center; margin-bottom: 10px; }
         @media print { .no-print { display: none; } }
     </style>
@@ -2399,16 +2753,19 @@ function generarValeEntrega(datosVenta, articulosAEntregar) {
         <div class="centro">
             <img src="img/Logo.svg" style="width:60px; height:60px; object-fit:contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
             <div class="negrita" style="font-size:16px;">MI PUEBLITO</div>
-            <div class="negrita">COMPROBANTE DE ENTREGA</div>
-            <div style="font-size:10px;">${fechaEntrega}</div>
+            <div class="negrita">COMPROBANTE DE ENTREGA DE MERCANCÍA</div>
+            <div style="font-size:10px;">Doc: ${_escapeHtml(folioDocumento)}</div>
+            <div style="font-size:10px;">${_escapeHtml(fechaEntrega)}</div>
         </div>
 
         <div class="separador"></div>
 
         <div>
-            <b>VENTA REF: ${folio}</b><br>
-            CLIENTE: ${datosVenta.cliente.nombre}<br>
-            DIRECCIÓN: ${datosVenta.cliente.direccion || 'Entrega en tienda'}
+            <b>VENTA REF: ${_escapeHtml(folioVenta)}</b><br>
+            TIPO: ${_escapeHtml(estatusEntrega)}<br>
+            CLIENTE: ${_escapeHtml(documento.cliente.nombre)}<br>
+            ${documento.cliente.telefono ? `TEL: ${_escapeHtml(documento.cliente.telefono)}<br>` : ''}
+            DIRECCIÓN: ${_escapeHtml(documento.cliente.direccion)}
         </div>
 
         <div class="separador"></div>
@@ -2419,7 +2776,14 @@ function generarValeEntrega(datosVenta, articulosAEntregar) {
 
         <div class="caja-conformidad">
             <b>DECLARACIÓN DE CONFORMIDAD:</b><br>
-            Recibí de entera conformidad la mercancía arriba descrita. Manifiesto que el producto ha sido revisado a detalle y se encuentra en <b>perfectas condiciones físicas</b>, sin raspaduras, golpes o defectos de fabricación visibles. Acepto que a partir de este momento la custodia y cuidado del mueble corre por mi cuenta.
+            Recibí de entera conformidad la mercancía arriba descrita. Manifiesto que fue revisada al momento de la entrega, que corresponde a la venta referida y que se entrega en condiciones físicas aceptadas. A partir de esta recepción asumo la custodia, uso y cuidado ordinario del mueble. Las garantías aplican conforme a política de tienda y no cubren mal uso, humedad, golpes, maniobras ajenas o traslados posteriores realizados por terceros.
+        </div>
+
+        <div class="bloque">
+            <b>Receptor:</b> ${_escapeHtml(receptorNombre || "________________________")}<br>
+            <b>Identificación:</b> ${_escapeHtml(identificacionReceptor || "________________________")}<br>
+            <b>Entregó:</b> ${_escapeHtml(entregadoPor || "________________________")}<br>
+            ${observaciones ? `<b>Observaciones:</b> ${_escapeHtml(observaciones)}<br>` : ''}
         </div>
 
         <div style="margin-top:40px; text-align:center;">
@@ -2434,15 +2798,21 @@ function generarValeEntrega(datosVenta, articulosAEntregar) {
         </div>
 
         <div class="centro" style="margin-top:30px; font-size:9px;">
-            *** Documento para control de inventario ***<br>
+            *** Documento generado únicamente por salida de inventario ***<br>
             Mueblería Mi Pueblito
         </div>
     </body>
     </html>`;
 
     const win = window.open('', '_blank');
+    if (!win) {
+        alert("⚠️ El comprobante de entrega se registró, pero el navegador bloqueó la ventana emergente.");
+        return documento;
+    }
     win.document.write(htmlVale);
     win.document.close();
+    win.focus();
+    return documento;
 }
 
 // ============================================================
@@ -2627,23 +2997,36 @@ window.renderReimprimirVenta = function() {
     const fechaHasta = document.getElementById('rvFechaHasta').value;
     const montoMin = parseFloat(document.getElementById('rvMontoMin').value) || 0;
     const montoMax = parseFloat(document.getElementById('rvMontoMax').value) || Infinity;
+    const tipoDoc = document.getElementById('rvTipoDoc')?.value || 'todos';
 
-    // 1. Extraer datos de las 3 bóvedas
-    const ventas = StorageService.get("ventasRegistradas", []).map(v => ({...v, _origen: 'venta'}));
+    // 1. Extraer documentos reimprimibles. Se excluyen abonos por regla operativa.
+    const ventas = StorageService.get("ventasRegistradas", [])
+        .filter(v => !['credito', 'apartado'].includes(String(v.metodoPago || '').toLowerCase()))
+        .map(v => ({...v, _origen: 'contado'}));
     const cxc = StorageService.get("cuentasPorCobrar", []).map(c => ({...c, _origen: 'credito'}));
     const apartados = StorageService.get("apartados", []).map(a => ({...a, _origen: 'apartado'}));
+    const entregas = StorageService.get("documentosEntrega", []).map(d => ({
+        ...d,
+        _origen: 'entrega_mcia',
+        folio: d.folioDocumento,
+        clienteNombre: d.cliente?.nombre || d.clienteNombre || '',
+        fecha: d.fechaEmision || d.fecha,
+        total: 0
+    }));
 
     // 2. Unificar todo en una sola lista maestra
-    let todo = [...ventas, ...cxc, ...apartados];
+    let todo = [...ventas, ...cxc, ...apartados, ...entregas];
 
     // 3. Aplicar Filtros de Búsqueda
     let filtrados = todo.filter(item => {
         const folio = String(item.folio || '').toLowerCase();
+        const folioVenta = String(item.folioVenta || '').toLowerCase();
         const cliente = String(item.cliente?.nombre || item.clienteNombre || item.nombre || '').toLowerCase();
-        const fecha = item.fechaVenta || item.fechaApartado || item.fecha || '';
+        const fecha = String(item.fechaVenta || item.fechaApartado || item.fechaEmision || item.fecha || '');
         const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
 
-        if (folioBuscado && !folio.includes(folioBuscado)) return false;
+        if (tipoDoc !== 'todos' && item._origen !== tipoDoc) return false;
+        if (folioBuscado && !folio.includes(folioBuscado) && !folioVenta.includes(folioBuscado)) return false;
         if (clienteBuscado && !cliente.includes(clienteBuscado)) return false;
         if (fechaDesde && fecha.split('T')[0] < fechaDesde) return false;
         if (fechaHasta && fecha.split('T')[0] > fechaHasta) return false;
@@ -2655,8 +3038,8 @@ window.renderReimprimirVenta = function() {
 
     // 4. Ordenar de lo más reciente a lo más viejo
     filtrados.sort((a, b) => {
-        const fa = new Date(a.fechaVenta || a.fechaApartado || a.fecha || 0);
-        const fb = new Date(b.fechaVenta || b.fechaApartado || b.fecha || 0);
+        const fa = new Date(a.fechaVenta || a.fechaApartado || a.fechaEmision || a.fecha || 0);
+        const fb = new Date(b.fechaVenta || b.fechaApartado || b.fechaEmision || b.fecha || 0);
         return fb - fa;
     });
 
@@ -2672,20 +3055,22 @@ window.renderReimprimirVenta = function() {
     
     filtrados.forEach(item => {
         const folio = item.folio || 'S/F';
-        let fechaLimpia = (item.fechaVenta || item.fechaApartado || item.fecha || '');
+        let fechaLimpia = String(item.fechaVenta || item.fechaApartado || item.fechaEmision || item.fecha || '');
         if(fechaLimpia.includes('T')) fechaLimpia = fechaLimpia.split('T')[0];
         
         const cliente = item.cliente?.nombre || item.clienteNombre || item.nombre || 'Desconocido';
         const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
-        const tipo = item._origen.toUpperCase();
+        const etiquetas = { contado: 'CONTADO', credito: 'CRÉDITO', apartado: 'APARTADO', entrega_mcia: 'ENTREGA MCIA' };
+        const tipo = etiquetas[item._origen] || item._origen.toUpperCase();
         
         let colorTipo = '#6b7280';
-        if (item._origen === 'venta') colorTipo = '#16a34a'; // Verde
+        if (item._origen === 'contado') colorTipo = '#16a34a'; // Verde
         if (item._origen === 'credito') colorTipo = '#2563eb'; // Azul
         if (item._origen === 'apartado') colorTipo = '#7c3aed'; // Morado
+        if (item._origen === 'entrega_mcia') colorTipo = '#0f766e'; // Teal
 
         html += `<tr>
-            <td><strong>${folio}</strong></td>
+            <td><strong>${folio}</strong>${item.folioVenta ? `<br><small style="color:#64748b;">Venta: ${item.folioVenta}</small>` : ''}</td>
             <td>${fechaLimpia}</td>
             <td>${cliente}</td>
             <td><span style="background:${colorTipo}; color:white; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:bold;">${tipo}</span></td>
@@ -2709,10 +3094,33 @@ window.limpiarFiltrosReimpresion = function() {
     document.getElementById('rvFechaHasta').value = '';
     document.getElementById('rvMontoMin').value = '';
     document.getElementById('rvMontoMax').value = '';
+    const tipoDoc = document.getElementById('rvTipoDoc');
+    if (tipoDoc) tipoDoc.value = 'todos';
     renderReimprimirVenta();
 };
 
 window.reimprimirFolioUnificado = function(folio, origen) {
+    if (origen === 'entrega_mcia') {
+        const docs = StorageService.get("documentosEntrega", []);
+        const doc = docs.find(d => d.folioDocumento === folio);
+        if (!doc) return alert("❌ No se encontró el documento de entrega.");
+        if (typeof generarValeEntrega === 'function') {
+            generarValeEntrega(doc, doc.articulos || [], {
+                registrar: false,
+                id: doc.id,
+                folioDocumento: doc.folioDocumento,
+                fechaIso: doc.fechaEmision,
+                fechaEntrega: doc.fecha,
+                estatusEntrega: doc.estatusEntrega,
+                receptorNombre: doc.receptorNombre,
+                identificacionReceptor: doc.identificacionReceptor,
+                observaciones: doc.observaciones,
+                entregadoPor: doc.entregadoPor
+            });
+        }
+        return;
+    }
+
     if (origen === 'apartado') {
         const apartados = StorageService.get("apartados", []);
         const ap = apartados.find(a => a.folio === folio);
@@ -2727,6 +3135,8 @@ window.reimprimirFolioUnificado = function(folio, origen) {
             total: ap.importeApartado,
             enganche: ap.enganche,
             saldoPendiente: ap.saldoPendiente,
+            apartadoFechaCompromiso: ap.fechaCompromiso || null,
+            apartadoCondiciones: ap.condiciones || null,
             metodo: 'apartado', // Esto asegura que salga la leyenda legal de almacenaje
             vendedorNombre: ap.vendedorNombre || 'N/A'
         };
@@ -2754,7 +3164,7 @@ window.reimprimirFolioUnificado = function(folio, origen) {
         };
         if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(datosVenta);
 
-    } else { // Venta de contado
+    } else { // Venta de contado / transferencia
         const ventas = StorageService.get("ventasRegistradas", []);
         const v = ventas.find(x => x.folio === folio);
         if (!v) return alert("❌ No se encontró la venta de contado.");
@@ -2813,16 +3223,19 @@ window.renderPanelAutorizaciones = function() {
                         <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Acción</th>
                     </tr>
                     ${abonosP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al día. No hay abonos pendientes.</td></tr>' : ''}
-                    ${abonosP.map((a, i) => `
+                    ${abonosP.map((a, i) => {
+                        const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
+                        const folioRef = a.folioApartado || a.folioCXC || '-';
+                        return `
                     <tr style="border-bottom: 1px solid #f3f4f6;">
                         <td style="padding: 8px;">${a.fechaCaptura || '-'}</td>
-                        <td style="padding: 8px; color: #475569;">${a.folioCXC}</td>
+                        <td style="padding: 8px; color: #475569;"><strong>${folioRef}</strong><br><span style="font-size:11px; color:#64748b;">${esApartado ? 'Apartado' : 'Crédito'}</span></td>
                         <td style="padding: 8px; font-weight: bold; color: #059669;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado || 0)}</td>
                         <td style="padding: 8px;">
                             <button onclick="revisarAbonoPendiente(${i})" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar 🔍</button>
                         </td>
                     </tr>
-                    `).join('')}
+                    `}).join('')}
                 </table>
             </div>
 
@@ -2895,7 +3308,8 @@ window.revisarVentaPendiente = function(index) {
     }
 
     // Determinar cuánto efectivo real entrará a caja/banco hoy
-    const importeEfectivoCaja = (metodoPago === "contado" || metodoPago === "transferencia") ? totalVenta : engancheActual;
+    const engancheYaRegistrado = v.datosVenta?.engancheYaRegistrado === true;
+    const importeEfectivoCaja = engancheYaRegistrado ? 0 : ((metodoPago === "contado" || metodoPago === "transferencia") ? totalVenta : engancheActual);
 
     // Construir tabla de productos del carrito provisional
     const articulos = v.datosVenta?.articulos || [];
@@ -2949,9 +3363,10 @@ window.revisarVentaPendiente = function(index) {
             </div>
 
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:10px; border-radius:8px; margin-bottom:15px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
-                <span style="color:#166534; font-weight:bold;">💵 Importe neto que ingresa a Caja:</span>
+                <span style="color:#166534; font-weight:bold;">💵 ${engancheYaRegistrado ? 'Importe a caja al autorizar:' : 'Importe neto que ingresa a Caja:'}</span>
                 <strong style="color:#15803d; font-size:15px;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(importeEfectivoCaja)}</strong>
             </div>
+            ${engancheYaRegistrado ? '<div style="margin-top:-8px; margin-bottom:15px; font-size:12px; color:#64748b;">Los anticipos ya fueron registrados durante el apartado; aquí sólo se formaliza la cartera.</div>' : ''}
             
             <label style="display:block; font-weight:bold; font-size:12px; color:#475569;">📅 Fecha de Aplicación Oficial:</label>
             <input type="date" id="authFechaVenta" value="${fechaCorta}" style="width:100%; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box; margin-bottom:20px;">
@@ -3065,15 +3480,691 @@ window.aprobarVentaCuarentena = function(index) {
     
     alert("✅ Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    if (typeof renderApartados === 'function') renderApartados();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
 };
 
 window.rechazarVentaCuarentena = function(index) {
     if (!confirm("¿Deseas eliminar permanentemente esta venta provisional sin afectar el inventario ni la caja?")) return;
     const ventasP = StorageService.get("ventasPendientes", []);
+    const v = ventasP[index];
+    if (v && (v.tipo === "conversion_apartado_credito" || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio)) {
+        const folioApartado = v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio || v.args?.[5];
+        const apartados = StorageService.get("apartados", []);
+        const idxApartado = apartados.findIndex(a => a.folio === folioApartado);
+        if (idxApartado !== -1 && apartados[idxApartado].estado === "Conversión a Crédito Pendiente") {
+            apartados[idxApartado].estado = "Pendiente";
+            StorageService.set("apartados", apartados);
+        }
+    }
     ventasP.splice(index, 1);
     StorageService.set("ventasPendientes", ventasP);
     document.querySelector('[data-modal=auth-venta]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    if (typeof renderApartados === 'function') renderApartados();
+};
+
+// =====================================================================
+// ⛔ CENTRO DE CANCELACIONES
+// =====================================================================
+window._cancelacionTipo = window._cancelacionTipo || 'venta';
+
+function _cancelEsc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function _cancelDinero(v) {
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
+}
+
+function _cancelIsoAhora() {
+    return window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+}
+
+function _cancelSelectorCuenta(id) {
+    return window._buildSelectorCuentas
+        ? window._buildSelectorCuentas(id, false)
+        : `<select id="${id}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo</option></select>`;
+}
+
+function _cancelCuentaSeleccionada(id) {
+    const sel = document.getElementById(id);
+    return {
+        cuentaId: sel?.value || 'efectivo',
+        etiqueta: sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].text : 'Efectivo'
+    };
+}
+
+function _cancelTotalPagadoVenta(folio, venta = null, pendiente = null) {
+    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
+    if (cxc) return (Number(cxc.engancheRecibido || cxc.enganche || 0) + (cxc.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0));
+    if (ap) return (Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0));
+    if (pendiente) {
+        const metodo = pendiente.args?.[0] || pendiente.datosVenta?.metodo;
+        const total = Number(pendiente.args?.[1] || pendiente.totalVenta || pendiente.datosVenta?.total || 0);
+        const enganche = Number(pendiente.args?.[2] || pendiente.datosVenta?.enganche || 0);
+        return (metodo === 'contado' || metodo === 'transferencia') ? total : enganche;
+    }
+    const metodo = venta?.metodoPago || venta?.metodo;
+    if (metodo === 'contado' || metodo === 'transferencia') return Number(venta?.total || 0);
+    return Number(venta?.enganche || 0);
+}
+
+function _cancelInfoDineroVenta(folio, venta = null, pendiente = null) {
+    const movimientos = StorageService.get("movimientosCaja", [])
+        .filter(m => String(m.tipo || '').toLowerCase() === 'ingreso')
+        .filter(m => String(m.referencia || '').includes(folio) || String(m.folio || '') === String(folio));
+    if (movimientos.length > 0) {
+        return {
+            monto: movimientos.reduce((s, m) => s + Number(m.monto || 0), 0),
+            cuentas: [...new Set(movimientos.map(m => m.etiquetaCuenta || m.cuenta || 'Sin cuenta'))],
+            fuente: 'Movimientos de caja'
+        };
+    }
+
+    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    if (cxc) {
+        const partes = [];
+        if (Number(cxc.engancheRecibido || cxc.enganche || 0) > 0) partes.push({ monto: Number(cxc.engancheRecibido || cxc.enganche || 0), cuenta: 'Cuenta de venta/enganche' });
+        (cxc.abonos || []).forEach(a => partes.push({ monto: Number(a.monto || 0), cuenta: a.etiquetaCuenta || a.cuentaId || a.medioPago || 'Sin cuenta' }));
+        return {
+            monto: partes.reduce((s, p) => s + p.monto, 0),
+            cuentas: [...new Set(partes.map(p => p.cuenta))],
+            fuente: 'Crédito / abonos'
+        };
+    }
+
+    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
+    if (ap) {
+        const partes = [];
+        if (Number(ap.enganche || 0) > 0) partes.push({ monto: Number(ap.enganche || 0), cuenta: 'Cuenta de apartado inicial' });
+        (ap.abonos || []).forEach(a => partes.push({ monto: Number(a.monto || 0), cuenta: a.etiquetaCuenta || a.cuentaId || 'Sin cuenta' }));
+        return {
+            monto: partes.reduce((s, p) => s + p.monto, 0),
+            cuentas: [...new Set(partes.map(p => p.cuenta))],
+            fuente: 'Apartado / abonos'
+        };
+    }
+
+    const metodo = pendiente?.args?.[0] || pendiente?.datosVenta?.metodo || venta?.metodoPago || venta?.metodo;
+    const total = Number(pendiente?.args?.[1] || pendiente?.totalVenta || pendiente?.datosVenta?.total || venta?.total || 0);
+    const enganche = Number(pendiente?.args?.[2] || pendiente?.datosVenta?.enganche || venta?.enganche || 0);
+    const monto = (metodo === 'contado' || metodo === 'transferencia') ? total : enganche;
+    return {
+        monto,
+        cuentas: [pendiente?.datosVenta?.etiquetaCuenta || window._estadoPago?.etiquetaCuenta || 'Pendiente de autorización / caja no oficial'],
+        fuente: pendiente ? 'Venta en cuarentena' : 'Venta'
+    };
+}
+
+function _cancelContextoVentaHTML(folio, venta = null, pendiente = null) {
+    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
+    const datos = pendiente?.datosVenta || {};
+    const metodo = venta?.metodoPago || venta?.metodo || cxc?.metodo || (ap ? 'apartado' : '') || pendiente?.args?.[0] || datos.metodo || '-';
+    const total = Number(venta?.total || cxc?.totalContadoOriginal || ap?.importeApartado || pendiente?.totalVenta || pendiente?.args?.[1] || datos.total || 0);
+    const enganche = Number(venta?.enganche || cxc?.engancheRecibido || ap?.enganche || pendiente?.args?.[2] || datos.enganche || 0);
+    const saldo = Number(venta?.saldoAFinanciar || cxc?.saldoActual || ap?.saldoPendiente || pendiente?.args?.[3] || datos.saldoPendiente || 0);
+    const plan = venta?.plan || cxc?.plan || pendiente?.args?.[4] || datos.plan || null;
+    const periodicidad = venta?.periodicidad || cxc?.periodicidad || datos.periodicidad || 'semanal';
+    const articulos = venta?.articulos || cxc?.articulos || ap?.articulos || datos.articulos || [];
+    const dinero = _cancelInfoDineroVenta(folio, venta, pendiente);
+    const docsEntrega = StorageService.get("documentosEntrega", []).filter(d => d.folioVenta === folio && d.estado !== 'Cancelado');
+
+    const plazoTexto = metodo === 'credito'
+        ? `${plan?.meses || plan?.plazo || '-'} meses / ${plan?.pagos || '-'} pagos ${periodicidad}${plan?.abono ? ` de ${_cancelDinero(plan.abono)}` : ''}`
+        : (metodo === 'apartado' ? `Apartado. Saldo pendiente: ${_cancelDinero(saldo)}` : 'No aplica');
+
+    const productosHTML = articulos.length
+        ? `<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;">
+            <thead><tr style="background:#f1f5f9;"><th style="text-align:left;padding:6px;">Producto</th><th style="text-align:center;padding:6px;">Cant.</th><th style="text-align:right;padding:6px;">Importe</th></tr></thead>
+            <tbody>${articulos.map(a => {
+                const cant = Number(a.cantidad || 1);
+                const precio = Number(a.precioContado || a.precio || 0);
+                return `<tr><td style="padding:6px;border-bottom:1px solid #e5e7eb;">${_cancelEsc(a.nombre || '-')} ${a.colorElegido ? `<br><small>Color: ${_cancelEsc(a.colorElegido)}</small>` : ''}</td><td style="padding:6px;text-align:center;border-bottom:1px solid #e5e7eb;">${cant}</td><td style="padding:6px;text-align:right;border-bottom:1px solid #e5e7eb;">${_cancelDinero(precio * cant)}</td></tr>`;
+            }).join('')}</tbody>
+        </table>`
+        : '<div style="color:#94a3b8;font-size:12px;">Sin detalle de productos.</div>';
+
+    return `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+            <div><span style="color:#64748b;">Importe total venta:</span><br><b>${_cancelDinero(total)}</b></div>
+            <div><span style="color:#64748b;">Método:</span><br><b>${_cancelEsc(metodo)}</b></div>
+            <div><span style="color:#64748b;">Dinero recibido:</span><br><b style="color:#059669;">${_cancelDinero(dinero.monto)}</b></div>
+            <div><span style="color:#64748b;">Recibido en:</span><br><b>${_cancelEsc(dinero.cuentas.join(', ') || '-')}</b><br><small>${_cancelEsc(dinero.fuente)}</small></div>
+            <div><span style="color:#64748b;">Enganche/anticipo:</span><br><b>${_cancelDinero(enganche)}</b></div>
+            <div><span style="color:#64748b;">Plazo:</span><br><b>${_cancelEsc(plazoTexto)}</b></div>
+        </div>
+        <div style="margin-top:10px;"><b>Producto vendido</b>${productosHTML}</div>
+        <div style="margin-top:10px;color:${docsEntrega.length ? '#b91c1c' : '#64748b'};"><b>Entregas emitidas:</b> ${docsEntrega.length}</div>
+    `;
+}
+
+function _cancelRegistrarHistorial(registro) {
+    const historial = StorageService.get("historialCancelaciones", []);
+    historial.push({
+        id: Date.now() + Math.random(),
+        fecha: _cancelIsoAhora(),
+        usuario: (() => {
+            try { return JSON.parse(sessionStorage.getItem('sesionActiva') || '{}')?.nombre || ''; }
+            catch { return ''; }
+        })(),
+        ...registro
+    });
+    StorageService.set("historialCancelaciones", historial);
+}
+
+function _cancelTieneIngresoCaja(folio) {
+    return StorageService.get("movimientosCaja", []).some(m =>
+        String(m.tipo || '').toLowerCase() === 'ingreso' &&
+        (String(m.referencia || '').includes(folio) || String(m.folio || '') === String(folio))
+    );
+}
+
+function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, referencia, clienteNombre, tipo, motivo, emitirComprobante, registrarMovimiento = true }) {
+    if (Number(monto || 0) <= 0) return;
+
+    if (registrarMovimiento) {
+        if (typeof window._egresarCuenta === 'function') {
+            window._egresarCuenta({ monto, cuentaId, etiqueta, concepto, referencia, fecha: _cancelIsoAhora() });
+        } else {
+            const movs = StorageService.get("movimientosCaja", []);
+            movs.push({
+                id: Date.now() + Math.random(),
+                tipo: "egreso",
+                concepto,
+                monto,
+                fecha: _cancelIsoAhora(),
+                cuenta: cuentaId,
+                etiquetaCuenta: etiqueta,
+                medioPago: String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo' ? 'efectivo' : 'transferencia',
+                referencia
+            });
+            StorageService.set("movimientosCaja", movs);
+        }
+    }
+
+    if (emitirComprobante) {
+        generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta: etiqueta, motivo });
+    }
+}
+
+function _cancelReingresarInventarioPorVenta(folio, motivo) {
+    const productosActuales = StorageService.get("productos", []);
+    const movimientosInv = StorageService.get("movimientosInventario", []);
+    const docs = StorageService.get("documentosEntrega", []);
+    const docsActivos = docs.filter(d => d.folioVenta === folio && d.estado !== 'Cancelado');
+    let articulos = [];
+
+    docsActivos.forEach(d => {
+        (d.articulos || []).forEach(a => articulos.push({
+            productoId: a.productoId || a.id,
+            nombre: a.nombre,
+            cantidad: Number(a.cantidad || 1),
+            color: a.colorElegido || a.color || 'General',
+            ubicacion: a.ubicacionElegida || a.ubicacion || 'General'
+        }));
+        d.estado = 'Cancelado';
+        d.fechaCancelacion = _cancelIsoAhora();
+        d.motivoCancelacion = motivo || 'Cancelación de venta';
+    });
+
+    if (articulos.length === 0) {
+        movimientosInv
+            .filter(m => m.tipo === 'salida' && String(m.concepto || '').includes(folio) && !m.reversadoCancelacion)
+            .forEach(m => {
+                const prod = productosActuales.find(p => String(p.id) === String(m.productoId));
+                articulos.push({
+                    productoId: m.productoId,
+                    nombre: prod?.nombre || m.productoId,
+                    cantidad: Number(m.cantidad || 0),
+                    color: 'General',
+                    ubicacion: 'General'
+                });
+                m.reversadoCancelacion = true;
+            });
+    }
+
+    articulos.forEach(a => {
+        if (!a.productoId || !a.cantidad) return;
+        const p = productosActuales.find(prod => String(prod.id) === String(a.productoId));
+        if (!p) return;
+        p.stock = (Number(p.stock) || 0) + Number(a.cantidad || 0);
+        if (!Array.isArray(p.variantes)) p.variantes = [];
+        const color = a.color || 'General';
+        const ubicacion = a.ubicacion || 'General';
+        let variante = p.variantes.find(v =>
+            String(v.color || 'General').toUpperCase() === String(color).toUpperCase() &&
+            String(v.ubicacion || 'General').toUpperCase() === String(ubicacion).toUpperCase()
+        );
+        if (variante) variante.stock = (Number(variante.stock) || 0) + Number(a.cantidad || 0);
+        else p.variantes.push({ color, ubicacion, stock: Number(a.cantidad || 0) });
+
+        movimientosInv.push({
+            id: Date.now() + Math.random(),
+            productoId: a.productoId,
+            tipo: 'entrada',
+            cantidad: Number(a.cantidad || 0),
+            concepto: `Reingreso por cancelación - Folio ${folio}`,
+            fecha: window.formatearFechaMX ? window.formatearFechaMX(new Date()) : _cancelIsoAhora(),
+            referencia: `CANCEL-${folio}`
+        });
+    });
+
+    StorageService.set("productos", productosActuales);
+    productos = productosActuales;
+    window.productos = productosActuales;
+    StorageService.set("movimientosInventario", movimientosInv);
+    StorageService.set("documentosEntrega", docs);
+    return articulos;
+}
+
+function _cancelRecalcularCredito(cuenta) {
+    let pagares = StorageService.get("pagaresSistema", []);
+    const totalAbonado = (cuenta.abonos || []).reduce((sum, a) => sum + Number(a.monto || 0), 0);
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    let deudaTotal = Number(cuenta.totalContadoOriginal || 0) - enganche;
+    if (cuenta.plan && cuenta.plan.total) deudaTotal = Number(cuenta.plan.total);
+    else if (cuenta.saldoOriginal) deudaTotal = Number(cuenta.saldoOriginal);
+
+    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado);
+    cuenta.estado = cuenta.saldoActual <= 0.01 ? "Saldado" : "Pendiente";
+    if (cuenta.saldoActual <= 0.01) cuenta.saldoActual = 0;
+
+    const pagaresFolio = pagares.filter(p => p.folio === cuenta.folio).sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    let bolsa = totalAbonado;
+    pagaresFolio.forEach(p => {
+        if (p.estado === 'Cancelado') return;
+        p.montoAbonado = 0;
+        p.fechaAbono = null;
+        p.estado = "Pendiente";
+        if (bolsa >= Number(p.monto || 0) - 0.01) {
+            p.estado = "Pagado";
+            p.montoAbonado = Number(p.monto || 0);
+            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1]?.fecha || _cancelIsoAhora();
+            bolsa -= Number(p.monto || 0);
+        } else if (bolsa > 0.01) {
+            p.estado = "Parcial";
+            p.montoAbonado = bolsa;
+            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1]?.fecha || _cancelIsoAhora();
+            bolsa = 0;
+        }
+    });
+    pagares = pagares.map(p => pagaresFolio.find(pf => pf.id === p.id) || p);
+    StorageService.set("pagaresSistema", pagares);
+}
+
+function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta, motivo }) {
+    const folioDoc = `DEV-${Date.now().toString().slice(-8)}`;
+    const fecha = window.formatearFechaMX ? window.formatearFechaMX(new Date()) : new Date().toLocaleString('es-MX');
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><style>
+        @page { size: 80mm auto; margin: 0; }
+        body { font-family:'Courier New', monospace; width:72mm; margin:4mm auto; color:#000; font-size:12px; line-height:1.3; }
+        .centro{text-align:center}.negrita{font-weight:bold}.sep{border-top:1px dashed #000;margin:8px 0}.no-print{background:#eee;padding:10px;text-align:center;margin-bottom:10px}
+        @media print{.no-print{display:none}}
+    </style></head><body>
+        <div class="no-print"><button onclick="window.print()" style="padding:10px 18px;font-weight:bold;">Imprimir comprobante</button></div>
+        <div class="centro">
+            <img src="img/Logo.svg" style="width:50px;height:50px;object-fit:contain;" onerror="this.style.display='none'">
+            <div class="negrita" style="font-size:15px;">MUEBLERÍA MI PUEBLITO</div>
+            <div class="negrita">COMPROBANTE DE DEVOLUCIÓN</div>
+            <div>${_cancelEsc(folioDoc)}</div>
+        </div>
+        <div class="sep"></div>
+        <div>Fecha: <b>${_cancelEsc(fecha)}</b></div>
+        <div>Tipo: <b>${_cancelEsc(tipo)}</b></div>
+        <div>Referencia: <b>${_cancelEsc(referencia)}</b></div>
+        <div>Cliente: <b>${_cancelEsc(clienteNombre || 'Público General')}</b></div>
+        <div class="sep"></div>
+        <div class="centro">
+            <div>MONTO DEVUELTO</div>
+            <div class="negrita" style="font-size:24px;">${_cancelDinero(monto)}</div>
+            <div style="font-size:10px;">Cuenta: ${_cancelEsc(cuenta)}</div>
+        </div>
+        <div class="sep"></div>
+        <div style="font-size:10px;text-align:justify;">Motivo: ${_cancelEsc(motivo || 'Cancelación autorizada')}</div>
+        <div style="margin-top:32px;text-align:center;">
+            <div style="border-top:1px solid #000;width:80%;margin:0 auto;"></div>
+            <div class="negrita" style="font-size:10px;">FIRMA DE RECIBIDO DEL CLIENTE</div>
+        </div>
+        <div class="centro" style="margin-top:18px;font-size:9px;">Documento de reversa administrativa</div>
+    </body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) return alert("El comprobante se generó, pero el navegador bloqueó la ventana emergente.");
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+}
+
+function renderCancelaciones(tipo = window._cancelacionTipo || 'venta') {
+    window._cancelacionTipo = tipo;
+    const cont = document.getElementById('contenidoCancelaciones');
+    if (!cont) return;
+    const filtro = (document.getElementById('cancelFiltro')?.value || '').trim().toLowerCase();
+    const btn = (id, label, color) => `<button onclick="renderCancelaciones('${id}')" style="padding:12px 16px;border:none;border-radius:8px;font-weight:bold;cursor:pointer;background:${tipo === id ? color : '#f1f5f9'};color:${tipo === id ? 'white' : '#475569'};">${label}</button>`;
+
+    cont.innerHTML = `
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:18px;box-shadow:0 4px 12px rgba(15,23,42,0.05);">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+                ${btn('venta', 'Cancelar venta', '#dc2626')}
+                ${btn('abono', 'Cancelar abono', '#b45309')}
+                ${btn('apartado', 'Cancelar apartado', '#7c3aed')}
+            </div>
+            <input id="cancelFiltro" value="${_cancelEsc(filtro)}" oninput="renderCancelaciones('${tipo}')" placeholder="Buscar por folio o cliente..." style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;margin-bottom:16px;">
+            <div id="cancelResultados">${_renderCancelacionesResultados(tipo, filtro)}</div>
+        </div>`;
+}
+
+function _renderCancelacionesResultados(tipo, filtro) {
+    if (tipo === 'venta') return _renderCancelacionesVentas(filtro);
+    if (tipo === 'abono') return _renderCancelacionesAbonos(filtro);
+    return _renderCancelacionesApartados(filtro);
+}
+
+function _renderCancelacionesVentas(filtro) {
+    const ventas = StorageService.get("ventasRegistradas", []).filter(v => v.estado !== 'Cancelada' && v.estatus !== 'Cancelada').map(v => ({ ...v, _origenCancel: 'registrada' }));
+    const pendientes = StorageService.get("ventasPendientes", []).map((v, idx) => ({
+        folio: v.datosVenta?.folio || v.args?.[5],
+        clienteNombre: v.clienteNombre || v.datosVenta?.cliente?.nombre,
+        fechaVenta: v.datosVenta?.fechaIso || v.args?.[7],
+        total: v.totalVenta || v.args?.[1],
+        metodoPago: v.args?.[0] || v.datosVenta?.metodo,
+        _origenCancel: 'cuarentena',
+        _pendienteIndex: idx
+    }));
+    const filas = [...ventas, ...pendientes]
+        .filter(v => {
+            const txt = `${v.folio || ''} ${v.clienteNombre || v.cliente?.nombre || ''}`.toLowerCase();
+            return !filtro || txt.includes(filtro);
+        })
+        .slice()
+        .sort((a,b) => new Date(b.fechaVenta || b.fechaIso || 0) - new Date(a.fechaVenta || a.fechaIso || 0));
+    if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin ventas para cancelar.</div>';
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Origen</th><th>Acción</th></tr></thead><tbody>${filas.map(v => `
+        <tr>
+            <td><b>${_cancelEsc(v.folio)}</b></td>
+            <td>${_cancelEsc(v.clienteNombre || v.cliente?.nombre || 'Público General')}</td>
+            <td>${_cancelEsc(v.metodoPago || v.metodo || '-')}</td>
+            <td>${_cancelDinero(v.total || v.totalVenta || 0)}</td>
+            <td>${v._origenCancel === 'cuarentena' ? 'Cuarentena' : 'Registrada'}</td>
+            <td><button onclick="abrirModalCancelarVenta('${_cancelEsc(v.folio)}', '${v._origenCancel}', ${v._pendienteIndex ?? -1})" style="padding:7px 12px;background:#dc2626;color:white;border:none;border-radius:6px;font-weight:bold;cursor:pointer;">Cancelar</button></td>
+        </tr>`).join('')}</tbody></table></div>`;
+}
+
+function _renderCancelacionesAbonos(filtro) {
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const apartados = StorageService.get("apartados", []);
+    const filas = [];
+    cxc.forEach(c => (c.abonos || []).forEach((ab, idx) => {
+        if (ab.cancelado) return;
+        filas.push({ origen: 'credito', folio: c.folio, cliente: c.nombre || c.clienteNombre, fecha: ab.fecha || ab.fechaAbono, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago, idx });
+    }));
+    apartados.forEach(a => (a.abonos || []).forEach((ab, idx) => {
+        if (ab.cancelado) return;
+        filas.push({ origen: 'apartado', folio: a.folio, cliente: a.clienteNombre, fecha: ab.fechaAbono || ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.cuentaId, idx });
+    }));
+    const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
+    if (!filtradas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin abonos para cancelar.</div>';
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead><tbody>${filtradas.map(a => `
+        <tr>
+            <td><b>${_cancelEsc(a.folio)}</b></td>
+            <td>${_cancelEsc(a.cliente)}</td>
+            <td>${a.origen === 'credito' ? 'Crédito' : 'Apartado'}</td>
+            <td>${a.fecha ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : String(a.fecha).slice(0,10)) : '-'}</td>
+            <td>${_cancelDinero(a.monto)}</td>
+            <td>${_cancelEsc(a.cuenta || '-')}</td>
+            <td><button onclick="abrirModalCancelarAbono('${a.origen}', '${_cancelEsc(a.folio)}', ${a.idx})" style="padding:7px 12px;background:#b45309;color:white;border:none;border-radius:6px;font-weight:bold;cursor:pointer;">Cancelar</button></td>
+        </tr>`).join('')}</tbody></table></div>`;
+}
+
+function _renderCancelacionesApartados(filtro) {
+    const apartados = StorageService.get("apartados", []).filter(a => a.estado !== 'Cancelado');
+    const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fechaApartado || 0) - new Date(a.fechaApartado || 0));
+    if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin apartados para cancelar.</div>';
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Total</th><th>Pagado</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${filas.map(a => {
+        const pagado = Number(a.enganche || 0) + (a.abonos || []).reduce((s, ab) => s + Number(ab.monto || 0), 0);
+        return `<tr>
+            <td><b>${_cancelEsc(a.folio)}</b></td>
+            <td>${_cancelEsc(a.clienteNombre)}</td>
+            <td>${_cancelDinero(a.importeApartado || a.total || 0)}</td>
+            <td>${_cancelDinero(pagado)}</td>
+            <td>${_cancelEsc(a.estado || 'Pendiente')}</td>
+            <td><button onclick="abrirModalCancelarApartado('${_cancelEsc(a.folio)}')" style="padding:7px 12px;background:#7c3aed;color:white;border:none;border-radius:6px;font-weight:bold;cursor:pointer;">Cancelar</button></td>
+        </tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function _modalCancelacion({ titulo, resumen, monto, onConfirm }) {
+    document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
+    const html = `
+    <div data-modal="cancelacion-modal" style="position:fixed;inset:0;background:rgba(15,23,42,0.82);z-index:10000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+        <div style="background:white;border-radius:14px;width:100%;max-width:560px;padding:24px;box-shadow:0 25px 60px rgba(0,0,0,0.35);">
+            <h2 style="margin:0 0 8px;color:#b91c1c;">${titulo}</h2>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin:14px 0;font-size:13px;">${resumen}</div>
+            ${monto > 0 ? `
+                <div style="background:#fff1f2;border:1px solid #fecaca;border-radius:10px;padding:14px;margin-bottom:14px;">
+                    <b style="color:#991b1b;">Dinero a devolver: ${_cancelDinero(monto)}</b>
+                    <label style="display:block;font-size:11px;font-weight:bold;color:#7f1d1d;margin-top:12px;">Cuenta de donde saldrá la devolución</label>
+                    ${_cancelSelectorCuenta('cancelCuentaReembolso')}
+                    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:#7f1d1d;">
+                        <input type="checkbox" id="cancelEmitirComprobante" checked>
+                        Emitir comprobante de devolución
+                    </label>
+                </div>` : ''}
+            <label style="font-size:12px;font-weight:bold;color:#475569;">Motivo de cancelación</label>
+            <textarea id="cancelMotivo" style="width:100%;min-height:74px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;margin-top:5px;"></textarea>
+            <div style="display:flex;gap:10px;margin-top:18px;">
+                <button onclick="${onConfirm}" style="flex:2;padding:13px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Confirmar cancelación</button>
+                <button onclick="document.querySelector('[data-modal=&quot;cancelacion-modal&quot;]')?.remove()" style="flex:1;padding:13px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cerrar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+window.abrirModalCancelarVenta = function(folio, origen, pendienteIndex = -1) {
+    const ventas = StorageService.get("ventasRegistradas", []);
+    const pendientes = StorageService.get("ventasPendientes", []);
+    const venta = origen === 'cuarentena' ? null : ventas.find(v => v.folio === folio);
+    const pendiente = origen === 'cuarentena' ? pendientes[pendienteIndex] : null;
+    const cliente = venta?.clienteNombre || venta?.cliente?.nombre || pendiente?.clienteNombre || pendiente?.datosVenta?.cliente?.nombre || 'Público General';
+    const monto = _cancelTotalPagadoVenta(folio, venta, pendiente);
+    const docsEntrega = StorageService.get("documentosEntrega", []).filter(d => d.folioVenta === folio && d.estado !== 'Cancelado').length;
+    window._cancelacionActual = { tipo: 'venta', folio, origen, pendienteIndex, monto, cliente };
+    _modalCancelacion({
+        titulo: `Cancelar venta ${_cancelEsc(folio)}`,
+        monto,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'Bóveda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirá cartera, pagarés, caja y mercancía entregada.</div>`,
+        onConfirm: "ejecutarCancelacionVenta()"
+    });
+};
+
+window.ejecutarCancelacionVenta = function() {
+    const ctx = window._cancelacionActual;
+    if (!ctx || ctx.tipo !== 'venta') return;
+    const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de venta';
+    const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
+    const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
+
+    const ventas = StorageService.get("ventasRegistradas", []);
+    const vIdx = ventas.findIndex(v => v.folio === ctx.folio);
+    if (vIdx >= 0) {
+        ventas[vIdx].estado = 'Cancelada';
+        ventas[vIdx].estatus = 'Cancelada';
+        ventas[vIdx].fechaCancelacion = _cancelIsoAhora();
+        ventas[vIdx].motivoCancelacion = motivo;
+        StorageService.set("ventasRegistradas", ventas);
+    }
+
+    const pendientes = StorageService.get("ventasPendientes", []);
+    const pendientesRestantes = pendientes.filter((p, idx) => !(idx === ctx.pendienteIndex || p.datosVenta?.folio === ctx.folio || p.args?.[5] === ctx.folio));
+    StorageService.set("ventasPendientes", pendientesRestantes);
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cIdx = cuentas.findIndex(c => c.folio === ctx.folio);
+    if (cIdx >= 0) {
+        cuentas[cIdx].estado = 'Cancelado';
+        cuentas[cIdx].saldoActual = 0;
+        cuentas[cIdx].fechaCancelacion = _cancelIsoAhora();
+        cuentas[cIdx].motivoCancelacion = motivo;
+        (cuentas[cIdx].abonos || []).forEach(a => a.canceladoPorVenta = true);
+        StorageService.set("cuentasPorCobrar", cuentas);
+    }
+
+    const apartados = StorageService.get("apartados", []);
+    const aIdx = apartados.findIndex(a => a.folio === ctx.folio);
+    if (aIdx >= 0) {
+        apartados[aIdx].estado = 'Cancelado';
+        apartados[aIdx].fechaCancelacion = _cancelIsoAhora();
+        apartados[aIdx].motivoCancelacion = motivo;
+        StorageService.set("apartados", apartados);
+    }
+
+    let pagares = StorageService.get("pagaresSistema", []);
+    pagares = pagares.map(p => p.folio === ctx.folio ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelación de venta' } : p);
+    StorageService.set("pagaresSistema", pagares);
+
+    const salidas = StorageService.get("salidasPendientesVenta", []).map(s => s.folioVenta === ctx.folio ? { ...s, estatus: 'Cancelado', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : s);
+    StorageService.set("salidasPendientesVenta", salidas);
+    const reqs = StorageService.get("requisicionesCompra", []).map(r => r.folioVenta === ctx.folio ? { ...r, estatus: 'Cancelada', motivoCancelacion: motivo } : r);
+    StorageService.set("requisicionesCompra", reqs);
+
+    const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo);
+    const registrarMovimientoReembolso = ctx.origen !== 'cuarentena' || _cancelTieneIngresoCaja(ctx.folio);
+    _cancelRegistrarReembolso({
+        monto: ctx.monto,
+        cuentaId: cuenta.cuentaId,
+        etiqueta: cuenta.etiqueta,
+        concepto: `Devolución por cancelación de venta ${ctx.folio}`,
+        referencia: `CANCEL-VENTA-${ctx.folio}`,
+        clienteNombre: ctx.cliente,
+        tipo: 'Cancelación de venta',
+        motivo,
+        emitirComprobante: emitir,
+        registrarMovimiento: registrarMovimientoReembolso
+    });
+    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: registrarMovimientoReembolso, motivo, articulosReingresados });
+
+    document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
+    alert("✅ Venta cancelada. Se aplicaron reversas de caja, cartera, pagarés e inventario entregado.");
+    renderCancelaciones('venta');
+};
+
+window.abrirModalCancelarAbono = function(origen, folio, index) {
+    const cuenta = origen === 'credito'
+        ? StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio)
+        : StorageService.get("apartados", []).find(a => a.folio === folio);
+    const abono = cuenta?.abonos?.[index];
+    if (!cuenta || !abono) return alert("No se encontró el abono.");
+    const cliente = cuenta.nombre || cuenta.clienteNombre || 'Cliente';
+    const monto = Number(abono.monto || 0);
+    window._cancelacionActual = { tipo: 'abono', origen, folio, index, monto, cliente };
+    _modalCancelacion({
+        titulo: `Cancelar abono ${_cancelEsc(folio)}`,
+        monto,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'credito' ? 'Crédito' : 'Apartado'}<br><b>Importe:</b> ${_cancelDinero(monto)}<br>Se retirará del historial del cliente y se recalcularán saldos.`,
+        onConfirm: "ejecutarCancelacionAbono()"
+    });
+};
+
+window.ejecutarCancelacionAbono = function() {
+    const ctx = window._cancelacionActual;
+    if (!ctx || ctx.tipo !== 'abono') return;
+    const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de abono';
+    const cuentaReembolso = _cancelCuentaSeleccionada('cancelCuentaReembolso');
+    const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
+
+    if (ctx.origen === 'credito') {
+        const cuentas = StorageService.get("cuentasPorCobrar", []);
+        const cuenta = cuentas.find(c => c.folio === ctx.folio);
+        if (!cuenta || !cuenta.abonos?.[ctx.index]) return alert("El abono ya no existe.");
+        const abono = cuenta.abonos.splice(ctx.index, 1)[0];
+        _cancelRecalcularCredito(cuenta);
+        StorageService.set("cuentasPorCobrar", cuentas);
+        ctx.monto = Number(abono.monto || ctx.monto || 0);
+        ctx.cliente = cuenta.nombre || cuenta.clienteNombre || ctx.cliente;
+    } else {
+        const apartados = StorageService.get("apartados", []);
+        const ap = apartados.find(a => a.folio === ctx.folio);
+        if (!ap || !ap.abonos?.[ctx.index]) return alert("El abono ya no existe.");
+        const abono = ap.abonos.splice(ctx.index, 1)[0];
+        ctx.monto = Number(abono.monto || ctx.monto || 0);
+        ap.saldoPendiente = Number(ap.saldoPendiente || 0) + ctx.monto;
+        if (ap.estado === 'Liquidado') ap.estado = 'Pendiente';
+        ctx.cliente = ap.clienteNombre || ctx.cliente;
+        StorageService.set("apartados", apartados);
+    }
+
+    _cancelRegistrarReembolso({
+        monto: ctx.monto,
+        cuentaId: cuentaReembolso.cuentaId,
+        etiqueta: cuentaReembolso.etiqueta,
+        concepto: `Devolución por cancelación de abono ${ctx.folio}`,
+        referencia: `CANCEL-ABONO-${ctx.folio}`,
+        clienteNombre: ctx.cliente,
+        tipo: 'Cancelación de abono',
+        motivo,
+        emitirComprobante: emitir
+    });
+    _cancelRegistrarHistorial({ tipo: 'abono', origen: ctx.origen, folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, motivo });
+    document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
+    alert("✅ Abono cancelado y saldos recalculados.");
+    renderCancelaciones('abono');
+};
+
+window.abrirModalCancelarApartado = function(folio) {
+    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
+    if (!ap) return alert("No se encontró el apartado.");
+    const monto = Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
+    window._cancelacionActual = { tipo: 'apartado', folio, monto, cliente: ap.clienteNombre || 'Cliente' };
+    _modalCancelacion({
+        titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
+        monto,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelará el apartado y cualquier crédito generado desde él.`,
+        onConfirm: "ejecutarCancelacionApartado()"
+    });
+};
+
+window.ejecutarCancelacionApartado = function() {
+    const ctx = window._cancelacionActual;
+    if (!ctx || ctx.tipo !== 'apartado') return;
+    const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de apartado';
+    const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
+    const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
+
+    const apartados = StorageService.get("apartados", []);
+    const idx = apartados.findIndex(a => a.folio === ctx.folio);
+    if (idx === -1) return alert("El apartado ya no existe.");
+    const ap = apartados[idx];
+    ap.estado = 'Cancelado';
+    ap.fechaCancelacion = _cancelIsoAhora();
+    ap.motivoCancelacion = motivo;
+    StorageService.set("apartados", apartados);
+
+    const ventas = StorageService.get("ventasRegistradas", []).map(v => v.folio === ctx.folio ? { ...v, estado: 'Cancelada', estatus: 'Cancelada', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : v);
+    StorageService.set("ventasRegistradas", ventas);
+    const cuentas = StorageService.get("cuentasPorCobrar", []).map(c => c.folio === ctx.folio ? { ...c, estado: 'Cancelado', saldoActual: 0, motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : c);
+    StorageService.set("cuentasPorCobrar", cuentas);
+    const pagares = StorageService.get("pagaresSistema", []).map(p => p.folio === ctx.folio ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelación de apartado' } : p);
+    StorageService.set("pagaresSistema", pagares);
+
+    _cancelRegistrarReembolso({
+        monto: ctx.monto,
+        cuentaId: cuenta.cuentaId,
+        etiqueta: cuenta.etiqueta,
+        concepto: `Devolución por cancelación de apartado ${ctx.folio}`,
+        referencia: `CANCEL-APARTADO-${ctx.folio}`,
+        clienteNombre: ctx.cliente,
+        tipo: 'Cancelación de apartado',
+        motivo,
+        emitirComprobante: emitir
+    });
+    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, motivo });
+    document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
+    alert("✅ Apartado cancelado y reversado.");
+    renderCancelaciones('apartado');
 };
 
 // 3. DETALLE DE ABONOS PENDIENTES (MODAL)
@@ -3083,12 +4174,15 @@ window.revisarAbonoPendiente = function(index) {
     if (!a) return;
 
     const fechaCorta = a.fechaAbonoIso.split('T')[0];
+    const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
+    const folioRef = a.folioApartado || a.folioCXC || '-';
 
     const html = `
     <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
         <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
-            <h3 style="color:#059669; margin-top:0;">💵 Autorizar Abono Provisional</h3>
-            <p style="font-size:14px; margin: 6px 0;"><strong>Folio Crédito:</strong> ${a.folioCXC}</p>
+            <h3 style="color:#059669; margin-top:0;">💵 Autorizar Abono Provisional ${esApartado ? 'de Apartado' : 'de Crédito'}</h3>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Folio ${esApartado ? 'Apartado' : 'Crédito'}:</strong> ${folioRef}</p>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Cliente:</strong> ${a.clienteNombre || '-'}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
             
@@ -3116,7 +4210,8 @@ window.aprobarAbonoCuarentena = function(index) {
     a.fechaAbonoIso = nuevaFechaIso;
     a.fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta;
 
-    window.ejecutarAbonoAutorizadoReal(a);
+    const aplicado = window.ejecutarAbonoAutorizadoReal(a);
+    if (aplicado === false) return;
     
     abonosP.splice(index, 1);
     StorageService.set("abonosPendientes", abonosP);
@@ -3158,9 +4253,11 @@ window.cambiarUbicacionInventario = cambiarUbicacionInventario;
 window.mostrarDialogoInventario = mostrarDialogoInventario;
 window.abrirDetalleEntrega = abrirDetalleEntrega;
 window.renderEntregas = renderEntregas;
+window.generarValeEntrega = generarValeEntrega;
+window.renderCancelaciones = renderCancelaciones;
 window.procesarMigracionMSI_POS = procesarMigracionMSI_POS;
 window.procesarMigracionCXC_POS = procesarMigracionCXC_POS;
 window.procesarMigracionCXP_POS = procesarMigracionCXP_POS;
-window.renderReimprimirVenta = renderReimprimirVenta;
+window.renderReimprimirVenta = window.renderReimprimirVenta || renderReimprimirVenta;
 window.reimprimirTicketVenta = reimprimirTicketVenta;
-window.limpiarFiltrosReimpresion = limpiarFiltrosReimpresion;
+window.limpiarFiltrosReimpresion = window.limpiarFiltrosReimpresion || limpiarFiltrosReimpresion;

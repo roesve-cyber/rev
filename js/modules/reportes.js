@@ -111,7 +111,7 @@ window.renderReporteCompras = function() {
             <h3 style="margin:0; color:#1e293b;">📦 Historial de Abastecimiento (Compras)</h3>
             <button onclick="exportarReporteCompras()" style="padding:8px 16px; background:#0f766e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">📊 Exportar CSV</button>
         </div>
-        <div style="margin-bottom:25px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:25px;">
             ${_kpiCard("Total de Inversión Registrada", fmt(totalInvertido), "#0f766e", "🏭")}
         </div>
         <div style="overflow-x:auto;">
@@ -205,18 +205,12 @@ window.renderReporteCompromisos = function() {
 
     // 📤 EGRESOS CXP (Excluye consignaciones activas - solo CXP reales)
     // PROTECCIÓN: Consignaciones activas NUNCA aparecen como egresos hasta transferirse a CXP
-    const consignacionesIdSet = new Set();
-    StorageService.get("consignacionesActivas", []).forEach(c => {
-        if (c.compraId) consignacionesIdSet.add(c.compraId);
-    });
+    // Las consignaciones activas no se proyectan aqui; solo las CXP ya creadas al reportar venta.
     
     StorageService.get("cuentasPorPagar", []).forEach(cp => {
         const saldo = parseFloat(cp.saldoPendiente || 0);
-        // REGLA: Solo incluir si:
-        // - Tiene saldo pendiente AND
-        // - NO es una consignación activa sin transferencia (esConsignacion: false) AND
-        // - Si tiene compraId, verificar que no esté en consignacionesActivas
-        if (saldo > 0 && !cp.esConsignacion && !consignacionesIdSet.has(cp.compraId)) {
+        // Solo CXP reales: las consignaciones activas entran hasta reportarse vendidas.
+        if (saldo > 0 && !cp.esConsignacion) {
             const fVenc = window.parseFechaMX(cp.vencimientoIso || cp.vencimiento || cp.fecha);
             const keyMesCXP = `${fVenc.getFullYear()}-${fVenc.getMonth()}`;
             
@@ -292,16 +286,26 @@ window.renderReporteLiquidezCortoPlazo = function() {
 
     const hoy = new Date();
     
-    // 1. DINERO REAL (Cajas y Débito)
+    // 1. DINERO REAL (misma base que "Mis Cuentas")
     const saldos = {};
-    StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]).forEach(c => saldos[c.nombre||c.id] = parseFloat(c.saldo||0));
-    StorageService.get("tarjetasConfig", []).filter(t => t.tipo === "debito").forEach(t => saldos[t.banco] = parseFloat(t.saldoInicial||0));
-    
+    const cajasLiquidez = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "Efectivo Principal", saldo: 0 }]);
+    const debitoLiquidez = StorageService.get("tarjetasConfig", []).filter(t => String(t.tipo || '').toLowerCase() === "debito");
+
+    cajasLiquidez.forEach(c => {
+        const id = String(c.id || "efectivo");
+        saldos[id] = 0;
+    });
+
+    debitoLiquidez.forEach(t => {
+        const id = String(t.banco || t.id || "");
+        if (id) saldos[id] = parseFloat(t.saldoInicial) || 0;
+    });
     StorageService.get("movimientosCaja", []).forEach(m => {
-        const esIng = m.tipo.toLowerCase() === "ingreso";
+        const esIng = String(m.tipo || '').toLowerCase() === "ingreso";
         const amt = parseFloat(m.monto) || 0;
-        const cta = (m.cuenta === "efectivo" || m.cuenta === "caja") ? "💵 Efectivo Principal" : m.cuenta;
-        if(saldos[cta] !== undefined) saldos[cta] += (esIng ? amt : -amt);
+        const cuentaMov = String(m.cuenta || m.cuentaId || '');
+        const cta = (cuentaMov === "efectivo" || cuentaMov === "caja") ? "efectivo" : cuentaMov;
+        if (saldos[cta] !== undefined) saldos[cta] += (esIng ? amt : -amt);
     });
     const liquidezTotalInicial = Object.values(saldos).reduce((a, b) => a + b, 0);
 
@@ -455,6 +459,8 @@ window.renderReporteFlujo = function() {
     const cuentaFiltro = window._filtroFlujoCuenta || 'todas';
     const periodoAgrupar = window._filtroFlujoPeriodo || 'diario';
     const ordenBloques = window._filtroFlujoOrden || 'desc';
+    const ordenMovimientos = window._filtroFlujoOrdenMov || 'fecha_desc';
+    const vistaMovimientos = window._filtroFlujoVista || 'normal';
 
     const dineroFlujo = (v) => new Intl.NumberFormat('es-MX', {
         style: 'currency',
@@ -473,49 +479,68 @@ window.renderReporteFlujo = function() {
         return [];
     };
 
-    const normalizarCuentaId = (valor) => {
+    const escFlujo = (valor) => String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const fechaLargaFlujo = (fecha) => {
+        const d = fecha instanceof Date ? fecha : new Date(fecha);
+        if (isNaN(d.getTime())) return '';
+        return new Intl.DateTimeFormat('es-MX', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            timeZone: 'America/Mexico_City'
+        }).format(d).replace(/,/g, '');
+    };
+
+    const mesLargoFlujo = (fecha) => {
+        const d = fecha instanceof Date ? fecha : new Date(fecha);
+        if (isNaN(d.getTime())) return '';
+        return new Intl.DateTimeFormat('es-MX', {
+            month: 'long',
+            year: 'numeric',
+            timeZone: 'America/Mexico_City'
+        }).format(d);
+    };
+
+    const ordenarItemsFlujo = (items) => [...items].sort((a, b) => {
+        if (ordenMovimientos === 'importe_desc') return (Number(b.monto) || 0) - (Number(a.monto) || 0);
+        if (ordenMovimientos === 'importe_asc') return (Number(a.monto) || 0) - (Number(b.monto) || 0);
+        if (ordenMovimientos === 'nombre_asc') return String(a.concepto || '').localeCompare(String(b.concepto || ''), 'es-MX');
+        if (ordenMovimientos === 'nombre_desc') return String(b.concepto || '').localeCompare(String(a.concepto || ''), 'es-MX');
+        if (ordenMovimientos === 'fecha_asc') return new Date(a.fecha).getTime() - new Date(b.fecha).getTime();
+        return new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
+    });
+
+            const normalizarCuentaId = (valor) => {
         let c = String(valor || '').trim();
 
-        if (!c) return 'efectivo';
+        if (!c) return 'efectivo_default';
 
         const lower = c.toLowerCase();
 
+        // Solo mandamos a efectivo_default cuando viene vacío o genérico.
+        // NO fusionamos cajas reales con nombres distintos.
         if (
             lower === 'efectivo' ||
             lower === 'caja' ||
-            lower === 'cash' ||
-            lower.includes('efectivo principal') ||
-            lower.includes('caja principal')
+            lower === 'cash'
         ) {
-            return 'efectivo';
+            return 'efectivo_default';
         }
 
-        if (
-            lower === 'transferencia' ||
-            lower === 'banco' ||
-            lower.includes('transfer')
-        ) {
-            return 'transferencia';
-        }
-
-        if (
-            lower === 'tarjeta' ||
-            lower === 'terminal' ||
-            lower.includes('tarjeta') ||
-            lower.includes('terminal')
-        ) {
-            return 'tarjeta';
-        }
-
+        // Mantener nombres reales de cuentas: Caja Principal, Caja Chica, etc.
         return c;
     };
 
-    const nombreCuenta = (id) => {
+            const nombreCuenta = (id) => {
         const key = normalizarCuentaId(id);
 
-        if (key === 'efectivo') return '💵 Efectivo Principal';
-        if (key === 'transferencia') return '🏦 Transferencia / Banco';
-        if (key === 'tarjeta') return '💳 Tarjeta / Terminal';
+        if (key === 'efectivo_default') return '💵 Efectivo';
 
         return String(id || key);
     };
@@ -774,52 +799,101 @@ window.renderReporteFlujo = function() {
         return true;
     });
 
-    // ======================================================
-    // 5. ARMAR COMBO CUENTA
-    // Cuentas configuradas + cuentas detectadas en movimientos
+    movimientos = movimientos.map((m, idx) => ({
+        ...m,
+        _flujoId: `flujo_${idx}_${String(m.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`
+    }));
+
+        // ======================================================
+    // 5. ARMAR COMBO CUENTA POR BLOQUES
+    // Bloques permitidos:
+    // - Efectivo / cajas
+    // - Tarjetas débito
+    // - Tarjetas MSI / crédito
     // ======================================================
     const cajas = asegurarArray(StorageService.get("cuentasEfectivo", [
-        { id: "efectivo", nombre: "💵 Efectivo Principal" }
+        { id: "efectivo_default", nombre: "💵 Efectivo" }
     ]));
 
     const tarjetas = asegurarArray(StorageService.get("tarjetasConfig", []));
 
-    const mapaCuentas = new Map();
+    const bloqueEfectivo = new Map();
+    const bloqueDebito = new Map();
+    const bloqueMSI = new Map();
 
-    mapaCuentas.set('efectivo', '💵 Efectivo Principal');
-    mapaCuentas.set('transferencia', '🏦 Transferencia / Banco');
-    mapaCuentas.set('tarjeta', '💳 Tarjeta / Terminal');
+    // 1. Efectivo / cajas configuradas
+    if (cajas.length > 0) {
+        cajas.forEach((c, index) => {
+            const rawId = c.id || c.nombre || `efectivo_${index + 1}`;
+            const id = normalizarCuentaId(rawId);
+            const nombre = c.nombre || c.descripcion || rawId || `Caja ${index + 1}`;
 
-    cajas.forEach(c => {
-        const id = normalizarCuentaId(c.id || c.nombre || 'efectivo');
-        mapaCuentas.set(id, c.nombre || nombreCuenta(id));
-    });
+            bloqueEfectivo.set(id, `💵 ${nombre}`);
+        });
+    } else {
+        bloqueEfectivo.set('efectivo_default', '💵 Efectivo');
+    }
 
-    tarjetas.forEach(t => {
-        const id = normalizarCuentaId(t.id || t.banco || t.nombre);
+    // 2. Tarjetas configuradas
+    tarjetas.forEach((t, index) => {
+        const tipo = String(t.tipo || '').toLowerCase();
+        const banco = String(t.banco || t.nombre || t.id || '').trim();
 
-        if (t.tipo === 'debito') {
-            mapaCuentas.set(id, `🏦 ${t.banco || t.nombre || id}`);
-        } else if (t.tipo === 'credito') {
-            mapaCuentas.set(id, `💳 ${t.banco || t.nombre || id}`);
+        if (!banco) return;
+
+        const id = normalizarCuentaId(t.id || t.banco || t.nombre || `tarjeta_${index + 1}`);
+        const etiqueta = banco;
+
+        if (tipo === 'debito' || tipo === 'débito') {
+            bloqueDebito.set(id, `🏦 ${etiqueta}`);
+        }
+
+        if (
+            tipo === 'credito' ||
+            tipo === 'crédito' ||
+            tipo === 'msi'
+        ) {
+            bloqueMSI.set(id, `💳 ${etiqueta}`);
         }
     });
 
-    movimientos.forEach(m => {
-        const id = normalizarCuentaId(m.cuenta);
-        if (!mapaCuentas.has(id)) {
-            mapaCuentas.set(id, nombreCuenta(id));
+    const renderOpcionesCuenta = () => {
+        let html = `<option value="todas" ${cuentaFiltro === 'todas' ? 'selected' : ''}>🌍 Ver Todas</option>`;
+
+        if (bloqueEfectivo.size > 0) {
+            html += `<optgroup label="💵 EFECTIVO / CAJAS">`;
+            bloqueEfectivo.forEach((nombre, id) => {
+                html += `<option value="${id}" ${cuentaFiltro === String(id) ? 'selected' : ''}>${nombre}</option>`;
+            });
+            html += `</optgroup>`;
         }
-    });
 
-    const cuentasParaSelector = Array.from(mapaCuentas.entries()).map(([id, nombre]) => ({
-        id,
-        nombre
-    }));
+        if (bloqueDebito.size > 0) {
+            html += `<optgroup label="🏦 TARJETAS DÉBITO">`;
+            bloqueDebito.forEach((nombre, id) => {
+                html += `<option value="${id}" ${cuentaFiltro === String(id) ? 'selected' : ''}>${nombre}</option>`;
+            });
+            html += `</optgroup>`;
+        }
 
-    // Si el filtro actual ya no existe, regresar a todas
-    const cuentasIds = cuentasParaSelector.map(c => String(c.id));
-    if (cuentaFiltro !== 'todas' && !cuentasIds.includes(String(cuentaFiltro))) {
+        if (bloqueMSI.size > 0) {
+            html += `<optgroup label="💳 TARJETAS MSI / CRÉDITO">`;
+            bloqueMSI.forEach((nombre, id) => {
+                html += `<option value="${id}" ${cuentaFiltro === String(id) ? 'selected' : ''}>${nombre}</option>`;
+            });
+            html += `</optgroup>`;
+        }
+
+        return html;
+    };
+
+    const cuentasValidas = [
+        ...Array.from(bloqueEfectivo.keys()),
+        ...Array.from(bloqueDebito.keys()),
+        ...Array.from(bloqueMSI.keys())
+    ].map(String);
+
+    if (cuentaFiltro !== 'todas' && !cuentasValidas.includes(String(cuentaFiltro))) {
         window._filtroFlujoCuenta = 'todas';
     }
 
@@ -865,17 +939,17 @@ window.renderReporteFlujo = function() {
             : d.toLocaleDateString('es-MX');
 
         if (periodoAgrupar === 'diario') {
-            clave = fmtFecha;
+            clave = fechaLargaFlujo(d) || fmtFecha;
         } else if (periodoAgrupar === 'semanal') {
             const day = d.getDay();
             const diff = d.getDate() - day + (day === 0 ? -6 : 1);
             const lunes = new Date(new Date(d).setDate(diff));
             const domingo = new Date(new Date(lunes).setDate(lunes.getDate() + 6));
 
-            clave = `${lunes.getDate()}/${lunes.getMonth() + 1} al ${domingo.getDate()}/${domingo.getMonth() + 1}`;
+            clave = `del ${fechaLargaFlujo(lunes)} al ${fechaLargaFlujo(domingo)}`;
             sortKey = lunes.getTime();
         } else {
-            clave = `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+            clave = mesLargoFlujo(d);
             sortKey = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
         }
 
@@ -912,11 +986,35 @@ window.renderReporteFlujo = function() {
         totalEgr += g.egr;
 
         const balance = g.ing - g.egr;
+        const itemsOrdenados = ordenarItemsFlujo(g.items);
+        const renderItem = (i) => `
+                        <label style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px; cursor:pointer;">
+                            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                                <input type="checkbox" class="flujo-check" data-tipo="${i.tipo}" data-monto="${Number(i.monto || 0)}" onchange="window.actualizarResumenSeleccionFlujo()" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af; flex-shrink:0;">
+                                <div style="max-width:190px; line-height:1.25; min-width:0;">
+                                    <b style="display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escFlujo(i.concepto)}">${escFlujo(i.concepto)}</b>
+                                    <small style="color:#64748b;">${escFlujo(i.cuentaNombre)}</small><br>
+                                    <small style="color:#94a3b8;">${escFlujo(fechaLargaFlujo(i.fecha))}</small>
+                                </div>
+                            </div>
+                            <span style="font-weight:bold; color:${i.tipo === 'ingreso' ? '#16a34a' : '#dc2626'}; white-space:nowrap;">
+                                ${i.tipo === 'ingreso' ? '+' : '-'}${dineroFlujo(i.monto)}
+                            </span>
+                        </label>`;
+
+        const itemsHTML = vistaMovimientos === 'tipo'
+            ? `
+                <div style="font-size:10px; font-weight:900; color:#15803d; margin:2px 0 6px;">INGRESOS</div>
+                ${itemsOrdenados.filter(i => i.tipo === 'ingreso').map(renderItem).join('') || '<div style="font-size:12px;color:#94a3b8;padding:8px 0;">Sin ingresos</div>'}
+                <div style="font-size:10px; font-weight:900; color:#b91c1c; margin:12px 0 6px;">EGRESOS</div>
+                ${itemsOrdenados.filter(i => i.tipo !== 'ingreso').map(renderItem).join('') || '<div style="font-size:12px;color:#94a3b8;padding:8px 0;">Sin egresos</div>'}
+              `
+            : itemsOrdenados.map(renderItem).join('');
 
         return `
             <div style="min-width:320px; background:white; border-radius:12px; border:1px solid #e2e8f0; display:flex; flex-direction:column; max-height:450px; box-shadow:0 4px 10px rgba(0,0,0,0.05);">
                 <div style="padding:15px; background:#1e3a8a; color:white; border-radius:12px 12px 0 0;">
-                    <div style="font-weight:bold; font-size:14px;">${clave.toUpperCase()}</div>
+                    <div style="font-weight:bold; font-size:14px;">${escFlujo(clave)}</div>
                     <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:12px;">
                         <span style="color:#4ade80;">+ ${dineroFlujo(g.ing)}</span>
                         <span style="color:#f87171;">- ${dineroFlujo(g.egr)}</span>
@@ -927,24 +1025,16 @@ window.renderReporteFlujo = function() {
                 </div>
 
                 <div style="flex:1; overflow-y:auto; padding:10px; background:#fcfcfc; border-radius:0 0 12px 12px;">
-                    ${g.items.map(i => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px;">
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <input type="checkbox" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af;">
-                                <div style="max-width:180px; line-height:1.2;">
-                                    <b>${i.concepto}</b><br>
-                                    <small style="color:#64748b;">${i.cuentaNombre}</small><br>
-                                    <small style="color:#94a3b8;">Origen: ${i.origen}</small>
-                                </div>
-                            </div>
-                            <span style="font-weight:bold; color:${i.tipo === 'ingreso' ? '#16a34a' : '#dc2626'};">
-                                ${i.tipo === 'ingreso' ? '+' : '-'}${dineroFlujo(i.monto)}
-                            </span>
-                        </div>
-                    `).join('')}
+                    ${itemsHTML}
                 </div>
             </div>`;
     }).join('');
+
+    window._flujoResumenBase = {
+        ingresos: totalIng,
+        egresos: totalEgr,
+        movimientos: movsFiltrados.length
+    };
 
     cont.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -966,12 +1056,9 @@ window.renderReporteFlujo = function() {
         <div style="display:flex; flex-wrap:wrap; gap:15px; background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:25px; align-items:end;">
             <div>
                 <label style="font-size:10px; font-weight:bold; color:#64748b;">CUENTA:</label>
-                <select onchange="window._filtroFlujoCuenta=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px; min-width:220px;">
-                    <option value="todas" ${cuentaFiltroFinal === 'todas' ? 'selected' : ''}>🌍 Ver Todas</option>
-                    ${cuentasParaSelector.map(c => `
-                        <option value="${c.id}" ${cuentaFiltroFinal === String(c.id) ? 'selected' : ''}>${c.nombre}</option>
-                    `).join('')}
-                </select>
+                <select onchange="window._filtroFlujoCuenta=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px; min-width:240px;">
+    ${renderOpcionesCuenta()}
+</select>
             </div>
 
             <div>
@@ -980,6 +1067,26 @@ window.renderReporteFlujo = function() {
                     <option value="diario" ${periodoAgrupar === 'diario' ? 'selected' : ''}>Diario</option>
                     <option value="semanal" ${periodoAgrupar === 'semanal' ? 'selected' : ''}>Semanal (Lun-Dom)</option>
                     <option value="mensual" ${periodoAgrupar === 'mensual' ? 'selected' : ''}>Mensual</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="font-size:10px; font-weight:bold; color:#64748b;">VER:</label>
+                <select onchange="window._filtroFlujoVista=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="normal" ${vistaMovimientos === 'normal' ? 'selected' : ''}>Tal cual</option>
+                    <option value="tipo" ${vistaMovimientos === 'tipo' ? 'selected' : ''}>Por tipo</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="font-size:10px; font-weight:bold; color:#64748b;">ORDEN MOVS:</label>
+                <select onchange="window._filtroFlujoOrdenMov=this.value; window.renderReporteFlujo();" style="display:block; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:4px;">
+                    <option value="fecha_desc" ${ordenMovimientos === 'fecha_desc' ? 'selected' : ''}>Fecha reciente</option>
+                    <option value="fecha_asc" ${ordenMovimientos === 'fecha_asc' ? 'selected' : ''}>Fecha antigua</option>
+                    <option value="importe_desc" ${ordenMovimientos === 'importe_desc' ? 'selected' : ''}>Importe mayor</option>
+                    <option value="importe_asc" ${ordenMovimientos === 'importe_asc' ? 'selected' : ''}>Importe menor</option>
+                    <option value="nombre_asc" ${ordenMovimientos === 'nombre_asc' ? 'selected' : ''}>Nombre A-Z</option>
+                    <option value="nombre_desc" ${ordenMovimientos === 'nombre_desc' ? 'selected' : ''}>Nombre Z-A</option>
                 </select>
             </div>
 
@@ -994,25 +1101,26 @@ window.renderReporteFlujo = function() {
             </div>
         </div>
 
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px; margin-bottom:25px;">
+        <div id="flujoResumenFijo" style="position:sticky; top:72px; z-index:20; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px; background:rgba(240,242,247,0.92); backdrop-filter:blur(8px); padding:10px 0;">
             <div style="background:#f0fdf4; border-left:5px solid #16a34a; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <small style="color:#166534; font-weight:bold;">INGRESOS DEL FILTRO</small><br>
-                <strong style="font-size:22px; color:#15803d;">${dineroFlujo(totalIng)}</strong>
+                <strong id="flujoKpiIngresos" style="font-size:22px; color:#15803d;">${dineroFlujo(totalIng)}</strong>
             </div>
 
             <div style="background:#fff1f2; border-left:5px solid #dc2626; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <small style="color:#991b1b; font-weight:bold;">EGRESOS DEL FILTRO</small><br>
-                <strong style="font-size:22px; color:#b91c1c;">${dineroFlujo(totalEgr)}</strong>
+                <strong id="flujoKpiEgresos" style="font-size:22px; color:#b91c1c;">${dineroFlujo(totalEgr)}</strong>
             </div>
 
             <div style="background:#eff6ff; border-left:5px solid #1e40af; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <small style="color:#1e3a8a; font-weight:bold;">BALANCE NETO</small><br>
-                <strong style="font-size:22px; color:#1e40af;">${dineroFlujo(totalIng - totalEgr)}</strong>
+                <strong id="flujoKpiBalance" style="font-size:22px; color:#1e40af;">${dineroFlujo(totalIng - totalEgr)}</strong>
             </div>
 
             <div style="background:#f8fafc; border-left:5px solid #64748b; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <small style="color:#475569; font-weight:bold;">MOVIMIENTOS MOSTRADOS</small><br>
-                <strong style="font-size:22px; color:#334155;">${movsFiltrados.length}</strong>
+                <strong id="flujoKpiMovs" style="font-size:22px; color:#334155;">${movsFiltrados.length}</strong>
+                <div id="flujoKpiModo" style="font-size:11px; color:#64748b; font-weight:bold; margin-top:4px;">Filtro completo</div>
             </div>
         </div>
 
@@ -1020,9 +1128,57 @@ window.renderReporteFlujo = function() {
             ${bloquesHTML || '<div style="width:100%; text-align:center; padding:50px; color:#94a3b8; background:white; border-radius:12px;">No hay movimientos con estos filtros.</div>'}
         </div>
     `;
+    if (typeof window.actualizarResumenSeleccionFlujo === 'function') {
+        window.actualizarResumenSeleccionFlujo();
+    }
 };
 
 // --- SOPORTE PARA REPORTE DE FLUJO ---
+window.actualizarResumenSeleccionFlujo = function() {
+    const dineroFlujo = (v) => new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN'
+    }).format(v || 0);
+
+    const checks = Array.from(document.querySelectorAll('.flujo-check'));
+    const seleccionados = checks.filter(ch => ch.checked);
+    const base = window._flujoResumenBase || { ingresos: 0, egresos: 0, movimientos: 0 };
+
+    let ingresos = base.ingresos;
+    let egresos = base.egresos;
+    let movimientos = base.movimientos;
+    let modo = 'Filtro completo';
+
+    if (seleccionados.length > 0) {
+        ingresos = 0;
+        egresos = 0;
+        movimientos = seleccionados.length;
+        modo = 'Selección manual';
+
+        seleccionados.forEach(ch => {
+            const monto = parseFloat(ch.dataset.monto || 0);
+            if (ch.dataset.tipo === 'ingreso') ingresos += monto;
+            else egresos += monto;
+        });
+    }
+
+    const balance = ingresos - egresos;
+    const ingresoEl = document.getElementById('flujoKpiIngresos');
+    const egresoEl = document.getElementById('flujoKpiEgresos');
+    const balanceEl = document.getElementById('flujoKpiBalance');
+    const movsEl = document.getElementById('flujoKpiMovs');
+    const modoEl = document.getElementById('flujoKpiModo');
+
+    if (ingresoEl) ingresoEl.textContent = dineroFlujo(ingresos);
+    if (egresoEl) egresoEl.textContent = dineroFlujo(egresos);
+    if (balanceEl) {
+        balanceEl.textContent = dineroFlujo(balance);
+        balanceEl.style.color = balance >= 0 ? '#1e40af' : '#dc2626';
+    }
+    if (movsEl) movsEl.textContent = movimientos;
+    if (modoEl) modoEl.textContent = modo;
+};
+
 window.actualizarFiltrosFlujo = function() {
     const fPer = document.getElementById('fPer');
     const fCta = document.getElementById('fCta');

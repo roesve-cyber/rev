@@ -717,6 +717,27 @@ window.ejecutarRecepcionFisica = function(idRecepcion) {
     rec.ubicacion = ubicacionRecepcion;
     rec.color = colorRecepcion;
 
+    if (rec.esConsignacion) {
+        _agregarConsignacionesActivasDesdeArticulos({
+            compraId: rec.compraId,
+            proveedor: rec.proveedor,
+            proveedorId: rec.proveedorId || null,
+            folioOrigen: rec.folio || `REC-${rec.id}`,
+            fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString(),
+            articulos: [{
+                productoId: rec.productoId,
+                nombre: rec.productoNombre,
+                costo: Number(rec.costoUnitario || rec.costo || 0),
+                cantidad,
+                color: colorRecepcion,
+                ubicacion: ubicacionRecepcion
+            }],
+            cantidadCampo: 'cantidad',
+            factorCosto: 1,
+            origen: 'recepcionPendiente'
+        });
+    }
+
     recs[index] = rec;
     
     StorageService.set("recepciones", recs);
@@ -1063,6 +1084,50 @@ window.confirmarAbonoProveedor = function(idCuenta) {
 };
 window.confirmarAbonoProveedor = confirmarAbonoProveedor;
 
+function _agregarConsignacionesActivasDesdeArticulos({ compraId, proveedor, proveedorId = null, folioOrigen = '', fecha, articulos = [], cantidadCampo = 'cantidad', factorCosto = 1, origen = 'compra' }) {
+    const factor = Number.isFinite(Number(factorCosto)) ? Math.max(0, Number(factorCosto)) : 1;
+    if (factor <= 0) return 0;
+
+    const actuales = StorageService.get("consignacionesActivas", []);
+    let creadas = 0;
+
+    articulos.forEach((art, index) => {
+        const cantidad = Number(art[cantidadCampo] ?? art.cantidad ?? art.cantidadRec ?? 0);
+        const costoBase = Number(art.costo || art.costoUnitario || 0);
+        if (cantidad <= 0 || costoBase < 0) return;
+
+        const costoUnitario = costoBase * factor;
+        const total = cantidad * costoUnitario;
+        if (total <= 0.01) return;
+
+        const id = Date.now() + Math.random() + index;
+        actuales.push({
+            id,
+            consignacionId: id,
+            compraId,
+            proveedor,
+            proveedorId: proveedorId || null,
+            producto: art.nombre || art.productoNombre || 'Producto',
+            productoId: art.productoId || null,
+            total,
+            cantidadTotal: cantidad,
+            cantidadPendiente: cantidad,
+            costoUnitario,
+            fecha,
+            folioOrigen: folioOrigen || '',
+            origen,
+            color: art.colorRec || art.color || 'General',
+            ubicacion: art.ubicacionRec || art.ubicacion || 'General',
+            montoTransferido: 0,
+            cantidadVendida: 0
+        });
+        creadas++;
+    });
+
+    if (creadas > 0) StorageService.set("consignacionesActivas", actuales);
+    return creadas;
+}
+
 // ===== ÓRDENES DE COMPRA =====
 function _foliosOC() {
     const hoyIso = window.obtenerHoyInputMX();
@@ -1173,10 +1238,15 @@ function abrirNuevaOrdenCompra() {
     const metodoPagoSel = document.getElementById('ocMetodoPago');
     const divCuentaOC = document.getElementById('divCuentaOC');
     if (metodoPagoSel && divCuentaOC) {
-        divCuentaOC.style.display = (metodoPagoSel.value === 'contado') ? 'block' : 'none';
-        metodoPagoSel.onchange = function() {
+        const actualizarMetodoOC = function() {
+            const divMsiOC = document.getElementById('divMsiOC');
+            const alertaConsignacionOC = document.getElementById('alertaConsignacionOC');
             divCuentaOC.style.display = (this.value === 'contado') ? 'block' : 'none';
+            if (divMsiOC) divMsiOC.style.display = (this.value === 'msi') ? 'block' : 'none';
+            if (alertaConsignacionOC) alertaConsignacionOC.style.display = (this.value === 'consignacion') ? 'block' : 'none';
         };
+        metodoPagoSel.onchange = actualizarMetodoOC;
+        actualizarMetodoOC.call(metodoPagoSel);
     }
 }
 
@@ -1831,20 +1901,18 @@ movimientosInventario = kardex;   // ✅ sincronizar global
     
     if (saldoRestante > 0.01) {
         if (oc.condicionesComerciales?.metodoPago === 'consignacion') {
-            let consig = StorageService.get("consignacionesActivas", []);
-            const cantRecibidaTotal = itemsRecibidos.reduce((s, a) => s + a.cantidadRec, 0);
-            consig.push({
-                id: Date.now() + 7,
+            const factorConsignacion = totalRecibido > 0 ? (saldoRestante / totalRecibido) : 1;
+            _agregarConsignacionesActivasDesdeArticulos({
                 compraId: oc.id,
                 proveedor: oc.proveedorNombre,
-                producto: itemsRecibidos.map(a => a.nombre).join(', '),
-                total: saldoRestante,
-                cantidadTotal: cantRecibidaTotal,
-                cantidadPendiente: cantRecibidaTotal,
-                costoUnitario: saldoRestante / cantRecibidaTotal,
-                fecha: window.formatearFechaCortaMX(fechaRec)
+                proveedorId: oc.proveedorId || null,
+                folioOrigen: oc.folio,
+                fecha: window.formatearFechaCortaMX(fechaRec),
+                articulos: itemsRecibidos,
+                cantidadCampo: 'cantidadRec',
+                factorCosto: factorConsignacion,
+                origen: 'ordenCompra'
             });
-            StorageService.set("consignacionesActivas", consig);
         } else {
             const fechaVenc = new Date();
             fechaVenc.setDate(fechaVenc.getDate() + 30);
@@ -2769,9 +2837,14 @@ function guardarCompraDirectaFinal() {
             proveedor: prov.nombre,
             fechaPedido: fechaFormatMX,
             metodoPago: formaPagoTexto,
+            metodoPagoCodigo: metodoPago,
             estatus: ingresoInmediato ? "Completado" : "Pendiente",
             color: art.color,
-            ubicacion: art.ubicacion
+            ubicacion: art.ubicacion,
+            costoUnitario: (metodoPago === "consignacion" && totalCompra > 0)
+                ? Number(art.costo || 0) * (totalAPagarReal / totalCompra)
+                : Number(art.costo || 0),
+            esConsignacion: metodoPago === "consignacion"
         });
     });
 
@@ -2786,7 +2859,7 @@ function guardarCompraDirectaFinal() {
         fechaISO: fechaStr,
         articulos: arts,
         metodo: metodoPago,
-        saldoPendiente: metodoPago !== 'contado' ? totalCompra : 0
+        saldoPendiente: metodoPago !== 'contado' ? totalAPagarReal : 0
     };
     comprasList.push(nuevaCompra);
 
@@ -2807,19 +2880,20 @@ function guardarCompraDirectaFinal() {
     } 
     else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
         if (metodoPago === "consignacion") {
-            let consig = StorageService.get("consignacionesActivas", []);
-            consig.push({
-                id: Date.now(),
-                compraId: idCompraUnico,
-                proveedor: prov.nombre,
-                producto: nombresProductos,
-                total: totalCompra,
-                cantidadTotal: arts.reduce((s, a) => s + a.cantidad, 0),
-                cantidadPendiente: arts.reduce((s, a) => s + a.cantidad, 0),
-                costoUnitario: totalCompra / arts.reduce((s, a) => s + a.cantidad, 0),
-                fecha: fechaFormatMX
-            });
-            StorageService.set("consignacionesActivas", consig);
+            if (ingresoInmediato && totalAPagarReal > 0.01) {
+                const factorConsignacion = totalCompra > 0 ? (totalAPagarReal / totalCompra) : 1;
+                _agregarConsignacionesActivasDesdeArticulos({
+                    compraId: idCompraUnico,
+                    proveedor: prov.nombre,
+                    proveedorId: prov.id,
+                    folioOrigen: `CD-${idCompraUnico.toString().slice(-6)}`,
+                    fecha: fechaFormatMX,
+                    articulos: arts,
+                    cantidadCampo: 'cantidad',
+                    factorCosto: factorConsignacion,
+                    origen: 'compraDirecta'
+                });
+            }
         } else {
             let cuentasProv = StorageService.get("cuentasPorPagar", []);
             cuentasProv.push({
@@ -3417,7 +3491,7 @@ window.abrirGestorConsignaciones = function() {
             <td style="padding:10px; text-align:center;"><span style="background:#fef3c7; color:#d97706; padding:4px 8px; border-radius:4px; font-weight:bold;">${c.cantidadPendiente} pzas</span></td>
             <td style="padding:10px; text-align:right;">${dinero(c.costoUnitario)}</td>
             <td style="padding:10px; text-align:center;">
-                <button onclick="marcarConsignacionVendida(${c.id})" style="padding:8px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Reportar Venta</button>
+                <button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Reportar Venta</button>
             </td>
         </tr>
     `).join('');
@@ -3452,7 +3526,7 @@ window.abrirGestorConsignaciones = function() {
 
 window.marcarConsignacionVendida = function(idConsig) {
     let consigArr = StorageService.get("consignacionesActivas", []);
-    const idx = consigArr.findIndex(c => c.id === idConsig);
+    const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
     if (idx === -1) return;
     const c = consigArr[idx];
 
@@ -3465,28 +3539,34 @@ window.marcarConsignacionVendida = function(idConsig) {
     if (!fechaPagoInput) return alert("❌ Operación cancelada. Debes fijar una fecha de pago.");
 
     const montoDeuda = cantidadAVender * c.costoUnitario;
+    const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     
     // Generar la Cuenta por Pagar
     let cxp = StorageService.get("cuentasPorPagar", []);
     cxp.push({
         id: Date.now(),
         compraId: c.compraId,
+        consignacionId: c.consignacionId || c.id,
+        origenConsignacion: true,
         proveedor: c.proveedor,
+        proveedorId: c.proveedorId || null,
         producto: `[Vendido de Consignación] - ${c.producto} (${cantidadAVender} pzas)`,
-        articulos: [{ nombre: c.producto, cantidad: cantidadAVender, costo: c.costoUnitario, subtotal: montoDeuda }],
+        articulos: [{ productoId: c.productoId || null, nombre: c.producto, cantidad: cantidadAVender, costo: c.costoUnitario, subtotal: montoDeuda, color: c.color || 'General', ubicacion: c.ubicacion || 'General' }],
         total: montoDeuda,
         saldoPendiente: montoDeuda,
         metodo: "credito_proveedor",
         formaPagoTexto: "Liquidación de Consignación",
         fecha: window.formatearFechaCortaMX(new Date()),
-        vencimiento: window.formatearFechaCortaMX(fechaPagoInput + "T12:00:00"),
-        vencimientoIso: window.localISO(fechaPagoInput + "T12:00:00"),
+        vencimiento: window.formatearFechaCortaMX(fechaVencimientoConsignacion),
+        vencimientoIso: window.localISO(fechaVencimientoConsignacion),
         esConsignacion: false 
     });
     StorageService.set("cuentasPorPagar", cxp);
 
     // Descontar inventario pendiente
     consigArr[idx].cantidadPendiente -= cantidadAVender;
+    consigArr[idx].cantidadVendida = Number(consigArr[idx].cantidadVendida || 0) + cantidadAVender;
+    consigArr[idx].montoTransferido = Number(consigArr[idx].montoTransferido || 0) + montoDeuda;
     StorageService.set("consignacionesActivas", consigArr);
 
     document.querySelector('[data-modal="gestor-consignaciones"]').remove();
