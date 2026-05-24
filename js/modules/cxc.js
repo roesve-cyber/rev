@@ -930,7 +930,7 @@ function generarTicketAbonoTermico(datosAbono) {
 <head>
     <meta charset="UTF-8">
     <title>Recibo de Abono ${esc(folioAbono || folio)}</title>
-    <base href="${baseUrl}"> <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" onload="document.getElementById('btn-imagen').disabled = false;"></script>
+    <base href="${baseUrl}">
     
     <style>
         @page { size: 80mm auto; margin: 0; }
@@ -948,9 +948,43 @@ function generarTicketAbonoTermico(datosAbono) {
         @media print { .no-print { display: none !important; } body { background: white; margin: 0; } #ticket-contenido { padding: 0; } }
     </style>
     <script>
+        function cargarHtml2Canvas(callback) {
+            if (typeof html2canvas !== 'undefined') {
+                callback();
+                return;
+            }
+
+            var existente = document.getElementById('html2canvas-loader');
+            if (existente) {
+                existente.addEventListener('load', callback, { once: true });
+                return;
+            }
+
+            var script = document.createElement('script');
+            script.id = 'html2canvas-loader';
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+            script.onload = callback;
+            script.onerror = function() {
+                alert('No se pudo cargar el motor de imagen. Revisa tu conexión e intenta de nuevo, o usa Imprimir > Guardar como PDF.');
+                var btn = document.getElementById('btn-imagen');
+                if (btn) {
+                    btn.innerHTML = '📷 Guardar Imagen';
+                    btn.disabled = false;
+                }
+            };
+            document.head.appendChild(script);
+        }
+
         function descargarImagen() {
-            if (typeof html2canvas === 'undefined') {
-                alert('⏳ La herramienta de imagen aún se está cargando o tu internet está lento. Intenta en 2 segundos.');
+            cargarHtml2Canvas(function() {
+                generarImagenTicket();
+            });
+        }
+
+        function generarImagenTicket() {
+            const ticket = document.getElementById('ticket-contenido');
+            if (!ticket) {
+                alert('No se encontró el contenido del ticket para generar la imagen.');
                 return;
             }
 
@@ -960,10 +994,12 @@ function generarTicketAbonoTermico(datosAbono) {
             btn.disabled = true;
             
             // 🛡️ CORRECCIÓN 3: useCORS permite cargar imágenes externas (como SVG locales procesados) sin fallar
-            html2canvas(document.getElementById('ticket-contenido'), {
+            html2canvas(ticket, {
                 scale: 3,
-                useCORS: true, 
-                backgroundColor: '#ffffff'
+                useCORS: true,
+                allowTaint: false,
+                backgroundColor: '#ffffff',
+                logging: false
             }).then(canvas => {
                 const link = document.createElement('a');
                 link.download = 'Abono_${esc(folio)}.png';
@@ -1016,7 +1052,7 @@ function generarTicketAbonoTermico(datosAbono) {
 </div>
 <div class="no-print" style="text-align:center; padding:15px; margin-top:10px; display:flex; justify-content:center; gap:10px;">
     <button onclick="window.print()" style="padding:10px 15px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🖨️ Imprimir</button>
-    <button id="btn-imagen" onclick="descargarImagen()" disabled style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📷 Guardar Imagen</button>
+    <button id="btn-imagen" onclick="descargarImagen()" style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📷 Guardar Imagen</button>
 </div>
 </body>
 </html>`;

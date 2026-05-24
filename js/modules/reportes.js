@@ -96,10 +96,10 @@ function _rvVentaNormalizada(v, origen = "registrada", index = null) {
     };
 }
 
-function _rvVentasFiltradas() {
-    const desde = document.getElementById("rvFechaDesde")?.value || "";
-    const hasta = document.getElementById("rvFechaHasta")?.value || "";
-    const metodo = document.getElementById("rvMetodo")?.value || "";
+function _rvVentasFiltradas(filtros = {}) {
+    const desde = filtros.desde ?? (document.getElementById("rvFechaDesde")?.value || "");
+    const hasta = filtros.hasta ?? (document.getElementById("rvFechaHasta")?.value || "");
+    const metodo = filtros.metodo ?? (document.getElementById("rvMetodo")?.value || "");
     const desdeD = desde ? new Date(desde + "T00:00:00") : null;
     const hastaD = hasta ? new Date(hasta + "T23:59:59") : null;
 
@@ -133,12 +133,14 @@ function _rvBadgeOrigen(origen) {
 }
 
 window.renderReporteVentas = function() {
-    const kpis = document.getElementById("rvKpis");
-    const grafica = document.getElementById("rvGraficaMeses");
-    const labels = document.getElementById("rvGraficaLabels");
-    const tabla = document.getElementById("rvTabla");
+    const app = document.getElementById("reporteVentasApp");
     const contenedorLegacy = document.getElementById("reportes") || document.getElementById("dashboardContenido");
-    const ventas = _rvVentasFiltradas();
+    const filtros = {
+        desde: document.getElementById("rvFechaDesde")?.value || "",
+        hasta: document.getElementById("rvFechaHasta")?.value || "",
+        metodo: document.getElementById("rvMetodo")?.value || ""
+    };
+    const ventas = _rvVentasFiltradas(filtros);
 
     const registradas = ventas.filter(v => v.origen === "registrada");
     const enBoveda = ventas.filter(v => v.origen === "cuarentena");
@@ -205,17 +207,61 @@ window.renderReporteVentas = function() {
                 <tbody>${filas}</tbody>
            </table>`;
 
-    if (kpis && grafica && labels && tabla) {
-        kpis.style.gridTemplateColumns = "repeat(auto-fit, minmax(190px, 1fr))";
-        kpis.innerHTML = kpisHTML;
-        grafica.innerHTML = graficaHTML;
-        labels.innerHTML = labelsHTML;
-        tabla.innerHTML = tablaHTML;
+    const html = `
+        <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; gap:14px; flex-wrap:wrap;">
+            <div>
+                <h2 style="margin:0; color:#0f172a;">💰 Reporte de Ventas</h2>
+                <p style="color:#64748b; margin:4px 0 0;">Consulta operativa de ventas registradas, cartera originada y movimientos en bóveda.</p>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button onclick="exportarReporteVentas()" style="padding:10px 18px; background:#16a34a; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">📥 Exportar CSV</button>
+                <button onclick="renderReporteVentas()" style="padding:10px 18px; background:#2563eb; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">🔄 Actualizar</button>
+            </div>
+        </div>
+
+        <div style="background:white; border:1px solid #e2e8f0; padding:16px; border-radius:10px; margin-bottom:18px; display:grid; grid-template-columns:repeat(4, minmax(150px, 1fr)); gap:12px; align-items:end;">
+            <div>
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">DESDE</label>
+                <input type="date" id="rvFechaDesde" value="${_escapeHtml(filtros.desde)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">HASTA</label>
+                <input type="date" id="rvFechaHasta" value="${_escapeHtml(filtros.hasta)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">MÉTODO</label>
+                <select id="rvMetodo" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                    <option value="" ${filtros.metodo === "" ? "selected" : ""}>Todos</option>
+                    <option value="contado" ${filtros.metodo === "contado" ? "selected" : ""}>Contado</option>
+                    <option value="transferencia" ${filtros.metodo === "transferencia" ? "selected" : ""}>Transferencia</option>
+                    <option value="credito" ${filtros.metodo === "credito" ? "selected" : ""}>Crédito</option>
+                    <option value="apartado" ${filtros.metodo === "apartado" ? "selected" : ""}>Apartado</option>
+                </select>
+            </div>
+            <button onclick="renderReporteVentas()" style="padding:10px 18px; background:#0f172a; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">🔍 Filtrar</button>
+        </div>
+
+        <div id="rvKpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:15px; margin-bottom:20px;">${kpisHTML}</div>
+
+        <div style="background:white; border:1px solid #e2e8f0; padding:18px; border-radius:10px; margin-bottom:20px;">
+            <h3 style="margin:0 0 15px; color:#0f172a; font-size:16px;">📈 Ventas Registradas por Mes</h3>
+            <div id="rvGraficaMeses" style="display:flex; align-items:flex-end; gap:6px; height:180px; padding:0 10px;">${graficaHTML}</div>
+            <div id="rvGraficaLabels" style="display:flex; gap:6px; padding:4px 10px; margin-top:4px;">${labelsHTML}</div>
+        </div>
+
+        <div style="background:white; border:1px solid #e2e8f0; padding:18px; border-radius:10px;">
+            <h3 style="margin:0 0 15px; color:#0f172a; font-size:16px;">📋 Detalle de Ventas</h3>
+            <div id="rvTabla" style="overflow-x:auto;">${tablaHTML}</div>
+        </div>
+    `;
+
+    if (app) {
+        app.innerHTML = html;
         return;
     }
 
     if (contenedorLegacy) {
-        contenedorLegacy.innerHTML = `<div style="padding:20px;">${kpisHTML}<div style="margin-top:20px; overflow-x:auto;">${tablaHTML}</div></div>`;
+        contenedorLegacy.innerHTML = `<div style="padding:20px;">${html}</div>`;
     }
 };
 
