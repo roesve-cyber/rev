@@ -33,6 +33,65 @@ function _condicionesApartadoDefault() {
     ].join("\n");
 }
 
+function _ventaArticuloPlano(item = {}) {
+    return {
+        id: item.id ?? item.productoId ?? null,
+        productoId: item.productoId ?? item.id ?? null,
+        nombre: item.nombre || item.productoNombre || "",
+        cantidad: Number(item.cantidad || 1),
+        precio: Number(item.precio || item.precioContado || 0),
+        precioContado: Number(item.precioContado || item.precio || 0),
+        colorElegido: item.colorElegido || "",
+        ubicacionElegida: item.ubicacionElegida || "",
+        salidaOperativaAplicada: item.salidaOperativaAplicada === true
+    };
+}
+
+function _ventaProductoPendientePlano(x = {}) {
+    const item = _ventaArticuloPlano(x.item || x);
+    const prod = x.prod || {};
+    return {
+        item,
+        prod: {
+            id: prod.id ?? item.productoId,
+            nombre: prod.nombre || item.nombre,
+            stock: Number(prod.stock || 0)
+        },
+        requiereCompra: x.requiereCompra !== false,
+        generarEntregaPendiente: x.generarEntregaPendiente !== false,
+        motivo: x.motivo || "",
+        salidaOperativaAplicada: x.salidaOperativaAplicada === true || item.salidaOperativaAplicada === true
+    };
+}
+
+function _envolverListaVentaPendiente(lista = []) {
+    return { items: (lista || []).map(_ventaProductoPendientePlano) };
+}
+
+function _desenvolverListaVentaPendiente(valor) {
+    if (Array.isArray(valor)) return valor;
+    if (valor && Array.isArray(valor.items)) return valor.items;
+    return [];
+}
+
+function _normalizarVentaPendienteFirestore(v = {}) {
+    const copia = { ...v };
+    if (Array.isArray(copia.args)) {
+        copia.args = [...copia.args];
+        copia.args[8] = _envolverListaVentaPendiente(_desenvolverListaVentaPendiente(copia.args[8]));
+        copia.args[9] = _envolverListaVentaPendiente(_desenvolverListaVentaPendiente(copia.args[9]));
+    }
+    if (copia.datosVenta) {
+        copia.datosVenta = {
+            ...copia.datosVenta,
+            articulos: (copia.datosVenta.articulos || []).map(_ventaArticuloPlano)
+        };
+    }
+    return copia;
+}
+
+window._normalizarVentaPendienteFirestore = _normalizarVentaPendienteFirestore;
+
 function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
     const productosActuales = StorageService.get("productos", []);
     const entregados = [];
@@ -1218,6 +1277,11 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
     }
 
+    let articulosEntregaOperativa = [];
+    if (productosConStock && productosConStock.length > 0 && metodoPago !== "apartado") {
+        articulosEntregaOperativa = _aplicarSalidaInventarioOperativa(folioVenta, productosConStock);
+    }
+
     // 1. Armar los datos para el Ticket Provisional
     const datosVenta = {
         folio: folioVenta,
@@ -1229,7 +1293,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         enganche: enganche,
         saldoPendiente: metodoPago === "credito" ? planElegido.total : (metodoPago === "apartado" ? saldoAFinanciar : 0),
         plan: planElegido,
-        articulos: [...carrito],
+        articulos: (carrito || []).map(_ventaArticuloPlano),
         tipoComprobante: "Ticket Provisional (Requiere Autorización)",
         periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
         apartadoFechaCompromiso: window._estadoPago?.apartadoFechaCompromiso || null,
@@ -1245,12 +1309,23 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         fechaCaptura: new Date().toLocaleString('es-MX'),
         clienteNombre: clienteSeleccionado.nombre,
         totalVenta: totalContado,
-        args: [metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock],
+        args: [
+            metodoPago,
+            totalContado,
+            enganche,
+            saldoAFinanciar,
+            planElegido,
+            folioVenta,
+            fechaHoy,
+            fechaVentaIso,
+            _envolverListaVentaPendiente(productosConStock),
+            _envolverListaVentaPendiente(productosSinStock)
+        ],
         datosVenta: datosVenta,
         vendedorSeleccionado: window._vendedorSeleccionado
     };
 
-    let pendientes = StorageService.get("ventasPendientes", []);
+    let pendientes = StorageService.get("ventasPendientes", []).map(_normalizarVentaPendienteFirestore);
     pendientes.push(cuarentena);
     StorageService.set("ventasPendientes", pendientes);
 
@@ -1258,25 +1333,21 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     // La cuarentena es administrativa; no debe detener caja ni entrega.
     generarTicketMediaHoja(datosVenta);
 
-    if (productosConStock && productosConStock.length > 0 && metodoPago !== "apartado" && typeof window.generarValeEntrega === "function") {
+    if (articulosEntregaOperativa.length > 0 && typeof window.generarValeEntrega === "function") {
         const clienteEntrega = { ...(clienteSeleccionado || {}) };
-        const articulosParaEntrega = _aplicarSalidaInventarioOperativa(folioVenta, productosConStock);
-
-        if (articulosParaEntrega.length > 0) {
-            window.generarValeEntrega({
-                folio: folioVenta,
-                fecha: fechaHoy,
-                fechaIso: fechaVentaIso,
-                metodoPago,
-                cliente: clienteEntrega,
-                estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total"
-            }, articulosParaEntrega, {
-                origen: "salida_operativa_venta_cuarentena",
-                registrar: true,
-                estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total",
-                observaciones: "Documento operativo emitido al ejecutar la venta. Su registro administrativo queda sujeto a autorización."
-            });
-        }
+        window.generarValeEntrega({
+            folio: folioVenta,
+            fecha: fechaHoy,
+            fechaIso: fechaVentaIso,
+            metodoPago,
+            cliente: clienteEntrega,
+            estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total"
+        }, articulosEntregaOperativa, {
+            origen: "salida_operativa_venta_cuarentena",
+            registrar: true,
+            estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total",
+            observaciones: "Documento operativo emitido al ejecutar la venta. Su registro administrativo queda sujeto a autorización."
+        });
     }
 
     // 4. Limpiar interfaz (sin afectar DB real)
@@ -1297,6 +1368,9 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 // 🚀 EJECUTOR REAL: Esta es la función original que escribe a la Base de Datos
 window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock, datosVentaP) {
+
+    productosConStock = _desenvolverListaVentaPendiente(productosConStock);
+    productosSinStock = _desenvolverListaVentaPendiente(productosSinStock);
 
     let requisicionesCompra = StorageService.get("requisicionesCompra", []);
     let movimientosCaja = StorageService.get("movimientosCaja", []);
@@ -3475,7 +3549,7 @@ window.aprobarVentaCuarentena = function(index) {
     
     // 4. Limpiar de la cuarentena
     ventasP.splice(index, 1);
-    StorageService.set("ventasPendientes", ventasP);
+    StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
     document.querySelector('[data-modal=auth-venta]').remove();
     
     alert("✅ Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
@@ -3499,7 +3573,7 @@ window.rechazarVentaCuarentena = function(index) {
         }
     }
     ventasP.splice(index, 1);
-    StorageService.set("ventasPendientes", ventasP);
+    StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
     document.querySelector('[data-modal=auth-venta]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (typeof renderApartados === 'function') renderApartados();
@@ -4000,7 +4074,7 @@ window.ejecutarCancelacionVenta = function() {
 
     const pendientes = StorageService.get("ventasPendientes", []);
     const pendientesRestantes = pendientes.filter((p, idx) => !(idx === ctx.pendienteIndex || p.datosVenta?.folio === ctx.folio || p.args?.[5] === ctx.folio));
-    StorageService.set("ventasPendientes", pendientesRestantes);
+    StorageService.set("ventasPendientes", pendientesRestantes.map(_normalizarVentaPendienteFirestore));
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const cIdx = cuentas.findIndex(c => c.folio === ctx.folio);

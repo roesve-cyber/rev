@@ -1952,12 +1952,15 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
         fechaCaptura: new Date().toLocaleString('es-MX'),
         clienteNombre: cliente.nombre,
         totalVenta: totalContado,
-        args: ["credito", totalContado, Number(totalAbonado) || 0, Number(saldoRestante) || 0, planElegido, folio, fechaHoy, fechaVentaIso, [], []],
+        args: ["credito", totalContado, Number(totalAbonado) || 0, Number(saldoRestante) || 0, planElegido, folio, fechaHoy, fechaVentaIso, { items: [] }, { items: [] }],
         datosVenta,
         vendedorSeleccionado: origen.vendedorId ? { id: origen.vendedorId, nombre: origen.vendedorNombre || "" } : null
     };
 
-    const pendientes = StorageService.get("ventasPendientes", []);
+    const pendientesRaw = StorageService.get("ventasPendientes", []);
+    const pendientes = typeof window._normalizarVentaPendienteFirestore === "function"
+        ? pendientesRaw.map(window._normalizarVentaPendienteFirestore)
+        : pendientesRaw;
     if (pendientes.some(p => p.origenApartadoFolio === folio || p.args?.[5] === folio)) {
         return alert("⚠️ Ya existe una conversión/venta pendiente para este folio en la Bóveda de Autorizaciones.");
     }
