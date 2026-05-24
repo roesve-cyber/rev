@@ -4176,13 +4176,22 @@ window.revisarAbonoPendiente = function(index) {
     const fechaCorta = a.fechaAbonoIso.split('T')[0];
     const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
     const folioRef = a.folioApartado || a.folioCXC || '-';
+    const cuentaRef = esApartado
+        ? StorageService.get("apartados", []).find(ap => ap.folio === folioRef)
+        : StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folioRef);
+    const clienteNombre = a.clienteNombre || cuentaRef?.nombre || cuentaRef?.clienteNombre || cuentaRef?.cliente?.nombre || '-';
+    if (!a.clienteNombre && clienteNombre !== '-') {
+        a.clienteNombre = clienteNombre;
+        abonosP[index] = a;
+        StorageService.set("abonosPendientes", abonosP);
+    }
 
     const html = `
     <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
         <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
             <h3 style="color:#059669; margin-top:0;">💵 Autorizar Abono Provisional ${esApartado ? 'de Apartado' : 'de Crédito'}</h3>
             <p style="font-size:14px; margin: 6px 0;"><strong>Folio ${esApartado ? 'Apartado' : 'Crédito'}:</strong> ${folioRef}</p>
-            <p style="font-size:14px; margin: 6px 0;"><strong>Cliente:</strong> ${a.clienteNombre || '-'}</p>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Cliente:</strong> ${clienteNombre}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
             

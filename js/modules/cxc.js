@@ -720,6 +720,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     const cuarentena = {
         folioCXC: folio,
         fechaCaptura: new Date().toLocaleString('es-MX'),
+        clienteNombre: cuenta.nombre || cuenta.clienteNombre || 'Cliente',
         montoAbonado: montoFinal,
         montoAbonoInput: montoAbonoInput,
         fechaAbonoRaw: fechaAbonoRaw,
