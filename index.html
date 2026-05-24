@@ -98,6 +98,7 @@
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
         <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
+        <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
         <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
@@ -145,6 +146,7 @@
         </button>
         <button onclick="navA('auditoria-productos')">📦 Productos</button>
         <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
+        <button onclick="navA('cancelaciones'); if(typeof renderCancelaciones === 'function') renderCancelaciones();" style="color:#b91c1c; font-weight:bold;">⛔ Cancelaciones</button>
         <button onclick="abrirAuditoriaCxC()" style="color: #b91c1c; font-weight: bold;">
             🛠️ Modificar Ventas CxC
         </button>
@@ -386,6 +388,19 @@
             <button onclick="renderCuentasXCobrar()" style="padding:10px 20px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
         </div>
         <div id="tablaCuentasXCobrar"></div>
+    </div>
+
+    <div id="abonosdirectos" class="vista oculto">
+        <div class="vista-header">
+            <h2>💵 Abonos Directos</h2>
+            <p>Aplica abonos sin pasar por autorizacion y emite el ticket al momento.</p>
+        </div>
+        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+            <input type="text" id="filtroClienteAbonoDirecto" placeholder="Buscar cliente o folio..."
+                   onkeyup="renderAbonosDirectos()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <button onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+        </div>
+        <div id="tablaAbonosDirectos"></div>
     </div>
 
     <!-- LISTA DE PRECIOS -->
@@ -773,7 +788,7 @@
         <!-- Filtros de búsqueda -->
         <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.06); margin-bottom:20px;">
             <h3 style="margin:0 0 15px 0; color:#1e40af;">🔍 Buscar Venta</h3>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px;">
                 <div>
                     <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FOLIO</label>
                     <input type="text" id="rvFolio" placeholder="Ej: VTA-001"
@@ -785,6 +800,17 @@
                     <input type="text" id="rvCliente" placeholder="Nombre del cliente"
                            oninput="renderReimprimirVenta()"
                            style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">DOCUMENTO</label>
+                    <select id="rvTipoDoc" onchange="renderReimprimirVenta()"
+                            style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+                        <option value="todos">Todos excepto abonos</option>
+                        <option value="contado">Contado</option>
+                        <option value="credito">Crédito</option>
+                        <option value="apartado">Apartado</option>
+                        <option value="entrega_mcia">Entrega mcia</option>
+                    </select>
                 </div>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:12px; align-items:end;">
@@ -890,6 +916,15 @@
             <p>Registra devoluciones y reingresa productos al inventario.</p>
         </div>
         <div id="contenidoDevoluciones"></div>
+    </div>
+
+    <!-- CANCELACIONES -->
+    <div id="cancelaciones" class="vista oculto">
+        <div class="vista-header">
+            <h2>⛔ Cancelaciones</h2>
+            <p>Reversa controlada de ventas, abonos y apartados con afectación de caja, cartera e inventario.</p>
+        </div>
+        <div id="contenidoCancelaciones"></div>
     </div>
 
     <!-- GARANTÍAS -->
@@ -1184,9 +1219,9 @@
 <script src="js/modules/auth.js"></script>
 <script src="js/modules/inventario.js"></script>
 <script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js"></script>
+<script src="js/modules/ventas.js?v=2"></script>
 <script src="js/modules/clientes.js"></script>
-<script src="js/modules/cxc.js?v=6"></script>
+<script src="js/modules/cxc.js?v=7"></script>
 <script src="js/modules/apartados.js?v=2"></script>
 <script src="js/modules/compras.js?v=5"></script>
 <script src="js/modules/bancos.js?v=5"></script>
