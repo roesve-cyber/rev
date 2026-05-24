@@ -1491,6 +1491,7 @@ function recibirOrdenCompra(id) {
 
     // Saldo pendiente según condición de pago de la OC
     const condPago   = oc.condicionesComerciales?.metodoPago || 'credito';
+    const esConsignacionOC = condPago === 'consignacion' || oc.esConsignacion === true;
     const totalOC    = oc.total || 0;
     const anticipo   = oc.anticipo_pagado || 0;
     const saldoOC    = totalOC - anticipo;
@@ -1617,21 +1618,25 @@ function recibirOrdenCompra(id) {
         <!-- Sección pago (solo si hay saldo) -->
         <div id="seccionPagoRecepcion" style="${saldoOC > 0 ? '' : 'display:none;'}">
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:18px;">
-            <div style="font-size:14px;font-weight:bold;color:#374151;margin-bottom:12px;">💳 ¿Realizar pago ahora?</div>
+            <div style="font-size:14px;font-weight:bold;color:#374151;margin-bottom:12px;">${esConsignacionOC ? 'Recepcion a consignacion' : '💳 ¿Realizar pago ahora?'}</div>
             <div style="display:flex;gap:8px;margin-bottom:12px;" id="botonesMetodoPago">
               <button id="btnPagoNo" onclick="window._ocSelPago('no')"
                       style="flex:1;padding:9px;border:2px solid #1e40af;background:#1e40af;color:white;border-radius:8px;cursor:pointer;font-weight:bold;">
-                ❌ No, registrar como C×P
+                ${esConsignacionOC ? 'Recibir a consignacion (sin CxP)' : '❌ No, registrar como C×P'}
               </button>
               <button id="btnPagoContado" onclick="window._ocSelPago('contado')"
-                      style="flex:1;padding:9px;border:2px solid #d1d5db;background:white;color:#374151;border-radius:8px;cursor:pointer;font-weight:bold;">
+                      style="flex:1;padding:9px;border:2px solid #d1d5db;background:white;color:#374151;border-radius:8px;cursor:pointer;font-weight:bold;${esConsignacionOC ? 'display:none;' : ''}">
                 💵 Sí, Efectivo
               </button>
               <button id="btnPagoDebito" onclick="window._ocSelPago('debito')"
-                      style="flex:1;padding:9px;border:2px solid #d1d5db;background:white;color:#374151;border-radius:8px;cursor:pointer;font-weight:bold;">
+                      style="flex:1;padding:9px;border:2px solid #d1d5db;background:white;color:#374151;border-radius:8px;cursor:pointer;font-weight:bold;${esConsignacionOC ? 'display:none;' : ''}">
                 💳 Sí, Débito
               </button>
             </div>
+            ${esConsignacionOC ? `
+                <div style="background:#ecfdf5;color:#047857;border:1px solid #bbf7d0;padding:10px 12px;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:12px;">
+                    Esta OC esta marcada como consignacion: la recepcion no genera CxP ni salida de efectivo. La obligacion nace cuando reportes mercancia vendida.
+                </div>` : ''}
             <div id="divCuentaPago" style="display:none;">
               <label style="font-size:13px;font-weight:bold;color:#374151;display:block;margin-bottom:6px;">Cuenta de pago:</label>
               ${selectorCuentas}
@@ -1744,7 +1749,8 @@ function confirmarRecepcionOC(ocId) {
     const fechaRec   = new Date();
     const fechaStr   = window.formatearFechaCortaMX(fechaRec);
     let notas      = document.getElementById('recNotas')?.value.trim() || '';
-    const metodoPago = window._ocMetodoPago || 'no';
+    const esConsignacionOC = oc.condicionesComerciales?.metodoPago === 'consignacion' || oc.esConsignacion === true;
+    const metodoPago = esConsignacionOC ? 'no' : (window._ocMetodoPago || 'no');
 
     // Recoger cantidades recibidas (permitir más de lo pedido)
     const itemsRecibidos = [];
@@ -1913,7 +1919,7 @@ movimientosInventario = kardex;   // ✅ sincronizar global
     const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipo);
     
     if (saldoRestante > 0.01) {
-        if (oc.condicionesComerciales?.metodoPago === 'consignacion') {
+        if (esConsignacionOC) {
             const factorConsignacion = totalRecibido > 0 ? (saldoRestante / totalRecibido) : 1;
             _agregarConsignacionesActivasDesdeArticulos({
                 compraId: oc.id,
@@ -1987,9 +1993,10 @@ movimientosInventario = kardex;   // ✅ sincronizar global
         articulos: itemsRecibidos.map(a => ({ ...a, cantidad: a.cantidadRec })),
         total: totalRecibido,
         fecha: window.localISO(fechaRec),
-        metodo: metodoPago !== 'no' && montoPagado >= totalRecibido ? metodoPago : 'credito',
+        metodo: esConsignacionOC ? 'consignacion' : (metodoPago !== 'no' && montoPagado >= totalRecibido ? metodoPago : 'credito'),
         saldoPendiente: Math.max(0, saldoRestante),
         ordenCompraId: oc.id,
+        esConsignacion: esConsignacionOC,
         pago: metodoPago !== 'no' ? { monto: montoPagado, metodo: metodoPago, cuenta: cuentaPagoId, etiqueta: cuentaPagoEtiqueta } : null
     };
     const comprasList = StorageService.get('compras', []);
