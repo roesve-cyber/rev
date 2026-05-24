@@ -888,9 +888,9 @@ window.renderReporteFlujo = function() {
         });
 
         cuentasCxC.forEach(c => {
-            (c.abonos || []).forEach(ab => {
+            (c.abonos || []).forEach((ab, indexAbono) => {
                 const mov = crearMovimiento({
-                    id: ab.id || `${c.folio || c.id}-${ab.fecha}-${ab.monto}`,
+                    id: ab.id || `${c.folio || c.id}-${indexAbono}-${ab.fecha}-${ab.monto}`,
                     fecha: ab.fecha,
                     concepto: `Abo: ${c.nombre || c.clienteNombre || c.folio || '-'}`,
                     tipo: 'ingreso',
@@ -981,13 +981,16 @@ window.renderReporteFlujo = function() {
 
     movimientos = movimientos.filter(m => {
         const fechaKey = new Date(m.fecha).toISOString().slice(0, 10);
-        const key = [
-            m.tipo,
-            fechaKey,
-            m.cuenta,
-            Number(m.monto || 0).toFixed(2),
-            String(m.referencia || m.concepto || '').toLowerCase().trim()
-        ].join('|');
+        const idKey = String(m.id || '').trim();
+        const key = idKey
+            ? `${m.origen}|id|${idKey}`
+            : [
+                m.tipo,
+                fechaKey,
+                m.cuenta,
+                Number(m.monto || 0).toFixed(2),
+                String(m.referencia || m.concepto || '').toLowerCase().trim()
+            ].join('|');
 
         if (vistos.has(key)) {
             console.warn("⏭️ Movimiento duplicado ignorado:", m);
