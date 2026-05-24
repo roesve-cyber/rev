@@ -241,12 +241,16 @@ const StorageService = {
             this._esTablaValida(key, value)
         ) {
             const valorFirestore = this._limpiarParaFirestore(value);
-            window._db.collection('posData').doc(key).set({
-                data: valorFirestore,
-                _updatedAt: Date.now()
-            }).catch(e => {
-                console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.");
-            });
+            try {
+                window._db.collection('posData').doc(key).set({
+                    data: valorFirestore,
+                    _updatedAt: Date.now()
+                }).catch(e => {
+                    console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
+                });
+            } catch (e) {
+                console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
+            }
         }
 
         return dbPromise;
