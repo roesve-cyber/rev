@@ -23,6 +23,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'clientes' && typeof renderClientes === 'function') renderClientes();
         if (vistaId === 'proveedores' && typeof renderProveedores === 'function') renderProveedores();
         if (vistaId === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+        if (vistaId === 'abonosdirectos' && typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
         if (vistaId === 'cobranzaesperada' && typeof renderCobranzaEsperada === 'function') renderCobranzaEsperada();
         if (vistaId === 'listaprecios' && typeof renderListaPrecios === 'function') renderListaPrecios();
         if (vistaId === 'entregas' && typeof renderEntregas === 'function') renderEntregas();
@@ -35,6 +36,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'cuentasporpagar' && typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
         if (vistaId === 'compras' && typeof prepararVistaCompras === 'function') prepararVistaCompras();
         if (vistaId === 'cotizaciones' && typeof renderCotizaciones === 'function') renderCotizaciones();
+        if (vistaId === 'cancelaciones' && typeof renderCancelaciones === 'function') renderCancelaciones();
         
         // 🛡️ REPARACIÓN: Aquí está el "ligue" que faltaba para las categorías
         if (vistaId === 'configcategorias' && typeof renderCategorias === 'function') renderCategorias();
@@ -42,6 +44,10 @@ window.navA = function(vistaId, isPopState = false) {
         // 🛡️ REPARACIÓN: "Ligue" para cargar la tabla de Recepciones Pendientes
         if (vistaId === 'recepcion' && typeof renderRecepciones === 'function') renderRecepciones();
     } catch(e) { console.warn("Aviso renderizando vista:", e); }
+
+    if (typeof window.cerrarSubmenusSidebar === 'function') {
+        window.cerrarSubmenusSidebar();
+    }
 
     // 4. RETRAER EL MENÚ AL SELECCIONAR ALGO Y QUITAR EL FONDO OSCURO (OVERLAY)
     const sidebar = document.getElementById('sidebar');
@@ -125,11 +131,24 @@ window.toggleMenu = function() {
     }
 };
 // ===== CONTROL DE SUBMENÚS =====
+window.cerrarSubmenusSidebar = function() {
+    document.querySelectorAll('#sidebar .submenu').forEach(submenu => {
+        submenu.classList.add('oculto-submenu');
+    });
+    document.querySelectorAll('#sidebar .btn-desplegable').forEach(btn => {
+        btn.classList.remove('open', 'active-menu');
+    });
+};
+
 window.toggleSubmenu = function(submenuId) {
     const submenu = document.getElementById(submenuId);
     if (submenu) {
         // Alterna la clase que oculta/muestra el submenú
-        submenu.classList.toggle('oculto-submenu');
+        const debeAbrir = submenu.classList.contains('oculto-submenu');
+        if (typeof window.cerrarSubmenusSidebar === 'function') window.cerrarSubmenusSidebar();
+        submenu.classList.toggle('oculto-submenu', !debeAbrir);
+        const boton = document.querySelector(`.btn-desplegable[onclick*="${submenuId}"]`);
+        if (boton) boton.classList.toggle('open', debeAbrir);
     }
 };
 
@@ -149,4 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    document.querySelectorAll('#sidebar .submenu button, #sidebar .submenu li').forEach(opcion => {
+        opcion.addEventListener('click', () => {
+            setTimeout(() => {
+                if (typeof window.cerrarSubmenusSidebar === 'function') window.cerrarSubmenusSidebar();
+            }, 0);
+        });
+    });
 });
