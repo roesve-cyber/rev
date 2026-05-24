@@ -11,6 +11,26 @@ function _getOrdenesCompra() {
     return _comprasAsegurarArray(StorageService.get('ordenesCompra', []));
 }
 
+function _getConsignacionesActivas() {
+    return _comprasAsegurarArray(StorageService.get('consignacionesActivas', []));
+}
+
+function _consigAbonos(c) {
+    return _comprasAsegurarArray(c?.abonos || []);
+}
+
+function _consigImporte(c) {
+    return Number(c?.total || 0) || (Number(c?.cantidadTotal || 0) * Number(c?.costoUnitario || 0));
+}
+
+function _consigPagos(c) {
+    return _consigAbonos(c).reduce((s, a) => s + Number(a.monto || 0), 0);
+}
+
+function _consigSaldo(c) {
+    return Math.max(0, _consigImporte(c) - _consigPagos(c));
+}
+
 // === AUDITORÍA: VISUALIZAR HISTORIAL DE COSTOS ===
 function renderHistorialCostosAuditoria() {
     // Obtener productos
@@ -3501,7 +3521,11 @@ window.marcarRequisicionesResueltasMasivo = function() {
 // GESTOR DE CONSIGNACIONES (TIPO LIVERPOOL)
 // ============================================================
 window.abrirGestorConsignaciones = function() {
-    const consignaciones = StorageService.get("consignacionesActivas", []).filter(c => c.cantidadPendiente > 0);
+    const todasConsignaciones = _getConsignacionesActivas();
+    const consignaciones = todasConsignaciones.filter(c => Number(c.cantidadPendiente || 0) > 0);
+    const totalImporte = todasConsignaciones.reduce((s, c) => s + _consigImporte(c), 0);
+    const totalPagos = todasConsignaciones.reduce((s, c) => s + _consigPagos(c), 0);
+    const totalSaldo = Math.max(0, totalImporte - totalPagos);
     
     let filas = consignaciones.map(c => `
         <tr style="border-bottom:1px solid #e2e8f0;">
@@ -3510,7 +3534,14 @@ window.abrirGestorConsignaciones = function() {
             <td style="padding:10px;">${c.producto}</td>
             <td style="padding:10px; text-align:center;"><span style="background:#fef3c7; color:#d97706; padding:4px 8px; border-radius:4px; font-weight:bold;">${c.cantidadPendiente} pzas</span></td>
             <td style="padding:10px; text-align:right;">${dinero(c.costoUnitario)}</td>
+            <td style="padding:10px; text-align:right;">
+                <strong>${dinero(_consigImporte(c))}</strong><br>
+                <small style="color:#16a34a;">Pagos: ${dinero(_consigPagos(c))}</small><br>
+                <small style="color:#dc2626;">Saldo: ${dinero(_consigSaldo(c))}</small>
+            </td>
             <td style="padding:10px; text-align:center;">
+                <button onclick="abrirModalAbonoConsignacion('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 10px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; margin-right:6px;">Abonar</button>
+                <button onclick="abrirEstadoCuentaConsignaciones()" style="padding:8px 10px; background:#0f766e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; margin-right:6px;">Estado</button>
                 <button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Reportar Venta</button>
             </td>
         </tr>
@@ -3534,6 +3565,7 @@ window.abrirGestorConsignaciones = function() {
                         <th style="padding:10px; text-align:left;">Producto(s)</th>
                         <th style="padding:10px; text-align:center;">Stock Pendiente</th>
                         <th style="padding:10px; text-align:right;">Costo Unit.</th>
+                        <th style="padding:10px; text-align:right;">Cuenta</th>
                         <th style="padding:10px; text-align:center;">Acción</th>
                     </tr>
                 </thead>
@@ -3544,8 +3576,155 @@ window.abrirGestorConsignaciones = function() {
     document.body.insertAdjacentHTML('beforeend', html);
 };
 
+window.abrirModalAbonoConsignacion = function(idConsig) {
+    const consignaciones = _getConsignacionesActivas();
+    const c = consignaciones.find(x => String(x.id) === String(idConsig));
+    if (!c) return alert("Consignacion no encontrada.");
+
+    const saldo = _consigSaldo(c);
+    if (saldo <= 0.01) return alert("Esta consignacion ya no tiene saldo pendiente.");
+
+    const fechaHoy = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    const selector = typeof _buildSelectorCuentas === 'function'
+        ? _buildSelectorCuentas('abonoConsigCuenta', false)
+        : '<select id="abonoConsigCuenta" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo</option></select>';
+
+    const html = `
+    <div data-modal="abono-consignacion" style="position:fixed; inset:0; background:rgba(15,23,42,0.75); z-index:10000; display:flex; justify-content:center; align-items:center; padding:18px;">
+        <div style="background:white; border-radius:12px; width:100%; max-width:430px; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h3 style="margin:0; color:#1e40af;">Abono a consignacion</h3>
+                <button onclick="document.querySelector('[data-modal=abono-consignacion]')?.remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">x</button>
+            </div>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:14px;">
+                <strong>${c.proveedor || 'Proveedor'}</strong><br>
+                <span style="color:#475569;">${c.producto || 'Producto'}</span><br>
+                <small>Importe: ${dinero(_consigImporte(c))} | Pagos: ${dinero(_consigPagos(c))}</small><br>
+                <strong style="color:#dc2626;">Saldo: ${dinero(saldo)}</strong>
+            </div>
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin-bottom:5px;">Fecha</label>
+            <input id="abonoConsigFecha" type="date" value="${fechaHoy}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; margin-bottom:12px;">
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin-bottom:5px;">Monto</label>
+            <input id="abonoConsigMonto" type="number" min="0.01" max="${saldo}" step="0.01" placeholder="${saldo.toFixed(2)}" style="width:100%; padding:12px; border:2px solid #1e40af; border-radius:6px; box-sizing:border-box; font-size:17px; font-weight:bold; margin-bottom:12px;">
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin-bottom:5px;">Pagar desde</label>
+            ${selector}
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin:12px 0 5px;">Nota</label>
+            <input id="abonoConsigNota" type="text" placeholder="Opcional" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button onclick="confirmarAbonoConsignacion('${String(idConsig).replace(/'/g, "\\'")}')" style="flex:2; padding:12px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Registrar abono</button>
+                <button onclick="document.querySelector('[data-modal=abono-consignacion]')?.remove()" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.confirmarAbonoConsignacion = function(idConsig) {
+    let consignaciones = _getConsignacionesActivas();
+    const idx = consignaciones.findIndex(x => String(x.id) === String(idConsig));
+    if (idx === -1) return alert("Consignacion no encontrada.");
+
+    const c = consignaciones[idx];
+    const saldo = _consigSaldo(c);
+    const monto = parseFloat(document.getElementById('abonoConsigMonto')?.value) || 0;
+    const fechaInput = document.getElementById('abonoConsigFecha')?.value;
+    const sel = document.getElementById('abonoConsigCuenta');
+    const nota = document.getElementById('abonoConsigNota')?.value.trim() || '';
+
+    if (!fechaInput) return alert("Selecciona la fecha del abono.");
+    if (monto <= 0 || monto > saldo + 0.01) return alert(`Monto invalido. Saldo disponible: ${dinero(saldo)}.`);
+    if (!sel || !sel.value) return alert("Selecciona la cuenta de pago.");
+
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+    const fecha = `${fechaInput}T12:00:00.000`;
+
+    if (!confirm(`Confirmas abonar ${dinero(monto)} a ${c.proveedor || 'proveedor'} por consignacion?`)) return;
+
+    if (typeof _egresarCuenta === 'function') {
+        _egresarCuenta({
+            monto,
+            cuentaId,
+            etiqueta,
+            concepto: `Abono consignacion ${c.proveedor || ''} - ${c.producto || ''}`.trim(),
+            referencia: `CONSIG-${c.consignacionId || c.id}`,
+            fecha
+        });
+    }
+
+    c.abonos = _consigAbonos(c);
+    c.abonos.push({
+        id: Date.now() + Math.random(),
+        fecha,
+        fechaStr: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(fecha)) : fechaInput,
+        monto,
+        cuentaId,
+        cuenta: etiqueta,
+        nota
+    });
+    c.montoAbonado = _consigPagos(c);
+    consignaciones[idx] = c;
+    StorageService.set("consignacionesActivas", consignaciones);
+
+    document.querySelector('[data-modal="abono-consignacion"]')?.remove();
+    document.querySelector('[data-modal="gestor-consignaciones"]')?.remove();
+    abrirGestorConsignaciones();
+    alert("Abono de consignacion registrado correctamente.");
+};
+
+window.abrirEstadoCuentaConsignaciones = function() {
+    const consignaciones = _getConsignacionesActivas();
+    const totalImporte = consignaciones.reduce((s, c) => s + _consigImporte(c), 0);
+    const totalPagos = consignaciones.reduce((s, c) => s + _consigPagos(c), 0);
+    const totalSaldo = Math.max(0, totalImporte - totalPagos);
+
+    const filas = consignaciones.map(c => `
+        <tr>
+            <td style="padding:8px; border-bottom:1px solid #e5e7eb;">${c.fecha || '-'}</td>
+            <td style="padding:8px; border-bottom:1px solid #e5e7eb;"><strong>${c.proveedor || '-'}</strong><br><small>${c.producto || '-'}</small></td>
+            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:center;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)}</td>
+            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:right;">${dinero(_consigImporte(c))}</td>
+            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:right; color:#16a34a; font-weight:bold;">${dinero(_consigPagos(c))}</td>
+            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:right; color:#dc2626; font-weight:bold;">${dinero(_consigSaldo(c))}</td>
+        </tr>
+        ${_consigAbonos(c).map(a => `
+            <tr style="background:#f8fafc;">
+                <td></td>
+                <td colspan="2" style="padding:6px 8px; color:#475569;">Pago: ${a.fechaStr || a.fecha || '-'} ${a.cuenta ? `| ${a.cuenta}` : ''} ${a.nota ? `| ${a.nota}` : ''}</td>
+                <td></td>
+                <td style="padding:6px 8px; text-align:right; color:#16a34a;">${dinero(a.monto || 0)}</td>
+                <td></td>
+            </tr>`).join('')}
+    `).join('');
+
+    const html = `
+    <div data-modal="estado-consignaciones" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10001; display:flex; justify-content:center; align-items:flex-start; padding:20px; overflow:auto;">
+        <div style="background:white; border-radius:12px; width:100%; max-width:980px; padding:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h2 style="margin:0; color:#0f766e;">Estado de cuenta - Consignaciones</h2>
+                <button onclick="document.querySelector('[data-modal=estado-consignaciones]')?.remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">x</button>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px;">
+                <div style="background:#eff6ff; padding:12px; border-radius:8px;"><small>Importe</small><br><strong>${dinero(totalImporte)}</strong></div>
+                <div style="background:#f0fdf4; padding:12px; border-radius:8px;"><small>Pagos</small><br><strong>${dinero(totalPagos)}</strong></div>
+                <div style="background:#fff1f2; padding:12px; border-radius:8px;"><small>Saldo</small><br><strong>${dinero(totalSaldo)}</strong></div>
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead style="background:#f1f5f9;">
+                    <tr><th style="padding:8px;text-align:left;">Fecha</th><th style="padding:8px;text-align:left;">Proveedor / Producto</th><th style="padding:8px;">Pend./Total</th><th style="padding:8px;text-align:right;">Importe</th><th style="padding:8px;text-align:right;">Pagos</th><th style="padding:8px;text-align:right;">Saldo</th></tr>
+                </thead>
+                <tbody>${filas || '<tr><td colspan="6" style="padding:20px;text-align:center;color:#64748b;">Sin consignaciones.</td></tr>'}</tbody>
+            </table>
+            <div style="text-align:right; margin-top:18px;">
+                <button onclick="window.print()" style="padding:10px 16px; background:#0f766e; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Imprimir</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
 window.marcarConsignacionVendida = function(idConsig) {
-    let consigArr = StorageService.get("consignacionesActivas", []);
+    let consigArr = _getConsignacionesActivas();
     const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
     if (idx === -1) return;
     const c = consigArr[idx];
@@ -3559,6 +3738,9 @@ window.marcarConsignacionVendida = function(idConsig) {
     if (!fechaPagoInput) return alert("❌ Operación cancelada. Debes fijar una fecha de pago.");
 
     const montoDeuda = cantidadAVender * c.costoUnitario;
+    const abonosDisponibles = Math.max(0, _consigPagos(c) - Number(c.montoAbonosAplicados || 0));
+    const montoCubiertoConAbonos = Math.min(montoDeuda, abonosDisponibles);
+    const montoCxp = Math.max(0, montoDeuda - montoCubiertoConAbonos);
     const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     
     // Generar la Cuenta por Pagar
@@ -3573,7 +3755,8 @@ window.marcarConsignacionVendida = function(idConsig) {
         producto: `[Vendido de Consignación] - ${c.producto} (${cantidadAVender} pzas)`,
         articulos: [{ productoId: c.productoId || null, nombre: c.producto, cantidad: cantidadAVender, costo: c.costoUnitario, subtotal: montoDeuda, color: c.color || 'General', ubicacion: c.ubicacion || 'General' }],
         total: montoDeuda,
-        saldoPendiente: montoDeuda,
+        saldoPendiente: montoCxp,
+        abonos: montoCubiertoConAbonos > 0 ? [{ fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(), monto: montoCubiertoConAbonos, cuenta: 'Anticipo consignacion', nota: 'Aplicado desde abonos previos a consignacion' }] : [],
         metodo: "credito_proveedor",
         formaPagoTexto: "Liquidación de Consignación",
         fecha: window.formatearFechaCortaMX(new Date()),
@@ -3581,15 +3764,23 @@ window.marcarConsignacionVendida = function(idConsig) {
         vencimientoIso: window.localISO(fechaVencimientoConsignacion),
         esConsignacion: false 
     });
+    if (montoCxp <= 0.01) cxp.pop();
     StorageService.set("cuentasPorPagar", cxp);
 
     // Descontar inventario pendiente
     consigArr[idx].cantidadPendiente -= cantidadAVender;
     consigArr[idx].cantidadVendida = Number(consigArr[idx].cantidadVendida || 0) + cantidadAVender;
-    consigArr[idx].montoTransferido = Number(consigArr[idx].montoTransferido || 0) + montoDeuda;
+    consigArr[idx].montoTransferido = Number(consigArr[idx].montoTransferido || 0) + montoCxp;
+    consigArr[idx].montoVendidoReportado = Number(consigArr[idx].montoVendidoReportado || 0) + montoDeuda;
+    consigArr[idx].montoAbonosAplicados = Number(consigArr[idx].montoAbonosAplicados || 0) + montoCubiertoConAbonos;
     StorageService.set("consignacionesActivas", consigArr);
 
     document.querySelector('[data-modal="gestor-consignaciones"]').remove();
+    alert(montoCxp > 0.01
+        ? `Listo. Se aplicaron ${dinero(montoCubiertoConAbonos)} de abonos previos y ${dinero(montoCxp)} quedo en Cuentas por Pagar con vencimiento el ${fechaPagoInput}.`
+        : `Listo. La venta quedo cubierta con abonos previos por ${dinero(montoCubiertoConAbonos)}; no se genero CxP.`);
+    abrirGestorConsignaciones();
+    return;
     alert(`✅ ¡Listo! La deuda por ${dinero(montoDeuda)} ha sido transferida a Cuentas por Pagar con vencimiento el ${fechaPagoInput}.`);
     abrirGestorConsignaciones(); // Refresca la ventana
 };
