@@ -92,6 +92,35 @@ function _normalizarVentaPendienteFirestore(v = {}) {
 
 window._normalizarVentaPendienteFirestore = _normalizarVentaPendienteFirestore;
 
+function _generarPagaresPreviewVentaCredito({ folio, cliente, fechaBaseIso, plan, periodicidad }) {
+    if (!plan) return [];
+    const diasIntervalo = periodicidad === "quincenal" ? 14 : periodicidad === "mensual" ? 30 : 7;
+    const pagos = Number(plan.pagos || plan.plazo || Math.round((plan.semanas || (Number(plan.meses || 0) * 4)) / (diasIntervalo / 7)) || 0);
+    if (!pagos || pagos <= 0) return [];
+
+    const monto = Number(plan.abono || (Number(plan.total || 0) / pagos) || 0);
+    if (!monto || monto <= 0) return [];
+
+    const fechaPago = new Date(fechaBaseIso || Date.now());
+    const pagares = [];
+    for (let i = 1; i <= pagos; i++) {
+        fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+        pagares.push({
+            id: Date.now() + i,
+            folio,
+            numeroPagere: `${folio}-${i}/${pagos}`,
+            clienteNombre: cliente?.nombre || "",
+            clienteId: cliente?.id || null,
+            fechaEmision: fechaBaseIso || window.localISO?.(new Date()) || new Date().toISOString(),
+            fechaVencimiento: fechaPago.getTime(),
+            monto,
+            estado: "Pendiente",
+            diasAtrasoActual: 0
+        });
+    }
+    return pagares;
+}
+
 function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
     const productosActuales = StorageService.get("productos", []);
     const entregados = [];
@@ -1277,6 +1306,18 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
     }
 
+    const totalMercanciaContado = (carrito || []).reduce((sum, p) => sum + (Number(p.precioContado || p.precio || 0) * Number(p.cantidad || 1)), 0);
+    const periodicidadVenta = document.getElementById("selPeriodicidad")?.value || window._estadoPago?.periodicidad || "semanal";
+    const pagaresPreview = metodoPago === "credito"
+        ? _generarPagaresPreviewVentaCredito({
+            folio: folioVenta,
+            cliente: clienteSeleccionado,
+            fechaBaseIso: fechaVentaIso,
+            plan: planElegido,
+            periodicidad: periodicidadVenta
+        })
+        : [];
+
     let articulosEntregaOperativa = [];
     if (productosConStock && productosConStock.length > 0 && metodoPago !== "apartado") {
         articulosEntregaOperativa = _aplicarSalidaInventarioOperativa(folioVenta, productosConStock);
@@ -1290,12 +1331,14 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         cliente: clienteSeleccionado,
         metodo: metodoPago,
         total: totalContado,
+        totalMercancia: totalMercanciaContado || totalContado,
         enganche: enganche,
         saldoPendiente: metodoPago === "credito" ? planElegido.total : (metodoPago === "apartado" ? saldoAFinanciar : 0),
         plan: planElegido,
+        pagaresPreview,
         articulos: (carrito || []).map(_ventaArticuloPlano),
         tipoComprobante: "Ticket Provisional (Requiere Autorización)",
-        periodicidad: document.getElementById("selPeriodicidad")?.value || "semanal",
+        periodicidad: periodicidadVenta,
         apartadoFechaCompromiso: window._estadoPago?.apartadoFechaCompromiso || null,
         apartadoCondiciones: window._estadoPago?.apartadoCondiciones || null,
         acreedor: "Roberto Escobedo Vega",
@@ -1465,8 +1508,9 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
 
     // PASO 4: CREAR CUENTAS POR COBRAR O APARTADOS
     if (metodoPago === "credito") {
-        let saldosPorMes = CalculatorService.calcularCreditoConPeriodicidad ? CalculatorService.calcularCreditoConPeriodicidad((totalContado - enganche), datosVentaP.periodicidad).map(p => ({ meses: p.meses, total: p.total })) : [];
-        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalContado, engancheRecibido: enganche, saldoActual: planElegido.total, saldoOriginal: planElegido.total, metodo: metodoPago, plan: planElegido, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalContado, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes });
+        const totalMercanciaCredito = Number(datosVentaP.totalMercancia || totalContado || 0);
+        let saldosPorMes = CalculatorService.calcularCreditoConPeriodicidad ? CalculatorService.calcularCreditoConPeriodicidad((totalMercanciaCredito - enganche), datosVentaP.periodicidad).map(p => ({ meses: p.meses, total: p.total })) : [];
+        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalMercanciaCredito, engancheRecibido: enganche, saldoActual: planElegido.total, saldoOriginal: planElegido.total, metodo: metodoPago, plan: planElegido, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalMercanciaCredito, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes });
 
         let diasIntervalo = datosVentaP.periodicidad === "quincenal" ? 14 : datosVentaP.periodicidad === "mensual" ? 30 : 7;
         let fechaPago = new Date(fechaVentaIso);
@@ -1537,7 +1581,7 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     }
 
     const ventasRegistradas = StorageService.get('ventasRegistradas', []);
-    ventasRegistradas.push({ folio: folioVenta, fechaVenta: fechaVentaIso, fecha: fechaHoy, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, cliente: datosVentaP.cliente, total: totalContado, enganche: enganche, saldoAFinanciar: saldoAFinanciar, metodoPago: metodoPago, plan: planElegido, periodicidad: datosVentaP.periodicidad, articulos: datosVentaP.articulos, apartadoFechaCompromiso: datosVentaP.apartadoFechaCompromiso || null, apartadoCondiciones: datosVentaP.apartadoCondiciones || null, vendedor: window._vendedorSeleccionado?.nombre || null });
+    ventasRegistradas.push({ folio: folioVenta, fechaVenta: fechaVentaIso, fecha: fechaHoy, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, cliente: datosVentaP.cliente, total: totalContado, totalMercancia: datosVentaP.totalMercancia || totalContado, enganche: enganche, saldoAFinanciar: saldoAFinanciar, metodoPago: metodoPago, plan: planElegido, periodicidad: datosVentaP.periodicidad, articulos: datosVentaP.articulos, apartadoFechaCompromiso: datosVentaP.apartadoFechaCompromiso || null, apartadoCondiciones: datosVentaP.apartadoCondiciones || null, vendedor: window._vendedorSeleccionado?.nombre || null });
     StorageService.set('ventasRegistradas', ventasRegistradas);
 
     const entregaYaDocumentada = StorageService.get("documentosEntrega", [])
@@ -1578,26 +1622,36 @@ function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
 function generarTicketMediaHoja(datosVenta) {
     const folio = datosVenta.folio;
     const fechaActual = datosVenta.fecha;
+    const subtotalMercancia = Number(datosVenta.totalMercancia || (datosVenta.articulos || []).reduce((sum, a) => sum + (Number(a.precioContado || a.precio || 0) * Number(a.cantidad || 1)), 0) || datosVenta.total || 0);
     
     // 1. Cálculos de Pagarés y Saldo
     let totalAPagar = 0;
     let tablaPagares = '';
     const pagares = StorageService.get("pagaresSistema", []);
     const pagaresOficiales = pagares.filter(p => p.folio === folio);
-    const pagaresDelFolio = pagaresOficiales.length > 0 ? pagaresOficiales : (datosVenta.pagaresPreview || []);
+    let pagaresDelFolio = pagaresOficiales.length > 0 ? pagaresOficiales : (datosVenta.pagaresPreview || []);
+    if (datosVenta.metodo === "credito" && pagaresDelFolio.length === 0 && datosVenta.plan) {
+        pagaresDelFolio = _generarPagaresPreviewVentaCredito({
+            folio,
+            cliente: datosVenta.cliente,
+            fechaBaseIso: datosVenta.fechaIso,
+            plan: datosVenta.plan,
+            periodicidad: datosVenta.periodicidad || "semanal"
+        });
+    }
 
     if (datosVenta.metodo === "credito") {
         pagaresDelFolio.forEach((pagar, index) => {
             const fechaPago = new Date(pagar.fechaVencimiento);
             const fechaFmt = window.formatearFechaCortaMX(fechaPago);
-            totalAPagar += pagar.monto;
+            totalAPagar += Number(pagar.monto) || 0;
             
             // SOLO NÚMERO, FECHA Y MONTO
             tablaPagares += `
                 <tr>
                     <td align="left" style="padding: 3px 0;">${index + 1}</td>
                     <td align="center" style="padding: 3px 0;">${fechaFmt}</td>
-                    <td align="right" style="padding: 3px 0; font-weight: bold;">${dinero(pagar.monto)}</td>
+                    <td align="right" style="padding: 3px 0; font-weight: bold;">${dinero(Number(pagar.monto) || 0)}</td>
                 </tr>`;
         });
     }
@@ -1707,7 +1761,7 @@ function generarTicketMediaHoja(datosVenta) {
 
         <div style="display:flex; justify-content:space-between;">
             <span>Subtotal Mercancía:</span>
-            <span>${dinero(datosVenta.total - (datosVenta.intereses || 0))}</span>
+            <span>${dinero(subtotalMercancia)}</span>
         </div>
         <div style="display:flex; justify-content:space-between;">
             <span>Anticipo / Enganche:</span>
@@ -3541,6 +3595,14 @@ window.aprobarVentaCuarentena = function(index) {
     v.datosVenta.tipoComprobante = "Ticket de Venta Oficial (Autorizado)";
     if (v.args[0] === "credito" && v.args[4]) {
         v.datosVenta.planCredito = v.args[4];
+        v.datosVenta.plan = v.args[4];
+        v.datosVenta.pagaresPreview = _generarPagaresPreviewVentaCredito({
+            folio: v.args[5],
+            cliente: v.datosVenta.cliente,
+            fechaBaseIso: nuevaFechaIso,
+            plan: v.args[4],
+            periodicidad: v.datosVenta.periodicidad || "semanal"
+        });
     }
 
     // 3. Ejecutar el motor de transacciones del POS original (GUARDA SILENCIOSAMENTE EN DB)

@@ -23,55 +23,208 @@ function _tablaHTML(headers, filas) {
 }
 
 // ─── 1. REPORTE DE VENTAS ────────────────────────────────────────────
+function _rvFecha(v) {
+    return v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaIso || "";
+}
+
+function _rvDate(v) {
+    const f = _rvFecha(v);
+    if (!f) return new Date(0);
+    if (window.parseFechaMX) return window.parseFechaMX(f);
+    const d = new Date(f);
+    return isNaN(d.getTime()) ? new Date(0) : d;
+}
+
+function _rvInputDate(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function _rvCliente(v) {
+    return v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || "Público General";
+}
+
+function _rvMetodo(v) {
+    return String(v.metodoPago || v.metodo || v.datosVenta?.metodo || v.args?.[0] || "contado").toLowerCase();
+}
+
+function _rvArticulos(v) {
+    return v.articulos || v.datosVenta?.articulos || [];
+}
+
+function _rvTotalMercancia(v) {
+    const articulos = _rvArticulos(v);
+    const porArticulos = articulos.reduce((s, a) => s + (Number(a.precioContado || a.precio || 0) * Number(a.cantidad || 1)), 0);
+    return Number(v.totalMercancia || v.totalContadoOriginal || v.importeApartado || porArticulos || v.totalVenta || v.total || v.args?.[1] || 0);
+}
+
+function _rvTotalDocumento(v) {
+    return Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || _rvTotalMercancia(v) || 0);
+}
+
+function _rvEnganche(v) {
+    return Number(v.enganche || v.engancheRecibido || v.datosVenta?.enganche || v.args?.[2] || 0);
+}
+
+function _rvSaldo(v) {
+    const metodo = _rvMetodo(v);
+    if (metodo === "credito") return Number(v.saldoAFinanciar || v.saldoActual || v.datosVenta?.saldoPendiente || v.args?.[3] || 0);
+    if (metodo === "apartado") return Number(v.saldoAFinanciar || v.saldoPendiente || v.datosVenta?.saldoPendiente || v.args?.[3] || 0);
+    return 0;
+}
+
+function _rvVentaNormalizada(v, origen = "registrada", index = null) {
+    return {
+        raw: v,
+        index,
+        origen,
+        folio: v.folio || v.datosVenta?.folio || v.args?.[5] || "-",
+        fecha: _rvDate(v),
+        fechaTexto: v.fecha || v.datosVenta?.fecha || (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(_rvDate(v)) : _rvInputDate(_rvDate(v))),
+        cliente: _rvCliente(v),
+        metodo: _rvMetodo(v),
+        totalMercancia: _rvTotalMercancia(v),
+        totalDocumento: _rvTotalDocumento(v),
+        enganche: _rvEnganche(v),
+        saldo: _rvSaldo(v),
+        articulos: _rvArticulos(v),
+        vendedor: v.vendedor || v.vendedorNombre || v.vendedorSeleccionado?.nombre || "",
+        estado: origen === "cuarentena" ? "En bóveda" : (v.estado || v.estatus || "Registrada")
+    };
+}
+
+function _rvVentasFiltradas() {
+    const desde = document.getElementById("rvFechaDesde")?.value || "";
+    const hasta = document.getElementById("rvFechaHasta")?.value || "";
+    const metodo = document.getElementById("rvMetodo")?.value || "";
+    const desdeD = desde ? new Date(desde + "T00:00:00") : null;
+    const hastaD = hasta ? new Date(hasta + "T23:59:59") : null;
+
+    const registradas = StorageService.get("ventasRegistradas", [])
+        .filter(v => v.estado !== "Cancelada" && v.estatus !== "Cancelada")
+        .map(v => _rvVentaNormalizada(v, "registrada"));
+    const cuarentena = StorageService.get("ventasPendientes", [])
+        .map((v, index) => _rvVentaNormalizada(v, "cuarentena", index));
+
+    return [...registradas, ...cuarentena]
+        .filter(v => !metodo || v.metodo === metodo)
+        .filter(v => !desdeD || v.fecha >= desdeD)
+        .filter(v => !hastaD || v.fecha <= hastaD)
+        .sort((a, b) => b.fecha - a.fecha);
+}
+
+function _rvBadgeMetodo(metodo) {
+    const meta = {
+        contado: ["Contado", "#dcfce7", "#166534"],
+        transferencia: ["Transferencia", "#dbeafe", "#1d4ed8"],
+        credito: ["Crédito", "#ede9fe", "#6d28d9"],
+        apartado: ["Apartado", "#fef3c7", "#92400e"]
+    }[metodo] || [metodo || "Venta", "#f1f5f9", "#334155"];
+    return `<span style="display:inline-flex; align-items:center; padding:4px 9px; border-radius:999px; background:${meta[1]}; color:${meta[2]}; font-size:11px; font-weight:800; text-transform:uppercase;">${meta[0]}</span>`;
+}
+
+function _rvBadgeOrigen(origen) {
+    return origen === "cuarentena"
+        ? `<span style="display:inline-flex; padding:4px 9px; border-radius:999px; background:#fff7ed; color:#c2410c; font-size:11px; font-weight:800;">Bóveda</span>`
+        : `<span style="display:inline-flex; padding:4px 9px; border-radius:999px; background:#ecfdf5; color:#047857; font-size:11px; font-weight:800;">Registrada</span>`;
+}
+
 window.renderReporteVentas = function() {
-    const contenedor = document.getElementById("reportes") || document.getElementById("dashboardContenido");
-    if (!contenedor) return;
+    const kpis = document.getElementById("rvKpis");
+    const grafica = document.getElementById("rvGraficaMeses");
+    const labels = document.getElementById("rvGraficaLabels");
+    const tabla = document.getElementById("rvTabla");
+    const contenedorLegacy = document.getElementById("reportes") || document.getElementById("dashboardContenido");
+    const ventas = _rvVentasFiltradas();
 
-    const ventas = StorageService.get("ventasRegistradas", []);
-    let totalVendido = 0;
-    let totalEnganches = 0;
-    let filas = [];
+    const registradas = ventas.filter(v => v.origen === "registrada");
+    const enBoveda = ventas.filter(v => v.origen === "cuarentena");
+    const totalMercancia = registradas.reduce((s, v) => s + v.totalMercancia, 0);
+    const totalDocumento = registradas.reduce((s, v) => s + v.totalDocumento, 0);
+    const cobradoInicial = registradas.reduce((s, v) => s + (["contado", "transferencia"].includes(v.metodo) ? v.totalMercancia : v.enganche), 0);
+    const carteraOriginada = registradas.filter(v => v.metodo === "credito").reduce((s, v) => s + v.saldo, 0);
 
-    ventas.forEach(v => {
-        if(v.estado === 'Cancelada' || v.estatus === 'Cancelada') return;
-        const total = parseFloat(v.total) || 0;
-        const eng = parseFloat(v.enganche) || 0;
-        totalVendido += total;
-        totalEnganches += eng;
+    const kpisHTML = `
+        ${_kpiCard("Ventas registradas", String(registradas.length), "#0f172a", "📄")}
+        ${_kpiCard("Mercancía vendida", fmt(totalMercancia), "#2563eb", "🛋️")}
+        ${_kpiCard("Cobro inicial", fmt(cobradoInicial), "#16a34a", "💵")}
+        ${_kpiCard("Cartera originada", fmt(carteraOriginada), "#7c3aed", "💳")}
+    `;
 
-        filas.push([
-            v.folio || '-', 
-            v.fecha || '-', 
-            v.clienteNombre || 'Público General',
-            `<span style="text-transform:uppercase; font-weight:bold; color:#4a5568;">${v.metodoPago || 'contado'}</span>`,
-            `<b style="color:#1e3a8a;">${fmt(total)}</b>`, 
-            `<span style="color:#16a34a;">${fmt(eng)}</span>`
-        ]);
+    const porMes = new Map();
+    registradas.forEach(v => {
+        const key = `${v.fecha.getFullYear()}-${String(v.fecha.getMonth() + 1).padStart(2, "0")}`;
+        const actual = porMes.get(key) || { total: 0, label: new Intl.DateTimeFormat("es-MX", { month: "short" }).format(v.fecha) };
+        actual.total += v.totalMercancia;
+        porMes.set(key, actual);
     });
+    const meses = [...porMes.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-8);
+    const maxMes = Math.max(1, ...meses.map(([, m]) => m.total));
+    const graficaHTML = meses.length === 0
+        ? `<div style="width:100%; align-self:center; text-align:center; color:#94a3b8;">Sin ventas registradas en el rango seleccionado.</div>`
+        : meses.map(([key, m]) => `
+            <div title="${key}: ${fmt(m.total)}" style="flex:1; min-width:36px; height:${Math.max(10, (m.total / maxMes) * 160)}px; background:linear-gradient(180deg,#2563eb,#0f766e); border-radius:6px 6px 2px 2px; display:flex; align-items:flex-start; justify-content:center; color:white; font-size:10px; font-weight:bold; padding-top:5px;">${fmt(m.total).replace(".00","")}</div>
+        `).join("");
+    const labelsHTML = meses.map(([, m]) => `<div style="flex:1; min-width:36px; text-align:center; font-size:11px; color:#64748b; text-transform:uppercase;">${m.label}</div>`).join("");
 
-    let html = `
-    <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 4px 6px rgba(0,0,0,0.02); margin-top:15px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h3 style="margin:0; color:#1e293b;">📋 Reporte Histórico de Ventas</h3>
-            <button onclick="exportarReporteVentas()" style="padding:8px 16px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">📊 Exportar CSV</button>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px;">
-            ${_kpiCard("Volumen Total Comercializado", fmt(totalVendido), "#1e3a8a", "🛒")}
-            ${_kpiCard("Liquidaciones e Inicios (Caja)", fmt(totalEnganches), "#16a34a", "💵")}
-        </div>
-        <div style="overflow-x:auto;">
-            ${_tablaHTML(["Folio", "Fecha", "Cliente", "Método", "Valor Total", "Enganche/Cobrado"], filas)}
-        </div>
-    </div>`;
-    contenedor.innerHTML = html;
+    const filas = ventas.map(v => {
+        const articulosTxt = v.articulos.length
+            ? v.articulos.slice(0, 3).map(a => `${a.cantidad || 1}x ${_escapeHtml(a.nombre || a.productoNombre || "-")}`).join("<br>")
+            : '<span style="color:#94a3b8;">Sin detalle</span>';
+        const saldoTxt = v.metodo === "credito" || v.metodo === "apartado"
+            ? `<div style="font-weight:800; color:#dc2626;">${fmt(v.saldo)}</div>`
+            : '<span style="color:#94a3b8;">-</span>';
+        return `
+            <tr style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:12px; vertical-align:top;"><strong>${_escapeHtml(v.folio)}</strong><br>${_rvBadgeOrigen(v.origen)}</td>
+                <td style="padding:12px; vertical-align:top; white-space:nowrap;">${_escapeHtml(v.fechaTexto)}</td>
+                <td style="padding:12px; vertical-align:top;"><strong>${_escapeHtml(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_escapeHtml(v.vendedor)}</small>` : ""}</td>
+                <td style="padding:12px; vertical-align:top;">${_rvBadgeMetodo(v.metodo)}</td>
+                <td style="padding:12px; vertical-align:top; font-size:12px;">${articulosTxt}${v.articulos.length > 3 ? `<br><small style="color:#64748b;">+${v.articulos.length - 3} más</small>` : ""}</td>
+                <td style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#1d4ed8;">${fmt(v.totalMercancia)}</strong><br><small style="color:#64748b;">Doc: ${fmt(v.totalDocumento)}</small></td>
+                <td style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#16a34a;">${fmt(v.enganche)}</strong></td>
+                <td style="padding:12px; vertical-align:top; text-align:right;">${saldoTxt}</td>
+            </tr>`;
+    }).join("");
+
+    const tablaHTML = ventas.length === 0
+        ? `<div style="padding:34px; text-align:center; color:#64748b; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:10px;">No hay ventas para mostrar con los filtros actuales.</div>`
+        : `<div style="margin-bottom:12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; color:#475569; font-size:13px;">
+                <span><strong>${ventas.length}</strong> movimientos mostrados</span>
+                <span><strong>${enBoveda.length}</strong> en bóveda pendientes de autorización</span>
+           </div>
+           <table style="width:100%; border-collapse:collapse; min-width:980px;">
+                <thead>
+                    <tr style="background:#f8fafc; color:#334155; text-align:left;">
+                        <th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Cliente</th><th style="padding:12px;">Método</th><th style="padding:12px;">Artículos</th><th style="padding:12px; text-align:right;">Mercancía</th><th style="padding:12px; text-align:right;">Cobrado/Eng.</th><th style="padding:12px; text-align:right;">Saldo</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+           </table>`;
+
+    if (kpis && grafica && labels && tabla) {
+        kpis.style.gridTemplateColumns = "repeat(auto-fit, minmax(190px, 1fr))";
+        kpis.innerHTML = kpisHTML;
+        grafica.innerHTML = graficaHTML;
+        labels.innerHTML = labelsHTML;
+        tabla.innerHTML = tablaHTML;
+        return;
+    }
+
+    if (contenedorLegacy) {
+        contenedorLegacy.innerHTML = `<div style="padding:20px;">${kpisHTML}<div style="margin-top:20px; overflow-x:auto;">${tablaHTML}</div></div>`;
+    }
 };
 
 window.exportarReporteVentas = function() {
-    const ventas = StorageService.get("ventasRegistradas", []);
-    let csv = "Folio,Fecha,Cliente,Metodo,Total,Enganche\n";
+    const ventas = _rvVentasFiltradas();
+    let csv = "Origen,Folio,Fecha,Cliente,Metodo,Articulos,TotalMercancia,TotalDocumento,EngancheCobrado,Saldo,Vendedor,Estado\n";
     ventas.forEach(v => {
-        if(v.estado === 'Cancelada' || v.estatus === 'Cancelada') return;
-        csv += `"${v.folio || ''}","${v.fecha || ''}","${v.clienteNombre || 'Publico General'}","${v.metodoPago || 'contado'}",${v.total || 0},${v.enganche || 0}\n`;
+        const articulos = v.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || ''}`).join(' | ');
+        csv += `"${v.origen}","${v.folio}","${v.fechaTexto}","${v.cliente}","${v.metodo}","${articulos}",${v.totalMercancia},${v.totalDocumento},${v.enganche},${v.saldo},"${v.vendedor}","${v.estado}"\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
