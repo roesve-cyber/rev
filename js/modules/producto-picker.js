@@ -133,6 +133,14 @@ window.abrirSelectorProducto = function(opciones) {
 
         contenido.style.gridTemplateColumns = 'repeat(auto-fill, minmax(240px, 1fr))'; // Grid más ancho para productos
 
+        const placeholderImg = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+                <rect width="50" height="50" rx="4" fill="#f1f5f9"/>
+                <path d="M14 34h22l-7-9-5 6-3-4-7 7Z" fill="#cbd5e1"/>
+                <circle cx="18" cy="17" r="4" fill="#cbd5e1"/>
+            </svg>
+        `);
+
         lista.forEach(prod => {
             const formatDinero = (val) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
             
@@ -142,7 +150,7 @@ window.abrirSelectorProducto = function(opciones) {
             btn.onmouseout = () => btn.style.borderColor = '#e2e8f0';
             
             btn.innerHTML = `
-                <img src="${prod.imagen || 'https://via.placeholder.com/50'}" style="width:50px;height:50px;object-fit:cover;border-radius:4px;flex-shrink:0;">
+                <img src="${prod.imagen || placeholderImg}" style="width:50px;height:50px;object-fit:cover;border-radius:4px;flex-shrink:0;">
                 <div style="flex:1;min-width:0;">
                     <div style="font-weight:bold;color:#0f172a;font-size:14px;line-height:1.2;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${prod.nombre}</div>
                     <div style="font-size:11px;color:#64748b;margin-bottom:4px;">${prod.codigo ? `Cód: ${prod.codigo}` : 'Sin código'}</div>
