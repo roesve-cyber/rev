@@ -1,3 +1,16 @@
+function _comprasAsegurarArray(valor) {
+    if (Array.isArray(valor)) return valor;
+    if (valor && Array.isArray(valor.data)) return valor.data;
+    if (valor && typeof valor === 'object') {
+        return Object.values(valor).filter(x => x && typeof x === 'object' && !Array.isArray(x));
+    }
+    return [];
+}
+
+function _getOrdenesCompra() {
+    return _comprasAsegurarArray(StorageService.get('ordenesCompra', []));
+}
+
 // === AUDITORÍA: VISUALIZAR HISTORIAL DE COSTOS ===
 function renderHistorialCostosAuditoria() {
     // Obtener productos
@@ -756,7 +769,7 @@ window.verDetalleCompra = function(idCuenta) {
 
     // 1. Buscar el origen del pedido
     const compras = StorageService.get("compras", []);
-    const ordenes = StorageService.get("ordenesCompra", []);
+    const ordenes = _getOrdenesCompra();
     let compraOriginal = compras.find(comp => String(comp.id) === String(c.id) || String(comp.id) === String(c.compraId)) ||
                          ordenes.find(oc => String(oc.id) === String(c.id) || String(oc.id) === String(c.compraId));
 
@@ -1068,7 +1081,7 @@ window.confirmarAbonoProveedor = function(idCuenta) {
 
     // 3. SINCRONIZACIÓN BARRERA: Si esta deuda viene de una Orden de Compra, actualizar la OC también
     if (cuenta.compraId) {
-        let ordenes = StorageService.get("ordenesCompra", []);
+        let ordenes = _getOrdenesCompra();
         let idxOC = ordenes.findIndex(o => String(o.id) === String(cuenta.compraId));
         if (idxOC !== -1) {
             ordenes[idxOC].saldoPendiente = Math.max(0, (ordenes[idxOC].saldoPendiente || 0) - montoAbono);
@@ -1132,7 +1145,7 @@ function _agregarConsignacionesActivasDesdeArticulos({ compraId, proveedor, prov
 function _foliosOC() {
     const hoyIso = window.obtenerHoyInputMX();
     const ymd = hoyIso.replace(/-/g, '');
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const seq = String(lista.length + 1).padStart(4, '0');
     return 'OC-' + ymd + '-' + seq;
 }
@@ -1394,7 +1407,7 @@ function guardarOrdenCompra() {
     // Eliminamos cualquier campo nulo que pueda molestar a Firestore
     Object.keys(oc).forEach(k => (oc[k] == null || oc[k] === undefined) && delete oc[k]);
 
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     lista.push(oc);
     // --- MARCAR REQUISICIONES COMO EN ORDEN ---
     if (window._requisicionesVinculadasA_OC && window._requisicionesVinculadasA_OC.length > 0) {
@@ -1415,7 +1428,7 @@ function guardarOrdenCompra() {
 }
 
 function imprimirOrdenCompra(id) {
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const oc = lista.find(x => x.id === id);
     if (!oc) return;
     const cfg = StorageService.get('configEmpresa', {});
@@ -1469,7 +1482,7 @@ function imprimirOrdenCompra(id) {
 }
 
 function recibirOrdenCompra(id) {
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const idx   = lista.findIndex(x => x.id === id);
     if (idx === -1) return;
     const oc = lista[idx];
@@ -1521,7 +1534,7 @@ function recibirOrdenCompra(id) {
 
     // Función global para actualizar el costo en recepción OC
     window._actualizarCostoOCArticulo = function(idx, nuevoCosto, ocId) {
-        const lista = StorageService.get('ordenesCompra', []);
+        const lista = _getOrdenesCompra();
         const oc = lista.find(x => x.id === ocId);
         if (!oc) return;
         
@@ -1723,7 +1736,7 @@ function recibirOrdenCompra(id) {
 }
 
 function confirmarRecepcionOC(ocId) {
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const idx   = lista.findIndex(x => x.id === ocId);
     if (idx === -1) return;
     const oc = lista[idx];
@@ -2057,7 +2070,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
                 </span>
             </div>
             ${(oc.backOrderId ? `<div style='font-size:11px;color:#d97706;margin-top:4px;'>→ Back Order: <b>${oc.folio}-BO</b></div>` : '')}
-            ${(oc.ocPadre ? `<div style='font-size:11px;color:#d97706;margin-top:4px;'>Back Order de: <b>${(StorageService.get('ordenesCompra', []).find(x=>x.id===oc.ocPadre)?.folio)||''}</b></div>` : '')}
+            ${(oc.ocPadre ? `<div style='font-size:11px;color:#d97706;margin-top:4px;'>Back Order de: <b>${(_getOrdenesCompra().find(x=>x.id===oc.ocPadre)?.folio)||''}</b></div>` : '')}
         </div>
     </div>
 
@@ -2139,7 +2152,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
 function renderListaOrdenesCompra() {
     const cont = document.getElementById('contenidoOrdenesCompra');
     if (!cont) return;
-        const lista = StorageService.get('ordenesCompra', []);
+        const lista = _getOrdenesCompra();
         const estadoColors = {
             Borrador:  '#9ca3af',
             Enviada:   '#2563eb',
@@ -2213,7 +2226,7 @@ function renderListaOrdenesCompra() {
 }
 
 function editarOrdenCompra(id) {
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const oc    = lista.find(x => x.id === id);
     if (!oc) return alert('OC no encontrada.');
     if (oc.estado === 'Recibida')  return alert('No se puede editar una OC ya recibida.');
@@ -2337,7 +2350,7 @@ function guardarEdicionOC(id) {
     const provs = StorageService.get('proveedores', []);
     const prov  = provs.find(p => String(p.id) === String(provId));
     
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const idx   = lista.findIndex(x => x.id === id);
     if (idx === -1) return;
 
@@ -3236,7 +3249,7 @@ window.abrirNuevaCompraDirectaBlanco = function() {
 };
 
 window.confirmarEliminarOC = function(id) {
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const oc = lista.find(x => x.id === id);
     if (!oc) return;
 
@@ -3257,7 +3270,7 @@ window.confirmarEliminarOC = function(id) {
 };
 
 function ejecutarEliminacionOC(id, montoAFavor) {
-    let lista = StorageService.get('ordenesCompra', []);
+    let lista = _getOrdenesCompra();
     const idx = lista.findIndex(x => x.id === id);
     if (idx === -1) return;
 
@@ -3297,7 +3310,7 @@ function ejecutarEliminacionOC(id, montoAFavor) {
 }
 
 function cancelarOrdenCompra(id) {
-    const lista = StorageService.get('ordenesCompra', []);
+    const lista = _getOrdenesCompra();
     const oc = lista.find(x => x.id === id);
     if (!oc) return;
     if (oc.estado === 'Cancelada') return alert('Esta orden ya está cancelada.');
@@ -3351,7 +3364,7 @@ window.abrirModalAgregarA_OC_Existente = function() {
     if (seleccionados.length === 0) return alert("⚠️ Selecciona al menos una requisición de la lista.");
 
     // Buscar OC's que aún se puedan editar
-    const ocs = StorageService.get('ordenesCompra', []).filter(oc => oc.estado === 'Borrador' || oc.estado === 'Enviada');
+    const ocs = _getOrdenesCompra().filter(oc => oc.estado === 'Borrador' || oc.estado === 'Enviada');
     if (ocs.length === 0) return alert("⚠️ No tienes Órdenes de Compra abiertas (Borrador o Enviadas). Crea una nueva primero.");
 
     let opciones = ocs.slice().reverse().map(oc => 
@@ -3385,7 +3398,7 @@ window.confirmarAgregarA_OC_Existente = function() {
     const reqIds = window._reqsTempParaOC || [];
     if (!ocId || reqIds.length === 0) return;
 
-    let ocs = StorageService.get('ordenesCompra', []);
+    let ocs = _getOrdenesCompra();
     let idxOC = ocs.findIndex(o => o.id === ocId);
     if (idxOC === -1) return alert("❌ Error: OC no encontrada.");
     let oc = ocs[idxOC];
