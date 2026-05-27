@@ -36,23 +36,50 @@ const StorageService = {
         return true;
     },
 
-    _limpiarParaFirestore(value) {
+    _limpiarParaFirestore(value, dentroDeArray = false) {
         if (value === undefined) return null;
         if (value === null) return null;
         if (value instanceof Date) return value;
         if (typeof value === 'function') return null;
 
         if (Array.isArray(value)) {
-            return value.map(item => this._limpiarParaFirestore(item));
+            const limpio = value.map(item => this._limpiarParaFirestore(item, true));
+            return dentroDeArray ? { __mmpArray: limpio } : limpio;
         }
 
         if (typeof value === 'object') {
             const limpio = {};
             Object.entries(value).forEach(([k, v]) => {
                 if (v === undefined || typeof v === 'function') return;
-                limpio[k] = this._limpiarParaFirestore(v);
+                limpio[k] = this._limpiarParaFirestore(v, false);
             });
             return limpio;
+        }
+
+        return value;
+    },
+
+    _restaurarDesdeFirestore(value) {
+        if (value === null || value === undefined) return value;
+
+        if (Array.isArray(value)) {
+            return value.map(item => this._restaurarDesdeFirestore(item));
+        }
+
+        if (typeof value === 'object') {
+            if (
+                Object.prototype.hasOwnProperty.call(value, '__mmpArray') &&
+                Array.isArray(value.__mmpArray) &&
+                Object.keys(value).length === 1
+            ) {
+                return value.__mmpArray.map(item => this._restaurarDesdeFirestore(item));
+            }
+
+            const restaurado = {};
+            Object.entries(value).forEach(([k, v]) => {
+                restaurado[k] = this._restaurarDesdeFirestore(v);
+            });
+            return restaurado;
         }
 
         return value;
@@ -286,13 +313,16 @@ const StorageService = {
                 const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
                     ? payload.data
                     : payload;
+                const datosRestaurados = this._restaurarDesdeFirestore(datosNube);
 
-                if (!this._esTablaValida(tabla, datosNube)) {
-                    console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
+                if (!this._esTablaValida(tabla, datosRestaurados)) {
+                    if (!this._clavesIgnoradas.has(tabla)) {
+                        console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
+                    }
                     continue;
                 }
 
-                await this._guardarLocalDirecto(tabla, datosNube);
+                await this._guardarLocalDirecto(tabla, datosRestaurados);
                 descargadas++;
             }
 
@@ -322,7 +352,9 @@ const StorageService = {
                 const datosLocales = this.get(tabla, null);
 
                 if (!this._esTablaValida(tabla, datosLocales)) {
-                    console.warn(`⏭️ Tabla ignorada al subir: ${tabla}`);
+                    if (!this._clavesIgnoradas.has(tabla)) {
+                        console.warn(`⏭️ Tabla ignorada al subir: ${tabla}`);
+                    }
                     continue;
                 }
 

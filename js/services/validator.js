@@ -12,8 +12,8 @@
  * Ejemplo: "2026-05-13T15:09:00.000"  ← 3:09 PM CDMX, no UTC
  */
 window.localISO = function(fecha) {
-    const d = fecha instanceof Date ? fecha : (fecha ? new Date(fecha) : new Date());
-    if (isNaN(d.getTime())) return new Date().toString();
+    const entrada = fecha instanceof Date ? fecha : (fecha ? new Date(fecha) : new Date());
+    const d = isNaN(entrada.getTime()) ? new Date() : entrada;
     const parts = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/Mexico_City',
         year: 'numeric', month: '2-digit', day: '2-digit',
@@ -119,6 +119,34 @@ window.parseFechaMX = function(fecha) {
     // ISO local del sistema
     if (fecha.includes('T')) {
         const d = new Date(fecha);
+        if (!isNaN(d.getTime())) return d;
+    }
+
+    // YYYY-MM-DD o YYYY/MM/DD
+    if (/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(fecha)) {
+        const [anio, mes, dia] = fecha.split(/[-/]/).map(n => parseInt(n, 10));
+        const d = new Date(anio, mes - 1, dia, 12, 0, 0);
+        if (!isNaN(d.getTime())) return d;
+    }
+
+    // DD/MM/YYYY, h:mm:ss a.m./p.m. o DD/MM/YYYY h:mm:ss
+    const fechaHoraMX = fecha.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?)?$/i);
+    if (fechaHoraMX) {
+        let [, diaStr, mesStr, anioStr, horaStr, minStr, segStr, ampm] = fechaHoraMX;
+        let hora = horaStr ? parseInt(horaStr, 10) : 12;
+        if (ampm) {
+            const p = ampm.toLowerCase() === 'p';
+            if (p && hora < 12) hora += 12;
+            if (!p && hora === 12) hora = 0;
+        }
+        const d = new Date(
+            parseInt(anioStr, 10),
+            parseInt(mesStr, 10) - 1,
+            parseInt(diaStr, 10),
+            hora,
+            parseInt(minStr || '0', 10),
+            parseInt(segStr || '0', 10)
+        );
         if (!isNaN(d.getTime())) return d;
     }
 
