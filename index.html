@@ -76,7 +76,7 @@
                 <button onclick="navA('requisiciones'); renderRequisiciones();">📝 Requisiciones</button>
                 <button onclick="navA('proveedores')">👥 Mis Proveedores</button>
                 <button onclick="navA('cuentasporpagar'); if(typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();">💳 Cuentas por Pagar</button>
-                <button onclick="abrirGestorConsignaciones()" style="color:#d97706; font-weight:bold;">📦 Gestor de Consignaciones</button>
+                <button onclick="navA('consignaciones')" style="color:#d97706; font-weight:bold;">📦 Gestor de Consignaciones</button>
             </div>
         </div>
 
@@ -556,6 +556,11 @@
         <div id="listaCuentasPorPagar" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
     </div>
 
+    <!-- GESTOR DE CONSIGNACIONES -->
+    <div id="consignaciones" class="vista oculto">
+        <div id="contenidoGestorConsignaciones"></div>
+    </div>
+
     <!-- INVENTARIO -->
     <div id="inventario" class="vista oculto">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -774,6 +779,7 @@
                         <option value="credito">Crédito</option>
                         <option value="apartado">Apartado</option>
                         <option value="entrega_mcia">Entrega mcia</option>
+                        <option value="devolucion_cancelacion">Devolucion</option>
                     </select>
                 </div>
             </div>
@@ -1173,31 +1179,32 @@
     </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
-<script src="js/services/storage.js?v=3"></script>
+<script src="js/services/storage.js?v=4"></script>
 <script src="js/services/recovery.js"></script>
-<script src="js/services/validator.js"></script>
+<script src="js/services/validator.js?v=3"></script>
 <script src="js/services/calculator.js"></script>
 <script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 
 <script src="js/modules/auth.js"></script>
-<script src="js/modules/inventario.js"></script>
+<script src="js/modules/inventario.js?v=1"></script>
 <script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js?v=5"></script>
+<script src="js/modules/ventas.js?v=21"></script>
 <script src="js/modules/clientes.js"></script>
-<script src="js/modules/cxc.js?v=11"></script>
-<script src="js/modules/apartados.js?v=2"></script>
-<script src="js/modules/compras.js?v=10"></script>
-<script src="js/modules/bancos.js?v=6"></script>
-<script src="js/modules/reportes.js?v=8"></script>
-<script src="js/modules/reportes-credito.js"></script>
-<script src="js/modules/dashboard.js"></script>
+<script src="js/modules/cxc.js?v=20"></script>
+<script src="js/modules/apartados.js?v=7"></script>
+<script src="js/modules/compras.js?v=26"></script>
+<script src="js/modules/bancos.js?v=9"></script>
+<script src="js/modules/reportes.js?v=18"></script>
+<script src="js/modules/reportes-plus.js?v=6"></script>
+<script src="js/modules/reportes-credito.js?v=3"></script>
+<script src="js/modules/dashboard.js?v=4"></script>
 <script src="js/modules/cotizaciones.js?v=3"></script>
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
 <script src="js/modules/gastos.js"></script>
-<script src="js/modules/proyeccion.js"></script>
+<script src="js/modules/proyeccion.js?v=2"></script>
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/agenda.js"></script>
 <script src="js/modules/producto-picker.js?v=2"></script>
@@ -1205,8 +1212,8 @@
 <script src="js/modules/notificaciones.js"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
-<script src="js/core/navigation.js?v=3"></script>
-<script src="js/init.js?v=6"></script>
+<script src="js/core/navigation.js?v=5"></script>
+<script src="js/init.js?v=7"></script>
     <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {
