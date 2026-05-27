@@ -41,6 +41,10 @@ function _cxcFechaCorta(fecha) {
     return isNaN(d.getTime()) ? String(fecha) : d.toLocaleDateString('es-MX');
 }
 
+function _cxcCuentaCancelada(cuenta) {
+    return String(cuenta?.estado || cuenta?.estatus || '').toLowerCase().includes('cancel');
+}
+
 // ==========================================
 // 1. MOTOR CENTRAL DE SALDOS
 // ==========================================
@@ -50,6 +54,21 @@ window._calcularEstadoCuenta = function(folio) {
     const cuenta = cuentas.find(c => c.folio === folio);
     
     if (!cuenta) return null;
+    if (_cxcCuentaCancelada(cuenta)) {
+        const totalAbonadoCancelado = (cuenta.abonos || []).reduce((sum, a) => sum + (a.monto || 0), 0);
+        return {
+            cuenta,
+            pagares: [],
+            pagaresPendientes: [],
+            pagaresVencidos: [],
+            saldoTotal: 0,
+            montoVencido: 0,
+            diasMaxAtraso: 0,
+            estadoGeneral: "Cancelado",
+            promesaVigente: false,
+            totalAbonado: totalAbonadoCancelado
+        };
+    }
 
     const hoy = new Date();
     const pagaresDelFolio = pagares.filter(p => p.folio === folio).sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
@@ -76,7 +95,7 @@ window._calcularEstadoCuenta = function(folio) {
         }
     });
 
-    const abonos = cuenta.abonos || [];
+    const abonos = (cuenta.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
     const totalAbonado = abonos.reduce((sum, a) => sum + (a.monto || 0), 0);
 
     let estadoGeneral = "Activo";
@@ -111,7 +130,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
     
-    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c));
 
     if (cuentas.length === 0) {
         contenedor.innerHTML = `<div style="background:#f0fdf4; padding:40px; text-align:center; border-radius:10px;"><p style="font-size:18px; color:#27ae60; font-weight:bold;">✅ ¡No hay cuentas registradas!</p></div>`;
@@ -180,7 +199,7 @@ function renderAbonosDirectos(filtroCliente = "") {
     if (!contenedor) return;
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteAbonoDirecto")?.value || "").trim().toLowerCase();
-    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c));
     const filas = cuentas
         .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
         .filter(x => x.estado && x.estado.saldoTotal > 0.01)
@@ -492,7 +511,7 @@ let mejorPlan = planesOrdenados.length > 0
                 <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">📅 Fecha de pago:</label>
-                        <input type="date" id="fechaAbonoInput" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0]}" 
+                        <input type="date" id="fechaAbonoInput" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0])}" 
                             style="padding:12px; font-size:16px; border:2px solid #e2e8f0; border-radius:8px; width:100%; box-sizing:border-box;">
                     </div>
                     <div>
@@ -814,8 +833,10 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     // 🚀 BÓVEDA DE CUARENTENA PARA ABONO
     const cuarentena = {
+        id: Date.now() + Math.random(),
         folioCXC: folio,
-        fechaCaptura: new Date().toLocaleString('es-MX'),
+        fechaCaptura: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
+        fechaCapturaIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
         clienteNombre: cuenta.nombre || cuenta.clienteNombre || 'Cliente',
         montoAbonado: montoFinal,
         montoAbonoInput: montoAbonoInput,
@@ -862,7 +883,10 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     let procesoOk = true;
     let ticketEmitido = false;
     try {
-        if (esDirecto) window.ejecutarAbonoAutorizadoReal(cuarentena);
+        if (esDirecto) {
+            const aplicado = window.ejecutarAbonoAutorizadoReal(cuarentena);
+            if (aplicado === false) throw new Error("El abono directo no fue aplicado por el ejecutor.");
+        }
 
         ticketEmitido = generarTicketAbonoTermico({
         folio,
@@ -904,8 +928,28 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
 // 🚀 EJECUTOR REAL: Llamado desde el Panel de Autorizaciones
 window.ejecutarAbonoAutorizadoReal = function(a) {
+    if (!a || String(a.estado || '').toLowerCase().includes('cancel')) {
+        alert("Este abono pendiente fue cancelado o ya no es valido.");
+        return false;
+    }
+    const _folioGuard = a.folioApartado || a.folioCXC || '';
+    const _montoGuard = Number(a.montoAbonado || a.monto || 0);
+    const _fechaGuard = String(a.fechaAbonoIso || a.fecha || '').slice(0, 10);
     if (a && (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado)) {
         const folioApartado = a.folioApartado || a.folioCXC;
+        const apartadoGuard = StorageService.get("apartados", []).find(ap => ap.folio === folioApartado);
+        if (!apartadoGuard || String(apartadoGuard.estado || '').toLowerCase().includes('cancel')) {
+            alert("No se puede aplicar el abono porque el apartado no existe o esta cancelado.");
+            return false;
+        }
+        const _idGuard = String(a.idCuarentena || a.id || a.idOperacion || '');
+        const yaExisteApartado = _idGuard && (apartadoGuard.abonos || []).some(ab =>
+            String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idGuard
+        );
+        if (yaExisteApartado) {
+            alert("Este abono ya aparece aplicado en el apartado. No se duplicara.");
+            return false;
+        }
         if (typeof window.registrarAbonoApartado === 'function') {
             const aplicado = window.registrarAbonoApartado(
                 folioApartado,
@@ -913,7 +957,7 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
                 a.fechaAbonoIso,
                 a.cuentaId,
                 a.etiquetaCuenta,
-                { imprimir: false, silencioso: true }
+                { imprimir: false, silencioso: true, idOperacion: a.idCuarentena || a.id || a.idOperacion }
             );
             if (!aplicado) {
                 alert("No se pudo aplicar el abono del apartado. Revisa que el apartado exista y que el monto no exceda el saldo pendiente.");
@@ -923,6 +967,26 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         }
 
         alert("No está disponible el módulo de Apartados para aplicar este abono.");
+        return false;
+    }
+
+    const cuentaGuard = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === _folioGuard);
+    if (!cuentaGuard || String(cuentaGuard.estado || '').toLowerCase().includes('cancel')) {
+        alert("No se puede aplicar el abono porque la cuenta por cobrar no existe o esta cancelada.");
+        return false;
+    }
+    const estadoCuentaGuard = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(_folioGuard) : null;
+    const saldoVigenteGuard = Number(estadoCuentaGuard?.saldoTotal ?? cuentaGuard.saldoActual ?? 0);
+    if (_montoGuard > saldoVigenteGuard + 0.01) {
+        alert(`No se puede aplicar el abono porque excede el saldo vigente.\n\nAbono: ${_cxcDinero(_montoGuard)}\nSaldo vigente: ${_cxcDinero(saldoVigenteGuard)}`);
+        return false;
+    }
+    const _idGuardCredito = String(a.idCuarentena || a.id || a.idOperacion || '');
+    const yaExisteCredito = _idGuardCredito && (cuentaGuard.abonos || []).some(ab =>
+        String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idGuardCredito
+    );
+    if (yaExisteCredito) {
+        alert("Este abono ya aparece aplicado en el credito. No se duplicara.");
         return false;
     }
 
@@ -959,7 +1023,7 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
     if (idxCuenta !== -1) {
         const cuentaAct = cuentasXCobrar[idxCuenta];
         cuentaAct.abonos = cuentaAct.abonos || [];
-        cuentaAct.abonos.push({ fecha: a.fechaAbonoStr, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, vendedorId: a.vendedorId || null });
+        cuentaAct.abonos.push({ idOperacion: a.idCuarentena || a.id || a.idOperacion || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, vendedorId: a.vendedorId || null });
 
         const _pagaresAct = StorageService.get("pagaresSistema", []);
         let nuevoSaldoReal = _pagaresAct.filter(p => p.folio === a.folioCXC && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
@@ -970,13 +1034,18 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         StorageService.set("cuentasPorCobrar", cuentasXCobrar);
 
         if (typeof window._ingresarCuenta === 'function') {
-            window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso });
+            window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null });
         }
+    } else {
+        alert("No se encontro la cuenta por cobrar para aplicar el abono.");
+        return false;
     }
 
     if (typeof window.registrarComisionAbono === 'function' && a.vendedorId) {
         window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId);
     }
+
+    return true;
 };
 
 function generarTicketAbonoTermico(datosAbono) {
@@ -1350,7 +1419,7 @@ function exportarCobranzaEsperada() {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.setAttribute("href", URL.createObjectURL(blob));
-    link.setAttribute("download", `cobranza_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `cobranza_${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0])}.csv`);
     link.click();
 }
 
@@ -1556,6 +1625,33 @@ window.abrirEditorAbono = function(folio, abonoIndex) {
     document.body.insertAdjacentHTML('beforeend', html);
 };
 
+function _cxcAjustarSaldoCuentaPorCorreccion(cuentaId, delta) {
+    const monto = Number(delta || 0);
+    if (!Number.isFinite(monto) || Math.abs(monto) <= 0.009) return true;
+
+    const cuentaRealId = (cuentaId === 'caja') ? 'efectivo' : (cuentaId || 'efectivo');
+    const isCaja = String(cuentaRealId).startsWith('caja_') || cuentaRealId === 'efectivo';
+
+    if (isCaja) {
+        const cuentasEfectivo = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: 'Efectivo Principal', saldo: 0 }]);
+        let idx = cuentasEfectivo.findIndex(c => String(c.id) === String(cuentaRealId));
+        if (idx === -1 && cuentaRealId === 'efectivo' && cuentasEfectivo.length > 0) idx = 0;
+        if (idx === -1) return false;
+
+        cuentasEfectivo[idx].saldo = (Number(cuentasEfectivo[idx].saldo) || 0) + monto;
+        StorageService.set('cuentasEfectivo', cuentasEfectivo);
+        return true;
+    }
+
+    const cuentasBanco = StorageService.get('cuentas-bancarias', []);
+    const idx = cuentasBanco.findIndex(c => String(c.id) === String(cuentaRealId) || String(c.banco) === String(cuentaRealId));
+    if (idx === -1) return false;
+
+    cuentasBanco[idx].saldo = (Number(cuentasBanco[idx].saldo) || 0) + monto;
+    StorageService.set('cuentas-bancarias', cuentasBanco);
+    return true;
+}
+
 window.procesarCorreccionAbono = function(folio, abonoIndex) {
     const nuevaFecha = document.getElementById('editFechaAbn').value;
     const nuevoMonto = parseFloat(document.getElementById('editMontoAbn').value);
@@ -1573,6 +1669,13 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
 
     let cuenta = cuentas.find(c => c.folio === folio);
     if (!cuenta) return;
+    cuenta.abonos = Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
+    if (!cuenta.abonos[abonoIndex]) return alert("No se encontro el abono a corregir.");
+
+    const movimientosAbonoPrevios = movimientosCaja.filter(m => m.folio === folio && m.referencia === `ABONO-${folio}`);
+    const saldosPrevios = movimientosAbonoPrevios.length
+        ? movimientosAbonoPrevios.map(m => ({ cuentaId: m.cuenta || m.cuentaId || m.medioPago || 'efectivo', monto: Number(m.monto || 0) }))
+        : cuenta.abonos.map(a => ({ cuentaId: a.cuentaId || a.medioPago || 'efectivo', monto: Number(a.monto || 0) }));
 
     cuenta.abonos[abonoIndex].fecha = window.localISO ? window.localISO(new Date(nuevaFecha + 'T12:00:00')) : new Date(nuevaFecha + 'T12:00:00').toISOString();
     cuenta.abonos[abonoIndex].monto = nuevoMonto;
@@ -1580,7 +1683,8 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
     cuenta.abonos[abonoIndex].medioPago = medioPago;
     cuenta.abonos[abonoIndex].etiquetaCuenta = etiqueta;
 
-    const totalAbonado = cuenta.abonos.reduce((sum, a) => sum + Number(a.monto), 0);
+    const abonosVigentes = cuenta.abonos.filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
+    const totalAbonado = abonosVigentes.reduce((sum, a) => sum + Number(a.monto || 0), 0);
     const enganche = Number(cuenta.engancheRecibido || 0);
     let deudaTotal = cuenta.totalContadoOriginal - enganche;
     if (cuenta.plan && cuenta.plan.total) deudaTotal = cuenta.plan.total;
@@ -1605,12 +1709,12 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
         if (bolsa >= p.monto - 0.01) {
             p.estado = "Pagado";
             p.montoAbonado = p.monto;
-            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1].fecha; 
+            p.fechaAbono = abonosVigentes[abonosVigentes.length - 1]?.fecha || null; 
             bolsa -= p.monto;
         } else if (bolsa > 0.01) {
             p.estado = "Parcial";
             p.montoAbonado = bolsa;
-            p.fechaAbono = cuenta.abonos[cuenta.abonos.length - 1].fecha;
+            p.fechaAbono = abonosVigentes[abonosVigentes.length - 1]?.fecha || null;
             bolsa = 0;
         }
     });
@@ -1640,8 +1744,18 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
     StorageService.set("pagaresSistema", pagares);
     StorageService.set("movimientosCaja", movimientosCaja);
 
+    let saldosActualizados = true;
+    saldosPrevios.forEach(m => {
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(m.cuentaId, -Number(m.monto || 0))) saldosActualizados = false;
+    });
+    cuenta.abonos.forEach(ab => {
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(ab.cuentaId || ab.medioPago || 'efectivo', Number(ab.monto || 0))) saldosActualizados = false;
+    });
+
     document.getElementById('modalCorreccionAbono').remove();
-    alert("✅ Abono modificado con éxito. Saldos, pagarés y flujo de caja están cuadrados.");
+    alert(saldosActualizados
+        ? "Abono modificado con exito. Saldos, pagares, flujo de caja y cuentas fueron recalculados."
+        : "Abono modificado, pero alguna cuenta destino no se encontro para ajustar su saldo. Revisa Mis Cuentas.");
     renderAuditoriaAbonos();
 };
 
@@ -1806,8 +1920,8 @@ function abrirEstadoCuentaCliente(clienteId) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     
     // Buscar la cuenta tanto por "clienteId" (ventas nuevas) como por "id" (ventas migradas del Excel)
-    const cuenta = cuentas.find(c => (String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId)) && c.estado !== 'Saldado') || 
-                   cuentas.find(c => String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId));
+    const cuenta = cuentas.find(c => (String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId)) && c.estado !== 'Saldado' && !_cxcCuentaCancelada(c)) || 
+                   cuentas.find(c => (String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId)) && !_cxcCuentaCancelada(c));
                    
     if (cuenta) {
         abrirEstadoCuentaFolio(cuenta.folio);
@@ -1832,7 +1946,7 @@ window.enviarRecordatorioWhatsApp = function(folio) {
 };
 
 window.abrirModalPromesaPago = function(folio) {
-    const fechaHoy = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    const fechaHoy = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0]);
     const html = `
     <div data-modal="promesa" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:center;">
         <div style="background:white; padding:30px; border-radius:12px; width:350px;">
@@ -1874,10 +1988,17 @@ function _planesConversionApartado(saldoRestante, periodicidad = "semanal") {
 function _pagaresPreviewConversion(folio, cliente, fechaBaseIso, plan, periodicidad) {
     const diasIntervalo = periodicidad === "quincenal" ? 14 : periodicidad === "mensual" ? 30 : 7;
     const totalPagos = Number(plan.pagos || Math.round((plan.semanas || (plan.meses * 4)) / (diasIntervalo / 7)) || 0);
+    const totalPlan = Number(plan.total || 0);
+    const abonoBase = Number(plan.abono || (totalPlan / totalPagos) || 0);
     const fechaPago = new Date(fechaBaseIso);
     const pagares = [];
+    let acumulado = 0;
     for (let i = 1; i <= totalPagos; i++) {
         fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+        const montoPagare = i === totalPagos && totalPlan > 0
+            ? Math.max(0, Number((totalPlan - acumulado).toFixed(2)))
+            : Number(abonoBase.toFixed(2));
+        acumulado = Number((acumulado + montoPagare).toFixed(2));
         pagares.push({
             id: Date.now() + i,
             folio,
@@ -1886,7 +2007,7 @@ function _pagaresPreviewConversion(folio, cliente, fechaBaseIso, plan, periodici
             clienteId: cliente.id || null,
             fechaEmision: fechaBaseIso,
             fechaVencimiento: fechaPago.getTime(),
-            monto: Number(plan.abono) || 0,
+            monto: montoPagare,
             estado: "Pendiente",
             diasAtrasoActual: 0
         });
@@ -1917,6 +2038,19 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     
     let apartado = apartados.find(a => a.folio === folioApartado) || ventas.find(v => v.folio === folioApartado);
     if (!apartado) return alert("❌ No se encontró el folio del apartado.");
+    const estadoApartado = String(apartado.estado || apartado.estatus || '').toLowerCase();
+    if (estadoApartado.includes('cancel')) return alert("Este apartado esta cancelado. No puede convertirse a credito.");
+    if (estadoApartado.includes('conversion') || estadoApartado.includes('migrado')) return alert("Este apartado ya esta en proceso de conversion o ya fue migrado a credito.");
+
+    const abonosPendientesApartado = StorageService.get("abonosPendientes", []).filter(a =>
+        !String(a.estado || '').toLowerCase().includes('cancel') &&
+        (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado) &&
+        String(a.folioApartado || a.folioCXC || '') === String(folioApartado)
+    );
+    if (abonosPendientesApartado.length) {
+        const totalPendiente = abonosPendientesApartado.reduce((s, a) => s + Number(a.montoAbonado || a.monto || 0), 0);
+        return alert(`Este apartado tiene ${abonosPendientesApartado.length} abono(s) pendiente(s) de autorizacion por ${_cxcDinero(totalPendiente)}. Resuelve esos abonos antes de convertirlo a credito.`);
+    }
 
     // 2. Calcular los saldos reales
     const totalVenta = parseFloat(apartado.importeApartado || apartado.total || apartado.totalContadoOriginal || 0);
@@ -1924,7 +2058,9 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     
     let totalAbonado = engancheInicial;
     if (apartado.abonos && Array.isArray(apartado.abonos)) {
-        totalAbonado += apartado.abonos.reduce((suma, abono) => suma + (parseFloat(abono.monto) || 0), 0);
+        totalAbonado += apartado.abonos
+            .filter(abono => !abono.cancelado && !abono.canceladoPorVenta && !abono.canceladoPorApartado)
+            .reduce((suma, abono) => suma + (parseFloat(abono.monto) || 0), 0);
     }
 
     const saldoRestante = totalVenta - totalAbonado;
@@ -2081,7 +2217,8 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
         idCuarentena: Date.now(),
         tipo: "conversion_apartado_credito",
         origenApartadoFolio: folio,
-        fechaCaptura: new Date().toLocaleString('es-MX'),
+        fechaCaptura: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
+        fechaCapturaIso: fechaVentaIso,
         clienteNombre: cliente.nombre,
         totalVenta: totalContado,
         args: ["credito", totalContado, Number(totalAbonado) || 0, Number(saldoRestante) || 0, planElegido, folio, fechaHoy, fechaVentaIso, { items: [] }, { items: [] }],

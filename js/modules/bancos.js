@@ -742,6 +742,10 @@ function deshacerPagoMSI(id) {
 function _etiquetaCuenta(m) {
     if (m.etiquetaCuenta) return m.etiquetaCuenta;
     const c = m.cuenta || "efectivo";
+    if (c === "efectivo" || c === "caja") {
+        const cajas = StorageService.get("cuentasEfectivo", []);
+        if (cajas[0]?.nombre) return cajas[0].nombre;
+    }
     if (c === "efectivo" || c === "caja") return "💵 Efectivo";
     const t = (tarjetasConfig || []).find(x => x.banco === c);
     if (t) return t.tipo === "debito" ? `🏦 ${t.banco} Débito` : `💳 ${t.banco} Crédito`;
@@ -834,6 +838,57 @@ window._filtroCuentaLiquidez = window._filtroCuentaLiquidez || 'Todos';
 window._filtroLiquidezDesde = window._filtroLiquidezDesde || '';
 window._filtroLiquidezHasta = window._filtroLiquidezHasta || '';
 
+function _bancosCalcularSaldosDesdeMovimientos() {
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const movimientos = StorageService.get("movimientosCaja", []);
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "Efectivo Principal", saldo: 0 }]);
+    const cuentasDebito = tarjetas.filter(t => t.tipo === "debito");
+    const cajaDefaultId = cajas[0]?.id || "efectivo";
+
+    const saldosCajas = {};
+    cajas.forEach(c => saldosCajas[c.id] = 0);
+
+    const saldosDebito = {};
+    cuentasDebito.forEach(t => saldosDebito[t.banco] = parseFloat(t.saldoInicial) || 0);
+
+    movimientos.forEach(m => {
+        const esIngreso = String(m.tipo || '').toLowerCase() === "ingreso";
+        const monto = parseFloat(m.monto) || 0;
+        const cuentaRaw = m.cuenta || m.cuentaId || m.metodoPago || m.medioPago || 'efectivo';
+        const cuentaMov = (cuentaRaw === "efectivo" || cuentaRaw === "caja") ? cajaDefaultId : cuentaRaw;
+
+        if (saldosCajas[cuentaMov] !== undefined) {
+            const idCajaAfectada = cuentaMov;
+            if (saldosCajas[idCajaAfectada] !== undefined) {
+                saldosCajas[idCajaAfectada] += esIngreso ? monto : -monto;
+            }
+        } else if (saldosDebito[cuentaMov] !== undefined) {
+            saldosDebito[cuentaMov] += esIngreso ? monto : -monto;
+        }
+    });
+
+    return { saldosCajas, saldosDebito, cajas, cuentasDebito };
+}
+
+function recalcularSaldosGuardadosDesdeMovimientos() {
+    const { saldosCajas, saldosDebito } = _bancosCalcularSaldosDesdeMovimientos();
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "Efectivo Principal", saldo: 0 }]);
+    const bancos = StorageService.get("cuentas-bancarias", []);
+
+    cajas.forEach(c => {
+        if (saldosCajas[c.id] !== undefined) c.saldo = saldosCajas[c.id];
+    });
+    bancos.forEach(c => {
+        const key = c.banco || c.id;
+        if (saldosDebito[key] !== undefined) c.saldo = saldosDebito[key];
+    });
+
+    StorageService.set("cuentasEfectivo", cajas);
+    StorageService.set("cuentas-bancarias", bancos);
+    alert("Saldos guardados recalculados desde movimientosCaja.");
+    renderCuentasBancarias();
+}
+
 function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (cuentaSeleccionada !== null) { window._filtroCuentaLiquidez = cuentaSeleccionada; }
     
@@ -843,31 +898,25 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     const tarjetas = StorageService.get("tarjetasConfig", []);
     const movimientos = StorageService.get("movimientosCaja", []);
     const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
-
-    // 1. Calcular saldos actuales de Cajas
-    const saldosCajas = {};
-    cajas.forEach(c => saldosCajas[c.id] = 0);
-    
-    // 2. Calcular saldos de Débito
+    const cuentasBancariasGuardadas = StorageService.get("cuentas-bancarias", []);
     const cuentasDebito = tarjetas.filter(t => t.tipo === "debito");
-    const saldosDebito = {};
-    cuentasDebito.forEach(t => saldosDebito[t.banco] = parseFloat(t.saldoInicial) || 0);
+    const { saldosCajas, saldosDebito } = _bancosCalcularSaldosDesdeMovimientos();
 
-    // 👉 CORRECCIÓN DE BUG: Reconocimiento inteligente de cajas
-    movimientos.forEach(m => {
-        const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
-        const monto = parseFloat(m.monto) || 0;
-        
-        // Sumar/restar a Cajas
-        if (saldosCajas[m.cuenta] !== undefined || m.cuenta === "efectivo" || m.cuenta === "caja") {
-            const idCajaAfectada = (m.cuenta === "efectivo" || m.cuenta === "caja") ? "efectivo" : m.cuenta;
-            if(saldosCajas[idCajaAfectada] !== undefined) {
-                saldosCajas[idCajaAfectada] += esIngreso ? monto : -monto;
-            }
-        } 
-        // Sumar/restar a Bancos Débito
-        else if (saldosDebito[m.cuenta] !== undefined) {
-            saldosDebito[m.cuenta] += esIngreso ? monto : -monto;
+    const diferenciasSaldo = [];
+    cajas.forEach(c => {
+        const guardado = Number(c.saldo || 0);
+        const calculado = Number(saldosCajas[c.id] || 0);
+        if (Math.abs(guardado - calculado) > 0.01) {
+            diferenciasSaldo.push(`${c.nombre || c.id}: guardado ${dinero(guardado)} vs movimientos ${dinero(calculado)}`);
+        }
+    });
+    cuentasDebito.forEach(t => {
+        const cuentaGuardada = cuentasBancariasGuardadas.find(c => String(c.banco || c.id) === String(t.banco));
+        if (!cuentaGuardada || cuentaGuardada.saldo === undefined) return;
+        const guardado = Number(cuentaGuardada.saldo || 0);
+        const calculado = Number(saldosDebito[t.banco] || 0);
+        if (Math.abs(guardado - calculado) > 0.01) {
+            diferenciasSaldo.push(`${t.banco}: guardado ${dinero(guardado)} vs movimientos ${dinero(calculado)}`);
         }
     });
 
@@ -915,9 +964,10 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     
     // 1. Filtro por Cuenta
     if (window._filtroCuentaLiquidez !== 'Todos') {
+        const cajaDefaultId = cajas[0]?.id || "efectivo";
         movimientosFiltrados = movimientosFiltrados.filter(m => {
             if (m.cuenta === window._filtroCuentaLiquidez) return true;
-            if (window._filtroCuentaLiquidez === 'efectivo' && (m.cuenta === 'efectivo' || m.cuenta === 'caja')) return true;
+            if (window._filtroCuentaLiquidez === cajaDefaultId && (m.cuenta === 'efectivo' || m.cuenta === 'caja')) return true;
             return false;
         });
     }
@@ -990,7 +1040,24 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     }
     rightPanelHTML += `</tbody></table></div></div>`;
 
+    const conciliacionHTML = diferenciasSaldo.length > 0
+        ? `<div style="background:#fffbeb; border:1px solid #f59e0b; border-radius:8px; padding:12px 14px; margin-bottom:16px; color:#92400e;">
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+                    <div>
+                        <strong>Conciliacion pendiente</strong><br>
+                        <small>Hay saldos guardados que no coinciden con la suma de movimientos.</small>
+                        <ul style="margin:8px 0 0 18px; padding:0; font-size:12px;">
+                            ${diferenciasSaldo.slice(0, 5).map(d => `<li>${d}</li>`).join('')}
+                            ${diferenciasSaldo.length > 5 ? `<li>${diferenciasSaldo.length - 5} diferencia(s) mas.</li>` : ''}
+                        </ul>
+                    </div>
+                    <button onclick="recalcularSaldosGuardadosDesdeMovimientos()" style="padding:8px 12px; background:#f59e0b; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Recalcular saldos</button>
+                </div>
+           </div>`
+        : '';
+
     contenedor.innerHTML = `
+        ${conciliacionHTML}
         <div style="display:flex; gap:20px; margin-bottom:20px; justify-content:center;">
             <div style="background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:15px; text-align:center; min-width:200px;">
                 <div style="font-size:11px; color:#166534; font-weight:bold; text-transform:uppercase;">💵 Total Cajas Efectivo</div>
@@ -1015,7 +1082,7 @@ function abrirModalPagoTarjeta(banco) {
     const deudas = StorageService.get("cuentasMSI", []);
     let totalAdeudado = 0, vencidoYMesActual = 0;
     const hoy = new Date();
-    const fechaHoyCorta = hoy.toISOString().split('T')[0];
+    const fechaHoyCorta = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.localISO ? window.localISO(hoy).split('T')[0] : hoy.toISOString().split('T')[0]);
     const mesActualClave = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
 
     deudas.filter(d => d.banco === banco).forEach(deuda => {
@@ -1765,7 +1832,7 @@ window.abrirAuditoriaSaldos = function() {
 
             <div style="margin-bottom:15px;">
                 <label style="font-weight:bold; font-size:12px; color:#475569;">📅 Fecha de aplicación:</label>
-                <input type="date" id="ajusteFecha" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;" value="${new Date().toISOString().split('T')[0]}">
+                <input type="date" id="ajusteFecha" style="width:100%; padding:10px; margin-top:5px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0])}">
                 <small style="color:#64748b; font-size:11px;">Puedes ajustar la fecha del movimiento si el descuadre se detectó después.</small>
             </div>
 
@@ -1787,18 +1854,18 @@ window.abrirAuditoriaSaldos = function() {
 };
 
 window.guardarAjusteAuditoria = function() {
-    const cuentaSel = document.getElementById("ajusteCta");
+    const modal = document.querySelector('[data-modal="auditoria-saldos"]');
+    const cuentaSel = modal?.querySelector("#ajusteCta") || document.getElementById("ajusteCta");
     if (!cuentaSel) return alert("❌ Error de interfaz: No se encontró el selector de cuenta.");
     
     const cuentaId = cuentaSel.value;
     // Quitamos los emojis del nombre para la etiqueta
     const cuentaNombre = cuentaSel.options[cuentaSel.selectedIndex].text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').replace(' Débito', '');
     
-    const tipo = document.getElementById("ajusteTipo").value;
-    const monto = parseFloat(document.getElementById("ajusteMonto").value);
+    const tipo = modal?.querySelector("#ajusteTipo")?.value || document.getElementById("ajusteTipo")?.value;
+    const monto = parseFloat(modal?.querySelector("#ajusteMonto")?.value || document.getElementById("ajusteMonto")?.value);
 
     // 🔍 REPARACIÓN QUIRÚRGICA: Localizar el motivo de forma segura dentro del modal activo
-    const modal = document.querySelector('[data-modal="auditoria-saldos"]');
     let motivo = "";
     
     if (modal) {
@@ -1812,6 +1879,7 @@ window.guardarAjusteAuditoria = function() {
         motivo = document.getElementById("ajusteMotivo")?.value.trim() || "";
     }
 
+    if (tipo !== 'ingreso' && tipo !== 'egreso') return alert("Error de interfaz: el tipo de ajuste no corresponde a auditoria de saldos.");
     if (!monto || monto <= 0) return alert("❌ Ingresa un monto válido mayor a 0.");
     if (!motivo || motivo.length < 5) return alert("❌ Debes escribir un motivo claro (mínimo 5 caracteres) para la evidencia.");
 
@@ -1819,7 +1887,7 @@ window.guardarAjusteAuditoria = function() {
     if (!confirm(`AUDITORÍA:\n\n¿Confirmas ${msj} de ${dinero(monto)} a la cuenta [${cuentaNombre}]?\n\nMotivo: ${motivo}`)) return;
 
     // Fijamos la hora al mediodía para evitar desfases de zona horaria
-    const fechaStr = document.getElementById("ajusteFecha")?.value || new Date().toISOString().split('T')[0];
+    const fechaStr = modal?.querySelector("#ajusteFecha")?.value || document.getElementById("ajusteFecha")?.value || (window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0]));
     const fechaBase = new Date(fechaStr + 'T12:00:00');
     const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
     
@@ -1854,6 +1922,7 @@ window.guardarAjusteAuditoria = function() {
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
 window.renderCuentasBancarias = renderCuentasBancarias;
+window.recalcularSaldosGuardadosDesdeMovimientos = recalcularSaldosGuardadosDesdeMovimientos;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
 window.procesarPagoTarjetaGlobal = procesarPagoTarjetaGlobal;

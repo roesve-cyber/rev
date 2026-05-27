@@ -1,5 +1,28 @@
 // ===== APARTADOS: Seguimiento y gestión =====
 
+function _apartadoAbonosVigentes(ap) {
+    return (ap?.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
+}
+
+function _apartadoTotalPagado(ap) {
+    return (Number(ap?.enganche || 0) || 0) + _apartadoAbonosVigentes(ap).reduce((s, ab) => s + (Number(ab.monto) || 0), 0);
+}
+
+function _apartadoSaldoReal(ap) {
+    const estado = String(ap?.estado || '').toLowerCase();
+    if (estado.includes('migrado') || estado.includes('conversion') || estado.includes('cancel')) return Number(ap?.saldoPendiente || 0) || 0;
+    return Math.max(0, (Number(ap?.importeApartado || ap?.total || 0) || 0) - _apartadoTotalPagado(ap));
+}
+
+function _apartadoCuentaDefault() {
+    const cajas = StorageService.get("cuentasEfectivo", []);
+    const primera = Array.isArray(cajas) && cajas.length ? cajas[0] : null;
+    return {
+        cuentaId: primera?.id || "efectivo",
+        etiqueta: primera?.nombre || "Efectivo"
+    };
+}
+
 function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, importeApartado, fechaCompromiso, saldoPendiente, articulos, condiciones}) {
     const apartados = StorageService.get('apartados', []);
     apartados.push({
@@ -14,6 +37,8 @@ function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, impo
         saldoPendiente,
         articulos,
         enganche: importeApartado - saldoPendiente,
+        cuentaIdEnganche: window._estadoPago?.cuentaReceptora || null,
+        etiquetaCuentaEnganche: window._estadoPago?.etiquetaCuenta || null,
         abonos: [],
         estado: 'Pendiente'
     });
@@ -24,9 +49,14 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
     const apartados = StorageService.get('apartados', []);
     const ap = apartados.find(a => a.folio === folio);
     if (!ap) return false;
+    if (String(ap.estado || '').toLowerCase().includes('cancel')) return false;
+
+    const cuentaDefault = _apartadoCuentaDefault();
+    if (!cuentaId || cuentaId === 'efectivo') cuentaId = cuentaDefault.cuentaId;
+    if (!etiquetaCuenta || etiquetaCuenta === 'Efectivo') etiquetaCuenta = cuentaDefault.etiqueta;
 
     const montoAplicado = parseFloat(monto) || 0;
-    const saldoActual = parseFloat(ap.saldoPendiente) || 0;
+    const saldoActual = _apartadoSaldoReal(ap);
     if (montoAplicado <= 0) return false;
     if (montoAplicado > saldoActual + 0.01) {
         if (!opciones.silencioso) alert(`El abono (${dinero(montoAplicado)}) excede el saldo pendiente del apartado (${dinero(saldoActual)}).`);
@@ -34,14 +64,20 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
     }
     
     ap.abonos = ap.abonos || [];
+    const idOperacion = String(opciones.idOperacion || opciones.idCuarentena || '');
+    if (idOperacion && ap.abonos.some(ab => String(ab.idOperacion || ab.idCuarentena || ab.id || '') === idOperacion)) {
+        if (!opciones.silencioso) alert("Este abono ya fue aplicado al apartado. No se duplicara.");
+        return false;
+    }
     ap.abonos.push({
+        idOperacion: idOperacion || null,
         monto: montoAplicado,
         fechaAbono: fechaAbono || window.localISO(new Date()),
         cuentaId,
         etiquetaCuenta,
         autorizado: opciones.autorizado !== false
     });
-    ap.saldoPendiente = Math.max(0, saldoActual - montoAplicado);
+    ap.saldoPendiente = Math.max(0, _apartadoSaldoReal(ap));
     ap.estado = ap.saldoPendiente <= 0.01 ? 'Liquidado' : 'Pendiente';
     
     StorageService.set('apartados', apartados);
@@ -54,7 +90,8 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
             etiqueta: etiquetaCuenta,
             concepto: `Abono a Apartado - ${ap.clienteNombre} (Folio: ${folio})`,
             referencia: `ABN-APT-${folio}`,
-            fecha: fechaAbono
+            fecha: fechaAbono,
+            idOperacion: opciones.idOperacion || opciones.idCuarentena || null
         });
     } else {
         let movimientos = StorageService.get("movimientosCaja", []);
@@ -91,7 +128,8 @@ function renderApartados() {
         html += `<table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Compromiso</th><th>Total</th><th>Abonado</th><th>Pendiente</th><th>Estado</th><th style="text-align:center;">Acciones</th></tr></thead><tbody>`;
         
         apartados.forEach(a => {
-            const abonado = (a.enganche || 0) + (a.abonos || []).reduce((s, ab) => s + (Number(ab.monto) || 0), 0);
+            const abonado = _apartadoTotalPagado(a);
+            const saldoVisible = _apartadoSaldoReal(a);
             html += `<tr>
                 <td><strong>${a.folio}</strong></td>
                 <td>${a.clienteNombre}</td>
@@ -99,7 +137,7 @@ function renderApartados() {
                 <td>${a.fechaCompromiso ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fechaCompromiso) : a.fechaCompromiso) : '—'}</td>
                 <td>${dinero(a.importeApartado)}</td>
                 <td>${dinero(abonado)}</td>
-                <td style="color:#dc2626; font-weight:bold;">${dinero(a.saldoPendiente)}</td>
+                <td style="color:#dc2626; font-weight:bold;">${dinero(saldoVisible)}</td>
                 <td>${a.estado}</td>
                 <td style="text-align:center;">
                     <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
@@ -130,7 +168,8 @@ function renderApartados() {
     const modalAbonoViejo = document.getElementById('modalAbonoApartado');
     if (modalAbonoViejo) modalAbonoViejo.remove();
 
-    const selectorCuentas = window._buildSelectorCuentas ? window._buildSelectorCuentas('abonoCuentaApartado', false) : '<select id="abonoCuentaApartado" style="width:100%;padding:10px;border-radius:6px;border:1px solid #cbd5e1;"><option value="efectivo">💵 Efectivo Principal</option></select>';
+    const cuentaDefault = _apartadoCuentaDefault();
+    const selectorCuentas = window._buildSelectorCuentas ? window._buildSelectorCuentas('abonoCuentaApartado', false) : `<select id="abonoCuentaApartado" style="width:100%;padding:10px;border-radius:6px;border:1px solid #cbd5e1;"><option value="${cuentaDefault.cuentaId}">${cuentaDefault.etiqueta}</option></select>`;
     
     const modalAbono = document.createElement('div');
     modalAbono.id = 'modalAbonoApartado';
@@ -185,7 +224,7 @@ function abrirHistorialAbonos(folio) {
             cuenta: (movEnganche && (movEnganche.etiquetaCuenta || movEnganche.cuenta)) || 'Cuenta de captura'
         });
     }
-    (ap.abonos || []).forEach(ab => {
+    _apartadoAbonosVigentes(ap).forEach(ab => {
         pagos.push({
             fecha: ab.fechaAbono,
             concepto: 'Abono autorizado',
@@ -240,7 +279,7 @@ function abrirModalAbonoApartado(folio) {
     if (!modal) return;
     document.getElementById('abonoFolioApartado').value = folio;
     document.getElementById('abonoMontoApartado').value = '';
-    document.getElementById('abonoFechaApartado').value = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    document.getElementById('abonoFechaApartado').value = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0]);
     modal.style.display = 'flex';
 }
 
@@ -254,9 +293,10 @@ function registrarAbonoApartadoDesdeModal() {
     const monto = parseFloat(document.getElementById('abonoMontoApartado').value);
     const fecha = document.getElementById('abonoFechaApartado').value;
     
+    const cuentaDefault = _apartadoCuentaDefault();
     const selCuenta = document.getElementById('abonoCuentaApartado');
-    const cuentaId = selCuenta ? selCuenta.value : 'efectivo';
-    const etiquetaCuenta = selCuenta && selCuenta.selectedIndex >= 0 ? selCuenta.options[selCuenta.selectedIndex].text : 'Efectivo';
+    const cuentaId = selCuenta ? selCuenta.value : cuentaDefault.cuentaId;
+    const etiquetaCuenta = selCuenta && selCuenta.selectedIndex >= 0 ? selCuenta.options[selCuenta.selectedIndex].text : cuentaDefault.etiqueta;
 
     if (!folio || !monto || monto <= 0) { alert('Monto inválido'); return; }
 
@@ -264,15 +304,33 @@ function registrarAbonoApartadoDesdeModal() {
     const ap = apartados.find(a => a.folio === folio);
     if (!ap) { alert('No se encontró el apartado.'); return; }
 
-    const saldoActual = Number(ap.saldoPendiente) || 0;
+    if (String(ap.estado || '').toLowerCase() !== 'pendiente') {
+        alert('Este apartado no esta pendiente. No se pueden registrar nuevos abonos.');
+        return;
+    }
+
+    const saldoActual = _apartadoSaldoReal(ap);
     const abonosPendientes = StorageService.get("abonosPendientes", []);
     const pendientePorAutorizar = abonosPendientes
-        .filter(p => (p.tipo === 'apartado' || p.origen === 'apartados' || p.folioApartado) && (p.folioApartado || p.folioCXC) === folio)
+        .filter(p => !String(p.estado || '').toLowerCase().includes('cancel') && (p.tipo === 'apartado' || p.origen === 'apartados' || p.folioApartado) && (p.folioApartado || p.folioCXC) === folio)
         .reduce((s, p) => s + (Number(p.montoAbonado) || 0), 0);
     const saldoDisponible = Math.max(0, saldoActual - pendientePorAutorizar);
     if (monto > saldoDisponible + 0.01) {
         alert(`El abono (${dinero(monto)}) excede el saldo disponible del apartado (${dinero(saldoDisponible)}).`);
         return;
+    }
+
+    const fechaKey = String(fecha || '').slice(0, 10);
+    const abonosDia = _apartadoAbonosVigentes(ap).filter(ab => String(ab.fechaAbono || ab.fecha || '').slice(0, 10) === fechaKey);
+    const pendientesDia = abonosPendientes.filter(p =>
+        !String(p.estado || '').toLowerCase().includes('cancel') &&
+        (p.tipo === 'apartado' || p.origen === 'apartados' || p.folioApartado) &&
+        (p.folioApartado || p.folioCXC) === folio &&
+        String(p.fechaAbonoIso || p.fecha || '').slice(0, 10) === fechaKey
+    );
+    if (abonosDia.length || pendientesDia.length) {
+        const totalDia = [...abonosDia, ...pendientesDia].reduce((s, ab) => s + Number(ab.monto || ab.montoAbonado || 0), 0);
+        if (!confirm(`Ya existe ${abonosDia.length + pendientesDia.length} abono(s) para este apartado en la fecha seleccionada por ${dinero(totalDia)}.\n\nSi continuas se registrara otro abono el mismo dia.\n\nDeseas continuar?`)) return;
     }
 
     const msjConf = `⚠️ ABONO PROVISIONAL DE APARTADO\n\nFolio: ${folio}\nMonto recibido: ${dinero(monto)}\nDestino solicitado: ${etiquetaCuenta}\n\nSe emitirá recibo provisional y quedará en la Bóveda de Autorizaciones. Auditoría deberá aprobarlo para mover caja y saldo.\n\n¿Deseas continuar?`;
@@ -285,6 +343,7 @@ function registrarAbonoApartadoDesdeModal() {
         tipo: 'apartado',
         origen: 'apartados',
         fechaCaptura: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
+        fechaCapturaIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
         folioApartado: folio,
         folioCXC: folio,
         clienteNombre: ap.clienteNombre || 'Cliente',

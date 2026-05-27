@@ -13,6 +13,48 @@ window._estadoPago = window._estadoPago || {
     apartadoCondiciones: ""
 };
 
+function _ventaCuentaEfectivoDefault() {
+    const cajas = StorageService.get("cuentasEfectivo", []);
+    const primera = Array.isArray(cajas) && cajas.length ? cajas[0] : null;
+    return {
+        cuentaId: primera?.id || "efectivo",
+        etiqueta: primera?.nombre || "Efectivo"
+    };
+}
+
+function _ventaFechaAhoraIso() {
+    return window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+}
+
+function _ventaFechaVisible(valor) {
+    if (!valor) return '-';
+    const d = window.parseFechaMX ? window.parseFechaMX(valor) : new Date(valor);
+    if (!d || isNaN(d.getTime())) return String(valor);
+    return window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString('es-MX');
+}
+
+function _normalizarFechasPendientesAutorizacion() {
+    let cambioVentas = false;
+    const ventasPend = StorageService.get("ventasPendientes", []).map(v => {
+        const iso = v.fechaCapturaIso || v.datosVenta?.fechaIso || v.args?.[7] || null;
+        const visible = _ventaFechaVisible(iso || v.fechaCaptura);
+        if (v.fechaCapturaIso === iso && v.fechaCaptura === visible) return v;
+        cambioVentas = true;
+        return { ...v, fechaCapturaIso: iso, fechaCaptura: visible };
+    });
+    if (cambioVentas) StorageService.set("ventasPendientes", ventasPend.map(_normalizarVentaPendienteFirestore));
+
+    let cambioAbonos = false;
+    const abonosPend = StorageService.get("abonosPendientes", []).map(a => {
+        const iso = a.fechaCapturaIso || a.fechaAbonoIso || null;
+        const visible = _ventaFechaVisible(iso || a.fechaCaptura || a.fechaAbonoStr);
+        if (a.fechaCapturaIso === iso && a.fechaCaptura === visible) return a;
+        cambioAbonos = true;
+        return { ...a, fechaCapturaIso: iso, fechaCaptura: visible };
+    });
+    if (cambioAbonos) StorageService.set("abonosPendientes", abonosPend);
+}
+
 function _escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -20,7 +62,7 @@ function _escapeHtml(s) {
 function _fechaInputDesdeHoy(dias = 30) {
     const d = new Date();
     d.setDate(d.getDate() + dias);
-    return d.toISOString().slice(0, 10);
+    return window.getFechaLocalMX ? window.getFechaLocalMX(d) : (window.localISO ? window.localISO(d).slice(0, 10) : d.toISOString().slice(0, 10));
 }
 
 function _condicionesApartadoDefault() {
@@ -98,13 +140,19 @@ function _generarPagaresPreviewVentaCredito({ folio, cliente, fechaBaseIso, plan
     const pagos = Number(plan.pagos || plan.plazo || Math.round((plan.semanas || (Number(plan.meses || 0) * 4)) / (diasIntervalo / 7)) || 0);
     if (!pagos || pagos <= 0) return [];
 
-    const monto = Number(plan.abono || (Number(plan.total || 0) / pagos) || 0);
+    const totalPlan = Number(plan.total || 0);
+    const monto = Number(plan.abono || (totalPlan / pagos) || 0);
     if (!monto || monto <= 0) return [];
 
     const fechaPago = new Date(fechaBaseIso || Date.now());
     const pagares = [];
+    let acumulado = 0;
     for (let i = 1; i <= pagos; i++) {
         fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
+        const montoPagare = i === pagos && totalPlan > 0
+            ? Math.max(0, Number((totalPlan - acumulado).toFixed(2)))
+            : Number(monto.toFixed(2));
+        acumulado = Number((acumulado + montoPagare).toFixed(2));
         pagares.push({
             id: Date.now() + i,
             folio,
@@ -113,12 +161,39 @@ function _generarPagaresPreviewVentaCredito({ folio, cliente, fechaBaseIso, plan
             clienteId: cliente?.id || null,
             fechaEmision: fechaBaseIso || window.localISO?.(new Date()) || new Date().toISOString(),
             fechaVencimiento: fechaPago.getTime(),
-            monto,
+            monto: montoPagare,
             estado: "Pendiente",
             diasAtrasoActual: 0
         });
     }
     return pagares;
+}
+
+function _normalizarPlanCreditoVenta(plan, capital, periodicidad = "semanal", planIndex = 0) {
+    const multiplicador = periodicidad === "quincenal" ? 2 : periodicidad === "mensual" ? 4 : 1;
+    const pagosBase = Number(plan?.pagos || plan?.plazo || Math.round(Number(plan?.semanas || 0) / multiplicador) || Math.round((Number(plan?.meses || 0) * 4) / multiplicador) || 0);
+    const abonoBase = Number(plan?.abono || 0);
+    const totalBase = Number(plan?.total || (pagosBase > 0 && abonoBase > 0 ? pagosBase * abonoBase : 0));
+
+    if (pagosBase > 0 && abonoBase > 0 && totalBase > 0) {
+        return {
+            ...plan,
+            pagos: pagosBase,
+            plazo: plan?.plazo || pagosBase,
+            abono: abonoBase,
+            total: totalBase,
+            semanas: plan?.semanas || pagosBase * multiplicador
+        };
+    }
+
+    const capitalSeguro = Number(capital || 0);
+    if (capitalSeguro <= 0 || !CalculatorService?.calcularCreditoConPeriodicidad) return null;
+
+    const planes = CalculatorService.calcularCreditoConPeriodicidad(capitalSeguro, periodicidad);
+    if (!planes || planes.length === 0) return null;
+    const idx = Number(planIndex);
+    const elegido = planes[idx >= 0 && idx < planes.length ? idx : 0] || planes.find(p => Number(p.abono || 0) > 0) || planes[0];
+    return elegido && Number(elegido.abono || 0) > 0 && Number(elegido.total || 0) > 0 ? elegido : null;
 }
 
 function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
@@ -134,9 +209,15 @@ function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
         const cant = Number(item.cantidad || 1);
         const colorElegido = item.colorElegido || '';
         const ubicacionElegida = item.ubicacionElegida || '';
-        if ((Number(prod.stock) || 0) < cant) return;
+        const validacionOrigen = _validarOrigenEntregaVenta(prod, item, { color: colorElegido, ubicacion: ubicacionElegida });
+        if (!validacionOrigen.ok || (Number(prod.stock) || 0) < cant) return;
 
-        if (Array.isArray(prod.variantes) && prod.variantes.length > 0) {
+        if (
+            Array.isArray(prod.variantes) &&
+            prod.variantes.length > 0 &&
+            ubicacionElegida &&
+            _normalizarClaveInventario(ubicacionElegida) !== 'STOCK GENERAL'
+        ) {
             let restante = cant;
             prod.variantes.forEach(v => {
                 const coincideColor = !colorElegido || String(v.color || '').toUpperCase() === String(colorElegido).toUpperCase();
@@ -147,15 +228,7 @@ function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
                     restante -= deducir;
                 }
             });
-            if (restante > 0) {
-                prod.variantes.forEach(v => {
-                    if (restante > 0 && Number(v.stock) > 0) {
-                        const deducir = Math.min(Number(v.stock), restante);
-                        v.stock -= deducir;
-                        restante -= deducir;
-                    }
-                });
-            }
+            if (restante > 0) return;
         }
 
         prod.stock = Math.max(0, (Number(prod.stock) || 0) - cant);
@@ -474,12 +547,14 @@ function renderCarrito() {
     vistaCarrito.innerHTML = html;
     
     // Resetear estado de pago al renderizar el carrito
+    const cuentaDefaultVenta = _ventaCuentaEfectivoDefault();
     window._estadoPago = {
         metodo: "contado",
         enganche: 0,
         periodicidad: "semanal",
         modoEnganche: "efectivo",
-        cuentaReceptora: "efectivo",
+        cuentaReceptora: cuentaDefaultVenta.cuentaId,
+        etiquetaCuenta: cuentaDefaultVenta.etiqueta,
         planIndex: null,
         plan: null,
         apartadoFechaCompromiso: _fechaInputDesdeHoy(30),
@@ -557,6 +632,134 @@ function obtenerUbicacionesPorColor(productoId, color) {
     return prod.variantes
         .filter(v => v.color && v.color.toUpperCase() === color.toUpperCase() && (Number(v.stock) || 0) > 0)
         .map(v => ({ ubicacion: v.ubicacion || 'General', stock: v.stock }));
+}
+
+function _normalizarClaveInventario(valor) {
+    return String(valor || '').trim().toUpperCase();
+}
+
+function _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida) {
+    if (!prod || !ubicacionElegida) return 0;
+
+    const cantidadTotal = Number(prod.stock || 0);
+    const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
+    const ubicNorm = _normalizarClaveInventario(ubicacionElegida);
+    const colorNorm = _normalizarClaveInventario(colorElegido);
+
+    if (ubicNorm === 'STOCK GENERAL') {
+        const asignadoAVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+        return Math.max(0, cantidadTotal - asignadoAVariantes);
+    }
+
+    if (variantes.length === 0) {
+        return ubicNorm === 'GENERAL' ? cantidadTotal : 0;
+    }
+
+    return variantes
+        .filter(v => _normalizarClaveInventario(v.ubicacion || 'General') === ubicNorm)
+        .filter(v => !colorNorm || _normalizarClaveInventario(v.color || 'General') === colorNorm)
+        .reduce((s, v) => s + (Number(v.stock) || 0), 0);
+}
+
+function _stockDisponibleParaSolicitudVenta(prod, item) {
+    if (!prod) return 0;
+    const cantidadTotal = Number(prod.stock || 0);
+    const colorNorm = _normalizarClaveInventario(item?.colorElegido || '');
+    if (!colorNorm) return cantidadTotal;
+
+    const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
+    const stockEnVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+    const stockGeneralSinAsignar = Math.max(0, cantidadTotal - stockEnVariantes);
+    const stockColor = variantes
+        .filter(v => _normalizarClaveInventario(v.color || 'General') === colorNorm)
+        .reduce((s, v) => s + (Number(v.stock) || 0), 0);
+
+    return stockGeneralSinAsignar + stockColor;
+}
+
+function _validarOrigenEntregaVenta(prod, item, decision) {
+    const cantidad = Number(item?.cantidad || 1);
+    const colorElegido = decision?.color !== undefined ? decision.color : (item?.colorElegido || '');
+    const ubicacionElegida = decision?.ubicacion !== undefined ? decision.ubicacion : (item?.ubicacionElegida || '');
+
+    if (!ubicacionElegida) {
+        return {
+            ok: false,
+            mensaje: `Selecciona la ubicacion de salida para "${prod?.nombre || item?.nombre || 'producto'}".`
+        };
+    }
+
+    const disponible = _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida);
+    if (disponible < cantidad) {
+        return {
+            ok: false,
+            mensaje: `"${prod?.nombre || item?.nombre || 'Producto'}" no tiene inventario suficiente en ${ubicacionElegida}.\n\nSolicitado: ${cantidad}\nDisponible ahi: ${disponible}${colorElegido ? `\nColor: ${colorElegido}` : ''}`
+        };
+    }
+
+    return { ok: true, disponible };
+}
+
+function _opcionesUbicacionSalidaVenta(prod, colorElegido = '', seleccionActual = '') {
+    if (!prod) return '<option value="">Producto no encontrado</option>';
+
+    const stockActual = Number(prod.stock || 0);
+    const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
+    const stockEnVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+    const stockGeneralSinAsignar = Math.max(0, stockActual - stockEnVariantes);
+    const colorNorm = _normalizarClaveInventario(colorElegido);
+    const seleccionNorm = _normalizarClaveInventario(seleccionActual);
+    let opciones = '<option value="">Selecciona salida...</option>';
+
+    if (stockGeneralSinAsignar > 0) {
+        opciones += `<option value="Stock General" ${seleccionNorm === 'STOCK GENERAL' ? 'selected' : ''}>Stock General (${stockGeneralSinAsignar} disp.)</option>`;
+    }
+
+    const ubicacionesStock = {};
+    variantes.forEach(v => {
+        const coincideColor = !colorNorm || _normalizarClaveInventario(v.color || 'General') === colorNorm;
+        if (!coincideColor) return;
+        const nombreUbi = v.ubicacion || 'General';
+        ubicacionesStock[nombreUbi] = (ubicacionesStock[nombreUbi] || 0) + (Number(v.stock) || 0);
+    });
+
+    Object.entries(ubicacionesStock).forEach(([ubicacion, stockUbi]) => {
+        if (stockUbi <= 0) return;
+        const selected = seleccionNorm === _normalizarClaveInventario(ubicacion) ? 'selected' : '';
+        opciones += `<option value="${_escapeHtml(ubicacion)}" ${selected}>${_escapeHtml(ubicacion)} (${stockUbi} disp.)</option>`;
+    });
+
+    return opciones;
+}
+
+function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '', ubicacionElegida = '') {
+    const cant = Number(cantidad || 0);
+    if (!prod || cant <= 0) return false;
+
+    const validacion = _validarOrigenEntregaVenta(prod, { cantidad: cant, nombre: prod.nombre }, { color: colorElegido, ubicacion: ubicacionElegida });
+    if (!validacion.ok) return false;
+
+    if (
+        Array.isArray(prod.variantes) &&
+        prod.variantes.length > 0 &&
+        ubicacionElegida &&
+        _normalizarClaveInventario(ubicacionElegida) !== 'STOCK GENERAL'
+    ) {
+        let restante = cant;
+        prod.variantes.forEach(v => {
+            const coincideColor = !colorElegido || _normalizarClaveInventario(v.color || 'General') === _normalizarClaveInventario(colorElegido);
+            const coincideUbicacion = _normalizarClaveInventario(v.ubicacion || 'General') === _normalizarClaveInventario(ubicacionElegida);
+            if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
+                const deducir = Math.min(Number(v.stock), restante);
+                v.stock -= deducir;
+                restante -= deducir;
+            }
+        });
+        if (restante > 0) return false;
+    }
+
+    prod.stock = Math.max(0, (Number(prod.stock) || 0) - cant);
+    return true;
 }
 
 function actualizarColorCarrito(index, color) {
@@ -720,9 +923,10 @@ function actualizarInterfazPago() {
     window._estadoPago.modoEnganche = metodo === "contado"
         ? "efectivo"
         : (document.querySelector('input[name="modoEnganche"]:checked')?.value || "efectivo");
+    const cuentaDefaultEstado = _ventaCuentaEfectivoDefault();
     window._estadoPago.cuentaReceptora = metodo === "contado"
-        ? "efectivo"
-        : (document.getElementById("selCuentaReceptora")?.value || "efectivo");
+        ? cuentaDefaultEstado.cuentaId
+        : (document.getElementById("selCuentaReceptora")?.value || cuentaDefaultEstado.cuentaId);
     const inputFechaDOM = document.getElementById("inputFechaVenta");
     if (inputFechaDOM && inputFechaDOM.value) {
         window._estadoPago.fechaVenta = inputFechaDOM.value;
@@ -730,8 +934,8 @@ function actualizarInterfazPago() {
     
     // Guardamos la caja seleccionada en nuestra libreta de estado temporal
     const selCaja = document.getElementById("cuentaReceptora_venta");
-    window._estadoPago.cuentaReceptora = selCaja ? selCaja.value : "efectivo";
-    window._estadoPago.etiquetaCuenta = selCaja && selCaja.selectedIndex >= 0 ? selCaja.options[selCaja.selectedIndex].text : "Efectivo";
+    window._estadoPago.cuentaReceptora = selCaja ? selCaja.value : cuentaDefaultEstado.cuentaId;
+    window._estadoPago.etiquetaCuenta = selCaja && selCaja.selectedIndex >= 0 ? selCaja.options[selCaja.selectedIndex].text : cuentaDefaultEstado.etiqueta;
     window._estadoPago.apartadoFechaCompromiso = document.getElementById("fechaCompromisoApartado")?.value || window._estadoPago.apartadoFechaCompromiso || "";
     window._estadoPago.apartadoCondiciones = document.getElementById("condicionesApartado")?.value || window._estadoPago.apartadoCondiciones || "";
 }
@@ -1032,7 +1236,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     carrito.forEach(item => {
         const prod = productos.find(p => String(p.id) === String(item.id));
         if (prod) {
-            if ((prod.stock || 0) >= (item.cantidad || 1)) {
+            if (_stockDisponibleParaSolicitudVenta(prod, item) >= (item.cantidad || 1)) {
                 productosConStock.push({ item, prod });
             } else {
                 productosSinStock.push({ item, prod });
@@ -1064,32 +1268,19 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                         style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; width:120px;">
                 </div>`;
 
-            // 1. Obtener ubicaciones oficiales del sistema
-            const ubicacionesConfig = StorageService.get("ubicacionesConfig", [
-                { id: 1, nombre: "Piso de Ventas (General)" },
-                { id: 2, nombre: "Bodega Principal" }
-            ]);
-            
-            // 2. Armar las opciones del Combo Box con INVENTARIO DINÁMICO
+            // 1. Armar las opciones del Combo Box con INVENTARIO DINAMICO
             const stockActual = parseFloat(x.prod.stock) || 0;
             const stockEnVariantes = (x.prod.variantes || []).reduce((s, v) => s + (parseFloat(v.stock) || 0), 0);
             const stockGeneralSinAsignar = Math.max(0, stockActual - stockEnVariantes);
 
-            let opcionesUbi = `<option value="Stock General" ${ubicacionElegida === 'Stock General' ? 'selected' : ''}>Stock General (${stockGeneralSinAsignar} disp.)</option>`;
-            
-            ubicacionesConfig.forEach(u => {
-                const varianteUbi = (x.prod.variantes || []).find(v => v.ubicacion === u.nombre);
-                const stockUbi = varianteUbi ? parseFloat(varianteUbi.stock) : 0;
-                let sel = ubicacionElegida === u.nombre ? 'selected' : '';
-                opcionesUbi += `<option value="${u.nombre}" ${sel}>${u.nombre} (${stockUbi} disp.)</option>`;
-            });
+            const opcionesUbi = _opcionesUbicacionSalidaVenta(x.prod, colorElegido, ubicacionElegida);
 
-            // 3. Crear el HTML del Selector
+            // 2. Crear el HTML del Selector
             let ubicacionSelectorHtml = `
                 <div style="margin-top:6px;">
-                    <label style="font-size:11px; color:#374151;">📍 Ubicación:</label>
+                    <label style="font-size:11px; color:#374151;">Ubicacion de salida:</label>
                     <select onchange="cambiarUbicacionInventario(${idProd}, this.value)"
-                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:220px; cursor:pointer;">
+                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:230px; cursor:pointer;">
                         ${opcionesUbi}
                     </select>
                 </div>`;
@@ -1114,7 +1305,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
                     <div>
                         <strong>${x.prod.nombre}</strong><br>
-                        <small style="color:#718096;">Stock disponible: ${x.prod.stock} | Solicitado: ${cantRequerida}</small>
+                        <small style="color:#718096;">Stock disponible: ${_stockDisponibleParaSolicitudVenta(x.prod, x.item)} | Solicitado: ${cantRequerida}</small>
                         ${colorSelectorHtml}
                         ${ubicacionSelectorHtml}
                     </div>
@@ -1141,7 +1332,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
                     <strong>${x.prod.nombre}</strong><br>
                     <small style="color:#991b1b;">⚠️ Se creará REQUISICIÓN DE COMPRA automáticamente</small><br>
-                    <small style="color:#7f1d1d;">Stock actual: ${x.prod.stock || 0} | Solicitado: ${x.item.cantidad || 1}</small><br>
+                    <small style="color:#7f1d1d;">Stock disponible para solicitud: ${_stockDisponibleParaSolicitudVenta(x.prod, x.item)} | Solicitado: ${x.item.cantidad || 1}</small><br>
                     <small style="color:#374151;">Color solicitado: <b>${_escapeHtml(colorElegido)}</b></small>
                 </div>
             `;
@@ -1252,24 +1443,33 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
         fechaVentaDate = new Date();
     }
 
-    const fechaHoy = fechaVentaDate.toLocaleDateString("es-MX");
-    const fechaVentaIso = fechaVentaDate.toISOString();
+    const fechaHoy = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaVentaDate) : fechaVentaDate.toLocaleDateString("es-MX");
+    const fechaVentaIso = window.localISO ? window.localISO(fechaVentaDate) : fechaVentaDate.toISOString();
     // --- FIN CORRECCIÓN DE FECHA ---
 
     let productosAEntregar = [];
     let productosAPendiente = [];
+    let errorInventario = "";
 
     carrito.forEach(item => {
         const prod = productos.find(prod => String(prod.id) === String(item.id)); 
-        if (!prod) return;
+        if (!prod || errorInventario) return;
         const decision = decisionesInventario[item.id];
-        const tieneStock = (prod.stock || 0) >= (item.cantidad || 1);
+        const tieneStock = _stockDisponibleParaSolicitudVenta(prod, item) >= (item.cantidad || 1);
         
         const puedeEntregarAhora = metodoPago !== "apartado" && tieneStock && decision && decision.entregar;
 
         if (puedeEntregarAhora) {
             const colorFinal = (decision.color !== undefined) ? decision.color : (item.colorElegido || '');
             const ubicacionFinal = (decision.ubicacion !== undefined) ? decision.ubicacion : (item.ubicacionElegida || '');
+            const validacionOrigen = _validarOrigenEntregaVenta(prod, item, {
+                color: colorFinal,
+                ubicacion: ubicacionFinal
+            });
+            if (!validacionOrigen.ok) {
+                errorInventario = validacionOrigen.mensaje;
+                return;
+            }
             productosAEntregar.push({ item: { ...item, colorElegido: colorFinal, ubicacionElegida: ubicacionFinal }, prod });
         } else {
             productosAPendiente.push({
@@ -1283,6 +1483,11 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
             });
         }
     });
+
+    if (errorInventario) {
+        alert(`No se puede entregar la mercancia todavia.\n\n${errorInventario}\n\nSelecciona una ubicacion con inventario suficiente o deja el producto como pendiente.`);
+        return;
+    }
 
     procesarVentaFinal(
         metodoPago, 
@@ -1349,7 +1554,8 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     // 2. Empaquetar todo en la Bóveda de Cuarentena
     const cuarentena = {
         idCuarentena: Date.now(),
-        fechaCaptura: new Date().toLocaleString('es-MX'),
+        fechaCaptura: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
+        fechaCapturaIso: _ventaFechaAhoraIso(),
         clienteNombre: clienteSeleccionado.nombre,
         totalVenta: totalContado,
         args: [
@@ -1415,6 +1621,25 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     productosConStock = _desenvolverListaVentaPendiente(productosConStock);
     productosSinStock = _desenvolverListaVentaPendiente(productosSinStock);
 
+    const folioNormalizado = String(folioVenta || '').trim();
+    const esConversionApartado = !!datosVentaP?.origenApartadoFolio &&
+        String(datosVentaP.origenApartadoFolio || '').trim() === folioNormalizado;
+    const ventaExistente = StorageService.get('ventasRegistradas', [])
+        .find(v => String(v.folio || '').trim() === folioNormalizado);
+    const ventaExistenteEsApartadoOrigen = ventaExistente &&
+        esConversionApartado &&
+        String(ventaExistente.metodoPago || '').toLowerCase() === 'apartado';
+    if (ventaExistente && !ventaExistenteEsApartadoOrigen) {
+        alert(`La venta ${folioNormalizado} ya existe en registros. No se volvera a procesar para evitar duplicar caja, cartera o inventario.`);
+        return false;
+    }
+    const canceladaAntes = StorageService.get("historialCancelaciones", [])
+        .some(h => h.tipo === 'venta' && String(h.folio || '').trim() === folioNormalizado);
+    if (canceladaAntes) {
+        alert(`La venta ${folioNormalizado} ya fue cancelada. No puede autorizarse desde la boveda.`);
+        return false;
+    }
+
     let requisicionesCompra = StorageService.get("requisicionesCompra", []);
     let movimientosCaja = StorageService.get("movimientosCaja", []);
     let cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
@@ -1422,19 +1647,30 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     let pagaresSistema = StorageService.get("pagaresSistema", []);
     let entregasPendientes = [];
     let entregadosAhora = [];
+    let productosActuales = StorageService.get("productos", []);
+    let inventarioVentaActualizado = false;
 
     // PASO 1: ACTUALIZAR STOCK 
     productosConStock.forEach(x => {
         if (x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada) return;
         const cantRequerida = x.item.cantidad || 1;
-        const stockActual = x.prod.stock || 0;
+        const prodPersistente = productosActuales.find(p => String(p.id) === String(x.prod?.id || x.item?.id || x.item?.productoId));
+        const prodVenta = prodPersistente || x.prod;
+        if (!prodVenta) return;
+        const stockActual = prodVenta.stock || 0;
         const colorElegido = x.item.colorElegido || '';
         const ubicacionElegida = x.item.ubicacionElegida || ''; 
 
-        if (stockActual >= cantRequerida) {
-            if (x.prod.variantes && x.prod.variantes.length > 0) {
+        const validacionOrigen = _validarOrigenEntregaVenta(prodVenta, x.item, { color: colorElegido, ubicacion: ubicacionElegida });
+        if (stockActual >= cantRequerida && validacionOrigen.ok) {
+            if (
+                prodVenta.variantes &&
+                prodVenta.variantes.length > 0 &&
+                ubicacionElegida &&
+                _normalizarClaveInventario(ubicacionElegida) !== 'STOCK GENERAL'
+            ) {
                 let restante = cantRequerida;
-                x.prod.variantes.forEach(v => {
+                prodVenta.variantes.forEach(v => {
                     const coincideColor = !colorElegido || (v.color && v.color.toUpperCase() === colorElegido.toUpperCase());
                     const coincideUbicacion = !ubicacionElegida || (v.ubicacion && v.ubicacion.toUpperCase() === ubicacionElegida.toUpperCase());
                     if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
@@ -1443,28 +1679,30 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
                         restante -= deducir;
                     }
                 });
-                if (restante > 0) {
-                    x.prod.variantes.forEach(v => {
-                        if (restante > 0 && Number(v.stock) > 0) {
-                            const deducir = Math.min(Number(v.stock), restante);
-                            v.stock -= deducir;
-                            restante -= deducir;
-                        }
-                    });
-                }
+                if (restante > 0) return;
             }
-            x.prod.stock = stockActual - cantRequerida;
+            prodVenta.stock = stockActual - cantRequerida;
+            if (prodPersistente) {
+                x.prod = prodPersistente;
+                inventarioVentaActualizado = true;
+            }
             const concepto = colorElegido ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})` : `Venta - ${folioVenta}`;
-            if (typeof registrarMovimiento === 'function') registrarMovimiento(x.prod.id, concepto, cantRequerida, "salida");
+            if (typeof registrarMovimiento === 'function') registrarMovimiento(prodVenta.id, concepto, cantRequerida, "salida");
             entregadosAhora.push({
-                productoId: x.prod.id,
-                nombre: x.prod.nombre,
+                productoId: prodVenta.id,
+                nombre: prodVenta.nombre,
                 colorElegido,
                 ubicacionElegida,
                 cantidad: cantRequerida
             });
         }
     });
+
+    if (inventarioVentaActualizado) {
+        StorageService.set("productos", productosActuales);
+        productos = productosActuales;
+        window.productos = productosActuales;
+    }
 
     // PASO 2: CREAR ENTREGAS PENDIENTES Y REQUISICIONES
     productosSinStock.forEach(x => {
@@ -1495,8 +1733,9 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     let tituloConcepto = (metodoPago === "contado" || metodoPago === "transferencia") ? "Venta" : "Enganche";
 
     if (montoIngresoHoy > 0) {
-        const cuentaId = window._estadoPago?.cuentaReceptora || 'efectivo';
-        const etiqueta = window._estadoPago?.etiquetaCuenta || 'Efectivo';
+        const cuentaDefaultIngreso = _ventaCuentaEfectivoDefault();
+        const cuentaId = window._estadoPago?.cuentaReceptora || cuentaDefaultIngreso.cuentaId;
+        const etiqueta = window._estadoPago?.etiquetaCuenta || cuentaDefaultIngreso.etiqueta;
 
         if (typeof window._ingresarCuenta === 'function') {
             window._ingresarCuenta({ monto: montoIngresoHoy, cuentaId: cuentaId, etiqueta: etiqueta, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre} (Folio: ${folioVenta})`, referencia: `VENTA-${folioVenta}`, fecha: fechaVentaIso });
@@ -1509,17 +1748,34 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     // PASO 4: CREAR CUENTAS POR COBRAR O APARTADOS
     if (metodoPago === "credito") {
         const totalMercanciaCredito = Number(datosVentaP.totalMercancia || totalContado || 0);
-        let saldosPorMes = CalculatorService.calcularCreditoConPeriodicidad ? CalculatorService.calcularCreditoConPeriodicidad((totalMercanciaCredito - enganche), datosVentaP.periodicidad).map(p => ({ meses: p.meses, total: p.total })) : [];
-        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalMercanciaCredito, engancheRecibido: enganche, saldoActual: planElegido.total, saldoOriginal: planElegido.total, metodo: metodoPago, plan: planElegido, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalMercanciaCredito, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes });
-
+        const capitalCredito = Math.max(0, totalMercanciaCredito - Number(enganche || 0));
+        planElegido = _normalizarPlanCreditoVenta(planElegido, capitalCredito, datosVentaP.periodicidad || "semanal", window._estadoPago?.planIndex || 0);
+        if (!planElegido) {
+            alert(`No se pudo autorizar la venta ${folioVenta}: el plan de credito no tiene pagos validos. Revisa la configuracion de credito antes de intentarlo de nuevo.`);
+            return false;
+        }
         let diasIntervalo = datosVentaP.periodicidad === "quincenal" ? 14 : datosVentaP.periodicidad === "mensual" ? 30 : 7;
         let fechaPago = new Date(fechaVentaIso);
-        const totalPagos = planElegido.pagos || Math.round(planElegido.semanas / (diasIntervalo/7));
-        
+        const totalPagos = Math.max(1, Number(planElegido.pagos || Math.round(planElegido.semanas / (diasIntervalo / 7))) || 1);
+        const totalCreditoPlan = Math.max(0, Number(planElegido.total || 0));
+        const abonoBasePlan = Math.max(0, Number(planElegido.abono || 0));
+        const pagaresNuevos = [];
+        let acumuladoPagares = 0;
+
         for (let i = 1; i <= totalPagos; i++) {
             fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
-            pagaresSistema.push({ id: Date.now() + i, folio: folioVenta, numeroPagere: `${folioVenta}-${i}/${totalPagos}`, clienteNombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, fechaEmision: fechaVentaIso, fechaVencimiento: fechaPago.getTime(), monto: planElegido.abono, estado: "Pendiente", diasAtrasoActual: 0 });
+            const montoPagare = i === totalPagos
+                ? Math.max(0, Number((totalCreditoPlan - acumuladoPagares).toFixed(2)))
+                : Number(abonoBasePlan.toFixed(2));
+            acumuladoPagares = Number((acumuladoPagares + montoPagare).toFixed(2));
+            pagaresNuevos.push({ id: Date.now() + i, folio: folioVenta, numeroPagere: `${folioVenta}-${i}/${totalPagos}`, clienteNombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, fechaEmision: fechaVentaIso, fechaVencimiento: fechaPago.getTime(), monto: montoPagare, estado: "Pendiente", diasAtrasoActual: 0 });
         }
+
+        const saldoCreditoPagares = Number(pagaresNuevos.reduce((sum, p) => sum + Number(p.monto || 0), 0).toFixed(2));
+        const planCreditoFinal = { ...planElegido, total: saldoCreditoPagares, pagos: totalPagos };
+        let saldosPorMes = CalculatorService.calcularCreditoConPeriodicidad ? CalculatorService.calcularCreditoConPeriodicidad((totalMercanciaCredito - enganche), datosVentaP.periodicidad).map(p => ({ meses: p.meses, total: p.total })) : [];
+        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalMercanciaCredito, engancheRecibido: enganche, saldoActual: saldoCreditoPagares, saldoOriginal: saldoCreditoPagares, metodo: metodoPago, plan: planCreditoFinal, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalMercanciaCredito, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes, origenApartadoFolio: datosVentaP.origenApartadoFolio || null, engancheOrigenApartado: datosVentaP.origenApartadoFolio ? enganche : 0 });
+        pagaresSistema.push(...pagaresNuevos);
         StorageService.set("cuentasPorCobrar", cuentasPorCobrar);
         StorageService.set("pagaresSistema", pagaresSistema);
 
@@ -1539,6 +1795,8 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
             articulos: datosVentaP.articulos,
             abonos: [],
             estado: 'Pendiente',
+            cuentaIdEnganche: window._estadoPago?.cuentaReceptora || null,
+            etiquetaCuentaEnganche: window._estadoPago?.etiquetaCuenta || null,
             vendedorId: window._vendedorSeleccionado?.id || null,
             vendedorNombre: window._vendedorSeleccionado?.nombre || null
         });
@@ -1581,7 +1839,44 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     }
 
     const ventasRegistradas = StorageService.get('ventasRegistradas', []);
-    ventasRegistradas.push({ folio: folioVenta, fechaVenta: fechaVentaIso, fecha: fechaHoy, clienteId: datosVentaP.cliente.id, clienteNombre: datosVentaP.cliente.nombre, cliente: datosVentaP.cliente, total: totalContado, totalMercancia: datosVentaP.totalMercancia || totalContado, enganche: enganche, saldoAFinanciar: saldoAFinanciar, metodoPago: metodoPago, plan: planElegido, periodicidad: datosVentaP.periodicidad, articulos: datosVentaP.articulos, apartadoFechaCompromiso: datosVentaP.apartadoFechaCompromiso || null, apartadoCondiciones: datosVentaP.apartadoCondiciones || null, vendedor: window._vendedorSeleccionado?.nombre || null });
+    const registroVentaAutorizada = {
+        folio: folioVenta,
+        fechaVenta: fechaVentaIso,
+        fecha: fechaHoy,
+        clienteId: datosVentaP.cliente.id,
+        clienteNombre: datosVentaP.cliente.nombre,
+        cliente: datosVentaP.cliente,
+        total: totalContado,
+        totalMercancia: datosVentaP.totalMercancia || totalContado,
+        enganche: enganche,
+        cuentaReceptora: window._estadoPago?.cuentaReceptora || null,
+        etiquetaCuenta: window._estadoPago?.etiquetaCuenta || null,
+        montoIngresoInicial: montoIngresoHoy,
+        saldoAFinanciar: metodoPago === "credito" && planElegido?.total ? planElegido.total : saldoAFinanciar,
+        metodoPago: metodoPago,
+        plan: planElegido,
+        periodicidad: datosVentaP.periodicidad,
+        articulos: datosVentaP.articulos,
+        apartadoFechaCompromiso: datosVentaP.apartadoFechaCompromiso || null,
+        apartadoCondiciones: datosVentaP.apartadoCondiciones || null,
+        vendedor: window._vendedorSeleccionado?.nombre || null
+    };
+    const idxVentaApartadoOrigen = ventasRegistradas.findIndex(v =>
+        String(v.folio || '').trim() === folioNormalizado &&
+        esConversionApartado &&
+        String(v.metodoPago || '').toLowerCase() === 'apartado'
+    );
+    if (idxVentaApartadoOrigen !== -1) {
+        ventasRegistradas[idxVentaApartadoOrigen] = {
+            ...ventasRegistradas[idxVentaApartadoOrigen],
+            ...registroVentaAutorizada,
+            folioApartadoOrigen: datosVentaP.origenApartadoFolio,
+            estadoAnteriorApartado: "Migrado a Credito",
+            fechaConversionCredito: fechaVentaIso
+        };
+    } else {
+        ventasRegistradas.push(registroVentaAutorizada);
+    }
     StorageService.set('ventasRegistradas', ventasRegistradas);
 
     const entregaYaDocumentada = StorageService.get("documentosEntrega", [])
@@ -1605,6 +1900,7 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     if (typeof window.acumularPuntosCliente === "function" && montoIngresoHoy > 0) {
         window.acumularPuntosCliente(datosVentaP.cliente.id, montoIngresoHoy);
     }
+    return true;
 };
 
 function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
@@ -1959,12 +2255,19 @@ function abrirDetalleEntrega(idSalida) {
     // Generamos los inputs para que el vendedor decida cuánto entregar hoy
     const itemsHtml = (s.items || []).map((i, index) => {
         if (i.cantidad <= 0) return ''; // Si ya se entregó todo este item, lo omitimos
-        
+        const prodActual = StorageService.get("productos", []).find(p => String(p.id) === String(i.productoId));
+        const opcionesUbicacion = _opcionesUbicacionSalidaVenta(prodActual, i.colorElegido || '', i.ubicacionElegida || '');
+
         return `
         <tr>
             <td style="padding:8px; border-bottom:1px solid #f3f4f6;">
                 <strong>${i.nombre || '—'}</strong>
                 ${i.colorElegido ? `<br><small style="color:#64748b;">Color: ${i.colorElegido}</small>` : ''}
+                <br>
+                <label style="font-size:11px; color:#475569; display:block; margin-top:6px;">Ubicacion de salida</label>
+                <select id="entregaUbi-${s.id}-${index}" style="width:100%; max-width:230px; padding:6px; border:1px solid #cbd5e1; border-radius:6px; background:white;">
+                    ${opcionesUbicacion}
+                </select>
             </td>
             <td style="padding:8px; text-align:center; border-bottom:1px solid #f3f4f6; color:#b91c1c; font-weight:bold;">
                 ${i.cantidad}
@@ -2054,11 +2357,27 @@ function aplicarSalidaPendienteVentas(idSalida) {
         let cantAEntregar = inputEl ? parseInt(inputEl.value) : 0;
         
         if (cantAEntregar > 0) {
+            if (cantAEntregar > Number(item.cantidad || 0)) {
+                validacionPasada = false;
+                mensajeError = `La cantidad a entregar de ${item.nombre} excede lo pendiente.`;
+                return;
+            }
             const prod = productosActuales.find(p => String(p.id) === String(item.productoId));
+            const ubicacionSeleccionada = document.getElementById(`entregaUbi-${s.id}-${index}`)?.value || '';
             if (!prod) {
                 validacionPasada = false;
                 mensajeError = `❌ Error: Producto no encontrado en el inventario: ${item.nombre}`;
-            } else if ((prod.stock || 0) < cantAEntregar) {
+            } else {
+                const validacionOrigen = _validarOrigenEntregaVenta(prod, { ...item, cantidad: cantAEntregar }, {
+                    color: item.colorElegido || '',
+                    ubicacion: ubicacionSeleccionada
+                });
+                if (!validacionOrigen.ok) {
+                    validacionPasada = false;
+                    mensajeError = validacionOrigen.mensaje;
+                }
+            }
+            if (validacionPasada && (prod.stock || 0) < cantAEntregar) {
                 validacionPasada = false;
                 mensajeError = `⚠️ STOCK INSUFICIENTE para: ${item.nombre}\n\n- Cantidad solicitada: ${cantAEntregar}\n- Piezas disponibles: ${prod.stock || 0}\n\nPor favor ajusta la cantidad a entregar.`;
             }
@@ -2079,44 +2398,23 @@ function aplicarSalidaPendienteVentas(idSalida) {
         
         if (cantAEntregar > 0) {
             const prod = productosActuales.find(p => String(p.id) === String(item.productoId));
+            const ubicacionSeleccionada = document.getElementById(`entregaUbi-${s.id}-${index}`)?.value || '';
             if (prod) {
-                // Descontar stock general
-                prod.stock = Math.max(0, (prod.stock || 0) - cantAEntregar);
-                
-                // Descontar de variantes (para evitar descuadres de color/bodega)
-                if (prod.variantes && prod.variantes.length > 0) {
-                    let restante = cantAEntregar;
-                    // Intentamos quitar del color que pidió el cliente
-                    prod.variantes.forEach(v => {
-                        const coincideColor = !item.colorElegido || (v.color && v.color.toUpperCase() === item.colorElegido.toUpperCase());
-                        if (restante > 0 && coincideColor && Number(v.stock) > 0) {
-                            const deducir = Math.min(Number(v.stock), restante);
-                            v.stock -= deducir;
-                            restante -= deducir;
-                        }
-                    });
-                    // Si hubo error de dedo y sobra, descontamos de donde haya
-                    if (restante > 0) {
-                        prod.variantes.forEach(v => {
-                            if (restante > 0 && Number(v.stock) > 0) {
-                                const deducir = Math.min(Number(v.stock), restante);
-                                v.stock -= deducir;
-                                restante -= deducir;
-                            }
-                        });
-                    }
-                }
+                const salidaOk = _descontarInventarioDesdeOrigenVenta(prod, cantAEntregar, item.colorElegido || '', ubicacionSeleccionada);
+                if (!salidaOk) return;
                 
                 // Afectar el Kardex
                 if (typeof window.registrarMovimiento === 'function') {
-                    window.registrarMovimiento(item.productoId, `Entrega diferida - Folio ${s.folioVenta}`, cantAEntregar, "salida");
+                    window.registrarMovimiento(item.productoId, `Entrega diferida - Folio ${s.folioVenta} (${ubicacionSeleccionada})`, cantAEntregar, "salida");
                 }
 
                 entregadosHoy.push({
                     nombre: item.nombre,
                     colorElegido: item.colorElegido || '',
+                    ubicacionElegida: ubicacionSeleccionada,
                     cantidad: cantAEntregar
                 });
+                item.ubicacionElegida = ubicacionSeleccionada;
                 item.cantidad -= cantAEntregar;
             }
         }
@@ -3141,9 +3439,17 @@ window.renderReimprimirVenta = function() {
         fecha: d.fechaEmision || d.fecha,
         total: 0
     }));
+    const devoluciones = StorageService.get("documentosCancelacion", []).map(d => ({
+        ...d,
+        _origen: 'devolucion_cancelacion',
+        folio: d.folioDocumento,
+        clienteNombre: d.clienteNombre || '',
+        fecha: d.fechaEmision || d.fecha,
+        total: d.monto || 0
+    }));
 
     // 2. Unificar todo en una sola lista maestra
-    let todo = [...ventas, ...cxc, ...apartados, ...entregas];
+    let todo = [...ventas, ...cxc, ...apartados, ...entregas, ...devoluciones];
 
     // 3. Aplicar Filtros de Búsqueda
     let filtrados = todo.filter(item => {
@@ -3228,6 +3534,24 @@ window.limpiarFiltrosReimpresion = function() {
 };
 
 window.reimprimirFolioUnificado = function(folio, origen) {
+    if (origen === 'devolucion_cancelacion') {
+        const docs = StorageService.get("documentosCancelacion", []);
+        const doc = docs.find(d => d.folioDocumento === folio);
+        if (!doc) return alert("No se encontro el comprobante de devolucion.");
+        generarComprobanteDevolucionCancelacion({
+            tipo: doc.tipo,
+            referencia: doc.referencia,
+            clienteNombre: doc.clienteNombre,
+            monto: doc.monto,
+            cuenta: doc.cuenta,
+            motivo: doc.motivo,
+            folioDoc: doc.folioDocumento,
+            fechaIso: doc.fechaEmision,
+            registrar: false
+        });
+        return;
+    }
+
     if (origen === 'entrega_mcia') {
         const docs = StorageService.get("documentosEntrega", []);
         const doc = docs.find(d => d.folioDocumento === folio);
@@ -3308,9 +3632,16 @@ window.reimprimirFolioUnificado = function(folio, origen) {
 window.renderPanelAutorizaciones = function() {
     const cont = document.getElementById("autorizaciones"); 
     if (!cont) return;
+    _normalizarFechasPendientesAutorizacion();
     
-    const ventasP = StorageService.get("ventasPendientes", []);
-    const abonosP = StorageService.get("abonosPendientes", []);
+    const ventasP = StorageService.get("ventasPendientes", []).map(v => ({
+        ...v,
+        fechaCapturaIso: v.fechaCapturaIso || v.datosVenta?.fechaIso || v.args?.[7] || null
+    }));
+    const abonosP = StorageService.get("abonosPendientes", []).map(a => ({
+        ...a,
+        fechaCapturaIso: a.fechaCapturaIso || a.fechaAbonoIso || null
+    }));
 
     let html = `
     <div style="padding: 20px;">
@@ -3330,7 +3661,7 @@ window.renderPanelAutorizaciones = function() {
                     ${ventasP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al día. No hay ventas pendientes.</td></tr>' : ''}
                     ${ventasP.map((v, i) => `
                     <tr style="border-bottom: 1px solid #f3f4f6;">
-                        <td style="padding: 8px;">${v.fechaCaptura || '-'}</td>
+                        <td style="padding: 8px;">${_ventaFechaVisible(v.fechaCapturaIso || v.fechaCaptura || v.datosVenta?.fechaIso || v.args?.[7])}</td>
                         <td style="padding: 8px;">${v.clienteNombre || 'Público General'}</td>
                         <td style="padding: 8px; font-weight: bold;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v.totalVenta || 0)}</td>
                         <td style="padding: 8px;">
@@ -3356,7 +3687,7 @@ window.renderPanelAutorizaciones = function() {
                         const folioRef = a.folioApartado || a.folioCXC || '-';
                         return `
                     <tr style="border-bottom: 1px solid #f3f4f6;">
-                        <td style="padding: 8px;">${a.fechaCaptura || '-'}</td>
+                        <td style="padding: 8px;">${_ventaFechaVisible(a.fechaCapturaIso || a.fechaAbonoIso || a.fechaCaptura || a.fechaAbonoStr)}</td>
                         <td style="padding: 8px; color: #475569;"><strong>${folioRef}</strong><br><span style="font-size:11px; color:#64748b;">${esApartado ? 'Apartado' : 'Crédito'}</span></td>
                         <td style="padding: 8px; font-weight: bold; color: #059669;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado || 0)}</td>
                         <td style="padding: 8px;">
@@ -3373,10 +3704,47 @@ window.renderPanelAutorizaciones = function() {
 };
 
 // 2. VENTANA DE REVISIÓN AVANZADA Y EDICIÓN DE VENTAS
-window.revisarVentaPendiente = function(index) {
+function _authFolioVentaPendiente(v) {
+    return String(v?.datosVenta?.folio || v?.args?.[5] || v?.folio || '').trim();
+}
+
+function _authResolverVentaPendiente(index) {
     const ventasP = StorageService.get("ventasPendientes", []);
-    const v = ventasP[index];
+    const ctx = window._authVentaPendienteCtx;
+    if (ctx) {
+        const idxCtx = ventasP.findIndex(v =>
+            String(v.idCuarentena || '') === String(ctx.idCuarentena || '') ||
+            (_authFolioVentaPendiente(v) && _authFolioVentaPendiente(v) === ctx.folio)
+        );
+        if (idxCtx !== -1) return { ventasP, index: idxCtx, venta: ventasP[idxCtx] };
+    }
+    return { ventasP, index, venta: ventasP[index] };
+}
+
+function _authVentaBloqueadaPorEstado(v) {
+    const folio = _authFolioVentaPendiente(v);
+    if (!folio) return { bloqueada: true, motivo: "La venta pendiente no tiene folio valido." };
+    const esConversionApartado = !!(v?.tipo === "conversion_apartado_credito" || v?.origenApartadoFolio || v?.datosVenta?.origenApartadoFolio);
+    const yaRegistrada = StorageService.get("ventasRegistradas", [])
+        .some(x => {
+            if (String(x.folio || '').trim() !== folio) return false;
+            if (esConversionApartado && String(x.metodoPago || '').toLowerCase() === 'apartado') return false;
+            return true;
+        });
+    if (yaRegistrada) return { bloqueada: true, motivo: `La venta ${folio} ya existe en registros.` };
+    const cancelada = StorageService.get("historialCancelaciones", [])
+        .some(h => h.tipo === 'venta' && String(h.folio || '').trim() === folio);
+    if (cancelada) return { bloqueada: true, motivo: `La venta ${folio} ya fue cancelada.` };
+    return { bloqueada: false, motivo: "" };
+}
+
+window.revisarVentaPendiente = function(index) {
+    const resPendiente = _authResolverVentaPendiente(index);
+    const ventasP = resPendiente.ventasP;
+    index = resPendiente.index;
+    const v = resPendiente.venta;
     if (!v) return;
+    window._authVentaPendienteCtx = { index, idCuarentena: v.idCuarentena, folio: _authFolioVentaPendiente(v) };
 
     const fechaActualIso = v.args[7] || new Date().toISOString();
     const fechaCorta = fechaActualIso.split('T')[0];
@@ -3532,9 +3900,20 @@ window.revisarVentaPendiente = function(index) {
 
 // 3. PROCESADOR DE APROBACIONES (MODO SILENCIOSO)
 window.aprobarVentaCuarentena = function(index) {
-    const ventasP = StorageService.get("ventasPendientes", []);
-    const v = ventasP[index];
+    const resPendiente = _authResolverVentaPendiente(index);
+    const ventasP = resPendiente.ventasP;
+    index = resPendiente.index;
+    const v = resPendiente.venta;
     if (!v) return;
+    const bloqueo = _authVentaBloqueadaPorEstado(v);
+    if (bloqueo.bloqueada) {
+        alert(`${bloqueo.motivo} Se retirara de la boveda para evitar duplicidad.`);
+        ventasP.splice(index, 1);
+        StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+        document.querySelector('[data-modal=auth-venta]')?.remove();
+        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+        return;
+    }
     
     // 1. Capturar las correcciones hechas por el Admin en la ventana
     const nuevoTotal = parseFloat(document.getElementById('authTotalVenta').value) || 0;
@@ -3605,9 +3984,28 @@ window.aprobarVentaCuarentena = function(index) {
         });
     }
 
+    if (v.args[0] === "credito") {
+        const periodicidadCredito = v.datosVenta.periodicidad || "semanal";
+        const capitalBase = Math.max(0, Number(v.datosVenta.totalMercancia || nuevoTotal || 0) - nuevoEnganche);
+        const planNormalizado = _normalizarPlanCreditoVenta(v.args[4], capitalBase, periodicidadCredito, window._estadoPago?.planIndex || 0);
+        if (!planNormalizado) return alert("No se puede autorizar: el plan de credito no genera pagos validos. Revisa la configuracion global de credito.");
+        v.args[4] = planNormalizado;
+        v.datosVenta.planCredito = planNormalizado;
+        v.datosVenta.plan = planNormalizado;
+        v.datosVenta.saldoPendiente = planNormalizado.total;
+        v.datosVenta.pagaresPreview = _generarPagaresPreviewVentaCredito({
+            folio: v.args[5],
+            cliente: v.datosVenta.cliente,
+            fechaBaseIso: nuevaFechaIso,
+            plan: planNormalizado,
+            periodicidad: periodicidadCredito
+        });
+    }
+
     // 3. Ejecutar el motor de transacciones del POS original (GUARDA SILENCIOSAMENTE EN DB)
     window._vendedorSeleccionado = v.vendedorSeleccionado;
-    window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
+    const autorizada = window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
+    if (autorizada === false) return;
     
     // 4. Limpiar de la cuarentena
     ventasP.splice(index, 1);
@@ -3622,17 +4020,31 @@ window.aprobarVentaCuarentena = function(index) {
 };
 
 window.rechazarVentaCuarentena = function(index) {
-    if (!confirm("¿Deseas eliminar permanentemente esta venta provisional sin afectar el inventario ni la caja?")) return;
-    const ventasP = StorageService.get("ventasPendientes", []);
-    const v = ventasP[index];
+    const resPendiente = _authResolverVentaPendiente(index);
+    const ventasP = resPendiente.ventasP;
+    index = resPendiente.index;
+    const v = resPendiente.venta;
+    if (!v) return;
+    const folio = _authFolioVentaPendiente(v);
+    const docsEntregaActivos = StorageService.get("documentosEntrega", [])
+        .filter(d => d.folioVenta === folio && d.estado !== 'Cancelado');
+    const tieneSalidaOperativa = docsEntregaActivos.length > 0 || _desenvolverListaVentaPendiente(v.args?.[8]).some(x => x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada);
+    const mensaje = tieneSalidaOperativa
+        ? `Esta venta provisional tiene mercancía entregada/documentada.\n\nAl rechazarla se reingresará inventario, se cancelará el vale de entrega y se retirará de la Bóveda.\n\n¿Deseas continuar?`
+        : "¿Deseas eliminar permanentemente esta venta provisional sin afectar inventario ni caja?";
+    if (!confirm(mensaje)) return;
+
     if (v && (v.tipo === "conversion_apartado_credito" || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio)) {
         const folioApartado = v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio || v.args?.[5];
         const apartados = StorageService.get("apartados", []);
         const idxApartado = apartados.findIndex(a => a.folio === folioApartado);
-        if (idxApartado !== -1 && apartados[idxApartado].estado === "Conversión a Crédito Pendiente") {
+        if (idxApartado !== -1 && String(apartados[idxApartado].estado || '').toLowerCase().includes('pendiente')) {
             apartados[idxApartado].estado = "Pendiente";
             StorageService.set("apartados", apartados);
         }
+    }
+    if (tieneSalidaOperativa && folio) {
+        _cancelReingresarInventarioPorVenta(folio, 'Rechazo de venta provisional en Boveda');
     }
     ventasP.splice(index, 1);
     StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
@@ -3799,12 +4211,90 @@ function _cancelTieneIngresoCaja(folio) {
     );
 }
 
+function _cancelFechaKey(valor) {
+    if (!valor) return '';
+    const d = window.parseFechaMX ? window.parseFechaMX(valor) : new Date(valor);
+    if (!d || isNaN(d.getTime())) return String(valor).slice(0, 10);
+    return window.getFechaLocalMX ? window.getFechaLocalMX(d) : d.toISOString().slice(0, 10);
+}
+
+function _cancelMarcarMovimientosOrigen({ folio, referenciaBase, motivo, tipoCancelacion, monto, fecha, cuentaId, idOperacion }) {
+    let movimientos = StorageService.get("movimientosCaja", []);
+    let marcados = 0;
+    const refNorm = String(referenciaBase || folio || '').toUpperCase();
+    const folioNorm = String(folio || '').toUpperCase();
+    const montoObjetivo = Number(monto || 0);
+    const fechaObjetivo = _cancelFechaKey(fecha);
+    const cuentaObjetivo = String(cuentaId || '').trim();
+    const idObjetivo = String(idOperacion || '').trim();
+
+    movimientos = movimientos.map(m => {
+        const texto = `${m.folio || ''} ${m.referencia || ''} ${m.concepto || ''}`.toUpperCase();
+        const esIngreso = String(m.tipo || '').toLowerCase() === 'ingreso';
+        const coincideReferencia = refNorm && texto.includes(refNorm);
+        const coincideFolioSeguro = !refNorm && folioNorm && texto.includes(folioNorm);
+        const coincideAbonoLegacy = tipoCancelacion === 'abono' && folioNorm && texto.includes(folioNorm) && (texto.includes('ABONO') || texto.includes('ABN') || texto.includes('APARTADO'));
+        if (!esIngreso || m.reversadoCancelacion || (!coincideReferencia && !coincideFolioSeguro && !coincideAbonoLegacy)) return m;
+        if (idObjetivo && String(m.idOperacion || '') !== idObjetivo) return m;
+        if (tipoCancelacion === 'abono' && !idObjetivo) {
+            if (montoObjetivo > 0 && Math.abs(Number(m.monto || 0) - montoObjetivo) > 0.01) return m;
+            if (fechaObjetivo && _cancelFechaKey(m.fecha || m.fechaISO || m.createdAt) !== fechaObjetivo) return m;
+            if (cuentaObjetivo && String(m.cuenta || m.cuentaId || '') !== cuentaObjetivo) return m;
+            if (marcados > 0) return m;
+        }
+        marcados++;
+        return {
+            ...m,
+            reversadoCancelacion: true,
+            fechaReversaCancelacion: _cancelIsoAhora(),
+            motivoReversaCancelacion: motivo,
+            tipoCancelacion: tipoCancelacion || 'cancelacion'
+        };
+    });
+
+    if (marcados > 0) StorageService.set("movimientosCaja", movimientos);
+    return marcados;
+}
+
+function _cancelLimpiarPendientesRelacionados(folio, motivo) {
+    const folioNorm = String(folio || '').toUpperCase();
+
+    let ventasPendientes = StorageService.get("ventasPendientes", []);
+    const ventasAntes = ventasPendientes.length;
+    ventasPendientes = ventasPendientes.filter(v => {
+        const ref = String(v.datosVenta?.folio || v.folio || v.args?.[5] || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio || '').toUpperCase();
+        return ref !== folioNorm;
+    });
+    if (ventasPendientes.length !== ventasAntes) {
+        StorageService.set("ventasPendientes", ventasPendientes.map(_normalizarVentaPendienteFirestore));
+    }
+
+    let abonosPendientes = StorageService.get("abonosPendientes", []);
+    let abonosModificados = false;
+    abonosPendientes = abonosPendientes.map(a => {
+        const ref = String(a.folioCXC || a.folioApartado || '').toUpperCase();
+        if (ref !== folioNorm || a.estado === 'Cancelado') return a;
+        abonosModificados = true;
+        return {
+            ...a,
+            estado: 'Cancelado',
+            canceladoPor: 'cancelacion_relacionada',
+            fechaCancelacion: _cancelIsoAhora(),
+            motivoCancelacion: motivo
+        };
+    });
+    if (abonosModificados) {
+        StorageService.set("abonosPendientes", abonosPendientes);
+    }
+}
+
 function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, referencia, clienteNombre, tipo, motivo, emitirComprobante, registrarMovimiento = true }) {
     if (Number(monto || 0) <= 0) return;
 
+    let movimientoOk = true;
     if (registrarMovimiento) {
         if (typeof window._egresarCuenta === 'function') {
-            window._egresarCuenta({ monto, cuentaId, etiqueta, concepto, referencia, fecha: _cancelIsoAhora() });
+            movimientoOk = window._egresarCuenta({ monto, cuentaId, etiqueta, concepto, referencia, fecha: _cancelIsoAhora() }) !== false;
         } else {
             const movs = StorageService.get("movimientosCaja", []);
             movs.push({
@@ -3822,9 +4312,11 @@ function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, refere
         }
     }
 
-    if (emitirComprobante) {
+    if (emitirComprobante && movimientoOk) {
         generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta: etiqueta, motivo });
     }
+
+    return movimientoOk;
 }
 
 function _cancelReingresarInventarioPorVenta(folio, motivo) {
@@ -3897,6 +4389,87 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
     return articulos;
 }
 
+function _cancelEsAbonoAnticipoConsignacion(abono) {
+    const txt = `${abono?.cuenta || ''} ${abono?.nota || ''} ${abono?.concepto || ''}`.toUpperCase();
+    return txt.includes('ANTICIPO CONSIGNACION') || txt.includes('ANTICIPO CONSIGNACI');
+}
+
+function _cancelReversarConsignacionPorVenta(folio, motivo) {
+    const folioNorm = String(folio || '').trim().toUpperCase();
+    if (!folioNorm) return { reversadas: 0, revision: 0, detalles: [] };
+
+    const consignaciones = StorageService.get("consignacionesActivas", []);
+    const cxp = StorageService.get("cuentasPorPagar", []);
+    const detalles = [];
+    let reversadas = 0;
+    let revision = 0;
+    let huboCambioConsig = false;
+    let huboCambioCxp = false;
+
+    consignaciones.forEach(c => {
+        const ventasReportadas = Array.isArray(c.ventasReportadas) ? c.ventasReportadas : [];
+        ventasReportadas.forEach(vr => {
+            if (String(vr.folioVentaOrigen || '').trim().toUpperCase() !== folioNorm || vr.estado === 'Cancelado') return;
+
+            const cuenta = cxp.find(cp =>
+                cp.origenConsignacion &&
+                cp.estado !== 'Cancelado' &&
+                (
+                    String(cp.folioReporteConsignacion || '') === String(vr.folioReporteConsignacion || vr.id || '') ||
+                    (String(cp.consignacionId || '') === String(c.consignacionId || c.id) && String(cp.folioVentaOrigen || '').trim().toUpperCase() === folioNorm)
+                )
+            );
+            const pagosReales = cuenta
+                ? (cuenta.abonos || []).filter(a => !_cancelEsAbonoAnticipoConsignacion(a)).reduce((s, a) => s + Number(a.monto || 0), 0)
+                : 0;
+
+            if (pagosReales > 0.01) {
+                revision++;
+                if (cuenta) {
+                    cuenta.requiereRevisionCancelacion = true;
+                    cuenta.motivoRevisionCancelacion = `Venta ${folio} cancelada despues de pagar proveedor`;
+                    cuenta.fechaRevisionCancelacion = _cancelIsoAhora();
+                    huboCambioCxp = true;
+                }
+                detalles.push(`Revision proveedor ${c.proveedor || ''}: ya se pagaron ${_cancelDinero(pagosReales)}.`);
+                return;
+            }
+
+            const cantidad = Number(vr.cantidad || 0);
+            const montoDeuda = Number(vr.montoDeuda || (cantidad * Number(c.costoUnitario || 0)));
+            const montoCxp = Number(vr.montoCxp || 0);
+            const montoAnticipo = Number(vr.montoAnticipoAplicado || vr.montoCubiertoConAnticipos || 0);
+
+            c.cantidadPendiente = Number(c.cantidadPendiente || 0) + cantidad;
+            c.cantidadVendida = Math.max(0, Number(c.cantidadVendida || 0) - cantidad);
+            c.montoTransferido = Math.max(0, Number(c.montoTransferido || 0) - montoCxp);
+            c.montoVendidoReportado = Math.max(0, Number(c.montoVendidoReportado || 0) - montoDeuda);
+            c.montoAbonosAplicados = Math.max(0, Number(c.montoAbonosAplicados || 0) - montoAnticipo);
+            vr.estado = 'Cancelado';
+            vr.fechaCancelacion = _cancelIsoAhora();
+            vr.motivoCancelacion = motivo;
+            huboCambioConsig = true;
+
+            if (cuenta) {
+                cuenta.estado = 'Cancelado';
+                cuenta.saldoPendiente = 0;
+                cuenta.fechaCancelacion = _cancelIsoAhora();
+                cuenta.motivoCancelacion = `Cancelacion de venta ${folio}: ${motivo}`;
+                cuenta.canceladoPorVenta = folio;
+                cuenta.abonos = (cuenta.abonos || []).map(a => _cancelEsAbonoAnticipoConsignacion(a) ? { ...a, canceladoPorVenta: folio } : a);
+                huboCambioCxp = true;
+            }
+
+            reversadas++;
+            detalles.push(`${cantidad} pza(s) de ${c.producto || 'producto'} regresan a saldo de consignacion.`);
+        });
+    });
+
+    if (huboCambioConsig) StorageService.set("consignacionesActivas", consignaciones);
+    if (huboCambioCxp) StorageService.set("cuentasPorPagar", cxp);
+    return { reversadas, revision, detalles };
+}
+
 function _cancelRecalcularCredito(cuenta) {
     let pagares = StorageService.get("pagaresSistema", []);
     const totalAbonado = (cuenta.abonos || []).reduce((sum, a) => sum + Number(a.monto || 0), 0);
@@ -3912,9 +4485,11 @@ function _cancelRecalcularCredito(cuenta) {
     const pagaresFolio = pagares.filter(p => p.folio === cuenta.folio).sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
     let bolsa = totalAbonado;
     pagaresFolio.forEach(p => {
-        if (p.estado === 'Cancelado') return;
+        const canceladoPorPolitica = p.estado === 'Cancelado' && String(p.nota || '').toLowerCase().includes('liquidado por');
+        if (p.estado === 'Cancelado' && !canceladoPorPolitica) return;
         p.montoAbonado = 0;
         p.fechaAbono = null;
+        if (canceladoPorPolitica) p.nota = '';
         p.estado = "Pendiente";
         if (bolsa >= Number(p.monto || 0) - 0.01) {
             p.estado = "Pagado";
@@ -3932,9 +4507,10 @@ function _cancelRecalcularCredito(cuenta) {
     StorageService.set("pagaresSistema", pagares);
 }
 
-function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta, motivo }) {
-    const folioDoc = `DEV-${Date.now().toString().slice(-8)}`;
-    const fecha = window.formatearFechaMX ? window.formatearFechaMX(new Date()) : new Date().toLocaleString('es-MX');
+function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta, motivo, folioDoc: folioDocExistente, fechaIso, registrar = true }) {
+    const folioDoc = folioDocExistente || `DEV-${Date.now().toString().slice(-8)}`;
+    const fechaRegistro = fechaIso || _cancelIsoAhora();
+    const fecha = window.formatearFechaMX ? window.formatearFechaMX(new Date(fechaRegistro)) : new Date(fechaRegistro).toLocaleString('es-MX');
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><style>
         @page { size: 80mm auto; margin: 0; }
         body { font-family:'Courier New', monospace; width:72mm; margin:4mm auto; color:#000; font-size:12px; line-height:1.3; }
@@ -3967,6 +4543,23 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
         </div>
         <div class="centro" style="margin-top:18px;font-size:9px;">Documento de reversa administrativa</div>
     </body></html>`;
+    if (registrar) {
+        const documentos = StorageService.get("documentosCancelacion", []);
+        documentos.push({
+            id: Date.now() + Math.random(),
+            tipoDocumento: "devolucion_cancelacion",
+            folioDocumento: folioDoc,
+            fechaEmision: fechaRegistro,
+            fecha,
+            tipo,
+            referencia,
+            clienteNombre,
+            monto,
+            cuenta,
+            motivo
+        });
+        StorageService.set("documentosCancelacion", documentos);
+    }
     const win = window.open('', '_blank');
     if (!win) return alert("El comprobante se generó, pero el navegador bloqueó la ventana emergente.");
     win.document.write(html);
@@ -4034,11 +4627,11 @@ function _renderCancelacionesAbonos(filtro) {
     const apartados = StorageService.get("apartados", []);
     const filas = [];
     cxc.forEach(c => (c.abonos || []).forEach((ab, idx) => {
-        if (ab.cancelado) return;
+        if (String(c.estado || '').toLowerCase().includes('cancel') || ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
         filas.push({ origen: 'credito', folio: c.folio, cliente: c.nombre || c.clienteNombre, fecha: ab.fecha || ab.fechaAbono, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago, idx });
     }));
     apartados.forEach(a => (a.abonos || []).forEach((ab, idx) => {
-        if (ab.cancelado) return;
+        if (String(a.estado || '').toLowerCase().includes('cancel') || ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
         filas.push({ origen: 'apartado', folio: a.folio, cliente: a.clienteNombre, fecha: ab.fechaAbono || ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.cuentaId, idx });
     }));
     const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
@@ -4137,6 +4730,7 @@ window.ejecutarCancelacionVenta = function() {
     const pendientes = StorageService.get("ventasPendientes", []);
     const pendientesRestantes = pendientes.filter((p, idx) => !(idx === ctx.pendienteIndex || p.datosVenta?.folio === ctx.folio || p.args?.[5] === ctx.folio));
     StorageService.set("ventasPendientes", pendientesRestantes.map(_normalizarVentaPendienteFirestore));
+    _cancelLimpiarPendientesRelacionados(ctx.folio, motivo);
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const cIdx = cuentas.findIndex(c => c.folio === ctx.folio);
@@ -4168,8 +4762,15 @@ window.ejecutarCancelacionVenta = function() {
     StorageService.set("requisicionesCompra", reqs);
 
     const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo);
+    const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
     const registrarMovimientoReembolso = ctx.origen !== 'cuarentena' || _cancelTieneIngresoCaja(ctx.folio);
-    _cancelRegistrarReembolso({
+    const movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
+        folio: ctx.folio,
+        referenciaBase: `VENTA-${ctx.folio}`,
+        motivo,
+        tipoCancelacion: 'venta'
+    });
+    const reembolsoOk = _cancelRegistrarReembolso({
         monto: ctx.monto,
         cuentaId: cuenta.cuentaId,
         etiqueta: cuenta.etiqueta,
@@ -4181,10 +4782,13 @@ window.ejecutarCancelacionVenta = function() {
         emitirComprobante: emitir,
         registrarMovimiento: registrarMovimientoReembolso
     });
-    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: registrarMovimientoReembolso, motivo, articulosReingresados });
+    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: registrarMovimientoReembolso && reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
 
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
     alert("✅ Venta cancelada. Se aplicaron reversas de caja, cartera, pagarés e inventario entregado.");
+    if (reversaConsignacion.reversadas || reversaConsignacion.revision) {
+        alert(`Consignacion: ${reversaConsignacion.reversadas} reversa(s) aplicada(s). ${reversaConsignacion.revision ? reversaConsignacion.revision + ' queda(n) para revision porque ya hubo pago real al proveedor.' : ''}`);
+    }
     renderCancelaciones('venta');
 };
 
@@ -4194,9 +4798,12 @@ window.abrirModalCancelarAbono = function(origen, folio, index) {
         : StorageService.get("apartados", []).find(a => a.folio === folio);
     const abono = cuenta?.abonos?.[index];
     if (!cuenta || !abono) return alert("No se encontró el abono.");
+    if (String(cuenta.estado || '').toLowerCase().includes('cancel') || abono.cancelado || abono.canceladoPorVenta || abono.canceladoPorApartado) {
+        return alert("Este abono ya pertenece a una cuenta cancelada o ya fue reversado.");
+    }
     const cliente = cuenta.nombre || cuenta.clienteNombre || 'Cliente';
     const monto = Number(abono.monto || 0);
-    window._cancelacionActual = { tipo: 'abono', origen, folio, index, monto, cliente };
+    window._cancelacionActual = { tipo: 'abono', origen, folio, index, monto, cliente, abonoSnapshot: { ...abono } };
     _modalCancelacion({
         titulo: `Cancelar abono ${_cancelEsc(folio)}`,
         monto,
@@ -4217,6 +4824,8 @@ window.ejecutarCancelacionAbono = function() {
         const cuenta = cuentas.find(c => c.folio === ctx.folio);
         if (!cuenta || !cuenta.abonos?.[ctx.index]) return alert("El abono ya no existe.");
         const abono = cuenta.abonos.splice(ctx.index, 1)[0];
+        cuenta.abonosCancelados = cuenta.abonosCancelados || [];
+        cuenta.abonosCancelados.push({ ...abono, cancelado: true, fechaCancelacion: _cancelIsoAhora(), motivoCancelacion: motivo });
         _cancelRecalcularCredito(cuenta);
         StorageService.set("cuentasPorCobrar", cuentas);
         ctx.monto = Number(abono.monto || ctx.monto || 0);
@@ -4226,6 +4835,8 @@ window.ejecutarCancelacionAbono = function() {
         const ap = apartados.find(a => a.folio === ctx.folio);
         if (!ap || !ap.abonos?.[ctx.index]) return alert("El abono ya no existe.");
         const abono = ap.abonos.splice(ctx.index, 1)[0];
+        ap.abonosCancelados = ap.abonosCancelados || [];
+        ap.abonosCancelados.push({ ...abono, cancelado: true, fechaCancelacion: _cancelIsoAhora(), motivoCancelacion: motivo });
         ctx.monto = Number(abono.monto || ctx.monto || 0);
         ap.saldoPendiente = Number(ap.saldoPendiente || 0) + ctx.monto;
         if (ap.estado === 'Liquidado') ap.estado = 'Pendiente';
@@ -4233,7 +4844,18 @@ window.ejecutarCancelacionAbono = function() {
         StorageService.set("apartados", apartados);
     }
 
-    _cancelRegistrarReembolso({
+    const refOriginal = ctx.origen === 'credito' ? `ABONO-${ctx.folio}` : `ABN-APT-${ctx.folio}`;
+    const movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
+        folio: ctx.folio,
+        referenciaBase: refOriginal,
+        motivo,
+        tipoCancelacion: 'abono',
+        monto: ctx.abonoSnapshot?.monto || ctx.monto,
+        fecha: ctx.abonoSnapshot?.fechaAbonoIso || ctx.abonoSnapshot?.fechaAbono || ctx.abonoSnapshot?.fecha,
+        cuentaId: ctx.abonoSnapshot?.cuentaId,
+        idOperacion: ctx.abonoSnapshot?.idOperacion || ctx.abonoSnapshot?.idCuarentena || ctx.abonoSnapshot?.id
+    });
+    const reembolsoOk = _cancelRegistrarReembolso({
         monto: ctx.monto,
         cuentaId: cuentaReembolso.cuentaId,
         etiqueta: cuentaReembolso.etiqueta,
@@ -4244,7 +4866,7 @@ window.ejecutarCancelacionAbono = function() {
         motivo,
         emitirComprobante: emitir
     });
-    _cancelRegistrarHistorial({ tipo: 'abono', origen: ctx.origen, folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, motivo });
+    _cancelRegistrarHistorial({ tipo: 'abono', origen: ctx.origen, folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, abono: ctx.abonoSnapshot });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
     alert("✅ Abono cancelado y saldos recalculados.");
     renderCancelaciones('abono');
@@ -4253,12 +4875,34 @@ window.ejecutarCancelacionAbono = function() {
 window.abrirModalCancelarApartado = function(folio) {
     const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
     if (!ap) return alert("No se encontró el apartado.");
-    const monto = Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
+    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio || c.origenApartadoFolio === folio);
+    const abonosApartadoVigentes = (ap.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
+    const abonosCreditoVigentes = (cxc?.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
+    const pagadoApartado = Number(ap.enganche || 0) + abonosApartadoVigentes.reduce((s, a) => s + Number(a.monto || 0), 0);
+    const abonosCreditoPosteriores = abonosCreditoVigentes.reduce((s, a) => s + Number(a.monto || 0), 0);
+    const monto = pagadoApartado + abonosCreditoPosteriores;
+    const resumenApartadoCancelacion = `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Anticipos del apartado:</b> ${_cancelDinero(pagadoApartado)}<br><b>Abonos posteriores al credito:</b> ${_cancelDinero(abonosCreditoPosteriores)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelara el apartado y cualquier credito generado desde el.`;
     window._cancelacionActual = { tipo: 'apartado', folio, monto, cliente: ap.clienteNombre || 'Cliente' };
     _modalCancelacion({
         titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
         monto,
         resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelará el apartado y cualquier crédito generado desde él.`,
+        onConfirm: "ejecutarCancelacionApartado()"
+    });
+};
+
+window.abrirModalCancelarApartado = function(folio) {
+    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
+    if (!ap) return alert("No se encontro el apartado.");
+    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    const pagadoApartado = Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
+    const abonosCreditoPosteriores = (cxc?.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
+    const monto = pagadoApartado + abonosCreditoPosteriores;
+    window._cancelacionActual = { tipo: 'apartado', folio, monto, cliente: ap.clienteNombre || 'Cliente' };
+    _modalCancelacion({
+        titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
+        monto,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Anticipos del apartado:</b> ${_cancelDinero(pagadoApartado)}<br><b>Abonos posteriores al credito:</b> ${_cancelDinero(abonosCreditoPosteriores)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelara el apartado y cualquier credito generado desde el.`,
         onConfirm: "ejecutarCancelacionApartado()"
     });
 };
@@ -4274,19 +4918,48 @@ window.ejecutarCancelacionApartado = function() {
     const idx = apartados.findIndex(a => a.folio === ctx.folio);
     if (idx === -1) return alert("El apartado ya no existe.");
     const ap = apartados[idx];
+    const foliosRelacionados = new Set([ctx.folio, ap.folioCredito].filter(Boolean).map(String));
+    const esFolioRelacionado = folio => foliosRelacionados.has(String(folio || ''));
     ap.estado = 'Cancelado';
     ap.fechaCancelacion = _cancelIsoAhora();
     ap.motivoCancelacion = motivo;
+    (ap.abonos || []).forEach(a => a.canceladoPorApartado = true);
     StorageService.set("apartados", apartados);
+    foliosRelacionados.forEach(folioRel => _cancelLimpiarPendientesRelacionados(folioRel, motivo));
 
-    const ventas = StorageService.get("ventasRegistradas", []).map(v => v.folio === ctx.folio ? { ...v, estado: 'Cancelada', estatus: 'Cancelada', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : v);
+    const ventas = StorageService.get("ventasRegistradas", []).map(v => (esFolioRelacionado(v.folio) || v.folioApartadoOrigen === ctx.folio || v.origenApartadoFolio === ctx.folio || v.datosVenta?.origenApartadoFolio === ctx.folio) ? { ...v, estado: 'Cancelada', estatus: 'Cancelada', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : v);
     StorageService.set("ventasRegistradas", ventas);
-    const cuentas = StorageService.get("cuentasPorCobrar", []).map(c => c.folio === ctx.folio ? { ...c, estado: 'Cancelado', saldoActual: 0, motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : c);
+    const cuentas = StorageService.get("cuentasPorCobrar", []).map(c => (esFolioRelacionado(c.folio) || c.origenApartadoFolio === ctx.folio) ? { ...c, estado: 'Cancelado', saldoActual: 0, motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : c);
     StorageService.set("cuentasPorCobrar", cuentas);
-    const pagares = StorageService.get("pagaresSistema", []).map(p => p.folio === ctx.folio ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelación de apartado' } : p);
+    const pagares = StorageService.get("pagaresSistema", []).map(p => esFolioRelacionado(p.folio) ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelación de apartado' } : p);
     StorageService.set("pagaresSistema", pagares);
+    const salidas = StorageService.get("salidasPendientesVenta", []).map(s => esFolioRelacionado(s.folioVenta) ? { ...s, estatus: 'Cancelado', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : s);
+    StorageService.set("salidasPendientesVenta", salidas);
+    const reqs = StorageService.get("requisicionesCompra", []).map(r => esFolioRelacionado(r.folioVenta) ? { ...r, estatus: 'Cancelada', motivoCancelacion: motivo } : r);
+    StorageService.set("requisicionesCompra", reqs);
+    const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo);
+    const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
 
-    _cancelRegistrarReembolso({
+    let movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
+        folio: ctx.folio,
+        referenciaBase: `VENTA-${ctx.folio}`,
+        motivo,
+        tipoCancelacion: 'apartado'
+    }) + _cancelMarcarMovimientosOrigen({
+        folio: ctx.folio,
+        referenciaBase: `ABN-APT-${ctx.folio}`,
+        motivo,
+        tipoCancelacion: 'apartado'
+    });
+    foliosRelacionados.forEach(folioRel => {
+        movimientosOrigenMarcados += _cancelMarcarMovimientosOrigen({
+            folio: folioRel,
+            referenciaBase: `ABONO-${folioRel}`,
+            motivo,
+            tipoCancelacion: 'apartado'
+        });
+    });
+    const reembolsoOk = _cancelRegistrarReembolso({
         monto: ctx.monto,
         cuentaId: cuenta.cuentaId,
         etiqueta: cuenta.etiqueta,
@@ -4297,19 +4970,70 @@ window.ejecutarCancelacionApartado = function() {
         motivo,
         emitirComprobante: emitir
     });
-    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, motivo });
+    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
     alert("✅ Apartado cancelado y reversado.");
+    if (reversaConsignacion.reversadas || reversaConsignacion.revision) {
+        alert(`Consignacion: ${reversaConsignacion.reversadas} reversa(s) aplicada(s). ${reversaConsignacion.revision ? reversaConsignacion.revision + ' queda(n) para revision porque ya hubo pago real al proveedor.' : ''}`);
+    }
     renderCancelaciones('apartado');
 };
 
 // 3. DETALLE DE ABONOS PENDIENTES (MODAL)
+function _authFolioAbonoPendiente(a) {
+    return String(a?.folioApartado || a?.folioCXC || '').trim();
+}
+
+function _authResolverAbonoPendiente(index) {
+    const abonosP = StorageService.get("abonosPendientes", []);
+    const ctx = window._authAbonoPendienteCtx;
+    if (ctx) {
+        const idxCtx = abonosP.findIndex(a =>
+            String(a.idCuarentena || a.id || '') === String(ctx.id || '') ||
+            (_authFolioAbonoPendiente(a) === ctx.folio && Number(a.montoAbonado || a.monto || 0) === Number(ctx.monto || 0))
+        );
+        if (idxCtx !== -1) return { abonosP, index: idxCtx, abono: abonosP[idxCtx] };
+    }
+    return { abonosP, index, abono: abonosP[index] };
+}
+
+function _authAbonoBloqueadoPorEstado(a) {
+    if (!a) return { bloqueado: true, motivo: "El abono pendiente ya no existe." };
+    if (String(a.estado || '').toLowerCase().includes('cancel')) return { bloqueado: true, motivo: "El abono pendiente fue cancelado." };
+    if (a.aprobado || a.procesado || a.estado === 'Aprobado') return { bloqueado: true, motivo: "El abono pendiente ya fue procesado." };
+    const folio = _authFolioAbonoPendiente(a);
+    const monto = Number(a.montoAbonado || a.monto || 0);
+    const idOperacion = String(a.idCuarentena || a.id || a.idOperacion || '');
+    const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
+    const cuenta = esApartado
+        ? StorageService.get("apartados", []).find(x => x.folio === folio)
+        : StorageService.get("cuentasPorCobrar", []).find(x => x.folio === folio);
+    if (!cuenta || String(cuenta.estado || '').toLowerCase().includes('cancel')) {
+        return { bloqueado: true, motivo: `La cuenta ${folio || ''} no existe o esta cancelada.` };
+    }
+    const saldoActual = esApartado
+        ? Number(cuenta.saldoPendiente || 0)
+        : (typeof window._calcularEstadoCuenta === 'function'
+            ? Number(window._calcularEstadoCuenta(folio)?.saldoTotal || 0)
+            : Number(cuenta.saldoActual || 0));
+    if (monto > saldoActual + 0.01) {
+        return { bloqueado: true, motivo: `El abono (${_cancelDinero(monto)}) excede el saldo vigente de ${folio} (${_cancelDinero(saldoActual)}).` };
+    }
+    const yaAplicado = idOperacion && (cuenta.abonos || []).some(ab =>
+        String(ab.idOperacion || ab.idCuarentena || ab.id || '') === idOperacion
+    );
+    if (yaAplicado) return { bloqueado: true, motivo: `Ya existe un abono igual aplicado en ${folio}.` };
+    return { bloqueado: false, motivo: "" };
+}
+
 window.revisarAbonoPendiente = function(index) {
     const abonosP = StorageService.get("abonosPendientes", []);
     const a = abonosP[index];
     if (!a) return;
+    window._authAbonoPendienteCtx = { index, id: a.idCuarentena || a.id, folio: _authFolioAbonoPendiente(a), monto: a.montoAbonado || a.monto || 0 };
 
-    const fechaCorta = a.fechaAbonoIso.split('T')[0];
+    const fechaAbonoBase = a.fechaAbonoIso || a.fechaIso || a.fecha || (window.localISO ? window.localISO(new Date()) : new Date().toISOString());
+    const fechaCorta = String(fechaAbonoBase).split('T')[0];
     const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
     const folioRef = a.folioApartado || a.folioCXC || '-';
     const cuentaRef = esApartado
@@ -4345,9 +5069,20 @@ window.revisarAbonoPendiente = function(index) {
 };
 
 window.aprobarAbonoCuarentena = function(index) {
-    const abonosP = StorageService.get("abonosPendientes", []);
-    const a = abonosP[index];
+    const resAbono = _authResolverAbonoPendiente(index);
+    const abonosP = resAbono.abonosP;
+    index = resAbono.index;
+    const a = resAbono.abono;
     if (!a) return;
+    const bloqueo = _authAbonoBloqueadoPorEstado(a);
+    if (bloqueo.bloqueado) {
+        alert(`${bloqueo.motivo} Se retirara de la boveda para evitar duplicidad.`);
+        abonosP.splice(index, 1);
+        StorageService.set("abonosPendientes", abonosP);
+        document.querySelector('[data-modal=auth-abono]')?.remove();
+        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+        return;
+    }
     
     const nuevaFechaCorta = document.getElementById('authFechaAbono').value;
     const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
@@ -4367,7 +5102,10 @@ window.aprobarAbonoCuarentena = function(index) {
 
 window.rechazarAbonoCuarentena = function(index) {
     if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
-    const abonosP = StorageService.get("abonosPendientes", []);
+    const resAbono = _authResolverAbonoPendiente(index);
+    const abonosP = resAbono.abonosP;
+    index = resAbono.index;
+    if (!resAbono.abono) return;
     abonosP.splice(index, 1);
     StorageService.set("abonosPendientes", abonosP);
     document.querySelector('[data-modal=auth-abono]').remove();

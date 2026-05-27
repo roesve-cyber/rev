@@ -31,6 +31,342 @@ function _consigSaldo(c) {
     return Math.max(0, _consigImporte(c) - _consigPagos(c));
 }
 
+function _comprasEscHTML(valor) {
+    return String(valor ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[ch]));
+}
+
+function _comprasEscAttr(valor) {
+    return _comprasEscHTML(valor).replace(/`/g, '&#96;');
+}
+
+function _comprasHoyInput() {
+    return window.obtenerHoyInputMX
+        ? window.obtenerHoyInputMX()
+        : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0]);
+}
+
+function _consigProveedorKey(c) {
+    const proveedorId = c?.proveedorId;
+    if (proveedorId !== undefined && proveedorId !== null && String(proveedorId).trim()) {
+        return `id:${encodeURIComponent(String(proveedorId).trim())}`;
+    }
+    const nombre = String(c?.proveedor || 'SIN PROVEEDOR').trim().toUpperCase();
+    return `nom:${encodeURIComponent(nombre || 'SIN PROVEEDOR')}`;
+}
+
+function _consigFolioLabel(c) {
+    return String(c?.folioOrigen || c?.folio || c?.ordenCompraFolio || c?.compraFolio || c?.compraId || c?.consignacionId || c?.id || 'SIN FOLIO').trim() || 'SIN FOLIO';
+}
+
+function _consigFolioKeyFromParts(proveedorKey, folio) {
+    return `${proveedorKey}|folio:${encodeURIComponent(String(folio || 'SIN FOLIO').trim() || 'SIN FOLIO')}`;
+}
+
+function _consigFolioKey(c) {
+    return _consigFolioKeyFromParts(_consigProveedorKey(c), _consigFolioLabel(c));
+}
+
+function _getAnticiposConsignacion() {
+    return _comprasAsegurarArray(StorageService.get('anticiposConsignacion', []));
+}
+
+function _registrarAnticipoConsignacionGlobal({ monto, cuentaId = null, cuenta = '', proveedor = '', proveedorId = null, fecha = '', nota = '', referencia = '', origen = 'ordenCompra', folioKey = null, folioOrigen = null, consignacionId = null }) {
+    const valor = Number(monto || 0);
+    if (valor <= 0.01) return false;
+    const ref = String(referencia || '').trim();
+    const anticipos = _getAnticiposConsignacion();
+    if (ref && anticipos.some(a => String(a.referencia || a.idOperacion || '') === ref)) return false;
+    const fechaFinal = fecha || (window.localISO ? window.localISO(new Date()) : new Date().toISOString());
+    anticipos.push({
+        id: Date.now() + Math.random(),
+        fecha: fechaFinal,
+        fechaStr: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(fechaFinal)) : String(fechaFinal).slice(0, 10),
+        monto: valor,
+        cuentaId,
+        cuenta,
+        nota,
+        proveedor,
+        proveedorId,
+        proveedorKey: _consigProveedorKey({ proveedor, proveedorId }),
+        folioKey,
+        folioOrigen,
+        consignacionId,
+        aplicado: 0,
+        referencia: ref,
+        origen
+    });
+    StorageService.set('anticiposConsignacion', anticipos);
+    return true;
+}
+
+function _consigAnticiposDesdePagosOC(consignaciones, anticiposBase = []) {
+    const folios = new Map();
+    consignaciones.forEach(c => {
+        const folio = _consigFolioLabel(c);
+        if (!folio || folio === 'SIN FOLIO') return;
+        if (!folios.has(folio)) folios.set(folio, c);
+    });
+    if (!folios.size) return [];
+
+    const firma = (folio, fecha, monto, cuenta) => `${folio}|${String(fecha || '').slice(0, 19)}|${Number(monto || 0).toFixed(2)}|${String(cuenta || '').trim().toUpperCase()}`;
+    const yaRegistrados = new Set(anticiposBase.map(a => firma(a.folioOrigen || a.folio, a.fecha, a.monto, a.cuenta || a.etiquetaCuenta || a.cuentaId)));
+    const firmasOC = new Set();
+    const resultado = [];
+
+    _getOrdenesCompra().forEach(oc => {
+        const folio = String(oc.folio || '').trim();
+        if (!folios.has(folio)) return;
+        const pagos = _comprasAsegurarArray(oc.pagos || []);
+        const base = folios.get(folio);
+        pagos.forEach((p, index) => {
+            const monto = Number(p.monto || 0);
+            if (monto <= 0.01) return;
+            const cuenta = p.cuenta || p.etiquetaCuenta || p.cuentaId || 'Pago OC';
+            const sig = firma(folio, p.fecha, monto, cuenta);
+            firmasOC.add(sig);
+            if (yaRegistrados.has(sig)) return;
+            resultado.push({
+                id: `OC-PAGO-${oc.id || folio}-${index}`,
+                fecha: p.fecha || oc.fechaEmision || '',
+                fechaStr: p.fechaStr || (p.fecha && window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(p.fecha)) : ''),
+                monto,
+                cuenta,
+                proveedor: oc.proveedorNombre || base.proveedor,
+                proveedorId: oc.proveedorId || base.proveedorId || null,
+                proveedorKey: _consigProveedorKey({ proveedor: oc.proveedorNombre || base.proveedor, proveedorId: oc.proveedorId || base.proveedorId || null }),
+                folioOrigen: folio,
+                folioKey: _consigFolioKey(base),
+                consignacionId: base.consignacionId || base.id,
+                referencia: `OC-PAGO-${oc.id || folio}-${index}`,
+                origen: 'ordenCompraPago',
+                legadoOC: true
+            });
+        });
+    });
+
+    _comprasAsegurarArray(StorageService.get('movimientosCaja', [])).forEach((m, index) => {
+        const monto = Number(m.monto || 0);
+        if (monto <= 0.01 || String(m.tipo || '').toLowerCase() !== 'egreso') return;
+        const texto = `${m.concepto || ''} ${m.referencia || ''} ${m.idOperacion || ''}`;
+        const folio = Array.from(folios.keys()).find(f => texto.includes(f));
+        if (!folio) return;
+        const cuenta = m.etiquetaCuenta || m.cuenta || m.medioPago || 'Movimiento caja';
+        const sig = firma(folio, m.fecha, monto, cuenta);
+        if (firmasOC.has(sig) || yaRegistrados.has(sig)) return;
+        const base = folios.get(folio);
+        resultado.push({
+            id: `MOV-OC-${m.id || index}`,
+            fecha: m.fecha || '',
+            fechaStr: m.fecha && window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(m.fecha)) : '',
+            monto,
+            cuenta,
+            proveedor: base.proveedor,
+            proveedorId: base.proveedorId || null,
+            proveedorKey: _consigProveedorKey(base),
+            folioOrigen: folio,
+            folioKey: _consigFolioKey(base),
+            consignacionId: base.consignacionId || base.id,
+            referencia: m.referencia || `MOV-OC-${index}`,
+            origen: 'movimientoCajaOC',
+            legadoMovimiento: true
+        });
+    });
+
+    return resultado;
+}
+
+function _consigAnticiposLegado(c) {
+    return _consigAbonos(c).map(a => ({
+        ...a,
+        proveedor: c?.proveedor || '',
+        proveedorId: c?.proveedorId || null,
+        proveedorKey: _consigProveedorKey(c),
+        folioOrigen: _consigFolioLabel(c),
+        folioKey: _consigFolioKey(c),
+        consignacionId: c?.consignacionId || c?.id,
+        producto: c?.producto || '',
+        legado: true
+    }));
+}
+
+function _consigEsAnticipoAplicado(abono) {
+    const txt = `${abono?.cuenta || ''} ${abono?.nota || ''} ${abono?.concepto || ''}`.toUpperCase();
+    return txt.includes('ANTICIPO CONSIGNACION') || txt.includes('ANTICIPO CONSIGNACI');
+}
+
+function _consigCuentasRelacionadas(consignaciones) {
+    const ids = new Set(consignaciones.map(c => String(c.consignacionId || c.id)));
+    const proveedores = new Set(consignaciones.map(_consigProveedorKey));
+    return _comprasAsegurarArray(StorageService.get('cuentasPorPagar', []))
+        .filter(cxp => {
+            if (cxp?.origenConsignacion) return true;
+            if (cxp?.consignacionId && ids.has(String(cxp.consignacionId))) return true;
+            return proveedores.has(_consigProveedorKey(cxp));
+        });
+}
+
+function _consigResumenGlobal() {
+    const consignaciones = _getConsignacionesActivas();
+    const anticiposNuevos = _getAnticiposConsignacion();
+    const anticiposLegado = consignaciones.flatMap(_consigAnticiposLegado);
+    const anticiposDesdeOC = _consigAnticiposDesdePagosOC(consignaciones, [...anticiposLegado, ...anticiposNuevos]);
+    const anticipos = [...anticiposLegado, ...anticiposNuevos, ...anticiposDesdeOC];
+    const cuentasCxp = _consigCuentasRelacionadas(consignaciones);
+    const grupos = new Map();
+    const folios = new Map();
+
+    const ensure = (key, base = {}) => {
+        if (!grupos.has(key)) {
+            grupos.set(key, {
+                key,
+                proveedor: base.proveedor || 'Proveedor',
+                proveedorId: base.proveedorId || null,
+                consignaciones: [],
+                anticipos: [],
+                cuentasCxp: [],
+                compraOriginal: 0,
+                inventarioPendiente: 0,
+                vendidoReportado: 0,
+                transferidoCxp: 0,
+                saldoCxp: 0,
+                pagadoPorVentas: 0,
+                anticiposAplicados: 0,
+                anticiposAplicadosCxp: 0,
+                anticiposTotal: 0,
+                saldoNeto: 0,
+                folios: []
+            });
+        }
+        return grupos.get(key);
+    };
+
+    const ensureFolio = (base = {}) => {
+        const proveedorKey = base.proveedorKey || _consigProveedorKey(base);
+        const folioOrigen = base.folioOrigen || base.folio || _consigFolioLabel(base);
+        const key = base.folioKey || _consigFolioKeyFromParts(proveedorKey, folioOrigen);
+        if (!folios.has(key)) {
+            folios.set(key, {
+                key,
+                proveedorKey,
+                proveedor: base.proveedor || 'Proveedor',
+                proveedorId: base.proveedorId || null,
+                folioOrigen,
+                consignaciones: [],
+                anticipos: [],
+                cuentasCxp: [],
+                compraOriginal: 0,
+                inventarioPendiente: 0,
+                vendidoReportado: 0,
+                pagadoPorVentas: 0,
+                anticiposTotal: 0,
+                anticiposAplicados: 0,
+                anticiposAplicadosCxp: 0,
+                saldoNeto: 0
+            });
+        }
+        return folios.get(key);
+    };
+
+    const consignacionPorId = new Map();
+
+    consignaciones.forEach(c => {
+        const key = _consigProveedorKey(c);
+        const g = ensure(key, c);
+        const f = ensureFolio(c);
+        consignacionPorId.set(String(c.consignacionId || c.id), c);
+        g.consignaciones.push(c);
+        g.compraOriginal += _consigImporte(c);
+        g.inventarioPendiente += Number(c.cantidadPendiente || 0) * Number(c.costoUnitario || 0);
+        g.vendidoReportado += Number(c.montoVendidoReportado || 0);
+        g.transferidoCxp += Number(c.montoTransferido || 0);
+        g.anticiposAplicados += Number(c.montoAbonosAplicados || 0);
+
+        f.consignaciones.push(c);
+        f.compraOriginal += _consigImporte(c);
+        f.inventarioPendiente += Number(c.cantidadPendiente || 0) * Number(c.costoUnitario || 0);
+        f.vendidoReportado += Number(c.montoVendidoReportado || 0);
+        f.anticiposAplicados += Number(c.montoAbonosAplicados || 0);
+    });
+
+    anticipos.forEach(a => {
+        const key = a.proveedorKey || _consigProveedorKey(a);
+        const g = ensure(key, a);
+        const monto = Number(a.monto || 0);
+        g.anticipos.push(a);
+        g.anticiposTotal += monto;
+
+        let folioKey = a.folioKey || '';
+        if (!folioKey && a.consignacionId && consignacionPorId.has(String(a.consignacionId))) {
+            folioKey = _consigFolioKey(consignacionPorId.get(String(a.consignacionId)));
+        }
+        if (!folioKey && (a.folioOrigen || a.folio)) {
+            folioKey = _consigFolioKeyFromParts(key, a.folioOrigen || a.folio);
+        }
+        if (folioKey) {
+            const f = ensureFolio({ ...a, proveedorKey: key, folioKey, folioOrigen: a.folioOrigen || a.folio || 'SIN FOLIO' });
+            f.anticipos.push(a);
+            f.anticiposTotal += monto;
+        }
+    });
+
+    cuentasCxp.forEach(cxp => {
+        const key = _consigProveedorKey(cxp);
+        const g = ensure(key, cxp);
+        const abonos = _comprasAsegurarArray(cxp.abonos || []);
+        g.cuentasCxp.push(cxp);
+        g.saldoCxp += Number(cxp.saldoPendiente || 0);
+        abonos.forEach(a => {
+            const monto = Number(a.monto || 0);
+            if (_consigEsAnticipoAplicado(a)) g.anticiposAplicadosCxp += monto;
+            else g.pagadoPorVentas += monto;
+        });
+
+        let folioKey = cxp.folioConsignacionKey || cxp.folioKey || '';
+        if (!folioKey && cxp.consignacionId && consignacionPorId.has(String(cxp.consignacionId))) {
+            folioKey = _consigFolioKey(consignacionPorId.get(String(cxp.consignacionId)));
+        }
+        if (!folioKey && (cxp.folioOrigen || cxp.folioReporteConsignacion)) {
+            folioKey = _consigFolioKeyFromParts(key, cxp.folioOrigen || cxp.folioReporteConsignacion);
+        }
+        if (folioKey) {
+            const f = ensureFolio({ ...cxp, proveedorKey: key, folioKey, folioOrigen: cxp.folioOrigen || cxp.folioReporteConsignacion || 'SIN FOLIO' });
+            f.cuentasCxp.push(cxp);
+            abonos.forEach(a => {
+                const monto = Number(a.monto || 0);
+                if (_consigEsAnticipoAplicado(a)) f.anticiposAplicadosCxp += monto;
+                else f.pagadoPorVentas += monto;
+            });
+        }
+    });
+
+    folios.forEach(f => {
+        f.anticiposAplicados = Math.max(Number(f.anticiposAplicados || 0), Number(f.anticiposAplicadosCxp || 0));
+        f.saldoNeto = Math.max(0, f.compraOriginal - f.pagadoPorVentas - f.anticiposTotal - f.anticiposAplicados);
+    });
+
+    grupos.forEach(g => {
+        g.anticiposAplicados = Math.max(Number(g.anticiposAplicados || 0), Number(g.anticiposAplicadosCxp || 0));
+        g.saldoNeto = Math.max(0, g.compraOriginal - g.pagadoPorVentas - g.anticiposTotal);
+        g.folios = Array.from(folios.values())
+            .filter(f => f.proveedorKey === g.key)
+            .sort((a, b) => String(a.folioOrigen).localeCompare(String(b.folioOrigen)));
+    });
+
+    return {
+        consignaciones,
+        anticipos,
+        cuentasCxp,
+        folios: Array.from(folios.values()).sort((a, b) => String(a.proveedor).localeCompare(String(b.proveedor)) || String(a.folioOrigen).localeCompare(String(b.folioOrigen))),
+        grupos: Array.from(grupos.values()).sort((a, b) => String(a.proveedor).localeCompare(String(b.proveedor)))
+    };
+}
+
 // === AUDITORÍA: VISUALIZAR HISTORIAL DE COSTOS ===
 function renderHistorialCostosAuditoria() {
     // Obtener productos
@@ -213,54 +549,124 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
 };
 
-window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha }) {
-    // Detectar si el ID es de una caja de efectivo
-    const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
-    
+function _normalizarFechaMovimientoCuenta(fecha) {
+    if (!fecha) return window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    if (window.localISO) return window.localISO(fecha);
+    const d = new Date(fecha);
+    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
+function _resolverCuentaMovimiento(cuentaId) {
+    let cuentaRealId = (cuentaId === 'caja') ? 'efectivo' : (cuentaId || 'efectivo');
+    let isCaja = String(cuentaRealId).startsWith('caja_') || cuentaRealId === 'efectivo';
+
     if (isCaja) {
-        let cef = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
-        const c = cef.find(x => String(x.id) === String(cuentaId));
-        if (c) c.saldo = (Number(c.saldo) || 0) - monto;
-        else if (cef.length > 0) cef[0].saldo = (Number(cef[0].saldo) || 0) - monto; // Fallback
-        StorageService.set('cuentasEfectivo', cef);
-    } else {
-        let cban = StorageService.get('cuentas-bancarias', []);
-        const c = cban.find(x => String(x.id) === String(cuentaId) || x.banco === cuentaId);
-        if (c) c.saldo = (Number(c.saldo) || 0) - monto;
-        StorageService.set('cuentas-bancarias', cban);
+        const cuentas = StorageService.get('cuentasEfectivo', []);
+        if (cuentas.length === 0 && cuentaRealId === 'efectivo') cuentas.push({ id: 'efectivo', nombre: 'Efectivo Principal', saldo: 0 });
+        let idx = cuentas.findIndex(x => String(x.id) === String(cuentaRealId));
+        if (idx === -1 && cuentaRealId === 'efectivo' && cuentas.length > 0) {
+            idx = 0;
+            cuentaRealId = cuentas[0].id;
+        }
+        return { ok: idx !== -1, tipo: 'efectivo', cuentaRealId, cuentas, idx, medioPago: 'efectivo' };
     }
 
-    // Registrar en el flujo de caja
+    const cuentas = StorageService.get('cuentas-bancarias', []);
+    const idx = cuentas.findIndex(x => String(x.id) === String(cuentaRealId) || String(x.banco) === String(cuentaRealId));
+    return { ok: idx !== -1, tipo: 'banco', cuentaRealId, cuentas, idx, medioPago: 'transferencia' };
+}
+
+function _validarMontoMovimientoCuenta(monto, concepto) {
+    const montoNum = Number(monto);
+    if (!Number.isFinite(montoNum) || montoNum <= 0) {
+        console.warn("Movimiento de cuenta rechazado por monto invalido:", { monto, concepto });
+        alert("No se registro el movimiento de cuenta porque el importe no es valido.");
+        return null;
+    }
+    return montoNum;
+}
+
+function _normalizarMovimientosEfectivoLegacy() {
+    const cajas = StorageService.get('cuentasEfectivo', []);
+    if (!Array.isArray(cajas) || cajas.length === 0) return;
+    if (cajas.some(c => String(c.id) === 'efectivo')) return;
+
+    const cuentaDefault = cajas[0];
+    let movs = StorageService.get('movimientosCaja', []);
+    if (!Array.isArray(movs) || movs.length === 0) return;
+
+    let cambios = 0;
+    movs = movs.map(m => {
+        const cuenta = String(m.cuenta || m.cuentaId || '').trim().toLowerCase();
+        const etiqueta = String(m.etiquetaCuenta || '').trim().toLowerCase();
+        if (cuenta !== 'efectivo' && etiqueta !== 'efectivo') return m;
+        cambios++;
+        return {
+            ...m,
+            cuenta: cuentaDefault.id,
+            etiquetaCuenta: cuentaDefault.nombre || cuentaDefault.id,
+            normalizadoCuentaLegacy: true,
+            fechaNormalizacionCuenta: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+        };
+    });
+
+    if (cambios > 0) StorageService.set('movimientosCaja', movs);
+}
+
+setTimeout(_normalizarMovimientosEfectivoLegacy, 0);
+
+window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha, idOperacion }) {
+    const montoNum = _validarMontoMovimientoCuenta(monto, concepto);
+    if (montoNum === null) return false;
+
+    const cuenta = _resolverCuentaMovimiento(cuentaId);
+    if (!cuenta.ok) {
+        console.warn("Egreso rechazado por cuenta inexistente:", { cuentaId, concepto, referencia });
+        alert(`No se registro el egreso porque la cuenta "${cuentaId || 'efectivo'}" no existe.`);
+        return false;
+    }
+
+    if (cuenta.tipo === 'efectivo') {
+        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) - montoNum;
+        StorageService.set('cuentasEfectivo', cuenta.cuentas);
+    } else {
+        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) - montoNum;
+        StorageService.set('cuentas-bancarias', cuenta.cuentas);
+    }
+
     const movs = StorageService.get('movimientosCaja', []);
     movs.push({
         id: Date.now() + Math.random(),
         tipo: 'egreso',
         concepto,
-        monto,
-        // 👇 AHORA TOMA LA FECHA QUE ELIJAS 👇
-        fecha: fecha || window.localISO(new Date()),
-        cuenta: cuentaId,
-        etiquetaCuenta: etiqueta || cuentaId,
-        medioPago: isCaja ? 'efectivo' : 'transferencia',
-        referencia
+        monto: montoNum,
+        fecha: _normalizarFechaMovimientoCuenta(fecha),
+        cuenta: cuenta.cuentaRealId,
+        etiquetaCuenta: etiqueta || cuenta.cuentaRealId,
+        medioPago: cuenta.medioPago,
+        referencia,
+        idOperacion: idOperacion || null
     });
     StorageService.set('movimientosCaja', movs);
+    return true;
 };
-window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha }) {
-    const cuentaRealId = (cuentaId === 'caja') ? 'efectivo' : cuentaId;
-    const isCaja = String(cuentaRealId).startsWith('caja_') || cuentaRealId === 'efectivo';
-    
-    if (isCaja) {
-        let cef = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
-        const c = cef.find(x => String(x.id) === String(cuentaRealId));
-        if (c) c.saldo = (Number(c.saldo) || 0) + monto;
-        else if (cef.length > 0) cef[0].saldo = (Number(cef[0].saldo) || 0) + monto; 
-        StorageService.set('cuentasEfectivo', cef);
+window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha, idOperacion }) {
+    const montoNum = _validarMontoMovimientoCuenta(monto, concepto);
+    if (montoNum === null) return false;
+
+    const cuenta = _resolverCuentaMovimiento(cuentaId);
+    if (!cuenta.ok) {
+        console.warn("Ingreso rechazado por cuenta inexistente:", { cuentaId, concepto, referencia });
+        alert(`No se registro el ingreso porque la cuenta "${cuentaId || 'efectivo'}" no existe.`);
+        return false;
+    }
+
+    if (cuenta.tipo === 'efectivo') {
+        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) + montoNum;
+        StorageService.set('cuentasEfectivo', cuenta.cuentas);
     } else {
-        let cban = StorageService.get('cuentas-bancarias', []);
-        const c = cban.find(x => String(x.id) === String(cuentaRealId) || x.banco === cuentaRealId);
-        if (c) c.saldo = (Number(c.saldo) || 0) + monto;
-        StorageService.set('cuentas-bancarias', cban);
+        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) + montoNum;
+        StorageService.set('cuentas-bancarias', cuenta.cuentas);
     }
 
     const movs = StorageService.get('movimientosCaja', []);
@@ -268,15 +674,16 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         id: Date.now() + Math.random(),
         tipo: 'ingreso',
         concepto,
-        monto,
-        // 👇 AHORA TOMA LA FECHA QUE LE MANDES, O USA HOY SI NO MANDAS NADA
-        fecha: fecha || window.localISO(new Date()), 
-        cuenta: cuentaRealId,
-        etiquetaCuenta: etiqueta || cuentaRealId,
-        medioPago: isCaja ? 'efectivo' : 'transferencia',
-        referencia
+        monto: montoNum,
+        fecha: _normalizarFechaMovimientoCuenta(fecha),
+        cuenta: cuenta.cuentaRealId,
+        etiquetaCuenta: etiqueta || cuenta.cuentaRealId,
+        medioPago: cuenta.medioPago,
+        referencia,
+        idOperacion: idOperacion || null
     });
     StorageService.set('movimientosCaja', movs);
+    return true;
 };
 
 function _getCuentaSeleccionada(sufijo) {
@@ -439,6 +846,9 @@ function registrarCompra() {
         total: totalCompra,
         fecha: fechaHoyStr,
         fechaISO: fechaHoyISO,
+        pagado: metodo === "contado" ? totalCompra : 0,
+        totalPagado: metodo === "contado" ? totalCompra : 0,
+        pago: metodo === "contado" ? { monto: totalCompra, metodo, cuenta: cuentaOrigenId, etiqueta: cuentaOrigenNombre } : null,
         caracteristicas,
         color: colorNuevo,           // <-- Guardamos el color en el historial
         ubicacion: ubicacionNueva    // <-- Guardamos la ubicación en el historial
@@ -795,7 +1205,9 @@ window.verDetalleCompra = function(idCuenta) {
 
     // 2. Extraer artículos
     let listaArticulos = [];
-    if (compraOriginal && compraOriginal.articulos && Array.isArray(compraOriginal.articulos)) {
+    if (Array.isArray(c.articulos) && c.articulos.length > 0) {
+        listaArticulos = c.articulos;
+    } else if (compraOriginal && compraOriginal.articulos && Array.isArray(compraOriginal.articulos)) {
         listaArticulos = compraOriginal.articulos;
     } else {
         const kardex = StorageService.get("movimientosInventario", []);
@@ -813,8 +1225,8 @@ window.verDetalleCompra = function(idCuenta) {
     let filasHTML = '';
     let subtotalReal = 0;
     listaArticulos.forEach(art => {
-        const cant = parseFloat(art.cantidad || art.cantidadRec) || 1;
-        const costoNeto = parseFloat(art.costo || art.precioOriginal) || 0;
+        const cant = parseFloat(art.cantidadRec ?? art.cantidad ?? art.cant ?? 1) || 1;
+        const costoNeto = parseFloat(art.costo ?? art.costoUnitario ?? art.precioOriginal ?? 0) || 0;
         const importe = cant * costoNeto;
         subtotalReal += importe;
         filasHTML += `
@@ -832,7 +1244,7 @@ window.verDetalleCompra = function(idCuenta) {
     let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
     
     // Rescatar abonos perdidos que se hicieron desde la pantalla de Órdenes de Compra
-    if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
+    if (compraOriginal && Array.isArray(compraOriginal.pagos) && !c.noRescatarPagosOC) {
         compraOriginal.pagos.forEach(pagoOC => {
             const yaExiste = abonos.find(a => a.fecha === pagoOC.fecha && a.monto === pagoOC.monto);
             if (!yaExiste) abonos.push(pagoOC);
@@ -848,7 +1260,7 @@ window.verDetalleCompra = function(idCuenta) {
     let anticipoInicial = 0;
     let mostrarFilaAnticipo = false;
 
-    if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01) {
+    if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01 && !c.noRescatarPagosOC) {
         const ap = parseFloat(compraOriginal.anticipo_pagado);
         // Verificar si los pagos de la OC ya fueron absorbidos por c.abonos
         const pagosOC = Array.isArray(compraOriginal.pagos) ? compraOriginal.pagos : [];
@@ -883,6 +1295,11 @@ window.verDetalleCompra = function(idCuenta) {
     }
 
     const saldoPendiente = saldoPendienteVerdadero;
+    const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
+    const empresaNombre = cfgEmpresa.nombre || 'Muebleria Mi Pueblito';
+    const empresaTel = cfgEmpresa.telefono || cfgEmpresa.celular || '';
+    const empresaDir = cfgEmpresa.direccion || '';
+    const detalleDomId = `estado-cuenta-proveedor-${String(c.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
     let movimientosHTML = '';
 
@@ -927,16 +1344,26 @@ window.verDetalleCompra = function(idCuenta) {
     // 5. Modal HTML
     const modalHTML = `
         <div data-modal="detalle-compra" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(3px);z-index:6000;display:flex;justify-content:center;align-items:flex-start;overflow-y:auto;padding:20px;">
-            <div style="background:white;padding:32px;border-radius:10px;width:95%;max-width:860px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);margin:auto;">
+            <div style="background:white;padding:0;border-radius:10px;width:95%;max-width:900px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);margin:auto;overflow:hidden;">
 
-                <div style="border-bottom:3px solid #1e3a8a;padding-bottom:12px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start;">
+                <div id="${detalleDomId}" style="background:white;padding:32px;color:#0f172a;">
+                <div style="border-bottom:3px solid #1e3a8a;padding-bottom:12px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start;gap:18px;">
                     <div>
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+                            <img src="img/Logo.svg" style="height:46px;max-width:130px;object-fit:contain;" onerror="this.style.display='none'">
+                            <div>
+                                <div style="font-size:17px;font-weight:900;color:#1e3a8a;">${empresaNombre}</div>
+                                ${empresaDir ? `<div style="font-size:11px;color:#64748b;">${empresaDir}</div>` : ''}
+                                ${empresaTel ? `<div style="font-size:11px;color:#64748b;">Tel. ${empresaTel}</div>` : ''}
+                            </div>
+                        </div>
                         <h2 style="margin:0;color:#1e3a8a;font-size:22px;font-weight:800;">ESTADO DE CUENTA — PROVEEDOR</h2>
                         <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Folio interno: <strong>#${c.compraId || c.id}</strong></p>
                     </div>
                     <div style="text-align:right;">
                         <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="background:none;border:none;font-size:24px;cursor:pointer;color:#94a3b8;">✕</button>
                         <p style="margin:8px 0 0;color:#64748b;font-size:13px;">Fecha: <strong>${c.fecha || '-'}</strong></p>
+                        <p style="margin:4px 0 0;color:#64748b;font-size:12px;">Emitido: <strong>${window.formatearFechaMX ? window.formatearFechaMX(new Date()) : new Date().toLocaleString('es-MX')}</strong></p>
                     </div>
                 </div>
 
@@ -1000,13 +1427,116 @@ window.verDetalleCompra = function(idCuenta) {
                     </div>
                 </div>
 
-                <div style="margin-top:24px;text-align:right;border-top:1px solid #e2e8f0;padding-top:16px;display:flex;justify-content:flex-end;gap:10px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:42px;margin-top:42px;color:#334155;font-size:12px;">
+                    <div style="border-top:1px solid #94a3b8;padding-top:8px;text-align:center;">Elaboro / Administracion</div>
+                    <div style="border-top:1px solid #94a3b8;padding-top:8px;text-align:center;">Recibio / Proveedor</div>
+                </div>
+                <p style="margin:22px 0 0;color:#64748b;font-size:11px;line-height:1.4;">Documento informativo generado con base en compras, recepciones y abonos registrados en el sistema. Cualquier aclaracion debe realizarse contra comprobantes de pago y documentos de recepcion.</p>
+                </div>
+
+                <div style="padding:16px 32px;background:#f8fafc;text-align:right;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
                     <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="padding:10px 22px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Cerrar</button>
+                    <button onclick="imprimirEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Imprimir / PDF</button>
+                    <button id="btn-img-estado-proveedor-${String(c.id).replace(/[^a-zA-Z0-9_-]/g, '-')}" onclick="descargarImagenEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Guardar imagen</button>
                     ${saldoPendiente > 0 ? `<button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove(); registrarAbonoProveedor('${c.id}');" style="padding:10px 22px;background:#1e3a8a;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💵 Registrar Abono</button>` : ''}
                 </div>
             </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+};
+
+function _estadoCuentaProveedorDomId(idCuenta) {
+    return `estado-cuenta-proveedor-${String(idCuenta).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
+function _clonarEstadoCuentaProveedor(idCuenta) {
+    const original = document.getElementById(_estadoCuentaProveedorDomId(idCuenta));
+    if (!original) return null;
+    const clone = original.cloneNode(true);
+    clone.querySelectorAll('button').forEach(btn => btn.remove());
+    clone.style.width = '820px';
+    clone.style.maxWidth = '820px';
+    clone.style.margin = '0 auto';
+    clone.style.boxSizing = 'border-box';
+    return clone;
+}
+
+window.imprimirEstadoCuentaProveedor = function(idCuenta) {
+    const clone = _clonarEstadoCuentaProveedor(idCuenta);
+    if (!clone) return alert('Abre primero el estado de cuenta para imprimirlo.');
+    const w = window.open('', '_blank', 'width=900,height=1000');
+    if (!w) return alert('Habilita las ventanas emergentes para imprimir el estado de cuenta.');
+    w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+        <title>Estado de cuenta proveedor</title>
+        <style>
+            *{box-sizing:border-box}
+            body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:22px;color:#0f172a}
+            .toolbar{display:flex;justify-content:center;gap:10px;margin-bottom:16px}
+            .toolbar button{padding:10px 18px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:bold;cursor:pointer}
+            @media print{body{background:white;padding:0}.toolbar{display:none!important}@page{margin:12mm}}
+        </style></head><body>
+        <div class="toolbar"><button onclick="window.print()">Imprimir / Guardar PDF</button></div>
+        ${clone.outerHTML}
+        <script>setTimeout(function(){ window.focus(); }, 200);<\/script>
+    </body></html>`);
+    w.document.close();
+};
+
+function _cargarHtml2CanvasEstadoProveedor(cb) {
+    if (typeof html2canvas !== 'undefined') return cb();
+    const existente = document.getElementById('html2canvas-estado-proveedor');
+    if (existente) {
+        existente.addEventListener('load', cb, { once: true });
+        return;
+    }
+    const script = document.createElement('script');
+    script.id = 'html2canvas-estado-proveedor';
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = cb;
+    script.onerror = () => alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.');
+    document.head.appendChild(script);
+}
+
+window.descargarImagenEstadoCuentaProveedor = function(idCuenta) {
+    const clone = _clonarEstadoCuentaProveedor(idCuenta);
+    if (!clone) return alert('Abre primero el estado de cuenta para guardarlo como imagen.');
+    const safeId = String(idCuenta).replace(/[^a-zA-Z0-9_-]/g, '-');
+    const btn = document.getElementById(`btn-img-estado-proveedor-${safeId}`);
+    const textoOriginal = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+    }
+
+    _cargarHtml2CanvasEstadoProveedor(() => {
+        const wrap = document.createElement('div');
+        wrap.style.position = 'fixed';
+        wrap.style.left = '-10000px';
+        wrap.style.top = '0';
+        wrap.style.background = '#ffffff';
+        wrap.style.padding = '20px';
+        wrap.appendChild(clone);
+        document.body.appendChild(wrap);
+
+        html2canvas(clone, { scale: 2.5, backgroundColor: '#ffffff', useCORS: true })
+            .then(canvas => {
+                const link = document.createElement('a');
+                link.download = `estado_cuenta_proveedor_${safeId}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            })
+            .catch(err => {
+                console.error('Error generando imagen de estado de cuenta:', err);
+                alert('No se pudo generar la imagen. Intenta con Imprimir / PDF.');
+            })
+            .finally(() => {
+                wrap.remove();
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = textoOriginal || 'Guardar imagen';
+                }
+            });
+    });
 };
 
 window.registrarAbonoProveedor = function(idCuenta) {
@@ -1017,7 +1547,7 @@ window.registrarAbonoProveedor = function(idCuenta) {
     document.querySelector('[data-modal="abono-proveedor"]')?.remove();
     
     // Generar fecha hoy
-    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+    const fechaHoy = _comprasHoyInput();
 
     const modalHTML = `
     <div data-modal="abono-proveedor" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:6000;display:flex;justify-content:center;align-items:center;">
@@ -1377,6 +1907,9 @@ function guardarOrdenCompra() {
     
     // Ahora el anticipo ya sabe quién es provNombre
     const anticipo = parseFloat(document.getElementById('ocAnticipo')?.value || '0');
+    const ocId = Date.now();
+    const fechaAnticipo = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    const anticipoRef = `ANTICIPO-OC-${ocId}`;
     if (anticipo > 0 && cuentaOrigen) {
         const etiqueta = document.getElementById('ocCuentaOrigen')?.options[document.getElementById('ocCuentaOrigen')?.selectedIndex]?.text || cuentaOrigen;
         _egresarCuenta({
@@ -1384,7 +1917,22 @@ function guardarOrdenCompra() {
             cuentaId: cuentaOrigen,
             etiqueta,
             concepto: `Anticipo OC a ${provNombre}`, 
-            referencia: `ANTICIPO-OC-${Date.now()}`
+            referencia: anticipoRef,
+            idOperacion: anticipoRef
+        });
+    }
+    if (metodoPago === 'consignacion' && anticipo > 0) {
+        const etiqueta = document.getElementById('ocCuentaOrigen')?.options[document.getElementById('ocCuentaOrigen')?.selectedIndex]?.text || cuentaOrigen || 'Sin cuenta';
+        _registrarAnticipoConsignacionGlobal({
+            monto: anticipo,
+            cuentaId: cuentaOrigen || null,
+            cuenta: etiqueta,
+            proveedor: provNombre,
+            proveedorId: provId || null,
+            fecha: fechaAnticipo,
+            nota: 'Anticipo registrado desde orden de compra a consignacion',
+            referencia: anticipoRef,
+            origen: 'ordenCompra'
         });
     }
     const meses = document.getElementById('ocMeses')?.value || '';
@@ -1403,7 +1951,7 @@ function guardarOrdenCompra() {
     }));
 
     const oc = {
-        id: Date.now(),
+        id: ocId,
         folio: _foliosOC(),
         proveedorId: provId || null,
         proveedorNombre: provNombre || "General",
@@ -1420,7 +1968,7 @@ function guardarOrdenCompra() {
         },
         anticipo_pagado: parseFloat(anticipo) || 0,
         saldoPendiente: Math.max(0, parseFloat(total) - (parseFloat(anticipo) || 0)),
-        pagos: (anticipo > 0) ? [{ fecha: new Date().toISOString(), monto: parseFloat(anticipo), cuenta: cuentaOrigen }] : [],
+        pagos: (anticipo > 0) ? [{ fecha: fechaAnticipo, monto: parseFloat(anticipo), cuenta: cuentaOrigen, referencia: anticipoRef }] : [],
         esConsignacion: metodoPago === 'consignacion'
     };
     
@@ -1748,11 +2296,12 @@ function recibirOrdenCompra(id) {
         if (totEl) totEl.textContent = dinero(totalRec);
         // actualizar monto sugerido
         const montoInp = document.getElementById('recMontoPago');
-        const saldoDisp = totalOC - anticipo;
+        const anticipoAplicable = Math.min(anticipo, totalRec);
+        const saldoDisp = Math.max(0, totalRec - anticipoAplicable);
         if (montoInp && !montoInp.dataset.editado) montoInp.value = Math.min(totalRec, saldoDisp > 0 ? saldoDisp : totalRec).toFixed(2);
         // saldo pendiente actualizado
         const lblSaldo = document.getElementById('lblSaldoMax');
-        if (lblSaldo) lblSaldo.textContent = dinero(Math.max(0, saldoDisp));
+        if (lblSaldo) lblSaldo.textContent = dinero(saldoDisp);
     };
 
     // Marcar monto como editado manualmente
@@ -1765,6 +2314,8 @@ function confirmarRecepcionOC(ocId) {
     const idx   = lista.findIndex(x => x.id === ocId);
     if (idx === -1) return;
     const oc = lista[idx];
+    if (oc.estado === 'Recibida' || oc.estado === 'Recibida Parcial') return alert('Esta orden ya fue procesada. Actualiza la vista antes de intentar otra recepcion.');
+    if (oc.estado === 'Cancelada') return alert('Esta orden esta cancelada.');
 
     const fechaRec   = new Date();
     const fechaStr   = window.formatearFechaCortaMX(fechaRec);
@@ -1789,44 +2340,6 @@ function confirmarRecepcionOC(ocId) {
 
         if (cantRec > 0) {
             itemsRecibidos.push({ ...a, cantidadRec: cantRec, subtotal: cantRec * a.costo, colorRec, ubicacionRec });
-            // Guardar historial de costos (recepción OC)
-            guardarHistorialCosto({
-                productoId: a.productoId,
-                precioCompra: a.costo,
-                fecha: fechaStr,
-                cantidad: cantRec,
-                proveedorId: oc.proveedorId,
-                proveedorNombre: oc.proveedorNombre,
-                origen: 'orden de compra'
-            });
-
-            // --- Ajuste automático de costo y precio si hay aumento ---
-            let productos = [];
-            try {
-                productos = StorageService.get('productos', []);
-            } catch (e) { productos = []; }
-            const idxProd = productos.findIndex(p => String(p.id) === String(a.productoId));
-            if (idxProd !== -1) {
-                const producto = productos[idxProd];
-                if (a.costo > producto.costo) {
-                    const costoAnterior = producto.costo;
-                    const precioAnterior = producto.precio;
-                    let margenAplicar = 30;
-                    if (typeof categoriasData !== 'undefined' && Array.isArray(categoriasData)) {
-                        categoriasData.forEach(cat => {
-                            const sub = cat.subcategorias.find(s => s.nombre === producto.subcategoria);
-                            if (sub) margenAplicar = sub.margen;
-                        });
-                    }
-                    const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(a.costo, margenAplicar);
-                    producto.costo = a.costo;
-                    producto.precio = nuevoPrecio;
-                    StorageService.set('productos', productos);
-                    // Aviso visual opcional
-                    alert(`📢 ¡ACTUALIZACIÓN DE PRECIOS!\n${producto.nombre}\nCosto: ${dinero(costoAnterior)} ➡️ ${dinero(a.costo)}\nPrecio: ${dinero(precioAnterior)} ➡️ ${dinero(nuevoPrecio)}\nMargen aplicado: ${margenAplicar}%`);
-                }
-            }
-            // --- Fin ajuste automático ---
         }
         if (backOrd > 0) itemsBackOrder.push({ ...a, cantidad: backOrd, subtotal: backOrd * a.costo });
         if (inputVal > a.cantidad) {
@@ -1844,7 +2357,9 @@ function confirmarRecepcionOC(ocId) {
     const totalRecibido = itemsRecibidos.reduce((s, a) => s + a.subtotal, 0);
     const totalOC       = oc.total || 0;
     const anticipo      = oc.anticipo_pagado || 0;
-    const saldoDisp     = Math.max(0, totalOC - anticipo);
+    const anticipoAplicadoRecepcion = Math.min(anticipo, totalRecibido);
+    const anticipoDisponibleBackOrder = Math.max(0, anticipo - anticipoAplicadoRecepcion);
+    const saldoDisp     = Math.max(0, totalRecibido - anticipoAplicadoRecepcion);
 
     // Validar pago si eligió pagar
     let montoPagado = 0;
@@ -1863,8 +2378,8 @@ function confirmarRecepcionOC(ocId) {
         cuentaPagoId = cuentaEl.value;
         cuentaPagoEtiqueta = cuentaEl.options[cuentaEl.selectedIndex]?.text || 'Efectivo';
         // Validación: advertir si pago + anticipo supera el total
-        if ((montoPagado + anticipo) > totalOC + 0.01) {
-            if (!confirm(`⚠️ El pago (${dinero(montoPagado)}) más el anticipo (${dinero(anticipo)}) supera el total de la OC (${dinero(totalOC)}). ¿Deseas continuar?`)) return;
+        if ((montoPagado + anticipoAplicadoRecepcion) > totalRecibido + 0.01) {
+            if (!confirm(`⚠️ El pago (${dinero(montoPagado)}) más el anticipo aplicado a esta recepcion (${dinero(anticipoAplicadoRecepcion)}) supera el total recibido (${dinero(totalRecibido)}). ¿Deseas continuar?`)) return;
         }
     }
 
@@ -1873,6 +2388,54 @@ function confirmarRecepcionOC(ocId) {
     const msjConfRec = `⚠️ RESUMEN DE OPERACIÓN - ¿CONFIRMAR RECEPCIÓN?\n\nOrden de Compra: ${oc.folio}\nProveedor: ${oc.proveedorNombre}\nTotal de unidades a ingresar: ${itemsRecibidos.reduce((s, a) => s + a.cantidadRec, 0)}\nPago a registrar hoy: ${formatoDinero(montoPagado)}\n\n¿Deseas procesar la entrada al inventario y actualizar la OC?`;
     if (!confirm(msjConfRec)) return;
     // --- FIN DE CONFIRMACIÓN ---
+
+    // Historial de costos y ajuste de precios: solo despues de confirmar la recepcion.
+    let productosCostos = StorageService.get('productos', []);
+    let preciosActualizados = false;
+    const avisosPrecio = [];
+
+    itemsRecibidos.forEach(art => {
+        guardarHistorialCosto({
+            productoId: art.productoId,
+            precioCompra: art.costo,
+            fecha: fechaStr,
+            cantidad: art.cantidadRec,
+            proveedorId: oc.proveedorId,
+            proveedorNombre: oc.proveedorNombre,
+            origen: 'orden de compra'
+        });
+
+        const idxProd = productosCostos.findIndex(p => String(p.id) === String(art.productoId));
+        if (idxProd === -1) return;
+
+        const producto = productosCostos[idxProd];
+        const costoAnteriorNum = Number(producto.costo || 0);
+        const costoNuevo = Number(art.costo || 0);
+        if (costoNuevo <= costoAnteriorNum) return;
+
+        const costoAnterior = producto.costo;
+        const precioAnterior = producto.precio;
+        let margenAplicar = 30;
+        if (typeof categoriasData !== 'undefined' && Array.isArray(categoriasData)) {
+            categoriasData.forEach(cat => {
+                const sub = (cat.subcategorias || []).find(s => s.nombre === producto.subcategoria);
+                if (sub) margenAplicar = sub.margen;
+            });
+        }
+
+        const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(costoNuevo, margenAplicar);
+        producto.costo = costoNuevo;
+        producto.precio = nuevoPrecio;
+        preciosActualizados = true;
+        avisosPrecio.push(`${producto.nombre}\nCosto: ${dinero(costoAnterior)} -> ${dinero(costoNuevo)}\nPrecio: ${dinero(precioAnterior)} -> ${dinero(nuevoPrecio)}\nMargen aplicado: ${margenAplicar}%`);
+    });
+
+    if (preciosActualizados) {
+        StorageService.set('productos', productosCostos);
+        productos = productosCostos;
+        window.productos = productosCostos;
+        alert(`ACTUALIZACION DE PRECIOS\n\n${avisosPrecio.join('\n\n')}`);
+    }
 
     // ── 1. Actualizar inventario ───────────────────────────────
 const prods = StorageService.get('productos', []);
@@ -1931,16 +2494,42 @@ movimientosInventario = kardex;   // ✅ sincronizar global
             cuentaId: cuentaPagoId,
             etiqueta: cuentaPagoEtiqueta,
             concepto: `Pago recepción OC ${oc.folio} — ${oc.proveedorNombre}`,
-            referencia: `OC-REC-${oc.id}`
+            referencia: `OC-REC-${oc.id}`,
+            idOperacion: `OC-REC-${oc.id}`
         });
     }
 
     // ── 3. Si queda saldo sin pagar → Cuenta por Pagar o Consignación ─────────
-    const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipo);
+    const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipoAplicadoRecepcion);
     
-    if (saldoRestante > 0.01) {
-        if (esConsignacionOC) {
-            const factorConsignacion = totalRecibido > 0 ? (saldoRestante / totalRecibido) : 1;
+    if (esConsignacionOC) {
+            if (anticipo > 0.01) {
+                const refBase = oc.anticipoTransferidoDeOC || oc.id;
+                _registrarAnticipoConsignacionGlobal({
+                    monto: anticipo,
+                    cuentaId: oc.condicionesComerciales?.cuentaOrigen || null,
+                    cuenta: 'Anticipo OC',
+                    proveedor: oc.proveedorNombre,
+                    proveedorId: oc.proveedorId || null,
+                    fecha: window.localISO ? window.localISO(fechaRec) : fechaRec.toISOString(),
+                    nota: 'Anticipo global recuperado desde recepcion de OC a consignacion',
+                    referencia: `ANTICIPO-OC-${refBase}`,
+                    origen: 'ordenCompra'
+                });
+            }
+            if (montoPagado > 0.01) {
+                _registrarAnticipoConsignacionGlobal({
+                    monto: montoPagado,
+                    cuentaId: cuentaPagoId || null,
+                    cuenta: cuentaPagoEtiqueta || 'Pago recepcion OC',
+                    proveedor: oc.proveedorNombre,
+                    proveedorId: oc.proveedorId || null,
+                    fecha: window.localISO ? window.localISO(fechaRec) : fechaRec.toISOString(),
+                    nota: `Pago de recepcion registrado como anticipo global de consignacion (${oc.folio})`,
+                    referencia: `OC-REC-${oc.id}`,
+                    origen: 'recepcionOC'
+                });
+            }
             _agregarConsignacionesActivasDesdeArticulos({
                 compraId: oc.id,
                 proveedor: oc.proveedorNombre,
@@ -1949,12 +2538,30 @@ movimientosInventario = kardex;   // ✅ sincronizar global
                 fecha: window.formatearFechaCortaMX(fechaRec),
                 articulos: itemsRecibidos,
                 cantidadCampo: 'cantidadRec',
-                factorCosto: factorConsignacion,
+                factorCosto: 1,
                 origen: 'ordenCompra'
             });
-        } else {
+    } else if (saldoRestante > 0.01) {
             const fechaVenc = new Date();
             fechaVenc.setDate(fechaVenc.getDate() + 30);
+            const abonosAplicadosCxp = [];
+            if (anticipoAplicadoRecepcion > 0.01) {
+                abonosAplicadosCxp.push({
+                    fecha: window.localISO ? window.localISO(fechaRec) : fechaRec.toISOString(),
+                    monto: anticipoAplicadoRecepcion,
+                    cuenta: 'Anticipo OC',
+                    nota: `Anticipo aplicado desde ${oc.folio}`
+                });
+            }
+            if (montoPagado > 0.01) {
+                abonosAplicadosCxp.push({
+                    fecha: window.localISO ? window.localISO(fechaRec) : fechaRec.toISOString(),
+                    monto: montoPagado,
+                    cuenta: cuentaPagoEtiqueta,
+                    cuentaId: cuentaPagoId,
+                    nota: `Pago registrado al recibir ${oc.folio}`
+                });
+            }
             let cxp = StorageService.get('cuentasPorPagar', []);
             cxp.push({
                 id: Date.now() + 7,
@@ -1964,6 +2571,8 @@ movimientosInventario = kardex;   // ✅ sincronizar global
                 articulos: itemsRecibidos,
                 total: totalRecibido, 
                 saldoPendiente: saldoRestante, 
+                abonos: abonosAplicadosCxp,
+                noRescatarPagosOC: true,
                 metodo: 'credito_proveedor',
                 formaPagoTexto: `Saldo OC ${oc.folio}`,
                 plazo: 30,
@@ -1972,25 +2581,29 @@ movimientosInventario = kardex;   // ✅ sincronizar global
                 vencimientoIso: window.localISO(fechaVenc)
             });
             StorageService.set('cuentasPorPagar', cxp);
-        }
     }
 
     // ── 4. Back order: nueva OC en Borrador con referencia a OC padre ──
     let boId = null;
     if (itemsBackOrder.length > 0) {
+        const totalBackOrder = itemsBackOrder.reduce((s, a) => s + a.subtotal, 0);
+        const anticipoBackOrder = Math.min(anticipoDisponibleBackOrder, totalBackOrder);
         const ocBO = {
             id: Date.now() + 1,
             folio: oc.folio + '-BO',
             proveedorId: oc.proveedorId,
             proveedorNombre: oc.proveedorNombre,
             articulos: itemsBackOrder,
-            total: itemsBackOrder.reduce((s, a) => s + a.subtotal, 0),
+            total: totalBackOrder,
             fechaEmision: Date.now(),
             fechaEntregaEstimada: null,
             estado: 'Borrador',
             notas: `Back Order de ${oc.folio}`,
             condicionesComerciales: { ...oc.condicionesComerciales },
-            anticipo_pagado: 0,
+            anticipo_pagado: anticipoBackOrder,
+            anticipoTransferidoDeOC: oc.id,
+            anticipoEsTransferido: anticipoBackOrder > 0,
+            saldoPendiente: Math.max(0, totalBackOrder - anticipoBackOrder),
             ocPadre: oc.id
         };
         boId = ocBO.id;
@@ -1999,7 +2612,8 @@ movimientosInventario = kardex;   // ✅ sincronizar global
 
     // ── 5. Actualizar estado OC ────────────────────────────────
     lista[idx].estado          = itemsBackOrder.length > 0 ? 'Recibida Parcial' : 'Recibida';
-    lista[idx].anticipo_pagado = anticipo + montoPagado;
+    lista[idx].anticipo_pagado = anticipoAplicadoRecepcion + montoPagado;
+    lista[idx].anticipoTransferidoBackOrder = anticipoDisponibleBackOrder;
     lista[idx].fechaRecepcion  = window.localISO(fechaRec);
     if (boId) lista[idx].backOrderId = boId;
     StorageService.set('ordenesCompra', lista);
@@ -2015,6 +2629,12 @@ movimientosInventario = kardex;   // ✅ sincronizar global
         fecha: window.localISO(fechaRec),
         metodo: esConsignacionOC ? 'consignacion' : (metodoPago !== 'no' && montoPagado >= totalRecibido ? metodoPago : 'credito'),
         saldoPendiente: Math.max(0, saldoRestante),
+        pagado: montoPagado,
+        totalPagado: montoPagado + anticipoAplicadoRecepcion,
+        montoPagado,
+        anticipo_pagado: anticipoAplicadoRecepcion,
+        anticipoAplicado: anticipoAplicadoRecepcion,
+        anticipoTransferidoBackOrder: anticipoDisponibleBackOrder,
         ordenCompraId: oc.id,
         esConsignacion: esConsignacionOC,
         pago: metodoPago !== 'no' ? { monto: montoPagado, metodo: metodoPago, cuenta: cuentaPagoId, etiqueta: cuentaPagoEtiqueta } : null
@@ -2028,14 +2648,14 @@ movimientosInventario = kardex;   // ✅ sincronizar global
 
     // Imprimir documento de recepción
     imprimirRecepcionCompra(oc, compraReg, itemsBackOrder, {
-        montoPagado, metodoPago, cuentaPagoEtiqueta, saldoRestante, notas, fechaStr
+        montoPagado, metodoPago, cuentaPagoEtiqueta, saldoRestante, notas, fechaStr, anticipoAplicado: anticipoAplicadoRecepcion
     });
 }
 
 function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     const cfg     = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
-    const { montoPagado, metodoPago, cuentaPagoEtiqueta, saldoRestante, notas, fechaStr } = pagoDatos;
+    const { montoPagado, metodoPago, cuentaPagoEtiqueta, saldoRestante, notas, fechaStr, anticipoAplicado = 0 } = pagoDatos;
     const rowsRecibidos = (compra.articulos || []).map(a => `
         <tr>
             <td style="padding:9px 12px;border-bottom:1px solid #e5e7eb;">${a.nombre || a.nombre}</td>
@@ -2054,7 +2674,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     // Calcular totales de la recepción (no de la OC)
     const totalRecibido = compra.total;
     // El saldo pendiente es lo recibido menos lo pagado en esta recepción
-    const saldoPendienteRecepcion = Math.max(0, totalRecibido - montoPagado);
+    const saldoPendienteRecepcion = Math.max(0, totalRecibido - montoPagado - anticipoAplicado);
     const w = window.open('', '_blank', 'width=780,height=960');
     w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
     <title>Recepción ${compra.folio}</title>
@@ -2138,10 +2758,14 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
         <div style="font-size:13px;font-weight:bold;margin-bottom:10px;color:${metodoPago !== 'no' ? '#15803d' : '#374151'};">
             💳 Estado del Pago
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
             <div>
                 <div style="font-size:11px;color:#6b7280;">Total Recibido</div>
                 <div style="font-size:16px;font-weight:bold;">${dinero(totalRecibido)}</div>
+            </div>
+            <div>
+                <div style="font-size:11px;color:#6b7280;">Anticipo aplicado</div>
+                <div style="font-size:16px;font-weight:bold;color:${anticipoAplicado > 0 ? '#2563eb' : '#9ca3af'};">${dinero(anticipoAplicado)}</div>
             </div>
             <div>
                 <div style="font-size:11px;color:#6b7280;">Pagado Hoy (${metodosLabel[metodoPago] || '-'})</div>
@@ -2601,7 +3225,7 @@ function abrirModalCompraDirectaMulti() {
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">📅 FECHA</label>
-            <input type="date" id="cdFecha" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0]}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <input type="date" id="cdFecha" value="${_comprasHoyInput()}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
           
           <div>
@@ -2881,9 +3505,7 @@ function guardarCompraDirectaFinal() {
             estatus: ingresoInmediato ? "Completado" : "Pendiente",
             color: art.color,
             ubicacion: art.ubicacion,
-            costoUnitario: (metodoPago === "consignacion" && totalCompra > 0)
-                ? Number(art.costo || 0) * (totalAPagarReal / totalCompra)
-                : Number(art.costo || 0),
+            costoUnitario: Number(art.costo || 0), // FIJADO: El costo original jamás se altera
             esConsignacion: metodoPago === "consignacion"
         });
     });
@@ -2899,7 +3521,11 @@ function guardarCompraDirectaFinal() {
         fechaISO: fechaStr,
         articulos: arts,
         metodo: metodoPago,
-        saldoPendiente: metodoPago !== 'contado' ? totalAPagarReal : 0
+        saldoPendiente: metodoPago !== 'contado' ? totalAPagarReal : 0,
+        pagado: metodoPago === 'contado' ? totalAPagarReal : 0,
+        totalPagado: metodoPago === 'contado' ? totalAPagarReal : 0,
+        pago: metodoPago === 'contado' ? { monto: totalAPagarReal, metodo: metodoPago, cuenta: cuentaOrigenId, etiqueta: cuentaOrigenNombre } : null,
+        saldoFavorAplicado: montoUsadoDelSaldo || 0
     };
     comprasList.push(nuevaCompra);
 
@@ -2920,8 +3546,23 @@ function guardarCompraDirectaFinal() {
     } 
     else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
         if (metodoPago === "consignacion") {
-            if (ingresoInmediato && totalAPagarReal > 0.01) {
-                const factorConsignacion = totalCompra > 0 ? (totalAPagarReal / totalCompra) : 1;
+            if (ingresoInmediato) { // Se remueve la restricción de totalAPagarReal para que siempre guarde la mercancía
+                
+                // AUDITORÍA: Si se usó un saldo a favor, lo mandamos al gestor de anticipos 
+                // en lugar de abaratar el costo del producto.
+                if (montoUsadoDelSaldo > 0) {
+                    _registrarAnticipoConsignacionGlobal({
+                        monto: montoUsadoDelSaldo,
+                        cuenta: 'Saldo a Favor',
+                        proveedor: prov.nombre,
+                        proveedorId: prov.id,
+                        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+                        nota: `Saldo a favor aplicado como anticipo inicial en CD-${idCompraUnico.toString().slice(-6)}`,
+                        referencia: `CONSIG-SALDO-${idCompraUnico}`,
+                        origen: 'compraDirecta'
+                    });
+                }
+
                 _agregarConsignacionesActivasDesdeArticulos({
                     compraId: idCompraUnico,
                     proveedor: prov.nombre,
@@ -2930,7 +3571,7 @@ function guardarCompraDirectaFinal() {
                     fecha: fechaFormatMX,
                     articulos: arts,
                     cantidadCampo: 'cantidad',
-                    factorCosto: factorConsignacion,
+                    factorCosto: 1, // FIJADO: La base de datos mantendrá siempre el 100% del costo original
                     origen: 'compraDirecta'
                 });
             }
@@ -3110,7 +3751,7 @@ function renderCuentasPorPagar() {
                                ordenesList.find(o => String(o.id) === String(c.compraId || c.id));
         const subtotalReal = parseFloat(c.total) || 0;
         let abonos = Array.isArray(c.abonos) ? [...c.abonos] : [];
-        if (compraOriginal && Array.isArray(compraOriginal.pagos)) {
+        if (compraOriginal && Array.isArray(compraOriginal.pagos) && !c.noRescatarPagosOC) {
             compraOriginal.pagos.forEach(p => {
                 if (!abonos.some(a => a.fecha === p.fecha && Math.abs((parseFloat(a.monto)||0)-(parseFloat(p.monto)||0)) < 0.01))
                     abonos.push(p);
@@ -3118,7 +3759,7 @@ function renderCuentasPorPagar() {
         }
         const totalAbonado = abonos.reduce((s, a) => s + (parseFloat(a.monto) || 0), 0);
         let anticipoExtra = 0;
-        if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01) {
+        if (compraOriginal && parseFloat(compraOriginal.anticipo_pagado) > 0.01 && !c.noRescatarPagosOC) {
             const ap = parseFloat(compraOriginal.anticipo_pagado);
             const pagosOC = Array.isArray(compraOriginal.pagos) ? compraOriginal.pagos : [];
             const pagosYaEnAbonos = pagosOC.length > 0 && pagosOC.every(p =>
@@ -3183,7 +3824,7 @@ function renderCuentasPorPagar() {
 
 window.abrirModalAbonoOC = function(idOC) {
     const ordenes = StorageService.get("ordenesCompra", []);
-    const fechaHoy = window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0];
+    const fechaHoy = _comprasHoyInput();
     const oc = ordenes.find(o => o.id === idOC);
     if (!oc) return;
 
@@ -3248,8 +3889,30 @@ window.confirmarAbonoOC = function(idOC) {
         etiqueta: cuentaNombre,
         concepto: `Abono a Orden de Compra ${ordenes[idx].folio}`,
         referencia: ordenes[idx].folio,
+        idOperacion: `ABONO-OC-${ordenes[idx].id}-${Date.now()}`,
         fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
     });
+
+    if (ordenes[idx].esConsignacion || ordenes[idx].condicionesComerciales?.metodoPago === 'consignacion') {
+        const folioOrigen = ordenes[idx].folio;
+        const folioKey = _consigFolioKeyFromParts(_consigProveedorKey({
+            proveedor: ordenes[idx].proveedorNombre,
+            proveedorId: ordenes[idx].proveedorId || null
+        }), folioOrigen);
+        _registrarAnticipoConsignacionGlobal({
+            monto,
+            cuentaId,
+            cuenta: cuentaNombre,
+            proveedor: ordenes[idx].proveedorNombre,
+            proveedorId: ordenes[idx].proveedorId || null,
+            fecha: fechaPagoFinal,
+            nota: `Abono registrado desde orden de compra ${folioOrigen}`,
+            referencia: `ABONO-OC-${ordenes[idx].id}-${fechaPagoFinal}-${monto}`,
+            origen: 'abonoOC',
+            folioKey,
+            folioOrigen
+        });
+    }
 
     // 2. Actualizar la OC
     ordenes[idx].pagos = ordenes[idx].pagos || [];
@@ -3517,64 +4180,6 @@ window.marcarRequisicionesResueltasMasivo = function() {
         console.log(`✅ Se limpiaron ${actualizados} requisiciones.`);
     }
 };
-// ============================================================
-// GESTOR DE CONSIGNACIONES (TIPO LIVERPOOL)
-// ============================================================
-window.abrirGestorConsignaciones = function() {
-    const todasConsignaciones = _getConsignacionesActivas();
-    const consignaciones = todasConsignaciones.filter(c => Number(c.cantidadPendiente || 0) > 0);
-    const totalImporte = todasConsignaciones.reduce((s, c) => s + _consigImporte(c), 0);
-    const totalPagos = todasConsignaciones.reduce((s, c) => s + _consigPagos(c), 0);
-    const totalSaldo = Math.max(0, totalImporte - totalPagos);
-    
-    let filas = consignaciones.map(c => `
-        <tr style="border-bottom:1px solid #e2e8f0;">
-            <td style="padding:10px;">${c.fecha}</td>
-            <td style="padding:10px; font-weight:bold; color:#1e40af;">${c.proveedor}</td>
-            <td style="padding:10px;">${c.producto}</td>
-            <td style="padding:10px; text-align:center;"><span style="background:#fef3c7; color:#d97706; padding:4px 8px; border-radius:4px; font-weight:bold;">${c.cantidadPendiente} pzas</span></td>
-            <td style="padding:10px; text-align:right;">${dinero(c.costoUnitario)}</td>
-            <td style="padding:10px; text-align:right;">
-                <strong>${dinero(_consigImporte(c))}</strong><br>
-                <small style="color:#16a34a;">Pagos: ${dinero(_consigPagos(c))}</small><br>
-                <small style="color:#dc2626;">Saldo: ${dinero(_consigSaldo(c))}</small>
-            </td>
-            <td style="padding:10px; text-align:center;">
-                <button onclick="abrirModalAbonoConsignacion('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 10px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; margin-right:6px;">Abonar</button>
-                <button onclick="abrirEstadoCuentaConsignaciones()" style="padding:8px 10px; background:#0f766e; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; margin-right:6px;">Estado</button>
-                <button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 12px; background:#059669; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Reportar Venta</button>
-            </td>
-        </tr>
-    `).join('');
-
-    if (consignaciones.length === 0) filas = `<tr><td colspan="6" style="padding:20px; text-align:center; color:#64748b;">No hay mercancía a consignación pendiente de vender.</td></tr>`;
-
-    const html = `
-    <div data-modal="gestor-consignaciones" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; justify-content:center; align-items:center;">
-        <div style="background:white; border-radius:12px; width:95%; max-width:900px; padding:25px; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 style="margin:0; color:#065f46;">📦 Gestor de Consignaciones</h2>
-                <button onclick="document.querySelector('[data-modal=gestor-consignaciones]').remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">✕</button>
-            </div>
-            <p style="color:#475569; font-size:14px; margin-bottom:15px;">Aquí se muestran los productos que tienes físicamente pero que no has pagado. Al reportar una venta, la deuda se transferirá a tus <b>Cuentas por Pagar</b>.</p>
-            <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                <thead style="background:#f1f5f9;">
-                    <tr>
-                        <th style="padding:10px; text-align:left;">Ingreso</th>
-                        <th style="padding:10px; text-align:left;">Proveedor</th>
-                        <th style="padding:10px; text-align:left;">Producto(s)</th>
-                        <th style="padding:10px; text-align:center;">Stock Pendiente</th>
-                        <th style="padding:10px; text-align:right;">Costo Unit.</th>
-                        <th style="padding:10px; text-align:right;">Cuenta</th>
-                        <th style="padding:10px; text-align:center;">Acción</th>
-                    </tr>
-                </thead>
-                <tbody>${filas}</tbody>
-            </table>
-        </div>
-    </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-};
 
 window.abrirModalAbonoConsignacion = function(idConsig) {
     const consignaciones = _getConsignacionesActivas();
@@ -3584,7 +4189,7 @@ window.abrirModalAbonoConsignacion = function(idConsig) {
     const saldo = _consigSaldo(c);
     if (saldo <= 0.01) return alert("Esta consignacion ya no tiene saldo pendiente.");
 
-    const fechaHoy = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    const fechaHoy = _comprasHoyInput();
     const selector = typeof _buildSelectorCuentas === 'function'
         ? _buildSelectorCuentas('abonoConsigCuenta', false)
         : '<select id="abonoConsigCuenta" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo</option></select>';
@@ -3672,59 +4277,110 @@ window.confirmarAbonoConsignacion = function(idConsig) {
     alert("Abono de consignacion registrado correctamente.");
 };
 
-window.abrirEstadoCuentaConsignaciones = function() {
-    const consignaciones = _getConsignacionesActivas();
-    const totalImporte = consignaciones.reduce((s, c) => s + _consigImporte(c), 0);
-    const totalPagos = consignaciones.reduce((s, c) => s + _consigPagos(c), 0);
-    const totalSaldo = Math.max(0, totalImporte - totalPagos);
+window.abrirModalAbonoConsignacion = function(idConsig) {
+    const resumen = _consigResumenGlobal();
+    let grupo = resumen.grupos.find(g => String(g.key) === String(idConsig));
+    if (!grupo) {
+        const cLegacy = resumen.consignaciones.find(x => String(x.id) === String(idConsig));
+        if (cLegacy) grupo = resumen.grupos.find(g => g.key === _consigProveedorKey(cLegacy));
+    }
+    if (!grupo) return alert("Proveedor de consignacion no encontrado.");
 
-    const filas = consignaciones.map(c => `
-        <tr>
-            <td style="padding:8px; border-bottom:1px solid #e5e7eb;">${c.fecha || '-'}</td>
-            <td style="padding:8px; border-bottom:1px solid #e5e7eb;"><strong>${c.proveedor || '-'}</strong><br><small>${c.producto || '-'}</small></td>
-            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:center;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)}</td>
-            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:right;">${dinero(_consigImporte(c))}</td>
-            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:right; color:#16a34a; font-weight:bold;">${dinero(_consigPagos(c))}</td>
-            <td style="padding:8px; border-bottom:1px solid #e5e7eb; text-align:right; color:#dc2626; font-weight:bold;">${dinero(_consigSaldo(c))}</td>
-        </tr>
-        ${_consigAbonos(c).map(a => `
-            <tr style="background:#f8fafc;">
-                <td></td>
-                <td colspan="2" style="padding:6px 8px; color:#475569;">Pago: ${a.fechaStr || a.fecha || '-'} ${a.cuenta ? `| ${a.cuenta}` : ''} ${a.nota ? `| ${a.nota}` : ''}</td>
-                <td></td>
-                <td style="padding:6px 8px; text-align:right; color:#16a34a;">${dinero(a.monto || 0)}</td>
-                <td></td>
-            </tr>`).join('')}
-    `).join('');
+    const saldo = grupo.saldoNeto;
+    if (saldo <= 0.01) return alert("Este proveedor ya no tiene saldo neto pendiente.");
+
+    const fechaHoy = _comprasHoyInput();
+    const selector = typeof _buildSelectorCuentas === 'function'
+        ? _buildSelectorCuentas('abonoConsigCuenta', false)
+        : '<select id="abonoConsigCuenta" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo</option></select>';
 
     const html = `
-    <div data-modal="estado-consignaciones" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10001; display:flex; justify-content:center; align-items:flex-start; padding:20px; overflow:auto;">
-        <div style="background:white; border-radius:12px; width:100%; max-width:980px; padding:24px;">
+    <div data-modal="abono-consignacion" style="position:fixed; inset:0; background:rgba(15,23,42,0.75); z-index:10000; display:flex; justify-content:center; align-items:center; padding:18px;">
+        <div style="background:white; border-radius:12px; width:100%; max-width:430px; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.25);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                <h2 style="margin:0; color:#0f766e;">Estado de cuenta - Consignaciones</h2>
-                <button onclick="document.querySelector('[data-modal=estado-consignaciones]')?.remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">x</button>
+                <h3 style="margin:0; color:#1e40af;">Anticipo global a proveedor</h3>
+                <button onclick="document.querySelector('[data-modal=abono-consignacion]')?.remove()" style="background:none; border:none; font-size:22px; cursor:pointer;">x</button>
             </div>
-            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px;">
-                <div style="background:#eff6ff; padding:12px; border-radius:8px;"><small>Importe</small><br><strong>${dinero(totalImporte)}</strong></div>
-                <div style="background:#f0fdf4; padding:12px; border-radius:8px;"><small>Pagos</small><br><strong>${dinero(totalPagos)}</strong></div>
-                <div style="background:#fff1f2; padding:12px; border-radius:8px;"><small>Saldo</small><br><strong>${dinero(totalSaldo)}</strong></div>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:14px;">
+                <strong>${_comprasEscHTML(grupo.proveedor || 'Proveedor')}</strong><br>
+                <span style="color:#475569;">${grupo.consignaciones.length} partida(s) en consignacion</span><br>
+                <small>Compra original: ${dinero(grupo.compraOriginal)} | Anticipos: ${dinero(grupo.anticiposTotal)}</small><br>
+                <strong style="color:#dc2626;">Saldo neto: ${dinero(saldo)}</strong>
             </div>
-            <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                <thead style="background:#f1f5f9;">
-                    <tr><th style="padding:8px;text-align:left;">Fecha</th><th style="padding:8px;text-align:left;">Proveedor / Producto</th><th style="padding:8px;">Pend./Total</th><th style="padding:8px;text-align:right;">Importe</th><th style="padding:8px;text-align:right;">Pagos</th><th style="padding:8px;text-align:right;">Saldo</th></tr>
-                </thead>
-                <tbody>${filas || '<tr><td colspan="6" style="padding:20px;text-align:center;color:#64748b;">Sin consignaciones.</td></tr>'}</tbody>
-            </table>
-            <div style="text-align:right; margin-top:18px;">
-                <button onclick="window.print()" style="padding:10px 16px; background:#0f766e; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Imprimir</button>
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin-bottom:5px;">Fecha</label>
+            <input id="abonoConsigFecha" type="date" value="${fechaHoy}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; margin-bottom:12px;">
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin-bottom:5px;">Monto</label>
+            <input id="abonoConsigMonto" type="number" min="0.01" max="${saldo}" step="0.01" placeholder="${saldo.toFixed(2)}" style="width:100%; padding:12px; border:2px solid #1e40af; border-radius:6px; box-sizing:border-box; font-size:17px; font-weight:bold; margin-bottom:12px;">
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin-bottom:5px;">Pagar desde</label>
+            ${selector}
+            <label style="display:block; font-size:12px; font-weight:bold; color:#475569; margin:12px 0 5px;">Nota</label>
+            <input id="abonoConsigNota" type="text" placeholder="Opcional" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            <div style="display:flex; gap:10px; margin-top:18px;">
+                <button onclick="confirmarAbonoConsignacion('${_comprasEscAttr(grupo.key)}')" style="flex:2; padding:12px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Registrar anticipo</button>
+                <button onclick="document.querySelector('[data-modal=abono-consignacion]')?.remove()" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
 };
 
+window.confirmarAbonoConsignacion = function(idConsig) {
+    const resumen = _consigResumenGlobal();
+    const grupo = resumen.grupos.find(g => String(g.key) === String(idConsig));
+    if (!grupo) return alert("Proveedor de consignacion no encontrado.");
+
+    const saldo = grupo.saldoNeto;
+    const monto = parseFloat(document.getElementById('abonoConsigMonto')?.value) || 0;
+    const fechaInput = document.getElementById('abonoConsigFecha')?.value;
+    const sel = document.getElementById('abonoConsigCuenta');
+    const nota = document.getElementById('abonoConsigNota')?.value.trim() || '';
+
+    if (!fechaInput) return alert("Selecciona la fecha del anticipo.");
+    if (monto <= 0 || monto > saldo + 0.01) return alert(`Monto invalido. Saldo disponible: ${dinero(saldo)}.`);
+    if (!sel || !sel.value) return alert("Selecciona la cuenta de pago.");
+
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+    const fecha = `${fechaInput}T12:00:00.000`;
+
+    if (!confirm(`Confirmas registrar un anticipo de ${dinero(monto)} a ${grupo.proveedor || 'proveedor'} por consignacion?`)) return;
+
+    if (typeof _egresarCuenta === 'function') {
+        const egresoOk = _egresarCuenta({
+            monto,
+            cuentaId,
+            etiqueta,
+            concepto: `Anticipo consignacion ${grupo.proveedor || ''}`.trim(),
+            referencia: `CONSIG-ANT-${Date.now()}`,
+            fecha
+        });
+        if (egresoOk === false) return;
+    }
+
+    const anticipos = _getAnticiposConsignacion();
+    anticipos.push({
+        id: Date.now() + Math.random(),
+        fecha,
+        fechaStr: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(fecha)) : fechaInput,
+        monto,
+        cuentaId,
+        cuenta: etiqueta,
+        nota,
+        proveedor: grupo.proveedor,
+        proveedorId: grupo.proveedorId || null,
+        proveedorKey: grupo.key,
+        aplicado: 0
+    });
+    StorageService.set("anticiposConsignacion", anticipos);
+
+    document.querySelector('[data-modal="abono-consignacion"]')?.remove();
+    document.querySelector('[data-modal="gestor-consignaciones"]')?.remove();
+    abrirGestorConsignaciones();
+    alert("Anticipo de consignacion registrado correctamente.");
+};
+
 window.marcarConsignacionVendida = function(idConsig) {
-    let consigArr = _getConsignacionesActivas();
+    let consigArr = StorageService.get("consignacionesActivas", []);
     const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
     if (idx === -1) return;
     const c = consigArr[idx];
@@ -3734,58 +4390,1008 @@ window.marcarConsignacionVendida = function(idConsig) {
         return alert("❌ Cantidad inválida.");
     }
 
-    const fechaPagoInput = prompt("📅 ¿En qué fecha tienes que liquidarle esto al proveedor? (Formato: YYYY-MM-DD)", window.obtenerHoyInputMX());
+    const fechaPagoInput = prompt("📅 ¿En qué fecha tienes que liquidarle esto al proveedor? (Formato: YYYY-MM-DD)", window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0]);
     if (!fechaPagoInput) return alert("❌ Operación cancelada. Debes fijar una fecha de pago.");
 
-    const montoDeuda = cantidadAVender * c.costoUnitario;
-    const abonosDisponibles = Math.max(0, _consigPagos(c) - Number(c.montoAbonosAplicados || 0));
-    const montoCubiertoConAbonos = Math.min(montoDeuda, abonosDisponibles);
-    const montoCxp = Math.max(0, montoDeuda - montoCubiertoConAbonos);
-    const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
+    const montoDeuda = cantidadAVender * Number(c.costoUnitario || 0);
     
-    // Generar la Cuenta por Pagar
-    let cxp = StorageService.get("cuentasPorPagar", []);
-    cxp.push({
+    const resumenGlobal = typeof _consigResumenGlobal === 'function' ? _consigResumenGlobal() : { grupos: [] };
+    const provKey = typeof _consigProveedorKey === 'function' ? _consigProveedorKey(c) : (c.proveedorKey || c.proveedor);
+    const resumenProveedor = resumenGlobal.grupos.find(g => g.key === provKey) || { anticiposTotal: 0, anticiposAplicados: 0 };
+    const anticiposDisponibles = Math.max(0, Number(resumenProveedor.anticiposTotal || 0) - Number(resumenProveedor.anticiposAplicados || 0));
+
+    let montoCubiertoConAnticipos = 0;
+
+    if (anticiposDisponibles > 0.01) {
+        const respuestaAbono = prompt(
+            `💰 TIENES UN ANTICIPO GLOBAL DISPONIBLE DE: ${dinero(anticiposDisponibles)}\n\n` +
+            `💸 Deuda que generará esta venta: ${dinero(montoDeuda)}\n\n` +
+            `¿Cuánto de tu anticipo deseas aplicar para cubrir esta venta?\n` +
+            `(Deja en 0 si prefieres guardar el anticipo para después)`, 
+            "0"
+        );
+        
+        if (respuestaAbono === null) return; 
+        
+        montoCubiertoConAnticipos = parseFloat(respuestaAbono) || 0;
+        if (montoCubiertoConAnticipos < 0) montoCubiertoConAnticipos = 0;
+        
+        const maximoPermitido = Math.min(montoDeuda, anticiposDisponibles);
+        if (montoCubiertoConAnticipos > maximoPermitido) {
+            montoCubiertoConAnticipos = maximoPermitido;
+        }
+    }
+
+    const montoCxp = Math.max(0, montoDeuda - montoCubiertoConAnticipos);
+    const folioVentaOrigen = (prompt("Si corresponde a una venta del POS, captura el folio (opcional):", "") || "").trim();
+    const folioReporteConsignacion = `RCON-${Date.now().toString().slice(-6)}`;
+    const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
+    const fechaActual = new Date();
+
+    // 🔍 INDEXACIÓN DE AUDITORÍA: Rastrear el ID real del proveedor en el catálogo maestro
+    const listaProveedores = StorageService.get("proveedores", []) || [];
+    const provEncontrado = listaProveedores.find(p => String(p.nombre).toLowerCase().trim() === String(c.proveedor).toLowerCase().trim());
+    const realProveedorId = provEncontrado ? provEncontrado.id : (c.proveedorId || c.proveedor);
+
+    let cxp = StorageService.get("cuentasPorPagar", []) || [];
+    
+    const nuevaCxp = {
         id: Date.now(),
-        compraId: c.compraId,
-        consignacionId: c.consignacionId || c.id,
+        compraId: c.compraId || Date.now(),
+        consignacionId: c.id,
+        folioOrigen: folioReporteConsignacion,
+        folioVentaAsociada: folioVentaOrigen,
         origenConsignacion: true,
         proveedor: c.proveedor,
-        proveedorId: c.proveedorId || null,
-        producto: `[Vendido de Consignación] - ${c.producto} (${cantidadAVender} pzas)`,
-        articulos: [{ productoId: c.productoId || null, nombre: c.producto, cantidad: cantidadAVender, costo: c.costoUnitario, subtotal: montoDeuda, color: c.color || 'General', ubicacion: c.ubicacion || 'General' }],
+        proveedorId: realProveedorId, // Forzar ID maestro para romper el bloqueo de la vista CXP
+        producto: `[Vendido de Consignacion] - ${c.producto} (${cantidadAVender} pzas)`,
+        articulos: [{
+            productoId: c.productoId || null,
+            nombre: c.producto,
+            cantidad: cantidadAVender,
+            costo: Number(c.costoUnitario || 0),
+            subtotal: montoDeuda,
+            color: c.color || 'General',
+            ubicacion: c.ubicacion || 'General'
+        }],
         total: montoDeuda,
+        monto: montoDeuda,
+        subtotal: montoDeuda,
+        saldo: montoCxp,
         saldoPendiente: montoCxp,
-        abonos: montoCubiertoConAbonos > 0 ? [{ fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(), monto: montoCubiertoConAbonos, cuenta: 'Anticipo consignacion', nota: 'Aplicado desde abonos previos a consignacion' }] : [],
-        metodo: "credito_proveedor",
-        formaPagoTexto: "Liquidación de Consignación",
-        fecha: window.formatearFechaCortaMX(new Date()),
-        vencimiento: window.formatearFechaCortaMX(fechaVencimientoConsignacion),
-        vencimientoIso: window.localISO(fechaVencimientoConsignacion),
+        tipo: "credito",               // Flag obligatorio para el renderizador general
+        origen: "compras",             // Flag obligatorio para inyección en Runway
+        estatus: "Pendiente",
+        estado: "Pendiente",
+        liquidado: false,
+        pagado: false,
+        abonos: montoCubiertoConAnticipos > 0.01 ? [{
+            id: Date.now(),
+            fecha: fechaActual.toISOString(),
+            monto: montoCubiertoConAnticipos,
+            cuenta: 'Anticipo consignacion',
+            nota: `Aplicado de saldo a favor global (Folio: ${folioReporteConsignacion})`
+        }] : [],
+        fecha: typeof window.formatearFechaCortaMX === 'function' ? window.formatearFechaCortaMX(fechaActual) : fechaActual.toISOString().split('T')[0],
+        fechaIso: fechaActual.toISOString(),
+        vencimiento: typeof window.formatearFechaCortaMX === 'function' ? window.formatearFechaCortaMX(fechaVencimientoConsignacion) : fechaPagoInput,
+        vencimientoIso: fechaVencimientoConsignacion.toISOString(),
         esConsignacion: false 
-    });
-    if (montoCxp <= 0.01) cxp.pop();
+    };
+
+    cxp.push(nuevaCxp);
     StorageService.set("cuentasPorPagar", cxp);
 
-    // Descontar inventario pendiente
     consigArr[idx].cantidadPendiente -= cantidadAVender;
     consigArr[idx].cantidadVendida = Number(consigArr[idx].cantidadVendida || 0) + cantidadAVender;
     consigArr[idx].montoTransferido = Number(consigArr[idx].montoTransferido || 0) + montoCxp;
     consigArr[idx].montoVendidoReportado = Number(consigArr[idx].montoVendidoReportado || 0) + montoDeuda;
-    consigArr[idx].montoAbonosAplicados = Number(consigArr[idx].montoAbonosAplicados || 0) + montoCubiertoConAbonos;
-    StorageService.set("consignacionesActivas", consigArr);
+    consigArr[idx].montoAbonosAplicados = Number(consigArr[idx].montoAbonosAplicados || 0) + montoCubiertoConAnticipos;
+    
+    if (!consigArr[idx].ventasReportadas) consigArr[idx].ventasReportadas = [];
+    consigArr[idx].ventasReportadas.push({
+        fecha: fechaActual.toISOString(),
+        cantidad: cantidadAVender,
+        folioReporte: folioReporteConsignacion,
+        folioVentaPOS: folioVentaOrigen,
+        montoTotal: montoDeuda,
+        anticipoUsado: montoCubiertoConAnticipos,
+        montoEnviadoCxP: montoCxp,
+        fechaPagoPrometida: fechaPagoInput
+    });
 
-    document.querySelector('[data-modal="gestor-consignaciones"]').remove();
-    alert(montoCxp > 0.01
-        ? `Listo. Se aplicaron ${dinero(montoCubiertoConAbonos)} de abonos previos y ${dinero(montoCxp)} quedo en Cuentas por Pagar con vencimiento el ${fechaPagoInput}.`
-        : `Listo. La venta quedo cubierta con abonos previos por ${dinero(montoCubiertoConAbonos)}; no se genero CxP.`);
-    abrirGestorConsignaciones();
-    return;
-    alert(`✅ ¡Listo! La deuda por ${dinero(montoDeuda)} ha sido transferida a Cuentas por Pagar con vencimiento el ${fechaPagoInput}.`);
-    abrirGestorConsignaciones(); // Refresca la ventana
+    StorageService.set("consignacionesActivas", consigArr);
+    const modal = document.querySelector('[data-modal="gestor-consignaciones"]');
+    if(modal) modal.remove();
+    
+    alert(`✅ Operación Exitosa.\n\nDeuda registrada por ${dinero(montoCxp)} con vencimiento el ${fechaPagoInput}.`);
+    if(typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
 };
 
-// Exponer la función para que el menú HTML la encuentre
+function _consigUiState() {
+    window._consigUiState = window._consigUiState || { proveedorKey: '', folioKey: '' };
+    return window._consigUiState;
+}
+
+function _consigResumenKPIs({ compraOriginal = 0, pagadoPorVentas = 0, anticiposTotal = 0, anticiposAplicados = 0, saldoNeto = 0 }) {
+    return `
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;margin-bottom:14px;">
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Compra original</small><br><strong style="font-size:20px;color:#1d4ed8;">${dinero(compraOriginal)}</strong></div>
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Pagado por ventas</small><br><strong style="font-size:20px;color:#15803d;">${dinero(pagadoPorVentas)}</strong></div>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipos</small><br><strong style="font-size:20px;color:#4338ca;">${dinero(Number(anticiposTotal || 0) + Number(anticiposAplicados || 0))}</strong></div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Saldo neto</small><br><strong style="font-size:20px;color:#be123c;">${dinero(saldoNeto)}</strong></div>
+        </div>`;
+}
+
+function _consigProductoRows(folio) {
+    return folio.consignaciones.map(c => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px;">${_comprasEscHTML(c.fecha || '-')}</td>
+            <td style="padding:10px;"><strong>${_comprasEscHTML(c.producto || '-')}</strong><br><small style="color:#64748b;">${_comprasEscHTML(c.color || 'General')} | ${_comprasEscHTML(c.ubicacion || 'General')}</small></td>
+            <td style="padding:10px;text-align:center;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)}</td>
+            <td style="padding:10px;text-align:right;">${dinero(c.costoUnitario)}</td>
+            <td style="padding:10px;text-align:right;"><strong>${dinero(_consigImporte(c))}</strong><br><small style="color:#64748b;">Pendiente: ${dinero(Number(c.cantidadPendiente || 0) * Number(c.costoUnitario || 0))}</small></td>
+            <td style="padding:10px;text-align:center;"><button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 12px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;">Reportar venta</button></td>
+        </tr>
+    `).join('');
+}
+
+window.seleccionarProveedorConsignacion = function(proveedorKey) {
+    const s = _consigUiState();
+    s.proveedorKey = proveedorKey || '';
+    s.folioKey = '';
+    abrirGestorConsignaciones();
+};
+
+window.seleccionarFolioConsignacion = function(folioKey) {
+    const s = _consigUiState();
+    s.folioKey = folioKey || '';
+    abrirGestorConsignaciones();
+};
+
+window.abrirGestorConsignaciones = function() {
+    const vistaGestor = document.getElementById('consignaciones');
+    const contGestor = document.getElementById('contenidoGestorConsignaciones');
+    if (contGestor && vistaGestor && (vistaGestor.classList.contains('oculto') || vistaGestor.style.display === 'none') && typeof window.navA === 'function') {
+        window.navA('consignaciones');
+        return;
+    }
+
+    const resumen = _consigResumenGlobal();
+    const state = _consigUiState();
+    let proveedor = resumen.grupos.find(g => g.key === state.proveedorKey) || null;
+    if (!proveedor) {
+        state.proveedorKey = '';
+        state.folioKey = '';
+    }
+    let folio = proveedor ? proveedor.folios.find(f => f.key === state.folioKey) : null;
+    if (!folio) state.folioKey = '';
+
+    const totalImporte = resumen.grupos.reduce((s, g) => s + g.compraOriginal, 0);
+    const totalPagadoVentas = resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0);
+    const totalAnticipos = resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0);
+    const totalSaldo = resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0);
+
+    const proveedoresHtml = resumen.grupos.map(g => {
+        const activo = g.key === state.proveedorKey;
+        
+        // 🚀 NUEVO: Calculamos si hay dinero libre y creamos el badge
+        const anticiposDisponibles = Math.max(0, g.anticiposTotal - g.anticiposAplicados);
+        const badgeAnticipo = anticiposDisponibles > 0.01 
+            ? `<div style="margin-top:8px; display:inline-block; background:#dcfce7; color:#166534; border:1px solid #22c55e; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:bold;">💰 A favor disponible: ${dinero(anticiposDisponibles)}</div>` 
+            : '';
+
+        return `
+        <div style="border:1px solid ${activo ? '#2563eb' : '#dbeafe'};background:${activo ? '#eff6ff' : '#ffffff'};border-radius:8px;padding:12px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+                <div>
+                    <strong style="color:#0f172a;">${_comprasEscHTML(g.proveedor || 'Proveedor')}</strong><br>
+                    <small style="color:#64748b;">${g.folios.length} folio(s) | ${g.anticipos.length} anticipo(s)</small>
+                    <br>${badgeAnticipo}
+                </div>
+                <button onclick="seleccionarProveedorConsignacion('${_comprasEscAttr(g.key)}')" style="padding:7px 10px;background:${activo ? '#1d4ed8' : '#475569'};color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">${activo ? 'Activo' : 'Ver'}</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px;font-size:12px;">
+                <div><span style="color:#64748b;">Original</span><br><b>${dinero(g.compraOriginal)}</b></div>
+                <div><span style="color:#64748b;">Saldo neto</span><br><b style="color:#dc2626;">${dinero(g.saldoNeto)}</b></div>
+            </div>
+        </div>`;
+    }).join('');
+
+    const foliosHtml = proveedor ? proveedor.folios.map(f => {
+        const activo = f.key === state.folioKey;
+        const productosPendientes = f.consignaciones.reduce((s, c) => s + Number(c.cantidadPendiente || 0), 0);
+        return `
+        <tr style="border-bottom:1px solid #e2e8f0;background:${activo ? '#eff6ff' : 'white'};">
+            <td style="padding:10px;"><strong>${_comprasEscHTML(f.folioOrigen)}</strong><br><small style="color:#64748b;">${f.consignaciones.length} producto(s)</small></td>
+            <td style="padding:10px;text-align:center;">${productosPendientes}</td>
+            <td style="padding:10px;text-align:right;">${dinero(f.compraOriginal)}</td>
+            <td style="padding:10px;text-align:right;color:#2563eb;font-weight:bold;">${dinero(Number(f.anticiposTotal || 0) + Number(f.anticiposAplicados || 0))}</td>
+            <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(f.saldoNeto)}</td>
+            <td style="padding:10px;text-align:center;white-space:nowrap;">
+                <button onclick="seleccionarFolioConsignacion('${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#1e40af;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Detalle</button>
+                <button onclick="abrirModalAbonoConsignacion('folio:${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#4338ca;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Abonar</button>
+                <button onclick="abrirEstadoCuentaConsignaciones('folio','${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#0f766e;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Estado</button>
+            </td>
+        </tr>`;
+    }).join('') : '';
+
+    let panelDerecho = `
+        <div style="padding:34px;text-align:center;color:#64748b;">
+            <strong style="display:block;color:#334155;margin-bottom:6px;">Selecciona un proveedor</strong>
+            La mercancia en consignacion se mostrara solo despues de elegir proveedor y folio.
+        </div>`;
+
+    if (proveedor && !folio) {
+        panelDerecho = `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px;border-bottom:1px solid #e2e8f0;">
+                <div>
+                    <div style="font-size:12px;font-weight:900;color:#64748b;text-transform:uppercase;">Folios de ${_comprasEscHTML(proveedor.proveedor)}</div>
+                    <div style="font-size:12px;color:#94a3b8;margin-top:2px;">Selecciona un folio para ver sus productos.</div>
+                </div>
+                <button onclick="abrirEstadoCuentaConsignaciones('proveedor','${_comprasEscAttr(proveedor.key)}')" style="padding:9px 12px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Estado proveedor</button>
+            </div>
+            <div style="overflow:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:760px;">
+                    <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:10px;text-align:left;">Folio</th><th style="padding:10px;text-align:center;">Pzas pend.</th><th style="padding:10px;text-align:right;">Original</th><th style="padding:10px;text-align:right;">Anticipos</th><th style="padding:10px;text-align:right;">Saldo</th><th style="padding:10px;text-align:center;">Accion</th></tr></thead>
+                    <tbody>${foliosHtml || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#64748b;">Este proveedor no tiene folios de consignacion.</td></tr>'}</tbody>
+                </table>
+            </div>`;
+    }
+
+    if (proveedor && folio) {
+        panelDerecho = `
+            <div style="padding:14px;border-bottom:1px solid #e2e8f0;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:12px;font-weight:900;color:#64748b;text-transform:uppercase;">Folio ${_comprasEscHTML(folio.folioOrigen)}</div>
+                        <div style="font-size:13px;color:#334155;margin-top:3px;">${_comprasEscHTML(proveedor.proveedor)}</div>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button onclick="seleccionarFolioConsignacion('')" style="padding:9px 12px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cambiar folio</button>
+                        <button onclick="abrirModalAbonoConsignacion('folio:${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#4338ca;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Abonar folio</button>
+                        <button onclick="abrirEstadoCuentaConsignaciones('folio','${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Estado folio</button>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">${_consigResumenKPIs(folio)}</div>
+            </div>
+            <div style="overflow:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:760px;">
+                    <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:10px;text-align:left;">Ingreso</th><th style="padding:10px;text-align:left;">Producto</th><th style="padding:10px;text-align:center;">Pend./Total</th><th style="padding:10px;text-align:right;">Costo</th><th style="padding:10px;text-align:right;">Importe</th><th style="padding:10px;text-align:center;">Accion</th></tr></thead>
+                    <tbody>${_consigProductoRows(folio) || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#64748b;">Sin productos en este folio.</td></tr>'}</tbody>
+                </table>
+            </div>`;
+    }
+
+    const html = `
+        <div class="vista-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px;">
+            <div>
+                <h2 style="margin:0;color:#0f172a;">Gestor de Consignaciones</h2>
+                <p style="margin:4px 0 0;color:#64748b;">Flujo por proveedor, folio y producto. Los anticipos a folio se reflejan en su propio estado de cuenta.</p>
+            </div>
+            <button onclick="abrirGestorConsignaciones()" style="padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">Actualizar</button>
+        </div>
+        ${_consigResumenKPIs({ compraOriginal: totalImporte, pagadoPorVentas: totalPagadoVentas, anticiposTotal: totalAnticipos, saldoNeto: totalSaldo })}
+        <div style="display:grid;grid-template-columns:minmax(260px,360px) minmax(0,1fr);gap:14px;align-items:start;">
+            <section style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:14px;">
+                <div style="font-size:12px;font-weight:900;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Proveedores</div>
+                <div style="display:grid;gap:10px;">${proveedoresHtml || '<div style="padding:14px;color:#64748b;background:#f8fafc;border-radius:8px;">Sin proveedores con consignaciones.</div>'}</div>
+            </section>
+            <section style="background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">${panelDerecho}</section>
+        </div>
+        <div id="panelEstadoConsignaciones" style="margin-top:14px;"></div>`;
+
+    if (contGestor) contGestor.innerHTML = html;
+    else document.body.insertAdjacentHTML('beforeend', `<div data-modal="gestor-consignaciones" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:9999;overflow:auto;padding:18px;"><div style="background:#f8fafc;border-radius:12px;max-width:1180px;margin:auto;padding:20px;">${html}</div></div>`);
+};
+
+window.abrirModalAbonoConsignacion = function(scopeKey) {
+    const resumen = _consigResumenGlobal();
+    const esFolio = String(scopeKey || '').startsWith('folio:');
+    const cleanKey = esFolio ? String(scopeKey).slice(6) : String(scopeKey || '');
+    const folio = esFolio ? resumen.folios.find(f => f.key === cleanKey) : null;
+    const grupo = folio ? resumen.grupos.find(g => g.key === folio.proveedorKey) : resumen.grupos.find(g => g.key === cleanKey);
+    if (!grupo) return alert("Proveedor de consignacion no encontrado.");
+
+    const saldo = folio ? folio.saldoNeto : grupo.saldoNeto;
+    if (saldo <= 0.01) return alert("No hay saldo neto pendiente para este alcance.");
+    const fechaHoy = _comprasHoyInput();
+    const selector = typeof _buildSelectorCuentas === 'function'
+        ? _buildSelectorCuentas('abonoConsigCuenta', false)
+        : '<select id="abonoConsigCuenta" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo</option></select>';
+
+    const titulo = folio ? `Anticipo a folio ${_comprasEscHTML(folio.folioOrigen)}` : 'Anticipo global a proveedor';
+    const resumenTexto = folio
+        ? `<span style="color:#475569;">${_comprasEscHTML(grupo.proveedor)}<br>Folio: <b>${_comprasEscHTML(folio.folioOrigen)}</b></span><br><small>Compra original: ${dinero(folio.compraOriginal)} | Anticipos aplicados: ${dinero(Number(folio.anticiposTotal || 0) + Number(folio.anticiposAplicados || 0))}</small>`
+        : `<span style="color:#475569;">${grupo.folios.length} folio(s) en consignacion</span><br><small>Compra original: ${dinero(grupo.compraOriginal)} | Anticipos: ${dinero(grupo.anticiposTotal)}</small>`;
+
+    const html = `
+    <div data-modal="abono-consignacion" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:10000;display:flex;justify-content:center;align-items:center;padding:18px;">
+        <div style="background:white;border-radius:12px;width:100%;max-width:450px;padding:24px;box-shadow:0 20px 40px rgba(0,0,0,0.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;color:#1e40af;">${titulo}</h3>
+                <button onclick="document.querySelector('[data-modal=abono-consignacion]')?.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;">x</button>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;">
+                <strong>${_comprasEscHTML(grupo.proveedor || 'Proveedor')}</strong><br>
+                ${resumenTexto}<br>
+                <strong style="color:#dc2626;">Saldo neto: ${dinero(saldo)}</strong>
+            </div>
+            <input id="abonoConsigScope" type="hidden" value="${_comprasEscAttr(scopeKey)}">
+            <label style="display:block;font-size:12px;font-weight:bold;color:#475569;margin-bottom:5px;">Fecha</label>
+            <input id="abonoConsigFecha" type="date" value="${fechaHoy}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
+            <label style="display:block;font-size:12px;font-weight:bold;color:#475569;margin-bottom:5px;">Monto</label>
+            <input id="abonoConsigMonto" type="number" min="0.01" max="${saldo}" step="0.01" placeholder="${saldo.toFixed(2)}" style="width:100%;padding:12px;border:2px solid #1e40af;border-radius:6px;box-sizing:border-box;font-size:17px;font-weight:bold;margin-bottom:12px;">
+            <label style="display:block;font-size:12px;font-weight:bold;color:#475569;margin-bottom:5px;">Pagar desde</label>
+            ${selector}
+            <label style="display:block;font-size:12px;font-weight:bold;color:#475569;margin:12px 0 5px;">Nota</label>
+            <input id="abonoConsigNota" type="text" placeholder="Opcional" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+            <div style="display:flex;gap:10px;margin-top:18px;">
+                <button onclick="confirmarAbonoConsignacion()" style="flex:2;padding:12px;background:#1e40af;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Registrar anticipo</button>
+                <button onclick="document.querySelector('[data-modal=abono-consignacion]')?.remove()" style="flex:1;padding:12px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.confirmarAbonoConsignacion = function(scopeKeyParam) {
+    const resumen = _consigResumenGlobal();
+    const scopeKey = scopeKeyParam || document.getElementById('abonoConsigScope')?.value || '';
+    const esFolio = String(scopeKey).startsWith('folio:');
+    const cleanKey = esFolio ? String(scopeKey).slice(6) : String(scopeKey);
+    const folio = esFolio ? resumen.folios.find(f => f.key === cleanKey) : null;
+    const grupo = folio ? resumen.grupos.find(g => g.key === folio.proveedorKey) : resumen.grupos.find(g => g.key === cleanKey);
+    if (!grupo) return alert("Proveedor de consignacion no encontrado.");
+
+    const saldo = folio ? folio.saldoNeto : grupo.saldoNeto;
+    const monto = parseFloat(document.getElementById('abonoConsigMonto')?.value) || 0;
+    const fechaInput = document.getElementById('abonoConsigFecha')?.value;
+    const sel = document.getElementById('abonoConsigCuenta');
+    const nota = document.getElementById('abonoConsigNota')?.value.trim() || '';
+
+    if (!fechaInput) return alert("Selecciona la fecha del anticipo.");
+    if (monto <= 0 || monto > saldo + 0.01) return alert(`Monto invalido. Saldo disponible: ${dinero(saldo)}.`);
+    if (!sel || !sel.value) return alert("Selecciona la cuenta de pago.");
+
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+    const fecha = `${fechaInput}T12:00:00.000`;
+    const ref = `${folio ? 'CONSIG-FOLIO-ANT' : 'CONSIG-ANT'}-${Date.now()}`;
+    if (!confirm(`Confirmas registrar un anticipo de ${dinero(monto)} a ${grupo.proveedor || 'proveedor'}${folio ? `, folio ${folio.folioOrigen}` : ''}?`)) return;
+
+    if (typeof _egresarCuenta === 'function') {
+        const egresoOk = _egresarCuenta({ monto, cuentaId, etiqueta, concepto: `${folio ? 'Anticipo folio consignacion' : 'Anticipo consignacion'} ${grupo.proveedor || ''}`.trim(), referencia: ref, idOperacion: ref, fecha });
+        if (egresoOk === false) return;
+    }
+
+    const anticipos = _getAnticiposConsignacion();
+    anticipos.push({
+        id: Date.now() + Math.random(),
+        fecha,
+        fechaStr: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(fecha)) : fechaInput,
+        monto,
+        cuentaId,
+        cuenta: etiqueta,
+        nota,
+        proveedor: grupo.proveedor,
+        proveedorId: grupo.proveedorId || null,
+        proveedorKey: grupo.key,
+        folioKey: folio ? folio.key : null,
+        folioOrigen: folio ? folio.folioOrigen : null,
+        aplicado: 0,
+        referencia: ref
+    });
+    StorageService.set("anticiposConsignacion", anticipos);
+
+    document.querySelector('[data-modal="abono-consignacion"]')?.remove();
+    document.querySelector('[data-modal="gestor-consignaciones"]')?.remove();
+    abrirGestorConsignaciones();
+    alert("Anticipo de consignacion registrado correctamente.");
+};
+
+window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
+    const resumen = _consigResumenGlobal();
+    const state = _consigUiState();
+    if (scope === 'actual') {
+        if (state.folioKey) { scope = 'folio'; key = state.folioKey; }
+        else if (state.proveedorKey) { scope = 'proveedor'; key = state.proveedorKey; }
+        else { scope = 'global'; }
+    }
+    const folio = scope === 'folio' ? resumen.folios.find(f => f.key === key) : null;
+    const grupo = scope === 'proveedor' ? resumen.grupos.find(g => g.key === key) : (folio ? resumen.grupos.find(g => g.key === folio.proveedorKey) : null);
+
+    const base = folio || grupo || {
+        folios: resumen.folios,
+        proveedor: 'Todos los Proveedores',
+        folioOrigen: 'Global'
+    };
+
+    const titulo = folio
+        ? `ESTADO DE CUENTA — CONSIGNACIÓN FOLIO: ${String(folio.folioOrigen).toUpperCase()}`
+        : grupo
+            ? `ESTADO DE CUENTA — PROVEEDOR: ${String(grupo.proveedor).toUpperCase()}`
+            : 'ESTADO DE CUENTA GLOBAL DE CONSIGNACIONES';
+
+    const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
+    const empresaNombre = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
+    const empresaTel = cfgEmpresa.telefono || cfgEmpresa.celular || '';
+    const empresaDir = cfgEmpresa.direccion || '';
+
+    const foliosEstado = folio ? [folio] : (grupo ? grupo.folios : resumen.folios);
+    
+    // 🧮 AUDITORÍA DIRECTA INTERNA: Recalcular métricas en tiempo real de forma limpia
+    // 🧮 CÁLCULO ESTRICTO Y AISLADO DE KPIs
+    let kpiOriginal = 0;
+    let kpiVendido = 0;
+    let kpiAnticipos = 0;
+    let kpiPagadoVentas = 0;
+
+    foliosEstado.forEach(f => {
+        // 1. Compra y Ventas exactas
+        f.consignaciones.forEach(c => {
+            kpiOriginal += (Number(c.cantidadTotal || 0) * Number(c.costoUnitario || 0));
+            kpiVendido += (Number(c.cantidadVendida || 0) * Number(c.costoUnitario || 0));
+        });
+        
+        // 2. Anticipos Globales Resguardados
+        f.anticipos.forEach(a => {
+            kpiAnticipos += Number(a.monto || 0);
+        });
+
+        // 3. Pagos a ventas (Filtrando ESTRICTAMENTE solo deudas de esta consignación)
+        f.cuentasCxp.forEach(cx => {
+            // Solo procesamos la CxP si su ID de consignación coincide con los artículos de este folio
+            const perteneceAFolio = f.consignaciones.some(c => c.id === cx.consignacionId);
+            if (perteneceAFolio) {
+                const abonos = Array.isArray(cx.abonos) ? cx.abonos : [];
+                abonos.forEach(ab => {
+                    // Evitar contar el anticipo como un pago en efectivo
+                    if (ab.cuenta !== 'Anticipo' && ab.cuenta !== 'Anticipo consignacion') {
+                        kpiPagadoVentas += Number(ab.monto || 0);
+                    }
+                });
+            }
+        });
+    });
+
+    let kpiSaldoNeto = Math.max(0, kpiOriginal - kpiPagadoVentas - kpiAnticipos);
+
+    const filas = foliosEstado.map(f => {
+        const itemsHtml = f.consignaciones.map(c => `
+            <tr style="border-bottom: 1px dashed #e2e8f0; font-size:12px; background:#ffffff;">
+                <td style="padding:8px 12px 8px 28px; color:#475569; max-width:280px; word-wrap:break-word;">
+                    <span style="color:#0f766e; font-weight:bold;">📦</span> ${_comprasEscHTML(c.producto)}
+                    <br><small style="color:#94a3b8; font-weight:500;">🎨 Variedad: ${_comprasEscHTML(c.color || 'General')} | 📍 Bodega: ${_comprasEscHTML(c.ubicacion || 'General')}</small>
+                </td>
+                <td style="padding:8px 12px; text-align:right; color:#475569; font-weight:500;">${dinero(c.costoUnitario)}</td>
+                <td style="padding:8px 12px; text-align:center; color:#334155; font-weight:600;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)} u</td>
+                <td style="padding:8px 12px; text-align:right; color:#0f172a; font-weight:600;">${dinero(_consigImporte(c))}</td>
+                <td colspan="2" style="background:#f8fafc; border-bottom: 1px dashed #e2e8f0;"></td>
+            </tr>
+        `).join('');
+
+        const anticiposHtml = f.anticipos.map(a => `
+            <tr style="background:#f0fdf4; border-bottom:1px solid #e2e8f0; font-size:12px;">
+                <td style="padding:6px 12px 6px 28px; color:#15803d; font-weight:600;">
+                    <span style="color:#16a34a;">💰</span> Anticipo registrado (${_comprasEscHTML(a.fechaStr || a.fecha || '-').substring(0,10)})
+                </td>
+                <td colspan="3" style="padding:6px 12px; color:#64748b; font-style:italic; max-width:250px; word-wrap:break-word;">
+                    Resguardo en Bolsa General
+                </td>
+                <td style="padding:6px 12px; text-align:right; color:#15803d; font-weight:bold;">${dinero(a.monto || 0)}</td>
+                <td style="background:#f0fdf4; border-bottom:1px solid #e2e8f0;"></td>
+            </tr>
+        `).join('');
+
+        // 📋 FILA SANEADA: Mapeo exacto de 6 celdas simétricas sin desbordamiento ni saltos
+        const cxpHtml = f.cuentasCxp.map(cxp => {
+            // Filtrar abonos reales descartando aplicaciones cruzadas de saldos generales
+            const pagosEfectivosVenta = _comprasAsegurarArray(cxp.abonos || [])
+                .filter(a => a.cuenta !== 'Anticipo' && a.cuenta !== 'Anticipo consignacion')
+                .reduce((s, a) => s + Number(a.monto || 0), 0);
+                
+            // Consistencia matemática absoluta forzada por renglón
+            // Consistencia matemática absoluta forzada por renglón
+            const saldoFijoRenglon = Math.max(0, Number(cxp.total || 0) - pagosEfectivosVenta);
+            
+            // Ya no hay botón, solo la etiqueta visual
+            const controlPagoHtml = saldoFijoRenglon > 0.01 
+                ? `<br><span style="color:#b91c1c; font-weight:bold; font-size:11px;">⚠️ Pendiente de Pago</span>`
+                : '<br><span style="color:#166534; font-weight:bold; font-size:11px;">✔️ Liquidada al 100%</span>';
+            return `
+            <tr style="background:#fff5f5; border-bottom:1px solid #fecdd3; font-size:12px;">
+                <td style="padding:6px 12px 6px 28px; color:#b91c1c;">
+                    <span style="color:#ef4444;">📑</span> <b>Reporte de Venta</b> (${_comprasEscHTML(cxp.fecha || '-').substring(0,10)})
+                    <br><small style="color:#475569;">${_comprasEscHTML(cxp.producto)}</small>
+                </td>
+                <td style="padding:6px 12px; text-align:right; color:#475569;">${dinero(cxp.articulos?.[0]?.costo || 0)}</td>
+                <td style="padding:6px 12px; text-align:center; color:#334155;">${cxp.articulos?.[0]?.cantidad || 1} u</td>
+                <td style="padding:6px 12px; text-align:right; color:#0f172a; font-weight:bold;">${dinero(cxp.total || 0)}</td>
+                <td style="padding:6px 12px; text-align:right; color:#16a34a;">${dinero(pagosEfectivosVenta)}</td>
+                <td style="padding:6px 12px; text-align:right; color:#b91c1c; font-weight:bold;">
+                    ${dinero(saldoFijoRenglon)}
+                    ${controlPagoHtml}
+                </td>
+            </tr>`;
+        }).join('');
+
+        return `
+            <tr style="background:#f1f5f9; font-weight:bold; border-top:2px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">
+                <td style="padding:10px 12px; color:#1e293b;">
+                    <span style="color:#475569;">📄</span> Folio: ${_comprasEscHTML(f.folioOrigen)}
+                    <br><small style="color:#64748b; font-weight:normal;">Proveedor: ${_comprasEscHTML(f.proveedor)}</small>
+                </td>
+                <td style="padding:10px 12px; text-align:right; color:#0f172a;">${dinero(f.compraOriginal)}</td>
+                <td style="padding:10px 12px; text-align:right; color:#d97706;">${dinero(f.vendidoReportado)}</td>
+                <td style="padding:10px 12px; text-align:right; color:#16a34a;">${dinero(f.pagadoPorVentas)}</td>
+                <td style="padding:10px 12px; text-align:right; color:#2563eb;">${dinero(Number(f.anticiposTotal || 0) + Number(f.anticiposAplicados || 0))}</td>
+                <td style="padding:10px 12px; text-align:right; color:#be123c;">${dinero(f.saldoNeto)}</td>
+            </tr>
+            ${itemsHtml}
+            ${anticiposHtml}
+            ${cxpHtml}
+        `;
+    }).join('');
+
+    const safeDomId = `panel-consignacion-print-${scope}-${String(key).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+    const html = `
+        <div id="${safeDomId}" style="background:#ffffff; padding:24px; color:#0f172a; font-family:Arial, sans-serif; box-sizing:border-box;">
+            <div style="border-bottom:3px solid #0f766e; padding-bottom:14px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">
+                <div style="flex:1;">
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                        <span style="font-size:28px;">🏛️</span>
+                        <div>
+                            <div style="font-size:18px; font-weight:900; color:#0f766e; letter-spacing:-0.5px;">${empresaNombre.toUpperCase()}</div>
+                            ${empresaDir ? `<div style="font-size:11px; color:#64748b; margin-top:1px;">${empresaDir}</div>` : ''}
+                            ${empresaTel ? `<div style="font-size:11px; color:#64748b;">Tel/Cel: ${empresaTel}</div>` : ''}
+                        </div>
+                    </div>
+                    <h2 style="margin:4px 0 0; color:#0f766e; font-size:20px; font-weight:800; letter-spacing:-0.5px;">${titulo}</h2>
+                    <p style="margin:2px 0 0; color:#64748b; font-size:12px;">Filtro de Alcance: <strong style="color:#334155;">${scope.toUpperCase()}</strong></p>
+                </div>
+                <div style="text-align:right; min-width:200px;">
+                    <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}')" style="background:#0f766e; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">🖨️ Imprimir Hoja</button>
+                    <button onclick="if(document.getElementById('panelEstadoConsignaciones')){document.getElementById('panelEstadoConsignaciones').innerHTML=''}else{document.querySelector('[data-modal=estado-consignaciones]')?.remove()}" style="background:#f1f5f9; border:1px solid #cbd5e1; color:#475569; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px;">✕ Cerrar</button>
+                    <p style="margin:0; color:#64748b; font-size:12px;">Fecha Emisión: <strong style="color:#334155;">${new Date().toLocaleDateString('es-MX')}</strong></p>
+                    <p style="margin:2px 0 0; color:#64748b; font-size:11px;">Hora: <strong>${new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})}</strong></p>
+                </div>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:18px; font-size:11px; color:#475569; line-height:1.4;">
+                📌 <strong>Regla de Auditoría Consolidada:</strong> Balance Pendiente Exigible = Compra Recibida − Pagos Liquidados − Bolsa de Anticipos Libres.
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:22px;">
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:12px; border-radius:8px;">
+                    <small style="color:#1e40af; font-weight:bold; font-size:11px; text-transform:uppercase;">Compra Original</small><br>
+                    <strong style="font-size:18px; color:#1d4ed8;">${dinero(kpiOriginal)}</strong>
+                </div>
+                <div style="background:#fef3c7; border:1px solid #fde68a; padding:12px; border-radius:8px;">
+                    <small style="color:#92400e; font-weight:bold; font-size:11px; text-transform:uppercase;">Vendido / Reportado</small><br>
+                    <strong style="font-size:18px; color:#b45309;">${dinero(kpiVendido)}</strong>
+                </div>
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
+                    <small style="color:#166534; font-weight:bold; font-size:11px; text-transform:uppercase;">Pagado por Ventas</small><br>
+                    <strong style="font-size:18px; color:#15803d;">${dinero(kpiPagadoVentas)}</strong>
+                </div>
+                <div style="background:#f5f3ff; border:1px solid #ddd6fe; padding:12px; border-radius:8px;">
+                    <small style="color:#5b21b6; font-weight:bold; font-size:11px; text-transform:uppercase;">Bolsa Anticipos</small><br>
+                    <strong style="font-size:18px; color:#6d28d9;">${dinero(kpiAnticipos)}</strong>
+                </div>
+                <div style="background:#fff1f2; border:1px solid #fecdd3; padding:12px; border-radius:8px;">
+                    <small style="color:#991b1b; font-weight:bold; font-size:11px; text-transform:uppercase;">Saldo Neto Real</small><br>
+                    <strong style="font-size:18px; color:#be123c;">${dinero(kpiSaldoNeto)}</strong>
+                </div>
+            </div>
+
+            <div style="width:100%; overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:24px; box-sizing:border-box;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:800px; table-layout:fixed;">
+                    <colgroup>
+                        <col style="width: 35%;">
+                        <col style="width: 13%;">
+                        <col style="width: 14%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 12%;">
+                    </colgroup>
+                    <thead style="background:#f8fafc; color:#475569; border-bottom:2px solid #e2e8f0;">
+                        <tr>
+                            <th style="padding:12px 10px; text-align:left; font-weight:700; text-transform:uppercase; font-size:11px;">Origen / Producto / Variante</th>
+                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Costo base</th>
+                            <th style="padding:12px 10px; text-align:center; font-weight:700; text-transform:uppercase; font-size:11px;">Stock Activo</th>
+                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Importe Total</th>
+                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Anticipos</th>
+                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Saldo Neto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filas || '<tr><td colspan="6" style="padding:32px; text-align:center; color:#94a3b8; background:#ffffff;">No hay registros.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:60px; margin-top:40px; padding:0 20px;">
+                <div style="text-align:center;">
+                    <div style="border-top:1px solid #94a3b8; padding-top:8px; font-size:12px; font-weight:700; color:#334155;">Elaboró / Administración Interna</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="border-top:1px solid #94a3b8; padding-top:8px; font-size:12px; font-weight:700; color:#334155;">Validó / Proveedor Acreedor</div>
+                </div>
+            </div>
+        </div>`;
+
+    const panel = document.getElementById('panelEstadoConsignaciones');
+    if (panel) { panel.innerHTML = html; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    else { document.body.insertAdjacentHTML('beforeend', `<div data-modal="estado-consignaciones" style="position:fixed; inset:0; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); z-index:10001; display:flex; justify-content:center; align-items:flex-start; padding:20px; overflow-y:auto;"><div style="max-width:1120px; width:100%; background:#ffffff; border-radius:12px; overflow:hidden;">${html}</div></div>`); }
+};
+
+window.imprimirEstadoCuentaClean = function(divId) {
+    const contenedor = document.getElementById(divId);
+    if (!contenedor) return alert("No se encontró el documento a imprimir.");
+
+    // 1. Clonamos el contenedor para manipularlo sin destruir la pantalla que estás viendo
+    const clon = contenedor.cloneNode(true);
+    
+    // 2. Eliminamos todos los botones para que no salgan horribles en el papel
+    const botones = clon.querySelectorAll('button');
+    botones.forEach(b => b.remove());
+
+    // 3. Extraemos el HTML ya limpio
+    const htmlLimpio = clon.innerHTML;
+
+    // 4. Creamos una "ventana" invisible (iframe) para no abrir pop-ups molestos
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Estado de Cuenta - Consignaciones</title>
+            <style>
+                /* Forzar formato de papel Carta, quitando márgenes del navegador */
+                @page { 
+                    margin: 10mm 15mm; 
+                    size: letter portrait; 
+                }
+                body { 
+                    font-family: Arial, sans-serif; 
+                    /* Esta línea mágica fuerza a las impresoras a pintar los fondos de color */
+                    -webkit-print-color-adjust: exact !important; 
+                    print-color-adjust: exact !important; 
+                    margin: 0;
+                    padding: 0;
+                    background: #ffffff;
+                }
+                * {
+                    box-sizing: border-box;
+                }
+                /* Obligar a la tabla a no salirse del ancho de la hoja */
+                table { 
+                    width: 100% !important; 
+                    table-layout: fixed; 
+                    border-collapse: collapse;
+                }
+                td, th {
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                }
+            </style>
+        </head>
+        <body>
+            <div style="width: 100%; max-width: 800px; margin: 0 auto;">
+                ${htmlLimpio}
+            </div>
+            <script>
+                // Le damos medio segundo a la impresora para que cargue los colores antes de lanzar el diálogo
+                setTimeout(() => {
+                    window.print();
+                }, 500);
+            </script>
+        </body>
+        </html>
+    `);
+    doc.close();
+
+    // Limpiamos la basura invisible después de unos segundos
+    setTimeout(() => {
+        document.body.removeChild(iframe);
+    }, 5000);
+};
+
+window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
+    const resumen = _consigResumenGlobal();
+    const state = _consigUiState();
+    
+    if (scope === 'actual') {
+        if (state.folioKey) { scope = 'folio'; key = state.folioKey; }
+        else if (state.proveedorKey) { scope = 'proveedor'; key = state.proveedorKey; }
+        else { scope = 'global'; }
+    }
+    
+    const folio = scope === 'folio' ? resumen.folios.find(f => f.key === key) : null;
+    const grupo = scope === 'proveedor' ? resumen.grupos.find(g => g.key === key) : (folio ? resumen.grupos.find(g => g.key === folio.proveedorKey) : null);
+
+    const base = folio || grupo || {
+        compraOriginal: resumen.grupos.reduce((s, g) => s + g.compraOriginal, 0),
+        pagadoPorVentas: resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0),
+        anticiposTotal: resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0),
+        anticiposAplicados: 0,
+        saldoNeto: resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0),
+        folios: resumen.folios,
+        anticipos: resumen.anticipos,
+        cuentasCxp: resumen.cuentasCxp,
+        consignaciones: resumen.consignaciones,
+        proveedor: 'Todos los Proveedores'
+    };
+
+    const proveedorNombre = folio ? folio.proveedor : (grupo ? grupo.proveedor : 'Estado General');
+    const foliosEstado = folio ? [folio] : (grupo ? grupo.folios : resumen.folios);
+    
+    const filasHtml = foliosEstado.map(f => {
+        const itemsHtml = f.consignaciones.map(c => {
+            const cantTotal = Number(c.cantidadTotal || 0);
+            const cantPendiente = Number(c.cantidadPendiente || 0);
+            const cantVendida = Math.max(0, cantTotal - cantPendiente);
+
+            // Rastrear la fecha prometida desde las ventas reportadas o desde la CxP ligada
+            let infoVentaHtml = '';
+            if (cantVendida > 0) {
+                const ventas = _comprasAsegurarArray(c.ventasReportadas || []);
+                if (ventas.length > 0) {
+                    infoVentaHtml = ventas.map(v => {
+                        let dateStr = v.fechaPagoPrometida || '';
+                        if (dateStr && window.formatearFechaCortaMX) {
+                            try { dateStr = window.formatearFechaCortaMX(new Date(dateStr + "T12:00:00")); } catch(e) {}
+                        }
+                        return `<br><span style="color: #b45309; font-size: 11px; font-weight: bold;">🗓️ Liquidación pactada: ${dateStr || v.fechaPagoPrometida}</span>`;
+                    }).join('');
+                } else {
+                    const cxpAsoc = _comprasAsegurarArray(f.cuentasCxp || []).find(cx => cx.consignacionId === c.id || cx.compraId === c.compraId);
+                    if (cxpAsoc && cxpAsoc.vencimiento) {
+                        infoVentaHtml = `<br><span style="color: #b45309; font-size: 11px; font-weight: bold;">🗓️ Liquidación pactada: ${cxpAsoc.vencimiento}</span>`;
+                    }
+                }
+            }
+
+            const estadoStockHtml = cantVendida > 0 
+                ? `<b style="color: #b45309; font-size: 12px;">✔️ ${cantVendida} Vendida(s)</b>${infoVentaHtml}<br><span style="color: #64748b; font-size: 11px;">${cantPendiente} en piso</span>`
+                : `<b style="color: #0f766e; font-size: 12px;">${cantPendiente} Disponible(s)</b>`;
+
+            return `
+            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px;">
+                <td style="padding: 10px; text-align: left; color: #334155;">
+                    <b>${_comprasEscHTML(c.producto)}</b>
+                    ${c.color ? `<br><span style="color:#64748b; font-size:11px;">Variante: ${_comprasEscHTML(c.color)}</span>` : ''}
+                </td>
+                <td style="padding: 10px; text-align: right; color: #334155;">${dinero(c.costoUnitario)}</td>
+                <td style="padding: 10px; text-align: center; line-height: 1.3;">
+                    ${estadoStockHtml}
+                </td>
+                <td style="padding: 10px; text-align: right; color: #334155; font-weight: bold;">${dinero(_consigImporte(c))}</td>
+                <td style="padding: 10px; text-align: right; color: #0f172a; font-weight: bold;">${dinero(_consigImporte(c))}</td>
+            </tr>`;
+        }).join('');
+
+        const anticiposHtml = f.anticipos.map(a => `
+            <tr style="background-color: #f0fdf4; color: #15803d; font-size: 12px; font-weight: bold;">
+                <td colspan="3" style="padding: 10px; text-align: right;">
+                    Anticipo registrado (${_comprasEscHTML(a.fechaStr || a.fecha || '-').substring(0,10)})
+                </td>
+                <td style="padding: 10px; text-align: right;">-${dinero(a.monto || 0)}</td>
+                <td style="padding: 10px; text-align: right; color: #16a34a;">Abonado</td>
+            </tr>
+        `).join('');
+
+        return `
+            <tr style="background: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1;">
+                <td colspan="5" style="padding: 10px; color: #1e293b; font-size: 12px;">📄 Identificador de Relación: ${_comprasEscHTML(f.folioOrigen)}</td>
+            </tr>
+            ${itemsHtml}
+            ${anticiposHtml}
+        `;
+    }).join('');
+
+    const baseKpi = folio ? base : { ...base, anticiposAplicados: 0 };
+    const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
+    const empresaNombre = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
+
+    const htmlDocumento = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>Estado de Cuenta Comercial</title>
+        <style>
+            @page { size: letter portrait; margin: 15mm; }
+            body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .tabla-estructura { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+            .tabla-estructura td { vertical-align: top; border: none; }
+            .kpi-box { padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #e2e8f0; }
+            .tabla-datos { width: 100%; border-collapse: collapse; margin-bottom: 30px; margin-top: 10px; }
+            .tabla-datos th { background: #f1f5f9; padding: 10px; border-bottom: 2px solid #cbd5e1; text-transform: uppercase; font-size: 11px; color: #475569; font-weight: bold; }
+            .tabla-datos td { padding: 10px; }
+            .linea-firma { border-top: 1px solid #94a3b8; margin-top: 60px; padding-top: 6px; font-weight: bold; color: #334155; font-size: 13px; }
+        </style>
+    </head>
+    <body>
+
+        <table class="tabla-estructura">
+            <tr>
+                <td style="width: 70px;">
+                    <img src="img/Logo.svg" alt="Logo" style="width: 60px; height: auto;">
+                </td>
+                <td>
+                    <div style="font-size: 19px; font-weight: bold; color: #0f766e; letter-spacing: -0.5px;">${empresaNombre.toUpperCase()}</div>
+                    <div style="font-size: 11px; color: #475569; margin-top: 2px; line-height: 1.3;">
+                        Tlaxcala, México<br>
+                        Contactos directos: 241 108 1657 | 749 106 0035
+                    </div>
+                </td>
+                <td style="text-align: right; width: 45%;">
+                    <div style="font-size: 14px; font-weight: bold; color: #1e293b; text-transform: uppercase; letter-spacing: 0.5px;">Estado de Cuenta Comercial</div>
+                    <div style="font-size: 11px; color: #475569; margin-top: 4px; line-height: 1.4;">
+                        <b>Proveedor:</b> ${_comprasEscHTML(proveedorNombre)}<br>
+                        <b>Fecha Emisión:</b> ${new Date().toLocaleDateString('es-MX')}<br>
+                        <b>Hora:</b> ${new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})}
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <table class="tabla-estructura" style="margin-bottom: 20px;">
+            <tr>
+                <td style="width: 25%; padding-right: 5px;">
+                    <div class="kpi-box" style="background: #eff6ff; color: #1d4ed8;">
+                        <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Valor Recibido</span><br>
+                        <strong style="font-size: 15px;">${dinero(baseKpi.compraOriginal)}</strong>
+                    </div>
+                </td>
+                <td style="width: 25%; padding-left: 5px; padding-right: 5px;">
+                    <div class="kpi-box" style="background: #fef3c7; color: #b45309;">
+                        <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Baja por Venta</span><br>
+                        <strong style="font-size: 15px;">${dinero(baseKpi.vendidoReportado || 0)}</strong>
+                    </div>
+                </td>
+                <td style="width: 25%; padding-left: 5px; padding-right: 5px;">
+                    <div class="kpi-box" style="background: #f5f3ff; color: #6d28d9;">
+                        <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Anticipos Entregados</span><br>
+                        <strong style="font-size: 15px;">${dinero(Number(baseKpi.anticiposTotal || 0) + Number(baseKpi.anticiposAplicados || 0))}</strong>
+                    </div>
+                </td>
+                <td style="width: 25%; padding-left: 5px;">
+                    <div class="kpi-box" style="background: #fff1f2; color: #be123c;">
+                        <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Balance Pendiente</span><br>
+                        <strong style="font-size: 15px;">${dinero(baseKpi.saldoNeto)}</strong>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <table class="tabla-datos">
+            <thead>
+                <tr>
+                    <th style="text-align: left; width: 40%;">Descripción del Artículo</th>
+                    <th style="text-align: right; width: 15%;">Precio Base</th>
+                    <th style="text-align: center; width: 15%;">Consumo Stock</th>
+                    <th style="text-align: right; width: 15%;">Subtotal</th>
+                    <th style="text-align: right; width: 15%;">Monto Neto</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${filasHtml}
+            </tbody>
+        </table>
+
+        <table class="tabla-estructura" style="margin-top: 60px;">
+            <tr>
+                <td style="width: 45%; text-align: center;">
+                    <div class="linea-firma">${empresaNombre}</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Representante Comercial</div>
+                </td>
+                <td style="width: 10%;"></td>
+                <td style="width: 45%; text-align: center;">
+                    <div class="linea-firma">Firma de Conformidad</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Acreedor / Proveedor</div>
+                </td>
+            </tr>
+        </table>
+
+        <script>
+            window.onload = function() {
+                window.print();
+                setTimeout(function() { window.close(); }, 1000);
+            }
+        </script>
+    </body>
+    </html>
+    `;
+
+    const ventanaNueva = window.open('', '_blank');
+    ventanaNueva.document.open();
+    ventanaNueva.document.write(htmlDocumento);
+    ventanaNueva.document.close();
+};
+
+window.pagarLiquidacionConsignacion = function(cxpId) {
+    let cxps = StorageService.get("cuentasPorPagar", []) || [];
+    const idx = cxps.findIndex(c => String(c.id) === String(cxpId));
+    if (idx === -1) return alert("No se localizó el registro de la liquidación.");
+    
+    const cxpItem = cxps[idx];
+    const saldoPendiente = Number(cxpItem.saldoPendiente ?? cxpItem.saldo ?? 0);
+    
+    if (saldoPendiente <= 0) return alert("Esta liquidación ya se encuentra totalmente liquidada.");
+    
+    const montoAPagar = parseFloat(prompt(`💸 SALDO EXIGIBLE POR ESTA VENTA: ${dinero(saldoPendiente)}\n\n¿Cuánto vas a pagarle al proveedor en este momento?`, saldoPendiente));
+    if (isNaN(montoAPagar) || montoAPagar <= 0 || montoAPagar > saldoPendiente) {
+        return alert("❌ Monto inválido o excede el saldo pendiente.");
+    }
+    
+    const cuentaOrigen = prompt("🏦 ¿De qué cuenta bancaria o caja saldrá el dinero?", "EFECTIVO");
+    if (!cuentaOrigen) return alert("❌ Operación cancelada. Se requiere la cuenta de origen para contabilidad.");
+    
+    // 1. Inyectar egreso real en movimientos de caja para el Cash Flow del sistema
+    let movimientos = StorageService.get("movimientosCaja", []) || [];
+    movimientos.push({
+        id: Date.now(),
+        folio: cxpItem.folioOrigen,
+        fecha: typeof window.obtenerHoyInputMX === 'function' ? window.obtenerHoyInputMX() : new Date().toISOString().slice(0, 10),
+        tipo: "egreso",
+        monto: montoAPagar,
+        concepto: `[Pago Consignación] - ${cxpItem.producto}`,
+        referencia: cxpItem.folioOrigen,
+        cuenta: cuentaOrigen.toUpperCase().trim()
+    });
+    StorageService.set("movimientosCaja", movimientos);
+    
+    // 2. Actualizar el saldo de la deuda e insertar el abono histórico
+    if (!cxpItem.abonos) cxpItem.abonos = [];
+    cxpItem.abonos.push({
+        id: Date.now(),
+        fecha: new Date().toISOString(),
+        monto: montoAPagar,
+        cuenta: cuentaOrigen.toUpperCase().trim(),
+        nota: "Liquidación parcial/total de mercancía vendida"
+    });
+    
+    cxpItem.saldoPendiente = Math.max(0, saldoPendiente - montoAPagar);
+    cxpItem.saldo = cxpItem.saldoPendiente;
+    
+    if (cxpItem.saldoPendiente <= 0.01) {
+        cxpItem.estatus = "Liquidado";
+        cxpItem.estado = "Liquidado";
+        cxpItem.liquidado = true;
+        cxpItem.pagado = true;
+    }
+    
+    StorageService.set("cuentasPorPagar", cxps);
+    
+    // 3. Sincronizar el descuento del histórico en el inventario activo
+    let consigArr = StorageService.get("consignacionesActivas", []) || [];
+    const cIdx = consigArr.findIndex(x => String(x.id) === String(cxpItem.consignacionId));
+    if (cIdx !== -1) {
+        consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - montoAPagar);
+        StorageService.set("consignacionesActivas", consigArr);
+    }
+    
+    alert(`✅ Pago aplicado con éxito por ${dinero(montoAPagar)}. Salida de efectivo registrada.`);
+    
+    // Refrescar las vistas abiertas de inmediato
+    if (typeof abrirEstadoCuentaConsignaciones === 'function') abrirEstadoCuentaConsignaciones();
+    if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+};
+
 window.renderRequisiciones = renderRequisiciones;
 window.renderProveedores = renderProveedores;
 window.guardarProveedor = guardarProveedor;

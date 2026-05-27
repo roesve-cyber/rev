@@ -1,11 +1,17 @@
 // ===== DASHBOARD PRINCIPAL =====
 
+function _dashboardCuentaCancelada(cuenta) {
+    return String(cuenta?.estado || cuenta?.estatus || '').toLowerCase().includes('cancel');
+}
+
 function renderDashboard() {
     const contenedor = document.getElementById("dashboardContenido");
     if (!contenedor) return;
 
-    const ventasRegistradas = StorageService.get("ventasRegistradas", []);
-    const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+    const ventasRegistradas = StorageService.get("ventasRegistradas", [])
+        .filter(v => !String(v.estado || v.estatus || '').toLowerCase().includes('cancel'));
+    const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", [])
+        .filter(c => !_dashboardCuentaCancelada(c));
     const pagaresSistema = StorageService.get("pagaresSistema", []);
     const movimientosCaja = StorageService.get("movimientosCaja", []);
 
@@ -50,8 +56,12 @@ function renderDashboard() {
     // KPI: Saldo CxC pendiente
     const cxcPendientes = cuentasPorCobrar.filter(c => c.estado !== "Saldado");
     const saldoCxC = cxcPendientes.reduce((s, c) => {
+        if (typeof window._calcularEstadoCuenta === 'function') {
+            const estado = window._calcularEstadoCuenta(c.folio);
+            if (estado) return s + Number(estado.saldoTotal || 0);
+        }
         const pagaresF = pagaresSistema.filter(p => p.folio === c.folio && (p.estado === "Pendiente" || p.estado === "Parcial" || p.estado === "Vencido"));
-        return s + pagaresF.reduce((a, p) => a + (p.monto || 0), 0);
+        return s + pagaresF.reduce((a, p) => a + Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)), 0);
     }, 0);
 
     // KPI: Saldo en caja/bancos
@@ -67,7 +77,7 @@ function renderDashboard() {
         return fv === hoyStr;
     });
     const cantVencHoy = pagaresVencidosHoy.length;
-    const montoVencHoy = pagaresVencidosHoy.reduce((s, p) => s + (p.monto || 0), 0);
+    const montoVencHoy = pagaresVencidosHoy.reduce((s, p) => s + Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)), 0);
 
     // Cobranza próxima: pagarés en los próximos 7 días
     const en7dias = new Date(hoy);
@@ -99,7 +109,7 @@ function renderDashboard() {
                 <td style="padding:8px 10px;">${cliente}</td>
                 <td style="padding:8px 10px; color:#1d4ed8; font-weight:bold;">${p.folio || '—'}</td>
                 <td style="padding:8px 10px;">${p.fechaVencimiento ? window.formatearFechaCortaMX(p.fechaVencimiento) : '—'}</td>
-                <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(p.monto || 0)}</td>
+                <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)))}</td>
                 <td style="padding:8px 10px; text-align:center; font-weight:bold; color:${colorDias};">${diasRestantes} día(s)</td>
             </tr>`;
         }).join('');
@@ -214,6 +224,8 @@ function verificarAlertasPagares() {
 
     const vencidos = pagaresSistema.filter(p => {
         if (p.estado === "Pagado" || p.estado === "Cancelado") return false;
+        const cuenta = cuentasPorCobrar.find(c => c.folio === p.folio);
+        if (cuenta && _dashboardCuentaCancelada(cuenta)) return false;
         return new Date(p.fechaVencimiento) < hoy;
     });
 

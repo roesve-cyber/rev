@@ -17,6 +17,7 @@ function renderProyeccionFlujo() {
     cajas.forEach(c => {
         saldosLiquidez[String(c.id || "efectivo")] = 0;
     });
+    const cajaDefaultId = cajas[0]?.id || "efectivo";
 
     cuentasDebito.forEach(t => {
         const id = String(t.banco || t.id || "");
@@ -27,7 +28,7 @@ function renderProyeccionFlujo() {
         const esIngreso = String(m.tipo || '').toLowerCase() === "ingreso";
         const monto = parseFloat(m.monto) || 0;
         const cuentaMov = String(m.cuenta || m.cuentaId || '');
-        const cuenta = (cuentaMov === "efectivo" || cuentaMov === "caja") ? "efectivo" : cuentaMov;
+        const cuenta = (cuentaMov === "efectivo" || cuentaMov === "caja" || !cuentaMov) ? cajaDefaultId : cuentaMov;
 
         if (saldosLiquidez[cuenta] !== undefined) {
             saldosLiquidez[cuenta] += esIngreso ? monto : -monto;

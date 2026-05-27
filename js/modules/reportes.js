@@ -5,6 +5,17 @@
 
 const fmt = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v || 0);
 
+function _rvEsc(valor) {
+    if (typeof window._esc === "function") return window._esc(valor);
+    return String(valor ?? "").replace(/[&<>"']/g, ch => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+    }[ch]));
+}
+
 // --- Helpers compartidos ---
 function _kpiCard(titulo, valor, color, icono) {
     return `<div style="background:white; padding:18px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); border-left:4px solid ${color};">
@@ -22,9 +33,59 @@ function _tablaHTML(headers, filas) {
     return `<table style="width:100%; border-collapse:collapse;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
 }
 
+function _repParseDate(valor) {
+    if (!valor) return new Date(0);
+    if (valor instanceof Date) return isNaN(valor.getTime()) ? new Date(0) : valor;
+    if (typeof valor === "number") return new Date(valor);
+    const raw = String(valor).trim();
+    if (!raw) return new Date(0);
+    if (window.parseFechaMX) {
+        try {
+            const d = window.parseFechaMX(raw);
+            if (d instanceof Date && !isNaN(d.getTime())) return d;
+        } catch (e) {}
+    }
+    const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12);
+    const mx = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+    if (mx) return new Date(Number(mx[3]), Number(mx[2]) - 1, Number(mx[1]), 12);
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? new Date(0) : d;
+}
+
+function _repInputDate(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function _repFechaTexto(d, fallback = "") {
+    if (!(d instanceof Date) || isNaN(d.getTime()) || d.getFullYear() < 2000) return fallback || "-";
+    return window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString("es-MX");
+}
+
+function _repBarraLista(items, total, color = "#2563eb") {
+    if (!items.length) return `<div style="padding:18px;text-align:center;color:#94a3b8;">Sin datos suficientes.</div>`;
+    return items.map((it, idx) => {
+        const pct = total > 0 ? Math.max(4, (it.valor / total) * 100) : 0;
+        return `<div style="display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="font-weight:900;color:#94a3b8;">${idx + 1}</div>
+            <div>
+                <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#0f172a;font-weight:800;">
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_rvEsc(it.nombre)}</span>
+                    <span>${it.extra || ""}</span>
+                </div>
+                <div style="height:7px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-top:5px;">
+                    <div style="width:${pct}%;height:100%;background:${color};border-radius:999px;"></div>
+                </div>
+            </div>
+            <div style="font-weight:900;color:${color};font-size:13px;">${fmt(it.valor)}</div>
+        </div>`;
+    }).join("");
+}
+
 // ─── 1. REPORTE DE VENTAS ────────────────────────────────────────────
 function _rvFecha(v) {
-    return v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaIso || "";
+    return v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaIso || v.args?.[7] || "";
 }
 
 function _rvDate(v) {
@@ -52,7 +113,10 @@ function _rvMetodo(v) {
 }
 
 function _rvArticulos(v) {
-    return v.articulos || v.datosVenta?.articulos || [];
+    const articulos = v.articulos || v.datosVenta?.articulos || [];
+    if (Array.isArray(articulos)) return articulos;
+    if (articulos && Array.isArray(articulos.data)) return articulos.data;
+    return [];
 }
 
 function _rvTotalMercancia(v) {
@@ -71,12 +135,36 @@ function _rvEnganche(v) {
 
 function _rvSaldo(v) {
     const metodo = _rvMetodo(v);
-    if (metodo === "credito") return Number(v.saldoAFinanciar || v.saldoActual || v.datosVenta?.saldoPendiente || v.args?.[3] || 0);
-    if (metodo === "apartado") return Number(v.saldoAFinanciar || v.saldoPendiente || v.datosVenta?.saldoPendiente || v.args?.[3] || 0);
+    const folio = v.folio || v.datosVenta?.folio || v.args?.[5] || "";
+    if (metodo === "credito") {
+        if (typeof window._calcularEstadoCuenta === "function" && folio) {
+            const estado = window._calcularEstadoCuenta(folio);
+            if (estado) return Number(estado.saldoTotal || 0);
+        }
+        return Number(v.saldoAFinanciar || v.saldoActual || v.datosVenta?.saldoPendiente || v.args?.[3] || 0);
+    }
+    if (metodo === "apartado") {
+        const ap = StorageService.get("apartados", []).find(a => String(a.folio || "") === String(folio));
+        return Number(ap?.saldoPendiente ?? v.saldoAFinanciar ?? v.saldoPendiente ?? v.datosVenta?.saldoPendiente ?? v.args?.[3] ?? 0);
+    }
     return 0;
 }
 
+function _rvUnidades(v) {
+    return _rvArticulos(v).reduce((s, a) => s + (Number(a.cantidad || a.cant || 1) || 1), 0);
+}
+
+function _rvCostoEstimado(v) {
+    return _rvArticulos(v).reduce((s, a) => {
+        const cantidad = Number(a.cantidad || a.cant || 1) || 1;
+        const costo = Number(a.costoUnitario || a.costo || a.precioCompra || a.costoPromedio || 0) || 0;
+        return s + (cantidad * costo);
+    }, 0);
+}
+
 function _rvVentaNormalizada(v, origen = "registrada", index = null) {
+    const totalMercancia = _rvTotalMercancia(v);
+    const costoEstimado = _rvCostoEstimado(v);
     return {
         raw: v,
         index,
@@ -86,12 +174,16 @@ function _rvVentaNormalizada(v, origen = "registrada", index = null) {
         fechaTexto: v.fecha || v.datosVenta?.fecha || (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(_rvDate(v)) : _rvInputDate(_rvDate(v))),
         cliente: _rvCliente(v),
         metodo: _rvMetodo(v),
-        totalMercancia: _rvTotalMercancia(v),
+        totalMercancia,
         totalDocumento: _rvTotalDocumento(v),
         enganche: _rvEnganche(v),
         saldo: _rvSaldo(v),
         articulos: _rvArticulos(v),
+        unidades: _rvUnidades(v),
+        costoEstimado,
+        utilidadEstimada: costoEstimado > 0 ? Math.max(0, totalMercancia - costoEstimado) : 0,
         vendedor: v.vendedor || v.vendedorNombre || v.vendedorSeleccionado?.nombre || "",
+        cuentaCobro: v.cuentaPago || v.cuenta || v.etiquetaCuenta || v.datosVenta?.cuentaPago || "",
         estado: origen === "cuarentena" ? "En bóveda" : (v.estado || v.estatus || "Registrada")
     };
 }
@@ -100,20 +192,42 @@ function _rvVentasFiltradas(filtros = {}) {
     const desde = filtros.desde ?? (document.getElementById("rvFechaDesde")?.value || "");
     const hasta = filtros.hasta ?? (document.getElementById("rvFechaHasta")?.value || "");
     const metodo = filtros.metodo ?? (document.getElementById("rvMetodo")?.value || "");
+    const estado = filtros.estado ?? (document.getElementById("rvEstado")?.value || "activas");
+    const busqueda = String(filtros.busqueda ?? (document.getElementById("rvBusqueda")?.value || "")).trim().toLowerCase();
+    const orden = filtros.orden ?? (document.getElementById("rvOrden")?.value || "fecha_desc");
     const desdeD = desde ? new Date(desde + "T00:00:00") : null;
     const hastaD = hasta ? new Date(hasta + "T23:59:59") : null;
 
     const registradas = StorageService.get("ventasRegistradas", [])
-        .filter(v => v.estado !== "Cancelada" && v.estatus !== "Cancelada")
         .map(v => _rvVentaNormalizada(v, "registrada"));
     const cuarentena = StorageService.get("ventasPendientes", [])
         .map((v, index) => _rvVentaNormalizada(v, "cuarentena", index));
 
     return [...registradas, ...cuarentena]
         .filter(v => !metodo || v.metodo === metodo)
+        .filter(v => {
+            const esCancelada = String(v.estado || "").toLowerCase().includes("cancel");
+            if (estado === "todas") return true;
+            if (estado === "canceladas") return esCancelada;
+            if (estado === "boveda") return v.origen === "cuarentena";
+            if (estado === "registradas") return v.origen === "registrada" && !esCancelada;
+            return v.origen === "registrada" && !esCancelada;
+        })
+        .filter(v => {
+            if (!busqueda) return true;
+            const articulos = v.articulos.map(a => `${a.nombre || a.productoNombre || ""}`).join(" ");
+            return `${v.folio} ${v.cliente} ${v.vendedor} ${v.metodo} ${v.estado} ${articulos}`.toLowerCase().includes(busqueda);
+        })
         .filter(v => !desdeD || v.fecha >= desdeD)
         .filter(v => !hastaD || v.fecha <= hastaD)
-        .sort((a, b) => b.fecha - a.fecha);
+        .sort((a, b) => {
+            if (orden === "fecha_asc") return a.fecha - b.fecha;
+            if (orden === "total_desc") return b.totalMercancia - a.totalMercancia;
+            if (orden === "total_asc") return a.totalMercancia - b.totalMercancia;
+            if (orden === "cliente") return String(a.cliente).localeCompare(String(b.cliente), "es");
+            if (orden === "metodo") return String(a.metodo).localeCompare(String(b.metodo), "es");
+            return b.fecha - a.fecha;
+        });
 }
 
 function _rvBadgeMetodo(metodo) {
@@ -132,32 +246,52 @@ function _rvBadgeOrigen(origen) {
         : `<span style="display:inline-flex; padding:4px 9px; border-radius:999px; background:#ecfdf5; color:#047857; font-size:11px; font-weight:800;">Registrada</span>`;
 }
 
+function _rvBadgeEstado(estado) {
+    const cancelada = String(estado || "").toLowerCase().includes("cancel");
+    const bg = cancelada ? "#fee2e2" : "#e0f2fe";
+    const color = cancelada ? "#991b1b" : "#075985";
+    return `<span style="display:inline-flex; padding:4px 9px; border-radius:999px; background:${bg}; color:${color}; font-size:11px; font-weight:800;">${_rvEsc(estado || "Activa")}</span>`;
+}
+
 window.renderReporteVentas = function() {
     const app = document.getElementById("reporteVentasApp");
-    const contenedorLegacy = document.getElementById("reportes") || document.getElementById("dashboardContenido");
+    const appVisible = app && app.closest(".vista") && app.closest(".vista").style.display !== "none" && !app.closest(".vista").classList.contains("oculto");
+    const contenedorLegacy = document.getElementById("contenidoReporte") || document.getElementById("dashboardContenido") || document.getElementById("reportes");
     const filtros = {
         desde: document.getElementById("rvFechaDesde")?.value || "",
         hasta: document.getElementById("rvFechaHasta")?.value || "",
-        metodo: document.getElementById("rvMetodo")?.value || ""
+        metodo: document.getElementById("rvMetodo")?.value || "",
+        estado: document.getElementById("rvEstado")?.value || "activas",
+        busqueda: document.getElementById("rvBusqueda")?.value || "",
+        orden: document.getElementById("rvOrden")?.value || "fecha_desc"
     };
     const ventas = _rvVentasFiltradas(filtros);
 
-    const registradas = ventas.filter(v => v.origen === "registrada");
+    const registradas = ventas.filter(v => v.origen === "registrada" && !String(v.estado || "").toLowerCase().includes("cancel"));
     const enBoveda = ventas.filter(v => v.origen === "cuarentena");
+    const canceladas = ventas.filter(v => String(v.estado || "").toLowerCase().includes("cancel"));
     const totalMercancia = registradas.reduce((s, v) => s + v.totalMercancia, 0);
     const totalDocumento = registradas.reduce((s, v) => s + v.totalDocumento, 0);
     const cobradoInicial = registradas.reduce((s, v) => s + (["contado", "transferencia"].includes(v.metodo) ? v.totalMercancia : v.enganche), 0);
     const carteraOriginada = registradas.filter(v => v.metodo === "credito").reduce((s, v) => s + v.saldo, 0);
+    const unidades = registradas.reduce((s, v) => s + v.unidades, 0);
+    const costoEstimado = registradas.reduce((s, v) => s + v.costoEstimado, 0);
+    const utilidadEstimada = registradas.reduce((s, v) => s + v.utilidadEstimada, 0);
+    const ticketPromedio = registradas.length ? totalMercancia / registradas.length : 0;
+    const margenEstimado = costoEstimado > 0 && totalMercancia > 0 ? (utilidadEstimada / totalMercancia) * 100 : 0;
 
     const kpisHTML = `
         ${_kpiCard("Ventas registradas", String(registradas.length), "#0f172a", "📄")}
         ${_kpiCard("Mercancía vendida", fmt(totalMercancia), "#2563eb", "🛋️")}
         ${_kpiCard("Cobro inicial", fmt(cobradoInicial), "#16a34a", "💵")}
         ${_kpiCard("Cartera originada", fmt(carteraOriginada), "#7c3aed", "💳")}
+        ${_kpiCard("Ticket promedio", fmt(ticketPromedio), "#0f766e", "AVG")}
+        ${_kpiCard("Utilidad estimada", costoEstimado > 0 ? `${fmt(utilidadEstimada)} (${margenEstimado.toFixed(1)}%)` : "Sin costo", "#dc2626", "M")}
     `;
 
     const porMes = new Map();
     registradas.forEach(v => {
+        if (!(v.fecha instanceof Date) || isNaN(v.fecha.getTime()) || v.fecha.getFullYear() < 2000) return;
         const key = `${v.fecha.getFullYear()}-${String(v.fecha.getMonth() + 1).padStart(2, "0")}`;
         const actual = porMes.get(key) || { total: 0, label: new Intl.DateTimeFormat("es-MX", { month: "short" }).format(v.fecha) };
         actual.total += v.totalMercancia;
@@ -172,21 +306,60 @@ window.renderReporteVentas = function() {
         `).join("");
     const labelsHTML = meses.map(([, m]) => `<div style="flex:1; min-width:36px; text-align:center; font-size:11px; color:#64748b; text-transform:uppercase;">${m.label}</div>`).join("");
 
+    const acumular = (lista, keyFn, valorFn, extraFn) => {
+        const map = new Map();
+        lista.forEach(item => {
+            const key = keyFn(item) || "Sin dato";
+            const actual = map.get(key) || { nombre: key, valor: 0, extraRaw: 0 };
+            actual.valor += valorFn(item) || 0;
+            actual.extraRaw += extraFn ? (extraFn(item) || 0) : 0;
+            map.set(key, actual);
+        });
+        return [...map.values()].sort((a, b) => b.valor - a.valor).slice(0, 5);
+    };
+    const topClientes = acumular(registradas, v => v.cliente, v => v.totalMercancia, v => 1).map(x => ({ ...x, extra: `${x.extraRaw} venta(s)` }));
+    const topVendedores = acumular(registradas, v => v.vendedor || "Sin vendedor", v => v.totalMercancia, v => 1).map(x => ({ ...x, extra: `${x.extraRaw} venta(s)` }));
+    const productosMap = new Map();
+    registradas.forEach(v => v.articulos.forEach(a => {
+        const nombre = a.nombre || a.productoNombre || "Producto";
+        const cantidad = Number(a.cantidad || a.cant || 1) || 1;
+        const precio = Number(a.precioContado || a.precio || 0) || 0;
+        const actual = productosMap.get(nombre) || { nombre, valor: 0, unidades: 0 };
+        actual.valor += precio * cantidad;
+        actual.unidades += cantidad;
+        productosMap.set(nombre, actual);
+    }));
+    const topProductos = [...productosMap.values()].sort((a, b) => b.valor - a.valor).slice(0, 5).map(x => ({ ...x, extra: `${x.unidades} pza(s)` }));
+    const totalMetodo = Math.max(1, totalMercancia);
+    const metodosHTML = ["contado", "transferencia", "credito", "apartado"].map(m => {
+        const total = registradas.filter(v => v.metodo === m).reduce((s, v) => s + v.totalMercancia, 0);
+        const pct = Math.round((total / totalMetodo) * 100);
+        return `<div style="padding:9px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:800;color:#334155;"><span>${_rvBadgeMetodo(m)}</span><span>${fmt(total)} (${pct}%)</span></div>
+            <div style="height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-top:7px;"><div style="width:${pct}%;height:100%;background:#0f766e;"></div></div>
+        </div>`;
+    }).join("");
+
     const filas = ventas.map(v => {
         const articulosTxt = v.articulos.length
-            ? v.articulos.slice(0, 3).map(a => `${a.cantidad || 1}x ${_escapeHtml(a.nombre || a.productoNombre || "-")}`).join("<br>")
+            ? v.articulos.slice(0, 3).map(a => `${a.cantidad || 1}x ${_rvEsc(a.nombre || a.productoNombre || "-")}`).join("<br>")
             : '<span style="color:#94a3b8;">Sin detalle</span>';
         const saldoTxt = v.metodo === "credito" || v.metodo === "apartado"
             ? `<div style="font-weight:800; color:#dc2626;">${fmt(v.saldo)}</div>`
             : '<span style="color:#94a3b8;">-</span>';
+        const utilidadTxt = v.costoEstimado > 0
+            ? `<strong style="color:#0f766e;">${fmt(v.utilidadEstimada)}</strong><br><small style="color:#64748b;">Costo: ${fmt(v.costoEstimado)}</small>`
+            : '<span style="color:#94a3b8;">Sin costo</span>';
         return `
             <tr style="border-bottom:1px solid #e2e8f0;">
-                <td style="padding:12px; vertical-align:top;"><strong>${_escapeHtml(v.folio)}</strong><br>${_rvBadgeOrigen(v.origen)}</td>
-                <td style="padding:12px; vertical-align:top; white-space:nowrap;">${_escapeHtml(v.fechaTexto)}</td>
-                <td style="padding:12px; vertical-align:top;"><strong>${_escapeHtml(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_escapeHtml(v.vendedor)}</small>` : ""}</td>
+                <td style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.folio)}</strong><br>${_rvBadgeOrigen(v.origen)}<br>${_rvBadgeEstado(v.estado)}</td>
+                <td style="padding:12px; vertical-align:top; white-space:nowrap;">${_rvEsc(v.fechaTexto)}</td>
+                <td style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_rvEsc(v.vendedor)}</small>` : ""}</td>
                 <td style="padding:12px; vertical-align:top;">${_rvBadgeMetodo(v.metodo)}</td>
                 <td style="padding:12px; vertical-align:top; font-size:12px;">${articulosTxt}${v.articulos.length > 3 ? `<br><small style="color:#64748b;">+${v.articulos.length - 3} más</small>` : ""}</td>
+                <td style="padding:12px; vertical-align:top; text-align:center; font-weight:900;">${v.unidades}</td>
                 <td style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#1d4ed8;">${fmt(v.totalMercancia)}</strong><br><small style="color:#64748b;">Doc: ${fmt(v.totalDocumento)}</small></td>
+                <td style="padding:12px; vertical-align:top; text-align:right;">${utilidadTxt}</td>
                 <td style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#16a34a;">${fmt(v.enganche)}</strong></td>
                 <td style="padding:12px; vertical-align:top; text-align:right;">${saldoTxt}</td>
             </tr>`;
@@ -196,6 +369,7 @@ window.renderReporteVentas = function() {
         ? `<div style="padding:34px; text-align:center; color:#64748b; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:10px;">No hay ventas para mostrar con los filtros actuales.</div>`
         : `<div style="margin-bottom:12px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; color:#475569; font-size:13px;">
                 <span><strong>${ventas.length}</strong> movimientos mostrados</span>
+                <span><strong>${canceladas.length}</strong> canceladas en vista</span>
                 <span><strong>${enBoveda.length}</strong> en bóveda pendientes de autorización</span>
            </div>
            <table style="width:100%; border-collapse:collapse; min-width:980px;">
@@ -219,14 +393,18 @@ window.renderReporteVentas = function() {
             </div>
         </div>
 
-        <div style="background:white; border:1px solid #e2e8f0; padding:16px; border-radius:10px; margin-bottom:18px; display:grid; grid-template-columns:repeat(4, minmax(150px, 1fr)); gap:12px; align-items:end;">
+        <div style="background:white; border:1px solid #e2e8f0; padding:16px; border-radius:10px; margin-bottom:18px; display:grid; grid-template-columns:repeat(auto-fit, minmax(155px, 1fr)); gap:12px; align-items:end;">
+            <div style="grid-column:span 2;">
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">BUSCAR</label>
+                <input type="search" id="rvBusqueda" value="${_rvEsc(filtros.busqueda)}" placeholder="Cliente, folio, vendedor o producto" onkeydown="if(event.key==='Enter')renderReporteVentas()" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">DESDE</label>
-                <input type="date" id="rvFechaDesde" value="${_escapeHtml(filtros.desde)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                <input type="date" id="rvFechaDesde" value="${_rvEsc(filtros.desde)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
             </div>
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">HASTA</label>
-                <input type="date" id="rvFechaHasta" value="${_escapeHtml(filtros.hasta)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                <input type="date" id="rvFechaHasta" value="${_rvEsc(filtros.hasta)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
             </div>
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">MÉTODO</label>
@@ -238,15 +416,58 @@ window.renderReporteVentas = function() {
                     <option value="apartado" ${filtros.metodo === "apartado" ? "selected" : ""}>Apartado</option>
                 </select>
             </div>
-            <button onclick="renderReporteVentas()" style="padding:10px 18px; background:#0f172a; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">🔍 Filtrar</button>
+            <div>
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">ESTADO</label>
+                <select id="rvEstado" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                    <option value="activas" ${filtros.estado === "activas" ? "selected" : ""}>Activas</option>
+                    <option value="todas" ${filtros.estado === "todas" ? "selected" : ""}>Todas</option>
+                    <option value="registradas" ${filtros.estado === "registradas" ? "selected" : ""}>Registradas</option>
+                    <option value="boveda" ${filtros.estado === "boveda" ? "selected" : ""}>Boveda</option>
+                    <option value="canceladas" ${filtros.estado === "canceladas" ? "selected" : ""}>Canceladas</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">ORDEN</label>
+                <select id="rvOrden" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                    <option value="fecha_desc" ${filtros.orden === "fecha_desc" ? "selected" : ""}>Mas recientes</option>
+                    <option value="fecha_asc" ${filtros.orden === "fecha_asc" ? "selected" : ""}>Mas antiguas</option>
+                    <option value="total_desc" ${filtros.orden === "total_desc" ? "selected" : ""}>Mayor importe</option>
+                    <option value="total_asc" ${filtros.orden === "total_asc" ? "selected" : ""}>Menor importe</option>
+                    <option value="cliente" ${filtros.orden === "cliente" ? "selected" : ""}>Cliente A-Z</option>
+                    <option value="metodo" ${filtros.orden === "metodo" ? "selected" : ""}>Metodo</option>
+                </select>
+            </div>
+            <button onclick="renderReporteVentas()" style="padding:10px 18px; background:#0f172a; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">Filtrar</button>
         </div>
 
         <div id="rvKpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:15px; margin-bottom:20px;">${kpisHTML}</div>
+
+        <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;margin-bottom:20px;">
+            <div style="background:white; border:1px solid #e2e8f0; padding:18px; border-radius:10px;">
+                <h3 style="margin:0 0 15px; color:#0f172a; font-size:16px;">Lectura rapida</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;color:#334155;font-size:13px;">
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Piezas vendidas</strong>${unidades}</div>
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Venta documental</strong>${fmt(totalDocumento)}</div>
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">En boveda</strong>${enBoveda.length} movimiento(s)</div>
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Canceladas visibles</strong>${canceladas.length}</div>
+                </div>
+            </div>
+            <div style="background:white; border:1px solid #e2e8f0; padding:18px; border-radius:10px;">
+                <h3 style="margin:0 0 12px; color:#0f172a; font-size:16px;">Mix de venta</h3>
+                ${metodosHTML}
+            </div>
+        </div>
 
         <div style="background:white; border:1px solid #e2e8f0; padding:18px; border-radius:10px; margin-bottom:20px;">
             <h3 style="margin:0 0 15px; color:#0f172a; font-size:16px;">📈 Ventas Registradas por Mes</h3>
             <div id="rvGraficaMeses" style="display:flex; align-items:flex-end; gap:6px; height:180px; padding:0 10px;">${graficaHTML}</div>
             <div id="rvGraficaLabels" style="display:flex; gap:6px; padding:4px 10px; margin-top:4px;">${labelsHTML}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;">
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top clientes</h3>${_repBarraLista(topClientes, totalMercancia, "#2563eb")}</div>
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top productos</h3>${_repBarraLista(topProductos, totalMercancia, "#0f766e")}</div>
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top vendedores</h3>${_repBarraLista(topVendedores, totalMercancia, "#7c3aed")}</div>
         </div>
 
         <div style="background:white; border:1px solid #e2e8f0; padding:18px; border-radius:10px;">
@@ -255,7 +476,7 @@ window.renderReporteVentas = function() {
         </div>
     `;
 
-    if (app) {
+    if (app && appVisible) {
         app.innerHTML = html;
         return;
     }
@@ -267,15 +488,15 @@ window.renderReporteVentas = function() {
 
 window.exportarReporteVentas = function() {
     const ventas = _rvVentasFiltradas();
-    let csv = "Origen,Folio,Fecha,Cliente,Metodo,Articulos,TotalMercancia,TotalDocumento,EngancheCobrado,Saldo,Vendedor,Estado\n";
+    let csv = "Origen,Folio,Fecha,Cliente,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,CostoEstimado,UtilidadEstimada,EngancheCobrado,Saldo,Vendedor,Estado\n";
     ventas.forEach(v => {
         const articulos = v.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || ''}`).join(' | ');
-        csv += `"${v.origen}","${v.folio}","${v.fechaTexto}","${v.cliente}","${v.metodo}","${articulos}",${v.totalMercancia},${v.totalDocumento},${v.enganche},${v.saldo},"${v.vendedor}","${v.estado}"\n`;
+        csv += `"${v.origen}","${v.folio}","${v.fechaTexto}","${v.cliente}","${v.metodo}","${articulos}",${v.unidades},${v.totalMercancia},${v.totalDocumento},${v.costoEstimado},${v.utilidadEstimada},${v.enganche},${v.saldo},"${v.vendedor}","${v.estado}"\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `reporte_ventas_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `reporte_ventas_${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0])}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -336,7 +557,7 @@ window.exportarReporteCompras = function() {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `reporte_compras_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `reporte_compras_${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.localISO ? window.localISO(new Date()).split('T')[0] : new Date().toISOString().split('T')[0])}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -494,6 +715,7 @@ window.renderReporteLiquidezCortoPlazo = function() {
         const id = String(c.id || "efectivo");
         saldos[id] = 0;
     });
+    const cajaDefaultLiquidezId = cajasLiquidez[0]?.id || "efectivo";
 
     debitoLiquidez.forEach(t => {
         const id = String(t.banco || t.id || "");
@@ -503,7 +725,7 @@ window.renderReporteLiquidezCortoPlazo = function() {
         const esIng = String(m.tipo || '').toLowerCase() === "ingreso";
         const amt = parseFloat(m.monto) || 0;
         const cuentaMov = String(m.cuenta || m.cuentaId || '');
-        const cta = (cuentaMov === "efectivo" || cuentaMov === "caja") ? "efectivo" : cuentaMov;
+        const cta = (cuentaMov === "efectivo" || cuentaMov === "caja" || !cuentaMov) ? cajaDefaultLiquidezId : cuentaMov;
         if (saldos[cta] !== undefined) saldos[cta] += (esIng ? amt : -amt);
     });
     const liquidezTotalInicial = Object.values(saldos).reduce((a, b) => a + b, 0);
@@ -729,8 +951,13 @@ window.renderReporteFlujo = function() {
             lower === 'caja' ||
             lower === 'cash'
         ) {
-            return 'efectivo_default';
+            const cajas = asegurarArray(StorageService.get("cuentasEfectivo", []));
+            return String(cajas[0]?.id || 'efectivo_default');
         }
+
+        const cajasPorNombre = asegurarArray(StorageService.get("cuentasEfectivo", []));
+        const cajaPorNombre = cajasPorNombre.find(caja => String(caja.nombre || '').toLowerCase().trim() === lower);
+        if (cajaPorNombre) return String(cajaPorNombre.id || c);
 
         // Mantener nombres reales de cuentas: Caja Principal, Caja Chica, etc.
         return c;
@@ -741,6 +968,9 @@ window.renderReporteFlujo = function() {
 
         if (key === 'efectivo_default') return '💵 Efectivo';
 
+        const cajas = asegurarArray(StorageService.get("cuentasEfectivo", []));
+        const caja = cajas.find(c => String(c.id) === String(key));
+        if (caja) return caja.nombre || key;
         return String(id || key);
     };
 
@@ -804,6 +1034,48 @@ window.renderReporteFlujo = function() {
         };
     };
 
+    const refBase = (valor) => String(valor || '')
+        .toUpperCase()
+        .replace(/^(VENTA|ABONO|ENGANCHE|OC|COMPRA|PAGO|CANCEL|DEV|CONSIG|REC)[-_:\s]*/g, '')
+        .trim();
+
+    const fechaKeyMovimiento = (fecha) => {
+        const d = new Date(normalizarFecha(fecha));
+        return isNaN(d.getTime()) ? '' : (window.getFechaLocalMX ? window.getFechaLocalMX(d) : d.toISOString().slice(0, 10));
+    };
+
+    const movimientoCajaSimilar = ({ tipo, referencia, monto, cuenta, fecha, concepto }) => {
+        const tipoNorm = normalizarTipo(tipo);
+        const ref = refBase(referencia);
+        const montoNum = Number(monto || 0);
+        const cuentaNorm = normalizarCuentaId(cuenta);
+        const fechaKey = fechaKeyMovimiento(fecha);
+        const conceptoNorm = String(concepto || '').toLowerCase();
+
+        return movimientosCaja.some(m => {
+            const mTipo = normalizarTipo(m.tipo);
+            if (mTipo !== tipoNorm) return false;
+
+            const mMonto = Number(m.monto || 0);
+            if (Math.abs(mMonto - montoNum) > 0.01) return false;
+
+            const mRef = refBase(m.folio || m.referencia || m.id);
+            const mConcepto = String(m.concepto || '').toLowerCase();
+            if (ref && (mRef === ref || mConcepto.includes(ref.toLowerCase()))) return true;
+
+            const mCuenta = normalizarCuentaId(m.cuenta || m.cuentaId || m.metodoPago || m.medioPago || 'efectivo');
+            const mFechaKey = fechaKeyMovimiento(m.fecha || m.fechaISO || m.createdAt);
+            return fechaKey && mFechaKey === fechaKey && mCuenta === cuentaNorm && conceptoNorm && mConcepto.includes(conceptoNorm.slice(0, 18));
+        });
+    };
+
+    const agregarRespaldoSiFalta = (datos) => {
+        const mov = crearMovimiento(datos);
+        if (!mov) return;
+        if (movimientoCajaSimilar(mov)) return;
+        movimientos.push({ ...mov, origen: `${mov.origen}_reconstruido` });
+    };
+
     // ======================================================
     // FUENTES DE DATOS
     // ======================================================
@@ -811,9 +1083,13 @@ window.renderReporteFlujo = function() {
     const manuales = asegurarArray(StorageService.get("movimientosManuales", []));
 
     const tickets = asegurarArray(StorageService.get("registroTickets", []));
+    const ventasRegistradas = asegurarArray(StorageService.get("ventasRegistradas", []));
     const cuentasCxC = asegurarArray(StorageService.get("cuentasPorCobrar", []));
+    const apartadosData = asegurarArray(StorageService.get("apartados", []));
     const ordenesCompra = asegurarArray(StorageService.get("ordenesCompra", []));
     const comprasDirectas = asegurarArray(StorageService.get("compras", []));
+    const cuentasPorPagar = asegurarArray(StorageService.get("cuentasPorPagar", []));
+    const anticiposConsignacion = asegurarArray(StorageService.get("anticiposConsignacion", []));
 
     let movimientos = [];
 
@@ -821,9 +1097,9 @@ window.renderReporteFlujo = function() {
     // 1. FUENTE PRINCIPAL: movimientosCaja
     // Evita duplicar ventas/abonos/compras que ya están registradas aquí.
     // ======================================================
-    movimientosCaja.forEach(m => {
+    movimientosCaja.forEach((m, indexMovimientoCaja) => {
         const mov = crearMovimiento({
-            id: m.id || m.folio || m.referencia,
+            id: m.id || `movcaja-${m.folio || m.referencia || 'sinref'}-${indexMovimientoCaja}`,
             fecha: m.fecha || m.fechaISO || m.createdAt,
             concepto: m.concepto || m.descripcion || m.referencia || m.folio || 'Movimiento de caja',
             tipo: m.tipo,
@@ -856,11 +1132,33 @@ window.renderReporteFlujo = function() {
     });
 
     // ======================================================
-    // 3. RESPALDO: si NO hay movimientosCaja, reconstruir desde módulos
-    // Esto evita duplicados cuando movimientosCaja ya existe.
+    // 3. RESPALDO CONCILIADO
+    // Reconstruye faltantes desde modulos sin duplicar lo que ya este en caja.
     // ======================================================
-    if (movimientosCaja.length === 0) {
-        console.warn("⚠️ No hay movimientosCaja. Reconstruyendo flujo desde tickets, CxC y compras como respaldo.");
+    {
+        if (movimientosCaja.length === 0) {
+            console.warn("No hay movimientosCaja. Reconstruyendo flujo desde tickets, ventas, CxC y compras como respaldo.");
+        }
+
+        ventasRegistradas.forEach(v => {
+            if (String(v.estado || v.estatus || '').toLowerCase().includes('cancel')) return;
+            const metodo = String(v.metodoPago || v.metodo || 'contado').toLowerCase();
+            const monto = Number(v.montoIngresoInicial ?? ((metodo === 'contado' || metodo === 'transferencia')
+                ? Number(v.total || v.totalDocumento || v.totalMercancia || 0)
+                : Number(v.enganche || v.engancheRecibido || 0)));
+            if (monto <= 0) return;
+
+            agregarRespaldoSiFalta({
+                id: `venta-reg-${v.folio || v.id || ''}-${monto}`,
+                fecha: v.fechaVenta || v.fechaIso || v.fecha,
+                concepto: `${metodo === 'credito' ? 'Enganche' : 'Venta'}: ${v.folio || '-'}`,
+                tipo: 'ingreso',
+                cuenta: v.cuentaReceptora || v.cuentaId || v.cuentaPago || v.medioPago || v.metodoPago || 'efectivo',
+                monto,
+                origen: 'ventaRegistrada',
+                referencia: v.folio || v.id
+            });
+        });
 
         tickets.forEach(t => {
             const venta = t.venta || {};
@@ -873,7 +1171,7 @@ window.renderReporteFlujo = function() {
                 ? parseFloat(venta.total || 0)
                 : parseFloat(venta.enganche || 0);
 
-            const mov = crearMovimiento({
+            agregarRespaldoSiFalta({
                 id: t.id || t.folio || venta.folio,
                 fecha: t.fechaEmision || t.fecha || venta.fecha || venta.fechaVenta,
                 concepto: `Venta: ${t.folio || venta.folio || '-'}`,
@@ -883,58 +1181,106 @@ window.renderReporteFlujo = function() {
                 origen: 'ticket',
                 referencia: t.folio || venta.folio
             });
-
-            if (mov) movimientos.push(mov);
         });
 
         cuentasCxC.forEach(c => {
+            if (String(c.estado || c.estatus || '').toLowerCase().includes('cancel')) return;
             (c.abonos || []).forEach((ab, indexAbono) => {
-                const mov = crearMovimiento({
+                if (ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
+                agregarRespaldoSiFalta({
                     id: ab.id || `${c.folio || c.id}-${indexAbono}-${ab.fecha}-${ab.monto}`,
-                    fecha: ab.fecha,
+                    fecha: ab.fechaAbonoIso || ab.fechaIso || ab.fecha,
                     concepto: `Abo: ${c.nombre || c.clienteNombre || c.folio || '-'}`,
                     tipo: 'ingreso',
-                    cuenta: ab.cuentaId || ab.medioPago || ab.metodoPago || 'efectivo',
+                    cuenta: ab.cuentaId || ab.etiquetaCuenta || ab.medioPago || ab.metodoPago || 'efectivo',
                     monto: ab.monto,
                     origen: 'abonoCxC',
                     referencia: c.folio || c.id
                 });
+            });
+        });
 
-                if (mov) movimientos.push(mov);
+        apartadosData.forEach(ap => {
+            if (String(ap.estado || ap.estatus || '').toLowerCase().includes('cancel')) return;
+            const engancheAp = Number(ap.enganche || 0);
+            if (engancheAp > 0) {
+                agregarRespaldoSiFalta({
+                    id: `apartado-eng-${ap.folio || ap.id}-${engancheAp}`,
+                    fecha: ap.fechaApartado || ap.fecha || ap.fechaVenta,
+                    concepto: `Enganche apartado: ${ap.clienteNombre || ap.folio || '-'}`,
+                    tipo: 'ingreso',
+                    cuenta: ap.cuentaIdEnganche || ap.etiquetaCuentaEnganche || 'efectivo',
+                    monto: engancheAp,
+                    origen: 'engancheApartado',
+                    referencia: ap.folio || ap.id
+                });
+            }
+
+            asegurarArray(ap.abonos || []).forEach((ab, indexAbono) => {
+                if (ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
+                agregarRespaldoSiFalta({
+                    id: ab.idOperacion || ab.id || `${ap.folio || ap.id}-abono-${indexAbono}`,
+                    fecha: ab.fechaAbonoIso || ab.fechaAbono || ab.fecha,
+                    concepto: `Abono apartado: ${ap.clienteNombre || ap.folio || '-'}`,
+                    tipo: 'ingreso',
+                    cuenta: ab.cuentaId || ab.etiquetaCuenta || 'efectivo',
+                    monto: ab.monto,
+                    origen: 'abonoApartado',
+                    referencia: ap.folio || ap.id
+                });
             });
         });
 
         ordenesCompra.forEach(com => {
-            const pagado = parseFloat(com.pagado || com.montoPagado || 0);
+            const pagos = asegurarArray(com.pagos || []);
+            if (pagos.length) {
+                pagos.forEach((p, indexPago) => {
+                    agregarRespaldoSiFalta({
+                        id: p.id || `${com.id || com.folio}-pago-${indexPago}`,
+                        fecha: p.fecha || p.fechaPago || com.fecha || com.fechaEmision,
+                        concepto: `Pago OC: ${com.proveedor || com.proveedorNombre || '-'}`,
+                        tipo: 'egreso',
+                        cuenta: p.cuentaId || p.cuenta || com.condicionesComerciales?.cuentaOrigen || 'efectivo',
+                        monto: p.monto || p.importe || 0,
+                        origen: 'ordenCompra',
+                        referencia: com.folio || com.id
+                    });
+                });
+                return;
+            }
 
-            const mov = crearMovimiento({
-                id: com.id || com.folio,
-                fecha: com.fecha || com.fechaEmision,
-                concepto: `Prov: ${com.proveedor || com.proveedorNombre || '-'}`,
-                tipo: 'egreso',
-                cuenta: com.metodoPago || com.cuentaPago || 'efectivo',
-                monto: pagado,
-                origen: 'ordenCompra',
-                referencia: com.folio || com.id
-            });
-
-            if (mov) movimientos.push(mov);
+            const pagado = com.anticipoEsTransferido ? 0 : parseFloat(com.pagado || com.montoPagado || com.anticipo_pagado || 0);
+            if (pagado > 0) {
+                agregarRespaldoSiFalta({
+                    id: com.id || com.folio,
+                    fecha: com.fecha || com.fechaEmision,
+                    concepto: `Prov: ${com.proveedor || com.proveedorNombre || '-'}`,
+                    tipo: 'egreso',
+                    cuenta: com.metodoPago || com.cuentaPago || com.condicionesComerciales?.cuentaOrigen || 'efectivo',
+                    monto: pagado,
+                    origen: 'ordenCompra',
+                    referencia: com.folio || com.id
+                });
+            }
         });
 
                 comprasDirectas.forEach(com => {
+            if (com.ordenCompraId) return;
             // IMPORTANTE:
             // El flujo de efectivo SOLO debe mostrar dinero realmente pagado.
             // Si una compra/recepción se fue a cuentas por pagar, NO debe salir aquí.
-            const pagado = parseFloat(
+            let pagado = parseFloat(
                 com.pagado ||
                 com.montoPagado ||
                 com.totalPagado ||
+                com.pago?.monto ||
                 com.anticipo ||
                 0
             );
 
             const metodo = String(
                 com.metodoPago ||
+                com.metodo ||
                 com.formaPago ||
                 com.tipoPago ||
                 ''
@@ -953,23 +1299,64 @@ window.renderReporteFlujo = function() {
                 com.estadoPago === 'pendiente' ||
                 com.estadoPago === 'Pendiente';
 
+            if (pagado <= 0 && !esCreditoProveedor && !com.esConsignacion && (metodo === 'contado' || metodo.includes('contado'))) {
+                pagado = Math.max(0, parseFloat(com.total || 0) - parseFloat(com.saldoFavorAplicado || 0));
+            }
+
             // Si no hubo pago real, no entra al flujo.
             if (pagado <= 0) return;
 
             // Si es crédito/CXP, solo entra si realmente trae un pago parcial/anticipo.
             // Nunca usar com.total como si fuera efectivo.
-            const mov = crearMovimiento({
+            agregarRespaldoSiFalta({
                 id: com.id || com.folio,
                 fecha: com.fechaPago || com.fechaISO || com.fecha,
                 concepto: `Pago compra: ${com.proveedor || com.proveedorNombre || com.id || '-'}`,
                 tipo: 'egreso',
-                cuenta: com.cuentaPago || com.cuenta || com.metodoPago || 'efectivo',
+                cuenta: com.pago?.cuenta || com.cuentaPago || com.cuenta || com.metodoPago || 'efectivo',
                 monto: pagado,
                 origen: esCreditoProveedor ? 'anticipoCompraCXP' : 'compraDirectaPagada',
                 referencia: com.folio || com.id
             });
+        });
 
-            if (mov) movimientos.push(mov);
+        cuentasPorPagar.forEach(cxp => {
+            const ligadaAOC = ordenesCompra.some(oc => String(oc.id) === String(cxp.compraId));
+            if (ligadaAOC) return;
+
+            asegurarArray(cxp.abonos || []).forEach((ab, indexAbono) => {
+                const monto = parseFloat(ab.monto || ab.importe || 0);
+                if (monto <= 0) return;
+                const cuentaTxt = String(ab.cuenta || ab.cuentaId || '').toLowerCase();
+                if (cuentaTxt.includes('saldo a favor') || cuentaTxt.includes('anticipo consignacion')) return;
+
+                agregarRespaldoSiFalta({
+                    id: ab.id || `cxp-${cxp.id || cxp.compraId || ''}-${indexAbono}`,
+                    fecha: ab.fecha || ab.fechaPago || cxp.fecha,
+                    concepto: `Pago proveedor: ${cxp.proveedor || cxp.proveedorNombre || '-'}`,
+                    tipo: 'egreso',
+                    cuenta: ab.cuentaId || ab.cuenta || cxp.cuentaPago || 'efectivo',
+                    monto,
+                    origen: 'abonoCXP',
+                    referencia: cxp.id || cxp.compraId
+                });
+            });
+        });
+
+        anticiposConsignacion.forEach((ant, indexAnticipo) => {
+            const monto = parseFloat(ant.monto || 0);
+            if (monto <= 0) return;
+
+            agregarRespaldoSiFalta({
+                id: ant.id || `anticipo-consig-${indexAnticipo}`,
+                fecha: ant.fecha || ant.fechaStr,
+                concepto: `Anticipo consignacion ${ant.proveedor || ''}`.trim(),
+                tipo: 'egreso',
+                cuenta: ant.cuentaId || ant.cuenta || 'efectivo',
+                monto,
+                origen: 'anticipoConsignacion',
+                referencia: ant.id || ant.proveedorKey || ant.proveedor
+            });
         });
     }
 
@@ -980,9 +1367,14 @@ window.renderReporteFlujo = function() {
     const vistos = new Set();
 
     movimientos = movimientos.filter(m => {
-        const fechaKey = new Date(m.fecha).toISOString().slice(0, 10);
+        const fechaObj = new Date(m.fecha);
+        const fechaKey = isNaN(fechaObj.getTime()) ? '' : (window.getFechaLocalMX ? window.getFechaLocalMX(fechaObj) : fechaObj.toISOString().slice(0, 10));
         const idKey = String(m.id || '').trim();
-        const key = idKey
+        const refRecon = refBase(m.referencia || m.id || m.concepto);
+        const esReconstruido = String(m.origen || '').includes('reconstruido');
+        const key = esReconstruido && refRecon
+            ? `recon|${m.tipo}|${refRecon}|${Number(m.monto || 0).toFixed(2)}|${m.cuenta}`
+            : idKey
             ? `${m.origen}|id|${idKey}`
             : [
                 m.tipo,

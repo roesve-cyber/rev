@@ -88,8 +88,11 @@ const _rc = {
         });
 
         // 2. ¿Cuánto HA PAGADO realmente?
-        const abonos = cuenta.abonos || [];
+        const abonos = (cuenta.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
         const totalPagado = abonos.reduce((s, a) => s + parseFloat(a.monto || 0), 0);
+        const saldoVivo = pagaresCuenta
+            .filter(p => p.estado !== 'Pagado' && p.estado !== 'Cancelado')
+            .reduce((s, p) => s + Math.max(0, parseFloat(p.monto || 0) - parseFloat(p.montoAbonado || 0)), 0);
 
         // 3. Saldo Neto Esperado
         const excedente = totalPagado - montoEsperado;
@@ -136,11 +139,15 @@ const _rc = {
             fechaUltimoVenc, ultimaFechaAbono, diasSinPagar,
             promedioAbono90, numAbonos: abonos.length,
             nivelRiesgo, colorRiesgo, emojiRiesgo,
-            saldoActual: cuenta.saldoActual || 0,
+            saldoActual: saldoVivo || cuenta.saldoActual || 0,
             totalVenta: cuenta.totalContadoOriginal || cuenta.totalMercancia || totalPlazo
         };
     }
 };
+
+function _rcCuentaCancelada(cuenta) {
+    return String(cuenta?.estado || cuenta?.estatus || '').toLowerCase().includes('cancel');
+}
 
 // ================================================================
 // 1. ARC v3 — ANÁLISIS DE RIESGO CON LÓGICA SNE
@@ -157,7 +164,7 @@ window.renderARC_v3 = function() {
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
-    const cuentasActivas = cxc.filter(c => (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
+    const cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
     if (!cuentasActivas.length) {
         cont.innerHTML = `<div style="padding:50px;text-align:center;background:white;border-radius:16px;margin:20px 0;">
             <div style="font-size:48px;">✅</div>
@@ -343,7 +350,7 @@ window.renderComportamiento = function() {
     const filtro  = window._cbFiltro || 'todos';
 
     const cuentasSNE = cxc
-        .filter(c => c.estado !== 'Saldado')
+        .filter(c => c.estado !== 'Saldado' && !_rcCuentaCancelada(c))
         .map(c => {
             const pagaresCuenta = pagaresSistema.filter(p => p.folio === c.folio);
             const sne = _rc.calcularSNE(c, pagaresCuenta, hoy);
@@ -734,7 +741,7 @@ window.renderConcentracion = function() {
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
-    const activas = cxc.filter(c => (c.saldoActual || 0) > 0 && c.estado !== 'Saldado')
+    const activas = cxc.filter(c => !_rcCuentaCancelada(c) && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado')
         .map(c => {
             const sne = _rc.calcularSNE(c, pagaresSistema.filter(p => p.folio === c.folio), hoy);
             return { ...c, sne };
