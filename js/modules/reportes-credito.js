@@ -1,15 +1,15 @@
 // ================================================================
 // 📊 MÓDULO DE REPORTES AVANZADOS PARA CARTERA DE CRÉDITO
-// Versión: 2.0 — Lógica de Saldo Neto Esperado (SNE)
+// Versión: 3.0 — Lógica de Saldo Neto Esperado (SNE) y Matriz Excel
 //
 // Reportes incluidos:
-//  1. renderARC_SNE()        → ARC mejorado con lógica SNE
-//  2. renderComportamiento() → Scorecard de comportamiento de pago
-//  3. renderCobranzaMensual()→ Capital colocado vs. recuperado
-//  4. renderConcentracion()  → Mapa de concentración de cartera
+//  1. renderARC_v3()         → ARC mejorado con lógica SNE
+//  2. renderARCTablaExcel()  → Matriz visual tipo Excel
+//  3. renderComportamiento() → Scorecard de comportamiento de pago
+//  4. renderCobranzaMensual()→ Capital colocado vs. recuperado
+//  5. renderConcentracion()  → Mapa de concentración de cartera
 // ================================================================
 
-// ─── Helpers compartidos ────────────────────────────────────────
 // ─── Helpers compartidos ────────────────────────────────────────
 const _rc = {
     fmt: v => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0),
@@ -21,24 +21,39 @@ const _rc = {
             const d = new Date(val);
             return isNaN(d.getTime()) ? null : d;
         }
+
         const s = String(val).trim();
+        if (/^\d+$/.test(s)) {
+            const d = new Date(Number(s));
+            return isNaN(d.getTime()) ? null : d;
+        }
+
         let d;
         if (s.includes('/')) {
-            const [day, m, y] = s.split('/');
-            d = new Date(parseInt(y), parseInt(m) - 1, parseInt(day), 12);
+            const parts = s.split('/');
+            if (parts[0].length === 4) {
+                d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12);
+            } else {
+                d = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]), 12);
+            }
         } else {
             const base = s.length > 10 ? s.split('T')[0] : s;
             const parts = base.split('-');
             if (parts.length >= 3) {
-                d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12);
+                if (parts[0].length === 4) {
+                    d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12);
+                } else {
+                    d = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]), 12);
+                }
             } else {
-                d = new Date(val); // Fallback nativo
+                d = new Date(val);
             }
         }
-        return (d && !isNaN(d.getTime())) ? d : null;
+        return (d && !isNaN(d.getTime()) && d.getFullYear() > 1990) ? d : null;
     },
 
     diasDesde(fecha) {
+        if (!fecha) return 9999;
         const d = _rc.parseFecha(fecha);
         if (!d) return 9999;
         return Math.floor((Date.now() - d.getTime()) / 86400000);
@@ -51,7 +66,6 @@ const _rc = {
     },
 
     mesLabel(key) {
-        // Blindaje contra llaves corruptas (NaN) para evitar el colapso del render
         if (!key || key.includes('NaN')) return 'S/F';
         const [y, m] = key.split('-');
         const d = new Date(+y, +m - 1, 1);
@@ -71,9 +85,6 @@ const _rc = {
             <div style="width:${w}%;height:100%;background:${color};border-radius:3px;transition:width .4s;"></div>
         </div>`;
     },
-
-    // ──────────────────────────────────────────────────────────────
-    // MOTOR CENTRAL SNE (Saldo Neto Esperado)
 
     // ──────────────────────────────────────────────────────────────
     // MOTOR CENTRAL SNE (Saldo Neto Esperado)
@@ -169,8 +180,6 @@ function _rcCuentaCancelada(cuenta) {
 
 // ================================================================
 // 1. ARC v3 — ANÁLISIS DE RIESGO CON LÓGICA SNE
-//    Diferencia clave: clasifica según "¿ha pagado lo esperado
-//    hasta hoy?" y no solo por conteo de pagarés vencidos.
 // ================================================================
 window.renderARC_v3 = function() {
     const cont = document.getElementById('reportes') ||
@@ -314,6 +323,7 @@ window.renderARC_v3 = function() {
                     </p>
                 </div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <button onclick="renderARCTablaExcel()" style="padding:10px 16px;background:#059669;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📊 Vista Matriz Excel</button>
                     <button onclick="renderComportamiento()" style="padding:10px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🧬 Comportamiento de Pago</button>
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
                 </div>
@@ -350,9 +360,398 @@ window.renderARC_v3 = function() {
 };
 
 // ================================================================
-// 2. SCORECARD DE COMPORTAMIENTO DE PAGO
-//    Tabla exhaustiva que muestra el patrón de pago de cada
-//    cliente: frecuencia, montos, tendencia y scoring final.
+// 2. MATRIZ DE COBRANZA TIPO EXCEL (Historial con Totales y Ordenamiento)
+// ================================================================
+
+// Motor de Ordenamiento Clickable
+window.sortARCExcel = function(col) {
+    if (window._arcExSort === col) {
+        // Alternar dirección si es la misma columna
+        window._arcExSortDir = window._arcExSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        window._arcExSort = col;
+        // Por defecto, importes y saldos bajan de Mayor a Menor. Textos van A-Z.
+        window._arcExSortDir = (['importe', 'restante', 'pendiente', 'cubierto', 'riesgo'].includes(col)) ? 'desc' : 'asc';
+    }
+    window.renderARCTablaExcel();
+};
+
+window.renderARCTablaExcel = function() {
+    const cont = document.getElementById('reportes') ||
+                 document.getElementById('reportes-contenido') ||
+                 document.getElementById('dashboardContenido');
+    if (!cont) return;
+
+    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const pagaresSistema = StorageService.get('pagaresSistema', []);
+    const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
+
+    // Estado de filtros guardados
+    window._arcExSort = window._arcExSort || 'riesgo';
+    window._arcExSortDir = window._arcExSortDir || 'desc';
+    window._arcExDateSort = window._arcExDateSort || 'asc';
+    window._arcExGroup = window._arcExGroup || 'semana'; 
+    window._arcExClienteFilter = window._arcExClienteFilter || '';
+
+    // --- Helpers para Agrupación de Tiempo ---
+    const getMonday = (fecha) => {
+        const d = new Date(fecha);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        return new Date(d.setDate(diff));
+    };
+
+    const formatGroupKey = (fecha) => {
+        if (!fecha) return null;
+        const d = new Date(fecha);
+        if (window._arcExGroup === 'dia') return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (window._arcExGroup === 'semana') {
+            const monday = getMonday(d);
+            return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+        }
+        if (window._arcExGroup === 'mes') return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (window._arcExGroup === 'año') return `${d.getFullYear()}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    const formatGroupLabel = (key) => {
+        if (window._arcExGroup === 'dia') {
+            const [y, m, d] = key.split('-');
+            return `${parseInt(d)} ${_rc.mesLabel(key).split(' ')[0].toLowerCase()}<br>${y}`;
+        }
+        if (window._arcExGroup === 'semana') {
+            const [y, m, d] = key.split('-');
+            const monday = new Date(parseInt(y), parseInt(m)-1, parseInt(d), 12);
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            
+            const d1 = monday.getDate();
+            const m1 = _rc.mesLabel(`${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2,'0')}`).split(' ')[0].toLowerCase();
+            const d2 = sunday.getDate();
+            const m2 = _rc.mesLabel(`${sunday.getFullYear()}-${String(sunday.getMonth()+1).padStart(2,'0')}`).split(' ')[0].toLowerCase();
+            const yr = sunday.getFullYear();
+            
+            if (m1 === m2) {
+                return `del ${d1} al ${d2} ${m1}<br>${yr}`;
+            } else {
+                return `del ${d1} ${m1} al ${d2} ${m2}<br>${yr}`;
+            }
+        }
+        if (window._arcExGroup === 'mes') {
+            const [y, m] = key.split('-');
+            return `${_rc.mesLabel(key).split(' ')[0]}<br>${y}`;
+        }
+        if (window._arcExGroup === 'año') return key;
+        return key;
+    };
+
+    // 1. Procesar cuentas activas y aplicar filtro de cliente
+    let cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
+    
+    if (window._arcExClienteFilter) {
+        const q = window._arcExClienteFilter.toLowerCase();
+        cuentasActivas = cuentasActivas.filter(c => String(c.nombre || '').toLowerCase().includes(q));
+    }
+
+    cuentasActivas = cuentasActivas.map(c => {
+        const pCta = pagaresSistema.filter(p => p.folio === c.folio);
+        const sne = _rc.calcularSNE(c, pCta, hoy);
+        return { ...c, sne, pagares: pCta };
+    });
+
+    // 2. Ordenamiento Vertical Dinámico
+    const sortDir = window._arcExSortDir === 'desc' ? -1 : 1;
+    cuentasActivas.sort((a, b) => {
+        let valA, valB;
+        if (window._arcExSort === 'riesgo') {
+            const riskOrder = { 'CRÍTICO': 1, 'INCOBRABLE': 1, 'EN MORA': 2, 'MODERADO': 3, 'LEVE': 4, 'AL CORRIENTE': 5 };
+            valA = riskOrder[a.sne.nivelRiesgo] || 99;
+            valB = riskOrder[b.sne.nivelRiesgo] || 99;
+            if (valA === valB) return sortDir * (b.sne.saldoActual - a.sne.saldoActual); // Desempate por saldo
+            return sortDir * (valA - valB);
+        }
+        if (window._arcExSort === 'fecha') {
+            valA = _rc.parseFecha(a.fechaVenta || a.fechaIso || a.fecha)?.getTime() || 0;
+            valB = _rc.parseFecha(b.fechaVenta || b.fechaIso || b.fecha)?.getTime() || 0;
+            return sortDir * (valA - valB);
+        }
+        if (window._arcExSort === 'desc') {
+            valA = (a.articulos || []).map(x => x.nombre).join(', ').toLowerCase();
+            valB = (b.articulos || []).map(x => x.nombre).join(', ').toLowerCase();
+            return sortDir * valA.localeCompare(valB);
+        }
+        if (window._arcExSort === 'cliente') {
+            valA = String(a.nombre || '').toLowerCase();
+            valB = String(b.nombre || '').toLowerCase();
+            return sortDir * valA.localeCompare(valB);
+        }
+        if (window._arcExSort === 'importe') {
+            valA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
+            valB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
+            return sortDir * (valA - valB);
+        }
+        if (window._arcExSort === 'cubierto') {
+            const impA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
+            const impB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
+            valA = impA > 0 ? ((impA - a.sne.saldoActual) / impA) : 0;
+            valB = impB > 0 ? ((impB - b.sne.saldoActual) / impB) : 0;
+            return sortDir * (valA - valB);
+        }
+        if (window._arcExSort === 'pendiente') {
+            const impA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
+            const impB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
+            valA = impA > 0 ? (a.sne.saldoActual / impA) : 0;
+            valB = impB > 0 ? (b.sne.saldoActual / impB) : 0;
+            return sortDir * (valA - valB);
+        }
+        if (window._arcExSort === 'restante') {
+            return sortDir * (a.sne.saldoActual - b.sne.saldoActual);
+        }
+        return 0;
+    });
+
+    // 3. Extraer columnas únicas de Abonos Reales
+    const groupSet = new Set();
+    cuentasActivas.forEach(c => {
+        (c.abonos || []).forEach(a => {
+            if (a.cancelado || a.canceladoPorVenta || a.canceladoPorApartado) return;
+            const f = _rc.parseFecha(a.fecha || a.fechaAbono);
+            if (f) groupSet.add(formatGroupKey(f));
+        });
+    });
+    
+    let uniqueGroups = Array.from(groupSet).sort();
+    if (window._arcExDateSort === 'desc') uniqueGroups.reverse();
+
+    // 4. Variables para TOTALES GENERALES
+    let sumImporte = 0;
+    let sumRestante = 0;
+    let sumAbonosFechas = {};
+    uniqueGroups.forEach(key => sumAbonosFechas[key] = 0);
+
+    // 5. Construir Filas
+    const filasHtml = cuentasActivas.map(c => {
+        const s = c.sne;
+        
+        let bgStatus, colorText;
+        if (s.nivelRiesgo === 'AL CORRIENTE') {
+            bgStatus = '#22c55e'; colorText = '#000000'; 
+        } else if (s.nivelRiesgo === 'LEVE' || s.nivelRiesgo === 'MODERADO') {
+            bgStatus = '#facc15'; colorText = '#000000'; 
+        } else {
+            bgStatus = '#b91c1c'; colorText = '#ffffff'; 
+        }
+
+        const desc = (c.articulos || []).map(a => a.nombre).join(', ') || 'Venta General';
+        const fVenta = _rc.parseFecha(c.fechaVenta || c.fechaIso || c.fecha);
+        const fechaVentaStr = fVenta ? `${String(fVenta.getDate()).padStart(2,'0')}/${String(fVenta.getMonth()+1).padStart(2,'0')}/${String(fVenta.getFullYear()).slice(-2)}` : '-';
+
+        const importeReal = Number(c.totalMercancia || c.totalContadoOriginal || c.total || 0);
+        const saldoRestante = Number(s.saldoActual);
+        const pagadoReal = Math.max(0, importeReal - saldoRestante);
+        const pctCubierto = importeReal > 0 ? Math.round((pagadoReal / importeReal) * 100) : 0;
+        const pctPendiente = importeReal > 0 ? Math.round((saldoRestante / importeReal) * 100) : 0;
+
+        sumImporte += importeReal;
+        sumRestante += saldoRestante;
+
+        let row = `<tr style="font-size:11px; background:#ffffff; border-bottom:1px solid #e2e8f0;">
+            <td class="ex-stky ex-col-1" style="background:${bgStatus}; color:${colorText};" title="${s.nivelRiesgo}">${s.emojiRiesgo}</td>
+            <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
+            <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${desc}">${desc}</td>
+            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${c.nombre}">${c.nombre}</td>
+            <td class="ex-stky ex-col-5" style="background:#f8fafc; color:#0f172a; text-align:right;">$${importeReal.toLocaleString('en-US')}</td>
+            <td class="ex-stky ex-col-6" style="background:#dcfce7; color:#166534; text-align:center; font-weight:bold;">${pctCubierto}%</td>
+            <td class="ex-stky ex-col-7" style="background:#fee2e2; color:#991b1b; text-align:center; font-weight:bold;">${pctPendiente}%</td>
+            <td class="ex-stky ex-col-8" style="background:#0ea5e9; color:#ffffff; font-weight:bold; text-align:right;">$${saldoRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+        `;
+
+        uniqueGroups.forEach(key => {
+            const abonosGrupo = (c.abonos || []).filter(a => {
+                if (a.cancelado || a.canceladoPorVenta || a.canceladoPorApartado) return false;
+                const f = _rc.parseFecha(a.fecha || a.fechaAbono);
+                return f && formatGroupKey(f) === key;
+            });
+
+            let cellHtml = '';
+            let cellBg = '#ffffff';
+            let cellColor = '#0f172a';
+
+            if (abonosGrupo.length > 0) {
+                const totalAbonado = abonosGrupo.reduce((sum, a) => sum + parseFloat(a.monto || 0), 0);
+                if (totalAbonado > 0) {
+                    sumAbonosFechas[key] += totalAbonado; // Sumar al total general
+                    cellBg = '#dcfce7'; 
+                    cellColor = '#166534';
+                    cellHtml = '$' + totalAbonado.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2}); 
+                }
+            }
+
+            row += `<td style="padding:6px 8px; border-right:1px solid #cbd5e1; text-align:right; background:${cellBg}; color:${cellColor}; font-weight:bold;">${cellHtml}</td>`;
+        });
+
+        row += '</tr>';
+        return row;
+    }).join('');
+
+    // Totales Calculados
+    const pctTotalCubierto = sumImporte > 0 ? Math.round(((sumImporte - sumRestante)/sumImporte)*100) : 0;
+    const pctTotalPendiente = sumImporte > 0 ? Math.round((sumRestante/sumImporte)*100) : 0;
+
+    // Helper para cabeceras ordenables
+    const thSort = (col, label, cls) => {
+        const icon = window._arcExSort === col ? (window._arcExSortDir === 'asc' ? ' <span style="color:#22c55e;">▲</span>' : ' <span style="color:#ef4444;">▼</span>') : ' <span style="opacity:0.3">↕</span>';
+        return `<th class="ex-stky ${cls}" style="cursor:pointer; user-select:none; transition:0.2s;" onclick="window.sortARCExcel('${col}')" onmouseover="this.style.background='#334155'" onmouseout="this.style.background='#000000'">${label}${icon}</th>`;
+    };
+
+    const dateHeadersHtml = uniqueGroups.map(key => {
+        return `<th style="padding:6px; border-right:1px solid #475569; border-bottom:1px solid #000; background:#1e293b; color:white; min-width:85px; font-size:10px; text-align:center; vertical-align:middle;">${formatGroupLabel(key)}</th>`;
+    }).join('');
+
+    // CSS Dinámico Calculado al Milímetro
+    const cssBlocks = `
+        <style>
+            .ex-table { border-collapse: separate; border-spacing: 0; min-width: max-content; font-family: Arial, sans-serif; }
+            .ex-table th, .ex-table td { padding: 4px 8px; white-space: nowrap; }
+            
+            /* Cabecera superior congelada */
+            .ex-thead th { position: sticky; top: 0; z-index: 20; border-bottom: 2px solid #000; }
+            
+            /* Fila de Totales inferior congelada */
+            .ex-tfoot td { position: sticky; bottom: 0; z-index: 20; border-top: 2px solid #000; background: #e2e8f0; font-weight: bold; }
+            
+            /* Celdas fijas a la izquierda (Sticky Left) */
+            .ex-stky { position: sticky; z-index: 10; border-right: 1px solid #000; text-align: center; }
+            
+            /* Cruce de congelamiento: Arriba+Izquierda y Abajo+Izquierda */
+            .ex-thead th.ex-stky { z-index: 30; background: #000000; color: #ffffff; text-transform: uppercase; border-right: 1px solid #475569; font-size:10px; }
+            .ex-tfoot td.ex-stky { z-index: 30; background: #cbd5e1; }
+            
+            /* Anchos Compactados Exactos */
+            .ex-col-1 { left: 0;      width: 35px;  min-width: 35px; }
+            .ex-col-2 { left: 35px;   width: 65px;  min-width: 65px;  text-align: center; }
+            .ex-col-3 { left: 100px;  width: 140px; min-width: 140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+            .ex-col-4 { left: 240px;  width: 130px; min-width: 130px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+            .ex-col-5 { left: 370px;  width: 70px;  min-width: 70px;  text-align: right; }
+            .ex-col-6 { left: 440px;  width: 50px;  min-width: 50px;  text-align: center; }
+            .ex-col-7 { left: 490px;  width: 50px;  min-width: 50px;  text-align: center; }
+            .ex-col-8 { left: 540px;  width: 80px;  min-width: 80px;  text-align: right; border-right: 4px solid #0f172a !important; }
+            
+            /* Contenedor que permite Scroll Vertical y Horizontal */
+            .ex-wrapper {
+                width: 100%;
+                max-width: 100%;
+                overflow: auto;
+                max-height: 70vh; 
+                background: white;
+                border-radius: 8px;
+                border: 2px solid #0f172a;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            }
+            
+            /* Scrollbar personalizada */
+            .ex-wrapper::-webkit-scrollbar { height: 16px; width: 16px; }
+            .ex-wrapper::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 8px; }
+            .ex-wrapper::-webkit-scrollbar-thumb { background: #64748b; border-radius: 8px; border: 3px solid #e2e8f0; }
+            .ex-wrapper::-webkit-scrollbar-thumb:hover { background: #334155; }
+        </style>
+    `;
+
+    cont.innerHTML = `
+    ${cssBlocks}
+    <div style="font-family:system-ui,sans-serif;max-width:100%;margin:0 auto;padding:0 4px;">
+
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg,#065f46,#047857);color:white;padding:22px;border-radius:14px;margin-bottom:18px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+                <div>
+                    <h2 style="margin:0;font-size:21px;font-weight:900;">📊 Matriz de Cobranza (Abonos Recibidos)</h2>
+                    <p style="margin:5px 0 0;color:#a7f3d0;font-size:12px;">Desplázate hacia la derecha y hacia abajo libremente. Clic en las cabeceras para ordenar.</p>
+                </div>
+                <div style="display:flex;gap:10px;">
+                    <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a Tarjetas</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controles Horizontales -->
+        <div style="background:white;padding:14px;border-radius:10px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:15px;align-items:center;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#64748b;">🔍 CLIENTE:</label>
+                <input type="text" id="arcExClienteFilter" value="${window._arcExClienteFilter || ''}" onkeyup="window._arcExClienteFilter=this.value; renderARCTablaExcel()" placeholder="Buscar cliente..." style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;background:#f8fafc;width:150px;">
+            </div>
+            <div style="width:1px;height:24px;background:#e2e8f0;"></div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#64748b;">⏳ AGRUPAR POR:</label>
+                <select onchange="window._arcExGroup=this.value;renderARCTablaExcel();" style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;background:#f8fafc;">
+                    <option value="dia" ${window._arcExGroup==='dia'?'selected':''}>Día</option>
+                    <option value="semana" ${window._arcExGroup==='semana'?'selected':''}>Semana (Lun-Dom)</option>
+                    <option value="mes" ${window._arcExGroup==='mes'?'selected':''}>Mes</option>
+                    <option value="año" ${window._arcExGroup==='año'?'selected':''}>Año</option>
+                </select>
+            </div>
+            <div style="width:1px;height:24px;background:#e2e8f0;"></div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#64748b;">➡️ ORDEN TIEMPO:</label>
+                <select onchange="window._arcExDateSort=this.value;renderARCTablaExcel();" style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                    <option value="asc" ${window._arcExDateSort==='asc'?'selected':''}>Cronológico (Antiguo a Nuevo)</option>
+                    <option value="desc" ${window._arcExDateSort==='desc'?'selected':''}>Inverso (Nuevo a Antiguo)</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Contenedor con Scrollbars (Horizontal y Vertical) -->
+        <div class="ex-wrapper">
+            <table class="ex-table">
+                <thead class="ex-thead">
+                    <tr>
+                        ${thSort('riesgo', 'Est', 'ex-col-1')}
+                        ${thSort('fecha', 'Fecha', 'ex-col-2')}
+                        ${thSort('desc', 'Descripción', 'ex-col-3')}
+                        ${thSort('cliente', 'Cliente', 'ex-col-4')}
+                        ${thSort('importe', 'Importe', 'ex-col-5')}
+                        ${thSort('cubierto', '% Cub', 'ex-col-6')}
+                        ${thSort('pendiente', '% Pen', 'ex-col-7')}
+                        ${thSort('restante', 'Restante', 'ex-col-8')}
+                        ${dateHeadersHtml}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filasHtml || `<tr><td colspan="${8 + uniqueGroups.length}" style="padding:40px; text-align:center; color:#64748b;">No hay cuentas con abonos para mostrar con estos filtros.</td></tr>`}
+                </tbody>
+                <tfoot class="ex-tfoot">
+                    <tr style="font-size:12px; color:#0f172a; box-shadow: 0 -2px 10px rgba(0,0,0,0.15);">
+                        <td class="ex-stky ex-col-1" style="border-bottom:none;"></td>
+                        <td class="ex-stky ex-col-2" style="border-bottom:none;"></td>
+                        <td class="ex-stky ex-col-3" style="border-bottom:none; text-align:right;">TOTALES:</td>
+                        <td class="ex-stky ex-col-4" style="border-bottom:none;"></td>
+                        <td class="ex-stky ex-col-5" style="border-bottom:none; text-align:right;">$${sumImporte.toLocaleString('en-US')}</td>
+                        <td class="ex-stky ex-col-6" style="border-bottom:none; text-align:center; color:#166534;">${pctTotalCubierto}%</td>
+                        <td class="ex-stky ex-col-7" style="border-bottom:none; text-align:center; color:#991b1b;">${pctTotalPendiente}%</td>
+                        <td class="ex-stky ex-col-8" style="border-bottom:none; text-align:right; color:#b91c1c;">$${sumRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+                        ${uniqueGroups.map(key => {
+                            const t = sumAbonosFechas[key];
+                            return `<td style="padding:6px 8px; border-right:1px solid #cbd5e1; border-bottom:none; text-align:right; color:#166534; background:#dcfce7;">${t > 0 ? '$'+t.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2}) : ''}</td>`;
+                        }).join('')}
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+    </div>`;
+
+    // Restaurar foco al input de búsqueda para que no se pierda mientras escribes
+    setTimeout(() => {
+        const input = document.getElementById('arcExClienteFilter');
+        if (input && document.activeElement !== input) {
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        }
+    }, 0);
+};
+
+// ================================================================
+// 3. SCORECARD DE COMPORTAMIENTO DE PAGO
 // ================================================================
 window.renderComportamiento = function() {
     const cont = document.getElementById('reportes') ||
@@ -373,7 +772,6 @@ window.renderComportamiento = function() {
             const pagaresCuenta = pagaresSistema.filter(p => p.folio === c.folio);
             const sne = _rc.calcularSNE(c, pagaresCuenta, hoy);
 
-            // Calcular tendencia de abono (promedio últimos 60d vs. 60d anteriores)
             const abonos = (c.abonos || []).map(a => ({
                 monto: parseFloat(a.monto || 0),
                 fecha: _rc.parseFecha(a.fecha || a.fechaAbono)
@@ -394,7 +792,6 @@ window.renderComportamiento = function() {
                 tendencia = 'nuevo';
             }
 
-            // Frecuencia media entre abonos
             let diasEntreAbonos = null;
             if (abonos.length >= 2) {
                 abonos.sort((a, b) => a.fecha - b.fecha);
@@ -411,14 +808,12 @@ window.renderComportamiento = function() {
             return { ...c, sne, tendencia, diasEntreAbonos, abonoMax, abonoMin, recientes, anteriores };
         });
 
-    // Filtrar
     let lista = cuentasSNE;
     if (filtro === 'alCorriente') lista = lista.filter(c => c.sne.excedente >= 0);
     if (filtro === 'enMora')      lista = lista.filter(c => c.sne.nivelRiesgo === 'EN MORA' || c.sne.nivelRiesgo === 'CRÍTICO');
     if (filtro === 'sinAbono60')  lista = lista.filter(c => c.sne.diasSinPagar > 60);
     if (filtro === 'subiendo')    lista = lista.filter(c => c.tendencia === 'subiendo');
 
-    // Ordenar
     if (ordenar === 'excedente') lista.sort((a, b) => a.sne.excedente - b.sne.excedente);
     if (ordenar === 'saldo')     lista.sort((a, b) => b.sne.saldoActual - a.sne.saldoActual);
     if (ordenar === 'diasSin')   lista.sort((a, b) => b.sne.diasSinPagar - a.sne.diasSinPagar);
@@ -488,7 +883,6 @@ window.renderComportamiento = function() {
             </div>
         </div>
 
-        <!-- Filtros + Orden -->
         <div style="background:white;padding:14px;border-radius:10px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
             <div>
                 <label style="font-size:11px;font-weight:bold;color:#64748b;">FILTRAR:</label>
@@ -512,7 +906,6 @@ window.renderComportamiento = function() {
             <div style="margin-left:auto;font-size:12px;color:#64748b;">${lista.length} clientes mostrados</div>
         </div>
 
-        <!-- Tabla -->
         <div style="background:white;border-radius:10px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;min-width:1200px;">
@@ -539,7 +932,6 @@ window.renderComportamiento = function() {
             </div>
         </div>
 
-        <!-- Nota explicativa -->
         <div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:14px;border-radius:8px;margin-top:18px;font-size:12px;color:#1e40af;line-height:1.6;">
             <b>📌 ¿Cómo leer el SNE (Saldo Neto Esperado)?</b><br>
             Compara el <b>total acumulado pagado</b> contra la <b>suma de pagarés cuya fecha ya venció</b> (lo que "debía" haber pagado hasta hoy).
@@ -550,9 +942,7 @@ window.renderComportamiento = function() {
 };
 
 // ================================================================
-// 3. REPORTE DE COBRANZA MENSUAL
-//    Capital nuevo colocado en crédito vs. efectivo recuperado
-//    por mes. La métrica más importante para un negocio 95% crédito.
+// 4. REPORTE DE COBRANZA MENSUAL
 // ================================================================
 window.renderCobranzaMensual = function() {
     const cont = document.getElementById('reportes') ||
@@ -563,7 +953,6 @@ window.renderCobranzaMensual = function() {
     const ventas  = StorageService.get('ventasRegistradas', []);
     const cxc     = StorageService.get('cuentasPorCobrar', []);
 
-    // ── Recolectar todos los abonos de todas las cuentas ──────────
     const todosAbonos = [];
     cxc.forEach(c => {
         (c.abonos || []).forEach(a => {
@@ -572,7 +961,6 @@ window.renderCobranzaMensual = function() {
         });
     });
 
-    // ── Identificar meses con actividad ───────────────────────────
     const mesesSet = new Set();
     ventas.forEach(v => {
         const k = _rc.mesKey(v.fechaVenta || v.fechaIso);
@@ -590,19 +978,15 @@ window.renderCobranzaMensual = function() {
         return;
     }
 
-    // ── Calcular por mes ──────────────────────────────────────────
     const datos = meses.map(mes => {
-        // Capital nuevo colocado en crédito
         const capitalNuevo = ventas
             .filter(v => _rc.mesKey(v.fechaVenta || v.fechaIso) === mes && v.metodoPago !== 'contado')
             .reduce((s, v) => s + parseFloat(v.total || v.totalVenta || 0), 0);
 
-        // Enganches cobrados ese mes (primer abono o dato de enganche en la venta)
         const enganches = ventas
             .filter(v => _rc.mesKey(v.fechaVenta || v.fechaIso) === mes && v.metodoPago !== 'contado')
             .reduce((s, v) => s + parseFloat(v.enganche || 0), 0);
 
-        // Cobranza real (abonos aplicados ese mes)
         const cobranzaReal = todosAbonos
             .filter(a => _rc.mesKey(a.fecha) === mes)
             .reduce((s, a) => s + a.monto, 0);
@@ -623,7 +1007,6 @@ window.renderCobranzaMensual = function() {
     const totalCobranza = datos.reduce((s, d) => s + d.cobranzaReal, 0);
     const tasaGlobal = totalColocado > 0 ? totalCobranza / totalColocado * 100 : 0;
 
-    // ── Gráfica de barras (SVG inline) ────────────────────────────
     const barW = 30, gap = 10, groupW = barW * 2 + gap + 20;
     const chartW = datos.length * groupW + 60;
     const chartH = 160;
@@ -641,7 +1024,6 @@ window.renderCobranzaMensual = function() {
         `;
     }).join('');
 
-    // ── Filas de tabla ────────────────────────────────────────────
     const filas = datos.map(d => {
         const tasa = d.capitalNuevo > 0 ? d.cobranzaReal / d.capitalNuevo * 100 : 0;
         const colorTasa = tasa >= 80 ? '#16a34a' : tasa >= 50 ? '#d97706' : '#dc2626';
@@ -677,7 +1059,6 @@ window.renderCobranzaMensual = function() {
             </div>
         </div>
 
-        <!-- KPIs globales -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:18px;">
             <div style="background:white;padding:16px;border-radius:10px;border-left:5px solid #3b82f6;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
                 <div style="font-size:11px;color:#64748b;font-weight:bold;">CAPITAL COLOCADO (TOTAL)</div>
@@ -697,7 +1078,6 @@ window.renderCobranzaMensual = function() {
             </div>
         </div>
 
-        <!-- Gráfica -->
         <div style="background:white;padding:20px;border-radius:12px;margin-bottom:18px;box-shadow:0 2px 6px rgba(0,0,0,0.05);overflow-x:auto;">
             <div style="display:flex;gap:20px;margin-bottom:12px;font-size:12px;">
                 <span><span style="display:inline-block;width:12px;height:12px;background:#3b82f6;border-radius:2px;margin-right:5px;"></span>Capital Colocado</span>
@@ -709,7 +1089,6 @@ window.renderCobranzaMensual = function() {
             </svg>
         </div>
 
-        <!-- Tabla detalle -->
         <div style="background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;min-width:900px;">
@@ -745,9 +1124,7 @@ window.renderCobranzaMensual = function() {
 };
 
 // ================================================================
-// 4. REPORTE DE CONCENTRACIÓN DE CARTERA
-//    ¿Cuánto del riesgo está en pocos clientes?
-//    Identifica dependencias críticas y calcula el índice HHI.
+// 5. REPORTE DE CONCENTRACIÓN DE CARTERA
 // ================================================================
 window.renderConcentracion = function() {
     const cont = document.getElementById('reportes') ||
@@ -777,7 +1154,6 @@ window.renderConcentracion = function() {
     const top10Pct = totalCartera > 0 ? top10Total / totalCartera * 100 : 0;
     const top3Pct = activas.slice(0, 3).reduce((s, c) => s + c.saldoActual, 0) / totalCartera * 100;
 
-    // Índice Herfindahl-Hirschman (HHI) — mide concentración
     const hhi = activas.reduce((s, c) => {
         const share = c.saldoActual / totalCartera * 100;
         return s + share * share;
@@ -785,7 +1161,6 @@ window.renderConcentracion = function() {
     const hhiLabel = hhi > 2500 ? '🔴 Alta Concentración' : hhi > 1500 ? '🟠 Concentración Media' : '🟢 Diversificada';
     const hhiColor = hhi > 2500 ? '#dc2626' : hhi > 1500 ? '#d97706' : '#16a34a';
 
-    // Pareto visual (acumulado)
     let acum = 0;
     const filas = activas.slice(0, 20).map((c, i) => {
         const share = totalCartera > 0 ? c.saldoActual / totalCartera * 100 : 0;
@@ -869,17 +1244,14 @@ window.renderConcentracion = function() {
                 </table>
             </div>
         </div>
-
-        <div style="background:#f0fdf4;border-left:4px solid #16a34a;padding:14px;border-radius:8px;margin-top:16px;font-size:12px;color:#14532d;line-height:1.6;">
-            <b>📌 ¿Qué es el índice HHI?</b> Un HHI &lt; 1500 indica cartera <b>bien diversificada</b>. Entre 1500 y 2500 es <b>concentración media</b>. Sobre 2500 es <b>alta concentración</b> — si tus top 3 clientes no pagan, tu flujo de efectivo lo resiente de inmediato.
-        </div>
     </div>`;
 };
 
 // ── Exponer al scope global ────────────────────────────────────
+window.renderARCTablaExcel = window.renderARCTablaExcel;
 window.renderConcentracion = window.renderConcentracion;
 window.renderCobranzaMensual = window.renderCobranzaMensual;
 window.renderComportamiento = window.renderComportamiento;
 window.renderARC_v3 = window.renderARC_v3;
 
-console.log('✅ Módulo reportes-credito.js cargado — ARC v3, Comportamiento, Cobranza Mensual, Concentración.');
+console.log('✅ Módulo reportes-credito.js cargado — ARC v3, Matriz Excel, Comportamiento, Cobranza Mensual, Concentración.');

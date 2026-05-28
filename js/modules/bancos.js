@@ -805,14 +805,21 @@ function renderFlujoCaja() {
     if (movimientos.length === 0) {
         html += `<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">Sin movimientos registrados.</td></tr>`;
     } else {
-        [...movimientos].reverse().forEach(m => {
+        // 🚀 ORDENAMIENTO ESTRICTO POR FECHA REAL
+        const movsOrdenados = [...movimientos].sort((a, b) => {
+            const dateA = new Date(a.fecha || 0);
+            const dateB = new Date(b.fecha || 0);
+            return dateB - dateA;
+        });
+
+        movsOrdenados.forEach(m => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
             const colorTipo = esIngreso ? "#059669" : "#dc2626";
             const labelTipo = esIngreso ? "⬆️ Ingreso" : "⬇️ Egreso";
             const etq = _etiquetaCuenta(m);
             html += `
                 <tr>
-                    <td>${m.fecha || ""}</td>
+                    <td>${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
                     <td>${m.folio || "—"}</td>
                     <td>${m.concepto || ""}</td>
                     <td>${m.referencia || "—"}</td>
@@ -959,8 +966,12 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     });
     leftPanelHTML += `</div>`;
 
-    // PANEL DERECHO (Filtros de movimientos y Rango de Fechas)
-    let movimientosFiltrados = movimientos.slice().reverse();
+    // 🚀 ORDENAMIENTO ESTRICTO POR FECHA (MÁS RECIENTE A MÁS ANTIGUO)
+    let movimientosFiltrados = movimientos.slice().sort((a, b) => {
+        const dateA = new Date(a.fecha || 0);
+        const dateB = new Date(b.fecha || 0);
+        return dateB - dateA;
+    });
     
     // 1. Filtro por Cuenta
     if (window._filtroCuentaLiquidez !== 'Todos') {
@@ -1004,7 +1015,6 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (movimientosFiltrados.length === 0) {
         rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No hay movimientos en este periodo o cuenta.</td></tr>`;
     } else {
-        // Si hay filtros de fecha, mostramos todos los resultados. Si no hay filtros, limitamos a 50 para no saturar.
         const limite = (window._filtroLiquidezDesde || window._filtroLiquidezHasta) ? movimientosFiltrados.length : 50;
         
         movimientosFiltrados.slice(0, limite).forEach(m => {
@@ -1013,16 +1023,13 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             const icon = esIngreso ? "⬆️" : "⬇️";
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
             
-            // 🧹 LIMPIEZA INTELIGENTE DE CONCEPTO SATURADO
             let conceptoLimpio = m.concepto || "";
             if (conceptoLimpio.startsWith("Pago a proveedor")) {
-                conceptoLimpio = conceptoLimpio.split(" - ")[0]; // Quita la lista de productos
+                conceptoLimpio = conceptoLimpio.split(" - ")[0]; 
             } else if (conceptoLimpio.startsWith("Compra: ") && conceptoLimpio.includes("(Prov:")) {
                 const provMatch = conceptoLimpio.match(/\(Prov:\s*(.*?)\)/);
                 if (provMatch) conceptoLimpio = `Compra a proveedor ${provMatch[1]}`;
             }
-            
-            // Acortador extra por seguridad (si sigue midiendo más de 65 caracteres)
             if (conceptoLimpio.length > 65) conceptoLimpio = conceptoLimpio.substring(0, 65) + '...';
 
             rightPanelHTML += `
