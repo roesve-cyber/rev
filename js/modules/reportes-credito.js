@@ -10,25 +10,35 @@
 // ================================================================
 
 // ─── Helpers compartidos ────────────────────────────────────────
+// ─── Helpers compartidos ────────────────────────────────────────
 const _rc = {
     fmt: v => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0),
     pct: v => Number(v).toFixed(1) + '%',
 
     parseFecha(val) {
-        if (!val) return null;
-        if (typeof val === 'number') return new Date(val);
-        const s = String(val).trim();
-        if (s.includes('/')) {
-            const [d, m, y] = s.split('/');
-            return new Date(parseInt(y), parseInt(m) - 1, parseInt(d), 12);
+        if (!val || val === 'null' || val === 'undefined') return null;
+        if (typeof val === 'number') {
+            const d = new Date(val);
+            return isNaN(d.getTime()) ? null : d;
         }
-        const base = s.length > 10 ? s.split('T')[0] : s;
-        const [y, m, d] = base.split('-');
-        return new Date(parseInt(y), parseInt(m) - 1, parseInt(d), 12);
+        const s = String(val).trim();
+        let d;
+        if (s.includes('/')) {
+            const [day, m, y] = s.split('/');
+            d = new Date(parseInt(y), parseInt(m) - 1, parseInt(day), 12);
+        } else {
+            const base = s.length > 10 ? s.split('T')[0] : s;
+            const parts = base.split('-');
+            if (parts.length >= 3) {
+                d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12);
+            } else {
+                d = new Date(val); // Fallback nativo
+            }
+        }
+        return (d && !isNaN(d.getTime())) ? d : null;
     },
 
     diasDesde(fecha) {
-        if (!fecha) return 9999;
         const d = _rc.parseFecha(fecha);
         if (!d) return 9999;
         return Math.floor((Date.now() - d.getTime()) / 86400000);
@@ -41,9 +51,14 @@ const _rc = {
     },
 
     mesLabel(key) {
+        // Blindaje contra llaves corruptas (NaN) para evitar el colapso del render
+        if (!key || key.includes('NaN')) return 'S/F';
         const [y, m] = key.split('-');
+        const d = new Date(+y, +m - 1, 1);
+        if (isNaN(d.getTime())) return 'S/F';
+        
         return new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' })
-            .format(new Date(+y, +m - 1, 1)).toUpperCase();
+            .format(d).toUpperCase();
     },
 
     badge(texto, bg, col) {
@@ -56,6 +71,9 @@ const _rc = {
             <div style="width:${w}%;height:100%;background:${color};border-radius:3px;transition:width .4s;"></div>
         </div>`;
     },
+
+    // ──────────────────────────────────────────────────────────────
+    // MOTOR CENTRAL SNE (Saldo Neto Esperado)
 
     // ──────────────────────────────────────────────────────────────
     // MOTOR CENTRAL SNE (Saldo Neto Esperado)
