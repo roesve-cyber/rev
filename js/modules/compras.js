@@ -197,7 +197,8 @@ function _consigAnticiposLegado(c) {
 
 function _consigEsAnticipoAplicado(abono) {
     const txt = `${abono?.cuenta || ''} ${abono?.nota || ''} ${abono?.concepto || ''}`.toUpperCase();
-    return txt.includes('ANTICIPO CONSIGNACION') || txt.includes('ANTICIPO CONSIGNACI');
+    // Atrapa cualquier variación para evitar descuadres entre Anticipos y Pagos Reales
+    return txt.includes('ANTICIPO') || txt.includes('SALDO A FAVOR');
 }
 
 function _consigCuentasRelacionadas(consignaciones) {
@@ -532,20 +533,42 @@ function eliminarProveedor(id) {
 window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     const cajas = soloDebito ? [] : StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
     
-    // LA SOLUCIÓN: Leemos directamente de la fuente maestra (tarjetasConfig) 
-    // que es la que sobrevive a los respaldos de JSON.
+    // 1. LEER FUENTE MAESTRA (Esta nunca se borra ni se desfasa con los respaldos)
     const tarjetas = StorageService.get('tarjetasConfig', []);
-    
-    // Mapeamos las tarjetas de débito. 
-    // IMPORTANTE: el ID debe ser el nombre del banco (t.banco) para que 
-    // las matemáticas del dashboard de Liquidez cuadren exactas.
-    const debito = tarjetas.filter(t => t.tipo === "debito").map(t => ({
-        id: t.banco, 
-        nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`
-    }));
+    const debito = tarjetas.filter(t => t.tipo === "debito");
 
-    const todas = [...cajas, ...debito];
-    const opts = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    // 2. AUTO-REPARACIÓN DE CACHÉ
+    // Si al restaurar el respaldo se perdió la memoria de "cuentas-bancarias",
+    // la reconstruimos silenciosamente para que no te vuelva a lanzar el error "no existe".
+    let bancarias = StorageService.get("cuentas-bancarias", []);
+    if (bancarias.length < debito.length) {
+        const reconstruccion = debito.map((t, idx) => ({
+            id: `debito_${idx}_${t.banco}`,
+            nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`,
+            tipo: t.tipo,
+            banco: t.banco,
+            ultimos4: t.ultimos4,
+            saldoInicial: t.saldoInicial || 0,
+            saldo: 0
+        }));
+        
+        // Rescatamos los saldos de las que sí hayan sobrevivido
+        bancarias.forEach(cb => {
+            const match = reconstruccion.find(r => r.banco === cb.banco);
+            if (match) match.saldo = cb.saldo || 0;
+        });
+        
+        StorageService.set("cuentas-bancarias", reconstruccion);
+        bancarias = reconstruccion; // Usamos la lista ya reparada
+    }
+
+    // 3. ARMAR EL SELECTOR
+    const todas = [...cajas, ...bancarias];
+    
+    // IMPORTANTE: Extraemos directamente el nombre puro del banco (c.banco) 
+    // para que haga match perfecto con las reglas de egreso.
+    const opts = todas.map(c => `<option value="${c.banco || c.id}">${c.nombre}</option>`).join('');
+    
     return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
 };
 
@@ -1438,7 +1461,11 @@ window.verDetalleCompra = function(idCuenta) {
                     <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="padding:10px 22px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Cerrar</button>
                     <button onclick="imprimirEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Imprimir / PDF</button>
                     <button id="btn-img-estado-proveedor-${String(c.id).replace(/[^a-zA-Z0-9_-]/g, '-')}" onclick="descargarImagenEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Guardar imagen</button>
-                    ${saldoPendiente > 0 ? `<button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove(); registrarAbonoProveedor('${c.id}');" style="padding:10px 22px;background:#1e3a8a;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💵 Registrar Abono</button>` : ''}
+                    ${saldoPendiente > 0 ? (
+                        c.origenConsignacion || String(c.folioOrigen).startsWith('RCON-')
+                        ? `<button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove(); abrirModalPagoConsignacion('${c.id}');" style="padding:10px 22px;background:#be123c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💸 Pagar Venta Consignación</button>`
+                        : `<button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove(); registrarAbonoProveedor('${c.id}');" style="padding:10px 22px;background:#1e3a8a;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💵 Registrar Abono</button>`
+                    ) : ''}
                 </div>
             </div>
         </div>`;
@@ -3812,9 +3839,10 @@ function renderCuentasPorPagar() {
                 <td>${dinero(c.total)}</td>
                 <td style="color:red; font-weight:bold;">${dinero(c.saldoPendiente)}</td>
                 <td>
-                    <button onclick="registrarAbonoProveedor('${c.id}')" style="background:#2c3e50; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">
-                        💵 Abonar
-                    </button>
+                    ${c.origenConsignacion || String(c.folioOrigen).startsWith('RCON-')
+                        ? `<button onclick="abrirModalPagoConsignacion('${c.id}')" style="background:#be123c; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">💸 Pagar Venta</button>`
+                        : `<button onclick="registrarAbonoProveedor('${c.id}')" style="background:#2c3e50; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">💵 Abonar</button>`
+                    }
                 </td>
             </tr>`;
     });
@@ -4524,16 +4552,31 @@ function _consigResumenKPIs({ compraOriginal = 0, pagadoPorVentas = 0, anticipos
 }
 
 function _consigProductoRows(folio) {
-    return folio.consignaciones.map(c => `
+    // 🛡️ Leer directo de la fuente maestra para evadir cualquier fallo de agrupacion
+    const todasCxp = StorageService.get("cuentasPorPagar", []); 
+
+    return folio.consignaciones.map(c => {
+        const cxpVinculada = todasCxp.find(cx => String(cx.consignacionId) === String(c.id) && Number(cx.saldoPendiente) > 0.01);
+        
+        let btnPago = '';
+        if (cxpVinculada) {
+            btnPago = `<button onclick="abrirModalPagoConsignacion('${cxpVinculada.id}')" style="margin-top:6px; width:100%; padding:8px 12px;background:#be123c;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">💸 Pagar Deuda</button>`;
+        }
+
+        return `
         <tr style="border-bottom:1px solid #e2e8f0;">
             <td style="padding:10px;">${_comprasEscHTML(c.fecha || '-')}</td>
             <td style="padding:10px;"><strong>${_comprasEscHTML(c.producto || '-')}</strong><br><small style="color:#64748b;">${_comprasEscHTML(c.color || 'General')} | ${_comprasEscHTML(c.ubicacion || 'General')}</small></td>
             <td style="padding:10px;text-align:center;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)}</td>
             <td style="padding:10px;text-align:right;">${dinero(c.costoUnitario)}</td>
             <td style="padding:10px;text-align:right;"><strong>${dinero(_consigImporte(c))}</strong><br><small style="color:#64748b;">Pendiente: ${dinero(Number(c.cantidadPendiente || 0) * Number(c.costoUnitario || 0))}</small></td>
-            <td style="padding:10px;text-align:center;"><button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="padding:8px 12px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;">Reportar venta</button></td>
+            <td style="padding:10px;text-align:center;vertical-align:middle;">
+                ${Number(c.cantidadPendiente) > 0 ? `<button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="width:100%; padding:8px 12px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Reportar venta</button>` : ''}
+                ${btnPago}
+            </td>
         </tr>
-    `).join('');
+        `;
+    }).join('');
 }
 
 window.seleccionarProveedorConsignacion = function(proveedorKey) {
@@ -4802,6 +4845,12 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
     const grupo = scope === 'proveedor' ? resumen.grupos.find(g => g.key === key) : (folio ? resumen.grupos.find(g => g.key === folio.proveedorKey) : null);
 
     const base = folio || grupo || {
+        compraOriginal: resumen.grupos.reduce((s, g) => s + g.compraOriginal, 0),
+        vendidoReportado: resumen.grupos.reduce((s, g) => s + g.vendidoReportado, 0),
+        pagadoPorVentas: resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0),
+        anticiposTotal: resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0),
+        anticiposAplicados: 0,
+        saldoNeto: resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0),
         folios: resumen.folios,
         proveedor: 'Todos los Proveedores',
         folioOrigen: 'Global'
@@ -4820,42 +4869,13 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
 
     const foliosEstado = folio ? [folio] : (grupo ? grupo.folios : resumen.folios);
     
-    // 🧮 AUDITORÍA DIRECTA INTERNA: Recalcular métricas en tiempo real de forma limpia
-    // 🧮 CÁLCULO ESTRICTO Y AISLADO DE KPIs
-    let kpiOriginal = 0;
-    let kpiVendido = 0;
-    let kpiAnticipos = 0;
-    let kpiPagadoVentas = 0;
-
-    foliosEstado.forEach(f => {
-        // 1. Compra y Ventas exactas
-        f.consignaciones.forEach(c => {
-            kpiOriginal += (Number(c.cantidadTotal || 0) * Number(c.costoUnitario || 0));
-            kpiVendido += (Number(c.cantidadVendida || 0) * Number(c.costoUnitario || 0));
-        });
-        
-        // 2. Anticipos Globales Resguardados
-        f.anticipos.forEach(a => {
-            kpiAnticipos += Number(a.monto || 0);
-        });
-
-        // 3. Pagos a ventas (Filtrando ESTRICTAMENTE solo deudas de esta consignación)
-        f.cuentasCxp.forEach(cx => {
-            // Solo procesamos la CxP si su ID de consignación coincide con los artículos de este folio
-            const perteneceAFolio = f.consignaciones.some(c => c.id === cx.consignacionId);
-            if (perteneceAFolio) {
-                const abonos = Array.isArray(cx.abonos) ? cx.abonos : [];
-                abonos.forEach(ab => {
-                    // Evitar contar el anticipo como un pago en efectivo
-                    if (ab.cuenta !== 'Anticipo' && ab.cuenta !== 'Anticipo consignacion') {
-                        kpiPagadoVentas += Number(ab.monto || 0);
-                    }
-                });
-            }
-        });
-    });
-
-    let kpiSaldoNeto = Math.max(0, kpiOriginal - kpiPagadoVentas - kpiAnticipos);
+    // 🚀 LA CURA DEFINITIVA AL DESCUADRE: 
+    // Leer los valores oficiales del sistema, sin inventar cálculos paralelos.
+    const kpiOriginal = base.compraOriginal || 0;
+    const kpiVendido = base.vendidoReportado || 0;
+    const kpiPagadoVentas = base.pagadoPorVentas || 0;
+    const kpiAnticipos = Number(base.anticiposTotal || 0) + Number(base.anticiposAplicados || 0);
+    const kpiSaldoNeto = base.saldoNeto || 0;
 
     const filas = foliosEstado.map(f => {
         const itemsHtml = f.consignaciones.map(c => `
@@ -4884,18 +4904,13 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             </tr>
         `).join('');
 
-        // 📋 FILA SANEADA: Mapeo exacto de 6 celdas simétricas sin desbordamiento ni saltos
         const cxpHtml = f.cuentasCxp.map(cxp => {
-            // Filtrar abonos reales descartando aplicaciones cruzadas de saldos generales
             const pagosEfectivosVenta = _comprasAsegurarArray(cxp.abonos || [])
-                .filter(a => a.cuenta !== 'Anticipo' && a.cuenta !== 'Anticipo consignacion')
+                .filter(a => !_consigEsAnticipoAplicado(a))
                 .reduce((s, a) => s + Number(a.monto || 0), 0);
                 
-            // Consistencia matemática absoluta forzada por renglón
-            // Consistencia matemática absoluta forzada por renglón
             const saldoFijoRenglon = Math.max(0, Number(cxp.total || 0) - pagosEfectivosVenta);
             
-            // Ya no hay botón, solo la etiqueta visual
             const controlPagoHtml = saldoFijoRenglon > 0.01 
                 ? `<br><span style="color:#b91c1c; font-weight:bold; font-size:11px;">⚠️ Pendiente de Pago</span>`
                 : '<br><span style="color:#166534; font-weight:bold; font-size:11px;">✔️ Liquidada al 100%</span>';
@@ -5323,73 +5338,119 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
     ventanaNueva.document.close();
 };
 
-window.pagarLiquidacionConsignacion = function(cxpId) {
+window.abrirModalPagoConsignacion = function(cxpId) {
+    let cxps = StorageService.get("cuentasPorPagar", []) || [];
+    const cxpItem = cxps.find(c => String(c.id) === String(cxpId));
+    if (!cxpItem) return alert("No se localizó la liquidación.");
+
+    const saldo = Number(cxpItem.saldoPendiente ?? cxpItem.saldo ?? 0);
+    if (saldo <= 0) return alert("Esta liquidación ya fue completada.");
+
+    // Usamos el selector universal ya reparado
+    const selectorCuentasHtml = window._buildSelectorCuentas('cuentaPagoConsig', false);
+
+    const modalHtml = `
+    <div id="modalPagoConsig" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); backdrop-filter:blur(3px); display:flex; justify-content:center; align-items:center; z-index:100000;">
+        <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:550px; max-height:90vh; overflow-y:auto; font-family:Arial,sans-serif; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+            <h2 style="margin-top:0; color:#0f766e;">💵 Pagar Venta de Consignación</h2>
+            
+            <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div><small style="color:#718096;">Producto / Referencia</small><br><strong>${cxpItem.producto || '-'}</strong></div>
+                    <div><small style="color:#718096;">Saldo Exigible</small><br><strong style="color:#e74c3c; font-size:20px;">${dinero(saldo)}</strong></div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold; display:block; margin-bottom:8px;">Monto del pago ($):</label>
+                <input type="number" id="montoPagoConsig" value="${saldo}" max="${saldo}" step="0.01" style="width:100%; padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; box-sizing:border-box;">
+            </div>
+            
+            <div style="margin-bottom:24px;">
+                <label style="font-weight:bold; display:block; margin-bottom:8px;">💳 ¿De dónde sale el dinero?</label>
+                ${selectorCuentasHtml}
+            </div>
+            
+            <div style="display:flex; gap:10px;">
+                <button onclick="window.ejecutarPagoConsig('${cxpId}')" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">✅ Registrar Pago</button>
+                <button onclick="document.getElementById('modalPagoConsig').remove()" style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.ejecutarPagoConsig = function(cxpId) {
+    const monto = parseFloat(document.getElementById('montoPagoConsig').value);
+    const selector = document.getElementById('cuentaPagoConsig');
+    const cuentaId = selector.value;
+    const cuentaNombreCompleto = selector.options[selector.selectedIndex].text;
+    
+    // Limpiar emojis para guardar texto limpio
+    const cuentaNombreLimpio = cuentaNombreCompleto.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').trim();
+
     let cxps = StorageService.get("cuentasPorPagar", []) || [];
     const idx = cxps.findIndex(c => String(c.id) === String(cxpId));
-    if (idx === -1) return alert("No se localizó el registro de la liquidación.");
-    
+    if (idx === -1) return;
     const cxpItem = cxps[idx];
     const saldoPendiente = Number(cxpItem.saldoPendiente ?? cxpItem.saldo ?? 0);
-    
-    if (saldoPendiente <= 0) return alert("Esta liquidación ya se encuentra totalmente liquidada.");
-    
-    const montoAPagar = parseFloat(prompt(`💸 SALDO EXIGIBLE POR ESTA VENTA: ${dinero(saldoPendiente)}\n\n¿Cuánto vas a pagarle al proveedor en este momento?`, saldoPendiente));
-    if (isNaN(montoAPagar) || montoAPagar <= 0 || montoAPagar > saldoPendiente) {
-        return alert("❌ Monto inválido o excede el saldo pendiente.");
-    }
-    
-    const cuentaOrigen = prompt("🏦 ¿De qué cuenta bancaria o caja saldrá el dinero?", "EFECTIVO");
-    if (!cuentaOrigen) return alert("❌ Operación cancelada. Se requiere la cuenta de origen para contabilidad.");
-    
-    // 1. Inyectar egreso real en movimientos de caja para el Cash Flow del sistema
-    let movimientos = StorageService.get("movimientosCaja", []) || [];
-    movimientos.push({
-        id: Date.now(),
-        folio: cxpItem.folioOrigen,
-        fecha: typeof window.obtenerHoyInputMX === 'function' ? window.obtenerHoyInputMX() : new Date().toISOString().slice(0, 10),
-        tipo: "egreso",
-        monto: montoAPagar,
-        concepto: `[Pago Consignación] - ${cxpItem.producto}`,
-        referencia: cxpItem.folioOrigen,
-        cuenta: cuentaOrigen.toUpperCase().trim()
+
+    if (isNaN(monto) || monto <= 0 || monto > saldoPendiente + 0.01) return alert("❌ Monto inválido o excede la deuda.");
+
+    // INYECCIÓN NATIVA SEGURA
+    const egresoOk = window._egresarCuenta({
+        monto: monto,
+        cuentaId: cuentaId, 
+        etiqueta: cuentaNombreLimpio,
+        concepto: `[Pago Consig] - ${cxpItem.producto}`,
+        referencia: cxpItem.folioOrigen || `PCON-${Date.now()}`,
+        idOperacion: `PAGO-CONSIG-${Date.now()}`,
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
     });
-    StorageService.set("movimientosCaja", movimientos);
-    
-    // 2. Actualizar el saldo de la deuda e insertar el abono histórico
+
+    if (egresoOk === false) return; 
+
+    // APLICAR ABONO EN LA CUENTA POR PAGAR
+    const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     if (!cxpItem.abonos) cxpItem.abonos = [];
     cxpItem.abonos.push({
         id: Date.now(),
-        fecha: new Date().toISOString(),
-        monto: montoAPagar,
-        cuenta: cuentaOrigen.toUpperCase().trim(),
-        nota: "Liquidación parcial/total de mercancía vendida"
+        fecha: fechaIso,
+        monto: monto,
+        cuenta: cuentaNombreLimpio,
+        cuentaId: cuentaId,
+        nota: "Liquidación ejecutada desde CxP"
     });
-    
-    cxpItem.saldoPendiente = Math.max(0, saldoPendiente - montoAPagar);
+
+    cxpItem.saldoPendiente = Math.max(0, saldoPendiente - monto);
     cxpItem.saldo = cxpItem.saldoPendiente;
-    
+
     if (cxpItem.saldoPendiente <= 0.01) {
         cxpItem.estatus = "Liquidado";
         cxpItem.estado = "Liquidado";
         cxpItem.liquidado = true;
         cxpItem.pagado = true;
     }
-    
     StorageService.set("cuentasPorPagar", cxps);
-    
-    // 3. Sincronizar el descuento del histórico en el inventario activo
+
+    // DESCONTAR DEL HISTÓRICO DE CONSIGNACIONES ACTIVAS
     let consigArr = StorageService.get("consignacionesActivas", []) || [];
     const cIdx = consigArr.findIndex(x => String(x.id) === String(cxpItem.consignacionId));
     if (cIdx !== -1) {
-        consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - montoAPagar);
+        consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - monto);
         StorageService.set("consignacionesActivas", consigArr);
     }
-    
-    alert(`✅ Pago aplicado con éxito por ${dinero(montoAPagar)}. Salida de efectivo registrada.`);
-    
-    // Refrescar las vistas abiertas de inmediato
-    if (typeof abrirEstadoCuentaConsignaciones === 'function') abrirEstadoCuentaConsignaciones();
-    if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+
+    document.getElementById('modalPagoConsig').remove();
+    alert(`✅ Pago aplicado exitosamente por ${dinero(monto)} desde ${cuentaNombreLimpio}.`);
+
+    // ACTUALIZAR PANTALLAS Y BANCOS
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+    if (typeof abrirGestorConsignaciones === 'function') {
+        const modalConsig = document.querySelector('[data-modal="gestor-consignaciones"]');
+        if(modalConsig) abrirGestorConsignaciones();
+    }
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 };
 
 window.renderRequisiciones = renderRequisiciones;
