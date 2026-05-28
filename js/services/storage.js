@@ -3,6 +3,7 @@ const StorageService = {
         _cache: {}, 
     _isReady: false,
     _usandoLocalForage: true,
+    _syncTimers: {}, // <-- AGREGAR ESTO PARA CONTROLAR EL TRÁFICO A FIREBASE
 
     // Claves que NO deben considerarse tablas de base de datos
     _clavesIgnoradas: new Set([
@@ -250,7 +251,7 @@ const StorageService = {
         // 2. Actualizar variable global dinámica
         this._actualizarVariableGlobal(key, value);
         
-        // 3. Guardado físico local
+        // 3. Guardado físico local (Inmediato)
         let dbPromise = Promise.resolve();
 
         if (this._usandoLocalForage) {
@@ -261,23 +262,31 @@ const StorageService = {
             localStorage.setItem(key, JSON.stringify(value));
         }
 
-        // 4. Auto-guardado en Firebase solo si es tabla válida
+        // 4. Auto-guardado en Firebase (CON DEBOUNCE PARA NO SATURAR)
         if (
             window._firebaseActivo &&
             window._db &&
             this._esTablaValida(key, value)
         ) {
-            const valorFirestore = this._limpiarParaFirestore(value);
-            try {
-                window._db.collection('posData').doc(key).set({
-                    data: valorFirestore,
-                    _updatedAt: Date.now()
-                }).catch(e => {
-                    console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
-                });
-            } catch (e) {
-                console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
+            // Si ya había un envío programado para esta tabla, lo cancelamos
+            if (this._syncTimers[key]) {
+                clearTimeout(this._syncTimers[key]);
             }
+
+            // Programamos el nuevo envío con 1.5 segundos de espera
+            this._syncTimers[key] = setTimeout(() => {
+                const valorFirestore = this._limpiarParaFirestore(value);
+                try {
+                    window._db.collection('posData').doc(key).set({
+                        data: valorFirestore,
+                        _updatedAt: Date.now()
+                    }).catch(e => {
+                        console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
+                    });
+                } catch (e) {
+                    console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
+                }
+            }, 1500); // 1.5 segundos de "respiro"
         }
 
         return dbPromise;
