@@ -1,0 +1,776 @@
+// ===== CORTE DE CAJA =====
+
+(function() {
+    const DENOMINACIONES = [1000, 500, 200, 100, 50, 20, 10, 5, 2, 1, 0.5];
+
+    const dinero = (valor) => new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN'
+    }).format(Number(valor || 0));
+
+    const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    }[ch]));
+
+    const hoyInput = () => {
+        if (typeof window.obtenerHoyInputMX === 'function') return window.obtenerHoyInputMX();
+        return new Date().toISOString().slice(0, 10);
+    };
+
+    const localIso = (fecha) => {
+        if (typeof window.localISO === 'function') return window.localISO(fecha || new Date());
+        const d = fecha ? new Date(fecha) : new Date();
+        return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+    };
+
+    const parseFechaLocal = (value, finDia = false) => {
+        if (!value) {
+            const d = new Date();
+            d.setHours(finDia ? 23 : 0, finDia ? 59 : 0, finDia ? 59 : 0, finDia ? 999 : 0);
+            return d;
+        }
+
+        if (value instanceof Date) {
+            const d = new Date(value);
+            if (!value.toISOString || !String(value).includes(':')) {
+                d.setHours(finDia ? 23 : 0, finDia ? 59 : 0, finDia ? 59 : 0, finDia ? 999 : 0);
+            }
+            return d;
+        }
+
+        if (typeof value === 'number') return new Date(value);
+
+        const raw = String(value);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            const [y, m, d] = raw.split('-').map(Number);
+            return new Date(y, m - 1, d, finDia ? 23 : 0, finDia ? 59 : 0, finDia ? 59 : 0, finDia ? 999 : 0);
+        }
+
+        const parsed = new Date(raw);
+        if (!isNaN(parsed.getTime())) return parsed;
+
+        const fallback = new Date();
+        fallback.setHours(finDia ? 23 : 0, finDia ? 59 : 0, finDia ? 59 : 0, finDia ? 999 : 0);
+        return fallback;
+    };
+
+    const fechaKey = (value) => {
+        if (typeof window.getFechaLocalMX === 'function') return window.getFechaLocalMX(value);
+        const d = parseFechaLocal(value);
+        return d.toISOString().slice(0, 10);
+    };
+
+    const normalizarId = (value) => String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+
+    function asegurarCuentasBancarias() {
+        let bancarias = StorageService.get('cuentas-bancarias', []);
+        const tarjetas = StorageService.get('tarjetasConfig', []);
+        const debito = tarjetas.filter(t => String(t.tipo || '').toLowerCase() === 'debito');
+
+        if (!Array.isArray(bancarias)) bancarias = [];
+        if (bancarias.length < debito.length) {
+            const reconstruidas = debito.map((t, idx) => {
+                const previa = bancarias.find(c => String(c.banco || c.nombre || '').toLowerCase() === String(t.banco || '').toLowerCase());
+                return {
+                    id: previa?.id || `debito_${idx}_${t.banco}`,
+                    nombre: previa?.nombre || `Banco ${t.banco}${t.ultimos4 ? ' ****' + t.ultimos4 : ''}`,
+                    tipo: 'debito',
+                    banco: t.banco,
+                    ultimos4: t.ultimos4 || '',
+                    saldoInicial: Number(t.saldoInicial || previa?.saldoInicial || 0),
+                    saldo: Number(previa?.saldo || 0)
+                };
+            });
+            StorageService.set('cuentas-bancarias', reconstruidas);
+            bancarias = reconstruidas;
+        }
+
+        return bancarias;
+    }
+
+    function obtenerCuentasCorte() {
+        const cajasRaw = StorageService.get('cuentasEfectivo', [
+            { id: 'efectivo', nombre: 'Efectivo Principal', tipo: 'efectivo', saldo: 0 }
+        ]);
+        const cajas = (Array.isArray(cajasRaw) && cajasRaw.length ? cajasRaw : [
+            { id: 'efectivo', nombre: 'Efectivo Principal', tipo: 'efectivo', saldo: 0 }
+        ]).map((c, index) => ({
+            id: String(c.id || `caja_${index + 1}`),
+            nombre: c.nombre || `Caja ${index + 1}`,
+            tipo: 'efectivo',
+            saldoActual: Number(c.saldo || 0),
+            aliases: [c.id, c.nombre, index === 0 ? 'efectivo' : '', index === 0 ? 'caja' : ''].filter(Boolean)
+        }));
+
+        const bancarias = asegurarCuentasBancarias();
+        const movimientos = StorageService.get('movimientosCaja', []);
+        const bancos = bancarias.map((c, index) => {
+            const aliases = [c.id, c.banco, c.nombre].filter(Boolean);
+            const movCuenta = sumarNetoMovimientos(movimientos, aliases);
+            const saldoBase = Number(c.saldoInicial || 0);
+            const saldoGuardado = Number(c.saldo || 0);
+            return {
+                id: String(c.banco || c.id || `banco_${index + 1}`),
+                nombre: c.nombre || c.banco || `Banco ${index + 1}`,
+                tipo: 'banco',
+                saldoActual: saldoBase + (saldoGuardado || movCuenta),
+                aliases
+            };
+        });
+
+        return [...cajas, ...bancos];
+    }
+
+    function coincideCuenta(mov, cuenta) {
+        if (!cuenta || cuenta.id === 'todas') return true;
+        const valorMov = normalizarId(mov.cuenta || mov.cuentaId || mov.metodoPago || mov.medioPago || mov.origen || 'efectivo');
+        return cuenta.aliases.some(alias => normalizarId(alias) === valorMov);
+    }
+
+    function sumarNetoMovimientos(movimientos, aliases, desdeExclusive = null, hastaInclusive = null) {
+        const cuenta = { id: 'tmp', aliases: aliases || [] };
+        return (Array.isArray(movimientos) ? movimientos : []).reduce((sum, mov) => {
+            if (!coincideCuenta(mov, cuenta)) return sum;
+            const fecha = parseFechaLocal(mov.fecha || mov.fechaISO || mov.createdAt);
+            if (desdeExclusive && fecha <= desdeExclusive) return sum;
+            if (hastaInclusive && fecha > hastaInclusive) return sum;
+            const monto = Number(mov.monto || 0);
+            const tipo = String(mov.tipo || '').toLowerCase();
+            return sum + (tipo === 'ingreso' ? monto : -monto);
+        }, 0);
+    }
+
+    function tipoNormalizado(mov) {
+        return String(mov.tipo || '').toLowerCase() === 'ingreso' ? 'ingreso' : 'egreso';
+    }
+
+    function categoriaMovimiento(mov) {
+        const txt = `${mov.concepto || ''} ${mov.referencia || ''}`.toLowerCase();
+        const tipo = tipoNormalizado(mov);
+
+        if (tipo === 'ingreso') {
+            if (txt.includes('abono a apartado') || txt.includes('abn-apt') || txt.includes('apartado')) return 'Apartados';
+            if (txt.includes('abono')) return 'Abonos credito';
+            if (txt.includes('enganche')) return 'Enganches';
+            if (txt.includes('venta')) return 'Ventas';
+            if (txt.includes('devolucion') || txt.includes('reembolso')) return 'Reembolsos';
+            return 'Otros ingresos';
+        }
+
+        if (txt.includes('gasto')) return 'Gastos operativos';
+        if (txt.includes('proveedor') || txt.includes('compra') || txt.includes('oc')) return 'Compras/proveedores';
+        if (txt.includes('tarjeta') || txt.includes('tc') || txt.includes('msi')) return 'Tarjetas/MSI';
+        if (txt.includes('cancel') || txt.includes('devolucion') || txt.includes('reembolso')) return 'Cancelaciones/devoluciones';
+        if (txt.includes('consign')) return 'Consignacion';
+        return 'Otros egresos';
+    }
+
+    function leerFiltros() {
+        return {
+            fechaInicio: document.getElementById('corteFechaInicio')?.value || hoyInput(),
+            fechaFin: document.getElementById('corteFechaFin')?.value || hoyInput(),
+            cuentaId: document.getElementById('corteCuenta')?.value || 'todas'
+        };
+    }
+
+    function idMovimientoCorte(mov, index) {
+        return String(mov.id || mov.idOperacion || `${mov.referencia || 'mov'}-${mov.fecha || mov.fechaISO || mov.createdAt || ''}-${mov.monto || 0}-${index}`)
+            .replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+
+    function calcularResumen(filtros = leerFiltros()) {
+        const cuentas = obtenerCuentasCorte();
+        const cuenta = filtros.cuentaId === 'todas'
+            ? { id: 'todas', nombre: 'Todas las cajas y cuentas', aliases: [], tipo: 'todas' }
+            : cuentas.find(c => String(c.id) === String(filtros.cuentaId)) || cuentas[0];
+
+        const inicio = parseFechaLocal(filtros.fechaInicio, false);
+        const fin = parseFechaLocal(filtros.fechaFin, true);
+        const movimientosRaw = StorageService.get('movimientosCaja', []);
+        const movimientos = (Array.isArray(movimientosRaw) ? movimientosRaw : [])
+            .map((m, index) => ({
+                ...m,
+                _idx: index,
+                _corteId: idMovimientoCorte(m, index),
+                _fechaObj: parseFechaLocal(m.fecha || m.fechaISO || m.createdAt),
+                _tipo: tipoNormalizado(m),
+                _categoria: categoriaMovimiento(m),
+                _monto: Number(m.monto || 0)
+            }))
+            .filter(m => m._monto > 0)
+            .filter(m => coincideCuenta(m, cuenta))
+            .filter(m => m._fechaObj >= inicio && m._fechaObj <= fin)
+            .sort((a, b) => b._fechaObj - a._fechaObj);
+
+        const ingresos = movimientos.filter(m => m._tipo === 'ingreso').reduce((s, m) => s + m._monto, 0);
+        const egresos = movimientos.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
+        const neto = ingresos - egresos;
+
+        const cuentasIncluidas = cuenta.id === 'todas' ? cuentas : [cuenta];
+        const saldoActual = cuentasIncluidas.reduce((s, c) => s + Number(c.saldoActual || 0), 0);
+        const aliases = cuentasIncluidas.flatMap(c => c.aliases);
+        const netoPosterior = cuenta.id === 'todas'
+            ? sumarNetoMovimientos(StorageService.get('movimientosCaja', []), aliases, fin, null)
+            : sumarNetoMovimientos(StorageService.get('movimientosCaja', []), cuenta.aliases, fin, null);
+        const saldoFinalSistema = saldoActual - netoPosterior;
+        const saldoInicial = saldoFinalSistema - neto;
+
+        const porCategoria = {};
+        movimientos.forEach(m => {
+            if (!porCategoria[m._categoria]) {
+                porCategoria[m._categoria] = { categoria: m._categoria, ingresos: 0, egresos: 0, movimientos: 0 };
+            }
+            porCategoria[m._categoria].movimientos += 1;
+            if (m._tipo === 'ingreso') porCategoria[m._categoria].ingresos += m._monto;
+            else porCategoria[m._categoria].egresos += m._monto;
+        });
+
+        return {
+            filtros,
+            cuenta,
+            cuentasIncluidas,
+            inicio,
+            fin,
+            saldoInicial,
+            ingresos,
+            egresos,
+            neto,
+            saldoFinalSistema,
+            movimientos,
+            porCategoria: Object.values(porCategoria).sort((a, b) => (b.ingresos + b.egresos) - (a.ingresos + a.egresos))
+        };
+    }
+
+    function resetSeleccionCorte(resumen, mantener = false) {
+        const key = `${resumen.filtros.fechaInicio}|${resumen.filtros.fechaFin}|${resumen.cuenta.id}`;
+        if (mantener && window._corteCajaSeleccion?.key === key) return;
+        window._corteCajaSeleccion = {
+            key,
+            ids: new Set(resumen.movimientos.map(m => m._corteId))
+        };
+    }
+
+    function movimientosSeleccionados(resumen = window._corteCajaResumen) {
+        if (!resumen) return [];
+        const ids = window._corteCajaSeleccion?.ids || new Set();
+        return resumen.movimientos.filter(m => ids.has(m._corteId));
+    }
+
+    function resumenSeleccionado(resumen = window._corteCajaResumen) {
+        const seleccionados = movimientosSeleccionados(resumen);
+        const ingresos = seleccionados.filter(m => m._tipo === 'ingreso').reduce((s, m) => s + m._monto, 0);
+        const egresos = seleccionados.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
+        const saldoFinalSistema = Number(resumen?.saldoInicial || 0) + ingresos - egresos;
+        const porCategoria = {};
+
+        seleccionados.forEach(m => {
+            if (!porCategoria[m._categoria]) {
+                porCategoria[m._categoria] = { categoria: m._categoria, ingresos: 0, egresos: 0, movimientos: 0 };
+            }
+            porCategoria[m._categoria].movimientos += 1;
+            if (m._tipo === 'ingreso') porCategoria[m._categoria].ingresos += m._monto;
+            else porCategoria[m._categoria].egresos += m._monto;
+        });
+
+        return {
+            ingresos,
+            egresos,
+            neto: ingresos - egresos,
+            saldoFinalSistema,
+            movimientos: seleccionados,
+            totalMovimientos: resumen?.movimientos?.length || 0,
+            porCategoria: Object.values(porCategoria).sort((a, b) => (b.ingresos + b.egresos) - (a.ingresos + a.egresos))
+        };
+    }
+
+    function renderSelectCuentas(cuentaId) {
+        const cuentas = obtenerCuentasCorte();
+        return `
+            <select id="corteCuenta" onchange="renderCorteCaja()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
+                <option value="todas" ${cuentaId === 'todas' ? 'selected' : ''}>Todas las cajas y cuentas</option>
+                ${cuentas.map(c => `<option value="${esc(c.id)}" ${String(cuentaId) === String(c.id) ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}
+            </select>`;
+    }
+
+    function renderKpi(titulo, valor, color, subtitulo = '', valorId = '', subtituloId = '') {
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-left:5px solid ${color};border-radius:10px;padding:15px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;">${esc(titulo)}</div>
+                <div ${valorId ? `id="${valorId}"` : ''} style="font-size:23px;font-weight:900;color:${color};margin-top:5px;">${dinero(valor)}</div>
+                ${subtitulo || subtituloId ? `<div ${subtituloId ? `id="${subtituloId}"` : ''} style="font-size:11px;color:#64748b;margin-top:4px;">${esc(subtitulo)}</div>` : ''}
+            </div>`;
+    }
+
+    function renderConteo(resumen) {
+        const denominaciones = DENOMINACIONES.map(d => `
+            <label style="display:grid;grid-template-columns:65px 1fr;gap:8px;align-items:center;font-size:12px;">
+                <span style="font-weight:800;color:#334155;">${dinero(d)}</span>
+                <input type="number" min="0" step="1" value="0" data-denom="${d}" oninput="recalcularConteoCorte()" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;text-align:right;">
+            </label>`).join('');
+
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;">
+                    <div>
+                        <h3 style="margin:0;color:#0f172a;font-size:16px;">Conteo real</h3>
+                        <p style="margin:3px 0 0;color:#64748b;font-size:12px;">Captura billetes/monedas o escribe el total contado.</p>
+                    </div>
+                    <button onclick="limpiarConteoCorte()" style="padding:8px 12px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;font-weight:700;">Limpiar</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;margin-bottom:14px;">
+                    ${denominaciones}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;align-items:end;">
+                    <div>
+                        <label style="font-size:11px;font-weight:800;color:#64748b;">TOTAL POR DENOMINACIONES</label>
+                        <input id="corteTotalDenominaciones" readonly value="${dinero(0)}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;font-weight:900;color:#0f172a;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;font-weight:800;color:#64748b;">TOTAL REAL CONTADO</label>
+                        <input id="corteTotalReal" type="number" min="0" step="0.01" value="" oninput="recalcularConteoCorte()" placeholder="${Number(resumen.saldoFinalSistema || 0).toFixed(2)}" style="width:100%;padding:10px;border:2px solid #1e40af;border-radius:6px;font-weight:900;font-size:16px;box-sizing:border-box;">
+                    </div>
+                    <div id="corteDiferenciaBox" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;">
+                        <div style="font-size:11px;font-weight:800;color:#1e3a8a;">DIFERENCIA</div>
+                        <div id="corteDiferencia" style="font-size:22px;font-weight:900;color:#1e40af;">${dinero(0)}</div>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <label style="font-size:11px;font-weight:800;color:#64748b;">OBSERVACIONES</label>
+                    <textarea id="corteObservaciones" placeholder="Ej. falta cambio, retiro a caja fuerte, pago pendiente de registrar..." style="width:100%;min-height:72px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;box-sizing:border-box;"></textarea>
+                </div>
+            </div>`;
+    }
+
+    function renderCategorias(resumen) {
+        const rows = resumen.porCategoria.map(c => `
+            <tr>
+                <td style="padding:9px;border-bottom:1px solid #f1f5f9;">${esc(c.categoria)}</td>
+                <td style="padding:9px;text-align:right;border-bottom:1px solid #f1f5f9;color:#15803d;font-weight:800;">${dinero(c.ingresos)}</td>
+                <td style="padding:9px;text-align:right;border-bottom:1px solid #f1f5f9;color:#b91c1c;font-weight:800;">${dinero(c.egresos)}</td>
+                <td style="padding:9px;text-align:center;border-bottom:1px solid #f1f5f9;">${c.movimientos}</td>
+            </tr>`).join('');
+
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Resumen por origen</h3>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead><tr style="background:#f8fafc;color:#475569;">
+                            <th style="padding:9px;text-align:left;">Origen</th>
+                            <th style="padding:9px;text-align:right;">Ingresos</th>
+                            <th style="padding:9px;text-align:right;">Egresos</th>
+                            <th style="padding:9px;text-align:center;">Movs.</th>
+                        </tr></thead>
+                        <tbody>${rows || '<tr><td colspan="4" style="padding:18px;text-align:center;color:#94a3b8;">Sin movimientos en el periodo.</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    function renderMovimientos(resumen) {
+        const seleccion = window._corteCajaSeleccion?.ids || new Set();
+        const rows = resumen.movimientos.map(m => `
+            <tr data-corte-row="${esc(m._corteId)}" style="background:${seleccion.has(m._corteId) ? '#f8fafc' : '#ffffff'};">
+                <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;">
+                    <input type="checkbox" class="corte-mov-check" data-id="${esc(m._corteId)}" ${seleccion.has(m._corteId) ? 'checked' : ''} onchange="toggleMovimientoCorte(this)" title="Incluir en corte" style="width:18px;height:18px;border-radius:999px;accent-color:#1e40af;cursor:pointer;">
+                </td>
+                <td style="padding:8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${esc(window.formatearFechaMX ? window.formatearFechaMX(m.fecha || m.fechaISO || m.createdAt) : fechaKey(m._fechaObj))}</td>
+                <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(m.concepto || '-')}<br><small style="color:#94a3b8;">${esc(m.referencia || '')}</small></td>
+                <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(m.etiquetaCuenta || m.cuenta || '-')}</td>
+                <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:900;color:${m._tipo === 'ingreso' ? '#15803d' : '#b91c1c'};">${m._tipo === 'ingreso' ? '+' : '-'}${dinero(m._monto)}</td>
+            </tr>`).join('');
+
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                    <div>
+                        <h3 style="margin:0;color:#0f172a;font-size:16px;">Movimientos del corte</h3>
+                        <p id="corteEstadoSeleccion" style="margin:3px 0 0;color:#64748b;font-size:12px;"></p>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button onclick="marcarTodosMovimientosCorte(true)" style="padding:8px 12px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-weight:800;">Marcar todos</button>
+                        <button onclick="marcarTodosMovimientosCorte(false)" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;font-weight:800;">Desmarcar todos</button>
+                        <button onclick="exportarCorteCajaCSV()" style="padding:8px 12px;background:#0f766e;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:800;">Exportar CSV</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;max-height:430px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead style="position:sticky;top:0;background:#f8fafc;color:#475569;">
+                            <tr>
+                                <th style="padding:8px;text-align:center;">OK</th>
+                                <th style="padding:8px;text-align:left;">Fecha</th>
+                                <th style="padding:8px;text-align:left;">Concepto</th>
+                                <th style="padding:8px;text-align:left;">Cuenta</th>
+                                <th style="padding:8px;text-align:right;">Monto</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#94a3b8;">No hay movimientos para estos filtros.</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    function renderHistorial() {
+        const cortes = StorageService.get('cortesCaja', []);
+        const rows = (Array.isArray(cortes) ? cortes : []).slice().reverse().slice(0, 12).map(c => {
+            const dif = Number(c.diferencia || 0);
+            return `
+                <tr>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.folio)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.cuentaNombre)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.fechaInicio)} a ${esc(c.fechaFin)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;">${dinero(c.totalReal)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;color:${Math.abs(dif) <= 0.01 ? '#15803d' : '#b91c1c'};font-weight:900;">${dinero(dif)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;">
+                        <button onclick="imprimirCorteGuardado('${esc(c.folio)}')" style="padding:6px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">Ver</button>
+                    </td>
+                </tr>`;
+        }).join('');
+
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:16px;">
+                <h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Cortes recientes</h3>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="background:#f8fafc;color:#475569;">
+                            <th style="padding:8px;text-align:left;">Folio</th>
+                            <th style="padding:8px;text-align:left;">Cuenta</th>
+                            <th style="padding:8px;text-align:left;">Periodo</th>
+                            <th style="padding:8px;text-align:right;">Contado</th>
+                            <th style="padding:8px;text-align:right;">Diferencia</th>
+                            <th style="padding:8px;text-align:center;">Accion</th>
+                        </tr></thead>
+                        <tbody>${rows || '<tr><td colspan="6" style="padding:18px;text-align:center;color:#94a3b8;">Aun no hay cortes guardados.</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    window.renderCorteCaja = function() {
+        const cont = document.getElementById('contenidoCorteCaja');
+        if (!cont) return;
+
+        const filtros = {
+            fechaInicio: document.getElementById('corteFechaInicio')?.value || hoyInput(),
+            fechaFin: document.getElementById('corteFechaFin')?.value || hoyInput(),
+            cuentaId: document.getElementById('corteCuenta')?.value || 'todas'
+        };
+        const resumen = calcularResumen(filtros);
+        window._corteCajaResumen = resumen;
+        resetSeleccionCorte(resumen, true);
+        const seleccion = resumenSeleccionado(resumen);
+
+        cont.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+                <div>
+                    <h3 style="margin:0;color:#0f172a;">Cierre operativo</h3>
+                    <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Base: movimientosCaja. El guardado del corte no altera saldos.</p>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button onclick="guardarCorteCaja()" style="padding:10px 16px;background:#1e40af;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">Guardar corte</button>
+                    <button onclick="imprimirCorteActual()" style="padding:10px 16px;background:#475569;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">Imprimir</button>
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;background:white;border:1px solid #e2e8f0;border-radius:10px;padding:15px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <div>
+                    <label style="font-size:11px;font-weight:800;color:#64748b;">DESDE</label>
+                    <input id="corteFechaInicio" type="date" value="${esc(filtros.fechaInicio)}" onchange="renderCorteCaja()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:800;color:#64748b;">HASTA</label>
+                    <input id="corteFechaFin" type="date" value="${esc(filtros.fechaFin)}" onchange="renderCorteCaja()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:800;color:#64748b;">CAJA / CUENTA</label>
+                    ${renderSelectCuentas(filtros.cuentaId)}
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;">
+                ${renderKpi('Saldo inicial calculado', resumen.saldoInicial, '#475569')}
+                ${renderKpi('Ingresos marcados', seleccion.ingresos, '#15803d', `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`, 'corteKpiIngresos', 'corteSubIngresos')}
+                ${renderKpi('Egresos marcados', seleccion.egresos, '#b91c1c', `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`, 'corteKpiEgresos', 'corteSubEgresos')}
+                ${renderKpi('Saldo esperado marcado', seleccion.saldoFinalSistema, '#1e40af', `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`, 'corteKpiSaldoSistema', 'corteSubSaldoSistema')}
+            </div>
+
+            <div style="display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(280px,0.85fr);gap:16px;align-items:start;">
+                ${renderConteo(seleccion)}
+                <div id="corteCategoriasSeleccion">${renderCategorias(seleccion)}</div>
+            </div>
+
+            ${renderMovimientos(resumen)}
+            ${renderHistorial()}
+        `;
+        recalcularSeleccionCorte();
+    };
+
+    window.toggleMovimientoCorte = function(input) {
+        const id = input?.dataset?.id;
+        if (!id || !window._corteCajaSeleccion) return;
+
+        if (input.checked) window._corteCajaSeleccion.ids.add(id);
+        else window._corteCajaSeleccion.ids.delete(id);
+
+        const row = input.closest('tr');
+        if (row) row.style.background = input.checked ? '#f8fafc' : '#ffffff';
+        recalcularSeleccionCorte();
+    };
+
+    window.marcarTodosMovimientosCorte = function(marcar) {
+        const resumen = window._corteCajaResumen || calcularResumen();
+        if (!window._corteCajaSeleccion) resetSeleccionCorte(resumen, false);
+        window._corteCajaSeleccion.ids = marcar
+            ? new Set(resumen.movimientos.map(m => m._corteId))
+            : new Set();
+
+        document.querySelectorAll('.corte-mov-check').forEach(input => {
+            input.checked = marcar;
+            const row = input.closest('tr');
+            if (row) row.style.background = marcar ? '#f8fafc' : '#ffffff';
+        });
+        recalcularSeleccionCorte();
+    };
+
+    window.recalcularSeleccionCorte = function() {
+        const resumen = window._corteCajaResumen || calcularResumen();
+        const seleccion = resumenSeleccionado(resumen);
+
+        const ingresoEl = document.getElementById('corteKpiIngresos');
+        const egresoEl = document.getElementById('corteKpiEgresos');
+        const saldoEl = document.getElementById('corteKpiSaldoSistema');
+        const subIng = document.getElementById('corteSubIngresos');
+        const subEgr = document.getElementById('corteSubEgresos');
+        const subSaldo = document.getElementById('corteSubSaldoSistema');
+        const estado = document.getElementById('corteEstadoSeleccion');
+        const cats = document.getElementById('corteCategoriasSeleccion');
+        const inputReal = document.getElementById('corteTotalReal');
+
+        if (ingresoEl) ingresoEl.textContent = dinero(seleccion.ingresos);
+        if (egresoEl) egresoEl.textContent = dinero(seleccion.egresos);
+        if (saldoEl) saldoEl.textContent = dinero(seleccion.saldoFinalSistema);
+        if (subIng) subIng.textContent = `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`;
+        if (subEgr) subEgr.textContent = `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`;
+        if (subSaldo) subSaldo.textContent = `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`;
+        if (estado) estado.textContent = `${seleccion.movimientos.length} movimientos marcados. Los no marcados quedan fuera de este corte.`;
+        if (cats) cats.innerHTML = renderCategorias(seleccion);
+        if (inputReal && inputReal.value === '') inputReal.placeholder = Number(seleccion.saldoFinalSistema || 0).toFixed(2);
+
+        window._corteCajaResumenSeleccionado = seleccion;
+        recalcularConteoCorte();
+    };
+
+    window.recalcularConteoCorte = function() {
+        const resumen = window._corteCajaResumen || calcularResumen();
+        const seleccion = window._corteCajaResumenSeleccionado || resumenSeleccionado(resumen);
+        const totalDenoms = Array.from(document.querySelectorAll('[data-denom]')).reduce((sum, input) => {
+            const denom = Number(input.dataset.denom || 0);
+            const cantidad = Math.max(0, Number(input.value || 0));
+            return sum + denom * cantidad;
+        }, 0);
+
+        const inputReal = document.getElementById('corteTotalReal');
+        const totalReal = inputReal && inputReal.value !== '' ? Number(inputReal.value || 0) : totalDenoms;
+        const diferencia = totalReal - Number(seleccion.saldoFinalSistema || 0);
+
+        const denomsEl = document.getElementById('corteTotalDenominaciones');
+        const difEl = document.getElementById('corteDiferencia');
+        const difBox = document.getElementById('corteDiferenciaBox');
+        if (denomsEl) denomsEl.value = dinero(totalDenoms);
+        if (difEl) difEl.textContent = dinero(diferencia);
+        if (difBox) {
+            const ok = Math.abs(diferencia) <= 0.01;
+            difBox.style.background = ok ? '#f0fdf4' : '#fff7ed';
+            difBox.style.borderColor = ok ? '#bbf7d0' : '#fed7aa';
+            difEl.style.color = ok ? '#15803d' : '#c2410c';
+        }
+
+        window._corteCajaConteo = { totalDenoms, totalReal, diferencia };
+    };
+
+    window.limpiarConteoCorte = function() {
+        document.querySelectorAll('[data-denom]').forEach(input => input.value = 0);
+        const real = document.getElementById('corteTotalReal');
+        const obs = document.getElementById('corteObservaciones');
+        if (real) real.value = '';
+        if (obs) obs.value = '';
+        recalcularConteoCorte();
+    };
+
+    function armarCorteDesdePantalla() {
+        recalcularConteoCorte();
+        const resumen = window._corteCajaResumen || calcularResumen();
+        const seleccion = window._corteCajaResumenSeleccionado || resumenSeleccionado(resumen);
+        const conteo = window._corteCajaConteo || { totalDenoms: 0, totalReal: 0, diferencia: 0 };
+        const denominaciones = Array.from(document.querySelectorAll('[data-denom]'))
+            .map(input => ({ denominacion: Number(input.dataset.denom), cantidad: Number(input.value || 0) }))
+            .filter(d => d.cantidad > 0);
+        const usuario = document.getElementById('nombreUsuarioActivo')?.textContent?.trim() || 'Usuario';
+        const folio = `CORTE-${fechaKey(new Date()).replace(/-/g, '')}-${Date.now().toString().slice(-5)}`;
+
+        return {
+            folio,
+            fechaCreacion: localIso(new Date()),
+            usuario,
+            cuentaId: resumen.cuenta.id,
+            cuentaNombre: resumen.cuenta.nombre,
+            fechaInicio: resumen.filtros.fechaInicio,
+            fechaFin: resumen.filtros.fechaFin,
+            saldoInicial: Number(resumen.saldoInicial.toFixed(2)),
+            ingresos: Number(seleccion.ingresos.toFixed(2)),
+            egresos: Number(seleccion.egresos.toFixed(2)),
+            saldoFinalSistema: Number(seleccion.saldoFinalSistema.toFixed(2)),
+            totalDenominaciones: Number(conteo.totalDenoms.toFixed(2)),
+            totalReal: Number(conteo.totalReal.toFixed(2)),
+            diferencia: Number(conteo.diferencia.toFixed(2)),
+            movimientosMarcados: seleccion.movimientos.length,
+            movimientosDisponibles: seleccion.totalMovimientos,
+            movimientosExcluidos: Math.max(0, seleccion.totalMovimientos - seleccion.movimientos.length),
+            observaciones: document.getElementById('corteObservaciones')?.value.trim() || '',
+            denominaciones,
+            resumenCategorias: seleccion.porCategoria,
+            movimientos: seleccion.movimientos.map(m => ({
+                id: m.id || m._idx,
+                fecha: m.fecha || m.fechaISO || m.createdAt,
+                tipo: m._tipo,
+                concepto: m.concepto || '',
+                cuenta: m.cuenta || m.cuentaId || '',
+                monto: m._monto,
+                referencia: m.referencia || ''
+            }))
+        };
+    }
+
+    window.guardarCorteCaja = function() {
+        const corte = armarCorteDesdePantalla();
+        const cortesRaw = StorageService.get('cortesCaja', []);
+        const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
+        const duplicado = cortes.some(c =>
+            c.cuentaId === corte.cuentaId &&
+            c.fechaInicio === corte.fechaInicio &&
+            c.fechaFin === corte.fechaFin
+        );
+
+        if (duplicado && !confirm('Ya existe un corte para esta cuenta y periodo. Deseas guardar otro?')) return;
+        if (Math.abs(corte.diferencia) > 0.01 && !confirm(`La diferencia es ${dinero(corte.diferencia)}. Deseas guardar el corte con diferencia?`)) return;
+
+        cortes.push(corte);
+        StorageService.set('cortesCaja', cortes);
+        alert(`Corte guardado: ${corte.folio}`);
+        renderCorteCaja();
+        imprimirCorteGuardado(corte.folio);
+    };
+
+    function htmlCorte(corte) {
+        const cats = (corte.resumenCategorias || []).map(c => `
+            <tr>
+                <td style="padding:5px;border-bottom:1px solid #ddd;">${esc(c.categoria)}</td>
+                <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(c.ingresos)}</td>
+                <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(c.egresos)}</td>
+            </tr>`).join('');
+        const denoms = (corte.denominaciones || []).map(d => `
+            <tr>
+                <td style="padding:5px;border-bottom:1px solid #ddd;">${dinero(d.denominacion)}</td>
+                <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${d.cantidad}</td>
+                <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(d.denominacion * d.cantidad)}</td>
+            </tr>`).join('');
+        const diferenciaColor = Math.abs(Number(corte.diferencia || 0)) <= 0.01 ? '#15803d' : '#b91c1c';
+
+        return `
+            <div id="ticket-contenido" style="font-family:Arial,sans-serif;max-width:780px;margin:0 auto;color:#111827;">
+                <h2 style="text-align:center;margin:0 0 4px;">Muebleria Mi Pueblito</h2>
+                <h3 style="text-align:center;margin:0 0 16px;">Corte de Caja</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:14px;">
+                    <div><b>Folio:</b> ${esc(corte.folio)}</div>
+                    <div><b>Usuario:</b> ${esc(corte.usuario)}</div>
+                    <div><b>Cuenta:</b> ${esc(corte.cuentaNombre)}</div>
+                    <div><b>Creado:</b> ${esc(window.formatearFechaMX ? window.formatearFechaMX(corte.fechaCreacion) : corte.fechaCreacion)}</div>
+                    <div><b>Desde:</b> ${esc(corte.fechaInicio)}</div>
+                    <div><b>Hasta:</b> ${esc(corte.fechaFin)}</div>
+                    <div><b>Movimientos marcados:</b> ${Number(corte.movimientosMarcados ?? corte.movimientos?.length ?? 0)} de ${Number(corte.movimientosDisponibles ?? corte.movimientos?.length ?? 0)}</div>
+                    <div><b>Excluidos:</b> ${Number(corte.movimientosExcluidos || 0)}</div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;">
+                    <tbody>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">Saldo inicial</td><td style="padding:6px;border:1px solid #ddd;text-align:right;">${dinero(corte.saldoInicial)}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">Ingresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#15803d;">${dinero(corte.ingresos)}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">Egresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#b91c1c;">${dinero(corte.egresos)}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Saldo sistema</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.saldoFinalSistema)}</b></td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Total contado</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.totalReal)}</b></td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Diferencia</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:${diferenciaColor};"><b>${dinero(corte.diferencia)}</b></td></tr>
+                    </tbody>
+                </table>
+                <h4 style="margin:10px 0 6px;">Resumen por origen</h4>
+                <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;">
+                    <thead><tr><th style="text-align:left;padding:5px;border-bottom:1px solid #ddd;">Origen</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Ingresos</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Egresos</th></tr></thead>
+                    <tbody>${cats || '<tr><td colspan="3" style="padding:8px;text-align:center;">Sin movimientos</td></tr>'}</tbody>
+                </table>
+                <h4 style="margin:10px 0 6px;">Conteo</h4>
+                <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;">
+                    <thead><tr><th style="text-align:left;padding:5px;border-bottom:1px solid #ddd;">Denominacion</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Cantidad</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Total</th></tr></thead>
+                    <tbody>${denoms || '<tr><td colspan="3" style="padding:8px;text-align:center;">Sin desglose</td></tr>'}</tbody>
+                </table>
+                ${corte.observaciones ? `<p style="font-size:12px;"><b>Observaciones:</b> ${esc(corte.observaciones)}</p>` : ''}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:45px;font-size:12px;text-align:center;">
+                    <div style="border-top:1px solid #111;padding-top:8px;">Entrega caja</div>
+                    <div style="border-top:1px solid #111;padding-top:8px;">Recibe / autoriza</div>
+                </div>
+            </div>`;
+    }
+
+    function abrirHtmlCorte(corte) {
+        const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(corte.folio)}</title></head><body>${htmlCorte(corte)}</body></html>`;
+        if (window.TicketService?.openHtml) {
+            window.TicketService.openHtml(html, { title: corte.folio, filename: corte.folio });
+            return;
+        }
+        const w = window.open('', '_blank');
+        if (!w) return alert('Habilita ventanas emergentes para imprimir el corte.');
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+    }
+
+    window.imprimirCorteActual = function() {
+        abrirHtmlCorte(armarCorteDesdePantalla());
+    };
+
+    window.imprimirCorteGuardado = function(folio) {
+        const cortes = StorageService.get('cortesCaja', []);
+        const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
+        if (!corte) return alert('No se encontro el corte solicitado.');
+        abrirHtmlCorte(corte);
+    };
+
+    window.exportarCorteCajaCSV = function() {
+        const resumen = window._corteCajaResumen || calcularResumen();
+        const ids = window._corteCajaSeleccion?.ids || new Set();
+        const rows = [
+            ['Marcado', 'Fecha', 'Tipo', 'Cuenta', 'Concepto', 'Referencia', 'Monto'],
+            ...resumen.movimientos.map(m => [
+                ids.has(m._corteId) ? 'SI' : 'NO',
+                window.formatearFechaMX ? window.formatearFechaMX(m.fecha || m.fechaISO || m.createdAt) : fechaKey(m._fechaObj),
+                m._tipo,
+                m.etiquetaCuenta || m.cuenta || '',
+                m.concepto || '',
+                m.referencia || '',
+                Number(m._monto || 0).toFixed(2)
+            ])
+        ];
+        const csv = rows.map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `corte-caja-${resumen.filtros.fechaInicio}-${resumen.filtros.fechaFin}.csv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+})();
