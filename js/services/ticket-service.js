@@ -1,0 +1,195 @@
+(function() {
+    function esc(value) {
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        }[ch]));
+    }
+
+    function safeName(value) {
+        return String(value || 'ticket')
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9_-]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 80) || 'ticket';
+    }
+
+    function baseHref() {
+        return window.location.href.split('?')[0].split('#')[0];
+    }
+
+    function thermalCss() {
+        return `
+<style id="mmp-thermal-80-style">
+@page { size: 80mm auto; margin: 0; }
+html, body {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: "Courier New", Courier, monospace !important;
+    font-size: 11px !important;
+    line-height: 1.22 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+body { box-sizing: border-box !important; }
+#ticket-contenido, .ticket-contenido, .mmp-ticket-body {
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 4mm 0 8mm !important;
+    background: #fff !important;
+    box-sizing: border-box !important;
+}
+* { box-sizing: border-box !important; }
+img { max-width: 22mm !important; max-height: 18mm !important; object-fit: contain !important; }
+table { width: 100% !important; border-collapse: collapse !important; font-size: 10px !important; }
+th, td { padding: 2px 1px !important; word-break: break-word !important; }
+h1, h2, h3 { font-size: 13px !important; margin: 4px 0 !important; color: #000 !important; }
+p { margin: 3px 0 !important; }
+.no-print, .mmp-print-toolbar {
+    width: 100% !important;
+    background: #f1f5f9 !important;
+    padding: 10px !important;
+    margin: 0 0 8px !important;
+    display: flex !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+}
+.mmp-print-toolbar button, .no-print button {
+    padding: 9px 12px !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+}
+.mmp-btn-print { background: #1e40af !important; color: #fff !important; }
+.mmp-btn-image { background: #047857 !important; color: #fff !important; }
+.mmp-cut { border-top: 1px dashed #000 !important; margin: 8px 0 !important; }
+@media print {
+    html, body { width: 80mm !important; margin: 0 !important; background: #fff !important; }
+    .no-print, .mmp-print-toolbar { display: none !important; }
+    #ticket-contenido, .ticket-contenido, .mmp-ticket-body { padding: 0 3mm 6mm !important; width: 80mm !important; max-width: 80mm !important; }
+}
+</style>`;
+    }
+
+    function imageScript(filename) {
+        const file = safeName(filename);
+        return `
+<script>
+function mmpCargarHtml2Canvas(cb){
+    if (typeof html2canvas !== 'undefined') return cb();
+    var existente = document.getElementById('mmp-html2canvas-loader');
+    if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
+    var s = document.createElement('script');
+    s.id = 'mmp-html2canvas-loader';
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload = cb;
+    s.onerror = function(){ alert('No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.'); };
+    document.head.appendChild(s);
+}
+function mmpGuardarTicketImagen(){
+    mmpCargarHtml2Canvas(function(){
+        var node = document.getElementById('ticket-contenido') || document.querySelector('.ticket-contenido') || document.querySelector('.mmp-ticket-body') || document.body;
+        var btn = document.getElementById('mmp-btn-imagen');
+        var old = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
+        html2canvas(node, { scale: 3, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+            var a = document.createElement('a');
+            a.download = '${file}.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        }).catch(function(err){
+            console.error(err);
+            alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
+        }).finally(function(){
+            if (btn) { btn.disabled = false; btn.textContent = old || 'Guardar imagen'; }
+        });
+    });
+}
+function mmpBase64Url(text){
+    var utf8 = unescape(encodeURIComponent(text || ''));
+    return btoa(utf8).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
+}
+function mmpTextoTicket(){
+    var node = document.getElementById('ticket-contenido') || document.querySelector('.ticket-contenido') || document.querySelector('.mmp-ticket-body') || document.body;
+    var clone = node.cloneNode(true);
+    clone.querySelectorAll('script,style,button,.no-print,.mmp-print-toolbar').forEach(function(el){ el.remove(); });
+    return (clone.innerText || clone.textContent || '').replace(/\\n{3,}/g, '\\n\\n').trim();
+}
+function mmpImprimirBluetooth(){
+    var text = mmpTextoTicket();
+    if (!text) { alert('No se encontro texto imprimible.'); return; }
+    if (text.length > 7000 && !confirm('El ticket es largo y Android puede rechazar el envio por enlace. ¿Intentar de todos modos?')) return;
+    window.location.href = 'mmpprinter://print?b64=' + mmpBase64Url(text);
+}
+<\/script>`;
+    }
+
+    function toolbar() {
+        return `
+<div class="mmp-print-toolbar no-print">
+    <button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button>
+    <button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button>
+    <button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button>
+</div>`;
+    }
+
+    function normalizeHtml(html, options = {}) {
+        let out = String(html || '');
+        const title = esc(options.title || 'Ticket');
+        const filename = options.filename || title;
+
+        if (!/<html[\s>]/i.test(out)) {
+            out = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${title}</title></head><body><div id="ticket-contenido">${out}</div></body></html>`;
+        }
+
+        if (!/<base\s/i.test(out)) {
+            out = out.replace(/<head[^>]*>/i, match => `${match}\n<base href="${esc(baseHref())}">`);
+        }
+        if (!/<title>/i.test(out)) {
+            out = out.replace(/<head[^>]*>/i, match => `${match}\n<title>${title}</title>`);
+        }
+        if (!/mmp-thermal-80-style/.test(out)) {
+            out = out.replace(/<\/head>/i, `${thermalCss()}\n${imageScript(filename)}\n</head>`);
+        }
+        if (!/mmp-print-toolbar/.test(out)) {
+            out = out.replace(/<body[^>]*>/i, match => `${match}\n${toolbar()}`);
+        }
+        return out;
+    }
+
+    function openHtml(html, options = {}) {
+        const w = window.open('', '_blank');
+        if (!w) {
+            alert('Habilita las ventanas emergentes para imprimir el ticket.');
+            return false;
+        }
+        w.document.write(normalizeHtml(html, options));
+        w.document.close();
+        w.focus();
+        return true;
+    }
+
+    function openThermal({ title = 'Ticket', filename = '', body = '' } = {}) {
+        const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(title)}</title></head><body><div id="ticket-contenido" class="mmp-ticket-body">${body}</div></body></html>`;
+        return openHtml(html, { title, filename: filename || title });
+    }
+
+    window.TicketService = {
+        esc,
+        safeName,
+        openHtml,
+        openThermal,
+        normalizeHtml,
+        thermalCss
+    };
+})();
