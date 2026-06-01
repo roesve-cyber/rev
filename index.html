@@ -118,6 +118,7 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-finanzas')">💰 FINANZAS <span>▾</span></button>
             <div id="sub-finanzas" class="submenu oculto-submenu">
+                <button onclick="navA('corte-caja');renderCorteCaja();">Corte de Caja</button>
                 <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
                 <button onclick="navA('proyeccion');renderProyeccionFlujo();">📈 Proyección de Flujo</button>
             </div>
@@ -852,6 +853,15 @@
         <div id="contenidoVendedores"></div>
     </div>
 
+    <!-- CORTE DE CAJA -->
+    <div id="corte-caja" class="vista oculto">
+        <div class="vista-header">
+            <h2>Corte de Caja</h2>
+            <p>Cierre diario por caja o cuenta, con conteo real, diferencia y registro historico.</p>
+        </div>
+        <div id="contenidoCorteCaja"></div>
+    </div>
+
     <!-- GASTOS OPERATIVOS -->
     <div id="gastos" class="vista oculto">
         <div class="vista-header">
@@ -1183,26 +1193,28 @@
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=3"></script>
 <script src="js/services/calculator.js"></script>
+<script src="js/services/ticket-service.js?v=2"></script>
 <script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 
 <script src="js/modules/auth.js"></script>
 <script src="js/modules/inventario.js?v=1"></script>
 <script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js?v=21"></script>
+<script src="js/modules/ventas.js?v=22"></script>
 <script src="js/modules/clientes.js"></script>
-<script src="js/modules/cxc.js?v=20"></script>
-<script src="js/modules/apartados.js?v=7"></script>
-<script src="js/modules/compras.js?v=26"></script>
+<script src="js/modules/cxc.js?v=21"></script>
+<script src="js/modules/apartados.js?v=8"></script>
+<script src="js/modules/compras.js?v=27"></script>
 <script src="js/modules/bancos.js?v=9"></script>
 <script src="js/modules/reportes.js?v=18"></script>
 <script src="js/modules/reportes-plus.js?v=6"></script>
 <script src="js/modules/reportes-credito.js?v=3"></script>
 <script src="js/modules/dashboard.js?v=4"></script>
-<script src="js/modules/cotizaciones.js?v=3"></script>
+<script src="js/modules/cotizaciones.js?v=4"></script>
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
+<script src="js/modules/corte-caja.js?v=1"></script>
 <script src="js/modules/gastos.js"></script>
 <script src="js/modules/proyeccion.js?v=2"></script>
 <script src="js/modules/devoluciones.js"></script>
