@@ -1222,6 +1222,9 @@ function generarTicketAbonoTermico(datosAbono) {
 </body>
 </html>`;
 
+    if (window.TicketService?.openHtml) {
+        return window.TicketService.openHtml(ticketHTML, { title: `Recibo de Abono ${folioAbono || folio}`, filename: `abono_${folioAbono || folio}` });
+    }
     const ventana = window.open('', '_blank');
     if (!ventana) {
         alert("Habilita las ventanas emergentes en tu navegador para ver el ticket.");

@@ -658,8 +658,7 @@ function imprimirCotizacion(id) {
         </tr>`).join('');
     }
 
-    const w = window.open('', '_blank', 'width=400,height=600');
-    w.document.write(`
+    const cotizacionHTML = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -746,7 +745,13 @@ function imprimirCotizacion(id) {
         }
       </script>
     </body>
-    </html>`);
+    </html>`;
+    if (window.TicketService?.openHtml) {
+      window.TicketService.openHtml(cotizacionHTML, { title: `Cotizacion ${c.folio}`, filename: `cotizacion_${c.folio}` });
+      return;
+    }
+    const w = window.open('', '_blank', 'width=400,height=600');
+    w.document.write(cotizacionHTML);
     w.document.close();
 }
 

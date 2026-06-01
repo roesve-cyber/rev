@@ -2125,6 +2125,10 @@ function generarTicketMediaHoja(datosVenta) {
     </body>
     </html>`;
 
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(ticketHTML, { title: `${tituloTicket} ${folio}`, filename: `ticket_${folio}` });
+        return;
+    }
     const win = window.open('', '_blank');
     if (!win) {
         alert("⚠️ Habilita las ventanas emergentes para ver el ticket.");
@@ -3230,6 +3234,10 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
     </body>
     </html>`;
 
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(htmlVale, { title: `Entrega ${documento.folioDocumento || folio}`, filename: `entrega_${documento.folioDocumento || folio}` });
+        return documento;
+    }
     const win = window.open('', '_blank');
     if (!win) {
         alert("⚠️ El comprobante de entrega se registró, pero el navegador bloqueó la ventana emergente.");
@@ -4559,6 +4567,10 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
             motivo
         });
         StorageService.set("documentosCancelacion", documentos);
+    }
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(html, { title: `Comprobante ${folioDoc}`, filename: `comprobante_${folioDoc}` });
+        return;
     }
     const win = window.open('', '_blank');
     if (!win) return alert("El comprobante se generó, pero el navegador bloqueó la ventana emergente.");

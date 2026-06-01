@@ -1491,6 +1491,10 @@ function _clonarEstadoCuentaProveedor(idCuenta) {
 window.imprimirEstadoCuentaProveedor = function(idCuenta) {
     const clone = _clonarEstadoCuentaProveedor(idCuenta);
     if (!clone) return alert('Abre primero el estado de cuenta para imprimirlo.');
+    if (window.TicketService?.openThermal) {
+        window.TicketService.openThermal({ title: 'Estado de cuenta proveedor', filename: `estado_proveedor_${idCuenta}`, body: clone.outerHTML });
+        return;
+    }
     const w = window.open('', '_blank', 'width=900,height=1000');
     if (!w) return alert('Habilita las ventanas emergentes para imprimir el estado de cuenta.');
     w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
@@ -2037,8 +2041,7 @@ function imprimirOrdenCompra(id) {
             <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.subtotal)}</td>
         </tr>`
     ).join('');
-    const w = window.open('', '_blank', 'width=750,height=900');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>OC ${oc.folio}</title>
+    const ocHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>OC ${oc.folio}</title>
     <style>body{font-family:Arial,sans-serif;padding:32px;color:#111;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:8px;text-align:left;}@media print{button{display:none!important;}}</style>
     </head><body>
     <div style="text-align:center;margin-bottom:24px;">
@@ -2072,7 +2075,13 @@ function imprimirOrdenCompra(id) {
     <div style="text-align:center;margin-top:12px;">
       <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-size:15px;">🖨️ Imprimir</button>
     </div>
-    </body></html>`);
+    </body></html>`;
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}` });
+        return;
+    }
+    const w = window.open('', '_blank', 'width=750,height=900');
+    w.document.write(ocHTML);
     w.document.close();
 }
 
@@ -2702,8 +2711,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     const totalRecibido = compra.total;
     // El saldo pendiente es lo recibido menos lo pagado en esta recepción
     const saldoPendienteRecepcion = Math.max(0, totalRecibido - montoPagado - anticipoAplicado);
-    const w = window.open('', '_blank', 'width=780,height=960');
-    w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    const recepcionHTML = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
     <title>Recepción ${compra.folio}</title>
     <style>
         *{box-sizing:border-box;margin:0;padding:0;}
@@ -2823,7 +2831,13 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     <div style="text-align:center;margin-top:28px;">
         <button onclick="window.print()" style="padding:11px 28px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:bold;">🖨️ Imprimir</button>
     </div>
-    </body></html>`);
+    </body></html>`;
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(recepcionHTML, { title: `Recepcion ${compra.folio}`, filename: `recepcion_${compra.folio}` });
+        return;
+    }
+    const w = window.open('', '_blank', 'width=780,height=960');
+    w.document.write(recepcionHTML);
     w.document.close();
 }
 
@@ -5332,6 +5346,10 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
     </html>
     `;
 
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(htmlDocumento, { title: `Estado consignacion ${titulo}`, filename: `estado_consignacion_${titulo}` });
+        return;
+    }
     const ventanaNueva = window.open('', '_blank');
     ventanaNueva.document.open();
     ventanaNueva.document.write(htmlDocumento);

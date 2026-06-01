@@ -445,6 +445,10 @@ function imprimirTicketAbonoApartado(ap, montoAbono, cuentaDestino, fecha, opcio
     </div>
     </body>
     </html>`;
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(ticketHTML, { title: `Recibo Apartado ${ap.folio}`, filename: `apartado_${ap.folio}` });
+        return;
+    }
     const ventana = window.open('', '_blank');
     if(ventana){
         ventana.document.write(ticketHTML);
