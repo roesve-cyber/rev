@@ -24,6 +24,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'proveedores' && typeof renderProveedores === 'function') renderProveedores();
         if (vistaId === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
         if (vistaId === 'abonosdirectos' && typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+        if (vistaId === 'visor-creditos' && typeof renderVisorCreditosCobranza === 'function') renderVisorCreditosCobranza();
         if (vistaId === 'cobranzaesperada' && typeof renderCobranzaEsperada === 'function') renderCobranzaEsperada();
         if (vistaId === 'listaprecios' && typeof renderListaPrecios === 'function') renderListaPrecios();
         if (vistaId === 'entregas' && typeof renderEntregas === 'function') renderEntregas();
