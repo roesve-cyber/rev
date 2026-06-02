@@ -45,6 +45,20 @@ function _cxcCuentaCancelada(cuenta) {
     return String(cuenta?.estado || cuenta?.estatus || '').toLowerCase().includes('cancel');
 }
 
+function _cxcTotalCreditoCuenta(cuenta, estadoCta = null) {
+    const estado = estadoCta || (cuenta?.folio ? window._calcularEstadoCuenta?.(cuenta.folio) : null);
+    const pagares = estado?.pagares || [];
+    const totalPagares = pagares
+        .filter(p => String(p.estado || '').toLowerCase() !== 'cancelado')
+        .reduce((s, p) => s + Number(p.monto || 0), 0);
+    const saldoMasAbonos = Number(estado?.saldoTotal || 0) + Number(estado?.totalAbonado || 0);
+    return Math.max(
+        totalPagares,
+        saldoMasAbonos,
+        Number(cuenta?.totalCredito || cuenta?.totalFinanciado || cuenta?.saldoOriginal || cuenta?.saldoActual || 0)
+    );
+}
+
 // ==========================================
 // 1. MOTOR CENTRAL DE SALDOS
 // ==========================================
@@ -127,6 +141,9 @@ window._pestanaCobranzaActiva = 'todas';
 function renderCuentasXCobrar(filtroCliente = "") {
     const contenedor = document.getElementById("tablaCuentasXCobrar");
     if (!contenedor) return;
+    if (!['todas', 'al_corriente', 'morosos', 'promesas'].includes(window._pestanaCobranzaActiva)) {
+        window._pestanaCobranzaActiva = 'todas';
+    }
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
     
@@ -138,8 +155,8 @@ function renderCuentasXCobrar(filtroCliente = "") {
     }
     let htmlTabs = `
     <div style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
-        ${['todas', 'al_corriente', 'morosos', 'promesas', 'saldadas'].map(p => {
-            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas', saldadas:'🔒 Saldadas'};
+        ${['todas', 'al_corriente', 'morosos', 'promesas'].map(p => {
+            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas'};
             const bg = window._pestanaCobranzaActiva === p ? '#1e40af' : '#f3f4f6';
             const col = window._pestanaCobranzaActiva === p ? 'white' : '#4b5563';
             return `<button onclick="cambiarPestanaCobranza('${p}')" style="flex:1; min-width:120px; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; border:none; background:${bg}; color:${col};">${labels[p]}</button>`;
@@ -155,6 +172,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
     cuentas.forEach(c => {
         const estadoCta = window._calcularEstadoCuenta(c.folio);
         if(!estadoCta) return;
+        if (estadoCta.estadoGeneral === "Saldado") return;
 
         let mostrar = false;
         switch (window._pestanaCobranzaActiva) {
@@ -162,10 +180,11 @@ function renderCuentasXCobrar(filtroCliente = "") {
             case 'al_corriente': mostrar = estadoCta.estadoGeneral === "Al corriente"; break;
             case 'morosos': mostrar = (estadoCta.estadoGeneral === "Atrasado" || estadoCta.estadoGeneral === "Crítico"); break;
             case 'promesas': mostrar = estadoCta.estadoGeneral === "Promesa"; break;
-            case 'saldadas': mostrar = estadoCta.estadoGeneral === "Saldado"; break;
         }
 
         if (!mostrar) return;
+        const filtroEstado = document.getElementById("filtroEstadoCobranza")?.value || "";
+        if (filtroEstado && estadoCta.estadoGeneral !== filtroEstado) return;
         const nombreCliente = c.nombre || c.clienteNombre || 'Cliente';
         const stringBusqueda = `${nombreCliente} ${c.folio || ''}`.toLowerCase();
         if (filtroCliente && !stringBusqueda.includes(filtroCliente)) return;
@@ -238,6 +257,89 @@ function renderAbonosDirectos(filtroCliente = "") {
                             </td>
                         </tr>
                     `).join('')}
+                </tbody>
+            </table>
+        </div>`;
+}
+
+function renderVisorCreditosCobranza() {
+    const contenedor = document.getElementById("tablaVisorCreditos");
+    if (!contenedor) return;
+
+    const filtroTexto = (document.getElementById("filtroVisorCreditos")?.value || "").trim().toLowerCase();
+    const filtroEstado = document.getElementById("filtroEstadoVisorCreditos")?.value || "";
+    const cuentas = StorageService.get("cuentasPorCobrar", [])
+        .filter(c => !_cxcCuentaCancelada(c))
+        .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
+        .filter(x => x.estado)
+        .filter(x => {
+            const texto = `${x.cuenta.nombre || x.cuenta.clienteNombre || ''} ${x.cuenta.folio || ''}`.toLowerCase();
+            return !filtroTexto || texto.includes(filtroTexto);
+        })
+        .filter(x => !filtroEstado || x.estado.estadoGeneral === filtroEstado)
+        .sort((a, b) => {
+            const saldoDiff = Number(b.estado.saldoTotal || 0) - Number(a.estado.saldoTotal || 0);
+            if (Math.abs(saldoDiff) > 0.01) return saldoDiff;
+            return String(a.cuenta.nombre || a.cuenta.clienteNombre || '').localeCompare(String(b.cuenta.nombre || b.cuenta.clienteNombre || ''), 'es');
+        });
+
+    const totalSaldo = cuentas.reduce((s, x) => s + Number(x.estado.saldoTotal || 0), 0);
+    const totalVencido = cuentas.reduce((s, x) => s + Number(x.estado.montoVencido || 0), 0);
+    const saldadas = cuentas.filter(x => x.estado.estadoGeneral === 'Saldado').length;
+    const activas = cuentas.length - saldadas;
+
+    const badge = (estado) => {
+        const map = {
+            'Saldado': ['#dcfce7', '#166534'],
+            'Al corriente': ['#dbeafe', '#1e40af'],
+            'Promesa': ['#fef3c7', '#92400e'],
+            'Atrasado': ['#ffedd5', '#c2410c'],
+            'Crítico': ['#fee2e2', '#991b1b']
+        };
+        const [bg, color] = map[estado] || ['#f1f5f9', '#475569'];
+        return `<span style="display:inline-block;padding:4px 9px;border-radius:999px;background:${bg};color:${color};font-weight:800;font-size:12px;">${_cxcEscHTML(estado)}</span>`;
+    };
+
+    contenedor.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px;">
+            <div style="background:#eff6ff;border-left:5px solid #1e40af;padding:15px;border-radius:10px;"><small style="font-weight:800;color:#1e3a8a;">CUENTAS ACTIVAS</small><br><strong style="font-size:22px;color:#1e40af;">${activas}</strong></div>
+            <div style="background:#f0fdf4;border-left:5px solid #16a34a;padding:15px;border-radius:10px;"><small style="font-weight:800;color:#166534;">SALDADAS</small><br><strong style="font-size:22px;color:#15803d;">${saldadas}</strong></div>
+            <div style="background:#fff1f2;border-left:5px solid #e11d48;padding:15px;border-radius:10px;"><small style="font-weight:800;color:#9f1239;">SALDO ACTUAL</small><br><strong style="font-size:22px;color:#be123c;">${_cxcDinero(totalSaldo)}</strong></div>
+            <div style="background:#fffbeb;border-left:5px solid #f59e0b;padding:15px;border-radius:10px;"><small style="font-weight:800;color:#92400e;">VENCIDO</small><br><strong style="font-size:22px;color:#b45309;">${_cxcDinero(totalVencido)}</strong></div>
+        </div>
+        <div style="overflow:auto;max-height:68vh;background:white;border:1px solid #e5e7eb;border-radius:10px;">
+            <table class="tabla-admin" style="margin:0;width:100%;">
+                <thead style="position:sticky;top:0;background:#f8fafc;z-index:1;">
+                    <tr>
+                        <th>Cliente / Folio</th>
+                        <th>Fecha venta</th>
+                        <th>Total credito</th>
+                        <th>Abonado</th>
+                        <th>Saldo</th>
+                        <th>Vencido</th>
+                        <th>Pagares</th>
+                        <th>Estado</th>
+                        <th style="text-align:right;">Consulta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${cuentas.map(({ cuenta, estado }) => {
+                        const totalCredito = _cxcTotalCreditoCuenta(cuenta, estado);
+                        return `
+                            <tr>
+                                <td><strong>${_cxcEscHTML(cuenta.nombre || cuenta.clienteNombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio || '-')}</small></td>
+                                <td>${cuenta.fechaVenta ? _cxcFechaCorta(cuenta.fechaVenta) : '-'}</td>
+                                <td style="font-weight:800;">${_cxcDinero(totalCredito)}</td>
+                                <td style="font-weight:800;color:#15803d;">${_cxcDinero(estado.totalAbonado)}</td>
+                                <td style="font-weight:900;color:${estado.saldoTotal > 0 ? '#be123c' : '#64748b'};">${_cxcDinero(estado.saldoTotal)}</td>
+                                <td style="font-weight:800;color:${estado.montoVencido > 0 ? '#c2410c' : '#64748b'};">${_cxcDinero(estado.montoVencido)}</td>
+                                <td>${estado.pagaresPendientes.length} pend. / ${estado.pagares.length} total</td>
+                                <td>${badge(estado.estadoGeneral)}</td>
+                                <td style="text-align:right;">
+                                    <button onclick="abrirEstadoCuentaFolio('${_cxcEscHTML(cuenta.folio)}')" style="padding:7px 11px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:800;">Estado</button>
+                                </td>
+                            </tr>`;
+                    }).join('') || '<tr><td colspan="9" style="padding:24px;text-align:center;color:#94a3b8;">Sin créditos con estos filtros.</td></tr>'}
                 </tbody>
             </table>
         </div>`;
@@ -1772,9 +1874,10 @@ function abrirEstadoCuentaFolio(folio) {
     const { cuenta, pagares, pagaresVencidos, montoVencido, saldoTotal, totalAbonado, estadoGeneral } = estadoCta;
     
     // Variables de apoyo
-    const totalVenta = Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0);
+    const precioContado = Number(cuenta.totalContadoOriginal || cuenta.totalMercancia || cuenta.precioContadoOriginal || 0);
+    const totalCredito = _cxcTotalCreditoCuenta(cuenta, estadoCta);
     const enganche   = Number(cuenta.engancheRecibido || 0);
-    const abonos     = cuenta.abonos || [];
+    const abonos     = (cuenta.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
     // 1. GENERAR TABLA DE AMORTIZACIÓN (PAGARÉS)
@@ -1844,10 +1947,14 @@ function abrirEstadoCuentaFolio(folio) {
                     </div>
                 </div>
 
-                <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px; margin-bottom:30px;">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:15px; margin-bottom:30px;">
                     <div style="padding:15px; border-radius:12px; background:#fff; border:1px solid #e2e8f0;">
-                        <div style="font-size:11px; color:#64748b; font-weight:bold; margin-bottom:5px;">TOTAL VENTA</div>
-                        <div style="font-size:19px; font-weight:900;">${_cxcDinero(totalVenta)}</div>
+                        <div style="font-size:11px; color:#64748b; font-weight:bold; margin-bottom:5px;">PRECIO CONTADO</div>
+                        <div style="font-size:19px; font-weight:900;">${_cxcDinero(precioContado)}</div>
+                    </div>
+                    <div style="padding:15px; border-radius:12px; background:#eff6ff; border:1px solid #bfdbfe;">
+                        <div style="font-size:11px; color:#1e40af; font-weight:bold; margin-bottom:5px;">TOTAL CRÉDITO</div>
+                        <div style="font-size:19px; font-weight:900; color:#1d4ed8;">${_cxcDinero(totalCredito)}</div>
                     </div>
                     <div style="padding:15px; border-radius:12px; background:#fff; border:1px solid #e2e8f0;">
                         <div style="font-size:11px; color:#64748b; font-weight:bold; margin-bottom:5px;">ENGANCHE</div>
@@ -2610,6 +2717,7 @@ window.ejecutarMigracionTdcMSI = function() {
 // EXPORTACIONES GLOBALES (CONEXIÓN CON EL HTML)
 // ==========================================
 window.renderCuentasXCobrar = renderCuentasXCobrar;
+window.renderVisorCreditosCobranza = renderVisorCreditosCobranza;
 window.renderAbonosDirectos = renderAbonosDirectos;
 window.actualizarPlanesConvertir = actualizarPlanesConvertir;
 window.abrirModalAbonoAvanzado = abrirModalAbonoAvanzado;

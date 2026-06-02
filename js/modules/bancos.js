@@ -1002,7 +1002,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
                     <button onclick="window._filtroLiquidezDesde=''; window._filtroLiquidezHasta=''; renderCuentasBancarias();" style="padding:6px 10px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:12px;" title="Mostrar Todo">🔄 Reset</button>
                 </div>
             </div>
-            <div style="overflow-x:auto; max-height:450px;">
+            <div style="overflow:auto; max-height:65vh; border:1px solid #f1f5f9; border-radius:8px;">
                 <table style="width:100%; border-collapse:collapse; font-size:13px;">
                     <thead><tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
                         <th style="padding:10px; text-align:left; position:sticky; top:0; background:#f8fafc;">Fecha</th>
@@ -1015,9 +1015,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (movimientosFiltrados.length === 0) {
         rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No hay movimientos en este periodo o cuenta.</td></tr>`;
     } else {
-        const limite = (window._filtroLiquidezDesde || window._filtroLiquidezHasta) ? movimientosFiltrados.length : 50;
-        
-        movimientosFiltrados.slice(0, limite).forEach(m => {
+        movimientosFiltrados.forEach(m => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
             const color = esIngreso ? "#16a34a" : "#dc2626";
             const icon = esIngreso ? "⬆️" : "⬇️";
@@ -1040,10 +1038,6 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
                     <td style="padding:10px; text-align:right; font-weight:bold; color:${color}; white-space:nowrap;">${icon} ${dinero(m.monto)}</td>
                 </tr>`;
         });
-        
-        if (!window._filtroLiquidezDesde && !window._filtroLiquidezHasta && movimientosFiltrados.length > 50) {
-            rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:15px; color:#64748b; font-size:12px; background:#f8fafc;">Mostrando los últimos 50 movimientos. Usa el filtro de fechas para ver el historial completo.</td></tr>`;
-        }
     }
     rightPanelHTML += `</tbody></table></div></div>`;
 

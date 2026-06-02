@@ -185,6 +185,20 @@
             .replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
+    function idsMovimientosYaCortados() {
+        const cortes = StorageService.get('cortesCaja', []);
+        const ids = new Set();
+        (Array.isArray(cortes) ? cortes : []).forEach(corte => {
+            (Array.isArray(corte.movimientos) ? corte.movimientos : []).forEach(m => {
+                const id = m.corteId || m._corteId || m.id;
+                if (id !== undefined && id !== null && String(id).trim() !== '') {
+                    ids.add(String(id));
+                }
+            });
+        });
+        return ids;
+    }
+
     function calcularResumen(filtros = leerFiltros()) {
         const cuentas = obtenerCuentasCorte();
         const cuenta = filtros.cuentaId === 'todas'
@@ -194,6 +208,7 @@
         const inicio = parseFechaLocal(filtros.fechaInicio, false);
         const fin = parseFechaLocal(filtros.fechaFin, true);
         const movimientosRaw = StorageService.get('movimientosCaja', []);
+        const yaCortados = idsMovimientosYaCortados();
         const movimientos = (Array.isArray(movimientosRaw) ? movimientosRaw : [])
             .map((m, index) => ({
                 ...m,
@@ -205,6 +220,7 @@
                 _monto: Number(m.monto || 0)
             }))
             .filter(m => m._monto > 0)
+            .filter(m => !yaCortados.has(String(m._corteId)) && !yaCortados.has(String(m.id || '')))
             .filter(m => coincideCuenta(m, cuenta))
             .filter(m => m._fechaObj >= inicio && m._fechaObj <= fin)
             .sort((a, b) => b._fechaObj - a._fechaObj);
@@ -250,7 +266,13 @@
 
     function resetSeleccionCorte(resumen, mantener = false) {
         const key = `${resumen.filtros.fechaInicio}|${resumen.filtros.fechaFin}|${resumen.cuenta.id}`;
-        if (mantener && window._corteCajaSeleccion?.key === key) return;
+        if (mantener && window._corteCajaSeleccion?.key === key) {
+            const disponibles = new Set(resumen.movimientos.map(m => m._corteId));
+            window._corteCajaSeleccion.ids = new Set(
+                Array.from(window._corteCajaSeleccion.ids || []).filter(id => disponibles.has(id))
+            );
+            return;
+        }
         window._corteCajaSeleccion = {
             key,
             ids: new Set(resumen.movimientos.map(m => m._corteId))
@@ -308,46 +330,6 @@
             </div>`;
     }
 
-    function renderConteo(resumen) {
-        const denominaciones = DENOMINACIONES.map(d => `
-            <label style="display:grid;grid-template-columns:65px 1fr;gap:8px;align-items:center;font-size:12px;">
-                <span style="font-weight:800;color:#334155;">${dinero(d)}</span>
-                <input type="number" min="0" step="1" value="0" data-denom="${d}" oninput="recalcularConteoCorte()" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;text-align:right;">
-            </label>`).join('');
-
-        return `
-            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;">
-                    <div>
-                        <h3 style="margin:0;color:#0f172a;font-size:16px;">Conteo real</h3>
-                        <p style="margin:3px 0 0;color:#64748b;font-size:12px;">Captura billetes/monedas o escribe el total contado.</p>
-                    </div>
-                    <button onclick="limpiarConteoCorte()" style="padding:8px 12px;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;font-weight:700;">Limpiar</button>
-                </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;margin-bottom:14px;">
-                    ${denominaciones}
-                </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;align-items:end;">
-                    <div>
-                        <label style="font-size:11px;font-weight:800;color:#64748b;">TOTAL POR DENOMINACIONES</label>
-                        <input id="corteTotalDenominaciones" readonly value="${dinero(0)}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;font-weight:900;color:#0f172a;box-sizing:border-box;">
-                    </div>
-                    <div>
-                        <label style="font-size:11px;font-weight:800;color:#64748b;">TOTAL REAL CONTADO</label>
-                        <input id="corteTotalReal" type="number" min="0" step="0.01" value="" oninput="recalcularConteoCorte()" placeholder="${Number(resumen.saldoFinalSistema || 0).toFixed(2)}" style="width:100%;padding:10px;border:2px solid #1e40af;border-radius:6px;font-weight:900;font-size:16px;box-sizing:border-box;">
-                    </div>
-                    <div id="corteDiferenciaBox" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;">
-                        <div style="font-size:11px;font-weight:800;color:#1e3a8a;">DIFERENCIA</div>
-                        <div id="corteDiferencia" style="font-size:22px;font-weight:900;color:#1e40af;">${dinero(0)}</div>
-                    </div>
-                </div>
-                <div style="margin-top:12px;">
-                    <label style="font-size:11px;font-weight:800;color:#64748b;">OBSERVACIONES</label>
-                    <textarea id="corteObservaciones" placeholder="Ej. falta cambio, retiro a caja fuerte, pago pendiente de registrar..." style="width:100%;min-height:72px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;box-sizing:border-box;"></textarea>
-                </div>
-            </div>`;
-    }
-
     function renderCategorias(resumen) {
         const rows = resumen.porCategoria.map(c => `
             <tr>
@@ -371,6 +353,14 @@
                         <tbody>${rows || '<tr><td colspan="4" style="padding:18px;text-align:center;color:#94a3b8;">Sin movimientos en el periodo.</td></tr>'}</tbody>
                     </table>
                 </div>
+            </div>`;
+    }
+
+    function renderObservacionesCorte() {
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:16px;">
+                <label style="font-size:11px;font-weight:800;color:#64748b;">OBSERVACIONES DEL CORTE</label>
+                <textarea id="corteObservaciones" placeholder="Ej. movimientos revisados, efectivo separado, pendiente por aclarar..." style="width:100%;min-height:72px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;box-sizing:border-box;margin-top:6px;"></textarea>
             </div>`;
     }
 
@@ -426,10 +416,13 @@
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.folio)}</td>
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.cuentaNombre)}</td>
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.fechaInicio)} a ${esc(c.fechaFin)}</td>
-                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;">${dinero(c.totalReal)}</td>
-                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;color:${Math.abs(dif) <= 0.01 ? '#15803d' : '#b91c1c'};font-weight:900;">${dinero(dif)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;">${dinero(c.saldoFinalSistema ?? c.totalReal)}</td>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;font-weight:900;">${Number(c.movimientosMarcados ?? c.movimientos?.length ?? 0)}</td>
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;">
-                        <button onclick="imprimirCorteGuardado('${esc(c.folio)}')" style="padding:6px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">Ver</button>
+                        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+                            <button onclick="abrirDetalleCorteCaja('${esc(c.folio)}')" style="padding:6px 10px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-weight:800;">Detalle</button>
+                            <button onclick="imprimirCorteGuardado('${esc(c.folio)}')" style="padding:6px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">Ver</button>
+                        </div>
                     </td>
                 </tr>`;
         }).join('');
@@ -443,8 +436,8 @@
                             <th style="padding:8px;text-align:left;">Folio</th>
                             <th style="padding:8px;text-align:left;">Cuenta</th>
                             <th style="padding:8px;text-align:left;">Periodo</th>
-                            <th style="padding:8px;text-align:right;">Contado</th>
-                            <th style="padding:8px;text-align:right;">Diferencia</th>
+                            <th style="padding:8px;text-align:right;">Monto identificado</th>
+                            <th style="padding:8px;text-align:center;">Movs.</th>
                             <th style="padding:8px;text-align:center;">Accion</th>
                         </tr></thead>
                         <tbody>${rows || '<tr><td colspan="6" style="padding:18px;text-align:center;color:#94a3b8;">Aun no hay cortes guardados.</td></tr>'}</tbody>
@@ -501,11 +494,11 @@
                 ${renderKpi('Saldo esperado marcado', seleccion.saldoFinalSistema, '#1e40af', `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`, 'corteKpiSaldoSistema', 'corteSubSaldoSistema')}
             </div>
 
-            <div style="display:grid;grid-template-columns:minmax(280px,1.15fr) minmax(280px,0.85fr);gap:16px;align-items:start;">
-                ${renderConteo(seleccion)}
+            <div style="display:grid;grid-template-columns:1fr;gap:16px;align-items:start;">
                 <div id="corteCategoriasSeleccion">${renderCategorias(seleccion)}</div>
             </div>
 
+            ${renderObservacionesCorte()}
             ${renderMovimientos(resumen)}
             ${renderHistorial()}
         `;
@@ -577,8 +570,8 @@
         }, 0);
 
         const inputReal = document.getElementById('corteTotalReal');
-        const totalReal = inputReal && inputReal.value !== '' ? Number(inputReal.value || 0) : totalDenoms;
-        const diferencia = totalReal - Number(seleccion.saldoFinalSistema || 0);
+        const totalReal = inputReal && inputReal.value !== '' ? Number(inputReal.value || 0) : Number(seleccion.saldoFinalSistema || 0);
+        const diferencia = inputReal ? totalReal - Number(seleccion.saldoFinalSistema || 0) : 0;
 
         const denomsEl = document.getElementById('corteTotalDenominaciones');
         const difEl = document.getElementById('corteDiferencia');
@@ -637,6 +630,7 @@
             denominaciones,
             resumenCategorias: seleccion.porCategoria,
             movimientos: seleccion.movimientos.map(m => ({
+                corteId: m._corteId,
                 id: m.id || m._idx,
                 fecha: m.fecha || m.fechaISO || m.createdAt,
                 tipo: m._tipo,
@@ -668,6 +662,76 @@
         imprimirCorteGuardado(corte.folio);
     };
 
+    window.abrirDetalleCorteCaja = function(folio) {
+        const cortes = StorageService.get('cortesCaja', []);
+        const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
+        if (!corte) return alert('No se encontro el corte solicitado.');
+
+        document.querySelector('[data-modal="detalle-corte-caja"]')?.remove();
+
+        const movimientos = Array.isArray(corte.movimientos) ? corte.movimientos : [];
+        const ingresos = movimientos.filter(m => String(m.tipo || '').toLowerCase() === 'ingreso');
+        const egresos = movimientos.filter(m => String(m.tipo || '').toLowerCase() !== 'ingreso');
+        const totalIngresos = ingresos.reduce((s, m) => s + Number(m.monto || 0), 0);
+        const totalEgresos = egresos.reduce((s, m) => s + Number(m.monto || 0), 0);
+
+        const row = (m, color) => `
+            <tr>
+                <td style="padding:8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">${esc(window.formatearFechaMX ? window.formatearFechaMX(m.fecha) : (m.fecha || '-'))}</td>
+                <td style="padding:8px;border-bottom:1px solid #e5e7eb;">
+                    <b>${esc(m.concepto || '-')}</b>
+                    ${m.referencia ? `<br><small style="color:#94a3b8;">${esc(m.referencia)}</small>` : ''}
+                </td>
+                <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${esc(m.cuenta || '-')}</td>
+                <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:900;color:${color};">${dinero(m.monto)}</td>
+            </tr>`;
+
+        const tabla = (titulo, items, total, color, vacio) => `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                    <h4 style="margin:0;color:#0f172a;">${esc(titulo)}</h4>
+                    <strong style="color:${color};">${dinero(total)}</strong>
+                </div>
+                <div style="overflow-x:auto;max-height:330px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead style="position:sticky;top:0;background:#ffffff;color:#475569;">
+                            <tr>
+                                <th style="padding:8px;text-align:left;">Fecha</th>
+                                <th style="padding:8px;text-align:left;">Movimiento</th>
+                                <th style="padding:8px;text-align:left;">Cuenta</th>
+                                <th style="padding:8px;text-align:right;">Monto</th>
+                            </tr>
+                        </thead>
+                        <tbody>${items.map(m => row(m, color)).join('') || `<tr><td colspan="4" style="padding:20px;text-align:center;color:#94a3b8;">${esc(vacio)}</td></tr>`}</tbody>
+                    </table>
+                </div>
+            </div>`;
+
+        const html = `
+            <div data-modal="detalle-corte-caja" style="position:fixed;inset:0;background:rgba(15,23,42,0.82);z-index:10000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+                <div style="background:#f8fafc;width:100%;max-width:1100px;border-radius:12px;padding:22px;box-shadow:0 20px 45px rgba(0,0,0,0.25);">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+                        <div>
+                            <h3 style="margin:0;color:#0f172a;">Detalle del corte ${esc(corte.folio)}</h3>
+                            <p style="margin:4px 0 0;color:#64748b;font-size:13px;">${esc(corte.cuentaNombre || '-')} | ${esc(corte.fechaInicio || '-')} a ${esc(corte.fechaFin || '-')}</p>
+                        </div>
+                        <button onclick="document.querySelector('[data-modal=&quot;detalle-corte-caja&quot;]')?.remove()" style="padding:9px 14px;background:#e2e8f0;color:#334155;border:0;border-radius:6px;cursor:pointer;font-weight:800;">Cerrar</button>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;">
+                        ${renderKpi('Ingresos', totalIngresos, '#15803d', `${ingresos.length} movimientos`)}
+                        ${renderKpi('Egresos', totalEgresos, '#b91c1c', `${egresos.length} movimientos`)}
+                        ${renderKpi('Monto identificado', Number(corte.saldoFinalSistema || 0), '#1e40af', `${movimientos.length} movimientos conciliados`)}
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;align-items:start;">
+                        ${tabla('Ingresos conciliados', ingresos, totalIngresos, '#15803d', 'Sin ingresos en este corte.')}
+                        ${tabla('Egresos conciliados', egresos, totalEgresos, '#b91c1c', 'Sin egresos en este corte.')}
+                    </div>
+                </div>
+            </div>`;
+
+        document.body.insertAdjacentHTML('beforeend', html);
+    };
+
     function htmlCorte(corte) {
         const cats = (corte.resumenCategorias || []).map(c => `
             <tr>
@@ -675,14 +739,6 @@
                 <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(c.ingresos)}</td>
                 <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(c.egresos)}</td>
             </tr>`).join('');
-        const denoms = (corte.denominaciones || []).map(d => `
-            <tr>
-                <td style="padding:5px;border-bottom:1px solid #ddd;">${dinero(d.denominacion)}</td>
-                <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${d.cantidad}</td>
-                <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(d.denominacion * d.cantidad)}</td>
-            </tr>`).join('');
-        const diferenciaColor = Math.abs(Number(corte.diferencia || 0)) <= 0.01 ? '#15803d' : '#b91c1c';
-
         return `
             <div id="ticket-contenido" style="font-family:Arial,sans-serif;max-width:780px;margin:0 auto;color:#111827;">
                 <h2 style="text-align:center;margin:0 0 4px;">Muebleria Mi Pueblito</h2>
@@ -702,20 +758,13 @@
                         <tr><td style="padding:6px;border:1px solid #ddd;">Saldo inicial</td><td style="padding:6px;border:1px solid #ddd;text-align:right;">${dinero(corte.saldoInicial)}</td></tr>
                         <tr><td style="padding:6px;border:1px solid #ddd;">Ingresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#15803d;">${dinero(corte.ingresos)}</td></tr>
                         <tr><td style="padding:6px;border:1px solid #ddd;">Egresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#b91c1c;">${dinero(corte.egresos)}</td></tr>
-                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Saldo sistema</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.saldoFinalSistema)}</b></td></tr>
-                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Total contado</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.totalReal)}</b></td></tr>
-                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Diferencia</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:${diferenciaColor};"><b>${dinero(corte.diferencia)}</b></td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Monto identificado</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.saldoFinalSistema)}</b></td></tr>
                     </tbody>
                 </table>
                 <h4 style="margin:10px 0 6px;">Resumen por origen</h4>
                 <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;">
                     <thead><tr><th style="text-align:left;padding:5px;border-bottom:1px solid #ddd;">Origen</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Ingresos</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Egresos</th></tr></thead>
                     <tbody>${cats || '<tr><td colspan="3" style="padding:8px;text-align:center;">Sin movimientos</td></tr>'}</tbody>
-                </table>
-                <h4 style="margin:10px 0 6px;">Conteo</h4>
-                <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;">
-                    <thead><tr><th style="text-align:left;padding:5px;border-bottom:1px solid #ddd;">Denominacion</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Cantidad</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Total</th></tr></thead>
-                    <tbody>${denoms || '<tr><td colspan="3" style="padding:8px;text-align:center;">Sin desglose</td></tr>'}</tbody>
                 </table>
                 ${corte.observaciones ? `<p style="font-size:12px;"><b>Observaciones:</b> ${esc(corte.observaciones)}</p>` : ''}
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:45px;font-size:12px;text-align:center;">
