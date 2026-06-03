@@ -17,6 +17,56 @@ function esAdmin() {
     return getSesion()?.rol === 'admin';
 }
 
+function _normalizarTextoUsuarioVendedor(valor) {
+    return String(valor || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
+function obtenerVendedorDeUsuario(usuario = getSesion()) {
+    if (!usuario || usuario.rol !== 'vendedor') return null;
+    const vendedores = StorageService.get('vendedores', []).filter(v => v.activo !== false);
+    if (!vendedores.length) return null;
+
+    if (usuario.vendedorId !== undefined && usuario.vendedorId !== null && usuario.vendedorId !== '') {
+        const directo = vendedores.find(v => String(v.id) === String(usuario.vendedorId));
+        if (directo) return directo;
+    }
+
+    const clavesUsuario = [
+        usuario.nombre,
+        usuario.usuario,
+        usuario.email
+    ].map(_normalizarTextoUsuarioVendedor).filter(Boolean);
+
+    const porNombre = vendedores.find(v => {
+        const nombreVend = _normalizarTextoUsuarioVendedor(v.nombre);
+        return clavesUsuario.some(clave => clave === nombreVend || clave.includes(nombreVend) || nombreVend.includes(clave));
+    });
+    if (porNombre) return porNombre;
+
+    return vendedores.length === 1 ? vendedores[0] : null;
+}
+
+function _sesionDesdePerfil({ uid, email, perfil = {}, fallbackNombre = '' }) {
+    const base = {
+        uid,
+        email,
+        nombre: perfil.nombre || fallbackNombre || email,
+        rol: perfil.rol || 'vendedor',
+        vendedorId: perfil.vendedorId || null,
+        vendedorNombre: perfil.vendedorNombre || null
+    };
+    const vendedor = obtenerVendedorDeUsuario(base);
+    if (vendedor) {
+        base.vendedorId = vendedor.id;
+        base.vendedorNombre = vendedor.nombre;
+    }
+    return base;
+}
+
 // Escapa caracteres HTML para prevenir XSS al insertar datos de usuario en HTML
 function _esc(str) {
     if (str == null) return '';
@@ -191,7 +241,7 @@ async function _verificarCredencialesAdmin(email, pass) {
             if (errEl) errEl.textContent = '❌ Este usuario no tiene permisos de administrador.';
             return;
         }
-        const sesion = { uid, email: cred.user.email, nombre: perfil.nombre || cred.user.email, rol: 'admin' };
+        const sesion = _sesionDesdePerfil({ uid, email: cred.user.email, perfil: { ...perfil, rol: 'admin' }, fallbackNombre: cred.user.email });
         sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
         aplicarRolUI();
         document.querySelector('[data-modal="req-admin"]')?.remove();
@@ -282,7 +332,7 @@ function verificarSesionInicial() {
                 if (!sesion || sesion.uid !== user.uid) {
                     const snap = await window._db.collection('usuarios').doc(user.uid).get();
                     const perfil = snap.exists ? snap.data() : { rol: 'vendedor', nombre: user.email };
-                    sesion = { uid: user.uid, email: user.email, nombre: perfil.nombre || user.email, rol: perfil.rol || 'vendedor' };
+                    sesion = _sesionDesdePerfil({ uid: user.uid, email: user.email, perfil, fallbackNombre: user.email });
                     sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
                 }
                 ocultarLoginScreen();
@@ -313,7 +363,7 @@ async function iniciarSesion() {
             const uid = cred.user.uid;
             const snap = await window._db.collection('usuarios').doc(uid).get();
             const perfil = snap.exists ? snap.data() : { rol: 'vendedor', nombre: email };
-            const sesion = { uid, email, nombre: perfil.nombre || email, rol: perfil.rol || 'vendedor' };
+            const sesion = _sesionDesdePerfil({ uid, email, perfil, fallbackNombre: email });
             sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
             ocultarLoginScreen();
             aplicarRolUI();
@@ -359,7 +409,21 @@ function _iniciarSesionLocalFallback(email, pass) {
         if (passInput) { passInput.value = ''; passInput.focus(); }
         return;
     }
-    sessionStorage.setItem('sesionActiva', JSON.stringify({ usuario: match.usuario, nombre: match.nombre || match.usuario, rol: match.rol, id: match.id }));
+    const sesion = {
+        usuario: match.usuario,
+        email: match.email || null,
+        nombre: match.nombre || match.usuario,
+        rol: match.rol,
+        id: match.id,
+        vendedorId: match.vendedorId || null,
+        vendedorNombre: match.vendedorNombre || null
+    };
+    const vendedorSesion = obtenerVendedorDeUsuario(sesion);
+    if (vendedorSesion) {
+        sesion.vendedorId = vendedorSesion.id;
+        sesion.vendedorNombre = vendedorSesion.nombre;
+    }
+    sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
     ocultarLoginScreen();
     aplicarRolUI();
     if (window._firebaseActivo) {
@@ -435,6 +499,13 @@ function abrirMenuUsuario() {
 }
 
 // ── gestión de usuarios ───────────────────────────────────────────────────────
+function _opcionesVendedoresUsuario(vendedorId = '') {
+    const vendedores = StorageService.get('vendedores', []).filter(v => v.activo !== false);
+    return `<option value="">Sin vendedor vinculado</option>` + vendedores
+        .map(v => `<option value="${_esc(v.id)}" ${String(v.id) === String(vendedorId || '') ? 'selected' : ''}>${_esc(v.nombre)}</option>`)
+        .join('');
+}
+
 function renderGestionUsuarios() {
     requireAdmin(() => {
         const cont = document.getElementById('contenidoUsuarios');
@@ -445,6 +516,7 @@ function renderGestionUsuarios() {
         <tr>
           <td style="padding:10px;">${_esc(u.nombre || u.usuario || u.email || '-')}</td>
           <td style="padding:10px;text-align:center;"><span style="background:${u.rol==='admin'?'#dbeafe':'#d1fae5'};color:${u.rol==='admin'?'#1e40af':'#065f46'};padding:3px 10px;border-radius:999px;font-size:12px;font-weight:bold;">${u.rol}</span></td>
+          <td style="padding:10px;text-align:center;">${u.rol === 'vendedor' ? _esc(u.vendedorNombre || StorageService.get('vendedores', []).find(v => String(v.id) === String(u.vendedorId))?.nombre || 'Sin vincular') : '-'}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${u.activo?'#16a34a':'#9ca3af'};font-weight:bold;">${u.activo?'✅ Activo':'⛔ Inactivo'}</span></td>
           <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
             <button onclick="abrirFormUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Editar">✏️</button>
@@ -469,10 +541,11 @@ function renderGestionUsuarios() {
             <thead><tr style="background:#f1f5f9;">
               <th style="padding:10px;text-align:left;">Usuario</th>
               <th style="padding:10px;text-align:center;">Rol</th>
+              <th style="padding:10px;text-align:center;">Vendedor vinculado</th>
               <th style="padding:10px;text-align:center;">Estado</th>
               <th style="padding:10px;text-align:center;">Acciones</th>
             </tr></thead>
-            <tbody>${rows || '<tr><td colspan="4" style="text-align:center;padding:20px;color:#9ca3af;">Sin usuarios</td></tr>'}</tbody>
+            <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#9ca3af;">Sin usuarios</td></tr>'}</tbody>
           </table>
         </div>`;
     });
@@ -499,10 +572,17 @@ function abrirFormUsuario(id) {
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">ROL</label>
-            <select id="usrRol" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <select id="usrRol" onchange="document.getElementById('usrVendedorWrap').style.display=this.value==='vendedor'?'block':'none';" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
               <option value="vendedor" ${u && u.rol === 'vendedor' ? 'selected' : ''}>Vendedor</option>
               <option value="admin" ${u && u.rol === 'admin' ? 'selected' : ''}>Administrador</option>
             </select>
+          </div>
+          <div id="usrVendedorWrap" style="display:${(!u || u.rol === 'vendedor') ? 'block' : 'none'};">
+            <label style="font-size:12px;font-weight:bold;color:#374151;">VENDEDOR VINCULADO</label>
+            <select id="usrVendedorId" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              ${_opcionesVendedoresUsuario(u?.vendedorId)}
+            </select>
+            <div style="font-size:11px;color:#64748b;margin-top:4px;">Cuando este usuario venda, el sistema asignara este vendedor automaticamente.</div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
             <input type="checkbox" id="usrActivo" ${u ? (u.activo ? 'checked' : '') : 'checked'} style="width:18px;height:18px;">
@@ -523,6 +603,8 @@ function guardarUsuario() {
     const nombre = document.getElementById('usrNombre')?.value.trim();
     const pin = document.getElementById('usrPin')?.value;
     const rol = document.getElementById('usrRol')?.value;
+    const vendedorId = rol === 'vendedor' ? (document.getElementById('usrVendedorId')?.value || '') : '';
+    const vendedor = vendedorId ? StorageService.get('vendedores', []).find(v => String(v.id) === String(vendedorId)) : null;
     const activo = document.getElementById('usrActivo')?.checked;
     if (!nombre) return alert('⚠️ El nombre de usuario es obligatorio.');
     let usuarios = _getUsuarios();
@@ -534,15 +616,27 @@ function guardarUsuario() {
         usuarios[idx].nombre = nombre;
         if (pin) usuarios[idx].pin = pin;
         usuarios[idx].rol = rol;
+        usuarios[idx].vendedorId = vendedor ? vendedor.id : null;
+        usuarios[idx].vendedorNombre = vendedor ? vendedor.nombre : null;
         usuarios[idx].activo = activo;
     } else {
         // Nuevo
         if (!pin) return alert('⚠️ El PIN es obligatorio para nuevos usuarios.');
         const existe = usuarios.find(u => u.usuario === nombre);
         if (existe) return alert('⚠️ Ya existe un usuario con ese nombre.');
-        usuarios.push({ id: Date.now(), usuario: nombre, nombre, pin, rol, activo });
+        usuarios.push({ id: Date.now(), usuario: nombre, nombre, pin, rol, vendedorId: vendedor ? vendedor.id : null, vendedorNombre: vendedor ? vendedor.nombre : null, activo });
     }
     StorageService.set('usuariosConfig', usuarios);
+    const usuarioActualizado = id ? usuarios.find(u => String(u.uid || u.id) === String(id)) : null;
+    if (window._db && usuarioActualizado?.uid) {
+        window._db.collection('usuarios').doc(usuarioActualizado.uid).set({
+            nombre,
+            rol,
+            vendedorId: vendedor ? vendedor.id : null,
+            vendedorNombre: vendedor ? vendedor.nombre : null,
+            activo
+        }, { merge: true }).catch(err => console.warn('No se pudo sincronizar el vendedor vinculado en Firebase:', err));
+    }
     document.querySelector('[data-modal="form-usuario"]')?.remove();
     renderGestionUsuarios();
 }
@@ -585,9 +679,15 @@ function abrirFormCrearUsuarioFirebase() {
           </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">ROL</label>
-            <select id="fbUsrRol" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <select id="fbUsrRol" onchange="document.getElementById('fbUsrVendedorWrap').style.display=this.value==='vendedor'?'block':'none';" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
               <option value="vendedor">Vendedor</option>
               <option value="admin">Administrador</option>
+            </select>
+          </div>
+          <div id="fbUsrVendedorWrap">
+            <label style="font-size:12px;font-weight:bold;color:#374151;">VENDEDOR VINCULADO</label>
+            <select id="fbUsrVendedorId" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              ${_opcionesVendedoresUsuario()}
             </select>
           </div>
           <div id="fbUsrError" style="color:#dc2626;font-size:13px;min-height:16px;"></div>
@@ -608,6 +708,7 @@ async function guardarUsuarioFirebase() {
     const pass = document.getElementById('fbUsrPass')?.value;
     const nombre = document.getElementById('fbUsrNombre')?.value.trim();
     const rol = document.getElementById('fbUsrRol')?.value;
+    const vendedorId = rol === 'vendedor' ? (document.getElementById('fbUsrVendedorId')?.value || '') : '';
     const errEl = document.getElementById('fbUsrError');
     const btn = document.getElementById('btnGuardarFbUsr');
     if (!email || !pass || !nombre) { if (errEl) errEl.textContent = '⚠️ Todos los campos son obligatorios.'; return; }
@@ -615,7 +716,7 @@ async function guardarUsuarioFirebase() {
     if (btn) { btn.disabled = true; btn.textContent = 'Creando...'; }
     if (errEl) errEl.textContent = '';
     try {
-        await crearUsuarioFirebase(email, pass, nombre, rol);
+        await crearUsuarioFirebase(email, pass, nombre, rol, vendedorId);
         document.querySelector('[data-modal="form-firebase-usuario"]')?.remove();
         alert(`✅ Usuario "${nombre}" creado correctamente en Firebase.\n\n⚠️ Es posible que necesites iniciar sesión nuevamente.`);
         renderGestionUsuarios();
@@ -629,18 +730,19 @@ async function guardarUsuarioFirebase() {
     }
 }
 
-async function crearUsuarioFirebase(email, pass, nombre, rol) {
+async function crearUsuarioFirebase(email, pass, nombre, rol, vendedorId = '') {
     // Guardar sesión actual del admin antes de crear el usuario
     let sesionAdmin = null;
     try { sesionAdmin = JSON.parse(sessionStorage.getItem('sesionActiva')); } catch { sesionAdmin = null; }
     const cred = await window._auth.createUserWithEmailAndPassword(email, pass);
     const uid = cred.user.uid;
+    const vendedor = vendedorId ? StorageService.get('vendedores', []).find(v => String(v.id) === String(vendedorId)) : null;
     // Guardar perfil en Firestore
-    await window._db.collection('usuarios').doc(uid).set({ nombre, rol, email, creadoEn: window.localISO(new Date()), activo: true });
+    await window._db.collection('usuarios').doc(uid).set({ nombre, rol, email, vendedorId: vendedor ? vendedor.id : null, vendedorNombre: vendedor ? vendedor.nombre : null, creadoEn: window.localISO(new Date()), activo: true });
     // También guardar en localStorage como respaldo
     const usuarios = _getUsuarios();
     if (!usuarios.find(u => u.email === email)) {
-        usuarios.push({ id: uid, uid, usuario: nombre, nombre, email, rol, activo: true });
+        usuarios.push({ id: uid, uid, usuario: nombre, nombre, email, rol, vendedorId: vendedor ? vendedor.id : null, vendedorNombre: vendedor ? vendedor.nombre : null, activo: true });
         StorageService.set('usuariosConfig', usuarios);
     }
     // Restaurar sesión del admin en sessionStorage
@@ -659,6 +761,7 @@ async function listarUsuariosFirebase() {
 // ── exportar al scope global ──────────────────────────────────────────────────
 window.getSesion = getSesion;
 window.esAdmin = esAdmin;
+window.obtenerVendedorDeUsuario = obtenerVendedorDeUsuario;
 window.requireAdmin = requireAdmin;
 window._verificarPinAdmin = _verificarPinAdmin;
 window._verificarCredencialesAdmin = _verificarCredencialesAdmin;

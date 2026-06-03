@@ -258,6 +258,36 @@ function _esAdmin() {
     }
 }
 
+function _ventaSesionActual() {
+    try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; }
+}
+
+function _ventaVendedorAsignadoSesion() {
+    const sesion = _ventaSesionActual();
+    if (!sesion || sesion.rol !== 'vendedor') return null;
+    if (typeof window.obtenerVendedorDeUsuario === 'function') {
+        return window.obtenerVendedorDeUsuario(sesion);
+    }
+    const vendedores = StorageService.get("vendedores", []).filter(v => v.activo !== false);
+    if (sesion.vendedorId) {
+        const directo = vendedores.find(v => String(v.id) === String(sesion.vendedorId));
+        if (directo) return directo;
+    }
+    return vendedores.length === 1 ? vendedores[0] : null;
+}
+
+function _ventaResolverVendedorSeleccionado() {
+    const sesion = _ventaSesionActual();
+    if (sesion?.rol === 'vendedor') return _ventaVendedorAsignadoSesion();
+
+    const selVnd = document.getElementById("selVendedor");
+    if (selVnd && selVnd.value) {
+        const vendedores = StorageService.get("vendedores", []);
+        return vendedores.find(v => String(v.id) === String(selVnd.value)) || null;
+    }
+    return null;
+}
+
 function agregarAlCarritoDesdeModal() {
     if (!productoActualId) return;
     const p = productos.find(prod => String(prod.id) === String(productoActualId));
@@ -355,6 +385,23 @@ function renderCarrito() {
     let totalContado = carrito.reduce((sum, p) => 
         sum + (p.precioContado || 0) * (p.cantidad || 1), 0
     );
+    const vendedorSesion = _ventaVendedorAsignadoSesion();
+    const vendedoresActivos = StorageService.get("vendedores", []).filter(v => v.activo !== false);
+    const vendedorControlHtml = esAdmin
+        ? `
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">👤 Vendedor</label>
+                    <select id="selVendedor" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                        <option value="">-- Sin vendedor asignado --</option>
+                        ${vendedoresActivos.map(v => `<option value="${v.id}" ${window._vendedorSeleccionado && String(window._vendedorSeleccionado.id) === String(v.id) ? 'selected' : ''}>${_escapeHtml(v.nombre)}</option>`).join('')}
+                    </select>
+                </div>`
+        : `
+                <div style="margin-bottom:12px; padding:10px 12px; background:${vendedorSesion ? '#f0fdf4' : '#fff7ed'}; border:1px solid ${vendedorSesion ? '#bbf7d0' : '#fed7aa'}; border-radius:8px;">
+                    <div style="font-size:11px; font-weight:bold; color:${vendedorSesion ? '#166534' : '#92400e'}; margin-bottom:3px;">👤 Vendedor asignado</div>
+                    <div style="font-size:14px; font-weight:800; color:${vendedorSesion ? '#14532d' : '#9a3412'};">${vendedorSesion ? _escapeHtml(vendedorSesion.nombre) : 'Sin vínculo de vendedor'}</div>
+                    ${vendedorSesion ? '' : '<div style="font-size:11px;color:#92400e;margin-top:4px;">Pide al administrador vincular tu usuario con un vendedor.</div>'}
+                </div>`;
 
     let html = `
         <div class="header-seccion" style="margin-bottom: 20px;">
@@ -459,13 +506,7 @@ function renderCarrito() {
                 </div>
 
                 <!-- VENDEDOR -->
-                <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">👤 Vendedor</label>
-                    <select id="selVendedor" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
-                        <option value="">-- Sin vendedor asignado --</option>
-                        ${StorageService.get("vendedores", []).map(v => `<option value="${v.id}">${v.nombre}</option>`).join('')}
-                    </select>
-                </div>
+                ${vendedorControlHtml}
 
                 <!-- MÉTODO DE PAGO -->
                 <div style="margin-bottom:12px;">
@@ -992,6 +1033,13 @@ function confirmarVentaFinal() {
         return;
     }
 
+    window._vendedorSeleccionado = _ventaResolverVendedorSeleccionado();
+    const sesionVenta = _ventaSesionActual();
+    if (sesionVenta?.rol === 'vendedor' && !window._vendedorSeleccionado) {
+        alert("⚠️ Tu usuario no está vinculado a un vendedor activo. Pide al administrador vincularlo en Configuración > Usuarios del sistema.");
+        return;
+    }
+
     let descuentoAplicado = 0;
     let listaDescuentos = [];
     
@@ -1061,13 +1109,7 @@ function confirmarVentaFinal() {
         window._estadoPago.periodicidad = periodicidad;
     }
 
-    const selVnd = document.getElementById("selVendedor");
-    if (selVnd && selVnd.value) {
-        const vendedores = StorageService.get("vendedores", []);
-        _vendedorSeleccionado = vendedores.find(v => String(v.id) === String(selVnd.value)) || null;
-    } else {
-        _vendedorSeleccionado = null;
-    }
+    window._vendedorSeleccionado = _ventaResolverVendedorSeleccionado();
 
     mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido, descuentoAplicado, totalConDescuento);
 }
@@ -1546,6 +1588,10 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         periodicidad: periodicidadVenta,
         apartadoFechaCompromiso: window._estadoPago?.apartadoFechaCompromiso || null,
         apartadoCondiciones: window._estadoPago?.apartadoCondiciones || null,
+        vendedorSeleccionado: window._vendedorSeleccionado || null,
+        vendedor: window._vendedorSeleccionado?.nombre || null,
+        vendedorId: window._vendedorSeleccionado?.id || null,
+        vendedorNombre: window._vendedorSeleccionado?.nombre || null,
         acreedor: "Roberto Escobedo Vega",
         lugar: "Santiago Cuaula, Tlaxcala",
         tasaMorosidad: 2
@@ -1859,7 +1905,9 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
         articulos: datosVentaP.articulos,
         apartadoFechaCompromiso: datosVentaP.apartadoFechaCompromiso || null,
         apartadoCondiciones: datosVentaP.apartadoCondiciones || null,
-        vendedor: window._vendedorSeleccionado?.nombre || null
+        vendedor: window._vendedorSeleccionado?.nombre || null,
+        vendedorId: window._vendedorSeleccionado?.id || null,
+        vendedorNombre: window._vendedorSeleccionado?.nombre || null
     };
     const idxVentaApartadoOrigen = ventasRegistradas.findIndex(v =>
         String(v.folio || '').trim() === folioNormalizado &&
@@ -1878,6 +1926,11 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
         ventasRegistradas.push(registroVentaAutorizada);
     }
     StorageService.set('ventasRegistradas', ventasRegistradas);
+
+    if (typeof window.registrarComisionVenta === "function" && window._vendedorSeleccionado?.id) {
+        window._ultimaVentaMetodo = metodoPago;
+        window.registrarComisionVenta(folioVenta, totalContado, window._vendedorSeleccionado.id);
+    }
 
     const entregaYaDocumentada = StorageService.get("documentosEntrega", [])
         .some(d => d.folioVenta === folioVenta && d.origen === "salida_operativa_venta_cuarentena");
@@ -2046,6 +2099,7 @@ function generarTicketMediaHoja(datosVenta) {
             <b>FOLIO: ${folio}</b><br>
             FECHA: ${fechaActual}<br>
             CLIENTE: ${datosVenta.cliente.nombre}<br>
+            ${datosVenta.vendedorNombre || datosVenta.vendedor ? `VENDEDOR: ${_escapeHtml(datosVenta.vendedorNombre || datosVenta.vendedor)}<br>` : ''}
             ${datosVenta.cliente.telefono ? 'TEL: ' + datosVenta.cliente.telefono : ''}
         </div>
 
@@ -2181,8 +2235,8 @@ function guardarTicketEnRegistro(datosVenta, folio) {
         planesDisponibles: CalculatorService.calcularCredito(datosVenta.total),
         estado: "Activo",
         abonos: [],
-        vendedorId: _vendedorSeleccionado ? _vendedorSeleccionado.id : null,
-        vendedorNombre: _vendedorSeleccionado ? _vendedorSeleccionado.nombre : null,
+        vendedorId: window._vendedorSeleccionado ? window._vendedorSeleccionado.id : null,
+        vendedorNombre: window._vendedorSeleccionado ? window._vendedorSeleccionado.nombre : null,
         ultimaActualizacion: window.localISO(new Date())
     };
 

@@ -656,7 +656,7 @@ window.renderReporteCompromisos = function() {
             </div>
             <div style="display:flex; gap:10px;">
                 <button onclick="renderReporteLiquidezCortoPlazo()" style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">💧 Evaluar Liquidez (Runway)</button>
-                <button onclick="renderAnalisisRiesgoCartera()" style="padding:10px 15px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">⬅️ Volver a ARC</button>
+                <button onclick="renderARC_v3()" style="padding:10px 15px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">⬅️ Volver a Cartera</button>
             </div>
         </div>
 

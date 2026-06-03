@@ -326,6 +326,7 @@ window.renderARC_v3 = function() {
                     <button onclick="renderARCTablaExcel()" style="padding:10px 16px;background:#059669;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📊 Vista Matriz Excel</button>
                     <button onclick="renderComportamiento()" style="padding:10px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🧬 Comportamiento de Pago</button>
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
+                    <button onclick="renderConcentracion()" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🎯 Concentración</button>
                 </div>
             </div>
         </div>
@@ -485,6 +486,15 @@ window.renderARCTablaExcel = function() {
             valB = String(b.nombre || '').toLowerCase();
             return sortDir * valA.localeCompare(valB);
         }
+        if (window._arcExSort === 'ultimoPago') {
+            valA = a.sne.ultimaFechaAbono ? a.sne.ultimaFechaAbono.getTime() : null;
+            valB = b.sne.ultimaFechaAbono ? b.sne.ultimaFechaAbono.getTime() : null;
+            if (valA === null && valB === null) return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+            if (valA === null) return window._arcExSortDir === 'asc' ? -1 : 1;
+            if (valB === null) return window._arcExSortDir === 'asc' ? 1 : -1;
+            if (valA === valB) return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+            return sortDir * (valA - valB);
+        }
         if (window._arcExSort === 'importe') {
             valA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
             valB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
@@ -545,6 +555,9 @@ window.renderARCTablaExcel = function() {
         const desc = (c.articulos || []).map(a => a.nombre).join(', ') || 'Venta General';
         const fVenta = _rc.parseFecha(c.fechaVenta || c.fechaIso || c.fecha);
         const fechaVentaStr = fVenta ? `${String(fVenta.getDate()).padStart(2,'0')}/${String(fVenta.getMonth()+1).padStart(2,'0')}/${String(fVenta.getFullYear()).slice(-2)}` : '-';
+        const fechaUltPagoStr = s.ultimaFechaAbono
+            ? `${String(s.ultimaFechaAbono.getDate()).padStart(2,'0')}/${String(s.ultimaFechaAbono.getMonth()+1).padStart(2,'0')}/${String(s.ultimaFechaAbono.getFullYear()).slice(-2)}`
+            : 'S/A';
 
         const importeReal = Number(c.totalMercancia || c.totalContadoOriginal || c.total || 0);
         const saldoRestante = Number(s.saldoActual);
@@ -560,10 +573,11 @@ window.renderARCTablaExcel = function() {
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
             <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${desc}">${desc}</td>
             <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${c.nombre}">${c.nombre}</td>
-            <td class="ex-stky ex-col-5" style="background:#f8fafc; color:#0f172a; text-align:right;">$${importeReal.toLocaleString('en-US')}</td>
-            <td class="ex-stky ex-col-6" style="background:#dcfce7; color:#166534; text-align:center; font-weight:bold;">${pctCubierto}%</td>
-            <td class="ex-stky ex-col-7" style="background:#fee2e2; color:#991b1b; text-align:center; font-weight:bold;">${pctPendiente}%</td>
-            <td class="ex-stky ex-col-8" style="background:#0ea5e9; color:#ffffff; font-weight:bold; text-align:right;">$${saldoRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+            <td class="ex-stky ex-col-5" style="background:#fef3c7; color:#92400e; text-align:center; font-weight:bold;">${fechaUltPagoStr}</td>
+            <td class="ex-stky ex-col-6" style="background:#f8fafc; color:#0f172a; text-align:right;">$${importeReal.toLocaleString('en-US')}</td>
+            <td class="ex-stky ex-col-7" style="background:#dcfce7; color:#166534; text-align:center; font-weight:bold;">${pctCubierto}%</td>
+            <td class="ex-stky ex-col-8" style="background:#fee2e2; color:#991b1b; text-align:center; font-weight:bold;">${pctPendiente}%</td>
+            <td class="ex-stky ex-col-9" style="background:#0ea5e9; color:#ffffff; font-weight:bold; text-align:right;">$${saldoRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
         `;
 
         uniqueGroups.forEach(key => {
@@ -632,10 +646,11 @@ window.renderARCTablaExcel = function() {
             .ex-col-2 { left: 35px;   width: 65px;  min-width: 65px;  text-align: center; }
             .ex-col-3 { left: 100px;  width: 140px; min-width: 140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
             .ex-col-4 { left: 240px;  width: 130px; min-width: 130px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
-            .ex-col-5 { left: 370px;  width: 70px;  min-width: 70px;  text-align: right; }
-            .ex-col-6 { left: 440px;  width: 50px;  min-width: 50px;  text-align: center; }
-            .ex-col-7 { left: 490px;  width: 50px;  min-width: 50px;  text-align: center; }
-            .ex-col-8 { left: 540px;  width: 80px;  min-width: 80px;  text-align: right; border-right: 4px solid #0f172a !important; }
+            .ex-col-5 { left: 370px;  width: 75px;  min-width: 75px;  text-align: center; }
+            .ex-col-6 { left: 445px;  width: 70px;  min-width: 70px;  text-align: right; }
+            .ex-col-7 { left: 515px;  width: 50px;  min-width: 50px;  text-align: center; }
+            .ex-col-8 { left: 565px;  width: 50px;  min-width: 50px;  text-align: center; }
+            .ex-col-9 { left: 615px;  width: 80px;  min-width: 80px;  text-align: right; border-right: 4px solid #0f172a !important; }
             
             /* Contenedor que permite Scroll Vertical y Horizontal */
             .ex-wrapper {
@@ -698,6 +713,15 @@ window.renderARCTablaExcel = function() {
                     <option value="desc" ${window._arcExDateSort==='desc'?'selected':''}>Inverso (Nuevo a Antiguo)</option>
                 </select>
             </div>
+            <div style="width:1px;height:24px;background:#e2e8f0;"></div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#64748b;">ESCALERA COBROS:</label>
+                <select onchange="if(this.value){window._arcExSort='ultimoPago';window._arcExSortDir=this.value;}else{window._arcExSort='riesgo';window._arcExSortDir='desc';}renderARCTablaExcel();" style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                    <option value="" ${window._arcExSort!=='ultimoPago'?'selected':''}>Orden actual del reporte</option>
+                    <option value="asc" ${window._arcExSort==='ultimoPago'&&window._arcExSortDir==='asc'?'selected':''}>Sin abono / mas antiguo arriba</option>
+                    <option value="desc" ${window._arcExSort==='ultimoPago'&&window._arcExSortDir==='desc'?'selected':''}>Mas reciente arriba</option>
+                </select>
+            </div>
         </div>
 
         <!-- Contenedor con Scrollbars (Horizontal y Vertical) -->
@@ -709,15 +733,16 @@ window.renderARCTablaExcel = function() {
                         ${thSort('fecha', 'Fecha', 'ex-col-2')}
                         ${thSort('desc', 'Descripción', 'ex-col-3')}
                         ${thSort('cliente', 'Cliente', 'ex-col-4')}
-                        ${thSort('importe', 'Importe', 'ex-col-5')}
-                        ${thSort('cubierto', '% Cub', 'ex-col-6')}
-                        ${thSort('pendiente', '% Pen', 'ex-col-7')}
-                        ${thSort('restante', 'Restante', 'ex-col-8')}
+                        ${thSort('ultimoPago', 'Ult Pago', 'ex-col-5')}
+                        ${thSort('importe', 'Importe', 'ex-col-6')}
+                        ${thSort('cubierto', '% Cub', 'ex-col-7')}
+                        ${thSort('pendiente', '% Pen', 'ex-col-8')}
+                        ${thSort('restante', 'Restante', 'ex-col-9')}
                         ${dateHeadersHtml}
                     </tr>
                 </thead>
                 <tbody>
-                    ${filasHtml || `<tr><td colspan="${8 + uniqueGroups.length}" style="padding:40px; text-align:center; color:#64748b;">No hay cuentas con abonos para mostrar con estos filtros.</td></tr>`}
+                    ${filasHtml || `<tr><td colspan="${9 + uniqueGroups.length}" style="padding:40px; text-align:center; color:#64748b;">No hay cuentas con abonos para mostrar con estos filtros.</td></tr>`}
                 </tbody>
                 <tfoot class="ex-tfoot">
                     <tr style="font-size:12px; color:#0f172a; box-shadow: 0 -2px 10px rgba(0,0,0,0.15);">
@@ -725,10 +750,11 @@ window.renderARCTablaExcel = function() {
                         <td class="ex-stky ex-col-2" style="border-bottom:none;"></td>
                         <td class="ex-stky ex-col-3" style="border-bottom:none; text-align:right;">TOTALES:</td>
                         <td class="ex-stky ex-col-4" style="border-bottom:none;"></td>
-                        <td class="ex-stky ex-col-5" style="border-bottom:none; text-align:right;">$${sumImporte.toLocaleString('en-US')}</td>
-                        <td class="ex-stky ex-col-6" style="border-bottom:none; text-align:center; color:#166534;">${pctTotalCubierto}%</td>
-                        <td class="ex-stky ex-col-7" style="border-bottom:none; text-align:center; color:#991b1b;">${pctTotalPendiente}%</td>
-                        <td class="ex-stky ex-col-8" style="border-bottom:none; text-align:right; color:#b91c1c;">$${sumRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
+                        <td class="ex-stky ex-col-5" style="border-bottom:none;"></td>
+                        <td class="ex-stky ex-col-6" style="border-bottom:none; text-align:right;">$${sumImporte.toLocaleString('en-US')}</td>
+                        <td class="ex-stky ex-col-7" style="border-bottom:none; text-align:center; color:#166534;">${pctTotalCubierto}%</td>
+                        <td class="ex-stky ex-col-8" style="border-bottom:none; text-align:center; color:#991b1b;">${pctTotalPendiente}%</td>
+                        <td class="ex-stky ex-col-9" style="border-bottom:none; text-align:right; color:#b91c1c;">$${sumRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
                         ${uniqueGroups.map(key => {
                             const t = sumAbonosFechas[key];
                             return `<td style="padding:6px 8px; border-right:1px solid #cbd5e1; border-bottom:none; text-align:right; color:#166534; background:#dcfce7;">${t > 0 ? '$'+t.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2}) : ''}</td>`;
