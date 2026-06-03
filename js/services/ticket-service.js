@@ -143,6 +143,107 @@ function mmpImprimirBluetooth(){
 </div>`;
     }
 
+    function documentCss(options = {}) {
+        const pageSize = options.pageSize === 'half-letter' ? '5.5in 8.5in' : 'letter portrait';
+        const maxWidth = options.pageSize === 'half-letter' ? '5.2in' : '8in';
+        return `
+<style id="mmp-document-print-style">
+@page { size: ${pageSize}; margin: ${options.margin || '12mm'}; }
+html, body {
+    margin: 0;
+    padding: 0;
+    background: #f1f5f9;
+    color: #0f172a;
+    font-family: Arial, Helvetica, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+body { box-sizing: border-box; }
+* { box-sizing: border-box; }
+.mmp-document-body {
+    width: 100%;
+    max-width: ${maxWidth};
+    margin: 0 auto;
+    padding: 18px;
+    background: #fff;
+}
+.mmp-document-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 12px;
+    background: #e2e8f0;
+    border-bottom: 1px solid #cbd5e1;
+}
+.mmp-document-toolbar button {
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 7px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.mmp-btn-print { background: #1e40af; color: #fff; }
+.mmp-btn-image { background: #047857; color: #fff; }
+table { max-width: 100%; }
+img { max-width: 100%; }
+@media print {
+    html, body { background: #fff; }
+    .no-print, .mmp-document-toolbar { display: none !important; }
+    .mmp-document-body { max-width: none; padding: 0; margin: 0; }
+}
+</style>`;
+    }
+
+    function documentImageScript(filename) {
+        const file = safeName(filename || 'documento');
+        return `
+<script>
+function mmpCargarHtml2CanvasDocumento(cb){
+    if (typeof html2canvas !== 'undefined') return cb();
+    var existente = document.getElementById('mmp-html2canvas-loader');
+    if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
+    var s = document.createElement('script');
+    s.id = 'mmp-html2canvas-loader';
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload = cb;
+    s.onerror = function(){ alert('No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.'); };
+    document.head.appendChild(s);
+}
+function mmpGuardarDocumentoImagen(){
+    mmpCargarHtml2CanvasDocumento(function(){
+        var node = document.querySelector('.mmp-document-body') || document.body;
+        var btn = document.getElementById('mmp-doc-btn-imagen');
+        var old = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
+        html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+            var a = document.createElement('a');
+            a.download = '${file}.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        }).catch(function(err){
+            console.error(err);
+            alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
+        }).finally(function(){
+            if (btn) { btn.disabled = false; btn.textContent = old || 'Guardar imagen'; }
+        });
+    });
+}
+<\/script>`;
+    }
+
+    function documentToolbar(options = {}) {
+        const imageButton = options.image === false ? '' : `<button id="mmp-doc-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarDocumentoImagen()">Guardar imagen</button>`;
+        return `
+<div class="mmp-document-toolbar no-print">
+    <button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button>
+    ${imageButton}
+</div>`;
+    }
+
     function normalizeHtml(html, options = {}) {
         let out = String(html || '');
         const title = esc(options.title || 'Ticket');
@@ -179,6 +280,46 @@ function mmpImprimirBluetooth(){
         return true;
     }
 
+    function normalizeDocumentHtml(html, options = {}) {
+        let out = String(html || '');
+        const title = esc(options.title || 'Documento');
+        const filename = options.filename || title;
+
+        if (!/<html[\s>]/i.test(out)) {
+            out = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${title}</title></head><body><div class="mmp-document-body">${out}</div></body></html>`;
+        }
+
+        if (!/<base\s/i.test(out)) {
+            out = out.replace(/<head[^>]*>/i, match => `${match}\n<base href="${esc(baseHref())}">`);
+        }
+        if (!/<title>/i.test(out)) {
+            out = out.replace(/<head[^>]*>/i, match => `${match}\n<title>${title}</title>`);
+        }
+        if (!/mmp-document-print-style/.test(out)) {
+            out = out.replace(/<\/head>/i, `${documentCss(options)}\n${documentImageScript(filename)}\n</head>`);
+        }
+        if (!/mmp-document-body/.test(out)) {
+            out = out.replace(/<body([^>]*)>/i, '<body$1><div class="mmp-document-body">')
+                     .replace(/<\/body>/i, '</div></body>');
+        }
+        if (!/mmp-document-toolbar/.test(out)) {
+            out = out.replace(/<body[^>]*>/i, match => `${match}\n${documentToolbar(options)}`);
+        }
+        return out;
+    }
+
+    function openDocument(html, options = {}) {
+        const w = window.open('', '_blank');
+        if (!w) {
+            alert('Habilita las ventanas emergentes para imprimir el documento.');
+            return false;
+        }
+        w.document.write(normalizeDocumentHtml(html, options));
+        w.document.close();
+        w.focus();
+        return true;
+    }
+
     function openThermal({ title = 'Ticket', filename = '', body = '' } = {}) {
         const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(title)}</title></head><body><div id="ticket-contenido" class="mmp-ticket-body">${body}</div></body></html>`;
         return openHtml(html, { title, filename: filename || title });
@@ -188,8 +329,10 @@ function mmpImprimirBluetooth(){
         esc,
         safeName,
         openHtml,
+        openDocument,
         openThermal,
         normalizeHtml,
+        normalizeDocumentHtml,
         thermalCss
     };
 })();
