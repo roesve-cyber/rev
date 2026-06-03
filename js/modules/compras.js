@@ -1491,8 +1491,8 @@ function _clonarEstadoCuentaProveedor(idCuenta) {
 window.imprimirEstadoCuentaProveedor = function(idCuenta) {
     const clone = _clonarEstadoCuentaProveedor(idCuenta);
     if (!clone) return alert('Abre primero el estado de cuenta para imprimirlo.');
-    if (window.TicketService?.openThermal) {
-        window.TicketService.openThermal({ title: 'Estado de cuenta proveedor', filename: `estado_proveedor_${idCuenta}`, body: clone.outerHTML });
+    if (window.TicketService?.openDocument) {
+        window.TicketService.openDocument(clone.outerHTML, { title: 'Estado de cuenta proveedor', filename: `estado_proveedor_${idCuenta}`, pageSize: 'letter' });
         return;
     }
     const w = window.open('', '_blank', 'width=900,height=1000');
@@ -2076,8 +2076,9 @@ function imprimirOrdenCompra(id) {
       <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-size:15px;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
-    if (window.TicketService?.openHtml) {
-        window.TicketService.openHtml(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}` });
+    if (window.TicketService?.openDocument) {
+        const pageSize = (oc.articulos || []).length <= 4 && !oc.notas ? 'half-letter' : 'letter';
+        window.TicketService.openDocument(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}`, pageSize });
         return;
     }
     const w = window.open('', '_blank', 'width=750,height=900');
@@ -2832,8 +2833,9 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
         <button onclick="window.print()" style="padding:11px 28px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:bold;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
-    if (window.TicketService?.openHtml) {
-        window.TicketService.openHtml(recepcionHTML, { title: `Recepcion ${compra.folio}`, filename: `recepcion_${compra.folio}` });
+    if (window.TicketService?.openDocument) {
+        const pageSize = ((compra.articulos || []).length + (backorder || []).length) <= 4 && !notas ? 'half-letter' : 'letter';
+        window.TicketService.openDocument(recepcionHTML, { title: `Recepcion ${compra.folio}`, filename: `recepcion_${compra.folio}`, pageSize });
         return;
     }
     const w = window.open('', '_blank', 'width=780,height=960');
@@ -5346,8 +5348,8 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
     </html>
     `;
 
-    if (window.TicketService?.openHtml) {
-        window.TicketService.openHtml(htmlDocumento, { title: `Estado consignacion ${titulo}`, filename: `estado_consignacion_${titulo}` });
+    if (window.TicketService?.openDocument) {
+        window.TicketService.openDocument(htmlDocumento, { title: `Estado consignacion ${titulo}`, filename: `estado_consignacion_${titulo}`, pageSize: 'letter' });
         return;
     }
     const ventanaNueva = window.open('', '_blank');
