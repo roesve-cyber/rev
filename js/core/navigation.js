@@ -98,6 +98,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'usuarios' && typeof renderGestionUsuarios === 'function') renderGestionUsuarios();
         if (vistaId === 'puntos' && typeof renderPanelPuntos === 'function') renderPanelPuntos();
         if (vistaId === 'clientesmorosos' && typeof renderClientesMorosos === 'function') renderClientesMorosos();
+        if (vistaId === 'autorizaciones' && typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         
         // REPARACION: liga que faltaba para las categorias
         if (vistaId === 'configcategorias' && typeof renderCategorias === 'function') renderCategorias();
