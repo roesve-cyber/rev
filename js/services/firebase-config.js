@@ -72,3 +72,13 @@ function _actualizarEstadoFirebaseUI() {
         el.innerHTML = '<span style="color:#d97706;">⚠️ Firebase no configurado — edita <code>js/services/firebase-config.js</code> con tus credenciales</span>';
     }
 }
+
+import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+
+// Exponemos las variables al entorno global (window)
+window.db = db;
+window.collection = collection;
+window.query = query;
+window.orderBy = orderBy;
+window.limit = limit;
+window.getDocs = getDocs;
