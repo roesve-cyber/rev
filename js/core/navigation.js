@@ -2,7 +2,42 @@
 
 // ===== CONTROL DE NAVEGACIÓN Y BOTÓN "ATRÁS" (PWA) =====
 
+function _navGrupoVista(vistaId) {
+    const operacion = new Set([
+        'tienda', 'carrito', 'seleccionarcliente', 'apartados', 'entregas',
+        'cotizaciones', 'listaprecios', 'devoluciones', 'garantias',
+        'cuentasxcobrar', 'gestion-datos-cliente'
+    ]);
+    if (operacion.has(vistaId)) return 'operacion';
+    return 'otro';
+}
+
+function _navLimpiarFiltrosOperacion() {
+    if (typeof window.resetFiltrosCatalogo === 'function') window.resetFiltrosCatalogo();
+    [
+        'buscarCliente',
+        'filtroClienteCobranza',
+        'filtroEstadoCobranza',
+        'filtroClienteAbonoDirecto',
+        'filtroVisorCreditos',
+        'filtroEstadoVisorCreditos'
+    ].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.tagName === 'SELECT') el.selectedIndex = 0;
+        else el.value = '';
+    });
+    window._clienteGestionSeleccionado = null;
+}
+
 window.navA = function(vistaId, isPopState = false) {
+    const vistaAnterior = window._vistaActualSistema || '';
+    const grupoAnterior = _navGrupoVista(vistaAnterior);
+    const grupoDestino = _navGrupoVista(vistaId);
+    if (vistaAnterior && grupoAnterior === 'operacion' && grupoDestino !== 'operacion') {
+        _navLimpiarFiltrosOperacion();
+    }
+
     // 1. Ocultar todas las vistas
     document.querySelectorAll('.vista').forEach(v => {
         v.classList.add('oculto');
@@ -19,7 +54,10 @@ window.navA = function(vistaId, isPopState = false) {
     // 3. AUTO-RENDERIZAR
     try {
         if (vistaId === 'inventario' && typeof renderInventario === 'function') renderInventario();
-        if (vistaId === 'tienda' && typeof renderTienda === 'function') renderTienda();
+        if (vistaId === 'kardex-inventario' && typeof renderKardexInventario === 'function') renderKardexInventario();
+        if (vistaId === 'productos-visor' && window._visorProductoIdActual && typeof mostrarDetalleProductoMaestro === 'function') mostrarDetalleProductoMaestro(window._visorProductoIdActual);
+        if (vistaId === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
+        else if (vistaId === 'tienda' && typeof renderTienda === 'function') renderTienda();
         if (vistaId === 'clientes' && typeof renderClientes === 'function') renderClientes();
         if (vistaId === 'proveedores' && typeof renderProveedores === 'function') renderProveedores();
         if (vistaId === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
@@ -27,10 +65,17 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'visor-creditos' && typeof renderVisorCreditosCobranza === 'function') renderVisorCreditosCobranza();
         if (vistaId === 'cobranzaesperada' && typeof renderCobranzaEsperada === 'function') renderCobranzaEsperada();
         if (vistaId === 'listaprecios' && typeof renderListaPrecios === 'function') renderListaPrecios();
+        if (vistaId === 'seleccionarcliente' && typeof renderSeleccionClienteVenta === 'function') {
+            renderSeleccionClienteVenta();
+            if (typeof renderResumenVentaCliente === 'function') renderResumenVentaCliente();
+            if (typeof mostrarInfoCliente === 'function') mostrarInfoCliente();
+        }
         if (vistaId === 'entregas' && typeof renderEntregas === 'function') renderEntregas();
+        if (vistaId === 'apartados' && typeof renderApartados === 'function') renderApartados();
         if (vistaId === 'carrito' && typeof renderCarrito === 'function') renderCarrito();
         if (vistaId === 'cuentas-bancarias' && typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
         if (vistaId === 'bancos' && typeof renderBancosConfig === 'function') renderBancosConfig();
+        if (vistaId === 'flujo-msi' && typeof renderDashboardMSI === 'function') renderDashboardMSI('Todos');
         if (vistaId === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
         if (vistaId === 'ordenescompra' && typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
         if (vistaId === 'requisiciones' && typeof renderRequisiciones === 'function') renderRequisiciones();
@@ -40,13 +85,24 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'cotizaciones' && typeof renderCotizaciones === 'function') renderCotizaciones();
         if (vistaId === 'cancelaciones' && typeof renderCancelaciones === 'function') renderCancelaciones();
         if (vistaId === 'corte-caja' && typeof renderCorteCaja === 'function') renderCorteCaja();
+        if (vistaId === 'gestion-datos-cliente' && typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();
         if (vistaId === 'reporte-ventas' && typeof renderReporteVentas === 'function') renderReporteVentas();
         if (vistaId === 'reporte-compras' && typeof renderReporteCompras === 'function') renderReporteCompras();
+        if (vistaId === 'reporte-flujo' && typeof renderReporteFlujo === 'function') renderReporteFlujo();
+        if (vistaId === 'reimprimir-venta' && typeof renderReimprimirVenta === 'function') renderReimprimirVenta();
+        if (vistaId === 'gastos' && typeof renderGestionGastos === 'function') renderGestionGastos();
+        if (vistaId === 'proyeccion' && typeof renderProyeccionFlujo === 'function') renderProyeccionFlujo();
+        if (vistaId === 'vendedores' && typeof renderGestionVendedores === 'function') renderGestionVendedores();
+        if (vistaId === 'descuentos' && typeof renderGestionDescuentos === 'function') renderGestionDescuentos();
+        if (vistaId === 'ubicaciones' && typeof renderUbicaciones === 'function') renderUbicaciones();
+        if (vistaId === 'usuarios' && typeof renderGestionUsuarios === 'function') renderGestionUsuarios();
+        if (vistaId === 'puntos' && typeof renderPanelPuntos === 'function') renderPanelPuntos();
+        if (vistaId === 'clientesmorosos' && typeof renderClientesMorosos === 'function') renderClientesMorosos();
         
-        // 🛡️ REPARACIÓN: Aquí está el "ligue" que faltaba para las categorías
+        // REPARACION: liga que faltaba para las categorias
         if (vistaId === 'configcategorias' && typeof renderCategorias === 'function') renderCategorias();
         
-        // 🛡️ REPARACIÓN: "Ligue" para cargar la tabla de Recepciones Pendientes
+        // REPARACION: liga para cargar la tabla de Recepciones Pendientes
         if (vistaId === 'recepcion' && typeof renderRecepciones === 'function') renderRecepciones();
     } catch(e) { console.warn("Aviso renderizando vista:", e); }
 
@@ -74,6 +130,7 @@ window.navA = function(vistaId, isPopState = false) {
     if (!isPopState) {
         try { history.pushState({ vista: vistaId }, '', `#${vistaId}`); } catch (e) {}
     }
+    window._vistaActualSistema = vistaId;
 };
 
 // ===== INTELIGENCIA DEL BOTÓN "ATRÁS" =====
