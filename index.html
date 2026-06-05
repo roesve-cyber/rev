@@ -15,6 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
     <!-- MSAL.js para autenticación OneDrive -->
     <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
     <!-- Configuración Firebase -->
@@ -609,6 +610,15 @@
  <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Agregar Plazo</button>
  </div>
  </div>
+ 
+ <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px; margin-top:18px;">
+ <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">
+ <h3 style="color:#c2410c; margin:0;">Alertas al celular para Boveda</h3>
+ <button onclick="if(typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig()" style="background:none; border:none; cursor:pointer; font-size:18px;">Actualizar</button>
+ </div>
+ <p style="font-size:13px; color:#6b7280; margin-bottom:16px;">Permite que el administrador reciba avisos cuando entren ventas, abonos o cambios de cliente a autorizacion.</p>
+ <div id="configPushAutorizaciones"></div>
+ </div>
  </div>
 
     <!-- CARRITO -->
@@ -1143,6 +1153,7 @@
 <script src="js/modules/producto-picker.js?v=2"></script>
 <script src="js/modules/cliente-picker.js"></script>
 <script src="js/modules/notificaciones.js?v=2"></script>
+<script src="js/modules/push-autorizaciones.js?v=1"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/core/navigation.js?v=8"></script>
