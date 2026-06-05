@@ -11,6 +11,8 @@ const firebaseConfig = {
     appId: "1:32950655624:web:42a8657431319f9a25dd3d"
 };
 
+window.firebaseConfig = firebaseConfig;
+
 // Inicializar Firebase solo en producción (Vercel), desactivado en local (Live Server)
 if (
     location.hostname === 'localhost' ||
@@ -31,6 +33,14 @@ if (
         firebase.initializeApp(firebaseConfig);
         window._auth = firebase.auth();
         window._db = firebase.firestore();
+        if (firebase.messaging) {
+            const soporteMessaging = firebase.messaging.isSupported ? firebase.messaging.isSupported() : true;
+            Promise.resolve(soporteMessaging)
+                .then(soportado => {
+                    if (soportado) window._messaging = firebase.messaging();
+                })
+                .catch(err => console.warn('Firebase Messaging no soportado en este navegador:', err));
+        }
 
         // 🚀 MAGIA PWA: Activamos persistencia offline SOLO EN PRODUCCIÓN
         // Esto permite que el guardado sea "al momento" y soporte pérdidas de conexión
