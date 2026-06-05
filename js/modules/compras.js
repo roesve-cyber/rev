@@ -66,6 +66,13 @@ function _comprasHoyInput() {
         : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0]);
 }
 
+function _comprasFechaVista(fecha, fallback = '-') {
+    if (window.formatearFechaVistaMX) return window.formatearFechaVistaMX(fecha, { fallback });
+    if (window.formatearFechaCortaMX) return window.formatearFechaCortaMX(fecha);
+    const d = fecha instanceof Date ? fecha : new Date(fecha);
+    return isNaN(d.getTime()) ? fallback : d.toLocaleDateString('es-MX');
+}
+
 function _consigProveedorKey(c) {
     const proveedorId = c?.proveedorId;
     if (proveedorId !== undefined && proveedorId !== null && String(proveedorId).trim()) {
@@ -3569,6 +3576,7 @@ function guardarCompraDirectaFinal() {
     let movimientosInventario = StorageService.get("movimientosInventario", []);
 
     const idCompraUnico = Date.now();
+    const folioCompraDirecta = window.generarFolioSistema ? window.generarFolioSistema("CD") : `CD-${idCompraUnico}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     let avisoActualizacion = "";
 
     arts.forEach((art, index) => {
@@ -3614,7 +3622,7 @@ function guardarCompraDirectaFinal() {
                     precioCompra: Number(art.costo || 0),
                     valor: Number(art.cantidad || 0) * Number(art.costo || 0),
                     proveedor: prov.nombre || '',
-                    referencia: `CD-${idCompraUnico.toString().slice(-6)}`,
+                    referencia: folioCompraDirecta,
                     compraId: idCompraUnico,
                     ubicacion: ubiFinal,
                     color: colFinal,
@@ -3649,7 +3657,7 @@ function guardarCompraDirectaFinal() {
     // 4. Guardar Compra Maestro
     const nuevaCompra = {
         id: idCompraUnico,
-        folio: `CD-${idCompraUnico.toString().slice(-6)}`,
+        folio: folioCompraDirecta,
         proveedor: prov.nombre,
         proveedorId: prov.id,
         total: totalCompra,
@@ -3693,7 +3701,7 @@ function guardarCompraDirectaFinal() {
                         proveedor: prov.nombre,
                         proveedorId: prov.id,
                         fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
-                        nota: `Saldo a favor aplicado como anticipo inicial en CD-${idCompraUnico.toString().slice(-6)}`,
+                        nota: `Saldo a favor aplicado como anticipo inicial en ${folioCompraDirecta}`,
                         referencia: `CONSIG-SALDO-${idCompraUnico}`,
                         origen: 'compraDirecta'
                     });
@@ -3703,7 +3711,7 @@ function guardarCompraDirectaFinal() {
                     compraId: idCompraUnico,
                     proveedor: prov.nombre,
                     proveedorId: prov.id,
-                    folioOrigen: `CD-${idCompraUnico.toString().slice(-6)}`,
+                    folioOrigen: folioCompraDirecta,
                     fecha: fechaFormatMX,
                     articulos: arts,
                     cantidadCampo: 'cantidad',
@@ -4576,7 +4584,7 @@ window.marcarConsignacionVendida = function(idConsig) {
 
     const montoCxp = Math.max(0, montoDeuda - montoCubiertoConAnticipos);
     const folioVentaOrigen = (prompt("Si corresponde a una venta del POS, captura el folio (opcional):", "") || "").trim();
-    const folioReporteConsignacion = `RCON-${Date.now().toString().slice(-6)}`;
+    const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("RCON") : `RCON-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     const fechaActual = new Date();
 
@@ -5050,7 +5058,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         const anticiposHtml = f.anticipos.map(a => `
             <tr style="background:#f0fdf4; border-bottom:1px solid #e2e8f0; font-size:12px;">
                 <td style="padding:6px 12px 6px 28px; color:#15803d; font-weight:600;">
-                    <span style="color:#16a34a;">💰</span> Anticipo registrado (${_comprasEscHTML(a.fechaStr || a.fecha || '-').substring(0,10)})
+                    <span style="color:#16a34a;">💰</span> Anticipo registrado (${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))})
                 </td>
                 <td colspan="3" style="padding:6px 12px; color:#64748b; font-style:italic; max-width:250px; word-wrap:break-word;">
                     Resguardo en Bolsa General
@@ -5077,7 +5085,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             return `
             <tr style="background:#fff5f5; border-bottom:1px solid #fecdd3; font-size:12px;">
                 <td style="padding:6px 12px 6px 28px; color:#b91c1c;">
-                    <span style="color:#ef4444;">📑</span> <b>Reporte de Venta</b> (${_comprasEscHTML(cxp.fecha || '-').substring(0,10)})
+                    <span style="color:#ef4444;">📑</span> <b>Reporte de Venta</b> (${_comprasEscHTML(_comprasFechaVista(cxp.fecha || cxp.fechaISO || cxp.fechaIso, '-'))})
                     <br><small style="color:#475569;">${_comprasEscHTML(cxp.producto)}</small>
                 </td>
                 <td style="padding:6px 12px; text-align:right; color:#475569;">${dinero(cxp.articulos?.[0]?.costo || 0)}</td>
@@ -5129,7 +5137,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 <div style="text-align:right; min-width:200px;">
                     <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}')" style="background:#0f766e; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">🖨️ Imprimir Hoja</button>
                     <button onclick="if(document.getElementById('panelEstadoConsignaciones')){document.getElementById('panelEstadoConsignaciones').innerHTML=''}else{document.querySelector('[data-modal=estado-consignaciones]')?.remove()}" style="background:#f1f5f9; border:1px solid #cbd5e1; color:#475569; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px;">✕ Cerrar</button>
-                    <p style="margin:0; color:#64748b; font-size:12px;">Fecha Emisión: <strong style="color:#334155;">${new Date().toLocaleDateString('es-MX')}</strong></p>
+                    <p style="margin:0; color:#64748b; font-size:12px;">Fecha Emisión: <strong style="color:#334155;">${_comprasFechaVista(new Date())}</strong></p>
                     <p style="margin:2px 0 0; color:#64748b; font-size:11px;">Hora: <strong>${new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})}</strong></p>
                 </div>
             </div>
@@ -5363,7 +5371,7 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
         const anticiposHtml = f.anticipos.map(a => `
             <tr style="background-color: #f0fdf4; color: #15803d; font-size: 12px; font-weight: bold;">
                 <td colspan="3" style="padding: 10px; text-align: right;">
-                    Anticipo registrado (${_comprasEscHTML(a.fechaStr || a.fecha || '-').substring(0,10)})
+                    Anticipo registrado (${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))})
                 </td>
                 <td style="padding: 10px; text-align: right;">-${dinero(a.monto || 0)}</td>
                 <td style="padding: 10px; text-align: right; color: #16a34a;">Abonado</td>
@@ -5422,7 +5430,7 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
                     <div style="font-size: 14px; font-weight: bold; color: #1e293b; text-transform: uppercase; letter-spacing: 0.5px;">Estado de Cuenta Comercial</div>
                     <div style="font-size: 11px; color: #475569; margin-top: 4px; line-height: 1.4;">
                         <b>Proveedor:</b> ${_comprasEscHTML(proveedorNombre)}<br>
-                        <b>Fecha Emisión:</b> ${new Date().toLocaleDateString('es-MX')}<br>
+                        <b>Fecha Emisión:</b> ${_comprasFechaVista(new Date())}<br>
                         <b>Hora:</b> ${new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})}
                     </div>
                 </td>

@@ -118,7 +118,7 @@ function procesarDevolucion(folio) {
 
     const devolucion = {
         id: Date.now(),
-        folio: 'DEV-' + Date.now(),
+        folio: window.generarFolioSistema ? window.generarFolioSistema('DEV') : 'DEV-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase(),
         folioVenta: folio,
         clienteNombre: venta.clienteNombre || venta.nombre || 'Cliente',
         clienteId: venta.clienteId || null,

@@ -17,6 +17,12 @@ const _rc = {
 
     parseFecha(val) {
         if (!val || val === 'null' || val === 'undefined') return null;
+        if (window.parseFechaMXOrNull) {
+            try {
+                const parsed = window.parseFechaMXOrNull(val);
+                if (parsed && parsed.getFullYear() > 1990) return parsed;
+            } catch (e) {}
+        }
         if (typeof val === 'number') {
             const d = new Date(val);
             return isNaN(d.getTime()) ? null : d;

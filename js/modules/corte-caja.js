@@ -18,7 +18,8 @@
 
     const hoyInput = () => {
         if (typeof window.obtenerHoyInputMX === 'function') return window.obtenerHoyInputMX();
-        return new Date().toISOString().slice(0, 10);
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
 
     const localIso = (fecha) => {
@@ -28,6 +29,11 @@
     };
 
     const parseFechaLocal = (value, finDia = false) => {
+        if (value && typeof window.fechaInicioDiaMX === 'function' && typeof window.fechaFinDiaMX === 'function') {
+            const d = finDia ? window.fechaFinDiaMX(value) : window.fechaInicioDiaMX(value);
+            if (d && !isNaN(d.getTime())) return d;
+        }
+
         if (!value) {
             const d = new Date();
             d.setHours(finDia ? 23 : 0, finDia ? 59 : 0, finDia ? 59 : 0, finDia ? 999 : 0);
@@ -59,9 +65,10 @@
     };
 
     const fechaKey = (value) => {
+        if (typeof window.fechaClaveMX === 'function') return window.fechaClaveMX(value, hoyInput());
         if (typeof window.getFechaLocalMX === 'function') return window.getFechaLocalMX(value);
         const d = parseFechaLocal(value);
-        return d.toISOString().slice(0, 10);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     };
 
     const normalizarId = (value) => String(value || '')
@@ -289,7 +296,7 @@
         const seleccionados = movimientosSeleccionados(resumen);
         const ingresos = seleccionados.filter(m => m._tipo === 'ingreso').reduce((s, m) => s + m._monto, 0);
         const egresos = seleccionados.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
-        const saldoFinalSistema = Number(resumen?.saldoInicial || 0) + ingresos - egresos;
+        const saldoFinalSistema = ingresos - egresos;
         const porCategoria = {};
 
         seleccionados.forEach(m => {
@@ -309,6 +316,21 @@
             movimientos: seleccionados,
             totalMovimientos: resumen?.movimientos?.length || 0,
             porCategoria: Object.values(porCategoria).sort((a, b) => (b.ingresos + b.egresos) - (a.ingresos + a.egresos))
+        };
+    }
+
+    function resumenCortesSeleccionados() {
+        const ids = window._corteCajaCortesSeleccionados || new Set();
+        const cortes = StorageService.get('cortesCaja', []);
+        const seleccionados = (Array.isArray(cortes) ? cortes : []).filter(c => ids.has(String(c.folio)));
+        const ingresos = seleccionados.reduce((s, c) => s + Number(c.ingresos || 0), 0);
+        const egresos = seleccionados.reduce((s, c) => s + Number(c.egresos || 0), 0);
+
+        return {
+            ingresos,
+            egresos,
+            saldoFinalSistema: ingresos - egresos,
+            cortes: seleccionados
         };
     }
 
@@ -409,10 +431,14 @@
 
     function renderHistorial() {
         const cortes = StorageService.get('cortesCaja', []);
+        const seleccionados = window._corteCajaCortesSeleccionados || new Set();
         const rows = (Array.isArray(cortes) ? cortes : []).slice().reverse().slice(0, 12).map(c => {
             const dif = Number(c.diferencia || 0);
             return `
                 <tr>
+                    <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;">
+                        <input type="checkbox" class="corte-reciente-check" data-folio="${esc(c.folio)}" ${seleccionados.has(String(c.folio)) ? 'checked' : ''} onchange="toggleCorteRecienteResumen(this)" title="Sumar este corte" style="width:18px;height:18px;accent-color:#1e40af;cursor:pointer;">
+                    </td>
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.folio)}</td>
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.cuentaNombre)}</td>
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${esc(c.fechaInicio)} a ${esc(c.fechaFin)}</td>
@@ -433,6 +459,7 @@
                 <div style="overflow-x:auto;">
                     <table style="width:100%;border-collapse:collapse;font-size:12px;">
                         <thead><tr style="background:#f8fafc;color:#475569;">
+                            <th style="padding:8px;text-align:center;">OK</th>
                             <th style="padding:8px;text-align:left;">Folio</th>
                             <th style="padding:8px;text-align:left;">Cuenta</th>
                             <th style="padding:8px;text-align:left;">Periodo</th>
@@ -440,7 +467,7 @@
                             <th style="padding:8px;text-align:center;">Movs.</th>
                             <th style="padding:8px;text-align:center;">Accion</th>
                         </tr></thead>
-                        <tbody>${rows || '<tr><td colspan="6" style="padding:18px;text-align:center;color:#94a3b8;">Aun no hay cortes guardados.</td></tr>'}</tbody>
+                        <tbody>${rows || '<tr><td colspan="7" style="padding:18px;text-align:center;color:#94a3b8;">Aun no hay cortes guardados.</td></tr>'}</tbody>
                     </table>
                 </div>
             </div>`;
@@ -487,8 +514,7 @@
                 </div>
             </div>
 
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;">
-                ${renderKpi('Saldo inicial calculado', resumen.saldoInicial, '#475569')}
+            <div id="corteKpiFranja" style="position:sticky;top:72px;z-index:30;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;background:rgba(248,250,252,0.94);backdrop-filter:blur(8px);padding:10px 0;">
                 ${renderKpi('Ingresos marcados', seleccion.ingresos, '#15803d', `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`, 'corteKpiIngresos', 'corteSubIngresos')}
                 ${renderKpi('Egresos marcados', seleccion.egresos, '#b91c1c', `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`, 'corteKpiEgresos', 'corteSubEgresos')}
                 ${renderKpi('Saldo esperado marcado', seleccion.saldoFinalSistema, '#1e40af', `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`, 'corteKpiSaldoSistema', 'corteSubSaldoSistema')}
@@ -503,11 +529,23 @@
             ${renderHistorial()}
         `;
         recalcularSeleccionCorte();
+        const seleccionCortes = resumenCortesSeleccionados();
+        if (seleccionCortes.cortes.length > 0) {
+            pintarKpisCorte({
+                ingresos: seleccionCortes.ingresos,
+                egresos: seleccionCortes.egresos,
+                saldoFinalSistema: seleccionCortes.saldoFinalSistema,
+                subIngresos: `${seleccionCortes.cortes.length} corte(s) seleccionados`,
+                subEgresos: 'Egresos de cortes seleccionados',
+                subSaldo: 'Ingresos menos egresos seleccionados'
+            });
+        }
     };
 
     window.toggleMovimientoCorte = function(input) {
         const id = input?.dataset?.id;
         if (!id || !window._corteCajaSeleccion) return;
+        limpiarSeleccionCortesRecientes();
 
         if (input.checked) window._corteCajaSeleccion.ids.add(id);
         else window._corteCajaSeleccion.ids.delete(id);
@@ -519,6 +557,7 @@
 
     window.marcarTodosMovimientosCorte = function(marcar) {
         const resumen = window._corteCajaResumen || calcularResumen();
+        limpiarSeleccionCortesRecientes();
         if (!window._corteCajaSeleccion) resetSeleccionCorte(resumen, false);
         window._corteCajaSeleccion.ids = marcar
             ? new Set(resumen.movimientos.map(m => m._corteId))
@@ -532,26 +571,69 @@
         recalcularSeleccionCorte();
     };
 
-    window.recalcularSeleccionCorte = function() {
-        const resumen = window._corteCajaResumen || calcularResumen();
-        const seleccion = resumenSeleccionado(resumen);
+    function limpiarSeleccionCortesRecientes() {
+        if (window._corteCajaCortesSeleccionados?.size) {
+            window._corteCajaCortesSeleccionados.clear();
+            document.querySelectorAll('.corte-reciente-check').forEach(input => input.checked = false);
+        }
+    }
 
+    function pintarKpisCorte({ ingresos, egresos, saldoFinalSistema, subIngresos, subEgresos, subSaldo }) {
         const ingresoEl = document.getElementById('corteKpiIngresos');
         const egresoEl = document.getElementById('corteKpiEgresos');
         const saldoEl = document.getElementById('corteKpiSaldoSistema');
         const subIng = document.getElementById('corteSubIngresos');
         const subEgr = document.getElementById('corteSubEgresos');
-        const subSaldo = document.getElementById('corteSubSaldoSistema');
+        const subSaldoEl = document.getElementById('corteSubSaldoSistema');
+
+        if (ingresoEl) ingresoEl.textContent = dinero(ingresos);
+        if (egresoEl) egresoEl.textContent = dinero(egresos);
+        if (saldoEl) saldoEl.textContent = dinero(saldoFinalSistema);
+        if (subIng) subIng.textContent = subIngresos || '';
+        if (subEgr) subEgr.textContent = subEgresos || '';
+        if (subSaldoEl) subSaldoEl.textContent = subSaldo || '';
+    }
+
+    window.toggleCorteRecienteResumen = function(input) {
+        const folio = input?.dataset?.folio;
+        if (!folio) return;
+        if (!window._corteCajaCortesSeleccionados) window._corteCajaCortesSeleccionados = new Set();
+
+        if (input.checked) window._corteCajaCortesSeleccionados.add(String(folio));
+        else window._corteCajaCortesSeleccionados.delete(String(folio));
+
+        const seleccionCortes = resumenCortesSeleccionados();
+        if (seleccionCortes.cortes.length > 0) {
+            pintarKpisCorte({
+                ingresos: seleccionCortes.ingresos,
+                egresos: seleccionCortes.egresos,
+                saldoFinalSistema: seleccionCortes.saldoFinalSistema,
+                subIngresos: `${seleccionCortes.cortes.length} corte(s) seleccionados`,
+                subEgresos: 'Egresos de cortes seleccionados',
+                subSaldo: 'Ingresos menos egresos seleccionados'
+            });
+            return;
+        }
+
+        recalcularSeleccionCorte();
+    };
+
+    window.recalcularSeleccionCorte = function() {
+        const resumen = window._corteCajaResumen || calcularResumen();
+        const seleccion = resumenSeleccionado(resumen);
+
         const estado = document.getElementById('corteEstadoSeleccion');
         const cats = document.getElementById('corteCategoriasSeleccion');
         const inputReal = document.getElementById('corteTotalReal');
 
-        if (ingresoEl) ingresoEl.textContent = dinero(seleccion.ingresos);
-        if (egresoEl) egresoEl.textContent = dinero(seleccion.egresos);
-        if (saldoEl) saldoEl.textContent = dinero(seleccion.saldoFinalSistema);
-        if (subIng) subIng.textContent = `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`;
-        if (subEgr) subEgr.textContent = `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`;
-        if (subSaldo) subSaldo.textContent = `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`;
+        pintarKpisCorte({
+            ingresos: seleccion.ingresos,
+            egresos: seleccion.egresos,
+            saldoFinalSistema: seleccion.saldoFinalSistema,
+            subIngresos: `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`,
+            subEgresos: `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`,
+            subSaldo: `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`
+        });
         if (estado) estado.textContent = `${seleccion.movimientos.length} movimientos marcados. Los no marcados quedan fuera de este corte.`;
         if (cats) cats.innerHTML = renderCategorias(seleccion);
         if (inputReal && inputReal.value === '') inputReal.placeholder = Number(seleccion.saldoFinalSistema || 0).toFixed(2);
@@ -606,7 +688,7 @@
             .map(input => ({ denominacion: Number(input.dataset.denom), cantidad: Number(input.value || 0) }))
             .filter(d => d.cantidad > 0);
         const usuario = document.getElementById('nombreUsuarioActivo')?.textContent?.trim() || 'Usuario';
-        const folio = `CORTE-${fechaKey(new Date()).replace(/-/g, '')}-${Date.now().toString().slice(-5)}`;
+        const folio = window.generarFolioSistema ? window.generarFolioSistema("CORTE") : `CORTE-${fechaKey(new Date()).replace(/-/g, '')}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 
         return {
             folio,
@@ -643,6 +725,13 @@
     }
 
     window.guardarCorteCaja = function() {
+        if (window.AuditService?.requireAdmin) {
+            if (!window.AuditService.requireAdmin('guardar corte de caja')) return;
+        } else {
+            const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+            if (!sesion || sesion.rol !== 'admin') return alert('Operacion restringida. Solo un administrador puede guardar cortes.');
+        }
+
         const corte = armarCorteDesdePantalla();
         const cortesRaw = StorageService.get('cortesCaja', []);
         const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
@@ -657,6 +746,26 @@
 
         cortes.push(corte);
         StorageService.set('cortesCaja', cortes);
+        window.AuditService?.log?.({
+            accion: 'CORTE_CAJA_GUARDADO',
+            modulo: 'Corte Caja',
+            entidad: corte.folio,
+            entidadId: corte.folio,
+            detalle: `Corte guardado para ${corte.cuentaNombre || corte.cuentaId || 'cuenta'} del ${corte.fechaInicio || '-'} al ${corte.fechaFin || '-'}. Diferencia: ${dinero(corte.diferencia || 0)}`,
+            monto: corte.totalReal,
+            severidad: Math.abs(Number(corte.diferencia || 0)) > 0.01 ? 'alerta' : 'info',
+            datos: {
+                cuentaId: corte.cuentaId,
+                fechaInicio: corte.fechaInicio,
+                fechaFin: corte.fechaFin,
+                ingresos: corte.ingresos,
+                egresos: corte.egresos,
+                saldoFinalSistema: corte.saldoFinalSistema,
+                totalReal: corte.totalReal,
+                diferencia: corte.diferencia,
+                movimientosMarcados: corte.movimientosMarcados
+            }
+        });
         alert(`Corte guardado: ${corte.folio}`);
         renderCorteCaja();
         imprimirCorteGuardado(corte.folio);
@@ -755,7 +864,6 @@
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;">
                     <tbody>
-                        <tr><td style="padding:6px;border:1px solid #ddd;">Saldo inicial</td><td style="padding:6px;border:1px solid #ddd;text-align:right;">${dinero(corte.saldoInicial)}</td></tr>
                         <tr><td style="padding:6px;border:1px solid #ddd;">Ingresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#15803d;">${dinero(corte.ingresos)}</td></tr>
                         <tr><td style="padding:6px;border:1px solid #ddd;">Egresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#b91c1c;">${dinero(corte.egresos)}</td></tr>
                         <tr><td style="padding:6px;border:1px solid #ddd;"><b>Monto identificado</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.saldoFinalSistema)}</b></td></tr>
@@ -795,6 +903,14 @@
         const cortes = StorageService.get('cortesCaja', []);
         const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
         if (!corte) return alert('No se encontro el corte solicitado.');
+        window.AuditService?.log?.({
+            accion: 'CORTE_CAJA_REIMPRESO',
+            modulo: 'Corte Caja',
+            entidad: corte.folio,
+            entidadId: corte.folio,
+            detalle: `Consulta/impresion de corte guardado ${corte.folio}`,
+            severidad: 'info'
+        });
         abrirHtmlCorte(corte);
     };
 
@@ -820,6 +936,19 @@
         a.href = url;
         a.download = `corte-caja-${resumen.filtros.fechaInicio}-${resumen.filtros.fechaFin}.csv`;
         a.click();
+        window.AuditService?.log?.({
+            accion: 'CORTE_CAJA_EXPORTADO_CSV',
+            modulo: 'Corte Caja',
+            entidad: `${resumen.filtros.fechaInicio}_${resumen.filtros.fechaFin}`,
+            detalle: `Exportacion CSV de corte. Movimientos: ${resumen.movimientos.length}`,
+            severidad: 'riesgo',
+            datos: {
+                cuentaId: resumen.cuenta?.id || '',
+                fechaInicio: resumen.filtros.fechaInicio,
+                fechaFin: resumen.filtros.fechaFin,
+                movimientos: resumen.movimientos.length
+            }
+        });
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
 })();

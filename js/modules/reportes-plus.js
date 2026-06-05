@@ -30,6 +30,12 @@
         if (typeof value === 'number') return new Date(value);
         const raw = String(value).trim();
         if (!raw) return new Date(0);
+        if (window.parseFechaMXOrNull) {
+            try {
+                const d = window.parseFechaMXOrNull(raw);
+                if (d instanceof Date && !isNaN(d.getTime())) return d;
+            } catch (e) {}
+        }
         if (window.parseFechaMX) {
             try {
                 const d = window.parseFechaMX(raw);
@@ -46,6 +52,7 @@
 
     function dateLabel(d, fallback) {
         if (!(d instanceof Date) || isNaN(d.getTime()) || d.getFullYear() < 2000) return fallback || '-';
+        if (window.formatearFechaVistaMX) return window.formatearFechaVistaMX(d, { fallback: fallback || '-' });
         return window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString('es-MX');
     }
 
@@ -162,7 +169,7 @@
             source,
             folio,
             date,
-            dateText: v.fecha || v.datosVenta?.fecha || dateLabel(date),
+            dateText: dateLabel(date, v.fecha || v.datosVenta?.fecha || '-'),
             customer: v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || 'Publico general',
             method,
             totalMerch,
@@ -190,8 +197,8 @@
             order: document.getElementById('rvOrden')?.value || 'fecha_desc'
         };
         window._rplusVentaFiltros = filters;
-        const fromD = filters.from ? new Date(filters.from + 'T00:00:00') : null;
-        const toD = filters.to ? new Date(filters.to + 'T23:59:59') : null;
+        const fromD = filters.from ? (window.fechaInicioDiaMX ? window.fechaInicioDiaMX(filters.from) : new Date(filters.from + 'T00:00:00')) : null;
+        const toD = filters.to ? (window.fechaFinDiaMX ? window.fechaFinDiaMX(filters.to) : new Date(filters.to + 'T23:59:59')) : null;
         const rows = [
             ...arr('ventasRegistradas').map(v => normalizeSale(v, 'registrada')),
             ...arr('ventasPendientes').map((v, i) => normalizeSale(v, 'cuarentena', i))
@@ -206,6 +213,7 @@
                 if (filters.status === 'registradas') return v.source === 'registrada' && !canceled;
                 return v.source === 'registrada' && !canceled;
             })
+            .filter(v => v.date instanceof Date && !isNaN(v.date.getTime()) && v.date.getFullYear() >= 1990)
             .filter(v => !fromD || v.date >= fromD)
             .filter(v => !toD || v.date <= toD)
             .filter(v => !filters.q || `${v.folio} ${v.customer} ${v.seller} ${v.method} ${v.status} ${v.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(filters.q))
@@ -369,12 +377,13 @@
         const status = document.getElementById('rcEstado')?.value || 'operativas';
         const order = document.getElementById('rcOrden')?.value || 'fecha_desc';
         window._rplusCompraFiltros = { q, from, to, type, status, order };
-        const fromD = from ? new Date(from + 'T00:00:00') : null;
-        const toD = to ? new Date(to + 'T23:59:59') : null;
+        const fromD = from ? (window.fechaInicioDiaMX ? window.fechaInicioDiaMX(from) : new Date(from + 'T00:00:00')) : null;
+        const toD = to ? (window.fechaFinDiaMX ? window.fechaFinDiaMX(to) : new Date(to + 'T23:59:59')) : null;
         return [
             ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden')),
             ...arr('compras').map(c => normalizePurchase(c, 'compra'))
-        ].filter(d => !fromD || d.date >= fromD)
+        ].filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && d.date.getFullYear() >= 1990)
+            .filter(d => !fromD || d.date >= fromD)
             .filter(d => !toD || d.date <= toD)
             .filter(d => !q || `${d.supplier} ${d.folio} ${d.status} ${d.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(q))
             .filter(d => {
@@ -589,7 +598,10 @@
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        const today = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().slice(0, 10);
+        const today = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (() => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        })();
         link.setAttribute('download', `${prefix}_${today}.csv`);
         document.body.appendChild(link);
         link.click();

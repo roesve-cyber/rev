@@ -39,6 +39,12 @@ function _repParseDate(valor) {
     if (typeof valor === "number") return new Date(valor);
     const raw = String(valor).trim();
     if (!raw) return new Date(0);
+    if (window.parseFechaMXOrNull) {
+        try {
+            const d = window.parseFechaMXOrNull(raw);
+            if (d instanceof Date && !isNaN(d.getTime())) return d;
+        } catch (e) {}
+    }
     if (window.parseFechaMX) {
         try {
             const d = window.parseFechaMX(raw);
@@ -55,11 +61,13 @@ function _repParseDate(valor) {
 
 function _repInputDate(d) {
     if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+    if (window.fechaClaveMX) return window.fechaClaveMX(d, "");
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function _repFechaTexto(d, fallback = "") {
     if (!(d instanceof Date) || isNaN(d.getTime()) || d.getFullYear() < 2000) return fallback || "-";
+    if (window.formatearFechaVistaMX) return window.formatearFechaVistaMX(d, { fallback: fallback || "-" });
     return window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString("es-MX");
 }
 
@@ -90,14 +98,12 @@ function _rvFecha(v) {
 
 function _rvDate(v) {
     const f = _rvFecha(v);
-    if (!f) return new Date(0);
-    if (window.parseFechaMX) return window.parseFechaMX(f);
-    const d = new Date(f);
-    return isNaN(d.getTime()) ? new Date(0) : d;
+    return _repParseDate(f);
 }
 
 function _rvInputDate(d) {
     if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+    if (window.fechaClaveMX) return window.fechaClaveMX(d, "");
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
@@ -171,7 +177,7 @@ function _rvVentaNormalizada(v, origen = "registrada", index = null) {
         origen,
         folio: v.folio || v.datosVenta?.folio || v.args?.[5] || "-",
         fecha: _rvDate(v),
-        fechaTexto: v.fecha || v.datosVenta?.fecha || (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(_rvDate(v)) : _rvInputDate(_rvDate(v))),
+        fechaTexto: _repFechaTexto(_rvDate(v), v.fecha || v.datosVenta?.fecha || "-"),
         cliente: _rvCliente(v),
         metodo: _rvMetodo(v),
         totalMercancia,
@@ -195,8 +201,8 @@ function _rvVentasFiltradas(filtros = {}) {
     const estado = filtros.estado ?? (document.getElementById("rvEstado")?.value || "activas");
     const busqueda = String(filtros.busqueda ?? (document.getElementById("rvBusqueda")?.value || "")).trim().toLowerCase();
     const orden = filtros.orden ?? (document.getElementById("rvOrden")?.value || "fecha_desc");
-    const desdeD = desde ? new Date(desde + "T00:00:00") : null;
-    const hastaD = hasta ? new Date(hasta + "T23:59:59") : null;
+    const desdeD = desde ? (window.fechaInicioDiaMX ? window.fechaInicioDiaMX(desde) : new Date(desde + "T00:00:00")) : null;
+    const hastaD = hasta ? (window.fechaFinDiaMX ? window.fechaFinDiaMX(hasta) : new Date(hasta + "T23:59:59")) : null;
 
     const registradas = StorageService.get("ventasRegistradas", [])
         .map(v => _rvVentaNormalizada(v, "registrada"));
@@ -218,6 +224,7 @@ function _rvVentasFiltradas(filtros = {}) {
             const articulos = v.articulos.map(a => `${a.nombre || a.productoNombre || ""}`).join(" ");
             return `${v.folio} ${v.cliente} ${v.vendedor} ${v.metodo} ${v.estado} ${articulos}`.toLowerCase().includes(busqueda);
         })
+        .filter(v => v.fecha instanceof Date && !isNaN(v.fecha.getTime()) && v.fecha.getFullYear() >= 1990)
         .filter(v => !desdeD || v.fecha >= desdeD)
         .filter(v => !hastaD || v.fecha <= hastaD)
         .sort((a, b) => {
@@ -908,11 +915,13 @@ window.renderReporteFlujo = function() {
         .replace(/'/g, '&#039;');
 
     const fechaLargaFlujo = (fecha) => {
-        const d = fecha instanceof Date ? fecha : new Date(fecha);
+        const d = _repParseDate(fecha);
         if (isNaN(d.getTime())) return '';
+        if (window.formatearFechaVistaMX) return window.formatearFechaVistaMX(d, { fallback: '' });
         return new Intl.DateTimeFormat('es-MX', {
             weekday: 'long',
             day: 'numeric',
+            year: 'numeric',
             month: 'long',
             timeZone: 'America/Mexico_City'
         }).format(d).replace(/,/g, '');
@@ -933,8 +942,8 @@ window.renderReporteFlujo = function() {
         if (ordenMovimientos === 'importe_asc') return (Number(a.monto) || 0) - (Number(b.monto) || 0);
         if (ordenMovimientos === 'nombre_asc') return String(a.concepto || '').localeCompare(String(b.concepto || ''), 'es-MX');
         if (ordenMovimientos === 'nombre_desc') return String(b.concepto || '').localeCompare(String(a.concepto || ''), 'es-MX');
-        if (ordenMovimientos === 'fecha_asc') return new Date(a.fecha).getTime() - new Date(b.fecha).getTime();
-        return new Date(b.fecha).getTime() - new Date(a.fecha).getTime();
+        if (ordenMovimientos === 'fecha_asc') return _repParseDate(a.fecha).getTime() - _repParseDate(b.fecha).getTime();
+        return _repParseDate(b.fecha).getTime() - _repParseDate(a.fecha).getTime();
     });
 
             const normalizarCuentaId = (valor) => {
@@ -990,19 +999,16 @@ window.renderReporteFlujo = function() {
     };
 
     const normalizarFecha = (fecha) => {
-        if (!fecha) return Date.now();
+        if (!fecha) return '';
 
         if (typeof fecha === 'number') return fecha;
 
-        const d = new Date(fecha);
-        if (!isNaN(d.getTime())) return fecha;
-
-        if (window.parseFechaMX) {
-            const mx = window.parseFechaMX(fecha);
-            if (mx && !isNaN(mx.getTime())) return mx.toISOString();
+        const dSeguro = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fecha) : _repParseDate(fecha);
+        if (dSeguro && !isNaN(dSeguro.getTime()) && dSeguro.getFullYear() >= 1990) {
+            return window.localISO ? window.localISO(dSeguro) : dSeguro.toISOString();
         }
 
-        return Date.now();
+        return '';
     };
 
     const crearMovimiento = ({
@@ -1040,8 +1046,9 @@ window.renderReporteFlujo = function() {
         .trim();
 
     const fechaKeyMovimiento = (fecha) => {
-        const d = new Date(normalizarFecha(fecha));
-        return isNaN(d.getTime()) ? '' : (window.getFechaLocalMX ? window.getFechaLocalMX(d) : d.toISOString().slice(0, 10));
+        if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
+        const d = _repParseDate(fecha);
+        return isNaN(d.getTime()) ? '' : (window.getFechaLocalMX ? window.getFechaLocalMX(d) : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     };
 
     const movimientoCajaSimilar = ({ tipo, referencia, monto, cuenta, fecha, concepto }) => {
@@ -1367,8 +1374,8 @@ window.renderReporteFlujo = function() {
     const vistos = new Set();
 
     movimientos = movimientos.filter(m => {
-        const fechaObj = new Date(m.fecha);
-        const fechaKey = isNaN(fechaObj.getTime()) ? '' : (window.getFechaLocalMX ? window.getFechaLocalMX(fechaObj) : fechaObj.toISOString().slice(0, 10));
+        const fechaObj = _repParseDate(m.fecha);
+        const fechaKey = isNaN(fechaObj.getTime()) ? '' : (window.fechaClaveMX ? window.fechaClaveMX(fechaObj, '') : `${fechaObj.getFullYear()}-${String(fechaObj.getMonth() + 1).padStart(2, '0')}-${String(fechaObj.getDate()).padStart(2, '0')}`);
         const idKey = String(m.id || '').trim();
         const refRecon = refBase(m.referencia || m.id || m.concepto);
         const esReconstruido = String(m.origen || '').includes('reconstruido');
@@ -1501,18 +1508,20 @@ window.renderReporteFlujo = function() {
             cuentaFiltroFinal === 'todas' ||
             String(normalizarCuentaId(m.cuenta)) === String(cuentaFiltroFinal);
 
-        const fMov = new Date(m.fecha);
+        const fMov = _repParseDate(m.fecha);
 
-        if (isNaN(fMov.getTime())) return false;
+        if (isNaN(fMov.getTime()) || fMov.getFullYear() < 1990) return false;
 
         let coincideRango = true;
 
         if (fDesde) {
-            coincideRango = coincideRango && fMov >= new Date(fDesde + "T00:00:00");
+            const desde = window.fechaInicioDiaMX ? window.fechaInicioDiaMX(fDesde) : new Date(fDesde + "T00:00:00");
+            coincideRango = coincideRango && (!desde || fMov >= desde);
         }
 
         if (fHasta) {
-            coincideRango = coincideRango && fMov <= new Date(fHasta + "T23:59:59");
+            const hasta = window.fechaFinDiaMX ? window.fechaFinDiaMX(fHasta) : new Date(fHasta + "T23:59:59");
+            coincideRango = coincideRango && (!hasta || fMov <= hasta);
         }
 
         return coincideCuenta && coincideRango;
@@ -1524,13 +1533,11 @@ window.renderReporteFlujo = function() {
     const grupos = {};
 
     movsFiltrados.forEach(m => {
-        const d = new Date(m.fecha);
+        const d = _repParseDate(m.fecha);
         let clave = "";
         let sortKey = d.getTime();
 
-        const fmtFecha = window.formatearFechaCortaMX
-            ? window.formatearFechaCortaMX(m.fecha)
-            : d.toLocaleDateString('es-MX');
+        const fmtFecha = _repFechaTexto(d, '-');
 
         if (periodoAgrupar === 'diario') {
             clave = fechaLargaFlujo(d) || fmtFecha;

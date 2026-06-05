@@ -9,13 +9,13 @@ function calcularAntiguedadProducto(p) {
  let fechaStr = null;
  if (entradas.length > 0) {
  // Tomar la ultima entrada
- let ultima = entradas.reduce((a, b) => new Date(a.fecha) > new Date(b.fecha) ? a : b);
+ let ultima = entradas.reduce((a, b) => _kardexDateValue(a.fecha) > _kardexDateValue(b.fecha) ? a : b);
  fechaStr = ultima.fecha;
  } else if (p.fechaAlta) {
  fechaStr = p.fechaAlta;
  }
  if (!fechaStr) return '-';
- let fecha = new Date(fechaStr);
+ let fecha = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fechaStr) : new Date(fechaStr);
  if (isNaN(fecha.getTime())) return '-';
  let ahora = new Date();
  let diffMs = ahora - fecha;
@@ -68,6 +68,10 @@ function _kardexFecha(m) {
 function _kardexDateValue(fecha) {
  if (!fecha) return 0;
  if (typeof fecha === 'number') return fecha;
+ if (window.parseFechaMXOrNull) {
+  const d = window.parseFechaMXOrNull(fecha);
+  return d ? d.getTime() : 0;
+ }
  const txt = String(fecha).trim();
  const mx = txt.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
  if (mx) return new Date(Number(mx[3]), Number(mx[2]) - 1, Number(mx[1]), 12).getTime();
@@ -76,9 +80,11 @@ function _kardexDateValue(fecha) {
 }
 
 function _kardexFechaClave(fecha) {
+ if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
  const t = _kardexDateValue(fecha);
  if (!t) return '';
- return new Date(t).toISOString().slice(0, 10);
+ const d = new Date(t);
+ return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function _kardexTipoBase(m = {}) {
@@ -471,7 +477,8 @@ window.exportarHistorialProductoCSV = function(productoId) {
  .replace(/[^a-zA-Z0-9_-]+/g, '_')
  .replace(/^_+|_+$/g, '')
  .slice(0, 70) || 'producto';
- a.download = `historial_producto_${nombreArchivo}_${new Date().toISOString().slice(0,10)}.csv`;
+ const hoyArchivo = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+ a.download = `historial_producto_${nombreArchivo}_${hoyArchivo}.csv`;
  a.click();
  URL.revokeObjectURL(url);
 };
@@ -605,7 +612,8 @@ window.exportarKardexCSV = function() {
  const url = URL.createObjectURL(blob);
  const a = document.createElement('a');
  a.href = url;
- a.download = `kardex_${new Date().toISOString().slice(0,10)}.csv`;
+ const hoyArchivo = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+ a.download = `kardex_${hoyArchivo}.csv`;
  a.click();
  URL.revokeObjectURL(url);
 };
@@ -1574,6 +1582,7 @@ function abrirProductoForm(id = null) {
 // ===== NUEVA LAGICA DE VARIANTES (COLOR Y UBICACIAN) =====
 
 function guardarProductoDB() {
+ if (!_invRequireAdmin('Guardar producto')) return;
  const nombre = document.getElementById("pNombre").value.trim();
  const costo = parseFloat(document.getElementById("pCosto").value);
  const precioManual = parseFloat(document.getElementById("pPrecio").value);

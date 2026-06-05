@@ -13,6 +13,7 @@ function _cxcEscHTML(s) {
 }
 
 function _cxcFechaClave(fecha) {
+    if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
     if (!fecha) return '';
     if (fecha instanceof Date && !isNaN(fecha.getTime())) {
         const y = fecha.getFullYear();
@@ -44,6 +45,11 @@ function _cxcFechaCorta(fecha) {
     return `${dia}-${mes}-${anio}`;
 }
 
+function _cxcFechaVista(fecha) {
+    if (window.formatearFechaVistaMX) return window.formatearFechaVistaMX(fecha, { fallback: _cxcFechaCorta(fecha) });
+    return _cxcFechaCorta(fecha);
+}
+
 function _cxcFechaAbonoBase(abono) {
     return abono?.fechaAbonoIso || abono?.fechaIso || abono?.fechaAbonoRaw || abono?.fechaAbono || abono?.fecha;
 }
@@ -69,7 +75,8 @@ function _cxcTotalCreditoCuenta(cuenta, estadoCta = null) {
 function _cxcFechaVentaDate(cuenta) {
     const raw = cuenta?.fechaVenta || cuenta?.fecha || cuenta?.fechaIso || cuenta?.fechaVentaIso || '';
     let d = null;
-    if (raw && window.parseFechaMX) d = window.parseFechaMX(raw);
+    if (raw && window.parseFechaMXOrNull) d = window.parseFechaMXOrNull(raw);
+    if (!d && raw && window.parseFechaMX) d = window.parseFechaMX(raw);
     if (!d || isNaN(d.getTime())) {
         const s = String(raw || '').trim();
         if (s.includes('T')) d = new Date(s);
@@ -327,11 +334,11 @@ function renderCuentasXCobrar(filtroCliente = "") {
         if (filtroCliente && !stringBusqueda.includes(filtroCliente)) return;
 
         cuentasMostradas++;
-        const textoPromesa = estadoCta.promesaVigente ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${window.formatearFechaCortaMX(c.promesaPago.fecha)}</span>` : '';
+        const textoPromesa = estadoCta.promesaVigente ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${_cxcFechaVista(c.promesaPago.fecha)}</span>` : '';
 
         htmlTabla += `<tr>
             <td><strong>${nombreCliente}</strong><br><small style="color:#718096;">${c.folio}</small></td>
-            <td>${c.fechaVenta ? window.formatearFechaCortaMX(c.fechaVenta) : '-'}</td>
+            <td>${c.fechaVenta ? _cxcFechaVista(c.fechaVenta) : '-'}</td>
             <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
             <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}</td>
             <td>${estadoCta.pagaresPendientes.length} pendiente(s)${textoPromesa}</td>
@@ -465,7 +472,7 @@ function renderVisorCreditosCobranza() {
                         return `
                             <tr>
                                 <td><strong>${_cxcEscHTML(cuenta.nombre || cuenta.clienteNombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio || '-')}</small></td>
-                                <td>${cuenta.fechaVenta ? _cxcFechaCorta(cuenta.fechaVenta) : '-'}</td>
+                                <td>${cuenta.fechaVenta ? _cxcFechaVista(cuenta.fechaVenta) : '-'}</td>
                                 <td style="font-weight:800;">${_cxcDinero(totalCredito)}</td>
                                 <td style="font-weight:800;color:#15803d;">${_cxcDinero(estado.totalAbonado)}</td>
                                 <td style="font-weight:900;color:${estado.saldoTotal > 0 ? '#be123c' : '#64748b'};">${_cxcDinero(estado.saldoTotal)}</td>
@@ -654,7 +661,7 @@ let mejorPlan = planesOrdenados.length > 0
 
                         return `<tr style="${rowStyle}">
                             <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${i + 1}</td>
-                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${window.formatearFechaCortaMX(p.fechaVencimiento)} ${esVencido ? `<br><small style="color:#dc2626;">(${diasAtraso} días)</small>` : ''}</td>
+                            <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9;">${_cxcFechaVista(p.fechaVencimiento)} ${esVencido ? `<br><small style="color:#dc2626;">(${diasAtraso} días)</small>` : ''}</td>
                             <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9; text-align:right;">${_cxcDinero(montoDisp)}</td>
                             <td style="padding:7px 5px; border-bottom:1px solid #f1f5f9; text-align:center;">${badge}</td>
                         </tr>`;
@@ -705,7 +712,7 @@ let mejorPlan = planesOrdenados.length > 0
             <div style="border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; max-height:190px; overflow-y:auto;">
                 ${abonosRegistrados.length ? abonosRegistrados.slice().reverse().map(ab => `
                     <div style="display:grid; grid-template-columns:90px 1fr auto; gap:10px; align-items:center; padding:10px 12px; border-bottom:1px solid #f1f5f9; font-size:13px;">
-                        <span style="color:#64748b;">${_cxcFechaCorta(ab.fecha || ab.fechaAbono || ab.fechaAbonoIso)}</span>
+                        <span style="color:#64748b;">${_cxcFechaVista(ab.fecha || ab.fechaAbono || ab.fechaAbonoIso)}</span>
                         <span style="color:#334155; overflow:hidden; text-overflow:ellipsis;">${_cxcEscHTML(ab.etiquetaCuenta || ab.cuentaId || ab.medioPago || 'Caja')}</span>
                         <strong style="color:#15803d; white-space:nowrap;">${_cxcDinero(ab.monto || ab.montoAbonado || 0)}</strong>
                     </div>`).join('') : `
@@ -1809,6 +1816,13 @@ function _cxcOpcionesCuentasReceptoras(seleccionId = '', seleccionEtiqueta = '')
 }
 
 window.procesarCorreccionAbono = function(folio, abonoIndex) {
+    if (window.AuditService?.requireAdmin) {
+        if (!window.AuditService.requireAdmin('corregir abono CxC')) return;
+    } else {
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        if (!sesion || (sesion.rol !== 'admin' && sesion.rol !== 'Administrador')) return alert("Acceso denegado: solo administradores.");
+    }
+
     const nuevaFecha = document.getElementById('editFechaAbn').value;
     const nuevoMonto = parseFloat(document.getElementById('editMontoAbn').value);
     const selCuenta = document.getElementById('editCuentaAbn');
@@ -1927,7 +1941,7 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
             modulo: 'CxC',
             entidad: 'Abono',
             entidadId: `${folio}#${abonoIndex + 1}`,
-            detalle: `Correccion de abono: ${_cxcDinero(abonoAnterior.monto || 0)} -> ${_cxcDinero(nuevoMonto)}`,
+            detalle: `Correccion de abono: monto ${_cxcDinero(abonoAnterior.monto || 0)} -> ${_cxcDinero(nuevoMonto)}; fecha ${abonoAnterior.fechaAbonoStr || abonoAnterior.fecha || '-'} -> ${nuevaFechaVisible}; cuenta ${abonoAnterior.etiquetaCuenta || abonoAnterior.cuentaId || '-'} -> ${etiqueta}`,
             monto: nuevoMonto,
             severidad: 'riesgo',
             datos: { antes: abonoAnterior, despues: cuenta.abonos[abonoIndex] }
@@ -1950,7 +1964,7 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
 // ESTADO DE CUENTA PROFESIONAL / TICKET
 // ==========================================
 function _cxcEstadoCuentaFecha(valor) {
-    return _cxcFechaCorta(valor);
+    return _cxcFechaVista(valor);
 }
 
 function _cxcEstadoCuentaAbonos(cuenta) {
@@ -2557,9 +2571,13 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
 // 🕰️ AUDITORÍA DE FECHAS RELACIONALES (VERSIÓN MULTI-CAJA Y DÉBITO V2)
 // =====================================================================
 window.abrirAuditoriaFechas = function() {
-    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
-    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
-        return alert("⛔ ACCESO DENEGADO: Solo Administradores.");
+    if (window.AuditService?.requireAdmin) {
+        if (!window.AuditService.requireAdmin('auditoria de fechas de ingreso')) return;
+    } else {
+        const usuarioActual = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        if (!usuarioActual || (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador")) {
+            return alert("⛔ ACCESO DENEGADO: Solo Administradores.");
+        }
     }
 
     const modalHTML = `
