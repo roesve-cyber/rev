@@ -1,4 +1,11 @@
 // ===== INICIALIZACIÓN (VERSIÓN OFFLINE-FIRST ULTRA RÁPIDA Y BLINDADA) =====
+ 
+document.addEventListener('wheel', (event) => {
+    const input = event.target;
+    if (input && input.matches && input.matches('input[type="number"]')) {
+        event.preventDefault();
+    }
+}, { passive: false, capture: true });
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.pathname.includes("catalogo.html")) {
@@ -63,7 +70,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // 4. ARRANCAR LA INTERFAZ GRÁFICA INMEDIATAMENTE
         if (!window.location.pathname.includes("catalogo.html")) {
-            if (typeof navA === 'function') navA('inicio');
+            const params = new URLSearchParams(window.location.search || '');
+            const vistaInicial = params.get('view') || (window.location.hash ? window.location.hash.replace('#', '') : '') || 'inicio';
+            if (typeof navA === 'function') navA(vistaInicial);
             if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
             if (typeof verificarAlertasPagares === 'function') verificarAlertasPagares();
         }
