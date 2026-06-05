@@ -127,6 +127,17 @@ function guardarCliente() {
                     rolSolicitante: sesion.rol || ''
                 });
                 StorageService.set('solicitudesClientesPendientes', pendientes);
+                if (typeof window.notificarBovedaAutorizacion === 'function') {
+                    window.notificarBovedaAutorizacion({
+                        tipo: 'cliente',
+                        id: `cliente-${clientesBD[index].id}-${Date.now()}`,
+                        titulo: 'Cambio de cliente pendiente',
+                        cuerpo: `${clientesBD[index].nombre} - ${cambios.join(', ')}`,
+                        clienteId: clientesBD[index].id,
+                        cliente: clientesBD[index].nombre,
+                        cambios
+                    });
+                }
                 window.AuditService?.log?.({
                     accion: 'CLIENTE_CAMBIO_SOLICITADO',
                     modulo: 'Clientes',
@@ -691,6 +702,17 @@ function enviarSolicitudCambioCliente() {
 
     pendientes.unshift(solicitud);
     StorageService.set('solicitudesClientesPendientes', pendientes);
+    if (typeof window.notificarBovedaAutorizacion === 'function') {
+        window.notificarBovedaAutorizacion({
+            tipo: 'cliente',
+            id: `cliente-${cliente.id}-${solicitud.id}`,
+            titulo: 'Cambio de cliente pendiente',
+            cuerpo: `${cliente.nombre} - ${cambios.join(', ')}`,
+            clienteId: cliente.id,
+            cliente: cliente.nombre,
+            cambios
+        });
+    }
     window.AuditService?.log?.({
         accion: 'CLIENTE_CAMBIO_SOLICITADO',
         modulo: 'Clientes',

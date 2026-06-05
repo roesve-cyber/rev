@@ -16,6 +16,7 @@ function renderConfiguracion() {
     }
     
     _dibujarPlazosGlobales(config.plazos);
+    if (typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig();
 }
 
 function _dibujarPlazosGlobales(plazos) {

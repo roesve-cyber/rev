@@ -944,6 +944,17 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         let abonosP = StorageService.get("abonosPendientes", []);
         abonosP.push(cuarentena);
         StorageService.set("abonosPendientes", abonosP);
+        if (typeof window.notificarBovedaAutorizacion === 'function') {
+            window.notificarBovedaAutorizacion({
+                tipo: 'abono',
+                id: `abono-${cuarentena.id}`,
+                titulo: 'Abono pendiente en Boveda',
+                cuerpo: `${cuenta.nombre || cuenta.clienteNombre || 'Cliente'} - ${_cxcDinero(montoFinal)}`,
+                folio,
+                cliente: cuenta.nombre || cuenta.clienteNombre || 'Cliente',
+                monto: montoFinal
+            });
+        }
     }
 
     // SIMULAMOS EN MEMORIA PARA EL TICKET PROVISIONAL

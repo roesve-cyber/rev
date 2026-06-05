@@ -106,7 +106,20 @@ function _kardexCantidadFirmada(m = {}, tipoBase = _kardexTipoBase(m)) {
 }
 
 function _kardexCostoUnitario(m = {}, p = {}) {
- return Number(m.costoUnitario || m.costo || m.precioCompra || p.costo || p.precioCompra || 0);
+ const candidatos = [
+ m.costoUnitario,
+ m.costo,
+ m.precioCompra,
+ m.costoPromedio,
+ p.costo,
+ p.precioCompra,
+ p.costoPromedio
+ ];
+ for (const valor of candidatos) {
+ const n = Number(valor);
+ if (Number.isFinite(n) && n > 0) return n;
+ }
+ return _invCostoHistoricoProducto(m.productoId || p.id) || 0;
 }
 
 function _normalizarMovimientoKardex(m = {}, productosMap = new Map()) {
@@ -190,6 +203,19 @@ function _invStorageArray(key) {
  }
 }
 
+function _invCostoHistoricoProducto(productoId) {
+ if (!productoId) return 0;
+ const historicos = _invStorageArray('historialCostos')
+ .filter(h => String(h.productoId || h.idProducto || '') === String(productoId))
+ .map(h => ({
+ costo: Number(h.precioCompra || h.costoNuevo || h.costo || h.nuevo || 0),
+ fecha: h.fecha || h.fechaISO || h.createdAt || ''
+ }))
+ .filter(h => Number.isFinite(h.costo) && h.costo > 0)
+ .sort((a, b) => _kardexDateValue(b.fecha) - _kardexDateValue(a.fecha));
+ return historicos[0]?.costo || 0;
+}
+
 function _invTextoNormalizado(value) {
  return String(value || '').trim().toLowerCase();
 }
@@ -211,7 +237,10 @@ function _invItemCantidad(item = {}) {
 function _invItemMonto(item = {}) {
  const raw = item.subtotal ?? item.total ?? item.importe ?? item.monto ?? item.precioTotal ?? item.precioVenta ?? item.precio;
  const n = Number(raw);
- return Number.isFinite(n) ? n : 0;
+ if (Number.isFinite(n) && n > 0) return n;
+ const costoUnitario = Number(item.costoUnitario ?? item.costo ?? item.precioCompra ?? 0);
+ const cantidad = _invItemCantidad(item);
+ return Number.isFinite(costoUnitario) && costoUnitario > 0 ? costoUnitario * cantidad : 0;
 }
 
 function _invItemCoincideProducto(item = {}, producto = {}) {
@@ -935,7 +964,11 @@ window.renderConsultaInventario = function() {
  const ubiFiltro = document.getElementById('filtroUbiInv')?.value || 'todos';
 
  // 2. Preparacion de Datos (Kardex y Ordenes de Compra)
- const kardex = window.movimientosInventario || [];
+ const productosConsulta = window.productos || [];
+ const productosMapConsulta = new Map(productosConsulta.map(p => [String(p.id), p]));
+ const kardex = (window.movimientosInventario || [])
+ .map(m => _normalizarMovimientoKardex(m, productosMapConsulta))
+ .filter(m => !m.anulado);
  const ocs = window.ordenesCompra || [];
  const estadoPedidoPorProd = {};
  
@@ -952,7 +985,7 @@ window.renderConsultaInventario = function() {
  });
 
  // 3. Filtrado de Productos
- let productosFiltrados = (window.productos || []).filter(p => {
+ let productosFiltrados = productosConsulta.filter(p => {
  const coincideCat = (cat === 'todos' || cat === 'todas' || p.categoria === cat);
  const coincideSub = (sub === 'todos' || sub === 'todas' || p.subcategoria === sub);
  const coincideStock = stockFiltro === 'todos' ? true : (stockFiltro === 'con' ? (p.stock > 0) : (p.stock <= 0));
@@ -994,13 +1027,15 @@ window.renderConsultaInventario = function() {
 
  productosFiltrados.forEach(p => {
  // Logica de Costo Promedio
- const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && _kardexTipoBase(m) === 'entrada');
+ const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipoBase === 'entrada');
  let totalCosto = 0, totalCantidadEntrada = 0;
  entradas.forEach(mov => {
- totalCosto += (mov.costoUnitario || 0) * (mov.cantidad || 0);
- totalCantidadEntrada += mov.cantidad || 0;
+ const cantidadEntrada = Number(mov.cantidad || 0);
+ totalCosto += Number(mov.costoUnitario || 0) * cantidadEntrada;
+ totalCantidadEntrada += cantidadEntrada;
  });
- const costoPromedio = totalCantidadEntrada > 0 ? (totalCosto / totalCantidadEntrada) : (p.costo || 0);
+ const costoBase = Number(p.costo || p.precioCompra || _invCostoHistoricoProducto(p.id) || 0);
+ const costoPromedio = totalCantidadEntrada > 0 && totalCosto > 0 ? (totalCosto / totalCantidadEntrada) : costoBase;
  const valorTotal = (p.stock || 0) * costoPromedio;
 
  totalGlobalUnidades += (p.stock || 0);
@@ -1421,13 +1456,20 @@ function actualizarStock(id, cant, concepto) {
 
 function registrarMovimiento(productoId, concepto, cantidad, tipo) {
  const kardexActual = StorageService.get("movimientosInventario", []);
+ const producto = (window.productos || []).find(p => String(p.id) === String(productoId)) || {};
+ const costoUnitario = Number(producto.costo || producto.precioCompra || 0);
  const movimiento = {
  id: Date.now() + Math.random(),
  productoId: productoId,
+ productoNombre: producto.nombre || '',
  fecha: window.localISO(new Date()),
  concepto: concepto,
  cantidad: Math.abs(cantidad),
- tipo: tipo
+ tipo: tipo,
+ costoUnitario,
+ costo: costoUnitario,
+ precioCompra: costoUnitario,
+ valor: Math.abs(Number(cantidad || 0)) * costoUnitario
  };
  kardexActual.push(movimiento);
  movimientosInventario = kardexActual;

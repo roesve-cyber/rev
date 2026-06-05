@@ -952,6 +952,8 @@ function registrarCompra() {
         fechaPedido: nuevaCompra.fecha,
         metodoPago: formaPagoTexto,
         estatus: ingresoInmediato ? "Completado" : "Pendiente",
+        costoUnitario: Number(costoNuevo || 0),
+        costo: Number(costoNuevo || 0),
         color: colorNuevo,           // <-- Sabe de qué color viene
         ubicacion: ubicacionNueva    // <-- Sabe a qué bodega va
     };
@@ -1214,6 +1216,15 @@ window.ejecutarRecepcionFisica = function(idRecepcion) {
             productoNombre: prod.nombre,
             tipo: 'entrada',
             cantidad,
+            costoUnitario: Number(rec.costoUnitario || rec.costo || prod.costo || 0),
+            costo: Number(rec.costoUnitario || rec.costo || prod.costo || 0),
+            precioCompra: Number(rec.costoUnitario || rec.costo || prod.costo || 0),
+            valor: cantidad * Number(rec.costoUnitario || rec.costo || prod.costo || 0),
+            proveedor: rec.proveedor || '',
+            referencia: rec.folio || rec.compraId || `REC-${rec.id}`,
+            compraId: rec.compraId || null,
+            ubicacion: ubicacionRecepcion,
+            color: colorRecepcion,
             concepto: `Recepción Pendiente - Prov: ${rec.proveedor} (${colorRecepcion}) -> Ingresado a [${ubicacionRecepcion}]`,
             fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
         });
@@ -2575,8 +2586,18 @@ itemsRecibidos.forEach(art => {
     kardex.push({
         id: Date.now() + Math.random(),
         productoId: art.productoId,
+        productoNombre: art.nombre,
         tipo: 'entrada',
         cantidad: art.cantidadRec,
+        costoUnitario: Number(art.costo || art.costoUnitario || 0),
+        costo: Number(art.costo || art.costoUnitario || 0),
+        precioCompra: Number(art.costo || art.costoUnitario || 0),
+        valor: Number(art.cantidadRec || 0) * Number(art.costo || art.costoUnitario || 0),
+        proveedor: oc.proveedorNombre || '',
+        referencia: oc.folio || oc.id || '',
+        compraId: oc.id || null,
+        ubicacion: art.ubicacionRec || 'General',
+        color: art.colorRec || 'General',
         concepto,
         fecha: window.formatearFechaMX(fechaRec)
     });
@@ -3585,10 +3606,21 @@ function guardarCompraDirectaFinal() {
                 movimientosInventario.push({
                     id: Date.now() + Math.random(),
                     productoId: art.productoId,
+                    productoNombre: art.nombre || p.nombre,
                     tipo: 'entrada',
                     cantidad: art.cantidad,
+                    costoUnitario: Number(art.costo || 0),
+                    costo: Number(art.costo || 0),
+                    precioCompra: Number(art.costo || 0),
+                    valor: Number(art.cantidad || 0) * Number(art.costo || 0),
+                    proveedor: prov.nombre || '',
+                    referencia: `CD-${idCompraUnico.toString().slice(-6)}`,
+                    compraId: idCompraUnico,
+                    ubicacion: ubiFinal,
+                    color: colFinal,
                     concepto: `Compra Directa Múltiple a ${prov.nombre} (${colFinal})`,
-                    fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString()
+                    fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString(),
+                    fechaISO: fechaStr
                 });
             }
         }

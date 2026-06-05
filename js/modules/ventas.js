@@ -675,7 +675,12 @@ function obtenerUbicacionesPorColor(productoId, color) {
 }
 
 function _normalizarClaveInventario(valor) {
-    return String(valor || '').trim().toUpperCase();
+    return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toUpperCase();
 }
 
 function _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida) {
@@ -701,6 +706,62 @@ function _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida) {
         .reduce((s, v) => s + (Number(v.stock) || 0), 0);
 }
 
+function _stockDisponibleEnUbicacionVenta(prod, ubicacionElegida) {
+    if (!prod || !ubicacionElegida) return 0;
+    const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
+    const ubicNorm = _normalizarClaveInventario(ubicacionElegida);
+    const cantidadTotal = Number(prod.stock || 0);
+
+    if (ubicNorm === 'STOCK GENERAL') {
+        const asignadoAVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+        return Math.max(0, cantidadTotal - asignadoAVariantes);
+    }
+
+    if (variantes.length === 0) {
+        return ubicNorm === 'GENERAL' ? cantidadTotal : 0;
+    }
+
+    return variantes
+        .filter(v => _normalizarClaveInventario(v.ubicacion || 'General') === ubicNorm)
+        .reduce((s, v) => s + (Number(v.stock) || 0), 0);
+}
+
+function _resolverOrigenEntregaVenta(prod, item, decision) {
+    const cantidad = Number(item?.cantidad || 1);
+    const colorElegido = decision?.color !== undefined ? decision.color : (item?.colorElegido || '');
+    const ubicacionElegida = decision?.ubicacion !== undefined ? decision.ubicacion : (item?.ubicacionElegida || '');
+
+    if (!ubicacionElegida) {
+        return {
+            ok: false,
+            mensaje: `Selecciona la ubicacion de salida para "${prod?.nombre || item?.nombre || 'producto'}".`
+        };
+    }
+
+    const disponibleExacto = _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida);
+    if (disponibleExacto >= cantidad) {
+        return { ok: true, disponible: disponibleExacto, requiereAjusteColor: false };
+    }
+
+    const disponibleUbicacion = _stockDisponibleEnUbicacionVenta(prod, ubicacionElegida);
+    if (colorElegido && disponibleUbicacion >= cantidad) {
+        return {
+            ok: true,
+            disponible: disponibleUbicacion,
+            disponibleExacto,
+            requiereAjusteColor: true,
+            mensaje: `El color vendido "${colorElegido}" no coincide con el color registrado en inventario para ${ubicacionElegida}. Se descontara stock fisico de esa ubicacion y quedara trazado en Kardex.`
+        };
+    }
+
+    return {
+        ok: false,
+        disponible: disponibleExacto,
+        disponibleUbicacion,
+        mensaje: `"${prod?.nombre || item?.nombre || 'Producto'}" no tiene inventario suficiente en ${ubicacionElegida}.\n\nSolicitado: ${cantidad}\nDisponible exacto: ${disponibleExacto}${colorElegido ? `\nColor vendido: ${colorElegido}` : ''}${disponibleUbicacion !== disponibleExacto ? `\nDisponible total en ubicacion: ${disponibleUbicacion}` : ''}`
+    };
+}
+
 function _stockDisponibleParaSolicitudVenta(prod, item) {
     if (!prod) return 0;
     const cantidadTotal = Number(prod.stock || 0);
@@ -718,26 +779,7 @@ function _stockDisponibleParaSolicitudVenta(prod, item) {
 }
 
 function _validarOrigenEntregaVenta(prod, item, decision) {
-    const cantidad = Number(item?.cantidad || 1);
-    const colorElegido = decision?.color !== undefined ? decision.color : (item?.colorElegido || '');
-    const ubicacionElegida = decision?.ubicacion !== undefined ? decision.ubicacion : (item?.ubicacionElegida || '');
-
-    if (!ubicacionElegida) {
-        return {
-            ok: false,
-            mensaje: `Selecciona la ubicacion de salida para "${prod?.nombre || item?.nombre || 'producto'}".`
-        };
-    }
-
-    const disponible = _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida);
-    if (disponible < cantidad) {
-        return {
-            ok: false,
-            mensaje: `"${prod?.nombre || item?.nombre || 'Producto'}" no tiene inventario suficiente en ${ubicacionElegida}.\n\nSolicitado: ${cantidad}\nDisponible ahi: ${disponible}${colorElegido ? `\nColor: ${colorElegido}` : ''}`
-        };
-    }
-
-    return { ok: true, disponible };
+    return _resolverOrigenEntregaVenta(prod, item, decision);
 }
 
 function _opcionesUbicacionSalidaVenta(prod, colorElegido = '', seleccionActual = '') {
@@ -756,18 +798,31 @@ function _opcionesUbicacionSalidaVenta(prod, colorElegido = '', seleccionActual 
     }
 
     const ubicacionesStock = {};
+    const ubicacionesTotales = {};
     variantes.forEach(v => {
+        const nombreUbi = v.ubicacion || 'General';
+        ubicacionesTotales[nombreUbi] = (ubicacionesTotales[nombreUbi] || 0) + (Number(v.stock) || 0);
         const coincideColor = !colorNorm || _normalizarClaveInventario(v.color || 'General') === colorNorm;
         if (!coincideColor) return;
-        const nombreUbi = v.ubicacion || 'General';
         ubicacionesStock[nombreUbi] = (ubicacionesStock[nombreUbi] || 0) + (Number(v.stock) || 0);
     });
 
+    const ubicacionesRenderizadas = new Set();
     Object.entries(ubicacionesStock).forEach(([ubicacion, stockUbi]) => {
         if (stockUbi <= 0) return;
         const selected = seleccionNorm === _normalizarClaveInventario(ubicacion) ? 'selected' : '';
         opciones += `<option value="${_escapeHtml(ubicacion)}" ${selected}>${_escapeHtml(ubicacion)} (${stockUbi} disp.)</option>`;
+        ubicacionesRenderizadas.add(_normalizarClaveInventario(ubicacion));
     });
+
+    if (colorNorm) {
+        Object.entries(ubicacionesTotales).forEach(([ubicacion, stockUbi]) => {
+            if (stockUbi <= 0) return;
+            if (ubicacionesRenderizadas.has(_normalizarClaveInventario(ubicacion))) return;
+            const selected = seleccionNorm === _normalizarClaveInventario(ubicacion) ? 'selected' : '';
+            opciones += `<option value="${_escapeHtml(ubicacion)}" ${selected}>${_escapeHtml(ubicacion)} (${stockUbi} disp. en otro color registrado)</option>`;
+        });
+    }
 
     return opciones;
 }
@@ -778,6 +833,12 @@ function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '',
 
     const validacion = _validarOrigenEntregaVenta(prod, { cantidad: cant, nombre: prod.nombre }, { color: colorElegido, ubicacion: ubicacionElegida });
     if (!validacion.ok) return false;
+    window._ultimaSalidaInventarioVenta = {
+        requiereAjusteColor: !!validacion.requiereAjusteColor,
+        colorVendido: colorElegido || '',
+        ubicacion: ubicacionElegida || '',
+        coloresFisicos: []
+    };
 
     if (
         Array.isArray(prod.variantes) &&
@@ -786,15 +847,31 @@ function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '',
         _normalizarClaveInventario(ubicacionElegida) !== 'STOCK GENERAL'
     ) {
         let restante = cant;
+        const descontarDeVariante = (v) => {
+            if (restante <= 0 || Number(v.stock) <= 0) return;
+            const deducir = Math.min(Number(v.stock), restante);
+            v.stock -= deducir;
+            restante -= deducir;
+            window._ultimaSalidaInventarioVenta.coloresFisicos.push({
+                color: v.color || 'General',
+                ubicacion: v.ubicacion || 'General',
+                cantidad: deducir
+            });
+        };
+
         prod.variantes.forEach(v => {
             const coincideColor = !colorElegido || _normalizarClaveInventario(v.color || 'General') === _normalizarClaveInventario(colorElegido);
             const coincideUbicacion = _normalizarClaveInventario(v.ubicacion || 'General') === _normalizarClaveInventario(ubicacionElegida);
-            if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
-                const deducir = Math.min(Number(v.stock), restante);
-                v.stock -= deducir;
-                restante -= deducir;
-            }
+            if (coincideColor && coincideUbicacion) descontarDeVariante(v);
         });
+
+        if (restante > 0 && validacion.requiereAjusteColor) {
+            prod.variantes.forEach(v => {
+                const coincideUbicacion = _normalizarClaveInventario(v.ubicacion || 'General') === _normalizarClaveInventario(ubicacionElegida);
+                if (coincideUbicacion) descontarDeVariante(v);
+            });
+        }
+
         if (restante > 0) return false;
     }
 
@@ -1620,6 +1697,17 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     let pendientes = StorageService.get("ventasPendientes", []).map(_normalizarVentaPendienteFirestore);
     pendientes.push(cuarentena);
     StorageService.set("ventasPendientes", pendientes);
+    if (typeof window.notificarBovedaAutorizacion === 'function') {
+        window.notificarBovedaAutorizacion({
+            tipo: 'venta',
+            id: `venta-${folioVenta}`,
+            titulo: 'Venta pendiente en Boveda',
+            cuerpo: `${clienteSeleccionado.nombre || 'Cliente'} - ${typeof dinero === 'function' ? dinero(totalContado) : totalContado}`,
+            folio: folioVenta,
+            cliente: clienteSeleccionado.nombre,
+            total: totalContado
+        });
+    }
 
     // 3. Emitir documentos operativos aunque la venta quede en cuarentena.
     // La cuarentena es administrativa; no debe detener caja ni entrega.
@@ -2332,6 +2420,11 @@ function abrirDetalleEntrega(idSalida) {
         if (i.cantidad <= 0) return ''; // Si ya se entregó todo este item, lo omitimos
         const prodActual = StorageService.get("productos", []).find(p => String(p.id) === String(i.productoId));
         const opcionesUbicacion = _opcionesUbicacionSalidaVenta(prodActual, i.colorElegido || '', i.ubicacionElegida || '');
+        const avisoColorFlexible = i.colorElegido && prodActual
+            ? `<div style="margin-top:6px; font-size:11px; color:#92400e; background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:6px;">
+                Si el color vendido fue capturado diferente al inventario, puedes elegir una ubicacion con stock en otro color registrado. El sistema lo dejara trazado.
+               </div>`
+            : '';
 
         return `
         <tr>
@@ -2343,6 +2436,7 @@ function abrirDetalleEntrega(idSalida) {
                 <select id="entregaUbi-${s.id}-${index}" style="width:100%; max-width:230px; padding:6px; border:1px solid #cbd5e1; border-radius:6px; background:white;">
                     ${opcionesUbicacion}
                 </select>
+                ${avisoColorFlexible}
             </td>
             <td style="padding:8px; text-align:center; border-bottom:1px solid #f3f4f6; color:#b91c1c; font-weight:bold;">
                 ${i.cantidad}
@@ -2426,6 +2520,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
     // ========================================================
     let validacionPasada = true;
     let mensajeError = "";
+    let advertenciasColor = [];
 
     (s.items || []).forEach((item, index) => {
         const inputEl = document.getElementById(`entregar-${s.id}-${index}`);
@@ -2450,6 +2545,8 @@ function aplicarSalidaPendienteVentas(idSalida) {
                 if (!validacionOrigen.ok) {
                     validacionPasada = false;
                     mensajeError = validacionOrigen.mensaje;
+                } else if (validacionOrigen.requiereAjusteColor) {
+                    advertenciasColor.push(validacionOrigen.mensaje);
                 }
             }
             if (validacionPasada && (prod.stock || 0) < cantAEntregar) {
@@ -2460,6 +2557,10 @@ function aplicarSalidaPendienteVentas(idSalida) {
     });
 
     if (!validacionPasada) return alert(mensajeError);
+    if (advertenciasColor.length > 0) {
+        const mensajesUnicos = [...new Set(advertenciasColor)];
+        if (!confirm(`${mensajesUnicos.join('\n\n')}\n\nDeseas continuar con la entrega?`)) return;
+    }
 
     // ========================================================
     // 2. DESCONTAR INVENTARIO Y AFECTAR KARDEX
@@ -2477,15 +2578,23 @@ function aplicarSalidaPendienteVentas(idSalida) {
             if (prod) {
                 const salidaOk = _descontarInventarioDesdeOrigenVenta(prod, cantAEntregar, item.colorElegido || '', ubicacionSeleccionada);
                 if (!salidaOk) return;
+                const metaSalida = window._ultimaSalidaInventarioVenta || {};
+                const coloresFisicos = (metaSalida.coloresFisicos || [])
+                    .map(x => `${x.color} x${x.cantidad}`)
+                    .join(', ');
+                const notaColor = metaSalida.requiereAjusteColor && coloresFisicos
+                    ? ` | color fisico descontado: ${coloresFisicos}; color vendido: ${item.colorElegido || '-'}`
+                    : '';
                 
                 // Afectar el Kardex
                 if (typeof window.registrarMovimiento === 'function') {
-                    window.registrarMovimiento(item.productoId, `Entrega diferida - Folio ${s.folioVenta} (${ubicacionSeleccionada})`, cantAEntregar, "salida");
+                    window.registrarMovimiento(item.productoId, `Entrega diferida - Folio ${s.folioVenta} (${ubicacionSeleccionada})${notaColor}`, cantAEntregar, "salida");
                 }
 
                 entregadosHoy.push({
                     nombre: item.nombre,
                     colorElegido: item.colorElegido || '',
+                    colorFisicoEntregado: coloresFisicos || '',
                     ubicacionElegida: ubicacionSeleccionada,
                     cantidad: cantAEntregar
                 });
