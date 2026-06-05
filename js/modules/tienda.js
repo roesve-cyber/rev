@@ -376,7 +376,8 @@ function agruparProductosPorCategoria() {
 window.filtrarTiendaTexto = function(valor) { window._filtroTiendaBuscador = String(valor || '').trim(); window.filtrarCatalogo(); };
 window.filtrarTiendaCategoria = function(cat) { window._filtroTiendaCategoria = cat === 'todas' ? '' : cat; window._filtroTiendaSubcategoria = ''; window.mostrarProductos(); };
 window.filtrarTiendaSubcategoria = function(sub) { window._filtroTiendaSubcategoria = sub === 'todas' ? '' : sub; window.filtrarCatalogo(); };
-window.limpiarFiltrosCatalogo = function() { window._filtroTiendaBuscador = ''; window._filtroTiendaCategoria = ''; window._filtroTiendaSubcategoria = ''; window.mostrarProductos(); };
+window.resetFiltrosCatalogo = function() { window._filtroTiendaBuscador = ''; window._filtroTiendaCategoria = ''; window._filtroTiendaSubcategoria = ''; };
+window.limpiarFiltrosCatalogo = function() { window.resetFiltrosCatalogo(); window.mostrarProductos(); };
 window.verDetalle = function(id) { window.verProductoAgrupado(id); };
 
 // Función para obtener categorías ordenadas por posición

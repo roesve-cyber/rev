@@ -157,6 +157,15 @@ function mostrarLoginScreen() {
 // ── requireAdmin ──────────────────────────────────────────────────────────────
 function requireAdmin(callback) {
     if (esAdmin()) { callback(); return; }
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ACCESO_ADMIN_REQUERIDO',
+            modulo: 'Seguridad',
+            entidad: 'admin',
+            detalle: 'Se solicito autorizacion de administrador para continuar',
+            severidad: 'riesgo'
+        });
+    }
     let html;
     if (window._firebaseActivo && window._auth) {
         html = `

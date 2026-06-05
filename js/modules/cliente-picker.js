@@ -48,7 +48,11 @@ window._filtrarClientesPicker = function(texto) {
     const filtrados = q
         ? clientesLista.filter(c =>
             (c.nombre   || '').toLowerCase().includes(q) ||
-            (c.telefono || '').includes(q))
+            (c.telefono || '').includes(q) ||
+            (c.direccion || '').toLowerCase().includes(q) ||
+            (c.referencia || '').toLowerCase().includes(q) ||
+            (c.referenciaBusqueda || '').toLowerCase().includes(q) ||
+            (c.busquedaCliente || '').toLowerCase().includes(q))
         : clientesLista;
 
     if (filtrados.length === 0) {
@@ -74,6 +78,10 @@ window._filtrarClientesPicker = function(texto) {
                 ${c.direccion ? `<div style="font-size:12px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ${c.direccion}</div>` : ''}
             </div>
         `;
+        if (c.referencia) {
+            const info = div.querySelector('div[style*="flex:1"]');
+            if (info) info.insertAdjacentHTML('beforeend', `<div style="font-size:12px;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Ref: ${c.referencia}</div>`);
+        }
         cont.appendChild(div);
     });
 };

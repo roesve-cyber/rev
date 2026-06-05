@@ -7,6 +7,21 @@ function _comprasAsegurarArray(valor) {
     return [];
 }
 
+function _comprasRequireAdmin(accion) {
+    if (typeof window.esAdmin === 'function' && window.esAdmin()) return true;
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ACCESO_DENEGADO',
+            modulo: 'Compras',
+            entidad: accion,
+            detalle: `Intento sin permisos: ${accion}`,
+            severidad: 'alerta'
+        });
+    }
+    alert('Operacion restringida. Solo administrador puede continuar.');
+    return false;
+}
+
 function _getOrdenesCompra() {
     return _comprasAsegurarArray(StorageService.get('ordenesCompra', []));
 }
@@ -348,12 +363,16 @@ function _consigResumenGlobal() {
 
     folios.forEach(f => {
         f.anticiposAplicados = Math.max(Number(f.anticiposAplicados || 0), Number(f.anticiposAplicadosCxp || 0));
-        f.saldoNeto = Math.max(0, f.compraOriginal - f.pagadoPorVentas - f.anticiposTotal - f.anticiposAplicados);
+        f.anticiposDisponibles = Math.max(0, Number(f.anticiposTotal || 0) - Number(f.anticiposAplicados || 0));
+        f.creditoAnticipos = Math.max(Number(f.anticiposTotal || 0), Number(f.anticiposAplicados || 0));
+        f.saldoNeto = Math.max(0, f.compraOriginal - f.pagadoPorVentas - f.creditoAnticipos);
     });
 
     grupos.forEach(g => {
         g.anticiposAplicados = Math.max(Number(g.anticiposAplicados || 0), Number(g.anticiposAplicadosCxp || 0));
-        g.saldoNeto = Math.max(0, g.compraOriginal - g.pagadoPorVentas - g.anticiposTotal);
+        g.anticiposDisponibles = Math.max(0, Number(g.anticiposTotal || 0) - Number(g.anticiposAplicados || 0));
+        g.creditoAnticipos = Math.max(Number(g.anticiposTotal || 0), Number(g.anticiposAplicados || 0));
+        g.saldoNeto = Math.max(0, g.compraOriginal - g.pagadoPorVentas - g.creditoAnticipos);
         g.folios = Array.from(folios.values())
             .filter(f => f.proveedorKey === g.key)
             .sort((a, b) => String(a.folioOrigen).localeCompare(String(b.folioOrigen)));
@@ -468,6 +487,7 @@ function guardarHistorialCosto({ productoId, precioCompra, fecha, cantidad, prov
 // ===== PROVEEDORES =====
 
 function guardarProveedor() {
+    if (!_comprasRequireAdmin('Guardar proveedor')) return;
     const nombreInput   = document.getElementById("provNombre");
     const contactoInput = document.getElementById("provContacto");
     const nombre   = nombreInput.value.trim();
@@ -518,6 +538,7 @@ function renderProveedores() {
 }
 
 function eliminarProveedor(id) {
+    if (!_comprasRequireAdmin('Eliminar proveedor')) return;
     if (confirm("¿Estás seguro de eliminar este proveedor?")) {
         proveedores = proveedores.filter(p => p.id !== id);
         if (!StorageService.set("proveedores", proveedores)) {
@@ -671,6 +692,18 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         idOperacion: idOperacion || null
     });
     StorageService.set('movimientosCaja', movs);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'EGRESO_CUENTA',
+            modulo: 'Finanzas',
+            entidad: cuenta.tipo,
+            entidadId: cuenta.cuentaRealId,
+            detalle: concepto,
+            monto: montoNum,
+            severidad: 'riesgo',
+            datos: { cuentaId, etiqueta: etiqueta || cuenta.cuentaRealId, referencia, idOperacion: idOperacion || null, medioPago: cuenta.medioPago }
+        });
+    }
     return true;
 };
 window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha, idOperacion }) {
@@ -706,6 +739,18 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         idOperacion: idOperacion || null
     });
     StorageService.set('movimientosCaja', movs);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'INGRESO_CUENTA',
+            modulo: 'Finanzas',
+            entidad: cuenta.tipo,
+            entidadId: cuenta.cuentaRealId,
+            detalle: concepto,
+            monto: montoNum,
+            severidad: 'info',
+            datos: { cuentaId, etiqueta: etiqueta || cuenta.cuentaRealId, referencia, idOperacion: idOperacion || null, medioPago: cuenta.medioPago }
+        });
+    }
     return true;
 };
 
@@ -1621,6 +1666,7 @@ window.registrarAbonoProveedor = function(idCuenta) {
 };
 
 window.confirmarAbonoProveedor = function(idCuenta) {
+    if (!_comprasRequireAdmin('Registrar pago a proveedor')) return;
     const fechaInput = document.getElementById("fechaAbonoProv").value;
     if (!fechaInput) return alert("❌ Error: Debes especificar la fecha del pago.");
     const fechaPagoFinal = `${fechaInput}T12:00:00.000`;
@@ -1659,6 +1705,18 @@ window.confirmarAbonoProveedor = function(idCuenta) {
         cuenta: etiqueta || 'No especificada'
     });
     StorageService.set("cuentasPorPagar", cuentas);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'PAGO_PROVEEDOR',
+            modulo: 'Compras',
+            entidad: 'cuentasPorPagar',
+            entidadId: idCuenta,
+            detalle: `Pago a proveedor ${cuenta.proveedor || ''}`.trim(),
+            monto: montoAbono,
+            severidad: 'riesgo',
+            datos: { proveedor: cuenta.proveedor, producto: cuenta.producto, cuentaId, etiqueta, saldoRestante: cuenta.saldoPendiente }
+        });
+    }
 
     // 3. SINCRONIZACIÓN BARRERA: Si esta deuda viene de una Orden de Compra, actualizar la OC también
     if (cuenta.compraId) {
@@ -1920,6 +1978,7 @@ function _renderTablaArticulosOC() {
 }
 
 function guardarOrdenCompra() {
+    if (!_comprasRequireAdmin('Guardar orden de compra')) return;
     const arts = window._articulosOC || [];
     if (arts.length === 0) return alert('⚠️ Agrega al menos un artículo.');
     
@@ -2347,6 +2406,7 @@ function recibirOrdenCompra(id) {
 }
 
 function confirmarRecepcionOC(ocId) {
+    if (!_comprasRequireAdmin('Confirmar recepcion de orden de compra')) return;
     const lista = _getOrdenesCompra();
     const idx   = lista.findIndex(x => x.id === ocId);
     if (idx === -1) return;
@@ -3417,6 +3477,7 @@ function _renderTablaArticulosCompraDirecta() {
 }
 
 function guardarCompraDirectaFinal() {
+    if (!_comprasRequireAdmin('Guardar compra directa')) return;
     const provId = document.getElementById('cdProveedor')?.value;
     if (!provId) return alert("⚠️ Selecciona el proveedor.");
     
@@ -4269,6 +4330,7 @@ window.abrirModalAbonoConsignacion = function(idConsig) {
 };
 
 window.confirmarAbonoConsignacion = function(idConsig) {
+    if (!_comprasRequireAdmin('Registrar abono de consignacion')) return;
     let consignaciones = _getConsignacionesActivas();
     const idx = consignaciones.findIndex(x => String(x.id) === String(idConsig));
     if (idx === -1) return alert("Consignacion no encontrada.");
@@ -4369,6 +4431,7 @@ window.abrirModalAbonoConsignacion = function(idConsig) {
 };
 
 window.confirmarAbonoConsignacion = function(idConsig) {
+    if (!_comprasRequireAdmin('Registrar anticipo de consignacion')) return;
     const resumen = _consigResumenGlobal();
     const grupo = resumen.grupos.find(g => String(g.key) === String(idConsig));
     if (!grupo) return alert("Proveedor de consignacion no encontrado.");
@@ -4416,6 +4479,18 @@ window.confirmarAbonoConsignacion = function(idConsig) {
         aplicado: 0
     });
     StorageService.set("anticiposConsignacion", anticipos);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: folio ? 'ANTICIPO_CONSIGNACION_FOLIO' : 'ANTICIPO_CONSIGNACION_PROVEEDOR',
+            modulo: 'Consignaciones',
+            entidad: folio ? 'folio' : 'proveedor',
+            entidadId: folio ? folio.folioOrigen : grupo.key,
+            detalle: `Anticipo a ${grupo.proveedor || 'proveedor'}`,
+            monto,
+            severidad: 'riesgo',
+            datos: { proveedor: grupo.proveedor, proveedorId: grupo.proveedorId || null, folioOrigen: folio ? folio.folioOrigen : null, cuentaId, cuenta: etiqueta, nota }
+        });
+    }
 
     document.querySelector('[data-modal="abono-consignacion"]')?.remove();
     document.querySelector('[data-modal="gestor-consignaciones"]')?.remove();
@@ -4424,6 +4499,7 @@ window.confirmarAbonoConsignacion = function(idConsig) {
 };
 
 window.marcarConsignacionVendida = function(idConsig) {
+    if (!_comprasRequireAdmin('Reportar venta de consignacion')) return;
     let consigArr = StorageService.get("consignacionesActivas", []);
     const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
     if (idx === -1) return;
@@ -4545,6 +4621,27 @@ window.marcarConsignacionVendida = function(idConsig) {
     });
 
     StorageService.set("consignacionesActivas", consigArr);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'REPORTE_VENTA_CONSIGNACION',
+            modulo: 'Consignaciones',
+            entidad: 'consignacion',
+            entidadId: c.id,
+            detalle: `${cantidadAVender} pza(s) vendidas de ${c.producto || 'producto'}`,
+            monto: montoDeuda,
+            severidad: montoCubiertoConAnticipos > 0.01 ? 'riesgo' : 'info',
+            datos: {
+                proveedor: c.proveedor,
+                producto: c.producto,
+                cantidad: cantidadAVender,
+                folioReporte: folioReporteConsignacion,
+                folioVentaPOS: folioVentaOrigen,
+                anticipoUsado: montoCubiertoConAnticipos,
+                montoEnviadoCxP: montoCxp,
+                fechaPagoPrometida: fechaPagoInput
+            }
+        });
+    }
     const modal = document.querySelector('[data-modal="gestor-consignaciones"]');
     if(modal) modal.remove();
     
@@ -4558,11 +4655,15 @@ function _consigUiState() {
 }
 
 function _consigResumenKPIs({ compraOriginal = 0, pagadoPorVentas = 0, anticiposTotal = 0, anticiposAplicados = 0, saldoNeto = 0 }) {
+    const anticipoEntregado = Number(anticiposTotal || 0);
+    const anticipoAplicado = Number(anticiposAplicados || 0);
+    const anticipoDisponible = Math.max(0, anticipoEntregado - anticipoAplicado);
     return `
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;margin-bottom:14px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Compra original</small><br><strong style="font-size:20px;color:#1d4ed8;">${dinero(compraOriginal)}</strong></div>
             <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Pagado por ventas</small><br><strong style="font-size:20px;color:#15803d;">${dinero(pagadoPorVentas)}</strong></div>
-            <div style="background:#eef2ff;border:1px solid #c7d2fe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipos</small><br><strong style="font-size:20px;color:#4338ca;">${dinero(Number(anticiposTotal || 0) + Number(anticiposAplicados || 0))}</strong></div>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipo entregado</small><br><strong style="font-size:20px;color:#4338ca;">${dinero(anticipoEntregado)}</strong></div>
+            <div style="background:#ecfeff;border:1px solid #a5f3fc;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipo aplicado</small><br><strong style="font-size:20px;color:#0e7490;">${dinero(anticipoAplicado)}</strong><br><small style="color:#64748b;">Disp. ${dinero(anticipoDisponible)}</small></div>
             <div style="background:#fff1f2;border:1px solid #fecdd3;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Saldo neto</small><br><strong style="font-size:20px;color:#be123c;">${dinero(saldoNeto)}</strong></div>
         </div>`;
 }
@@ -4629,13 +4730,14 @@ window.abrirGestorConsignaciones = function() {
     const totalImporte = resumen.grupos.reduce((s, g) => s + g.compraOriginal, 0);
     const totalPagadoVentas = resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0);
     const totalAnticipos = resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0);
+    const totalAnticiposAplicados = resumen.grupos.reduce((s, g) => s + g.anticiposAplicados, 0);
     const totalSaldo = resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0);
 
     const proveedoresHtml = resumen.grupos.map(g => {
         const activo = g.key === state.proveedorKey;
         
         // 🚀 NUEVO: Calculamos si hay dinero libre y creamos el badge
-        const anticiposDisponibles = Math.max(0, g.anticiposTotal - g.anticiposAplicados);
+        const anticiposDisponibles = Math.max(0, Number(g.anticiposTotal || 0) - Number(g.anticiposAplicados || 0));
         const badgeAnticipo = anticiposDisponibles > 0.01 
             ? `<div style="margin-top:8px; display:inline-block; background:#dcfce7; color:#166534; border:1px solid #22c55e; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:bold;">💰 A favor disponible: ${dinero(anticiposDisponibles)}</div>` 
             : '';
@@ -4660,12 +4762,15 @@ window.abrirGestorConsignaciones = function() {
     const foliosHtml = proveedor ? proveedor.folios.map(f => {
         const activo = f.key === state.folioKey;
         const productosPendientes = f.consignaciones.reduce((s, c) => s + Number(c.cantidadPendiente || 0), 0);
+        const anticipoEntregado = Number(f.anticiposTotal || 0);
+        const anticipoAplicado = Number(f.anticiposAplicados || 0);
+        const anticipoDisponible = Math.max(0, anticipoEntregado - anticipoAplicado);
         return `
         <tr style="border-bottom:1px solid #e2e8f0;background:${activo ? '#eff6ff' : 'white'};">
             <td style="padding:10px;"><strong>${_comprasEscHTML(f.folioOrigen)}</strong><br><small style="color:#64748b;">${f.consignaciones.length} producto(s)</small></td>
             <td style="padding:10px;text-align:center;">${productosPendientes}</td>
             <td style="padding:10px;text-align:right;">${dinero(f.compraOriginal)}</td>
-            <td style="padding:10px;text-align:right;color:#2563eb;font-weight:bold;">${dinero(Number(f.anticiposTotal || 0) + Number(f.anticiposAplicados || 0))}</td>
+            <td style="padding:10px;text-align:right;color:#2563eb;font-weight:bold;">${dinero(anticipoEntregado)}<br><small style="color:#0e7490;">Aplicado: ${dinero(anticipoAplicado)}</small><br><small style="color:#64748b;">Disp: ${dinero(anticipoDisponible)}</small></td>
             <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(f.saldoNeto)}</td>
             <td style="padding:10px;text-align:center;white-space:nowrap;">
                 <button onclick="seleccionarFolioConsignacion('${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#1e40af;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Detalle</button>
@@ -4730,7 +4835,7 @@ window.abrirGestorConsignaciones = function() {
             </div>
             <button onclick="abrirGestorConsignaciones()" style="padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">Actualizar</button>
         </div>
-        ${_consigResumenKPIs({ compraOriginal: totalImporte, pagadoPorVentas: totalPagadoVentas, anticiposTotal: totalAnticipos, saldoNeto: totalSaldo })}
+        ${_consigResumenKPIs({ compraOriginal: totalImporte, pagadoPorVentas: totalPagadoVentas, anticiposTotal: totalAnticipos, anticiposAplicados: totalAnticiposAplicados, saldoNeto: totalSaldo })}
         <div style="display:grid;grid-template-columns:minmax(260px,360px) minmax(0,1fr);gap:14px;align-items:start;">
             <section style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:14px;">
                 <div style="font-size:12px;font-weight:900;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Proveedores</div>
@@ -4761,8 +4866,8 @@ window.abrirModalAbonoConsignacion = function(scopeKey) {
 
     const titulo = folio ? `Anticipo a folio ${_comprasEscHTML(folio.folioOrigen)}` : 'Anticipo global a proveedor';
     const resumenTexto = folio
-        ? `<span style="color:#475569;">${_comprasEscHTML(grupo.proveedor)}<br>Folio: <b>${_comprasEscHTML(folio.folioOrigen)}</b></span><br><small>Compra original: ${dinero(folio.compraOriginal)} | Anticipos aplicados: ${dinero(Number(folio.anticiposTotal || 0) + Number(folio.anticiposAplicados || 0))}</small>`
-        : `<span style="color:#475569;">${grupo.folios.length} folio(s) en consignacion</span><br><small>Compra original: ${dinero(grupo.compraOriginal)} | Anticipos: ${dinero(grupo.anticiposTotal)}</small>`;
+        ? `<span style="color:#475569;">${_comprasEscHTML(grupo.proveedor)}<br>Folio: <b>${_comprasEscHTML(folio.folioOrigen)}</b></span><br><small>Compra original: ${dinero(folio.compraOriginal)} | Entregado: ${dinero(folio.anticiposTotal || 0)} | Aplicado: ${dinero(folio.anticiposAplicados || 0)} | Disponible: ${dinero(Math.max(0, Number(folio.anticiposTotal || 0) - Number(folio.anticiposAplicados || 0)))}</small>`
+        : `<span style="color:#475569;">${grupo.folios.length} folio(s) en consignacion</span><br><small>Compra original: ${dinero(grupo.compraOriginal)} | Entregado: ${dinero(grupo.anticiposTotal || 0)} | Aplicado: ${dinero(grupo.anticiposAplicados || 0)} | Disponible: ${dinero(Math.max(0, Number(grupo.anticiposTotal || 0) - Number(grupo.anticiposAplicados || 0)))}</small>`;
 
     const html = `
     <div data-modal="abono-consignacion" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:10000;display:flex;justify-content:center;align-items:center;padding:18px;">
@@ -4795,6 +4900,7 @@ window.abrirModalAbonoConsignacion = function(scopeKey) {
 };
 
 window.confirmarAbonoConsignacion = function(scopeKeyParam) {
+    if (!_comprasRequireAdmin('Registrar anticipo de consignacion')) return;
     const resumen = _consigResumenGlobal();
     const scopeKey = scopeKeyParam || document.getElementById('abonoConsigScope')?.value || '';
     const esFolio = String(scopeKey).startsWith('folio:');
@@ -4890,7 +4996,9 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
     const kpiOriginal = base.compraOriginal || 0;
     const kpiVendido = base.vendidoReportado || 0;
     const kpiPagadoVentas = base.pagadoPorVentas || 0;
-    const kpiAnticipos = Number(base.anticiposTotal || 0) + Number(base.anticiposAplicados || 0);
+    const kpiAnticiposEntregados = Number(base.anticiposTotal || 0);
+    const kpiAnticiposAplicados = Number(base.anticiposAplicados || 0);
+    const kpiAnticiposDisponibles = Math.max(0, kpiAnticiposEntregados - kpiAnticiposAplicados);
     const kpiSaldoNeto = base.saldoNeto || 0;
 
     const filas = foliosEstado.map(f => {
@@ -4921,11 +5029,15 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         `).join('');
 
         const cxpHtml = f.cuentasCxp.map(cxp => {
-            const pagosEfectivosVenta = _comprasAsegurarArray(cxp.abonos || [])
+            const abonosCxp = _comprasAsegurarArray(cxp.abonos || []);
+            const pagosEfectivosVenta = abonosCxp
                 .filter(a => !_consigEsAnticipoAplicado(a))
                 .reduce((s, a) => s + Number(a.monto || 0), 0);
+            const anticiposAplicadosVenta = abonosCxp
+                .filter(a => _consigEsAnticipoAplicado(a))
+                .reduce((s, a) => s + Number(a.monto || 0), 0);
                 
-            const saldoFijoRenglon = Math.max(0, Number(cxp.total || 0) - pagosEfectivosVenta);
+            const saldoFijoRenglon = Math.max(0, Number(cxp.saldoPendiente ?? (Number(cxp.total || 0) - pagosEfectivosVenta - anticiposAplicadosVenta)));
             
             const controlPagoHtml = saldoFijoRenglon > 0.01 
                 ? `<br><span style="color:#b91c1c; font-weight:bold; font-size:11px;">⚠️ Pendiente de Pago</span>`
@@ -4939,7 +5051,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 <td style="padding:6px 12px; text-align:right; color:#475569;">${dinero(cxp.articulos?.[0]?.costo || 0)}</td>
                 <td style="padding:6px 12px; text-align:center; color:#334155;">${cxp.articulos?.[0]?.cantidad || 1} u</td>
                 <td style="padding:6px 12px; text-align:right; color:#0f172a; font-weight:bold;">${dinero(cxp.total || 0)}</td>
-                <td style="padding:6px 12px; text-align:right; color:#16a34a;">${dinero(pagosEfectivosVenta)}</td>
+                <td style="padding:6px 12px; text-align:right; color:#16a34a;">${dinero(pagosEfectivosVenta)}<br>${anticiposAplicadosVenta > 0.01 ? `<small style="color:#0e7490;">Anticipo aplicado: ${dinero(anticiposAplicadosVenta)}</small>` : ''}</td>
                 <td style="padding:6px 12px; text-align:right; color:#b91c1c; font-weight:bold;">
                     ${dinero(saldoFijoRenglon)}
                     ${controlPagoHtml}
@@ -4956,7 +5068,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 <td style="padding:10px 12px; text-align:right; color:#0f172a;">${dinero(f.compraOriginal)}</td>
                 <td style="padding:10px 12px; text-align:right; color:#d97706;">${dinero(f.vendidoReportado)}</td>
                 <td style="padding:10px 12px; text-align:right; color:#16a34a;">${dinero(f.pagadoPorVentas)}</td>
-                <td style="padding:10px 12px; text-align:right; color:#2563eb;">${dinero(Number(f.anticiposTotal || 0) + Number(f.anticiposAplicados || 0))}</td>
+                <td style="padding:10px 12px; text-align:right; color:#2563eb;">${dinero(f.anticiposTotal || 0)}<br><small style="color:#0e7490;">Aplicado: ${dinero(f.anticiposAplicados || 0)}</small><br><small style="color:#64748b;">Disp: ${dinero(Math.max(0, Number(f.anticiposTotal || 0) - Number(f.anticiposAplicados || 0)))}</small></td>
                 <td style="padding:10px 12px; text-align:right; color:#be123c;">${dinero(f.saldoNeto)}</td>
             </tr>
             ${itemsHtml}
@@ -5008,8 +5120,10 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                     <strong style="font-size:18px; color:#15803d;">${dinero(kpiPagadoVentas)}</strong>
                 </div>
                 <div style="background:#f5f3ff; border:1px solid #ddd6fe; padding:12px; border-radius:8px;">
-                    <small style="color:#5b21b6; font-weight:bold; font-size:11px; text-transform:uppercase;">Bolsa Anticipos</small><br>
-                    <strong style="font-size:18px; color:#6d28d9;">${dinero(kpiAnticipos)}</strong>
+                    <small style="color:#5b21b6; font-weight:bold; font-size:11px; text-transform:uppercase;">Anticipo Entregado</small><br>
+                    <strong style="font-size:18px; color:#6d28d9;">${dinero(kpiAnticiposEntregados)}</strong><br>
+                    <small style="color:#0e7490;">Aplicado: ${dinero(kpiAnticiposAplicados)}</small><br>
+                    <small style="color:#64748b;">Disponible: ${dinero(kpiAnticiposDisponibles)}</small>
                 </div>
                 <div style="background:#fff1f2; border:1px solid #fecdd3; padding:12px; border-radius:8px;">
                     <small style="color:#991b1b; font-weight:bold; font-size:11px; text-transform:uppercase;">Saldo Neto Real</small><br>
@@ -5233,7 +5347,10 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
         `;
     }).join('');
 
-    const baseKpi = folio ? base : { ...base, anticiposAplicados: 0 };
+    const baseKpi = base;
+    const baseAnticipoEntregado = Number(baseKpi.anticiposTotal || 0);
+    const baseAnticipoAplicado = Number(baseKpi.anticiposAplicados || 0);
+    const baseAnticipoDisponible = Math.max(0, baseAnticipoEntregado - baseAnticipoAplicado);
     const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
     const empresaNombre = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
 
@@ -5297,7 +5414,9 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
                 <td style="width: 25%; padding-left: 5px; padding-right: 5px;">
                     <div class="kpi-box" style="background: #f5f3ff; color: #6d28d9;">
                         <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Anticipos Entregados</span><br>
-                        <strong style="font-size: 15px;">${dinero(Number(baseKpi.anticiposTotal || 0) + Number(baseKpi.anticiposAplicados || 0))}</strong>
+                        <strong style="font-size: 15px;">${dinero(baseAnticipoEntregado)}</strong><br>
+                        <span style="font-size: 9px;">Aplicado: ${dinero(baseAnticipoAplicado)}</span><br>
+                        <span style="font-size: 9px;">Disponible: ${dinero(baseAnticipoDisponible)}</span>
                     </div>
                 </td>
                 <td style="width: 25%; padding-left: 5px;">

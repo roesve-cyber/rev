@@ -1,5 +1,5 @@
-// ===== ESTADO DE PAGO persiste entre vistas =====
-// Se guarda aquí para no depender del DOM del carrito cuando
+﻿// ===== ESTADO DE PAGO â€” persiste entre vistas =====
+// Se guarda aquÃ­ para no depender del DOM del carrito cuando
 // confirmarVentaFinal() se llama desde la vista seleccionarcliente
 window._estadoPago = window._estadoPago || {
     metodo: "contado",
@@ -68,9 +68,9 @@ function _fechaInputDesdeHoy(dias = 30) {
 function _condicionesApartadoDefault() {
     return [
         "Liquidar el saldo dentro del plazo comprometido.",
-        "La mercancía se entrega únicamente cuando el apartado esté liquidado al 100%.",
-        "Presentar este recibo e identificación para recoger la mercancía.",
-        "La cancelación por causa del cliente puede generar cargo administrativo y/o almacenaje.",
+        "La mercancÃ­a se entrega Ãºnicamente cuando el apartado estÃ© liquidado al 100%.",
+        "Presentar este recibo e identificaciÃ³n para recoger la mercancÃ­a.",
+        "La cancelaciÃ³n por causa del cliente puede generar cargo administrativo y/o almacenaje.",
         "Colores, medidas y piezas quedan sujetos al detalle descrito en este comprobante."
     ].join("\n");
 }
@@ -292,23 +292,23 @@ function agregarAlCarritoDesdeModal() {
     if (!productoActualId) return;
     const p = productos.find(prod => String(prod.id) === String(productoActualId));
     if (!p) {
-        alert("Error: Producto no encontrado.");
+        alert("âŒ Error: Producto no encontrado.");
         return;
     }
 
     const indiceExistente = carrito.findIndex(item => String(item.id) === String(productoActualId));
     
     if (indiceExistente !== -1) {
-        const mensaje = `"${p.nombre}" ya está en el carrito.\n\n¿Aumentar la cantidad en 1?`;
+        const mensaje = `âš ï¸ "${p.nombre}" ya estÃ¡ en el carrito.\n\nÂ¿Aumentar la cantidad en 1?`;
         
         if (confirm(mensaje)) {
             carrito[indiceExistente].cantidad = (carrito[indiceExistente].cantidad || 1) + 1;
             if (!StorageService.set("carrito", carrito)) {
-                console.error("Error actualizando carrito");
+                console.error("âŒ Error actualizando carrito");
                 return;
             }
             actualizarContadorCarrito();
-            alert(`Cantidad aumentada a ${carrito[indiceExistente].cantidad}`);
+            alert(`âœ… Cantidad aumentada a ${carrito[indiceExistente].cantidad}`);
         }
     } else {
         const planes = CalculatorService.calcularCredito(p.precio);
@@ -326,12 +326,12 @@ function agregarAlCarritoDesdeModal() {
         });
 
         if (!StorageService.set("carrito", carrito)) {
-            console.error("Error guardando carrito");
+            console.error("âŒ Error guardando carrito");
             return;
         }
         actualizarContadorCarrito();
         
-        alert(`"${p.nombre}" agregado al carrito`);
+        alert(`âœ… "${p.nombre}" agregado al carrito`);
     }
     
     cerrarProducto();
@@ -363,9 +363,9 @@ function renderCarrito() {
 
     if (carrito.length === 0) {
         vistaCarrito.innerHTML = `
-            <div class="header-seccion"><h2>Carrito de Ventas</h2></div>
+            <div class="header-seccion"><h2>ðŸ›’ Carrito de Ventas</h2></div>
             <p style="text-align:center; padding:40px; color:#718096; background:white; border-radius:8px;">
-                El carrito está vacío. Agrega productos desde el inventario.
+                El carrito estÃ¡ vacÃ­o. Agrega productos desde el inventario.
             </p>`;
         actualizarContadorCarrito();
         return;
@@ -374,7 +374,7 @@ function renderCarrito() {
     carrito = carrito.filter(item => {
         const prod = productos.find(p => String(p.id) === String(item.id));
         if (!prod) {
-            console.warn("Producto fantasma eliminado del carrito:", item.id);
+            console.warn("âš ï¸ Producto fantasma eliminado del carrito:", item.id);
             return false;
         }
         return true;
@@ -390,7 +390,7 @@ function renderCarrito() {
     const vendedorControlHtml = esAdmin
         ? `
                 <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Vendedor</label>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">ðŸ‘¤ Vendedor</label>
                     <select id="selVendedor" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
                         <option value="">-- Sin vendedor asignado --</option>
                         ${vendedoresActivos.map(v => `<option value="${v.id}" ${window._vendedorSeleccionado && String(window._vendedorSeleccionado.id) === String(v.id) ? 'selected' : ''}>${_escapeHtml(v.nombre)}</option>`).join('')}
@@ -398,14 +398,14 @@ function renderCarrito() {
                 </div>`
         : `
                 <div style="margin-bottom:12px; padding:10px 12px; background:${vendedorSesion ? '#f0fdf4' : '#fff7ed'}; border:1px solid ${vendedorSesion ? '#bbf7d0' : '#fed7aa'}; border-radius:8px;">
-                    <div style="font-size:11px; font-weight:bold; color:${vendedorSesion ? '#166534' : '#92400e'}; margin-bottom:3px;">Vendedor asignado</div>
-                    <div style="font-size:14px; font-weight:800; color:${vendedorSesion ? '#14532d' : '#9a3412'};">${vendedorSesion ? _escapeHtml(vendedorSesion.nombre) : 'Sin vínculo de vendedor'}</div>
+                    <div style="font-size:11px; font-weight:bold; color:${vendedorSesion ? '#166534' : '#92400e'}; margin-bottom:3px;">ðŸ‘¤ Vendedor asignado</div>
+                    <div style="font-size:14px; font-weight:800; color:${vendedorSesion ? '#14532d' : '#9a3412'};">${vendedorSesion ? _escapeHtml(vendedorSesion.nombre) : 'Sin vÃ­nculo de vendedor'}</div>
                     ${vendedorSesion ? '' : '<div style="font-size:11px;color:#92400e;margin-top:4px;">Pide al administrador vincular tu usuario con un vendedor.</div>'}
                 </div>`;
 
     let html = `
         <div class="header-seccion" style="margin-bottom: 20px;">
-            <h2>Carrito de Ventas</h2>
+            <h2>ðŸ›’ Carrito de Ventas</h2>
         </div>
         
         <div style="display:grid; grid-template-columns: 1.8fr 1.2fr; gap: 20px; align-items: start;">
@@ -420,7 +420,7 @@ function renderCarrito() {
                             <th style="text-align:center;">Color</th>
                             <th style="text-align:center;">Piezas</th>
                             <th style="text-align:right;">Precio</th>
-                            <th style="text-align:center;">Acción</th>
+                            <th style="text-align:center;">AcciÃ³n</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -433,7 +433,7 @@ function renderCarrito() {
         const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
         const textoStock = stock > 0 ? stock : "Sin stock";
 
-        // === LGICA DE COLOR (TEXTO LIBRE CON SUGERENCIAS) ===
+        // === LÃ“GICA DE COLOR (TEXTO LIBRE CON SUGERENCIAS) ===
         const coloresDisp = obtenerColoresDisponibles(p.id);
         const colorSeleccionado = p.colorElegido || '';
         
@@ -485,7 +485,8 @@ function renderCarrito() {
                 <td style="text-align:center;">
                     <button onclick="eliminarDelCarrito(${index}); renderCarrito();" 
                         style="background:#fed7d7; color:#c53030; border:none; padding:8px; border-radius:5px; cursor:pointer;">
-                        </button>
+                        ðŸ—‘ï¸
+                    </button>
                 </td>
             </tr>
         `;
@@ -500,29 +501,29 @@ function renderCarrito() {
                 <h3 style="margin:0 0 15px 0;">Resumen</h3>
 
                 <div style="text-align:center; margin-bottom:20px;">
-                    <div style="font-size:11px; color:#718096; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Total mercancía</div>
+                    <div style="font-size:11px; color:#718096; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Total mercancÃ­a</div>
                     <strong style="font-size:26px; color:#2d3748;">${dinero(totalContado)}</strong>
                 </div>
 
                 <!-- VENDEDOR -->
                 ${vendedorControlHtml}
 
-                <!-- M0TODO DE PAGO -->
+                <!-- MÃ‰TODO DE PAGO -->
                 <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Método de pago</label>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">ðŸ’³ MÃ©todo de pago</label>
                     <select id="selMetodoPago"
                             onchange="actualizarInterfazPago();"
                             style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold;">
-                        <option value="contado">Contado</option>
-                        <option value="transferencia">Transferencia / Depósito</option>
-                        <option value="credito">Crédito</option>
-                        <option value="apartado">Apartado</option>
+                        <option value="contado">ðŸ’µ Contado</option>
+                        <option value="transferencia">ðŸ¦ Transferencia / DepÃ³sito</option>
+                        <option value="credito">ðŸ’³ CrÃ©dito</option>
+                        <option value="apartado">ðŸ“¦ Apartado</option>
                     </select>
                 </div>
 
-                <!-- ENGANCHE (visible para crédito y apartado) -->
+                <!-- ENGANCHE (visible para crÃ©dito y apartado) -->
                 <div id="divEnganche" class="oculto" style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Enganche inicial</label>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">ðŸ’µ Enganche inicial</label>
                     <input type="number" id="numEnganche" min="0" step="50" value="0"
                            onchange="actualizarInterfazPago()"
                            oninput="actualizarInterfazPago()"
@@ -532,7 +533,7 @@ function renderCarrito() {
                 </div>
 
                 <div id="divCondicionesApartado" class="oculto" style="margin-bottom:12px; padding:12px; background:#fffbeb; border:1px solid #fcd34d; border-radius:8px;">
-                    <label style="font-size:12px; font-weight:bold; color:#92400e; display:block; margin-bottom:4px;">Fecha compromiso de liquidación</label>
+                    <label style="font-size:12px; font-weight:bold; color:#92400e; display:block; margin-bottom:4px;">ðŸ“… Fecha compromiso de liquidaciÃ³n</label>
                     <input type="date" id="fechaCompromisoApartado"
                            onchange="actualizarInterfazPago()"
                            style="width:100%; padding:9px; border:1px solid #f59e0b; border-radius:6px; font-size:14px; box-sizing:border-box; margin-bottom:10px;">
@@ -542,9 +543,9 @@ function renderCarrito() {
                               style="width:100%; min-height:110px; padding:9px; border:1px solid #f59e0b; border-radius:6px; font-size:12px; box-sizing:border-box; resize:vertical;"></textarea>
                 </div>
 
-                <!-- PERIODICIDAD (solo crédito) -->
+                <!-- PERIODICIDAD (solo crÃ©dito) -->
                 <div id="divPeriodicidad" class="oculto" style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Periodicidad de abonos</label>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">ðŸ“… Periodicidad de abonos</label>
                     <select id="selPeriodicidad"
                             onchange="actualizarInterfazPago()"
                             style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
@@ -556,21 +557,21 @@ function renderCarrito() {
 
                 <!-- ENCHUFE UNIVERSAL DE CAJAS/BANCOS -->
                 <div id="divSelectorUniversal" class="oculto" style="margin-bottom:12px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
-                    <label style="font-size:13px; font-weight:bold; color:#166534; display:block; margin-bottom:6px;">¿A qué caja o cuenta ingresa el dinero hoy?</label>
-                    ${window._buildSelectorCuentas ? window._buildSelectorCuentas('cuentaReceptora_venta', false) : '<select id="cuentaReceptora_venta" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">Efectivo Principal</option></select>'}
+                    <label style="font-size:13px; font-weight:bold; color:#166534; display:block; margin-bottom:6px;">ðŸ’³ Â¿A quÃ© caja o cuenta ingresa el dinero hoy?</label>
+                    ${window._buildSelectorCuentas ? window._buildSelectorCuentas('cuentaReceptora_venta', false) : '<select id="cuentaReceptora_venta" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">ðŸ’µ Efectivo Principal</option></select>'}
                 </div>
 
                 <!-- RESULTADOS DEL PLAN -->
                 <div id="resultadosPago" style="margin-bottom:12px;"></div>
 
-                <!-- NOTA DE INVENTARIO AUTOMÁTICO -->
+                <!-- NOTA DE INVENTARIO AUTOMÃTICO -->
                 <div style="background:#eff6ff; padding:10px; border-radius:6px; margin-bottom:16px; font-size:12px; border:1px solid #bfdbfe; color:#1e40af;">
-                    <strong>Inventario automático:</strong> Si hay stock se preguntará si se entrega; si no hay stock se genera requisición de compra automáticamente.
+                    â„¹ï¸ <strong>Inventario automÃ¡tico:</strong> Si hay stock se preguntarÃ¡ si se entrega; si no hay stock se genera requisiciÃ³n de compra automÃ¡ticamente.
                 </div>
 
                 <!-- FECHA DE VENTA -->
                 <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Fecha de venta</label>
+                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">ðŸ“… Fecha de venta</label>
                     <input type="date" id="inputFechaVenta"
                            style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold; box-sizing:border-box;"
                            value="${window.obtenerHoyInputMX()}">
@@ -578,7 +579,7 @@ function renderCarrito() {
 
                 <button onclick="irASeleccionCliente()"
                     style="width:100%; padding:14px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:15px; letter-spacing:0.5px;">
-                    Seleccionar cliente 
+                    ðŸ‘¤ Seleccionar cliente â†’
                 </button>
             </div>
         </div>
@@ -629,13 +630,13 @@ function actualizarCantidadCarrito(index, nuevaCantidad) {
     if (index >= 0 && index < carrito.length) {
         carrito[index].cantidad = cantidad;
         if (!StorageService.set("carrito", carrito)) {
-            console.error("Error actualizando cantidad");
+            console.error("âŒ Error actualizando cantidad");
         }
         renderCarrito();
     }
 }
 
-// ===== HELPERS DE VARIANTES (COLOR Y UBICACIN) =====
+// ===== HELPERS DE VARIANTES (COLOR Y UBICACIÃ“N) =====
 
 // 1. Obtiene los colores sumando el stock de todas las ubicaciones
 function obtenerColoresDisponibles(productoId) {
@@ -645,7 +646,7 @@ function obtenerColoresDisponibles(productoId) {
     const mapaColores = {};
     prod.variantes.forEach(v => {
         if (v.color) {
-            // Sumamos el stock de este color, sin importar la ubicación
+            // Sumamos el stock de este color, sin importar la ubicaciÃ³n
             mapaColores[v.color] = (mapaColores[v.color] || 0) + (Number(v.stock) || 0);
         }
     });
@@ -653,7 +654,7 @@ function obtenerColoresDisponibles(productoId) {
     return Object.entries(mapaColores).map(([color, stock]) => ({ color, stock }));
 }
 
-// 2. Obtiene el stock total de un color específico
+// 2. Obtiene el stock total de un color especÃ­fico
 function obtenerStockPorColor(productoId, color) {
     const prod = productos.find(p => String(p.id) === String(productoId));
     if (!prod || !prod.variantes) return 0;
@@ -663,7 +664,7 @@ function obtenerStockPorColor(productoId, color) {
         .reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
 }
 
-// 3. Obtiene en qué ubicaciones está disponible un color específico
+// 3. Obtiene en quÃ© ubicaciones estÃ¡ disponible un color especÃ­fico
 function obtenerUbicacionesPorColor(productoId, color) {
     const prod = productos.find(p => String(p.id) === String(productoId));
     if (!prod || !prod.variantes) return [];
@@ -805,13 +806,13 @@ function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '',
 function actualizarColorCarrito(index, color) {
     if (index >= 0 && index < carrito.length) {
         carrito[index].colorElegido = color;
-        // Al cambiar de color, reseteamos la ubicación elegida porque podría no estar ahí
+        // Al cambiar de color, reseteamos la ubicaciÃ³n elegida porque podrÃ­a no estar ahÃ­
         carrito[index].ubicacionElegida = ""; 
         StorageService.set("carrito", carrito);
     }
 }
 
-// 4. Guarda la ubicación elegida en el carrito
+// 4. Guarda la ubicaciÃ³n elegida en el carrito
 function actualizarUbicacionCarrito(index, ubicacion) {
     if (index >= 0 && index < carrito.length) {
         carrito[index].ubicacionElegida = ubicacion;
@@ -881,11 +882,12 @@ function actualizarInterfazPago() {
         divCondicionesApartado?.classList.add("oculto");
     }
 
-    // CUENTA RECEPTORA / MODO DE COBRO (NUEVO MOTOR) const divUniversal = document.getElementById("divSelectorUniversal");
+    // â”€â”€ CUENTA RECEPTORA / MODO DE COBRO (NUEVO MOTOR) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const divUniversal = document.getElementById("divSelectorUniversal");
     const engancheVal = parseFloat(document.getElementById("numEnganche")?.value) || 0;
 
     if (divUniversal) {
-        // ¿Realmente está entrando dinero en este momento? 
+        // Â¿Realmente estÃ¡ entrando dinero en este momento? 
         if (metodo === "contado" || metodo === "transferencia" || engancheVal > 0) {
             divUniversal.classList.remove("oculto");
             
@@ -915,8 +917,8 @@ function actualizarInterfazPago() {
 
     if (metodo === "apartado") {
         html = `
-            <p>Enganche: <strong>${dinero(enganche)}</strong></p>
-            <p>Saldo pendiente: <strong>${dinero(saldo)}</strong></p>
+            <p>ðŸ’° Enganche: <strong>${dinero(enganche)}</strong></p>
+            <p>ðŸ“¦ Saldo pendiente: <strong>${dinero(saldo)}</strong></p>
         `;
     }
 
@@ -929,8 +931,8 @@ function actualizarInterfazPago() {
         }
 
         html = `
-        <p>Enganche: <strong>${dinero(enganche)}</strong></p>
-        <p>Saldo financiado: <strong>${dinero(saldo)}</strong></p>
+        <p>ðŸ’° Enganche: <strong>${dinero(enganche)}</strong></p>
+        <p>ðŸ“‰ Saldo financiado: <strong>${dinero(saldo)}</strong></p>
         <hr>
         <p><strong>Selecciona un plan:</strong></p>
     `;
@@ -942,9 +944,9 @@ function actualizarInterfazPago() {
                 <label style="cursor:pointer; display:block;">
                     <input type="radio" name="planCredito" value="${i}" ${checked}
                         onchange="seleccionarPlan(${i})">
-                    ${plan.meses} meses 
-                    | Total: ${dinero(plan.total)} 
-                    | ${dinero(plan.abono)}${textoPeriodicidad} (${plan.pagos} pagos)
+                    ðŸ“… ${plan.meses} meses 
+                    | ðŸ’³ Total: ${dinero(plan.total)} 
+                    | ðŸ“† ${dinero(plan.abono)}${textoPeriodicidad} (${plan.pagos} pagos)
                 </label>
             </div>`;
         });
@@ -953,7 +955,8 @@ function actualizarInterfazPago() {
     resultados.innerHTML = html;
     capturarDatosCredito();
 
-    // GUARDAR ESTADO DE PAGO para no depender del DOM después window._estadoPago.metodo      = metodo;
+    // â”€â”€ GUARDAR ESTADO DE PAGO para no depender del DOM despuÃ©s â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    window._estadoPago.metodo      = metodo;
     window._estadoPago.enganche    = enganche;
     window._estadoPago.periodicidad = metodo === "credito"
         ? (document.getElementById("selPeriodicidad")?.value || "semanal")
@@ -991,10 +994,10 @@ function seleccionarPlan(index) {
         
         if (planes && planes[index]) {
             window._estadoPago.plan = planes[index];
-            console.log("Plan guardado con éxito:", window._estadoPago.plan);
+            console.log("âœ… Plan guardado con Ã©xito:", window._estadoPago.plan);
         }
     } catch(e) {
-        console.error("Error al guardar el plan:", e);
+        console.error("âŒ Error al guardar el plan:", e);
     }
     actualizarInterfazPago();
 }
@@ -1003,7 +1006,7 @@ function eliminarDelCarrito(index) {
     if (index >= 0 && index < carrito.length) {
         carrito.splice(index, 1);
         if (!StorageService.set("carrito", carrito)) {
-            console.error("Error guardando carrito");
+            console.error("âŒ Error guardando carrito");
         }
         actualizarContadorCarrito();
     }
@@ -1011,29 +1014,29 @@ function eliminarDelCarrito(index) {
 
 // ===== VENTA FINAL =====
 function confirmarVentaFinal() {
-    console.log("Iniciando confirmarVentaFinal()...");
+    console.log("ðŸ” Iniciando confirmarVentaFinal()...");
 
     if (!clienteSeleccionado) {
-        alert("Por favor selecciona un cliente antes de continuar.");
+        alert("âš ï¸ Por favor selecciona un cliente antes de continuar.");
         return;
     }
 
     if (carrito.length === 0) {
-        alert("El carrito está vacío.");
+        alert("âš ï¸ El carrito estÃ¡ vacÃ­o.");
         return;
     }
 
     const metodoPago = window._estadoPago?.metodo || document.getElementById("selMetodoPago")?.value;
 
     if (!metodoPago) {
-        alert("Regresa al carrito y selecciona un método de pago.");
+        alert("âš ï¸ Regresa al carrito y selecciona un mÃ©todo de pago.");
         return;
     }
 
     window._vendedorSeleccionado = _ventaResolverVendedorSeleccionado();
     const sesionVenta = _ventaSesionActual();
     if (sesionVenta?.rol === 'vendedor' && !window._vendedorSeleccionado) {
-        alert("Tu usuario no está vinculado a un vendedor activo. Pide al administrador vincularlo en Configuración > Usuarios del sistema.");
+        alert("âš ï¸ Tu usuario no estÃ¡ vinculado a un vendedor activo. Pide al administrador vincularlo en ConfiguraciÃ³n > Usuarios del sistema.");
         return;
     }
 
@@ -1056,7 +1059,7 @@ function confirmarVentaFinal() {
     if (enganche < 0) enganche = 0;
 
     if (enganche > totalConDescuento) {
-        alert("El enganche no puede ser mayor al total.");
+        alert("âš ï¸ El enganche no puede ser mayor al total.");
         return;
     }
 
@@ -1068,15 +1071,15 @@ function confirmarVentaFinal() {
         const condicionesApartado = (window._estadoPago?.apartadoCondiciones || document.getElementById("condicionesApartado")?.value || "").trim();
 
         if (enganche <= 0) {
-            alert("Para registrar un apartado debes capturar un anticipo.");
+            alert("âš ï¸ Para registrar un apartado debes capturar un anticipo.");
             return;
         }
         if (!fechaCompromiso) {
-            alert("Captura la fecha compromiso de liquidación del apartado.");
+            alert("âš ï¸ Captura la fecha compromiso de liquidaciÃ³n del apartado.");
             return;
         }
         if (!condicionesApartado) {
-            alert("Captura las condiciones del apartado para que aparezcan en el recibo.");
+            alert("âš ï¸ Captura las condiciones del apartado para que aparezcan en el recibo.");
             return;
         }
 
@@ -1090,7 +1093,7 @@ function confirmarVentaFinal() {
         const planIdx = window._estadoPago?.planIndex ?? plazoSeleccionado ?? 0;
 
         if (planIdx === null || planIdx === undefined || planIdx < 0 || planIdx >= planes.length) {
-            alert("Selecciona un plazo de crédito en el carrito antes de continuar.");
+            alert("âš ï¸ Selecciona un plazo de crÃ©dito en el carrito antes de continuar.");
             return;
         }
 
@@ -1098,7 +1101,7 @@ function confirmarVentaFinal() {
         plazoSeleccionado = planIdx;
 
         if (!planElegido || planElegido.abono === 0) {
-            alert("Plan de crédito inválido. Regresa al carrito y vuelve a seleccionar el plazo.");
+            alert("âš ï¸ Plan de crÃ©dito invÃ¡lido. Regresa al carrito y vuelve a seleccionar el plazo.");
             return;
         }
 
@@ -1116,18 +1119,18 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     let detalleMetodo = "";
 
     if (metodoPago === "contado") {
-        detalleMetodo = `<p style="color:#27ae60;"><strong>CONTADO</strong></p>`;
+        detalleMetodo = `<p style="color:#27ae60;"><strong>ðŸ’° CONTADO</strong></p>`;
     } else if (metodoPago === "transferencia") {
-        detalleMetodo = `<p style="color:#2b6cb0;"><strong>TRANSFERENCIA / DEPSITO</strong></p>`;
+        detalleMetodo = `<p style="color:#2b6cb0;"><strong>ðŸ¦ TRANSFERENCIA / DEPÃ“SITO</strong></p>`;
     } else if (metodoPago === "apartado") {
         const fechaCompromiso = window._estadoPago?.apartadoFechaCompromiso || document.getElementById("fechaCompromisoApartado")?.value || "";
         const condicionesApartado = window._estadoPago?.apartadoCondiciones || document.getElementById("condicionesApartado")?.value || "";
         detalleMetodo = `
-            <p><strong>APARTADO</strong></p>
+            <p><strong>ðŸ“¦ APARTADO</strong></p>
             <div style="background:#fffbeb; padding:10px; border-radius:5px;">
-                <p style="margin:5px 0;">Enganche: <strong>${dinero(enganche)}</strong></p>
-                <p style="margin:5px 0;">Pendiente: <strong>${dinero(saldoAFinanciar)}</strong></p>
-                <p style="margin:5px 0;">Liquidar antes de: <strong>${fechaCompromiso || 'Sin fecha'}</strong></p>
+                <p style="margin:5px 0;">ðŸ’µ Enganche: <strong>${dinero(enganche)}</strong></p>
+                <p style="margin:5px 0;">ðŸ“¦ Pendiente: <strong>${dinero(saldoAFinanciar)}</strong></p>
+                <p style="margin:5px 0;">ðŸ“… Liquidar antes de: <strong>${fechaCompromiso || 'Sin fecha'}</strong></p>
                 <div style="margin-top:8px; font-size:12px; color:#78350f; white-space:pre-line;">${_escapeHtml(condicionesApartado)}</div>
             </div>
         `;
@@ -1153,12 +1156,12 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
         const textoFreq = periodicidadResumen === "semanal" ? "Semanales" : periodicidadResumen === "quincenal" ? "Quincenales" : "Mensuales";
         
         detalleMetodo = `
-            <p style="color:#2b6cb0; margin-bottom:5px;"><strong>CR0DITO CONFIGURADO</strong></p>
+            <p style="color:#2b6cb0; margin-bottom:5px;"><strong>ðŸ’³ CRÃ‰DITO CONFIGURADO</strong></p>
             <div style="background:#ebf8ff; padding:12px; border-radius:8px; border: 1px solid #bee3f8;">
-                <p style="margin:3px 0;">Enganche inicial: <strong>${dinero(engancheReal)}</strong></p>
-                <p style="margin:3px 0;">Plazo: <strong>${plan.meses} meses</strong></p>
-                <p style="margin:3px 0;">${plan.pagos} pagos <strong>${textoFreq}</strong></p>
-                <p style="margin:3px 0;">Importe de cada pagaré: <strong>${dinero(plan.abono)}</strong></p>
+                <p style="margin:3px 0;">ðŸ’° Enganche inicial: <strong>${dinero(engancheReal)}</strong></p>
+                <p style="margin:3px 0;">ðŸ“… Plazo: <strong>${plan.meses} meses</strong></p>
+                <p style="margin:3px 0;">ðŸ”„ ${plan.pagos} pagos <strong>${textoFreq}</strong></p>
+                <p style="margin:3px 0;">ðŸ’µ Importe de cada pagarÃ©: <strong>${dinero(plan.abono)}</strong></p>
                 <p style="margin:8px 0 0 0; border-top:1px solid #bee3f8; padding-top:8px; font-size:1.1em; color: #2c5282;">
                     <strong>Suma total de pagos: ${dinero(plan.total)}</strong>
                 </p>
@@ -1183,7 +1186,7 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     _planElegidoPendiente = planElegido;
     document.querySelector('[data-modal="resumen-venta"]')?.remove();
 
-    // REPARACIN: Empaquetar el plan para pasarlo por HTML sin que se rompa
+    // ðŸ›¡ï¸ REPARACIÃ“N: Empaquetar el plan para pasarlo por HTML sin que se rompa
     const planSafeStr = planElegido ? JSON.stringify(planElegido).replace(/'/g, "\\'").replace(/"/g, '&quot;') : 'null';
 
     const resumenFinanciero = `
@@ -1208,15 +1211,15 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
     const modalHTML = `
     <div class="modal" data-modal="resumen-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
         <div style="background:white; padding:30px; border-radius:15px; width:100%; max-width:700px; margin:0 auto;">
-            <h2 style="margin-top:0; color:#2c3e50;">Resumen de Transacción</h2>
+            <h2 style="margin-top:0; color:#2c3e50;">ðŸ“‹ Resumen de TransacciÃ³n</h2>
             <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
-                <h4 style="margin:0 0 10px 0; color:#166534;">Cliente</h4>
+                <h4 style="margin:0 0 10px 0; color:#166534;">ðŸ‘¤ Cliente</h4>
                 <p style="margin:5px 0;"><strong>${clienteSeleccionado.nombre}</strong></p>
-                ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">~ ${clienteSeleccionado.telefono}</p>` : ''}
-                ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">${clienteSeleccionado.direccion}</p>` : ''}
+                ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">ðŸ“ž ${clienteSeleccionado.telefono}</p>` : ''}
+                ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">ðŸ“ ${clienteSeleccionado.direccion}</p>` : ''}
             </div>
             <div style="margin-bottom:20px;">
-                <h4 style="color:#2c3e50; margin:0 0 10px 0;">Productos</h4>
+                <h4 style="color:#2c3e50; margin:0 0 10px 0;">ðŸ›ï¸ Productos</h4>
                 <table class="tabla-admin" style="width:100%; font-size:14px;">
                     <thead>
                         <tr>
@@ -1233,18 +1236,18 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
             ${resumenFinanciero}
 
             <div style="margin-bottom:20px;">
-                <h4 style="color:#2c3e50; margin:0 0 10px 0;">Forma de Pago</h4>
+                <h4 style="color:#2c3e50; margin:0 0 10px 0;">ðŸ’³ Forma de Pago</h4>
                 ${detalleMetodo}
             </div>
 
             <div style="display:flex; gap:10px;">
                 <button onclick="mostrarDialogoInventario('${metodoPago}', ${totalConDescuento ?? totalContado}, ${enganche}, ${saldoAFinanciar}, ${planSafeStr})"
                     style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
-                    Confirmar Venta
+                    âœ… Confirmar Venta
                 </button>
                 <button onclick="cancelarYVolverAlCarrito()"
                     style="padding: 12px 24px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
-                    S" Cancelar
+                    âœ• Cancelar
                 </button>
             </div>
         </div>
@@ -1263,7 +1266,7 @@ function cancelarYVolverAlCarrito() {
 }
 
 /**
- * Dialogo interactivo de gestión de inventario
+ * Dialogo interactivo de gestiÃ³n de inventario
  */
 function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegidoRecibido) {
     let planElegido = planElegidoRecibido || _planElegidoPendiente;
@@ -1288,7 +1291,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     if (productosConStock.length > 0) {
         htmlProductos += `
             <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px; border-left:5px solid #27ae60;">
-                <h4 style="margin:0 0 15px 0; color:#166534;">PRODUCTOS CON STOCK</h4>
+                <h4 style="margin:0 0 15px 0; color:#166534;">âœ… PRODUCTOS CON STOCK</h4>
         `;
         
         productosConStock.forEach(x => {
@@ -1300,7 +1303,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
 
             let colorSelectorHtml = `
                 <div style="margin-top:6px;">
-                    <label style="font-size:11px; color:#374151;">}Color:</label>
+                    <label style="font-size:11px; color:#374151;">ðŸŽ¨ Color:</label>
                     <input type="text" value="${_escapeHtml(colorElegido)}" 
                         onchange="cambiarColorInventario(${idProd}, this.value)"
                         placeholder="Ej. Rojo" 
@@ -1331,12 +1334,12 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                         <button onclick="setDecisionInventario(${idProd}, true)" 
                                 id="btn-si-${idProd}"
                                 style="padding:8px 16px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
-                            Entregar
+                            âœ… Entregar
                         </button>
                         <button onclick="setDecisionInventario(${idProd}, false)" 
                                 id="btn-no-${idProd}"
                                 style="padding:8px 16px; background:#f59e0b; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
-                            ⏳ Pendiente
+                            â³ Pendiente
                         </button>
                    </div>`;
 
@@ -1359,7 +1362,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     if (productosSinStock.length > 0) {
         htmlProductos += `
             <div style="background:#fee2e2; padding:15px; border-radius:8px; border-left:5px solid #dc2626;">
-                <h4 style="margin:0 0 15px 0; color:#7f1d1d;">PRODUCTOS SIN STOCK</h4>
+                <h4 style="margin:0 0 15px 0; color:#7f1d1d;">ðŸ“¦ PRODUCTOS SIN STOCK</h4>
         `;
         
         productosSinStock.forEach(x => {
@@ -1370,7 +1373,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             htmlProductos += `
                 <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px;">
                     <strong>${x.prod.nombre}</strong><br>
-                    <small style="color:#991b1b;">Se creará REQUISICIN DE COMPRA automáticamente</small><br>
+                    <small style="color:#991b1b;">âš ï¸ Se crearÃ¡ REQUISICIÃ“N DE COMPRA automÃ¡ticamente</small><br>
                     <small style="color:#7f1d1d;">Stock disponible para solicitud: ${_stockDisponibleParaSolicitudVenta(x.prod, x.item)} | Solicitado: ${x.item.cantidad || 1}</small><br>
                     <small style="color:#374151;">Color solicitado: <b>${_escapeHtml(colorElegido)}</b></small>
                 </div>
@@ -1382,26 +1385,26 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
 
     document.querySelector('[data-modal="dialogo-inventario"]')?.remove();
 
-    // REPARACIN: Volver a empaquetar el plan para el último botón
+    // ðŸ›¡ï¸ REPARACIÃ“N: Volver a empaquetar el plan para el Ãºltimo botÃ³n
     const planSafeStr2 = planElegido ? JSON.stringify(planElegido).replace(/'/g, "\\'").replace(/"/g, '&quot;') : 'null';
 
     const modalHTML = `
         <div class="modal" data-modal="dialogo-inventario" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
             <div style="background:white; padding:30px; border-radius:15px; width:100%; max-width:700px; margin:0 auto;">
                 
-                <h2 style="margin-top:0; color:#2c3e50;">Gestión de Inventario</h2>
-                <p style="color:#718096; margin:0 0 20px 0;">Confirma cómo se entregarán los productos</p>
+                <h2 style="margin-top:0; color:#2c3e50;">ðŸ“¦ GestiÃ³n de Inventario</h2>
+                <p style="color:#718096; margin:0 0 20px 0;">Confirma cÃ³mo se entregarÃ¡n los productos</p>
                 
                 ${htmlProductos}
                 
                 <div style="display:flex; gap:10px; margin-top:20px;">
                     <button onclick="confirmarDecisionesInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar}, ${planSafeStr2})" 
                             style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
-                        Procesar Venta
+                        âœ… Procesar Venta
                     </button>
                     <button onclick="cancelarYVolverAlCarrito()" 
                             style="flex:1; padding:14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
-                        S" Cancelar
+                        âœ• Cancelar
                     </button>
                 </div>
             </div>
@@ -1469,7 +1472,7 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
 
     const folioVenta = "V-" + Date.now().toString().slice(-6);
 
-    // --- CORRECCIN DE FECHA ---
+    // --- CORRECCIÃ“N DE FECHA ---
     const inputFechaEl = document.getElementById("inputFechaVenta");
     const fechaGuardada = window._estadoPago?.fechaVenta;
     let fechaVentaStr = (inputFechaEl && inputFechaEl.value) ? inputFechaEl.value : fechaGuardada;
@@ -1477,14 +1480,14 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
     let fechaVentaDate;
     if (fechaVentaStr) {
         const [anio, mes, dia] = fechaVentaStr.split("-").map(Number);
-        fechaVentaDate = new Date(anio, mes - 1, dia, 12, 0, 0); // Fija a las 12pm para evitar saltos de día por zona horaria
+        fechaVentaDate = new Date(anio, mes - 1, dia, 12, 0, 0); // Fija a las 12pm para evitar saltos de dÃ­a por zona horaria
     } else {
         fechaVentaDate = new Date();
     }
 
     const fechaHoy = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaVentaDate) : fechaVentaDate.toLocaleDateString("es-MX");
     const fechaVentaIso = window.localISO ? window.localISO(fechaVentaDate) : fechaVentaDate.toISOString();
-    // --- FIN CORRECCIN DE FECHA ---
+    // --- FIN CORRECCIÃ“N DE FECHA ---
 
     let productosAEntregar = [];
     let productosAPendiente = [];
@@ -1517,8 +1520,8 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
                 requiereCompra: !tieneStock,
                 generarEntregaPendiente: metodoPago !== "apartado",
                 motivo: metodoPago === "apartado"
-                    ? "Apartado en resguardo hasta liquidación"
-                    : (tieneStock ? "Entrega diferida por decisión de venta" : "Sin stock en almacén")
+                    ? "Apartado en resguardo hasta liquidaciÃ³n"
+                    : (tieneStock ? "Entrega diferida por decisiÃ³n de venta" : "Sin stock en almacÃ©n")
             });
         }
     });
@@ -1542,7 +1545,7 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
     );
 };
 
-// INTERCEPTOR MAKER-CHECKER: Pone la venta en cuarentena y emite ticket provisional
+// ðŸ›¡ï¸ INTERCEPTOR MAKER-CHECKER: Pone la venta en cuarentena y emite ticket provisional
 function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock) {
 
@@ -1581,7 +1584,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         plan: planElegido,
         pagaresPreview,
         articulos: (carrito || []).map(_ventaArticuloPlano),
-        tipoComprobante: "Ticket Provisional (Requiere Autorización)",
+        tipoComprobante: "Ticket Provisional (Requiere AutorizaciÃ³n)",
         periodicidad: periodicidadVenta,
         apartadoFechaCompromiso: window._estadoPago?.apartadoFechaCompromiso || null,
         apartadoCondiciones: window._estadoPago?.apartadoCondiciones || null,
@@ -1594,7 +1597,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         tasaMorosidad: 2
     };
 
-    // 2. Empaquetar todo en la Bóveda de Cuarentena
+    // 2. Empaquetar todo en la BÃ³veda de Cuarentena
     const cuarentena = {
         idCuarentena: Date.now(),
         fechaCaptura: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
@@ -1638,7 +1641,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
             origen: "salida_operativa_venta_cuarentena",
             registrar: true,
             estatusEntrega: productosSinStock && productosSinStock.some(x => x.generarEntregaPendiente !== false) ? "Parcial" : "Total",
-            observaciones: "Documento operativo emitido al ejecutar la venta. Su registro administrativo queda sujeto a autorización."
+            observaciones: "Documento operativo emitido al ejecutar la venta. Su registro administrativo queda sujeto a autorizaciÃ³n."
         });
     }
 
@@ -1647,17 +1650,17 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     clienteSeleccionado = null;
     plazoSeleccionado = null;
     window._vendedorSeleccionado = null;
-    if (!StorageService.set("carrito", carrito)) console.error("Error limpiando carrito");
+    if (!StorageService.set("carrito", carrito)) console.error("âŒ Error limpiando carrito");
     actualizarContadorCarrito();
 
     document.querySelectorAll('[data-modal]').forEach(m => m.remove());
     document.querySelectorAll('.modal').forEach(m => { m.classList.add('oculto'); m.style.display = 'none'; });
 
-    alert(`⏳ VENTA EN CUARENTENA\\n\\nFolio: ${folioVenta}\\nLa nota fue emitida y el proceso en caja finalizó. Si marcaste mercancía para entrega, también se generó su comprobante operativo.\\n\\nEl registro financiero e inventario oficial quedan pendientes de autorización del Administrador.`);
+    alert(`â³ VENTA EN CUARENTENA\\n\\nFolio: ${folioVenta}\\nLa nota fue emitida y el proceso en caja finalizÃ³. Si marcaste mercancÃ­a para entrega, tambiÃ©n se generÃ³ su comprobante operativo.\\n\\nEl registro financiero e inventario oficial quedan pendientes de autorizaciÃ³n del Administrador.`);
     navA('tienda');
 }
 
-// aEJECUTOR REAL: Esta es la función original que escribe a la Base de Datos
+// ðŸš€ EJECUTOR REAL: Esta es la funciÃ³n original que escribe a la Base de Datos
 window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock, datosVentaP) {
 
@@ -1852,7 +1855,7 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
         if (idxApartado !== -1) {
             apartadosBD[idxApartado] = {
                 ...apartadosBD[idxApartado],
-                estado: "Migrado a Crédito",
+                estado: "Migrado a CrÃ©dito",
                 folioCredito: folioVenta,
                 fechaConversionCredito: fechaVentaIso,
                 saldoPendiente: 0
@@ -1978,19 +1981,19 @@ function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
     const fecha = datosVenta.fecha;
 
     if (esCompacta) {
-        return `PAGAR0: Yo ${cliente} me obligo a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)} conforme al calendario de pagos; incumplimiento genera interés moratorio del 2% mensual; firmado  en Santiago Cuaula Tlaxcala el ${fecha}.`;
+        return `PAGARÃ‰: Yo ${cliente} me obligo a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)} conforme al calendario de pagos; incumplimiento genera interÃ©s moratorio del 2% mensual; firmado  en Santiago Cuaula Tlaxcala el ${fecha}.`;
     }
 
-    return `PAGAR0: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crédito otorgado, misma que cubriré en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarán intereses moratorios del 2% mensual sobre saldos insolutos; este pagaré se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligándome a cumplir en el domicilio del acreedor y sometiéndome para su interpretación y cumplimiento a la jurisdicción de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.`;
+    return `PAGARÃ‰: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crÃ©dito otorgado, misma que cubrirÃ© en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarÃ¡n intereses moratorios del 2% mensual sobre saldos insolutos; este pagarÃ© se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligÃ¡ndome a cumplir en el domicilio del acreedor y sometiÃ©ndome para su interpretaciÃ³n y cumplimiento a la jurisdicciÃ³n de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.`;
 }
 
-// ===== GENERADOR DE TICKET T0RMICO (80MM) CON CALENDARIO LIMPIO =====
+// ===== GENERADOR DE TICKET TÃ‰RMICO (80MM) CON CALENDARIO LIMPIO =====
 function generarTicketMediaHoja(datosVenta) {
     const folio = datosVenta.folio;
     const fechaActual = datosVenta.fecha;
     const subtotalMercancia = Number(datosVenta.totalMercancia || (datosVenta.articulos || []).reduce((sum, a) => sum + (Number(a.precioContado || a.precio || 0) * Number(a.cantidad || 1)), 0) || datosVenta.total || 0);
     
-    // 1. Cálculos de Pagarés y Saldo
+    // 1. CÃ¡lculos de PagarÃ©s y Saldo
     let totalAPagar = 0;
     let tablaPagares = '';
     const pagares = StorageService.get("pagaresSistema", []);
@@ -2012,7 +2015,7 @@ function generarTicketMediaHoja(datosVenta) {
             const fechaFmt = window.formatearFechaCortaMX(fechaPago);
             totalAPagar += Number(pagar.monto) || 0;
             
-            // SOLO NMERO, FECHA Y MONTO
+            // SOLO NÃšMERO, FECHA Y MONTO
             tablaPagares += `
                 <tr>
                     <td align="left" style="padding: 3px 0;">${index + 1}</td>
@@ -2032,11 +2035,11 @@ function generarTicketMediaHoja(datosVenta) {
                     <span><b>${art.cantidad || 1}x</b> ${art.nombre}</span>
                     <b>${dinero(subtotal)}</b>
                 </div>
-                ${art.colorElegido ? `<small style="display:block; color:#555;">}Color: ${art.colorElegido}</small>` : ''}
+                ${art.colorElegido ? `<small style="display:block; color:#555;">ðŸŽ¨ Color: ${art.colorElegido}</small>` : ''}
             </div>`;
     });
 
-    // 3. Política de Liquidación Anticipada (TODOS LOS PLAZOS)
+    // 3. PolÃ­tica de LiquidaciÃ³n Anticipada (TODOS LOS PLAZOS)
     let planesHTML = '';
     if (datosVenta.metodo === "credito") {
         let saldoParaPlanes = (datosVenta.articulos || []).reduce(
@@ -2051,15 +2054,15 @@ function generarTicketMediaHoja(datosVenta) {
         todosLosPlanes.forEach(p => {
             planesHTML += `
                 <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #ccc; padding:4px 0;">
-                    <span style="font-size:10px;">${p.meses} Meses ${p.pagos || ''} pagos:</span>
+                    <span style="font-size:10px;">${p.meses} Meses â€” ${p.pagos || ''} pagos:</span>
                     <strong style="font-size:11px;">${dinero(p.total)}</strong>
                 </div>`;
         });
     }
 
-    // LEYENDAS LEGALES DINÁMICAS (Como las grandes cadenas)
+    // LEYENDAS LEGALES DINÃMICAS (Como las grandes cadenas)
     let textoLegal = '';
-    const tituloTicketBase = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CR0DITO' : 'COMPROBANTE DE VENTA');
+    const tituloTicketBase = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CRÃ‰DITO' : 'COMPROBANTE DE VENTA');
     const tituloTicket = datosVenta.tipoComprobante || tituloTicketBase;
     const condicionesApartado = datosVenta.apartadoCondiciones || datosVenta.condiciones || _condicionesApartadoDefault();
     const fechaCompromisoApartado = datosVenta.apartadoFechaCompromiso || datosVenta.fechaCompromiso || "";
@@ -2072,9 +2075,9 @@ function generarTicketMediaHoja(datosVenta) {
     if (datosVenta.metodo === "credito") {
         textoLegal = generarLeyendaPagare(datosVenta, totalAPagar, false);
     } else if (datosVenta.metodo === "apartado") {
-        textoLegal = `<b>T0RMINOS DE APARTADO:</b><br>El cliente ${_escapeHtml(datosVenta.cliente.nombre)} entrega ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancía descrita. El saldo pendiente es ${dinero(datosVenta.saldoPendiente)}${fechaCompromisoApartado ? ` y deberá liquidarse a más tardar el ${_escapeHtml(fechaCompromisoApartado)}` : ""}. La mercancía queda bajo resguardo de Mueblería Mi Pueblito y se entrega únicamente tras liquidación total. El cliente acepta las condiciones impresas en este comprobante.`;
+        textoLegal = `<b>TÃ‰RMINOS DE APARTADO:</b><br>El cliente ${_escapeHtml(datosVenta.cliente.nombre)} entrega ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancÃ­a descrita. El saldo pendiente es ${dinero(datosVenta.saldoPendiente)}${fechaCompromisoApartado ? ` y deberÃ¡ liquidarse a mÃ¡s tardar el ${_escapeHtml(fechaCompromisoApartado)}` : ""}. La mercancÃ­a queda bajo resguardo de MueblerÃ­a Mi Pueblito y se entrega Ãºnicamente tras liquidaciÃ³n total. El cliente acepta las condiciones impresas en este comprobante.`;
     } else {
-        textoLegal = `<b>T0RMINOS DE VENTA:</b><br>El cliente ${datosVenta.cliente.nombre} recibe la mercancía a su entera satisfacción, liquidada en su totalidad. Toda aclaración o garantía deberá tramitarse en tienda presentando este comprobante original.`;
+        textoLegal = `<b>TÃ‰RMINOS DE VENTA:</b><br>El cliente ${datosVenta.cliente.nombre} recibe la mercancÃ­a a su entera satisfacciÃ³n, liquidada en su totalidad. Toda aclaraciÃ³n o garantÃ­a deberÃ¡ tramitarse en tienda presentando este comprobante original.`;
     }
 
     // 4. Estructura HTML del Ticket de 80mm
@@ -2101,7 +2104,7 @@ function generarTicketMediaHoja(datosVenta) {
     </style>
     </head>
     <body>
-        <div class="no-print"><button onclick="window.print()" style="padding:10px 20px; cursor:pointer;">IMPRIMIR TICKET</button></div>
+        <div class="no-print"><button onclick="window.print()" style="padding:10px 20px; cursor:pointer;">ðŸ–¨ï¸ IMPRIMIR TICKET</button></div>
 
         <div class="centro">
             <img src="img/Logo.svg" style="width:50px; height:50px; object-fit:contain;" onerror="this.style.display='none'">
@@ -2121,13 +2124,13 @@ function generarTicketMediaHoja(datosVenta) {
         </div>
 
         <div class="separador"></div>
-        <div class="centro negrita" style="font-size:10px;">DETALLE DE MERCANCÍA</div>
+        <div class="centro negrita" style="font-size:10px;">DETALLE DE MERCANCÃA</div>
         <div style="margin-top:5px;">${listaProductos}</div>
 
         <div class="separador"></div>
 
         <div style="display:flex; justify-content:space-between;">
-            <span>Subtotal Mercancía:</span>
+            <span>Subtotal MercancÃ­a:</span>
             <span>${dinero(subtotalMercancia)}</span>
         </div>
         <div style="display:flex; justify-content:space-between;">
@@ -2136,24 +2139,24 @@ function generarTicketMediaHoja(datosVenta) {
         </div>
         ${datosVenta.metodo === 'apartado' && fechaCompromisoApartado ? `
         <div style="display:flex; justify-content:space-between;">
-            <span>Fecha límite:</span>
+            <span>Fecha lÃ­mite:</span>
             <span>${_escapeHtml(fechaCompromisoApartado)}</span>
         </div>` : ''}
         
         <div class="total-box">
             <div style="font-size:10px;">${datosVenta.metodo === 'credito' ? 'GRAN TOTAL A PAGAR' : (datosVenta.metodo === 'apartado' ? 'SALDO PENDIENTE' : 'TOTAL PAGADO')}</div>
             <div style="font-size:24px;" class="negrita">${dinero(datosVenta.metodo === 'credito' ? totalAPagar + (datosVenta.enganche || 0) : (datosVenta.metodo === 'apartado' ? datosVenta.saldoPendiente : datosVenta.total))}</div>
-            ${datosVenta.metodo === 'credito' ? `<div style="font-size:9px;">(${dinero(totalAPagar)} en pagarés + enganche)</div>` : ''}
+            ${datosVenta.metodo === 'credito' ? `<div style="font-size:9px;">(${dinero(totalAPagar)} en pagarÃ©s + enganche)</div>` : ''}
         </div>
 
         ${datosVenta.metodo === "credito" ? `
-            <div class="centro negrita" style="background:#000; color:#fff; padding:4px; font-size:10px; margin-bottom:5px;">POLÍTICA DE LIQUIDACIN</div>
-            <div style="font-size:9px; text-align:center; margin-bottom:5px;">Total de pagarés si liquida en:</div>
+            <div class="centro negrita" style="background:#000; color:#fff; padding:4px; font-size:10px; margin-bottom:5px;">POLÃTICA DE LIQUIDACIÃ“N</div>
+            <div style="font-size:9px; text-align:center; margin-bottom:5px;">Total de pagarÃ©s si liquida en:</div>
             ${planesHTML}
 
             <div class="separador"></div>
             <div style="font-size:10px; padding:4px 0;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Forma de pago:</span><strong>Crédito</strong></div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Forma de pago:</span><strong>CrÃ©dito</strong></div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Plazo:</span><strong>${datosVenta.plan?.meses || pagaresDelFolio.length} meses</strong></div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Periodicidad:</span><strong>${{'semanal':'Semanal','quincenal':'Quincenal','mensual':'Mensual'}[datosVenta.periodicidad || 'semanal'] || 'Semanal'}</strong></div>
                 <div style="display:flex; justify-content:space-between;"><span>No. de pagos:</span><strong>${pagaresDelFolio.length}</strong></div>
@@ -2191,7 +2194,7 @@ function generarTicketMediaHoja(datosVenta) {
 
         <div class="centro" style="margin-top:20px; font-size:9px;">
             *** Gracias por su preferencia ***<br>
-            Mueblería Mi Pueblito
+            MueblerÃ­a Mi Pueblito
         </div>
     </body>
     </html>`;
@@ -2202,7 +2205,7 @@ function generarTicketMediaHoja(datosVenta) {
     }
     const win = window.open('', '_blank');
     if (!win) {
-        alert("Habilita las ventanas emergentes para ver el ticket.");
+        alert("âš ï¸ Habilita las ventanas emergentes para ver el ticket.");
         return;
     }
     win.document.write(ticketHTML);
@@ -2257,11 +2260,11 @@ function guardarTicketEnRegistro(datosVenta, folio) {
         ultimaActualizacion: window.localISO(new Date())
     };
 
-    // BLINDAJE ANTI-DUPLICADOS
+    // ðŸ›¡ï¸ BLINDAJE ANTI-DUPLICADOS
     const indexExistente = registroTickets.findIndex(t => t.folio === folio);
     
     if (indexExistente !== -1) {
-        // Si ya existe (ej. es una reimpresión), mantenemos su ID original y solo actualizamos
+        // Si ya existe (ej. es una reimpresiÃ³n), mantenemos su ID original y solo actualizamos
         ticketRegistro.id = registroTickets[indexExistente].id;
         registroTickets[indexExistente] = ticketRegistro;
     } else {
@@ -2270,7 +2273,7 @@ function guardarTicketEnRegistro(datosVenta, folio) {
     }
 
     if (!StorageService.set("registroTickets", registroTickets)) {
-        console.error("Error guardando ticket en registro");
+        console.error("âŒ Error guardando ticket en registro");
     }
 }
 
@@ -2283,7 +2286,7 @@ function renderEntregas() {
     const pendientes = salidasPendientesVenta.filter(s => s.estatus === "Pendiente" || s.estatus === "Parcial");
 
     if (pendientes.length === 0) {
-        contenedor.innerHTML = "<p style='color:#718096; padding:20px; background:white; border-radius:8px;'>No hay entregas pendientes.</p>";
+        contenedor.innerHTML = "<p style='color:#718096; padding:20px; background:white; border-radius:8px;'>âœ… No hay entregas pendientes.</p>";
         return;
     }
 
@@ -2293,22 +2296,22 @@ function renderEntregas() {
                 <th>Folio</th>
                 <th>Cliente</th>
                 <th>Fecha</th>
-                <th>Método Pago</th>
+                <th>MÃ©todo Pago</th>
                 <th>Productos</th>
                 <th style="text-align:center;">Acciones</th>
             </tr></thead>
             <tbody>`;
 
     pendientes.forEach(s => {
-        const resumen = (s.items || []).map(item => `${item.nombre} ${item.cantidad || 1}`).join(', ');
+        const resumen = (s.items || []).map(item => `${item.nombre} Ã—${item.cantidad || 1}`).join(', ');
         html += `<tr>
             <td><strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="abrirDetalleEntrega(${s.id})">${s.folioVenta}</strong></td>
-            <td>${s.clienteNombre || ''}</td>
-            <td>${s.fecha || ''}</td>
-            <td><small>${s.metodoPago || ''}</small></td>
-            <td style="font-size:13px;">${resumen || ''}</td>
+            <td>${s.clienteNombre || 'â€”'}</td>
+            <td>${s.fecha || 'â€”'}</td>
+            <td><small>${s.metodoPago || 'â€”'}</small></td>
+            <td style="font-size:13px;">${resumen || 'â€”'}</td>
             <td style="text-align:center;">
-                <button onclick="abrirDetalleEntrega(${s.id})" style="background:#3498db; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer; margin-right:4px;">Detalle</button>
+                <button onclick="abrirDetalleEntrega(${s.id})" style="background:#3498db; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer; margin-right:4px;">ðŸ” Detalle</button>
             </td>
         </tr>`;
     });
@@ -2324,19 +2327,19 @@ function abrirDetalleEntrega(idSalida) {
 
     let clientes = StorageService.get("clientes", []);
     const clienteObj = clientes.find(c => String(c.id) === String(s.clienteId));
-    const direccion = clienteObj ? (clienteObj.direccion || '') : (s.clienteDireccion || '');
-    const telefono = clienteObj ? (clienteObj.telefono || '') : '';
+    const direccion = clienteObj ? (clienteObj.direccion || 'â€”') : (s.clienteDireccion || 'â€”');
+    const telefono = clienteObj ? (clienteObj.telefono || 'â€”') : 'â€”';
 
-    // Generamos los inputs para que el vendedor decida cuánto entregar hoy
+    // Generamos los inputs para que el vendedor decida cuÃ¡nto entregar hoy
     const itemsHtml = (s.items || []).map((i, index) => {
-        if (i.cantidad <= 0) return ''; // Si ya se entregó todo este item, lo omitimos
+        if (i.cantidad <= 0) return ''; // Si ya se entregÃ³ todo este item, lo omitimos
         const prodActual = StorageService.get("productos", []).find(p => String(p.id) === String(i.productoId));
         const opcionesUbicacion = _opcionesUbicacionSalidaVenta(prodActual, i.colorElegido || '', i.ubicacionElegida || '');
 
         return `
         <tr>
             <td style="padding:8px; border-bottom:1px solid #f3f4f6;">
-                <strong>${i.nombre || ''}</strong>
+                <strong>${i.nombre || 'â€”'}</strong>
                 ${i.colorElegido ? `<br><small style="color:#64748b;">Color: ${i.colorElegido}</small>` : ''}
                 <br>
                 <label style="font-size:11px; color:#475569; display:block; margin-top:6px;">Ubicacion de salida</label>
@@ -2358,19 +2361,19 @@ function abrirDetalleEntrega(idSalida) {
         <div data-modal="detalle-entrega" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:600px; max-height:90vh; overflow-y:auto;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h2 style="margin:0; color:#1e3a8a;">aa Gestión de Entrega</h2>
-                    <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">S"</button>
+                    <h2 style="margin:0; color:#1e3a8a;">ðŸšš GestiÃ³n de Entrega</h2>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();" style="background:none; border:none; font-size:22px; cursor:pointer; color:#6b7280;">âœ•</button>
                 </div>
                 
                 <div style="display:grid; gap:8px; margin-bottom:20px; background:#f8fafc; padding:15px; border-radius:8px; border: 1px solid #e2e8f0; font-size:13px;">
                     <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Folio:</span><strong>${s.folioVenta}</strong></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Cliente:</span><strong>${s.clienteNombre || ''}</strong></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Dirección:</span><span>${direccion}</span></div>
-                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Teléfono:</span><span>${telefono}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">Cliente:</span><strong>${s.clienteNombre || 'â€”'}</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">DirecciÃ³n:</span><span>${direccion}</span></div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#718096;">TelÃ©fono:</span><span>${telefono}</span></div>
                 </div>
 
                 <div style="background:#fffbeb; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:12px; border:1px solid #fcd34d;">
-                    <strong>Entregas Parciales:</strong> Modifica la cantidad en la columna "A entregar hoy". Si el cliente se lleva solo una parte, el resto seguirá quedando pendiente en el sistema.
+                    ðŸ’¡ <strong>Entregas Parciales:</strong> Modifica la cantidad en la columna "A entregar hoy". Si el cliente se lleva solo una parte, el resto seguirÃ¡ quedando pendiente en el sistema.
                 </div>
 
                 <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:20px;">
@@ -2384,12 +2387,12 @@ function abrirDetalleEntrega(idSalida) {
 
                 <div style="display:grid; gap:10px; margin-bottom:18px; background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0;">
                     <div>
-                        <label style="font-size:11px; font-weight:bold; color:#475569;">RECIBE MERCANCÍA</label>
+                        <label style="font-size:11px; font-weight:bold; color:#475569;">RECIBE MERCANCÃA</label>
                         <input id="entregaReceptor-${s.id}" type="text" value="${_escapeHtml(s.clienteNombre || '')}" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
                     </div>
                     <div>
-                        <label style="font-size:11px; font-weight:bold; color:#475569;">IDENTIFICACIN / REFERENCIA</label>
-                        <input id="entregaIdentificacion-${s.id}" type="text" placeholder="INE, familiar autorizado, teléfono, etc." style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                        <label style="font-size:11px; font-weight:bold; color:#475569;">IDENTIFICACIÃ“N / REFERENCIA</label>
+                        <input id="entregaIdentificacion-${s.id}" type="text" placeholder="INE, familiar autorizado, telÃ©fono, etc." style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
                     </div>
                     <div>
                         <label style="font-size:11px; font-weight:bold; color:#475569;">OBSERVACIONES DE ENTREGA</label>
@@ -2400,7 +2403,7 @@ function abrirDetalleEntrega(idSalida) {
                 <div style="display:flex; gap:10px;">
                     <button onclick="aplicarSalidaPendienteVentas('${s.id}')"
                             style="flex:2; padding:14px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:14px;">
-                        Registrar Entrega e Imprimir Vale
+                        âœ… Registrar Entrega e Imprimir Vale
                     </button>
                     <button onclick="document.querySelector('[data-modal=&quot;detalle-entrega&quot;]')?.remove();"
                             style="flex:1; padding:14px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
@@ -2422,7 +2425,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
     const productosActuales = StorageService.get("productos", []);
     
     // ========================================================
-    // 1. VALIDACIN DE STOCK (Revisar antes de descontar)
+    // 1. VALIDACIÃ“N DE STOCK (Revisar antes de descontar)
     // ========================================================
     let validacionPasada = true;
     let mensajeError = "";
@@ -2441,7 +2444,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
             const ubicacionSeleccionada = document.getElementById(`entregaUbi-${s.id}-${index}`)?.value || '';
             if (!prod) {
                 validacionPasada = false;
-                mensajeError = `Error: Producto no encontrado en el inventario: ${item.nombre}`;
+                mensajeError = `âŒ Error: Producto no encontrado en el inventario: ${item.nombre}`;
             } else {
                 const validacionOrigen = _validarOrigenEntregaVenta(prod, { ...item, cantidad: cantAEntregar }, {
                     color: item.colorElegido || '',
@@ -2454,7 +2457,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
             }
             if (validacionPasada && (prod.stock || 0) < cantAEntregar) {
                 validacionPasada = false;
-                mensajeError = `STOCK INSUFICIENTE para: ${item.nombre}\n\n- Cantidad solicitada: ${cantAEntregar}\n- Piezas disponibles: ${prod.stock || 0}\n\nPor favor ajusta la cantidad a entregar.`;
+                mensajeError = `âš ï¸ STOCK INSUFICIENTE para: ${item.nombre}\n\n- Cantidad solicitada: ${cantAEntregar}\n- Piezas disponibles: ${prod.stock || 0}\n\nPor favor ajusta la cantidad a entregar.`;
             }
         }
     });
@@ -2496,7 +2499,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
         if (item.cantidad > 0) quedanPendientes = true;
     });
 
-    if (entregadosHoy.length === 0) return alert("No indicaste ninguna cantidad para entregar.");
+    if (entregadosHoy.length === 0) return alert("âš ï¸ No indicaste ninguna cantidad para entregar.");
 
     // ========================================================
     // 3. ACTUALIZAR ESTADOS Y GUARDAR
@@ -2519,7 +2522,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
     const datosParaVale = {
         cliente: {
             id: s.clienteId || null,
-            nombre: s.clienteNombre || 'Público General',
+            nombre: s.clienteNombre || 'PÃºblico General',
             direccion: s.clienteDireccion || '',
             telefono: s.clienteTelefono || ''
         },
@@ -2539,7 +2542,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
     });
 }
 
-// Función auxiliar para mantener limpio el historial
+// FunciÃ³n auxiliar para mantener limpio el historial
 
 window.aplicarSalidaPendienteVentas = aplicarSalidaPendienteVentas;
 
@@ -2559,7 +2562,7 @@ function renderReimprimirVenta() {
     
     let registrosCombinados = [...ventasNuevas];
     
-    // Concatenar registros históricos que no existan en la tabla nueva para preservar el pasado
+    // Concatenar registros histÃ³ricos que no existan en la tabla nueva para preservar el pasado
     ticketsViejos.forEach(tv => {
         if (!registrosCombinados.find(v => v.folio === tv.folio)) {
             registrosCombinados.push({
@@ -2575,7 +2578,7 @@ function renderReimprimirVenta() {
 
     if (registrosCombinados.length === 0) {
         contenedor.innerHTML = `<div style="background:#fef3c7; padding:30px; border-radius:10px; text-align:center; color:#92400e;">
-            <p style="font-size:16px;">No hay transacciones registradas en el sistema.</p>
+            <p style="font-size:16px;">âš ï¸ No hay transacciones registradas en el sistema.</p>
         </div>`;
         return;
     }
@@ -2609,7 +2612,7 @@ function renderReimprimirVenta() {
 
     if (filtrados.length === 0) {
         contenedor.innerHTML = `<div style="background:#f3f4f6; padding:30px; border-radius:10px; text-align:center; color:#6b7280;">
-            <p style="font-size:16px;">Sin resultados para los filtros aplicados.</p>
+            <p style="font-size:16px;">ðŸ” Sin resultados para los filtros aplicados.</p>
         </div>`;
         return;
     }
@@ -2620,26 +2623,26 @@ function renderReimprimirVenta() {
             <th>Cliente</th>
             <th>Fecha</th>
             <th>Total</th>
-            <th>Método</th>
+            <th>MÃ©todo</th>
             <th style="text-align:center;">Acciones</th>
         </tr></thead>
         <tbody>`;
 
     filtrados.forEach(t => {
-        const fecha = t.fechaVenta ? window.formatearFechaCortaMX(t.fechaVenta) : (t.fecha || '');
+        const fecha = t.fechaVenta ? window.formatearFechaCortaMX(t.fechaVenta) : (t.fecha || 'â€”');
         const total = t.total || t.venta?.total || 0;
-        const metodo = t.metodoPago || t.venta?.metodoPago || '';
+        const metodo = t.metodoPago || t.venta?.metodoPago || 'â€”';
         const folioEsc = (t.folio || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         html += `<tr>
-            <td><strong style="color:#1d4ed8;">${t.folio || ''}</strong></td>
-            <td>${t.clienteNombre || t.cliente?.nombre || ''}</td>
+            <td><strong style="color:#1d4ed8;">${t.folio || 'â€”'}</strong></td>
+            <td>${t.clienteNombre || t.cliente?.nombre || 'â€”'}</td>
             <td>${fecha}</td>
             <td><strong>${dinero(total)}</strong></td>
             <td style="text-transform: uppercase;">${metodo}</td>
             <td style="text-align:center;">
                 <button onclick="reimprimirTicketVenta('${folioEsc}')"
                         style="padding:6px 12px; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">
-                    Reimprimir
+                    ðŸ–¨ï¸ Reimprimir
                 </button>
             </td>
         </tr>`;
@@ -2656,7 +2659,7 @@ function reimprimirTicketVenta(folio) {
     let datosVenta;
 
     if (ticket) {
-        // Re-mapeo del plan y la periodicidad desde CxC en caso de ventas históricas sin datos cruzados
+        // Re-mapeo del plan y la periodicidad desde CxC en caso de ventas histÃ³ricas sin datos cruzados
         if (ticket.metodoPago === 'credito' && !ticket.plan) {
             const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === ticket.folio);
             if (cxc) {
@@ -2670,7 +2673,7 @@ function reimprimirTicketVenta(folio) {
             folio: ticket.folio,
             fecha: ticket.fecha || window.formatearFechaCortaMX(new Date(ticket.fechaVenta || Date.now())),
             fechaIso: ticket.fechaVenta || ticket.fechaIso || window.localISO(new Date()),
-            cliente: ticket.cliente || { nombre: ticket.clienteNombre || 'Público General' },
+            cliente: ticket.cliente || { nombre: ticket.clienteNombre || 'PÃºblico General' },
             metodo: ticket.metodoPago || 'contado',
             total: ticket.total || 0,
             enganche: ticket.enganche || 0,
@@ -2682,12 +2685,12 @@ function reimprimirTicketVenta(folio) {
             apartadoCondiciones: ticket.apartadoCondiciones || null
         };
     } else {
-        // Fallback: Si la venta es muy antigua y no está en la tabla nueva, lee el nodo histórico para no quebrar el pasado
+        // Fallback: Si la venta es muy antigua y no estÃ¡ en la tabla nueva, lee el nodo histÃ³rico para no quebrar el pasado
         const registrosViejos = StorageService.get("registroTickets", []);
         const ticketViejo = registrosViejos.find(t => t.folio === folio);
         
         if (!ticketViejo) {
-            alert(`No se encontró el ticket con folio: ${folio}`);
+            alert(`âš ï¸ No se encontrÃ³ el ticket con folio: ${folio}`);
             return;
         }
         
@@ -2722,7 +2725,7 @@ function limpiarFiltrosReimpresion() {
 }
 
 // =====================================================================
-// MDULO DE AUDITORÍA CXC (MODIFICACIN DE VENTAS Y PAGAR0S)
+// ðŸ”’ MÃ“DULO DE AUDITORÃA CXC (MODIFICACIÃ“N DE VENTAS Y PAGARÃ‰S)
 // SOLO ADMINISTRADORES
 // =====================================================================
 
@@ -2733,7 +2736,7 @@ function abrirAuditoriaCxC() {
         if (window.AuditService?.log) {
             window.AuditService.log({ accion: 'ACCESO_DENEGADO', modulo: 'Seguridad', entidad: 'Auditoria CxC', detalle: 'Intento de modificar ventas CxC sin rol admin', severidad: 'alerta' });
         }
-        alert(": ACCESO DENEGADO: Esta función es exclusiva para Administradores.");
+        alert("â›” ACCESO DENEGADO: Esta funciÃ³n es exclusiva para Administradores.");
         return;
     }
 
@@ -2743,16 +2746,16 @@ function abrirAuditoriaCxC() {
             
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #ef4444; padding-bottom:15px; margin-bottom:20px;">
                 <div>
-                    <h2 style="margin:0; color:#b91c1c; font-size:24px;">Auditoría CxC: Edición de Ventas</h2>
-                    <p style="margin:0; color:#64748b; font-size:14px;">Modificación profunda de fechas y pagarés con impacto en Caja</p>
+                    <h2 style="margin:0; color:#b91c1c; font-size:24px;">ðŸ› ï¸ AuditorÃ­a CxC: EdiciÃ³n de Ventas</h2>
+                    <p style="margin:0; color:#64748b; font-size:14px;">ModificaciÃ³n profunda de fechas y pagarÃ©s con impacto en Caja</p>
                 </div>
-                <button onclick="document.querySelector('[data-modal=\\'auditoria-cxc\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">S" Cerrar</button>
+                <button onclick="document.querySelector('[data-modal=\\'auditoria-cxc\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">âœ• Cerrar</button>
             </div>
 
             <div style="display:flex; gap:10px; margin-bottom:25px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0;">
                 <input type="text" id="auditFolioInput" placeholder="Ej. V-123456" style="flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:6px; font-size:16px;">
                 <button id="btnHiddenBuscarAudit" onclick="buscarVentaAuditoria()" style="display:none;"></button>
-                <button onclick="abrirBuscadorVentasCxC('auditFolioInput')" style="background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Buscar Venta</button>
+                <button onclick="abrirBuscadorVentasCxC('auditFolioInput')" style="background:#2563eb; color:white; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">ðŸ” Buscar Venta</button>
             </div>
 
             <div id="auditContenedorDatos">
@@ -2774,14 +2777,14 @@ function buscarVentaAuditoria() {
 
     const cuenta = cuentas.find(c => String(c.folio).toUpperCase() === folio);
     if (!cuenta) {
-        document.getElementById("auditContenedorDatos").innerHTML = `<div style="padding:20px; background:#fef2f2; color:#b91c1c; border-radius:8px; border:1px solid #fecaca;">No se encontró ninguna cuenta con el folio: ${folio}</div>`;
+        document.getElementById("auditContenedorDatos").innerHTML = `<div style="padding:20px; background:#fef2f2; color:#b91c1c; border-radius:8px; border:1px solid #fecaca;">âŒ No se encontrÃ³ ninguna cuenta con el folio: ${folio}</div>`;
         return;
     }
 
-    // Buscar pagarés asociados al folio o al clienteId si no tienen folio explícito
+    // Buscar pagarÃ©s asociados al folio o al clienteId si no tienen folio explÃ­cito
     let pagaresVenta = pagares.filter(p => String(p.folio).toUpperCase() === folio);
     
-    // Ordenar pagarés por fecha
+    // Ordenar pagarÃ©s por fecha
     pagaresVenta.sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
 
     // Guardar temporalmente en memoria para poder agregar/quitar antes de guardar definitivamente
@@ -2789,20 +2792,6 @@ function buscarVentaAuditoria() {
     window._auditPagaresActuales = JSON.parse(JSON.stringify(pagaresVenta));
 
     dibujarFormularioAuditoria();
-}
-
-function _auditFechaAbonoBase(abono) {
-    return abono?.fechaAbonoIso || abono?.fechaIso || abono?.fechaAbonoRaw || abono?.fechaAbono || abono?.fecha;
-}
-
-function _auditFechaCorta(valor) {
-    if (!valor) return '-';
-    const d = window.parseFechaMX ? window.parseFechaMX(valor) : new Date(valor);
-    if (!d || isNaN(d.getTime())) return String(valor);
-    const dia = String(d.getDate()).padStart(2, '0');
-    const mes = String(d.getMonth() + 1).padStart(2, '0');
-    const anio = d.getFullYear();
-    return `${dia}-${mes}-${anio}`;
 }
 
 function dibujarFormularioAuditoria() {
@@ -2833,31 +2822,14 @@ function dibujarFormularioAuditoria() {
                 </select>
             </td>
             <td style="padding:8px; text-align:center;">
-                <button onclick="eliminarPagareAuditoria(${index})" style="background:#ef4444; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;" title="Eliminar Pagaré"></button>
+                <button onclick="eliminarPagareAuditoria(${index})" style="background:#ef4444; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;" title="Eliminar PagarÃ©">ðŸ—‘ï¸</button>
             </td>
         </tr>`;
     }).join('');
 
-    const abonosActivos = (cuenta.abonos || [])
-        .map((ab, originalIndex) => ({ ab, originalIndex }))
-        .filter(x => !x.ab.cancelado && !x.ab.canceladoPorVenta && !x.ab.canceladoPorApartado);
-    const totalAbonosAudit = abonosActivos.reduce((s, x) => s + Number(x.ab.monto || x.ab.montoAbonado || 0), 0);
-    const abonosHTML = abonosActivos.map(({ ab, originalIndex }, idx) => `
-        <tr style="border-bottom:1px solid #e2e8f0;">
-            <td style="padding:8px; color:#64748b;">${idx + 1}</td>
-            <td style="padding:8px;">${_auditFechaCorta(_auditFechaAbonoBase(ab))}</td>
-            <td style="padding:8px; font-weight:bold; color:#15803d;">${dinero(Number(ab.monto || ab.montoAbonado || 0))}</td>
-            <td style="padding:8px; font-size:12px; color:#475569;">${_escapeHtml(ab.etiquetaCuenta || ab.medioPago || ab.cuentaId || 'Efectivo')}</td>
-            <td style="padding:8px; text-align:right;">
-                <button onclick="if (typeof abrirEditorAbono === 'function') abrirEditorAbono('${cuenta.folio}', ${originalIndex}); else alert('Editor de abonos no disponible.');"
-                    style="background:#1e40af; color:white; border:none; padding:7px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Corregir abono</button>
-            </td>
-        </tr>
-    `).join('');
-
     const html = `
     <div style="background:#f8fafc; padding:20px; border-radius:8px; margin-bottom:20px; border:1px solid #e2e8f0;">
-        <h3 style="margin-top:0; color:#334155; font-size:16px;">Datos Generales de la Cuenta</h3>
+        <h3 style="margin-top:0; color:#334155; font-size:16px;">ðŸ‘¤ Datos Generales de la Cuenta</h3>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
             <div>
                 <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Cliente</label>
@@ -2866,63 +2838,36 @@ function dibujarFormularioAuditoria() {
             <div>
                 <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Fecha de Venta</label>
                 <input type="date" id="auditFechaVenta" value="${fechaVentaDate}" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; background:#fffbdd; border-color:#fde047;">
-                <small style="color:#d97706;">* Modificar esta fecha afecta el cálculo de antiguedad.</small>
+                <small style="color:#d97706;">* Modificar esta fecha afecta el cÃ¡lculo de antiguedad.</small>
             </div>
         </div>
-    </div>
-
-    <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #bae6fd; margin-bottom:20px;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:15px;">
-            <div>
-                <h3 style="margin:0; color:#075985; font-size:16px;">Abonos registrados</h3>
-                <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Corrige fecha, importe o cuenta receptora. Al guardar se recalculan caja/banco, saldo CxC, pagarés y flujo de caja.</p>
-            </div>
-            <div style="background:#ecfdf5; border:1px solid #bbf7d0; color:#166534; padding:9px 12px; border-radius:8px; text-align:right;">
-                <div style="font-size:10px; font-weight:bold;">TOTAL ABONADO</div>
-                <strong>${dinero(totalAbonosAudit)}</strong>
-            </div>
-        </div>
-        <table style="width:100%; border-collapse:collapse; text-align:left;">
-            <thead>
-                <tr style="background:#f0f9ff; color:#075985; font-size:12px;">
-                    <th style="padding:9px; border-bottom:2px solid #bae6fd;">#</th>
-                    <th style="padding:9px; border-bottom:2px solid #bae6fd;">Fecha</th>
-                    <th style="padding:9px; border-bottom:2px solid #bae6fd;">Importe</th>
-                    <th style="padding:9px; border-bottom:2px solid #bae6fd;">Cuenta</th>
-                    <th style="padding:9px; border-bottom:2px solid #bae6fd; text-align:right;">Accion</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${abonosHTML || '<tr><td colspan="5" style="text-align:center; padding:15px; color:#94a3b8;">Esta venta no tiene abonos registrados.</td></tr>'}
-            </tbody>
-        </table>
     </div>
 
     <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #e2e8f0;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h3 style="margin:0; color:#334155; font-size:16px;">Tabla de Amortización (Pagarés)</h3>
-            <button onclick="agregarPagareAuditoria()" style="background:#10b981; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold;">+ Nuevo Pagaré</button>
+            <h3 style="margin:0; color:#334155; font-size:16px;">ðŸ“ Tabla de AmortizaciÃ³n (PagarÃ©s)</h3>
+            <button onclick="agregarPagareAuditoria()" style="background:#10b981; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold;">+ Nuevo PagarÃ©</button>
         </div>
         
         <table style="width:100%; border-collapse:collapse; text-align:left;">
             <thead>
                 <tr style="background:#f1f5f9; color:#475569; font-size:13px;">
-                    <th style="padding:10px; border-bottom:2px solid #cbd5e1;">N° Pagaré</th>
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1;">NÂ° PagarÃ©</th>
                     <th style="padding:10px; border-bottom:2px solid #cbd5e1;">Fecha Vencimiento</th>
                     <th style="padding:10px; border-bottom:2px solid #cbd5e1;">Monto ($)</th>
                     <th style="padding:10px; border-bottom:2px solid #cbd5e1;">Estado</th>
-                    <th style="padding:10px; border-bottom:2px solid #cbd5e1; text-align:center;">Acción</th>
+                    <th style="padding:10px; border-bottom:2px solid #cbd5e1; text-align:center;">AcciÃ³n</th>
                 </tr>
             </thead>
             <tbody>
-                ${pagaresHTML || '<tr><td colspan="5" style="text-align:center; padding:15px; color:#94a3b8;">No hay pagarés. Haz clic en "+ Nuevo Pagaré" para agregar.</td></tr>'}
+                ${pagaresHTML || '<tr><td colspan="5" style="text-align:center; padding:15px; color:#94a3b8;">No hay pagarÃ©s. Haz clic en "+ Nuevo PagarÃ©" para agregar.</td></tr>'}
             </tbody>
         </table>
     </div>
 
     <div style="margin-top:25px; text-align:right;">
         <button onclick="guardarAuditoriaDefinitiva()" style="background:#b91c1c; color:white; border:none; padding:12px 25px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer; box-shadow:0 4px 6px rgba(220, 38, 38, 0.2);">
-            Guardar Cambios en Base de Datos
+            âš ï¸ Guardar Cambios en Base de Datos
         </button>
     </div>
     `;
@@ -2934,9 +2879,9 @@ function agregarPagareAuditoria() {
     const cuenta = window._auditCuentaActual;
     const nuevoIndex = window._auditPagaresActuales.length + 1;
     
-    // Crear un pagaré vacío asociado a la cuenta actual
+    // Crear un pagarÃ© vacÃ­o asociado a la cuenta actual
     window._auditPagaresActuales.push({
-        id: Date.now() + Math.floor(Math.random() * 1000), // Generar ID único
+        id: Date.now() + Math.floor(Math.random() * 1000), // Generar ID Ãºnico
         folio: cuenta.folio,
         clienteId: cuenta.clienteId || cuenta.id,
         numeroPagere: `${cuenta.folio}-${nuevoIndex}/${nuevoIndex}`,
@@ -2949,13 +2894,13 @@ function agregarPagareAuditoria() {
 }
 
 function eliminarPagareAuditoria(index) {
-    if(!confirm("¿Estás seguro de eliminar este pagaré? Esta acción no se puede deshacer si guardas los cambios.")) return;
+    if(!confirm("Â¿EstÃ¡s seguro de eliminar este pagarÃ©? Esta acciÃ³n no se puede deshacer si guardas los cambios.")) return;
     window._auditPagaresActuales.splice(index, 1);
     dibujarFormularioAuditoria();
 }
 
 function guardarAuditoriaDefinitiva() {
-    if(!confirm("ADVERTENCIA: Estás a punto de reescribir los datos de esta venta y sus pagarés. ¿Continuar?")) return;
+    if(!confirm("âš ï¸ ADVERTENCIA: EstÃ¡s a punto de reescribir los datos de esta venta y sus pagarÃ©s. Â¿Continuar?")) return;
 
     const folio = window._auditCuentaActual.folio;
     
@@ -2983,14 +2928,14 @@ function guardarAuditoriaDefinitiva() {
         }
     }
 
-    // 2. REESCRIBIR PAGAR0S
+    // 2. REESCRIBIR PAGARÃ‰S
     pagaresSistema = pagaresSistema.filter(p => String(p.folio).toUpperCase() !== String(folio).toUpperCase());
     pagaresSistema = pagaresSistema.concat(window._auditPagaresActuales);
 
     StorageService.set("cuentasPorCobrar", cuentas);
     StorageService.set("pagaresSistema", pagaresSistema);
 
-    alert("Cambios de auditoría guardados exitosamente. El Estado de Cuenta ha sido actualizado.");
+    alert("âœ… Cambios de auditorÃ­a guardados exitosamente. El Estado de Cuenta ha sido actualizado.");
     
     document.querySelector('[data-modal="auditoria-cxc"]').remove();
     if(typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
@@ -2998,7 +2943,7 @@ function guardarAuditoriaDefinitiva() {
 // ===== GENERADOR DE DOCUMENTO DE ENTREGA (SOLO CON SALIDA REAL DE INVENTARIO) =====
 function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
     if (!articulosAEntregar || articulosAEntregar.length === 0) {
-        alert("No hay mercancía para documentar en esta entrega.");
+        alert("âš ï¸ No hay mercancÃ­a para documentar en esta entrega.");
         return null;
     }
 
@@ -3031,7 +2976,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
         fecha: fechaEntrega,
         cliente: {
             id: cliente.id || datosVenta.clienteId || null,
-            nombre: cliente.nombre || datosVenta.clienteNombre || "Público General",
+            nombre: cliente.nombre || datosVenta.clienteNombre || "PÃºblico General",
             telefono: cliente.telefono || datosVenta.clienteTelefono || "",
             direccion: cliente.direccion || datosVenta.clienteDireccion || "Entrega en tienda"
         },
@@ -3060,7 +3005,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
                     <span><b>${art.cantidad}x</b> ${_escapeHtml(art.nombre)}</span>
                 </div>
                 ${art.colorElegido ? `<small style="color:#555;">Color: ${_escapeHtml(art.colorElegido)}</small>` : ''}
-                ${art.ubicacionElegida ? `<small style="color:#555; display:block;">Ubicación salida: ${_escapeHtml(art.ubicacionElegida)}</small>` : ''}
+                ${art.ubicacionElegida ? `<small style="color:#555; display:block;">UbicaciÃ³n salida: ${_escapeHtml(art.ubicacionElegida)}</small>` : ''}
             </div>`;
     });
 
@@ -3087,13 +3032,13 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
     </head>
     <body>
         <div class="no-print">
-            <button onclick="window.print()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">IMPRIMIR COMPROBANTE</button>
+            <button onclick="window.print()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">ðŸ–¨ï¸ IMPRIMIR COMPROBANTE</button>
         </div>
 
         <div class="centro">
-            <img src="img/Logo.svg" style="width:60px; height:60px; object-fit:contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'></span>'">
+            <img src="img/Logo.svg" style="width:60px; height:60px; object-fit:contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>ðŸ›ï¸</span>'">
             <div class="negrita" style="font-size:16px;">MI PUEBLITO</div>
-            <div class="negrita">COMPROBANTE DE ENTREGA DE MERCANCÍA</div>
+            <div class="negrita">COMPROBANTE DE ENTREGA DE MERCANCÃA</div>
             <div style="font-size:10px;">Doc: ${_escapeHtml(folioDocumento)}</div>
             <div style="font-size:10px;">${_escapeHtml(fechaEntrega)}</div>
         </div>
@@ -3105,31 +3050,31 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
             TIPO: ${_escapeHtml(estatusEntrega)}<br>
             CLIENTE: ${_escapeHtml(documento.cliente.nombre)}<br>
             ${documento.cliente.telefono ? `TEL: ${_escapeHtml(documento.cliente.telefono)}<br>` : ''}
-            DIRECCIN: ${_escapeHtml(documento.cliente.direccion)}
+            DIRECCIÃ“N: ${_escapeHtml(documento.cliente.direccion)}
         </div>
 
         <div class="separador"></div>
-        <div class="centro negrita" style="font-size:11px;">MERCANCÍA QUE RECIBE:</div>
+        <div class="centro negrita" style="font-size:11px;">MERCANCÃA QUE RECIBE:</div>
         <div style="margin-top:10px;">
             ${listaEntregada}
         </div>
 
         <div class="caja-conformidad">
-            <b>DECLARACIN DE CONFORMIDAD:</b><br>
-            Recibí de entera conformidad la mercancía arriba descrita. Manifiesto que fue revisada al momento de la entrega, que corresponde a la venta referida y que se entrega en condiciones físicas aceptadas. A partir de esta recepción asumo la custodia, uso y cuidado ordinario del mueble. Las garantías aplican conforme a política de tienda y no cubren mal uso, humedad, golpes, maniobras ajenas o traslados posteriores realizados por terceros.
+            <b>DECLARACIÃ“N DE CONFORMIDAD:</b><br>
+            RecibÃ­ de entera conformidad la mercancÃ­a arriba descrita. Manifiesto que fue revisada al momento de la entrega, que corresponde a la venta referida y que se entrega en condiciones fÃ­sicas aceptadas. A partir de esta recepciÃ³n asumo la custodia, uso y cuidado ordinario del mueble. Las garantÃ­as aplican conforme a polÃ­tica de tienda y no cubren mal uso, humedad, golpes, maniobras ajenas o traslados posteriores realizados por terceros.
         </div>
 
         <div class="bloque">
             <b>Receptor:</b> ${_escapeHtml(receptorNombre || "________________________")}<br>
-            <b>Identificación:</b> ${_escapeHtml(identificacionReceptor || "________________________")}<br>
-            <b>Entregó:</b> ${_escapeHtml(entregadoPor || "________________________")}<br>
+            <b>IdentificaciÃ³n:</b> ${_escapeHtml(identificacionReceptor || "________________________")}<br>
+            <b>EntregÃ³:</b> ${_escapeHtml(entregadoPor || "________________________")}<br>
             ${observaciones ? `<b>Observaciones:</b> ${_escapeHtml(observaciones)}<br>` : ''}
         </div>
 
         <div style="margin-top:40px; text-align:center;">
             <div style="border-top: 1px solid #000; width: 80%; margin: 0 auto;"></div>
             <div class="negrita" style="font-size:10px; margin-top:5px;">FIRMA DEL CLIENTE</div>
-            <div style="font-size:9px;">DNI/Identificación: ________________</div>
+            <div style="font-size:9px;">DNI/IdentificaciÃ³n: ________________</div>
         </div>
 
         <div style="margin-top:30px; text-align:center;">
@@ -3138,8 +3083,8 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
         </div>
 
         <div class="centro" style="margin-top:30px; font-size:9px;">
-            *** Documento generado únicamente por salida de inventario ***<br>
-            Mueblería Mi Pueblito
+            *** Documento generado Ãºnicamente por salida de inventario ***<br>
+            MueblerÃ­a Mi Pueblito
         </div>
     </body>
     </html>`;
@@ -3150,7 +3095,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
     }
     const win = window.open('', '_blank');
     if (!win) {
-        alert("El comprobante de entrega se registró, pero el navegador bloqueó la ventana emergente.");
+        alert("âš ï¸ El comprobante de entrega se registrÃ³, pero el navegador bloqueÃ³ la ventana emergente.");
         return documento;
     }
     win.document.write(htmlVale);
@@ -3160,7 +3105,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
 }
 
 // ============================================================
-// MOTOR DE AUDITORÍA FINANCIERA Y BUSCADOR CXC
+// MOTOR DE AUDITORÃA FINANCIERA Y BUSCADOR CXC
 // ============================================================
 
 window.abrirBuscadorVentasCxC = function(inputIdDestino) {
@@ -3170,7 +3115,7 @@ window.abrirBuscadorVentasCxC = function(inputIdDestino) {
         // Formateamos la fecha
         const fechaFmt = c.fechaVenta ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(c.fechaVenta) : c.fechaVenta) : '-';
         
-        // Creamos un resumen de los artículos vendidos
+        // Creamos un resumen de los artÃ­culos vendidos
         const resumenArticulos = (c.articulos || []).map(a => a.nombre).join(', ');
 
         return `
@@ -3195,11 +3140,11 @@ window.abrirBuscadorVentasCxC = function(inputIdDestino) {
     <div data-modal="buscador-folios" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:flex-start; padding-top:50px; backdrop-filter:blur(4px);">
         <div style="background:white; padding:25px; border-radius:12px; width:100%; max-width:850px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.4);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <h3 style="margin:0; color:#1e40af; font-size:20px;">Seleccionar Venta para Auditoría</h3>
-                <button onclick="document.querySelector('[data-modal=\\'buscador-folios\\']').remove()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#9ca3af;">S"</button>
+                <h3 style="margin:0; color:#1e40af; font-size:20px;">ðŸ” Seleccionar Venta para AuditorÃ­a</h3>
+                <button onclick="document.querySelector('[data-modal=\\'buscador-folios\\']').remove()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#9ca3af;">âœ•</button>
             </div>
             
-            <input type="text" id="inputFiltroAudit" onkeyup="filtrarTablaAuditoria()" placeholder="} Escribe nombre, folio o artículo..." style="width:100%; padding:14px; border:2px solid #3b82f6; border-radius:8px; font-size:16px; margin-bottom:15px; box-sizing:border-box; outline:none; box-shadow:0 2px 4px rgba(59,130,246,0.1);">
+            <input type="text" id="inputFiltroAudit" onkeyup="filtrarTablaAuditoria()" placeholder="ðŸ”Ž Escribe nombre, folio o artÃ­culo..." style="width:100%; padding:14px; border:2px solid #3b82f6; border-radius:8px; font-size:16px; margin-bottom:15px; box-sizing:border-box; outline:none; box-shadow:0 2px 4px rgba(59,130,246,0.1);">
             
             <div style="max-height:500px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px;">
                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
@@ -3207,7 +3152,7 @@ window.abrirBuscadorVentasCxC = function(inputIdDestino) {
                         <tr>
                             <th style="padding:12px; text-align:left; color:#475569;">Folio</th>
                             <th style="padding:12px; text-align:left; color:#475569;">Cliente / Fecha</th>
-                            <th style="padding:12px; text-align:left; color:#475569;">Artículos Vendidos</th>
+                            <th style="padding:12px; text-align:left; color:#475569;">ArtÃ­culos Vendidos</th>
                             <th style="padding:12px; text-align:right; color:#475569;">Importe</th>
                         </tr>
                     </thead>
@@ -3251,11 +3196,11 @@ window.auditarCambioPagareEnMemoria = function(index, nuevoEstado, estadoAnterio
         const html = `
         <div data-modal="auditoria-finanzas" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:25px; border-radius:12px; width:450px;">
-                <h3 style="color:#dc2626; margin-top:0;">Reverso de Cobranza</h3>
-                <p style="color:#4b5563; font-size:14px; margin-bottom:10px;">Estás cancelando el pago de <b>${_cxcDinero(montoDevolver)}</b> del pagaré <b>${p.numeroPagere || p.folio}</b>.</p>
-                <p style="color:#dc2626; font-weight:bold; font-size:13px; margin-bottom:15px;">Este dinero se RESTARÁ de tu flujo de caja de inmediato.</p>
+                <h3 style="color:#dc2626; margin-top:0;">âš ï¸ Reverso de Cobranza</h3>
+                <p style="color:#4b5563; font-size:14px; margin-bottom:10px;">EstÃ¡s cancelando el pago de <b>${_cxcDinero(montoDevolver)}</b> del pagarÃ© <b>${p.numeroPagere || p.folio}</b>.</p>
+                <p style="color:#dc2626; font-weight:bold; font-size:13px; margin-bottom:15px;">Este dinero se RESTARÃ de tu flujo de caja de inmediato.</p>
                 
-                <label style="display:block; margin-bottom:8px; font-size:12px; font-weight:bold; color:#374151;">¿DE QU0 CUENTA SE DESCUENTA ESTE DINERO?</label>
+                <label style="display:block; margin-bottom:8px; font-size:12px; font-weight:bold; color:#374151;">Â¿DE QUÃ‰ CUENTA SE DESCUENTA ESTE DINERO?</label>
                 ${window._buildSelectorCuentas ? window._buildSelectorCuentas('auditoriaCuentaSelect', false) : '<select id="auditoriaCuentaSelect" style="width:100%; padding:10px; border-radius:6px;"><option value="efectivo">Efectivo</option></select>'}
                 
                 <div style="display:flex; gap:10px; margin-top:25px;">
@@ -3272,11 +3217,11 @@ window.auditarCambioPagareEnMemoria = function(index, nuevoEstado, estadoAnterio
         const html = `
         <div data-modal="auditoria-finanzas" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:25px; border-radius:12px; width:450px;">
-                <h3 style="color:#059669; margin-top:0;">Ingreso de Cobranza</h3>
-                <p style="color:#4b5563; font-size:14px; margin-bottom:10px;">Estás marcando como pagado el pagaré <b>${p.numeroPagere || p.folio}</b>.</p>
-                <p style="color:#059669; font-weight:bold; font-size:13px; margin-bottom:15px;">Se SUMARÁN <b>${_cxcDinero(montoCobrar)}</b> a tu flujo de caja de inmediato.</p>
+                <h3 style="color:#059669; margin-top:0;">ðŸ’° Ingreso de Cobranza</h3>
+                <p style="color:#4b5563; font-size:14px; margin-bottom:10px;">EstÃ¡s marcando como pagado el pagarÃ© <b>${p.numeroPagere || p.folio}</b>.</p>
+                <p style="color:#059669; font-weight:bold; font-size:13px; margin-bottom:15px;">Se SUMARÃN <b>${_cxcDinero(montoCobrar)}</b> a tu flujo de caja de inmediato.</p>
                 
-                <label style="display:block; margin-bottom:8px; font-size:12px; font-weight:bold; color:#374151;">¿A QU0 CUENTA INGRESA ESTE DINERO?</label>
+                <label style="display:block; margin-bottom:8px; font-size:12px; font-weight:bold; color:#374151;">Â¿A QUÃ‰ CUENTA INGRESA ESTE DINERO?</label>
                 ${window._buildSelectorCuentas ? window._buildSelectorCuentas('auditoriaCuentaSelect', false) : '<select id="auditoriaCuentaSelect" style="width:100%; padding:10px; border-radius:6px;"><option value="efectivo">Efectivo</option></select>'}
                 
                 <div style="display:flex; gap:10px; margin-top:25px;">
@@ -3302,7 +3247,7 @@ window.ejecutarCambioFinancieroEnMemoria = function(index, nuevoEstado, monto, t
     if (tipo === 'egreso' && typeof window._egresarCuenta === 'function') {
         window._egresarCuenta({
             monto: monto, cuentaId: cuentaId, etiqueta: etiquetaCuenta,
-            concepto: `Reverso por Auditoría - Pagaré ${p.numeroPagere || p.folio}`,
+            concepto: `Reverso por AuditorÃ­a - PagarÃ© ${p.numeroPagere || p.folio}`,
             referencia: `REV-AUDIT-${p.folio}`
         });
         p.montoAbonado = 0;
@@ -3311,7 +3256,7 @@ window.ejecutarCambioFinancieroEnMemoria = function(index, nuevoEstado, monto, t
     else if (tipo === 'ingreso' && typeof window._ingresarCuenta === 'function') {
         window._ingresarCuenta({
             monto: monto, cuentaId: cuentaId, etiqueta: etiquetaCuenta,
-            concepto: `Cobro por Auditoría - Pagaré ${p.numeroPagere || p.folio}`,
+            concepto: `Cobro por AuditorÃ­a - PagarÃ© ${p.numeroPagere || p.folio}`,
             referencia: `COB-AUDIT-${p.folio}`
         });
         p.montoAbonado = monto;
@@ -3320,7 +3265,7 @@ window.ejecutarCambioFinancieroEnMemoria = function(index, nuevoEstado, monto, t
 
     p.estado = nuevoEstado;
     document.querySelector('[data-modal="auditoria-finanzas"]')?.remove();
-    alert(`Operación financiera (${tipo.toUpperCase()}) aplicada a ${etiquetaCuenta}.\\n¡NO OLVIDES HACER CLIC EN "GUARDAR CAMBIOS" AL FINAL!`);
+    alert(`âœ… OperaciÃ³n financiera (${tipo.toUpperCase()}) aplicada a ${etiquetaCuenta}.\\nâš ï¸ Â¡NO OLVIDES HACER CLIC EN "GUARDAR CAMBIOS" AL FINAL!`);
     dibujarFormularioAuditoria();
 };
 
@@ -3331,7 +3276,7 @@ window.cancelarAuditoriaCxC = function(index, estadoAnterior) {
 };
 
 // =====================================================================
-// BUSCADOR UNIFICADO DE REIMPRESIN (CONTADO, CR0DITO Y APARTADOS)
+// ðŸ–¨ï¸ BUSCADOR UNIFICADO DE REIMPRESIÃ“N (CONTADO, CRÃ‰DITO Y APARTADOS)
 // =====================================================================
 
 window.renderReimprimirVenta = function() {
@@ -3369,7 +3314,7 @@ window.renderReimprimirVenta = function() {
     // 2. Unificar todo en una sola lista maestra
     let todo = [...ventas, ...cxc, ...apartados, ...entregas, ...devoluciones];
 
-    // 3. Aplicar Filtros de Búsqueda
+    // 3. Aplicar Filtros de BÃºsqueda
     let filtrados = todo.filter(item => {
         const folio = String(item.folio || '').toLowerCase();
         const folioVenta = String(item.folioVenta || '').toLowerCase();
@@ -3388,7 +3333,7 @@ window.renderReimprimirVenta = function() {
         return true;
     });
 
-    // 4. Ordenar de lo más reciente a lo más viejo
+    // 4. Ordenar de lo mÃ¡s reciente a lo mÃ¡s viejo
     filtrados.sort((a, b) => {
         const fa = new Date(a.fechaVenta || a.fechaApartado || a.fechaEmision || a.fecha || 0);
         const fb = new Date(b.fechaVenta || b.fechaApartado || b.fechaEmision || b.fecha || 0);
@@ -3398,12 +3343,12 @@ window.renderReimprimirVenta = function() {
     // 5. Dibujar la Tabla
     const cont = document.getElementById('contenidoReimprimirVenta');
     if (filtrados.length === 0) {
-        cont.innerHTML = '<div style="padding:20px; text-align:center; color:#6b7280; background:white; border-radius:8px;">No se encontraron registros con esos filtros en ninguna categoría.</div>';
+        cont.innerHTML = '<div style="padding:20px; text-align:center; color:#6b7280; background:white; border-radius:8px;">No se encontraron registros con esos filtros en ninguna categorÃ­a.</div>';
         return;
     }
 
     const fmtDinero = (m) => '$' + Number(m || 0).toLocaleString('es-MX', {minimumFractionDigits:2});
-    let html = '<table class="tabla-admin" style="width:100%;"><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Total</th><th style="text-align:center;">Acción</th></tr></thead><tbody>';
+    let html = '<table class="tabla-admin" style="width:100%;"><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Total</th><th style="text-align:center;">AcciÃ³n</th></tr></thead><tbody>';
     
     filtrados.forEach(item => {
         const folio = item.folio || 'S/F';
@@ -3412,7 +3357,7 @@ window.renderReimprimirVenta = function() {
         
         const cliente = item.cliente?.nombre || item.clienteNombre || item.nombre || 'Desconocido';
         const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
-        const etiquetas = { contado: 'CONTADO', credito: 'CR0DITO', apartado: 'APARTADO', entrega_mcia: 'ENTREGA MCIA' };
+        const etiquetas = { contado: 'CONTADO', credito: 'CRÃ‰DITO', apartado: 'APARTADO', entrega_mcia: 'ENTREGA MCIA' };
         const tipo = etiquetas[item._origen] || item._origen.toUpperCase();
         
         let colorTipo = '#6b7280';
@@ -3429,7 +3374,7 @@ window.renderReimprimirVenta = function() {
             <td>${fmtDinero(total)}</td>
             <td style="text-align:center;">
                 <button onclick="reimprimirFolioUnificado('${folio}', '${item._origen}')" style="background:#475569; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                    Reimprimir
+                    ðŸ–¨ï¸ Reimprimir
                 </button>
             </td>
         </tr>`;
@@ -3473,7 +3418,7 @@ window.reimprimirFolioUnificado = function(folio, origen) {
     if (origen === 'entrega_mcia') {
         const docs = StorageService.get("documentosEntrega", []);
         const doc = docs.find(d => d.folioDocumento === folio);
-        if (!doc) return alert("No se encontró el documento de entrega.");
+        if (!doc) return alert("âŒ No se encontrÃ³ el documento de entrega.");
         if (typeof generarValeEntrega === 'function') {
             generarValeEntrega(doc, doc.articulos || [], {
                 registrar: false,
@@ -3494,9 +3439,9 @@ window.reimprimirFolioUnificado = function(folio, origen) {
     if (origen === 'apartado') {
         const apartados = StorageService.get("apartados", []);
         const ap = apartados.find(a => a.folio === folio);
-        if (!ap) return alert("No se encontró el apartado en la base de datos.");
+        if (!ap) return alert("âŒ No se encontrÃ³ el apartado en la base de datos.");
         
-        // Reconstruimos el paquete de datos para engañar y alimentar a tu generador de tickets térmicos
+        // Reconstruimos el paquete de datos para engaÃ±ar y alimentar a tu generador de tickets tÃ©rmicos
         const datosVenta = {
             folio: ap.folio,
             fecha: ap.fechaApartado,
@@ -3512,12 +3457,12 @@ window.reimprimirFolioUnificado = function(folio, origen) {
         };
         
         if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(datosVenta);
-        else alert("La función de impresión de tickets no está disponible.");
+        else alert("âš ï¸ La funciÃ³n de impresiÃ³n de tickets no estÃ¡ disponible.");
 
     } else if (origen === 'credito') {
         const cxc = StorageService.get("cuentasPorCobrar", []);
         const c = cxc.find(x => x.folio === folio);
-        if (!c) return alert("No se encontró el crédito.");
+        if (!c) return alert("âŒ No se encontrÃ³ el crÃ©dito.");
         
         const datosVenta = {
             folio: c.folio,
@@ -3537,13 +3482,13 @@ window.reimprimirFolioUnificado = function(folio, origen) {
     } else { // Venta de contado / transferencia
         const ventas = StorageService.get("ventasRegistradas", []);
         const v = ventas.find(x => x.folio === folio);
-        if (!v) return alert("No se encontró la venta de contado.");
+        if (!v) return alert("âŒ No se encontrÃ³ la venta de contado.");
         if (typeof generarTicketMediaHoja === 'function') generarTicketMediaHoja(v);
     }
 };
 
 // ===============================================================
-// BVEDA DE AUTORIZACIONES (MAKER-CHECKER) - MOTOR REPARADO V2
+// ðŸ›¡ï¸ BÃ“VEDA DE AUTORIZACIONES (MAKER-CHECKER) - MOTOR REPARADO V2
 // ===============================================================
 
 // 1. PANEL PRINCIPAL DE LA VISTA (Mantiene tu estructura limpia)
@@ -3564,27 +3509,27 @@ window.renderPanelAutorizaciones = function() {
 
     let html = `
     <div style="padding: 20px;">
-        <h2 style="color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; margin-top:0;">Bóveda de Autorizaciones (Pendientes)</h2>
+        <h2 style="color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; margin-top:0;">ðŸ›¡ï¸ BÃ³veda de Autorizaciones (Pendientes)</h2>
         
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 20px; margin-top: 20px;">
             
             <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h3 style="color: #d97706; margin-top: 0;">Ventas Provisionales (${ventasP.length})</h3>
+                <h3 style="color: #d97706; margin-top: 0;">ðŸ›’ Ventas Provisionales (${ventasP.length})</h3>
                 <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                     <tr style="background: #fef3c7; text-align: left;">
                         <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Fecha Captura</th>
                         <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Cliente</th>
                         <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Total</th>
-                        <th style="padding: 8px; border-bottom: 2px solid #fde68a;">Acción</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #fde68a;">AcciÃ³n</th>
                     </tr>
-                    ${ventasP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al día. No hay ventas pendientes.</td></tr>' : ''}
+                    ${ventasP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al dÃ­a. No hay ventas pendientes.</td></tr>' : ''}
                     ${ventasP.map((v, i) => `
                     <tr style="border-bottom: 1px solid #f3f4f6;">
                         <td style="padding: 8px;">${_ventaFechaVisible(v.fechaCapturaIso || v.fechaCaptura || v.datosVenta?.fechaIso || v.args?.[7])}</td>
-                        <td style="padding: 8px;">${v.clienteNombre || 'Público General'}</td>
+                        <td style="padding: 8px;">${v.clienteNombre || 'PÃºblico General'}</td>
                         <td style="padding: 8px; font-weight: bold;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v.totalVenta || 0)}</td>
                         <td style="padding: 8px;">
-                            <button onclick="revisarVentaPendiente(${i})" style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar </button>
+                            <button onclick="revisarVentaPendiente(${i})" style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar ðŸ”</button>
                         </td>
                     </tr>
                     `).join('')}
@@ -3592,25 +3537,25 @@ window.renderPanelAutorizaciones = function() {
             </div>
 
             <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h3 style="color: #059669; margin-top: 0;">Abonos Provisionales (${abonosP.length})</h3>
+                <h3 style="color: #059669; margin-top: 0;">ðŸ’µ Abonos Provisionales (${abonosP.length})</h3>
                 <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                     <tr style="background: #d1fae5; text-align: left;">
                         <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Fecha Captura</th>
                         <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Folio Deuda</th>
                         <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Monto</th>
-                        <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">Acción</th>
+                        <th style="padding: 8px; border-bottom: 2px solid #a7f3d0;">AcciÃ³n</th>
                     </tr>
-                    ${abonosP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al día. No hay abonos pendientes.</td></tr>' : ''}
+                    ${abonosP.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#9ca3af;">Todo al dÃ­a. No hay abonos pendientes.</td></tr>' : ''}
                     ${abonosP.map((a, i) => {
                         const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
                         const folioRef = a.folioApartado || a.folioCXC || '-';
                         return `
                     <tr style="border-bottom: 1px solid #f3f4f6;">
                         <td style="padding: 8px;">${_ventaFechaVisible(a.fechaCapturaIso || a.fechaAbonoIso || a.fechaCaptura || a.fechaAbonoStr)}</td>
-                        <td style="padding: 8px; color: #475569;"><strong>${folioRef}</strong><br><span style="font-size:11px; color:#64748b;">${esApartado ? 'Apartado' : 'Crédito'}</span></td>
+                        <td style="padding: 8px; color: #475569;"><strong>${folioRef}</strong><br><span style="font-size:11px; color:#64748b;">${esApartado ? 'Apartado' : 'CrÃ©dito'}</span></td>
                         <td style="padding: 8px; font-weight: bold; color: #059669;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado || 0)}</td>
                         <td style="padding: 8px;">
-                            <button onclick="revisarAbonoPendiente(${i})" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar </button>
+                            <button onclick="revisarAbonoPendiente(${i})" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar ðŸ”</button>
                         </td>
                     </tr>
                     `}).join('')}
@@ -3626,7 +3571,7 @@ window.renderPanelAutorizaciones = function() {
     cont.innerHTML = html;
 };
 
-// 2. VENTANA DE REVISIN AVANZADA Y EDICIN DE VENTAS
+// 2. VENTANA DE REVISIÃ“N AVANZADA Y EDICIÃ“N DE VENTAS
 function _authFolioVentaPendiente(v) {
     return String(v?.datosVenta?.folio || v?.args?.[5] || v?.folio || '').trim();
 }
@@ -3679,7 +3624,7 @@ window.revisarVentaPendiente = function(index) {
     const saldoFinanciado = parseFloat(v.args[3] || 0);
     const plan = v.args[4] || {};
     
-    // Lógica para mostrar detalles de crédito si existen (EDITABLES)
+    // LÃ³gica para mostrar detalles de crÃ©dito si existen (EDITABLES)
     let detalleCreditoHTML = "";
     if (metodoPago === "credito") {
         // Extraer plazo del plan o usar fallback
@@ -3694,7 +3639,7 @@ window.revisarVentaPendiente = function(index) {
             periodicidad = plan.periodicidad || 'semanal';
             valorPagareDisplay = plan.valorPagare || (abonoSemanal * plazo + engancheActual);
         } else {
-            // Si no hay plan, mostrar campos vacíos pero editables
+            // Si no hay plan, mostrar campos vacÃ­os pero editables
             plazo = 0;
             abonoSemanal = 0;
             valorPagareDisplay = engancheActual;
@@ -3703,30 +3648,30 @@ window.revisarVentaPendiente = function(index) {
         if (plazo > 0 || saldoFinanciado > 0) {
             detalleCreditoHTML = `
                 <div style="background:#fffbeb; border:1px solid #fcd34d; padding:12px; border-radius:8px; margin-bottom:15px; font-size:12px;">
-                    <label style="font-weight:bold; display:block; margin-bottom:8px; color:#92400e;">" AJUSTAR T0RMINOS DEL CR0DITO (Editable):</label>
+                    <label style="font-weight:bold; display:block; margin-bottom:8px; color:#92400e;">âš™ï¸ AJUSTAR TÃ‰RMINOS DEL CRÃ‰DITO (Editable):</label>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                         <div>
                             <label style="font-size:11px; color:#92400e;">Plazo (Pagos):</label>
                             <input type="number" id="authPlazoCreditoAjuste" value="${plazo || 0}" min="1" max="52" step="1" style="width:100%; padding:6px; border:1px solid #fde68a; border-radius:4px; font-weight:bold;">
                         </div>
                         <div>
-                            <label style="font-size:11px; color:#92400e;">Abono por Período ($):</label>
+                            <label style="font-size:11px; color:#92400e;">Abono por PerÃ­odo ($):</label>
                             <input type="number" id="authAbonoPeriodoAjuste" value="${abonoSemanal.toFixed(2)}" min="0" step="0.01" style="width:100%; padding:6px; border:1px solid #fde68a; border-radius:4px; font-weight:bold;">
                         </div>
                     </div>
                     <div style="display:flex; justify-content:space-between; background:#fef3c7; padding:8px; border-radius:4px; font-weight:bold; color:#92400e;">
-                        <span>Período:</span>
+                        <span>PerÃ­odo:</span>
                         <span>${periodicidad}</span>
                     </div>
                     <div style="display:flex; justify-content:space-between; background:#fef3c7; padding:8px; border-radius:4px; margin-top:4px; font-weight:bold; color:#92400e;">
-                        <span>Valor Pagaré:</span>
+                        <span>Valor PagarÃ©:</span>
                         <span id="authValorPagareRecalc">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(valorPagareDisplay)}</span>
                     </div>
                 </div>`;
         }
     }
 
-    // Determinar cuánto efectivo real entrará a caja/banco hoy
+    // Determinar cuÃ¡nto efectivo real entrarÃ¡ a caja/banco hoy
     const engancheYaRegistrado = v.datosVenta?.engancheYaRegistrado === true;
     const importeEfectivoCaja = engancheYaRegistrado ? 0 : ((metodoPago === "contado" || metodoPago === "transferencia") ? totalVenta : engancheActual);
 
@@ -3736,7 +3681,7 @@ window.revisarVentaPendiente = function(index) {
     articulos.forEach(art => {
         tablaProductosHTML += `
             <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding:6px 0;">⬢ ${art.nombre} ${art.colorElegido ? `(${art.colorElegido})` : ''}</td>
+                <td style="padding:6px 0;">â€¢ ${art.nombre} ${art.colorElegido ? `(${art.colorElegido})` : ''}</td>
                 <td style="padding:6px 0; text-align:center;">${art.cantidad || 1}</td>
                 <td style="padding:6px 0; text-align:right;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(art.precioContado || art.precio || 0)}</td>
             </tr>`;
@@ -3745,22 +3690,22 @@ window.revisarVentaPendiente = function(index) {
     const html = `
     <div data-modal="auth-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; padding:20px;">
         <div style="background:white; padding:25px; border-radius:12px; width:100%; max-width:500px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); max-height:90vh; overflow-y:auto;">
-            <h3 style="color:#d97706; margin-top:0; border-bottom:2px solid #fde68a; padding-bottom:8px;">Auditoría de Venta Provisional</h3>
+            <h3 style="color:#d97706; margin-top:0; border-bottom:2px solid #fde68a; padding-bottom:8px;">ðŸ›’ AuditorÃ­a de Venta Provisional</h3>
             
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:13px; margin-bottom:15px; background:#f8fafc; padding:10px; border-radius:8px;">
                 <div><strong>Folio:</strong> ${v.args[5]}</div>
-                <div><strong>Método:</strong> <span style="text-transform:uppercase; font-weight:bold; color:#1e3a8a;">${metodoPago}</span></div>
+                <div><strong>MÃ©todo:</strong> <span style="text-transform:uppercase; font-weight:bold; color:#1e3a8a;">${metodoPago}</span></div>
                 <div style="grid-column: span 2;"><strong>Cliente:</strong> ${v.clienteNombre}</div>
             </div>
             
             ${detalleCreditoHTML}
 
-            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">Productos en la Nota:</label>
+            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">ðŸ“¦ Productos en la Nota:</label>
             <div style="margin-bottom:15px; border-bottom:1px dashed #cbd5e1; padding-bottom:10px;">
                 <table style="width:100%; font-size:12px; border-collapse:collapse;">
                     <thead>
                         <tr style="color:#64748b; text-align:left; border-bottom:1px solid #e2e8f0;">
-                            <th>Descripción</th>
+                            <th>DescripciÃ³n</th>
                             <th style="text-align:center;">Cant</th>
                             <th style="text-align:right;">Precio</th>
                         </tr>
@@ -3769,7 +3714,7 @@ window.revisarVentaPendiente = function(index) {
                 </table>
             </div>
 
-            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">Condiciones de Venta (Editables):</label>
+            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">ðŸ’° Condiciones de Venta (Editables):</label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:5px; margin-bottom:15px;">
                 <div>
                     <label style="font-size:11px; color:#64748b;">Total de la Venta ($):</label>
@@ -3782,24 +3727,24 @@ window.revisarVentaPendiente = function(index) {
             </div>
 
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:10px; border-radius:8px; margin-bottom:15px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
-                <span style="color:#166534; font-weight:bold;">${engancheYaRegistrado ? 'Importe a caja al autorizar:' : 'Importe neto que ingresa a Caja:'}</span>
+                <span style="color:#166534; font-weight:bold;">ðŸ’µ ${engancheYaRegistrado ? 'Importe a caja al autorizar:' : 'Importe neto que ingresa a Caja:'}</span>
                 <strong style="color:#15803d; font-size:15px;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(importeEfectivoCaja)}</strong>
             </div>
-            ${engancheYaRegistrado ? '<div style="margin-top:-8px; margin-bottom:15px; font-size:12px; color:#64748b;">Los anticipos ya fueron registrados durante el apartado; aquí sólo se formaliza la cartera.</div>' : ''}
+            ${engancheYaRegistrado ? '<div style="margin-top:-8px; margin-bottom:15px; font-size:12px; color:#64748b;">Los anticipos ya fueron registrados durante el apartado; aquÃ­ sÃ³lo se formaliza la cartera.</div>' : ''}
             
-            <label style="display:block; font-weight:bold; font-size:12px; color:#475569;">Fecha de Aplicación Oficial:</label>
+            <label style="display:block; font-weight:bold; font-size:12px; color:#475569;">ðŸ“… Fecha de AplicaciÃ³n Oficial:</label>
             <input type="date" id="authFechaVenta" value="${fechaCorta}" style="width:100%; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box; margin-bottom:20px;">
 
             <div style="display:flex; gap:10px;">
-                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Autorizar a DB</button>
-                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Anular Movimiento</button>
+                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">âœ… Autorizar a DB</button>
+                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">ðŸ—‘ï¸ Anular Movimiento</button>
                 <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
             </div>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
     
-    // Agregar listener para recalcular Valor Pagaré cuando se edite plazo o abono (CR0DITO)
+    // Agregar listener para recalcular Valor PagarÃ© cuando se edite plazo o abono (CRÃ‰DITO)
     if (metodoPago === "credito") {
         setTimeout(() => {
             const plazoInput = document.getElementById('authPlazoCreditoAjuste');
@@ -3844,18 +3789,18 @@ window.aprobarVentaCuarentena = function(index) {
     const nuevaFechaCorta = document.getElementById('authFechaVenta').value;
     const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
     
-    // NUEVOS CAMPOS: Capturar ajustes de crédito si aplica
+    // NUEVOS CAMPOS: Capturar ajustes de crÃ©dito si aplica
     const nuevoPlazoCreditoInput = document.getElementById('authPlazoCreditoAjuste');
     const nuevoAbonoPeriodoInput = document.getElementById('authAbonoPeriodoAjuste');
     
-    if (nuevoTotal <= 0) return alert("El total de la venta debe ser mayor a 0.");
+    if (nuevoTotal <= 0) return alert("âŒ El total de la venta debe ser mayor a 0.");
 
-    // 2. Modificar dinámicamente los argumentos antes de inyectar a la base de datos real
+    // 2. Modificar dinÃ¡micamente los argumentos antes de inyectar a la base de datos real
     v.totalVenta = nuevoTotal;
     v.args[1] = nuevoTotal; // totalContado original
     v.args[2] = nuevoEnganche; // enganche original
     
-    // Si es crédito, recalcular el saldo pendiente financiero CON LA MATEMÁTICA CORRECTA
+    // Si es crÃ©dito, recalcular el saldo pendiente financiero CON LA MATEMÃTICA CORRECTA
     if (v.args[0] === "credito" && v.args[4]) {
         const saldoFinanciado = nuevoTotal - nuevoEnganche;
         v.args[3] = saldoFinanciado; 
@@ -3865,15 +3810,15 @@ window.aprobarVentaCuarentena = function(index) {
             const nuevoPlazoCreditoValor = parseInt(nuevoPlazoCreditoInput.value) || (v.args[4].plazo || v.args[4].pagos || 1);
             const nuevoAbonoPeriodo = parseFloat(nuevoAbonoPeriodoInput.value) || (saldoFinanciado / nuevoPlazoCreditoValor);
             
-            // CORRECCIN: La deuda real en el sistema es la suma de los pagarés.
+            // ðŸ›¡ï¸ CORRECCIÃ“N: La deuda real en el sistema es la suma de los pagarÃ©s.
             const totalDeudaFinanciera = parseFloat((nuevoAbonoPeriodo * nuevoPlazoCreditoValor).toFixed(2));
 
             v.args[4].plazo = nuevoPlazoCreditoValor;
             v.args[4].pagos = nuevoPlazoCreditoValor;
             v.args[4].abono = parseFloat(nuevoAbonoPeriodo.toFixed(2));
-            v.args[4].total = totalDeudaFinanciera; // Matemática blindada
+            v.args[4].total = totalDeudaFinanciera; // MatemÃ¡tica blindada
             
-            // Recalcular valor pagaré visual 
+            // Recalcular valor pagarÃ© visual 
             v.args[4].valorPagare = parseFloat((totalDeudaFinanciera + nuevoEnganche).toFixed(2));
         } else {
             v.args[4].total = saldoFinanciado;
@@ -3884,11 +3829,11 @@ window.aprobarVentaCuarentena = function(index) {
         v.args[3] = nuevoTotal - nuevoEnganche; 
     }
 
-    // Actualizar las marcas de tiempo oficiales de auditoría
+    // Actualizar las marcas de tiempo oficiales de auditorÃ­a
     v.args[6] = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta; 
     v.args[7] = nuevaFechaIso; 
 
-    // Actualizar el espejo del objeto de impresión para futuras reimpresiones
+    // Actualizar el espejo del objeto de impresiÃ³n para futuras reimpresiones
     v.datosVenta.total = nuevoTotal;
     v.datosVenta.enganche = nuevoEnganche;
     v.datosVenta.fecha = v.args[6];
@@ -3935,7 +3880,7 @@ window.aprobarVentaCuarentena = function(index) {
     StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
     document.querySelector('[data-modal=auth-venta]').remove();
     
-    alert("Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
+    alert("âœ… Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrÃ¡ generar el ticket definitivo desde la opciÃ³n 'Reimprimir Ticket' si el cliente lo requiere.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (typeof renderApartados === 'function') renderApartados();
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
@@ -3953,8 +3898,8 @@ window.rechazarVentaCuarentena = function(index) {
         .filter(d => d.folioVenta === folio && d.estado !== 'Cancelado');
     const tieneSalidaOperativa = docsEntregaActivos.length > 0 || _desenvolverListaVentaPendiente(v.args?.[8]).some(x => x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada);
     const mensaje = tieneSalidaOperativa
-        ? `Esta venta provisional tiene mercancía entregada/documentada.\n\nAl rechazarla se reingresará inventario, se cancelará el vale de entrega y se retirará de la Bóveda.\n\n¿Deseas continuar?`
-        : "¿Deseas eliminar permanentemente esta venta provisional sin afectar inventario ni caja?";
+        ? `Esta venta provisional tiene mercancÃ­a entregada/documentada.\n\nAl rechazarla se reingresarÃ¡ inventario, se cancelarÃ¡ el vale de entrega y se retirarÃ¡ de la BÃ³veda.\n\nÂ¿Deseas continuar?`
+        : "Â¿Deseas eliminar permanentemente esta venta provisional sin afectar inventario ni caja?";
     if (!confirm(mensaje)) return;
 
     if (v && (v.tipo === "conversion_apartado_credito" || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio)) {
@@ -3977,7 +3922,7 @@ window.rechazarVentaCuarentena = function(index) {
 };
 
 // =====================================================================
-// : CENTRO DE CANCELACIONES
+// â›” CENTRO DE CANCELACIONES
 // =====================================================================
 window._cancelacionTipo = window._cancelacionTipo || 'venta';
 
@@ -4043,7 +3988,7 @@ function _cancelInfoDineroVenta(folio, venta = null, pendiente = null) {
         return {
             monto: partes.reduce((s, p) => s + p.monto, 0),
             cuentas: [...new Set(partes.map(p => p.cuenta))],
-            fuente: 'Crédito / abonos'
+            fuente: 'CrÃ©dito / abonos'
         };
     }
 
@@ -4065,7 +4010,7 @@ function _cancelInfoDineroVenta(folio, venta = null, pendiente = null) {
     const monto = (metodo === 'contado' || metodo === 'transferencia') ? total : enganche;
     return {
         monto,
-        cuentas: [pendiente?.datosVenta?.etiquetaCuenta || window._estadoPago?.etiquetaCuenta || 'Pendiente de autorización / caja no oficial'],
+        cuentas: [pendiente?.datosVenta?.etiquetaCuenta || window._estadoPago?.etiquetaCuenta || 'Pendiente de autorizaciÃ³n / caja no oficial'],
         fuente: pendiente ? 'Venta en cuarentena' : 'Venta'
     };
 }
@@ -4102,7 +4047,7 @@ function _cancelContextoVentaHTML(folio, venta = null, pendiente = null) {
     return `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
             <div><span style="color:#64748b;">Importe total venta:</span><br><b>${_cancelDinero(total)}</b></div>
-            <div><span style="color:#64748b;">Método:</span><br><b>${_cancelEsc(metodo)}</b></div>
+            <div><span style="color:#64748b;">MÃ©todo:</span><br><b>${_cancelEsc(metodo)}</b></div>
             <div><span style="color:#64748b;">Dinero recibido:</span><br><b style="color:#059669;">${_cancelDinero(dinero.monto)}</b></div>
             <div><span style="color:#64748b;">Recibido en:</span><br><b>${_cancelEsc(dinero.cuentas.join(', ') || '-')}</b><br><small>${_cancelEsc(dinero.fuente)}</small></div>
             <div><span style="color:#64748b;">Enganche/anticipo:</span><br><b>${_cancelDinero(enganche)}</b></div>
@@ -4259,7 +4204,7 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
         }));
         d.estado = 'Cancelado';
         d.fechaCancelacion = _cancelIsoAhora();
-        d.motivoCancelacion = motivo || 'Cancelación de venta';
+        d.motivoCancelacion = motivo || 'CancelaciÃ³n de venta';
     });
 
     if (articulos.length === 0) {
@@ -4298,7 +4243,7 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
             productoId: a.productoId,
             tipo: 'entrada',
             cantidad: Number(a.cantidad || 0),
-            concepto: `Reingreso por cancelación - Folio ${folio}`,
+            concepto: `Reingreso por cancelaciÃ³n - Folio ${folio}`,
             fecha: window.formatearFechaMX ? window.formatearFechaMX(new Date()) : _cancelIsoAhora(),
             referencia: `CANCEL-${folio}`
         });
@@ -4443,15 +4388,15 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
         <div class="no-print"><button onclick="window.print()" style="padding:10px 18px;font-weight:bold;">Imprimir comprobante</button></div>
         <div class="centro">
             <img src="img/Logo.svg" style="width:50px;height:50px;object-fit:contain;" onerror="this.style.display='none'">
-            <div class="negrita" style="font-size:15px;">MUEBLERÍA MI PUEBLITO</div>
-            <div class="negrita">COMPROBANTE DE DEVOLUCIN</div>
+            <div class="negrita" style="font-size:15px;">MUEBLERÃA MI PUEBLITO</div>
+            <div class="negrita">COMPROBANTE DE DEVOLUCIÃ“N</div>
             <div>${_cancelEsc(folioDoc)}</div>
         </div>
         <div class="sep"></div>
         <div>Fecha: <b>${_cancelEsc(fecha)}</b></div>
         <div>Tipo: <b>${_cancelEsc(tipo)}</b></div>
         <div>Referencia: <b>${_cancelEsc(referencia)}</b></div>
-        <div>Cliente: <b>${_cancelEsc(clienteNombre || 'Público General')}</b></div>
+        <div>Cliente: <b>${_cancelEsc(clienteNombre || 'PÃºblico General')}</b></div>
         <div class="sep"></div>
         <div class="centro">
             <div>MONTO DEVUELTO</div>
@@ -4459,7 +4404,7 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
             <div style="font-size:10px;">Cuenta: ${_cancelEsc(cuenta)}</div>
         </div>
         <div class="sep"></div>
-        <div style="font-size:10px;text-align:justify;">Motivo: ${_cancelEsc(motivo || 'Cancelación autorizada')}</div>
+        <div style="font-size:10px;text-align:justify;">Motivo: ${_cancelEsc(motivo || 'CancelaciÃ³n autorizada')}</div>
         <div style="margin-top:32px;text-align:center;">
             <div style="border-top:1px solid #000;width:80%;margin:0 auto;"></div>
             <div class="negrita" style="font-size:10px;">FIRMA DE RECIBIDO DEL CLIENTE</div>
@@ -4488,7 +4433,7 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
         return;
     }
     const win = window.open('', '_blank');
-    if (!win) return alert("El comprobante se generó, pero el navegador bloqueó la ventana emergente.");
+    if (!win) return alert("El comprobante se generÃ³, pero el navegador bloqueÃ³ la ventana emergente.");
     win.document.write(html);
     win.document.close();
     win.focus();
@@ -4546,10 +4491,10 @@ function _renderCancelacionesVentas(filtro) {
         .slice()
         .sort((a,b) => new Date(b.fechaVenta || b.fechaIso || 0) - new Date(a.fechaVenta || a.fechaIso || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin ventas para cancelar.</div>';
-    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Origen</th><th>Acción</th></tr></thead><tbody>${filas.map(v => `
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Origen</th><th>AcciÃ³n</th></tr></thead><tbody>${filas.map(v => `
         <tr>
             <td><b>${_cancelEsc(v.folio)}</b></td>
-            <td>${_cancelEsc(v.clienteNombre || v.cliente?.nombre || 'Público General')}</td>
+            <td>${_cancelEsc(v.clienteNombre || v.cliente?.nombre || 'PÃºblico General')}</td>
             <td>${_cancelEsc(v.metodoPago || v.metodo || '-')}</td>
             <td>${_cancelDinero(v.total || v.totalVenta || 0)}</td>
             <td>${v._origenCancel === 'cuarentena' ? 'Cuarentena' : 'Registrada'}</td>
@@ -4571,11 +4516,11 @@ function _renderCancelacionesAbonos(filtro) {
     }));
     const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
     if (!filtradas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin abonos para cancelar.</div>';
-    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead><tbody>${filtradas.map(a => `
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>AcciÃ³n</th></tr></thead><tbody>${filtradas.map(a => `
         <tr>
             <td><b>${_cancelEsc(a.folio)}</b></td>
             <td>${_cancelEsc(a.cliente)}</td>
-            <td>${a.origen === 'credito' ? 'Crédito' : 'Apartado'}</td>
+            <td>${a.origen === 'credito' ? 'CrÃ©dito' : 'Apartado'}</td>
             <td>${a.fecha ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : String(a.fecha).slice(0,10)) : '-'}</td>
             <td>${_cancelDinero(a.monto)}</td>
             <td>${_cancelEsc(a.cuenta || '-')}</td>
@@ -4587,7 +4532,7 @@ function _renderCancelacionesApartados(filtro) {
     const apartados = StorageService.get("apartados", []).filter(a => a.estado !== 'Cancelado');
     const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fechaApartado || 0) - new Date(a.fechaApartado || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin apartados para cancelar.</div>';
-    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Total</th><th>Pagado</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${filas.map(a => {
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Total</th><th>Pagado</th><th>Estado</th><th>AcciÃ³n</th></tr></thead><tbody>${filas.map(a => {
         const pagado = Number(a.enganche || 0) + (a.abonos || []).reduce((s, ab) => s + Number(ab.monto || 0), 0);
         return `<tr>
             <td><b>${_cancelEsc(a.folio)}</b></td>
@@ -4610,17 +4555,17 @@ function _modalCancelacion({ titulo, resumen, monto, onConfirm }) {
             ${monto > 0 ? `
                 <div style="background:#fff1f2;border:1px solid #fecaca;border-radius:10px;padding:14px;margin-bottom:14px;">
                     <b style="color:#991b1b;">Dinero a devolver: ${_cancelDinero(monto)}</b>
-                    <label style="display:block;font-size:11px;font-weight:bold;color:#7f1d1d;margin-top:12px;">Cuenta de donde saldrá la devolución</label>
+                    <label style="display:block;font-size:11px;font-weight:bold;color:#7f1d1d;margin-top:12px;">Cuenta de donde saldrÃ¡ la devoluciÃ³n</label>
                     ${_cancelSelectorCuenta('cancelCuentaReembolso')}
                     <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:#7f1d1d;">
                         <input type="checkbox" id="cancelEmitirComprobante" checked>
-                        Emitir comprobante de devolución
+                        Emitir comprobante de devoluciÃ³n
                     </label>
                 </div>` : ''}
-            <label style="font-size:12px;font-weight:bold;color:#475569;">Motivo de cancelación</label>
+            <label style="font-size:12px;font-weight:bold;color:#475569;">Motivo de cancelaciÃ³n</label>
             <textarea id="cancelMotivo" style="width:100%;min-height:74px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;margin-top:5px;"></textarea>
             <div style="display:flex;gap:10px;margin-top:18px;">
-                <button onclick="${onConfirm}" style="flex:2;padding:13px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Confirmar cancelación</button>
+                <button onclick="${onConfirm}" style="flex:2;padding:13px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Confirmar cancelaciÃ³n</button>
                 <button onclick="document.querySelector('[data-modal=&quot;cancelacion-modal&quot;]')?.remove()" style="flex:1;padding:13px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cerrar</button>
             </div>
         </div>
@@ -4633,14 +4578,14 @@ window.abrirModalCancelarVenta = function(folio, origen, pendienteIndex = -1) {
     const pendientes = StorageService.get("ventasPendientes", []);
     const venta = origen === 'cuarentena' ? null : ventas.find(v => v.folio === folio);
     const pendiente = origen === 'cuarentena' ? pendientes[pendienteIndex] : null;
-    const cliente = venta?.clienteNombre || venta?.cliente?.nombre || pendiente?.clienteNombre || pendiente?.datosVenta?.cliente?.nombre || 'Público General';
+    const cliente = venta?.clienteNombre || venta?.cliente?.nombre || pendiente?.clienteNombre || pendiente?.datosVenta?.cliente?.nombre || 'PÃºblico General';
     const monto = _cancelTotalPagadoVenta(folio, venta, pendiente);
     const docsEntrega = StorageService.get("documentosEntrega", []).filter(d => d.folioVenta === folio && d.estado !== 'Cancelado').length;
     window._cancelacionActual = { tipo: 'venta', folio, origen, pendienteIndex, monto, cliente };
     _modalCancelacion({
         titulo: `Cancelar venta ${_cancelEsc(folio)}`,
         monto,
-        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'Bóveda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirá cartera, pagarés, caja y mercancía entregada.</div>`,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'BÃ³veda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirÃ¡ cartera, pagarÃ©s, caja y mercancÃ­a entregada.</div>`,
         onConfirm: "ejecutarCancelacionVenta()"
     });
 };
@@ -4648,7 +4593,7 @@ window.abrirModalCancelarVenta = function(folio, origen, pendienteIndex = -1) {
 window.ejecutarCancelacionVenta = function() {
     const ctx = window._cancelacionActual;
     if (!ctx || ctx.tipo !== 'venta') return;
-    const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de venta';
+    const motivo = document.getElementById('cancelMotivo')?.value || 'CancelaciÃ³n de venta';
     const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
     const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
 
@@ -4688,7 +4633,7 @@ window.ejecutarCancelacionVenta = function() {
     }
 
     let pagares = StorageService.get("pagaresSistema", []);
-    pagares = pagares.map(p => p.folio === ctx.folio ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelación de venta' } : p);
+    pagares = pagares.map(p => p.folio === ctx.folio ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelaciÃ³n de venta' } : p);
     StorageService.set("pagaresSistema", pagares);
 
     const salidas = StorageService.get("salidasPendientesVenta", []).map(s => s.folioVenta === ctx.folio ? { ...s, estatus: 'Cancelado', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : s);
@@ -4709,10 +4654,10 @@ window.ejecutarCancelacionVenta = function() {
         monto: ctx.monto,
         cuentaId: cuenta.cuentaId,
         etiqueta: cuenta.etiqueta,
-        concepto: `Devolución por cancelación de venta ${ctx.folio}`,
+        concepto: `DevoluciÃ³n por cancelaciÃ³n de venta ${ctx.folio}`,
         referencia: `CANCEL-VENTA-${ctx.folio}`,
         clienteNombre: ctx.cliente,
-        tipo: 'Cancelación de venta',
+        tipo: 'CancelaciÃ³n de venta',
         motivo,
         emitirComprobante: emitir,
         registrarMovimiento: registrarMovimientoReembolso
@@ -4739,7 +4684,7 @@ window.ejecutarCancelacionVenta = function() {
     }
 
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
-    alert("Venta cancelada. Se aplicaron reversas de caja, cartera, pagarés e inventario entregado.");
+    alert("âœ… Venta cancelada. Se aplicaron reversas de caja, cartera, pagarÃ©s e inventario entregado.");
     if (reversaConsignacion.reversadas || reversaConsignacion.revision) {
         alert(`Consignacion: ${reversaConsignacion.reversadas} reversa(s) aplicada(s). ${reversaConsignacion.revision ? reversaConsignacion.revision + ' queda(n) para revision porque ya hubo pago real al proveedor.' : ''}`);
     }
@@ -4751,7 +4696,7 @@ window.abrirModalCancelarAbono = function(origen, folio, index) {
         ? StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio)
         : StorageService.get("apartados", []).find(a => a.folio === folio);
     const abono = cuenta?.abonos?.[index];
-    if (!cuenta || !abono) return alert("No se encontró el abono.");
+    if (!cuenta || !abono) return alert("No se encontrÃ³ el abono.");
     if (String(cuenta.estado || '').toLowerCase().includes('cancel') || abono.cancelado || abono.canceladoPorVenta || abono.canceladoPorApartado) {
         return alert("Este abono ya pertenece a una cuenta cancelada o ya fue reversado.");
     }
@@ -4761,7 +4706,7 @@ window.abrirModalCancelarAbono = function(origen, folio, index) {
     _modalCancelacion({
         titulo: `Cancelar abono ${_cancelEsc(folio)}`,
         monto,
-        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'credito' ? 'Crédito' : 'Apartado'}<br><b>Importe:</b> ${_cancelDinero(monto)}<br>Se retirará del historial del cliente y se recalcularán saldos.`,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'credito' ? 'CrÃ©dito' : 'Apartado'}<br><b>Importe:</b> ${_cancelDinero(monto)}<br>Se retirarÃ¡ del historial del cliente y se recalcularÃ¡n saldos.`,
         onConfirm: "ejecutarCancelacionAbono()"
     });
 };
@@ -4769,7 +4714,7 @@ window.abrirModalCancelarAbono = function(origen, folio, index) {
 window.ejecutarCancelacionAbono = function() {
     const ctx = window._cancelacionActual;
     if (!ctx || ctx.tipo !== 'abono') return;
-    const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de abono';
+    const motivo = document.getElementById('cancelMotivo')?.value || 'CancelaciÃ³n de abono';
     const cuentaReembolso = _cancelCuentaSeleccionada('cancelCuentaReembolso');
     const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
 
@@ -4813,22 +4758,22 @@ window.ejecutarCancelacionAbono = function() {
         monto: ctx.monto,
         cuentaId: cuentaReembolso.cuentaId,
         etiqueta: cuentaReembolso.etiqueta,
-        concepto: `Devolución por cancelación de abono ${ctx.folio}`,
+        concepto: `DevoluciÃ³n por cancelaciÃ³n de abono ${ctx.folio}`,
         referencia: `CANCEL-ABONO-${ctx.folio}`,
         clienteNombre: ctx.cliente,
-        tipo: 'Cancelación de abono',
+        tipo: 'CancelaciÃ³n de abono',
         motivo,
         emitirComprobante: emitir
     });
     _cancelRegistrarHistorial({ tipo: 'abono', origen: ctx.origen, folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, abono: ctx.abonoSnapshot });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
-    alert("Abono cancelado y saldos recalculados.");
+    alert("âœ… Abono cancelado y saldos recalculados.");
     renderCancelaciones('abono');
 };
 
 window.abrirModalCancelarApartado = function(folio) {
     const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
-    if (!ap) return alert("No se encontró el apartado.");
+    if (!ap) return alert("No se encontrÃ³ el apartado.");
     const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio || c.origenApartadoFolio === folio);
     const abonosApartadoVigentes = (ap.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
     const abonosCreditoVigentes = (cxc?.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
@@ -4840,7 +4785,7 @@ window.abrirModalCancelarApartado = function(folio) {
     _modalCancelacion({
         titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
         monto,
-        resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelará el apartado y cualquier crédito generado desde él.`,
+        resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelarÃ¡ el apartado y cualquier crÃ©dito generado desde Ã©l.`,
         onConfirm: "ejecutarCancelacionApartado()"
     });
 };
@@ -4864,7 +4809,7 @@ window.abrirModalCancelarApartado = function(folio) {
 window.ejecutarCancelacionApartado = function() {
     const ctx = window._cancelacionActual;
     if (!ctx || ctx.tipo !== 'apartado') return;
-    const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de apartado';
+    const motivo = document.getElementById('cancelMotivo')?.value || 'CancelaciÃ³n de apartado';
     const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
     const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
 
@@ -4885,7 +4830,7 @@ window.ejecutarCancelacionApartado = function() {
     StorageService.set("ventasRegistradas", ventas);
     const cuentas = StorageService.get("cuentasPorCobrar", []).map(c => (esFolioRelacionado(c.folio) || c.origenApartadoFolio === ctx.folio) ? { ...c, estado: 'Cancelado', saldoActual: 0, motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : c);
     StorageService.set("cuentasPorCobrar", cuentas);
-    const pagares = StorageService.get("pagaresSistema", []).map(p => esFolioRelacionado(p.folio) ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelación de apartado' } : p);
+    const pagares = StorageService.get("pagaresSistema", []).map(p => esFolioRelacionado(p.folio) ? { ...p, estado: 'Cancelado', nota: 'Cancelado por cancelaciÃ³n de apartado' } : p);
     StorageService.set("pagaresSistema", pagares);
     const salidas = StorageService.get("salidasPendientesVenta", []).map(s => esFolioRelacionado(s.folioVenta) ? { ...s, estatus: 'Cancelado', motivoCancelacion: motivo, fechaCancelacion: _cancelIsoAhora() } : s);
     StorageService.set("salidasPendientesVenta", salidas);
@@ -4917,16 +4862,16 @@ window.ejecutarCancelacionApartado = function() {
         monto: ctx.monto,
         cuentaId: cuenta.cuentaId,
         etiqueta: cuenta.etiqueta,
-        concepto: `Devolución por cancelación de apartado ${ctx.folio}`,
+        concepto: `DevoluciÃ³n por cancelaciÃ³n de apartado ${ctx.folio}`,
         referencia: `CANCEL-APARTADO-${ctx.folio}`,
         clienteNombre: ctx.cliente,
-        tipo: 'Cancelación de apartado',
+        tipo: 'CancelaciÃ³n de apartado',
         motivo,
         emitirComprobante: emitir
     });
     _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
-    alert("Apartado cancelado y reversado.");
+    alert("âœ… Apartado cancelado y reversado.");
     if (reversaConsignacion.reversadas || reversaConsignacion.revision) {
         alert(`Consignacion: ${reversaConsignacion.reversadas} reversa(s) aplicada(s). ${reversaConsignacion.revision ? reversaConsignacion.revision + ' queda(n) para revision porque ya hubo pago real al proveedor.' : ''}`);
     }
@@ -5003,18 +4948,18 @@ window.revisarAbonoPendiente = function(index) {
     const html = `
     <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
         <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
-            <h3 style="color:#059669; margin-top:0;">Autorizar Abono Provisional ${esApartado ? 'de Apartado' : 'de Crédito'}</h3>
-            <p style="font-size:14px; margin: 6px 0;"><strong>Folio ${esApartado ? 'Apartado' : 'Crédito'}:</strong> ${folioRef}</p>
+            <h3 style="color:#059669; margin-top:0;">ðŸ’µ Autorizar Abono Provisional ${esApartado ? 'de Apartado' : 'de CrÃ©dito'}</h3>
+            <p style="font-size:14px; margin: 6px 0;"><strong>Folio ${esApartado ? 'Apartado' : 'CrÃ©dito'}:</strong> ${folioRef}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Cliente:</strong> ${clienteNombre}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
             
-            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px; color:#475569;">Fecha de Ingreso Oficial (Auditoría):</label>
+            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px; color:#475569;">Fecha de Ingreso Oficial (AuditorÃ­a):</label>
             <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
 
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Ingresar a Caja</button>
-                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Eliminar</button>
+                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">âœ… Ingresar a Caja</button>
+                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">ðŸ—‘ï¸ Eliminar</button>
                 <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
@@ -5050,12 +4995,12 @@ window.aprobarAbonoCuarentena = function(index) {
     abonosP.splice(index, 1);
     StorageService.set("abonosPendientes", abonosP);
     document.querySelector('[data-modal=auth-abono]').remove();
-    alert("Abono aprobado y registrado en flujo de caja.");
+    alert("âœ… Abono aprobado y registrado en flujo de caja.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 };
 
 window.rechazarAbonoCuarentena = function(index) {
-    if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
+    if (!confirm("Â¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
     const resAbono = _authResolverAbonoPendiente(index);
     const abonosP = resAbono.abonosP;
     index = resAbono.index;
@@ -5066,11 +5011,11 @@ window.rechazarAbonoCuarentena = function(index) {
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 };
 
-// Exponer la función globalmente para poder llamarla desde un botón
+// Exponer la funciÃ³n globalmente para poder llamarla desde un botÃ³n
 window.abrirAuditoriaCxC = abrirAuditoriaCxC;
 
 // ============================================================
-// EXPOSICIN GLOBAL PARA QUE HTML Y EL MENENCUENTREN LAS FUNCIONES
+// EXPOSICIÃ“N GLOBAL PARA QUE HTML Y EL MENÃš ENCUENTREN LAS FUNCIONES
 // ============================================================
 window.renderCarrito = renderCarrito;
 window.agregarAlCarrito = agregarAlCarrito;

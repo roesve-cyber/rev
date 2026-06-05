@@ -93,10 +93,13 @@ function renderBadgeNotificaciones() {
     if (!badge) return;
     const notifs = recopilarNotificaciones();
     if (notifs.length === 0) {
-        badge.style.display = 'none';
+        badge.textContent = '0';
+        badge.style.setProperty('display', 'none', 'important');
+        badge.setAttribute('aria-hidden', 'true');
     } else {
-        badge.style.display = 'flex';
         badge.textContent = notifs.length > 99 ? '99+' : notifs.length;
+        badge.style.setProperty('display', 'flex', 'important');
+        badge.removeAttribute('aria-hidden');
     }
 }
 

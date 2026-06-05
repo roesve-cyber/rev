@@ -1778,8 +1778,11 @@ window.ejecutarTransferenciaCuentas = function() {
 // ⚖️ MÓDULO DE AUDITORÍA: AJUSTE DE SALDOS FÍSICOS
 // =====================================================================
 window.abrirAuditoriaSaldos = function() {
-    const usuarioActual = StorageService.get("usuarioActual") || StorageService.get("sesionActiva") || { rol: "admin" }; 
-    if (usuarioActual.rol !== "admin" && usuarioActual.rol !== "Administrador") {
+    const usuarioActual = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+    if (usuarioActual?.rol !== "admin" && usuarioActual?.rol !== "Administrador") {
+        if (window.AuditService?.log) {
+            window.AuditService.log({ accion: 'ACCESO_DENEGADO', modulo: 'Seguridad', entidad: 'Ajuste de saldos', detalle: 'Intento de abrir ajuste de saldos sin rol admin', severidad: 'alerta' });
+        }
         return alert("⛔ ACCESO DENEGADO: Solo Administradores pueden hacer ajustes de auditoría.");
     }
 
@@ -1908,6 +1911,18 @@ window.guardarAjusteAuditoria = function() {
     });
 
     StorageService.set("movimientosCaja", movimientos);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'AJUSTE_SALDO_AUDITORIA',
+            modulo: 'Finanzas',
+            entidad: 'cuenta',
+            entidadId: cuentaId,
+            detalle: motivo,
+            monto,
+            severidad: 'alerta',
+            datos: { tipo, cuentaNombre, referencia: `AUD-${idAjuste}`, fecha: fechaIso }
+        });
+    }
     
     if (modal) {
         modal.remove();
