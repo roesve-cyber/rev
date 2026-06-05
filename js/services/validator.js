@@ -81,6 +81,26 @@ window.formatearFechaCortaMX = function(fecha) {
 /**
  * Alias: igual que getFechaLocalMX — compatibilidad con inventario
  */
+window.formatearFechaVistaMX = function(fecha, opciones = {}) {
+    const d = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fecha) : (fecha instanceof Date ? fecha : new Date(fecha));
+    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : 'â€”');
+    const dias = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+    const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    return `${dias[d.getDay()]} ${String(d.getDate()).padStart(2, '0')} de ${meses[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+window.formatearFechaHoraVistaMX = function(fecha, opciones = {}) {
+    const d = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fecha) : (fecha instanceof Date ? fecha : new Date(fecha));
+    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : 'â€”');
+    const hora = new Intl.DateTimeFormat('es-MX', {
+        timeZone: 'America/Mexico_City',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+    }).format(d);
+    return `${window.formatearFechaVistaMX(d, opciones)}, ${hora}`;
+};
+
 window.obtenerFechaCDMX = function(fechaManual = null) {
     return window.getFechaLocalMX(fechaManual);
 };
@@ -169,6 +189,72 @@ window.parseFechaMX = function(fecha) {
     const d = new Date(fecha);
 
     return isNaN(d.getTime()) ? new Date() : d;
+};
+
+window.parseFechaMXOrNull = function(fecha) {
+    if (fecha === null || fecha === undefined || fecha === '') return null;
+    if (fecha instanceof Date) return isNaN(fecha.getTime()) ? null : fecha;
+    if (typeof fecha === 'number') {
+        const d = new Date(fecha);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof fecha !== 'string') {
+        const d = new Date(fecha);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    const raw = fecha.trim();
+    if (!raw || raw === 'null' || raw === 'undefined' || raw === 'Invalid Date') return null;
+
+    if (/^\d+$/.test(raw)) {
+        const d = new Date(Number(raw));
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    const isoLocal = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (isoLocal) {
+        const [, y, m, d, hh = '12', mm = '0', ss = '0'] = isoLocal;
+        const parsed = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+        return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    const mx = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])\.?\s*m\.?)?/i);
+    if (mx) {
+        let [, d, m, y, hh = '12', mm = '0', ss = '0', ampm] = mx;
+        let hora = Number(hh);
+        if (ampm) {
+            const pm = ampm.toLowerCase() === 'p';
+            if (pm && hora < 12) hora += 12;
+            if (!pm && hora === 12) hora = 0;
+        }
+        const parsed = new Date(Number(y), Number(m) - 1, Number(d), hora, Number(mm), Number(ss));
+        return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    const fallback = new Date(raw);
+    return isNaN(fallback.getTime()) ? null : fallback;
+};
+
+window.fechaClaveMX = function(fecha, fallback = '') {
+    const d = window.parseFechaMXOrNull(fecha);
+    if (!d) return fallback;
+    return [
+        d.getFullYear(),
+        String(d.getMonth() + 1).padStart(2, '0'),
+        String(d.getDate()).padStart(2, '0')
+    ].join('-');
+};
+
+window.fechaInicioDiaMX = function(fecha) {
+    const d = window.parseFechaMXOrNull(fecha);
+    if (!d) return null;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+};
+
+window.fechaFinDiaMX = function(fecha) {
+    const d = window.parseFechaMXOrNull(fecha);
+    if (!d) return null;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
 };
 
 const ValidatorService = {
