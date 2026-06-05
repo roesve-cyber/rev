@@ -131,6 +131,52 @@ function mmpImprimirBluetooth(){
     if (text.length > 7000 && !confirm('El ticket es largo y Android puede rechazar el envio por enlace. ¿Intentar de todos modos?')) return;
     window.location.href = 'mmpprinter://print?b64=' + mmpBase64Url(text);
 }
+function mmpGuardarDocumentoProfesionalImagen(){
+    mmpCargarHtml2Canvas(function(){
+        var node = document.querySelector('.mmp-professional-page') || document.body;
+        var btn = document.getElementById('mmp-prof-btn-imagen');
+        var old = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
+        html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+            var a = document.createElement('a');
+            a.download = '${file}_profesional.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        }).catch(function(err){
+            console.error(err);
+            alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
+        }).finally(function(){
+            if (btn) { btn.disabled = false; btn.textContent = old || 'Guardar imagen'; }
+        });
+    });
+}
+function mmpAbrirComprobanteProfesional(){
+    var source = document.getElementById('ticket-contenido') || document.querySelector('.ticket-contenido') || document.querySelector('.mmp-ticket-body') || document.body;
+    var clone = source.cloneNode(true);
+    clone.querySelectorAll('script,style,button,.no-print,.mmp-print-toolbar').forEach(function(el){ el.remove(); });
+    var titulo = document.title || 'Comprobante profesional';
+    var css = '<style>' +
+        '@page{size:letter portrait;margin:12mm}' +
+        'html,body{margin:0;padding:0;background:#e2e8f0;color:#0f172a;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+        '*{box-sizing:border-box}' +
+        '.mmp-prof-toolbar{position:sticky;top:0;z-index:10;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;background:#e2e8f0;border-bottom:1px solid #cbd5e1;padding:12px}' +
+        '.mmp-prof-toolbar button{border:0;border-radius:7px;padding:10px 15px;font-weight:800;cursor:pointer}' +
+        '.mmp-professional-page{max-width:8in;margin:18px auto;background:white;padding:26px 32px;border-radius:10px;box-shadow:0 14px 28px rgba(15,23,42,.12)}' +
+        '.mmp-prof-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;border-bottom:3px solid #1e40af;padding-bottom:14px;margin-bottom:18px}' +
+        '.mmp-prof-brand{font-size:20px;font-weight:900;color:#0f172a;letter-spacing:.02em}.mmp-prof-sub{font-size:12px;color:#64748b;margin-top:4px}.mmp-prof-badge{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:900;text-align:right}' +
+        '.mmp-prof-content{font-size:12px;line-height:1.45;color:#0f172a}.mmp-prof-content *{font-family:Arial,Helvetica,sans-serif!important;color:#0f172a!important;font-size:12px!important;line-height:1.42!important}.mmp-prof-content .centro{text-align:center!important}.mmp-prof-content .negrita,.mmp-prof-content b,.mmp-prof-content strong{font-weight:900!important}.mmp-prof-content table{width:100%!important;border-collapse:collapse!important;margin:10px 0!important}.mmp-prof-content th{background:#f8fafc!important;color:#475569!important;border-bottom:1px solid #cbd5e1!important;padding:7px!important}.mmp-prof-content td{border-bottom:1px solid #e2e8f0!important;padding:7px!important}.mmp-prof-content img{max-width:80px!important;max-height:70px!important;object-fit:contain!important}.mmp-prof-content .separador,.mmp-prof-content .sep{border-top:1px solid #cbd5e1!important;margin:14px 0!important}.mmp-prof-content .total-box{border:2px solid #0f172a!important;border-radius:8px!important;padding:12px!important;margin:14px 0!important;background:#f8fafc!important;text-align:center!important}' +
+        '.mmp-prof-footer{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:18px;font-size:11px;color:#64748b}.mmp-sign{border-top:1px solid #0f172a;text-align:center;padding-top:8px;color:#0f172a;font-weight:800}' +
+        '@media print{html,body{background:white}.mmp-prof-toolbar{display:none!important}.mmp-professional-page{box-shadow:none;border-radius:0;margin:0;max-width:none;padding:0}}' +
+        '</style>';
+    var script = '<script>' + mmpCargarHtml2Canvas.toString() + mmpGuardarDocumentoProfesionalImagen.toString() + '<\\/script>';
+    var win = window.open('', '_blank');
+    if (!win) { alert('Habilita las ventanas emergentes para abrir el comprobante profesional.'); return; }
+    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' profesional</title>' + css + '</head><body>' +
+        '<div class="mmp-prof-toolbar no-print"><button style="background:#1e40af;color:white" onclick="window.print()">Imprimir / PDF</button><button id="mmp-prof-btn-imagen" style="background:#047857;color:white" onclick="mmpGuardarDocumentoProfesionalImagen()">Guardar imagen</button></div>' +
+        '<main class="mmp-professional-page"><header class="mmp-prof-header"><div><div class="mmp-prof-brand">Muebleria Mi Pueblito</div><div class="mmp-prof-sub">Comprobante documental generado desde el sistema</div></div><div class="mmp-prof-badge">Formato profesional</div></header><section class="mmp-prof-content">' + clone.innerHTML + '</section><footer class="mmp-prof-footer"><div>El contenido corresponde al mismo comprobante emitido en formato ticket.</div><div class="mmp-sign">Firma / Recibe</div></footer></main>' + script + '</body></html>');
+    win.document.close();
+    win.focus();
+}
 <\/script>`;
     }
 
@@ -139,6 +185,7 @@ function mmpImprimirBluetooth(){
 <div class="mmp-print-toolbar no-print">
     <button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button>
     <button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button>
+    <button class="mmp-btn-print" onclick="mmpAbrirComprobanteProfesional()">Comprobante profesional</button>
     <button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button>
 </div>`;
     }
