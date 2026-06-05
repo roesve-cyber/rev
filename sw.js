@@ -1,5 +1,5 @@
 ﻿// sw.js — Service Worker MMP POS
-var CACHE_NAME = 'mmp-pos-v1';
+var CACHE_NAME = 'mmp-pos-v18';
 var ASSETS = [
   '/',
   '/index.html',
@@ -36,3 +36,11 @@ self.addEventListener('fetch', function(e) {
     })
   );
 });
+
+
+
+
+
+
+
+

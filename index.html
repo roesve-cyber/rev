@@ -63,6 +63,7 @@
                 <button onclick="navA('inventario')">📋 Inventario</button>
                 <button onclick="navA('configcategorias')">🏷️ Categorías</button>
                 <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
+                <button onclick="navA('kardex-inventario'); if(typeof renderKardexInventario === 'function') renderKardexInventario();">&#128202; Kardex de Inventario</button>
             </div>
 
         </div>
@@ -87,6 +88,7 @@
                 <button onclick="navA('tienda'); mostrarProductos();">🖼️ Catálogo</button>
                 <button onclick="navA('apartados'); renderApartados();">📦 Mis Apartados</button> 
                 <button onclick="navA('entregas')">🚚 Entregas</button>
+                <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
                 <button onclick="navA('cotizaciones')">📄 Cotizaciones</button>
                 <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
                 <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
@@ -103,6 +105,7 @@
         <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
         <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
+        <button onclick="navA('clientesmorosos')">&#128308; Clientes Morosos</button>
     </div>
 </div>
 
@@ -120,6 +123,7 @@
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-finanzas')">💰 FINANZAS <span>▾</span></button>
             <div id="sub-finanzas" class="submenu oculto-submenu">
                 <button onclick="navA('corte-caja');renderCorteCaja();">Corte de Caja</button>
+                <button onclick="navA('flujocaja')">&#128200; Flujo de Caja</button>
                 <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
                 <button onclick="navA('proyeccion');renderProyeccionFlujo();">📈 Proyección de Flujo</button>
             </div>
@@ -129,8 +133,10 @@
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-reportes')">📊 REPORTES <span>▾</span></button>
             <div id="sub-reportes" class="submenu oculto-submenu">
                 <button onclick="navA('reporte-ventas')">💰 Ventas</button>
+                <button onclick="navA('dashboard'); if(typeof renderDashboard === 'function') renderDashboard();">&#128200; Dashboard Principal</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
                 <button onclick="navA('reporte-flujo'); renderReporteFlujo();">💵 Flujo Real</button>
+                <button onclick="navA('reporte-rentabilidad'); if(typeof renderReporteRentabilidad === 'function') renderReporteRentabilidad();">&#128201; Rentabilidad Real</button>
                 <button onclick="navA('reportes'); renderReporteCompromisos();" style="color:#965cfa; font-weight:bold;">🔮 Flujo Proyectado</button>
                 <button onclick="navA('reportes'); renderARC_v3();" style="color:#8ff5aede; font-weight:bold; border-top:1px solid #e2e8f0; margin-top:5px; padding-top:10px;">💳 Cartera / Cobranza</button>
             </div>
@@ -162,6 +168,7 @@
             <div id="sub-config-ext" class="submenu oculto-submenu">
                 <button onclick="navA('vendedores');renderGestionVendedores();">👤 Vendedores</button>
                 <button onclick="navA('descuentos');renderGestionDescuentos();">🎯 Descuentos y Promos</button>
+                <button onclick="navA('puntos'); if(typeof renderPanelPuntos === 'function') renderPanelPuntos();">&#11088; Puntos y Fidelidad</button>
                 <button onclick="navA('configuracion-nube');">☁️ Nube y Respaldos</button>
                 <button onclick="navA('ubicaciones'); renderUbicaciones();">📍 Bodegas y Ubicaciones</button> 
                 
@@ -199,11 +206,9 @@
 <div id="autorizaciones" class="vista oculto">
     </div>
 
-<div id="apartados" class="vista oculto" style="display:none;">
-    <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">
-        <div id="contenidoApartados" style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);"></div>
-    </div>
-</div>
+<div id="apartados" class="vista oculto">
+ <div id="contenidoApartados"></div>
+ </div>
 
 <div id="conciliacion" class="vista oculto">
     <div class="vista-header" style="margin-bottom:20px;">
@@ -214,791 +219,708 @@
 </div>
 
 <div id="consulta-inventario" class="vista oculto" style="display:none;">
-    <div style="padding: 30px; max-width: 1400px; margin: 0 auto;">
-        <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);">
-            <h2 style="color: #1e40af; margin-bottom: 10px;">📊 Consulta Dinámica de Inventarios</h2>
-            <div style="display:flex; gap:16px; margin-bottom:20px; align-items:center; flex-wrap:wrap;">
-                <select id="filtroCatInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
-                <select id="filtroSubInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:180px;"></select>
-                <select id="filtroStockInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:160px;">
-                    <option value="todos">Stock: Todos</option>
-                    <option value="con">Con stock</option>
-                    <option value="sin">Sin stock</option>
-                </select>
-                <select id="filtroPedidoInv" style="padding:8px 12px; border-radius:6px; border:1px solid #d1d5db; min-width:220px;">
-                    <option value="todos">Estado pedido: Todos</option>
-                    <option value="pendiente">Pendiente de recibir</option>
-                    <option value="baja">Pendiente de baja</option>
-                    <option value="ninguno">Sin pedido pendiente</option>
-                </select>
-            </div>
-            <div id="tablaConsultaInventario"></div>
-        </div>
-    </div>
+ <div style="padding:24px;max-width:1280px;margin:0 auto;">
+ <h2 style="margin:0 0 14px;color:#0f172a;">Consulta de Inventario</h2>
+ <div id="filtrosConsultaInventario" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+ <select id="filtroCatInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></select>
+ <select id="filtroSubInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></select>
+ <select id="filtroStockInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todo stock</option><option value="con">Con stock</option><option value="sin">Sin stock</option></select>
+ <select id="filtroPedidoInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todo pedido</option><option value="pendiente">Pedido pendiente</option><option value="baja">Pendiente baja</option></select>
+ <select id="filtroUbiInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todas ubicaciones</option><option value="sin_asignar">Sin asignar</option></select>
+ </div>
+ <div id="tablaConsultaInventario"></div>
+ </div>
 </div>
-<div id="auditoria-productos" class="vista oculto" style="display: none;">
-    <div style="padding: 30px; max-width: 900px; margin: 0 auto;">
-        <div style="background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center;">
-            <h2 style="color: #1e40af; margin-bottom: 10px;">🕵️ Auditoría de Base de Datos</h2>
-            <p style="color: #64748b; margin-bottom: 35px;">Seleccione una acción para corregir la integridad de los productos o consultar historial de costos.</p>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom:30px;">
-                <button onclick="contarIdsDuplicados()" style="padding: 20px; background: #f59e42; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
-                    🔍 Analizar Duplicados
-                </button>
-                <button onclick="detectarYCorregirIdsDuplicados()" style="padding: 20px; background: #10b981; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
-                    🛠️ Reparar IDs Automáticamente
-                </button>
-                <button onclick="abrirModalCargaInicialStock()" style="padding: 20px; background: #2563eb; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
-                    ➕ Carga inicial de stock
-                </button>
-                <button onclick="abrirCotizadorAuditoria()" style="padding: 20px; background: #d97706; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; transition: 0.3s;">
-    📄 Cotización Avanzada
-</button>
-            </div>
-
-            <div style="margin: 30px 0 0 0; padding: 20px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; text-align: left;">
-                <h3 style='color:#1e40af;margin-bottom:10px;'>Historial de Costos de Producto</h3>
-                <div id="contenedorHistorialCostosAuditoria"></div>
-            </div>
-            <!-- 👇 NUEVO PANEL DE MIGRACIÓN MASIVA 👇 -->
-            <div style="margin: 40px 0 0 0; padding: 25px; background: #eff6ff; border-radius: 10px; border: 2px dashed #3b82f6; text-align: left;">
-                <h3 style="color: #1e40af; margin-bottom: 15px;">📥 Carga Inicial / Migración Histórica</h3>
-                
-                <div style="margin-bottom: 20px;">
-                    <label style="font-weight:bold; color:#1e3a8a;">💳 Deudas de Clientes (Cuentas por Cobrar)</label>
-                    <p style="font-size:12px; color:#475569; margin-bottom:8px;">Pega el JSON. El sistema generará al cliente y calculará sus pagarés automáticamente.</p>
-                    <textarea id="jsonCuentasPorCobrarPOS" placeholder="Pega aquí el arreglo JSON [ { ... } ]" style="width:100%; height:120px; padding:10px; border-radius:6px; border:1px solid #93c5fd; font-family:monospace;"></textarea>
-                    <button onclick="procesarMigracionCXC_POS()" style="margin-top:10px; padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Inyectar Clientes y Pagarés</button>
-                </div>
-
-                <div>
-                    <label style="font-weight:bold; color:#92400e;">🛒 Deudas a Proveedores (Cuentas por Pagar)</label>
-                    <textarea id="jsonCuentasPorPagarPOS" placeholder="Pega aquí el arreglo JSON [ { ... } ]" style="width:100%; height:80px; padding:10px; border-radius:6px; border:1px solid #fcd34d; font-family:monospace; margin-top:8px;"></textarea>
-                    <button onclick="procesarMigracionCXP_POS()" style="margin-top:10px; padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Inyectar Proveedores</button>
-                </div>
-                <div style="margin-top: 20px;">
-                    <label style="font-weight:bold; color:#6b21a8;">💳 Deudas de Tarjetas de Crédito (MSI)</label>
-                    <p style="font-size:12px; color:#475569; margin-bottom:8px;">Pega el JSON. El sistema creará el calendario de pagos usando el día de corte de cada banco.</p>
-                    <textarea id="jsonCuentasMSIPOS" placeholder="Pega aquí el arreglo JSON [ { ... } ]" style="width:100%; height:80px; padding:10px; border-radius:6px; border:1px solid #c4b5fd; font-family:monospace;"></textarea>
-                    <button onclick="procesarMigracionMSI_POS()" style="margin-top:10px; padding:10px 20px; background:#9333ea; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Inyectar Compras MSI</button>
-                </div>
-            </div>
-            <!-- 👆 FIN DEL PANEL DE MIGRACIÓN 👆 -->
-            <!-- Modal carga inicial stock -->
-            <div id="modalCargaInicialStock" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.35); z-index:9000; align-items:center; justify-content:center;">
-                <div style="background:white; padding:32px 28px; border-radius:12px; min-width:320px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.18); text-align:center;">
-                    <h2 style='margin-bottom:18px;color:#1e40af;font-size:20px;'>Carga inicial de stock</h2>
-                    
-                    <div style='margin-bottom:12px;'>
-                        <input type="hidden" id="cargaStockProducto" value="">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <span id="cargaStockProducto-display"
-                                  style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:15px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                                Sin seleccionar
-                            </span>
-                            <button type="button"
-                                    onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
-                                        document.getElementById('cargaStockProducto').value=p.id;
-                                        var d=document.getElementById('cargaStockProducto-display');
-                                        d.textContent=p.nombre; d.style.color='#111827';
-                                    }})"
-                                    style="padding:10px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">
-                                🔍 Buscar
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- 👇 NUEVOS CAMPOS: COLOR Y UBICACIÓN 👇 -->
-                    <div style='margin-bottom:12px; display:flex; gap:10px;'>
-                        <input type="text" id="cargaStockColor" placeholder="Color (Ej. Rojo)" style="flex:1; text-align:center; font-size:14px; padding:7px 10px; border:1px solid #d1d5db; border-radius:6px;">
-                        <select id="cargaStockUbicacion" style="flex:1; font-size:14px; padding:7px 10px; border:1px solid #d1d5db; border-radius:6px; background:#f0fdf4;"></select>
-                    </div>
-                    <!-- 👆 FIN NUEVOS CAMPOS 👆 -->
-
-                    <div style='margin-bottom:12px;'>
-                        <input type="number" id="cargaStockCantidad" placeholder="Cantidad a ingresar" min="1" style="width:100%;text-align:center;font-size:15px;padding:9px 10px; border:1px solid #d1d5db; border-radius:6px;">
-                    </div>
-                    <div style='margin-bottom:18px;'>
-                        <input type="number" id="cargaStockCosto" placeholder="Costo unitario $" min="0" step="0.01" style="width:100%;text-align:center;font-size:15px;padding:9px 10px; border:1px solid #d1d5db; border-radius:6px;">
-                    </div>
-                    
-                    <button onclick="guardarCargaInicialStock()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;margin-right:10px;">Guardar</button>
-                    <button onclick="cerrarModalCargaInicialStock()" style="padding:10px 18px;background:#aaa;color:white;border:none;border-radius:6px;font-weight:bold;font-size:15px;">Cancelar</button>
-                </div>
-            </div>
-            
-            <div style="margin-top: 30px; padding: 15px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6; text-align: left;">
-                <small style="color: #475569;">
-                    <strong>Nota:</strong> La reparación analiza cada producto y, si detecta un ID repetido, genera uno nuevo único. Esto evita errores en el carrito y en el historial de ventas.
-                </small>
-            </div>
-        </div>
-    </div>
+<div id="kardex-inventario" class="vista oculto" style="display:none;">
+ <div id="contenidoKardexInventario"></div>
+</div>
+<div id="auditoria-productos" class="vista oculto" style="display:none;">
+ <div style="padding:30px;max-width:900px;margin:0 auto;">
+ <div style="background:white;padding:40px;border-radius:15px;box-shadow:0 10px 25px rgba(0,0,0,0.1);text-align:center;">
+ <h2 style="color:#1e40af;margin-bottom:10px;">Auditoria de Base de Datos</h2>
+ <p style="color:#64748b;margin-bottom:35px;">Herramientas de integridad de productos e historial de costos.</p>
+ <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:20px;margin-bottom:30px;">
+ <button onclick="contarIdsDuplicados()" style="padding:20px;background:#f59e42;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">Analizar Duplicados</button>
+ <button onclick="detectarYCorregirIdsDuplicados()" style="padding:20px;background:#10b981;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">Reparar IDs Automaticamente</button>
+ <button onclick="abrirCotizadorAuditoria()" style="padding:20px;background:#d97706;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">Cotizacion Avanzada</button>
+ </div>
+ <div style="margin:30px 0 0;padding:20px;background:#f8fafc;border-radius:8px;border-left:4px solid #3b82f6;text-align:left;">
+ <h3 style="color:#1e40af;margin-bottom:10px;">Historial de Costos de Producto</h3>
+ <div id="contenedorHistorialCostosAuditoria"></div>
+ </div>
+ <div style="margin-top:30px;padding:15px;background:#f8fafc;border-radius:8px;border-left:4px solid #3b82f6;text-align:left;">
+ <small style="color:#475569;"><strong>Nota:</strong> La reparacion analiza cada producto y, si detecta un ID repetido, genera uno nuevo unico.</small>
+ </div>
+ </div>
+ </div>
 </div>
     <!-- INICIO -->
     <div id="inicio" class="vista">
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; text-align: center;">
-            <img src="img/Logo.svg" style="width: 200px; opacity: 0.1; filter: grayscale(100%);" onerror="this.style.display='none'">
-            <h2 style="color: #bdc3c7; font-weight: 300; margin-top: 20px;">ADMINISTRACIÓN</h2>
-        </div>
-    </div>
+ <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; text-align: center;">
+ <img src="img/Logo.svg" style="width: 200px; opacity: 0.1; filter: grayscale(100%);" onerror="this.style.display='none'">
+ <h2 style="color: #bdc3c7; font-weight: 300; margin-top: 20px;">ADMINISTRACION</h2>
+ </div>
+ </div>
 
     <!-- DASHBOARD -->
     <div id="dashboard" class="vista oculto">
-        <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <div>
-                <h2>📊 Dashboard</h2>
-                <p style="color:#718096; margin:0;">Resumen general del negocio</p>
-            </div>
-            <button onclick="renderDashboard()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔄 Actualizar</button>
-        </div>
-        <div id="dashboardContenido"></div>
-    </div>
+ <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+ <div>
+ <h2>Dashboard</h2>
+ <p style="color:#718096; margin:0;">Resumen general del negocio</p>
+ </div>
+ <button onclick="renderDashboard()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Actualizar</button>
+ </div>
+ <div id="dashboardContenido"></div>
+ </div>
 
     <!-- VISOR MAESTRO -->
     <div id="productos-visor" class="vista oculto">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2>🔍 Visor Maestro de Producto</h2>
-            <button onclick="navA('inventario')" style="padding:8px 16px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">← Volver</button>
-        </div>
-        <div id="detalle-producto-maestro">
-            <p style="color:gray; text-align:center; padding:40px;">Selecciona un producto desde el inventario.</p>
-        </div>
-    </div>
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+ <h2>Visor Maestro de Producto</h2>
+ <button onclick="volverDesdeVisorProducto()" style="padding:8px 16px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Volver</button>
+ </div>
+ <div id="detalle-producto-maestro">
+ <p style="color:gray; text-align:center; padding:40px;">Selecciona un producto desde el inventario.</p>
+ </div>
+ </div>
 
     <!-- CUENTAS POR COBRAR (MEJORADA) -->
     <div id="cuentasxcobrar" class="vista oculto">
-        <div class="vista-header">
-            <h2>💳 Cuentas por Cobrar (Pagarés y Seguimiento)</h2>
-            <p>Control de ventas a crédito, pagarés, atrasos y abonos.</p>
-        </div>
-        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" id="filtroClienteCobranza" placeholder="Buscar cliente..." 
-                   onkeyup="filtrarCuentasCobranza()" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <select id="filtroEstadoCobranza" onchange="filtrarCuentasCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
-                <option value="">-- Todos los estados --</option>
-                <option value="Al corriente">✅ Al corriente</option>
-                <option value="Atrasado">⚠️ Atrasado</option>
-                <option value="Crítico">🔴 Crítico</option>
-                <option value="Promesa">📝 Promesa</option>
-            </select>
-            <button onclick="renderCuentasXCobrar()" style="padding:10px 20px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
-        </div>
-        <div id="tablaCuentasXCobrar"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Cuentas por Cobrar (Pagares y Seguimiento)</h2>
+ <p>Control de ventas a credito, pagares, atrasos y abonos.</p>
+ </div>
+ <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="filtroClienteCobranza" placeholder="Buscar cliente..." 
+ onkeyup="filtrarCuentasCobranza()" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <select id="filtroEstadoCobranza" onchange="filtrarCuentasCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <option value="">-- Todos los estados --</option>
+ <option value="Al corriente">Al corriente</option>
+ <option value="Atrasado">Atrasado</option>
+ <option value="Critico">Critico</option>
+ <option value="Promesa">Promesa</option>
+ </select>
+ <button onclick="renderCuentasXCobrar()" style="padding:10px 20px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ <div id="tablaCuentasXCobrar"></div>
+ </div>
 
     <div id="abonosdirectos" class="vista oculto">
-        <div class="vista-header">
-            <h2>💵 Abonos Directos</h2>
-            <p>Aplica abonos sin pasar por autorizacion y emite el ticket al momento.</p>
-        </div>
-        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" id="filtroClienteAbonoDirecto" placeholder="Buscar cliente o folio..."
-                   onkeyup="renderAbonosDirectos()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <button onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
-        </div>
-        <div id="tablaAbonosDirectos"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Abonos Directos</h2>
+ <p>Aplica abonos sin pasar por autorizacion y emite el ticket al momento.</p>
+ </div>
+ <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="filtroClienteAbonoDirecto" placeholder="Buscar cliente o folio..."
+ onkeyup="renderAbonosDirectos()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <button onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ <div id="tablaAbonosDirectos"></div>
+ </div>
 
     <div id="visor-creditos" class="vista oculto">
-        <div class="vista-header">
-            <h2>📋 Visor de Créditos</h2>
-            <p>Consulta ventas a crédito y su estado, sin captura de abonos.</p>
-        </div>
-        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" id="filtroVisorCreditos" placeholder="Buscar cliente o folio..."
-                   onkeyup="renderVisorCreditosCobranza()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <select id="filtroEstadoVisorCreditos" onchange="renderVisorCreditosCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
-                <option value="">Todos los estados</option>
-                <option value="Al corriente">Al corriente</option>
-                <option value="Atrasado">Atrasado</option>
-                <option value="Crítico">Crítico</option>
-                <option value="Promesa">Promesa</option>
-                <option value="Saldado">Saldado</option>
-            </select>
-            <button onclick="renderVisorCreditosCobranza()" style="padding:10px 20px; background:#1e40af; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
-        </div>
-        <div id="tablaVisorCreditos"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Visor de Creditos</h2>
+ <p>Consulta ventas a credito y su estado, sin captura de abonos.</p>
+ </div>
+ <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="filtroVisorCreditos" placeholder="Buscar cliente o folio..."
+ onkeyup="renderVisorCreditosCobranza()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <select id="filtroEstadoVisorCreditos" onchange="renderVisorCreditosCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <option value="">Todos los estados</option>
+ <option value="Al corriente">Al corriente</option>
+ <option value="Atrasado">Atrasado</option>
+ <option value="Critico">Critico</option>
+ <option value="Promesa">Promesa</option>
+ <option value="Saldado">Saldado</option>
+ </select>
+ <button onclick="renderVisorCreditosCobranza()" style="padding:10px 20px; background:#1e40af; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ <div id="tablaVisorCreditos"></div>
+ </div>
 
     <!-- LISTA DE PRECIOS -->
     <div id="listaprecios" class="vista oculto">
-        <div id="listaPrecios" style="background: white; min-height: 100vh;">
-        <!-- Se llenará con JavaScript -->
-        </div>
-    </div>
+ <div id="listaPrecios" style="background: white; min-height: 100vh;">
+ <!-- Se llenara con JavaScript -->
+ </div>
+ </div>
 
 
     <!-- COBRANZA ESPERADA -->
     <div id="cobranzaesperada" class="vista oculto">
-        <div class="vista-header">
-            <h2>📈 Cobranza Esperada - Proyección de Pagos</h2>
-            <p>Escalera mensual de pagarés vencidos y proyectados.</p>
-        </div>
-        <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px;">
-            <button onclick="renderCobranzaEsperada()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
-            <button onclick="exportarCobranzaEsperada()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">📥 Exportar CSV</button>
-        </div>
-        <div id="escaleraCobranza"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Cobranza Esperada - Proyeccion de Pagos</h2>
+ <p>Escalera mensual de pagares vencidos y proyectados.</p>
+ </div>
+ <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px;">
+ <button onclick="renderCobranzaEsperada()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ <button onclick="exportarCobranzaEsperada()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">Exportar CSV</button>
+ </div>
+ <div id="escaleraCobranza"></div>
+ </div>
 
     <!-- FLUJO DE CAJA -->
     <div id="flujocaja" class="vista oculto">
-        <div class="vista-header">
-            <h2>💰 Flujo de Caja - Integración Completa</h2>
-            <p>Ingresos (ventas y abonos), egresos (compras, proveedores, MSI) y saldo proyectado.</p>
-        </div>
-        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:20px;">
-            <div style="background:#d1fae5; padding:20px; border-radius:10px; text-align:center;">
-                <small style="color:#065f46;">INGRESOS CONTADO</small><br>
-                <strong style="font-size:24px; color:#059669;" id="totalIngresoContado">$0.00</strong>
-            </div>
-            <div style="background:#bfdbfe; padding:20px; border-radius:10px; text-align:center;">
-                <small style="color:#1e3a8a;">ABONOS ESPERADOS</small><br>
-                <strong style="font-size:24px; color:#1d4ed8;" id="totalAbonos">$0.00</strong>
-            </div>
-            <div style="background:#fee2e2; padding:20px; border-radius:10px; text-align:center;">
-                <small style="color:#7f1d1d;">EGRESOS A PROVEEDORES</small><br>
-                <strong style="font-size:24px; color:#dc2626;" id="totalEgresosProveedores">$0.00</strong>
-            </div>
-            <div style="background:#fef3c7; padding:20px; border-radius:10px; text-align:center;">
-                <small style="color:#92400e;">DEUDA MSI PENDIENTE</small><br>
-                <strong style="font-size:24px; color:#d97706;" id="totalDeudaMSI">$0.00</strong>
-            </div>
-        </div>
-        <div id="tablasFlujoCaja"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Flujo de Caja - Integracion Completa</h2>
+ <p>Ingresos (ventas y abonos), egresos (compras, proveedores, MSI) y saldo proyectado.</p>
+ </div>
+ <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:20px;">
+ <div style="background:#d1fae5; padding:20px; border-radius:10px; text-align:center;">
+ <small style="color:#065f46;">INGRESOS CONTADO</small><br>
+ <strong style="font-size:24px; color:#059669;" id="totalIngresoContado">$0.00</strong>
+ </div>
+ <div style="background:#bfdbfe; padding:20px; border-radius:10px; text-align:center;">
+ <small style="color:#1e3a8a;">ABONOS ESPERADOS</small><br>
+ <strong style="font-size:24px; color:#1d4ed8;" id="totalAbonos">$0.00</strong>
+ </div>
+ <div style="background:#fee2e2; padding:20px; border-radius:10px; text-align:center;">
+ <small style="color:#7f1d1d;">EGRESOS A PROVEEDORES</small><br>
+ <strong style="font-size:24px; color:#dc2626;" id="totalEgresosProveedores">$0.00</strong>
+ </div>
+ <div style="background:#fef3c7; padding:20px; border-radius:10px; text-align:center;">
+ <small style="color:#92400e;">DEUDA MSI PENDIENTE</small><br>
+ <strong style="font-size:24px; color:#d97706;" id="totalDeudaMSI">$0.00</strong>
+ </div>
+ </div>
+ <div id="tablasFlujoCaja"></div>
+ </div>
 
     <!-- CONTENEDOR DE REPORTES EJECUTIVOS -->
     <div id="reportes" class="vista oculto">
-        <div id="contenidoReporte"></div>
-    </div>
+ <div id="contenidoReporte"></div>
+ </div>
 
     <!-- CATEGORÍAS -->
     <div id="configcategorias" class="vista oculto">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px;">
-            <h2 style="margin: 0; font-size: 20px;">🏷️ Gestión de Categorías</h2>
-            <button onclick="nuevaCategoria()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;">+ Añadir Categoría</button>
-        </div>
-        <div id="listaCategoriasCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; padding: 0;"></div>
-    </div>
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px;">
+ <h2 style="margin: 0; font-size: 20px;">Gestion de Categorias</h2>
+ <button onclick="nuevaCategoria()" style="padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;">+ Anadir Categoria</button>
+ </div>
+ <div id="listaCategoriasCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; padding: 0;"></div>
+ </div>
     <!-- REQUISICIONES -->
     <div id="requisiciones" class="vista oculto">
-        <div id="contenidoRequisiciones"></div>
-    </div>
+ <div id="contenidoRequisiciones"></div>
+ </div>
     <!-- COMPRAS -->
     <div id="compras" class="vista oculto">
-        <div class="vista-header">
-            <h2>🛒 Centro de Compras</h2>
-            <p>Registra facturas o notas de mercancía entrante.</p>
-        </div>
-        
-        <div style="padding: 40px; text-align: center; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 20px; max-width: 800px; margin-left: auto; margin-right: auto;">
-            <div style="font-size: 48px; margin-bottom: 15px;">📦</div>
-            <h3 style="color: #1e40af; margin-bottom: 10px; font-size: 22px;">Registro Multi-Artículo</h3>
-            <p style="color: #64748b; margin-bottom: 35px; font-size: 15px; line-height: 1.5;">
-                Agrega todos los productos de tu factura en un solo paso. <br>
-                Podrás decidir si la mercancía entra al inventario ahora mismo o si la envías a Recepciones Pendientes.
-            </p>
-            
-            <button onclick="abrirNuevaCompraDirectaBlanco()" 
-                    style="padding: 16px 36px; background: #1e40af; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(30,64,175,0.3);">
-                ➕ Iniciar Nuevo Registro de Compra
-            </button>
-        </div>
-    </div>
+ <div class="vista-header">
+ <h2>Centro de Compras</h2>
+ <p>Registra facturas o notas de mercancia entrante.</p>
+ </div>
+ 
+ <div style="padding: 40px; text-align: center; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-top: 20px; max-width: 800px; margin-left: auto; margin-right: auto;">
+ <div style="font-size: 48px; margin-bottom: 15px;"></div>
+ <h3 style="color: #1e40af; margin-bottom: 10px; font-size: 22px;">Registro Multi-Articulo</h3>
+ <p style="color: #64748b; margin-bottom: 35px; font-size: 15px; line-height: 1.5;">
+ Agrega todos los productos de tu factura en un solo paso. <br>
+ Podras decidir si la mercancia entra al inventario ahora mismo o si la envias a Recepciones Pendientes.
+ </p>
+ 
+ <button onclick="abrirNuevaCompraDirectaBlanco()" 
+ style="padding: 16px 36px; background: #1e40af; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(30,64,175,0.3);">
+ Iniciar Nuevo Registro de Compra
+ </button>
+ </div>
+ </div>
 
     <!-- TIENDA / CATÁLOGO -->
     <div id="tienda" class="vista oculto">
-        <span style="font-size:14px; font-weight:bold; color:#2c3e50; margin:0 0 10px 0; padding:6px 12px; background:#f1f5f9; border-radius:20px; display:inline-block;">🖼️ Catálogo de Productos</span>
-        <div id="gridProductos"></div>
-    </div>
+ <span style="font-size:14px; font-weight:bold; color:#2c3e50; margin:0 0 10px 0; padding:6px 12px; background:#f1f5f9; border-radius:20px; display:inline-block;">Catalogo de Productos</span>
+ <div id="gridProductos"></div>
+ </div>
 
     <!-- RECEPCIÓN -->
     <div id="recepcion" class="vista oculto">
-        <h2>🚚 Recepciones Pendientes</h2>
-        <div id="listaRecepcionesPendientes" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
-    </div>
+ <h2>Recepciones Pendientes</h2>
+ <div id="listaRecepcionesPendientes" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
+ </div>
 
     <!-- PROVEEDORES -->
     <div id="proveedores" class="vista oculto">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2>🏢 Base de Proveedores</h2>
-            <button onclick="renderProveedores()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
-        </div>
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" id="provNombre" placeholder="Nombre de la Empresa" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <input type="text" id="provContacto" placeholder="Contacto" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <button onclick="guardarProveedor()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Añadir</button>
-        </div>
-        <div id="tablaProveedores"></div>
-    </div>
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+ <h2>Base de Proveedores</h2>
+ <button onclick="renderProveedores()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="provNombre" placeholder="Nombre de la Empresa" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <input type="text" id="provContacto" placeholder="Contacto" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <button onclick="guardarProveedor()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Anadir</button>
+ </div>
+ <div id="tablaProveedores"></div>
+ </div>
 
     <!-- CLIENTES (SIMPLIFICADO) -->
     <div id="clientes" class="vista oculto">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2>👥 Base de Datos de Clientes</h2>
-            <button onclick="renderClientes()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Refrescar</button>
-        </div>
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" id="clienteNombre" placeholder="Nombre Completo" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <input type="text" id="clienteDireccion" placeholder="Dirección" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <input type="text" id="clienteTelefono" placeholder="Teléfono" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <input type="text" id="clienteReferencia" placeholder="Referencia" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <button onclick="guardarCliente()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Añadir</button>
-        </div>
-        <div id="listaClientes" style="margin-top: 10px;"></div>
-    </div>
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+ <h2>Base de Datos de Clientes</h2>
+ <button onclick="renderClientes()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Refrescar</button>
+ </div>
+ <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="clienteNombre" placeholder="Nombre Completo" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <input type="text" id="clienteDireccion" placeholder="Direccion" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <input type="text" id="clienteTelefono" placeholder="Telefono" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <input type="text" id="clienteReferencia" placeholder="Referencia" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <button onclick="guardarCliente()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Anadir</button>
+ </div>
+ <div id="listaClientes" style="margin-top: 10px;"></div>
+ </div>
 
     <!-- CUENTAS POR PAGAR -->
     <div id="cuentasporpagar" class="vista oculto">
-        <h2>💳 Cuentas por Pagar (Deudas a Proveedores)</h2>
-        <div id="listaCuentasPorPagar" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
-    </div>
+ <h2>Cuentas por Pagar (Deudas a Proveedores)</h2>
+ <div id="listaCuentasPorPagar" style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
+ </div>
 
     <!-- GESTOR DE CONSIGNACIONES -->
     <div id="consignaciones" class="vista oculto">
-        <div id="contenidoGestorConsignaciones"></div>
-    </div>
+ <div id="contenidoGestorConsignaciones"></div>
+ </div>
+<div id="gestion-datos-cliente" class="vista oculto">
+ <div id="contenidoGestionDatosCliente"></div>
+ </div>
 
     <!-- INVENTARIO -->
     <div id="inventario" class="vista oculto">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h2>📦 Control de Inventario</h2>
-            <div style="display:flex; gap:8px;">
-                <button onclick="abrirModalTransferenciaInv()" style="background:#3b82f6; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🚚 Transferir</button>
-                <button onclick="abrirModalAjusteInv()" style="background:#f59e0b; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⚖️ Ajuste</button>
-                <button onclick="abrirProductoForm()" style="background:#27ae60; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Nuevo</button>
-                <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄</button>
-            </div>
-        </div>
-        <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
-            <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Categoría:</label><select id="filtroCategoria" onchange="actualizarSubcategoriasFiltro('filtroCategoria', 'filtroSubcategoria')" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
-            <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Subcategoría:</label><select id="filtroSubcategoria" onchange="aplicarFiltros()" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
-            <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar..." style="padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
-            <button onclick="limpiarFiltros()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Limpiar</button>
-        </div>
-        <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px;"></div>
-    </div>
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+ <h2>Control de Inventario</h2>
+ <div style="display:flex; gap:8px;">
+ <button onclick="abrirModalTransferenciaInv()" style="background:#3b82f6; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Transferir</button>
+ <button onclick="abrirModalAjusteInv()" style="background:#f59e0b; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Ajuste</button>
+ <button onclick="abrirProductoForm()" style="background:#27ae60; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Nuevo</button>
+ <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ </div>
+ <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+ <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Categoria:</label><select id="filtroCategoria" onchange="actualizarSubcategoriasFiltro('filtroCategoria', 'filtroSubcategoria')" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
+ <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Subcategoria:</label><select id="filtroSubcategoria" onchange="aplicarFiltros()" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
+ <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar..." style="padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+ <button onclick="limpiarFiltros()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Limpiar</button>
+ </div>
+ <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px;"></div>
+ </div>
 
     <!-- BANCOS -->
     <div id="bancos" class="vista oculto">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
-            <h2>⚙️ Gestión de Cuentas y Tarjetas</h2>
-        </div>
-        <div id="tablaBancosConfig"></div>
-    </div>
+ <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+ <h2>Gestion de Cuentas y Tarjetas</h2>
+ </div>
+ <div id="tablaBancosConfig"></div>
+ </div>
 
     <!-- CUENTAS BANCARIAS -->
     <div id="cuentas-bancarias" class="vista oculto">
-    <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-        <div>
-            <h2>🏦 Mis Cuentas</h2>
-            <p style="color:#718096; margin:0;">Saldo actual por cuenta basado en movimientos registrados.</p>
-        </div>
-        <button onclick="abrirModalTransferencia()" style="padding:10px 18px; background:#6366f1; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(99,102,241,0.3);">📲 Transferir entre Cuentas</button>
-    </div>
-    <div id="tablaCuentasBancarias"></div>
+ <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+ <div>
+ <h2>Mis Cuentas</h2>
+ <p style="color:#718096; margin:0;">Saldo actual por cuenta basado en movimientos registrados.</p>
+ </div>
+ <button onclick="abrirModalTransferencia()" style="padding:10px 18px; background:#6366f1; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(99,102,241,0.3);">Transferir entre Cuentas</button>
+ </div>
+ <div id="tablaCuentasBancarias"></div>
 </div>
 
     <!-- FLUJO MSI -->
     <div id="flujo-msi" class="vista oculto">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
-            <h2 style="color:#2c3e50; margin:0;">📊 Flujo de Efectivo - MSI</h2>
-            <button onclick="renderDashboardMSI('Todos')" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Mostrar Todos</button>
-        </div>
-        <div class="grid-msi">
-            <div class="panel-bancos-msi">
-                <h3 style="margin-top:0; color:#4a5568; padding:15px; border-bottom:1px solid #eee;">Deuda por Banco</h3>
-                <div id="listaBancosMSI" style="padding:15px;"></div>
-            </div>
-            <div class="panel-meses-msi">
-                <h3 id="tituloMesesMSI" style="margin-top:0; color:#4a5568; padding:15px; border-bottom:1px solid #eee;">Proyección de Pagos</h3>
-                <div id="listaMesesMSI" style="padding:15px;"></div>
-            </div>
-        </div>
-        <div style="margin-top:20px;">
-            <h3 style="color:#4a5568;">📋 Seguimiento de Compras MSI</h3>
-            <div id="listaCuentasMSI"></div>
-        </div>
-    </div>
+ <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+ <h2 style="color:#2c3e50; margin:0;">Flujo de Efectivo - MSI</h2>
+ <button onclick="renderDashboardMSI('Todos')" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Mostrar Todos</button>
+ </div>
+ <div class="grid-msi">
+ <div class="panel-bancos-msi">
+ <h3 style="margin-top:0; color:#4a5568; padding:15px; border-bottom:1px solid #eee;">Deuda por Banco</h3>
+ <div id="listaBancosMSI" style="padding:15px;"></div>
+ </div>
+ <div class="panel-meses-msi">
+ <h3 id="tituloMesesMSI" style="margin-top:0; color:#4a5568; padding:15px; border-bottom:1px solid #eee;">Proyeccion de Pagos</h3>
+ <div id="listaMesesMSI" style="padding:15px;"></div>
+ </div>
+ </div>
+ <div style="margin-top:20px;">
+ <h3 style="color:#4a5568;">Seguimiento de Compras MSI</h3>
+ <div id="listaCuentasMSI"></div>
+ </div>
+ </div>
 
     <!-- SELECCIONAR CLIENTE -->
     <div id="seleccionarcliente" class="vista oculto">
-        <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:20px;">
-            <div id="resumenVentaCliente"></div>
-            <div style="background:white; padding:20px; border-radius:10px;">
-                <h3>👤 Seleccionar Cliente</h3>
-                <input type="text" id="buscarCliente" placeholder="🔍 Buscar cliente..."
-                    oninput="filtrarClientes()"
-                    style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; margin-bottom:10px;">
-                <div id="listaClientesCards"
-                     style="max-height:280px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;background:white;"></div>
-                <button onclick="abrirModalCliente()" style="margin-top:10px; width:100%;">
-                    ➕ Nuevo Cliente
-                </button>
-                <div id="infoCliente" style="margin-top:15px;"></div>
-                <button onclick="confirmarVentaFinal()"
-                    style="margin-top:15px; width:100%; background:#27ae60; color:white; padding:12px;">
-                    ✅ Confirmar Venta
-                </button>
-            </div>
-        </div>
-    </div>
+ <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:20px;">
+ <div id="resumenVentaCliente"></div>
+ <div style="background:white; padding:20px; border-radius:10px;">
+ <h3>Seleccionar Cliente</h3>
+ <input type="text" id="buscarCliente" placeholder="Buscar cliente..."
+ oninput="filtrarClientes()"
+ style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; margin-bottom:10px;">
+ <div id="listaClientesCards"
+ style="max-height:280px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;background:white;"></div>
+ <button onclick="abrirModalCliente()" style="margin-top:10px; width:100%;">
+ Nuevo Cliente
+ </button>
+ <div id="infoCliente" style="margin-top:15px;"></div>
+ <button onclick="confirmarVentaFinal()"
+ style="margin-top:15px; width:100%; background:#27ae60; color:white; padding:12px;">
+ Confirmar Venta
+ </button>
+ </div>
+ </div>
+ </div>
     <!-- GESTIÓN DE UBICACIONES -->
     <div id="ubicaciones" class="vista oculto">
-        <div class="vista-header">
-            <h2>📍 Bodegas y Ubicaciones</h2>
-            <p>Define los lugares físicos donde guardas tu mercancía (Ej. Piso de Ventas, Bodega 1).</p>
-        </div>
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
-            <input type="text" id="nuevaUbicacionNombre" placeholder="Escribe la nueva ubicación..." style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
-            <button onclick="guardarUbicacion()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">➕ Añadir Ubicación</button>
-        </div>
-        <div id="tablaUbicaciones"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Bodegas y Ubicaciones</h2>
+ <p>Define los lugares fisicos donde guardas tu mercancia (Ej. Piso de Ventas, Bodega 1).</p>
+ </div>
+ <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="nuevaUbicacionNombre" placeholder="Escribe la nueva ubicacion..." style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <button onclick="guardarUbicacion()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Anadir Ubicacion</button>
+ </div>
+ <div id="tablaUbicaciones"></div>
+ </div>
     <!-- CONFIGURACIÓN -->
     <div id="configuracion" class="vista oculto">
-        <div class="vista-header" style="margin-bottom:20px;">
-            <h2>⚙️ Configuración del Sistema</h2>
-            <p style="color:#718096; margin:0;">Ajustes globales de crédito y reglas de la tienda.</p>
-        </div>
-        
-        <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">
-                <h3 style="color:#1e40af; margin:0;">💳 Regla Global de Crédito</h3>
-                <button onclick="renderConfiguracion()" style="background:none; border:none; cursor:pointer; font-size:18px;">🔄</button>
-            </div>
-            <p style="font-size:13px; color:#6b7280; margin-bottom:20px;">Define los plazos y tasas de interés que aplicarán por defecto a <b>todos los productos</b> (a menos que el producto tenga una regla especial).</p>
-            
-            <div id="listaPlazosGlobales" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; min-height:40px; padding:10px; background:#f8fafc; border-radius:8px; border:1px dashed #cbd5e1;">
-                <!-- Aquí se inyectan los plazos dinámicos -->
-            </div>
-            
-            <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:15px; align-items:end; background:#eff6ff; padding:20px; border-radius:8px; border:1px solid #bfdbfe;">
-                <div class="campo">
-                    <label style="color:#1e40af;">AGREGAR PLAZO (MESES)</label>
-                    <input type="number" id="cfgMesesGlobal" min="1" placeholder="Ej: 12" style="border-color:#93c5fd;">
-                </div>
-                <div class="campo">
-                    <label style="color:#1e40af;">TASA MENSUAL (%)</label>
-                    <input type="number" id="cfgTasaGlobal" min="0" step="0.1" placeholder="Ej: 3.5" style="border-color:#93c5fd;">
-                </div>
-                <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">➕ Agregar Plazo</button>
-            </div>
-        </div>
-    </div>
+ <div class="vista-header" style="margin-bottom:20px;">
+ <h2>Configuracion del Sistema</h2>
+ <p style="color:#718096; margin:0;">Ajustes globales de credito y reglas de la tienda.</p>
+ </div>
+ 
+ <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px;">
+ <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">
+ <h3 style="color:#1e40af; margin:0;">Regla Global de Credito</h3>
+ <button onclick="renderConfiguracion()" style="background:none; border:none; cursor:pointer; font-size:18px;">Actualizar</button>
+ </div>
+ <p style="font-size:13px; color:#6b7280; margin-bottom:20px;">Define los plazos y tasas de interes que aplicaran por defecto a <b>todos los productos</b> (a menos que el producto tenga una regla especial).</p>
+ 
+ <div id="listaPlazosGlobales" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; min-height:40px; padding:10px; background:#f8fafc; border-radius:8px; border:1px dashed #cbd5e1;">
+ <!-- Aqui se inyectan los plazos dinamicos -->
+ </div>
+ 
+ <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:15px; align-items:end; background:#eff6ff; padding:20px; border-radius:8px; border:1px solid #bfdbfe;">
+ <div class="campo">
+ <label style="color:#1e40af;">AGREGAR PLAZO (MESES)</label>
+ <input type="number" id="cfgMesesGlobal" min="1" placeholder="Ej: 12" style="border-color:#93c5fd;">
+ </div>
+ <div class="campo">
+ <label style="color:#1e40af;">TASA MENSUAL (%)</label>
+ <input type="number" id="cfgTasaGlobal" min="0" step="0.1" placeholder="Ej: 3.5" style="border-color:#93c5fd;">
+ </div>
+ <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Agregar Plazo</button>
+ </div>
+ </div>
+ </div>
 
     <!-- CARRITO -->
     <div id="carrito" class="vista oculto"></div>
 
     <!-- ENTREGAS -->
     <div id="entregas" class="vista oculto">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
-            <h2 style="margin:0;">🚚 Entrega de Mercancía</h2>
-            <button type="button" onclick="renderEntregas()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">🔄 Actualizar</button>
-        </div>
-        <p style="color:#4a5568; margin-bottom:20px;">Ventas con salida de almacén pendiente.</p>
-        <div id="panel-entregas-pendientes"></div>
-    </div>
+ <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+ <h2 style="margin:0;">Entrega de Mercancia</h2>
+ <button type="button" onclick="renderEntregas()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ <p style="color:#4a5568; margin-bottom:20px;">Ventas con salida de almacen pendiente.</p>
+ <div id="panel-entregas-pendientes"></div>
+ </div>
 
     <!-- REPORTE VENTAS -->
     <div id="reporte-ventas" class="vista oculto">
-        <div id="reporteVentasApp"></div>
-    </div>
+ <div id="reporteVentasApp"></div>
+ </div>
 
     <!-- REPORTE COMPRAS -->
     <div id="reporte-compras" class="vista oculto">
-        <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <div>
-                <h2>🛒 Reporte de Compras</h2>
-                <p style="color:#718096; margin:0;">Consulta y análisis de compras a proveedores</p>
-            </div>
-            <div style="display:flex; gap:10px;">
-                <button onclick="exportarReporteCompras()" style="padding:10px 18px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📥 Exportar CSV</button>
-                <button onclick="renderReporteCompras()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔄 Actualizar</button>
-            </div>
-        </div>
-        <!-- Filtros -->
-        <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:20px; display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end;">
-            <div><label style="font-size:11px; font-weight:bold; color:#555;">DESDE</label><input type="date" id="rcFechaDesde" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
-            <div><label style="font-size:11px; font-weight:bold; color:#555;">HASTA</label><input type="date" id="rcFechaHasta" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
-            <button onclick="renderReporteCompras()" style="padding:9px 18px; background:#2c3e50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔍 Filtrar</button>
-        </div>
-        <!-- KPIs -->
-        <div id="rcKpis" style="display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-bottom:20px;"></div>
-        <!-- Tabla -->
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-            <h3 style="margin:0 0 15px 0; color:#2c3e50;">📋 Detalle de Compras</h3>
-            <div id="rcTabla" style="overflow-x:auto;"></div>
-        </div>
-    </div>
+ <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+ <div>
+ <h2>Reporte de Compras</h2>
+ <p style="color:#718096; margin:0;">Consulta y analisis de compras a proveedores</p>
+ </div>
+ <div style="display:flex; gap:10px;">
+ <button onclick="exportarReporteCompras()" style="padding:10px 18px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Exportar CSV</button>
+ <button onclick="renderReporteCompras()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Actualizar</button>
+ </div>
+ </div>
+ <!-- Filtros -->
+ <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:20px; display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end;">
+ <div><label style="font-size:11px; font-weight:bold; color:#555;">DESDE</label><input type="date" id="rcFechaDesde" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+ <div><label style="font-size:11px; font-weight:bold; color:#555;">HASTA</label><input type="date" id="rcFechaHasta" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
+ <button onclick="renderReporteCompras()" style="padding:9px 18px; background:#2c3e50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Filtrar</button>
+ </div>
+ <!-- KPIs -->
+ <div id="rcKpis" style="display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-bottom:20px;"></div>
+ <!-- Tabla -->
+ <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+ <h3 style="margin:0 0 15px 0; color:#2c3e50;">Detalle de Compras</h3>
+ <div id="rcTabla" style="overflow-x:auto;"></div>
+ </div>
+ </div>
 
     <div id="reporte-flujo" class="vista oculto"></div>
 
     <div id="reporte-rentabilidad" class="vista oculto">
-        <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:28px;max-width:900px;margin:0 auto;">
-            <h2 style="margin:0 0 8px;color:#0f172a;">Rentabilidad integrada</h2>
-            <p style="color:#64748b;margin:0 0 18px;">La utilidad estimada ya vive en Reporte de Ventas. Para revisar dinero real, usa Flujo Real.</p>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                <button onclick="navA('reporte-ventas')" style="padding:10px 16px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Ir a Ventas</button>
-                <button onclick="navA('reporte-flujo');renderReporteFlujo();" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Ir a Flujo Real</button>
-            </div>
-        </div>
-    </div>
+ <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:28px;max-width:900px;margin:0 auto;">
+ <h2 style="margin:0 0 8px;color:#0f172a;">Rentabilidad integrada</h2>
+ <p style="color:#64748b;margin:0 0 18px;">La utilidad estimada ya vive en Reporte de Ventas. Para revisar dinero real, usa Flujo Real.</p>
+ <div style="display:flex;gap:10px;flex-wrap:wrap;">
+ <button onclick="navA('reporte-ventas')" style="padding:10px 16px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Ir a Ventas</button>
+ <button onclick="navA('reporte-flujo');renderReporteFlujo();" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Ir a Flujo Real</button>
+ </div>
+ </div>
+ </div>
 
     <!-- REIMPRIMIR TICKET DE VENTA -->
     <div id="reimprimir-venta" class="vista oculto">
-        <div class="vista-header">
-            <h2>🖨️ Reimprimir Ticket de Venta</h2>
-            <p>Busca y reimprime cualquier ticket de venta registrado en el sistema.</p>
-        </div>
-        <!-- Filtros de búsqueda -->
-        <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.06); margin-bottom:20px;">
-            <h3 style="margin:0 0 15px 0; color:#1e40af;">🔍 Buscar Venta</h3>
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px;">
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FOLIO</label>
-                    <input type="text" id="rvFolio" placeholder="Ej: VTA-001"
-                           oninput="renderReimprimirVenta()"
-                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                </div>
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">CLIENTE</label>
-                    <input type="text" id="rvCliente" placeholder="Nombre del cliente"
-                           oninput="renderReimprimirVenta()"
-                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                </div>
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">DOCUMENTO</label>
-                    <select id="rvTipoDoc" onchange="renderReimprimirVenta()"
-                            style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                        <option value="todos">Todos excepto abonos</option>
-                        <option value="contado">Contado</option>
-                        <option value="credito">Crédito</option>
-                        <option value="apartado">Apartado</option>
-                        <option value="entrega_mcia">Entrega mcia</option>
-                        <option value="devolucion_cancelacion">Devolucion</option>
-                    </select>
-                </div>
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:12px; align-items:end;">
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FECHA DESDE</label>
-                    <input type="date" id="rvFechaDesde" onchange="renderReimprimirVenta()"
-                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                </div>
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FECHA HASTA</label>
-                    <input type="date" id="rvFechaHasta" onchange="renderReimprimirVenta()"
-                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                </div>
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">MONTO MÍN ($)</label>
-                    <input type="number" id="rvMontoMin" placeholder="0" min="0" onchange="renderReimprimirVenta()"
-                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                </div>
-                <div>
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">MONTO MÁX ($)</label>
-                    <input type="number" id="rvMontoMax" placeholder="Sin límite" min="0" onchange="renderReimprimirVenta()"
-                           style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
-                </div>
-            </div>
-            <div style="margin-top:12px; display:flex; gap:10px;">
-                <button onclick="renderReimprimirVenta()"
-                        style="padding:9px 18px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔍 Buscar</button>
-                <button onclick="limpiarFiltrosReimpresion()"
-                        style="padding:9px 18px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">✕ Limpiar</button>
-            </div>
-        </div>
-        <!-- Resultados -->
-        <div id="contenidoReimprimirVenta"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Reimprimir Ticket de Venta</h2>
+ <p>Busca y reimprime cualquier ticket de venta registrado en el sistema.</p>
+ </div>
+ <!-- Filtros de busqueda -->
+ <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.06); margin-bottom:20px;">
+ <h3 style="margin:0 0 15px 0; color:#1e40af;">Buscar Venta</h3>
+ <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px;">
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FOLIO</label>
+ <input type="text" id="rvFolio" placeholder="Ej: VTA-001"
+ oninput="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ </div>
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">CLIENTE</label>
+ <input type="text" id="rvCliente" placeholder="Nombre del cliente"
+ oninput="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ </div>
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">DOCUMENTO</label>
+ <select id="rvTipoDoc" onchange="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ <option value="todos">Todos excepto abonos</option>
+ <option value="contado">Contado</option>
+ <option value="credito">Credito</option>
+ <option value="apartado">Apartado</option>
+ <option value="entrega_mcia">Entrega mcia</option>
+ <option value="devolucion_cancelacion">Devolucion</option>
+ </select>
+ </div>
+ </div>
+ <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:12px; align-items:end;">
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FECHA DESDE</label>
+ <input type="date" id="rvFechaDesde" onchange="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ </div>
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">FECHA HASTA</label>
+ <input type="date" id="rvFechaHasta" onchange="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ </div>
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">MONTO MIN ($)</label>
+ <input type="number" id="rvMontoMin" placeholder="0" min="0" onchange="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ </div>
+ <div>
+ <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">MONTO MAX ($)</label>
+ <input type="number" id="rvMontoMax" placeholder="Sin limite" min="0" onchange="renderReimprimirVenta()"
+ style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
+ </div>
+ </div>
+ <div style="margin-top:12px; display:flex; gap:10px;">
+ <button onclick="renderReimprimirVenta()"
+ style="padding:9px 18px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Buscar</button>
+ <button onclick="limpiarFiltrosReimpresion()"
+ style="padding:9px 18px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer;">Limpiar</button>
+ </div>
+ </div>
+ <!-- Resultados -->
+ <div id="contenidoReimprimirVenta"></div>
+ </div>
 
     <!-- COTIZACIONES -->
     <div id="cotizaciones" class="vista oculto">
-        <div class="vista-header">
-            <h2>📄 Cotizaciones</h2>
-            <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
-        </div>
-        <div id="listaCotizaciones"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Cotizaciones</h2>
+ <p>Genera cotizaciones con vigencia y conviertelas a venta.</p>
+ </div>
+ <div id="listaCotizaciones"></div>
+ </div>
 
     <!-- PUNTOS Y FIDELIDAD -->
     <div id="puntos" class="vista oculto">
-        <div class="vista-header">
-            <h2>⭐ Puntos y Fidelidad</h2>
-            <p>Programa de puntos por compra y canje en descuentos.</p>
-        </div>
-        <div id="contenidoPuntos"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Puntos y Fidelidad</h2>
+ <p>Programa de puntos por compra y canje en descuentos.</p>
+ </div>
+ <div id="contenidoPuntos"></div>
+ </div>
 
     <!-- DESCUENTOS Y PROMOCIONES -->
     <div id="descuentos" class="vista oculto">
-        <div class="vista-header">
-            <h2>🎯 Descuentos y Promociones</h2>
-            <p>Gestiona descuentos por temporada, categoría o monto fijo.</p>
-        </div>
-        <div id="contenidoDescuentos"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Descuentos y Promociones</h2>
+ <p>Gestiona descuentos por temporada, categoria o monto fijo.</p>
+ </div>
+ <div id="contenidoDescuentos"></div>
+ </div>
 
     <!-- VENDEDORES -->
     <div id="vendedores" class="vista oculto">
-        <div class="vista-header">
-            <h2>👤 Vendedores y Comisiones</h2>
-            <p>Gestiona vendedores y calcula comisiones automáticamente.</p>
-        </div>
-        <div id="contenidoVendedores"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Vendedores y Comisiones</h2>
+ <p>Gestiona vendedores y calcula comisiones automaticamente.</p>
+ </div>
+ <div id="contenidoVendedores"></div>
+ </div>
 
     <!-- CORTE DE CAJA -->
     <div id="corte-caja" class="vista oculto">
-        <div class="vista-header">
-            <h2>Corte de Caja</h2>
-            <p>Cierre diario por caja o cuenta, con conteo real, diferencia y registro historico.</p>
-        </div>
-        <div id="contenidoCorteCaja"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Corte de Caja</h2>
+ <p>Cierre diario por caja o cuenta, con conteo real, diferencia y registro historico.</p>
+ </div>
+ <div id="contenidoCorteCaja"></div>
+ </div>
 
     <!-- GASTOS OPERATIVOS -->
     <div id="gastos" class="vista oculto">
-        <div class="vista-header">
-            <h2>💸 Gastos Operativos</h2>
-            <p>Registra renta, luz, nómina, transporte y más.</p>
-        </div>
-        <div id="contenidoGastos"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Gastos Operativos</h2>
+ <p>Registra renta, luz, nomina, transporte y mas.</p>
+ </div>
+ <div id="contenidoGastos"></div>
+ </div>
 
     <!-- PROYECCIÓN DE FLUJO -->
     <div id="proyeccion" class="vista oculto">
-        <div class="vista-header">
-            <h2>📈 Proyección de Flujo</h2>
-            <p>Ingresos esperados vs gastos programados a futuro.</p>
-        </div>
-        <div id="contenidoProyeccion"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Proyeccion de Flujo</h2>
+ <p>Ingresos esperados vs gastos programados a futuro.</p>
+ </div>
+ <div id="contenidoProyeccion"></div>
+ </div>
 
     <!-- CLIENTES MOROSOS -->
     <div id="clientesmorosos" class="vista oculto">
-        <div class="vista-header">
-            <h2>🔴 Clientes Morosos</h2>
-            <p>Ranking de clientes con mayor deuda y días de atraso.</p>
-        </div>
-        <div id="contenidoMorosos"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Clientes Morosos</h2>
+ <p>Ranking de clientes con mayor deuda y dias de atraso.</p>
+ </div>
+ <div id="contenidoMorosos"></div>
+ </div>
 
     <!-- DEVOLUCIONES -->
     <div id="devoluciones" class="vista oculto">
-        <div class="vista-header">
-            <h2>↩️ Devoluciones</h2>
-            <p>Registra devoluciones y reingresa productos al inventario.</p>
-        </div>
-        <div id="contenidoDevoluciones"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Devoluciones</h2>
+ <p>Registra devoluciones y reingresa productos al inventario.</p>
+ </div>
+ <div id="contenidoDevoluciones"></div>
+ </div>
 
     <!-- CANCELACIONES -->
     <div id="cancelaciones" class="vista oculto">
-        <div class="vista-header">
-            <h2>⛔ Cancelaciones</h2>
-            <p>Reversa controlada de ventas, abonos y apartados con afectación de caja, cartera e inventario.</p>
-        </div>
-        <div id="contenidoCancelaciones"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Cancelaciones</h2>
+ <p>Reversa controlada de ventas, abonos y apartados con afectacion de caja, cartera e inventario.</p>
+ </div>
+ <div id="contenidoCancelaciones"></div>
+ </div>
 
     <!-- GARANTÍAS -->
     <div id="garantias" class="vista oculto">
-        <div class="vista-header">
-            <h2>🛡️ Control de Garantías</h2>
-            <p>Vigencia, fechas de vencimiento y estado de garantías.</p>
-        </div>
-        <div id="contenidoGarantias"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Control de Garantias</h2>
+ <p>Vigencia, fechas de vencimiento y estado de garantias.</p>
+ </div>
+ <div id="contenidoGarantias"></div>
+ </div>
 
     <!-- ÓRDENES DE COMPRA -->
     <div id="ordenescompra" class="vista oculto">
-        <div class="vista-header">
-            <h2>📋 Órdenes de Compra</h2>
-            <p>Genera OC a proveedores y da seguimiento a su estado.</p>
-        </div>
-        <div id="contenidoOrdenesCompra"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Ordenes de Compra</h2>
+ <p>Genera OC a proveedores y da seguimiento a su estado.</p>
+ </div>
+ <div id="contenidoOrdenesCompra"></div>
+ </div>
 
     <!-- AGENDA DE COBROS -->
     <div id="agendacobros" class="vista oculto">
-        <div class="vista-header">
-            <h2>📅 Agenda de Cobros</h2>
-            <p>Calendario visual con pagarés que vencen cada día.</p>
-        </div>
-        <div id="contenidoAgenda"></div>
-    </div>
+ <div class="vista-header">
+ <h2>Agenda de Cobros</h2>
+ <p>Calendario visual con pagares que vencen cada dia.</p>
+ </div>
+ <div id="contenidoAgenda"></div>
+ </div>
 
     <!-- USUARIOS -->
-    <div id="usuarios" class="vista oculto"><div style="padding:20px;"><h2>👤 Gestión de Usuarios</h2><div id="contenidoUsuarios"></div></div></div>
+    <div id="usuarios" class="vista oculto"><div style="padding:20px;"><h2>Gestion de Usuarios</h2><div id="contenidoUsuarios"></div></div></div>
 
     <!-- NUBE Y RESPALDOS -->
     <div id="configuracion-nube" class="vista oculto">
-        <div class="vista-header">
-            <h2>☁️ Nube y Respaldos</h2>
-            <p>Sincronización con Firebase, respaldos en OneDrive y exportación manual de datos.</p>
-        </div>
+ <div class="vista-header">
+ <h2>Nube y Respaldos</h2>
+ <p>Sincronizacion con Firebase, respaldos en OneDrive y exportacion manual de datos.</p>
+ </div>
 
-        <div id="backup-panel" style="max-width:700px;">
+ <div id="backup-panel" style="max-width:700px;">
 
-            <!-- Firebase -->
-            <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
-                <h3 style="margin:0 0 8px; color:#374151;">🔥 Firebase (base de datos en la nube)</h3>
-                <p id="estadoFirebase" style="color:#6b7280; font-size:13px; margin:0 0 14px;">Verificando estado...</p>
-                <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                    <button onclick="StorageService.syncAll().then(()=>alert('✅ Sincronizado con Firebase')).catch(e=>alert('❌ '+e.message))"
-                        style="padding:10px 16px; background:#f97316; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        ⬇️ Sincronizar desde nube
-                    </button>
-                    <button onclick="StorageService.uploadAll().then(()=>alert('✅ Datos subidos a Firebase')).catch(e=>alert('❌ '+e.message))"
-                        style="padding:10px 16px; background:#dc2626; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        ⬆️ Subir todo a nube
-                    </button>
-                </div>
-            </div>
+ <!-- Firebase -->
+ <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
+ <h3 style="margin:0 0 8px; color:#374151;">Firebase (base de datos en la nube)</h3>
+ <p id="estadoFirebase" style="color:#6b7280; font-size:13px; margin:0 0 14px;">Verificando estado...</p>
+ <div style="display:flex; gap:10px; flex-wrap:wrap;">
+ <button onclick="StorageService.syncAll().then(()=>alert('Sincronizado con Firebase')).catch(e=>alert(''+e.message))"
+ style="padding:10px 16px; background:#f97316; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Sincronizar desde nube
+ </button>
+ <button onclick="StorageService.uploadAll().then(()=>alert('Datos subidos a Firebase')).catch(e=>alert(''+e.message))"
+ style="padding:10px 16px; background:#dc2626; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Subir todo a nube
+ </button>
+ </div>
+ </div>
 
-            <!-- OneDrive -->
-            <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
-                <h3 style="margin:0 0 8px; color:#374151;">💾 OneDrive (respaldos físicos)</h3>
-                <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Conecta tu cuenta de Microsoft para subir y restaurar respaldos automáticamente.</p>
-                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-                    <button onclick="conectarOneDrive()"
-                        style="padding:10px 16px; background:#0078d4; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        🔗 Conectar OneDrive
-                    </button>
-                    <button onclick="subirBackupOneDrive().then(r=>r&&alert('✅ Respaldo guardado en OneDrive'))"
-                        style="padding:10px 16px; background:#106ebe; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        📤 Crear respaldo ahora
-                    </button>
-                    <button onclick="mostrarListaBackups()"
-                        style="padding:10px 16px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        📂 Ver respaldos
-                    </button>
-                </div>
-                <div id="listaBackupsOneDrive"></div>
-            </div>
+ <!-- OneDrive -->
+ <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
+ <h3 style="margin:0 0 8px; color:#374151;">OneDrive (respaldos fisicos)</h3>
+ <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Conecta tu cuenta de Microsoft para subir y restaurar respaldos automaticamente.</p>
+ <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+ <button onclick="conectarOneDrive()"
+ style="padding:10px 16px; background:#0078d4; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Conectar OneDrive
+ </button>
+ <button onclick="subirBackupOneDrive().then(r=>r&&alert('Respaldo guardado en OneDrive'))"
+ style="padding:10px 16px; background:#106ebe; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Crear respaldo ahora
+ </button>
+ <button onclick="mostrarListaBackups()"
+ style="padding:10px 16px; background:#6b7280; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Ver respaldos
+ </button>
+ </div>
+ <div id="listaBackupsOneDrive"></div>
+ </div>
 
-            <!-- Backup local JSON -->
-            <div style="background:white; padding:20px; border-radius:10px; border:1px solid #e5e7eb;">
-                <h3 style="margin:0 0 8px; color:#374151;">📁 Backup local (JSON)</h3>
-                <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Exporta o importa todos los datos del sistema en un archivo JSON.</p>
-                <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-                    <button onclick="exportarBackupJSON()"
-                        style="padding:10px 16px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        ⬇️ Exportar todos los datos
-                    </button>
-                    <label style="padding:10px 16px; background:#8b5cf6; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
-                        📥 Importar backup
-                        <input type="file" accept=".json" onchange="importarBackupJSON(event)" style="display:none;">
-                    </label>
-                </div>
-            </div>
+ <!-- Backup local JSON -->
+ <div style="background:white; padding:20px; border-radius:10px; border:1px solid #e5e7eb;">
+ <h3 style="margin:0 0 8px; color:#374151;">Backup local (JSON)</h3>
+ <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Exporta o importa todos los datos del sistema en un archivo JSON.</p>
+ <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+ <button onclick="exportarBackupJSON()"
+ style="padding:10px 16px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Exportar todos los datos
+ </button>
+ <label style="padding:10px 16px; background:#8b5cf6; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
+ Importar backup
+ <input type="file" accept=".json" onchange="importarBackupJSON(event)" style="display:none;">
+ </label>
+ </div>
+ </div>
 
-        </div>
-    </div>
+ </div>
+ </div>
 </main>
 
 <!-- ===== MODALES ===== -->
@@ -1192,13 +1114,14 @@
 <script src="js/services/validator.js?v=3"></script>
 <script src="js/services/calculator.js"></script>
 <script src="js/services/ticket-service.js?v=2"></script>
+<script src="js/services/audit-service.js?v=1"></script>
 <script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 
 <script src="js/modules/auth.js"></script>
-<script src="js/modules/inventario.js?v=1"></script>
+<script src="js/modules/inventario.js?v=18"></script>
 <script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js?v=22"></script>
+<script src="js/modules/ventas.js?v=23"></script>
 <script src="js/modules/clientes.js"></script>
 <script src="js/modules/cxc.js?v=21"></script>
 <script src="js/modules/apartados.js?v=8"></script>
@@ -1219,17 +1142,17 @@
 <script src="js/modules/agenda.js"></script>
 <script src="js/modules/producto-picker.js?v=2"></script>
 <script src="js/modules/cliente-picker.js"></script>
-<script src="js/modules/notificaciones.js"></script>
+<script src="js/modules/notificaciones.js?v=2"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
-<script src="js/core/navigation.js?v=5"></script>
+<script src="js/core/navigation.js?v=8"></script>
 <script src="js/init.js?v=7"></script>
-    <!-- Eliminado override de navA para evitar ciclo infinito -->
+ <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js")
-    .then(() => console.log("SW registrado"))
-    .catch(err => console.log("Error SW:", err));
+ navigator.serviceWorker.register("/sw.js")
+ .then(() => console.log("SW registrado"))
+ .catch(err => console.log("Error SW:", err));
 }
 </script>
 
