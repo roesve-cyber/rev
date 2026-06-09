@@ -71,39 +71,6 @@ function _clienteCamposBase(c = {}) {
     };
 }
 
-function _clienteRefId(ref = {}) {
-    return ref?.clienteId
-        ?? ref?.idCliente
-        ?? ref?.cliente?.id
-        ?? ref?.datosVenta?.cliente?.id
-        ?? ref?.datosCliente?.id
-        ?? null;
-}
-
-function _clienteMismoId(a, b) {
-    return a !== null && a !== undefined && b !== null && b !== undefined && String(a) === String(b);
-}
-
-function _clienteBuscarVigente(ref = {}) {
-    const id = _clienteRefId(ref);
-    if (id === null || id === undefined || id === '') return null;
-    const lista = Array.isArray(window.clientes) && window.clientes.length
-        ? window.clientes
-        : StorageService.get("clientes", []);
-    return lista.find(c => _clienteMismoId(c.id, id)) || null;
-}
-
-function _clienteDatosVigentes(ref = {}) {
-    const vigente = _clienteBuscarVigente(ref);
-    if (!vigente) return null;
-    return { id: vigente.id, ..._clienteCamposBase(vigente) };
-}
-
-function _clienteNombreVigente(ref = {}, respaldo = "Cliente") {
-    const vigente = _clienteDatosVigentes(ref);
-    return vigente?.nombre || respaldo || "Cliente";
-}
-
 function _clienteCambios(antes, despues) {
     return Object.keys(despues).filter(k => String(antes[k] || '') !== String(despues[k] || ''));
 }
@@ -160,17 +127,6 @@ function guardarCliente() {
                     rolSolicitante: sesion.rol || ''
                 });
                 StorageService.set('solicitudesClientesPendientes', pendientes);
-                if (typeof window.notificarBovedaAutorizacion === 'function') {
-                    window.notificarBovedaAutorizacion({
-                        tipo: 'cliente',
-                        id: `cliente-${clientesBD[index].id}-${Date.now()}`,
-                        titulo: 'Cambio de cliente pendiente',
-                        cuerpo: `${clientesBD[index].nombre} - ${cambios.join(', ')}`,
-                        clienteId: clientesBD[index].id,
-                        cliente: clientesBD[index].nombre,
-                        cambios
-                    });
-                }
                 window.AuditService?.log?.({
                     accion: 'CLIENTE_CAMBIO_SOLICITADO',
                     modulo: 'Clientes',
@@ -188,11 +144,13 @@ function guardarCliente() {
                 renderClientes();
                 return alert('Solicitud enviada a la Boveda de Autorizaciones.');
             }
-            clientesBD[index].nombre   = nombre;
-            clientesBD[index].direccion = direccion;
-            clientesBD[index].telefono = telefono;
+            clientesBD[index].nombre     = nombre;
+            clientesBD[index].direccion  = direccion;
+            clientesBD[index].telefono   = telefono;
             clientesBD[index].referencia = referencia;
+            clientesBD[index].fechaActualizacion = _clienteFechaIso();
             clientesBD[index] = _clienteConBusqueda(clientesBD[index]);
+            // Propagar cambios a todas las tablas que copian datos del cliente
             _clientesSincronizarDatosRelacionados(clientesBD[index]);
         }
         window.clienteEditandoId = null;
@@ -369,7 +327,6 @@ function abrirPickerClienteVenta() {
     }
     window.abrirSelectorCliente({
         titulo: 'Seleccionar cliente para venta',
-        onNuevo: () => abrirModalNuevoCliente({ seleccionar: true }),
         onSeleccion: (cliente) => {
             window.clienteSeleccionado = cliente;
             renderSeleccionClienteVenta();
@@ -571,9 +528,8 @@ function abrirModalNuevoCliente(opciones = {}) {
                     <input type="tel" id="nuevoCliTelefono" placeholder="555-1234567" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:5px;">
                 </div>
                 <div class="campo" style="margin-bottom:20px;">
-                    <label>Referencia buscable</label>
+                    <label>Referencia</label>
                     <textarea id="nuevoCliReferencia" placeholder="Ej: Cerca del parque, casa azul" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:5px; height:60px;"></textarea>
-                    <small style="color:#64748b;">Incluye alias, colonia, punto cercano o dato que ayude a encontrarlo despues.</small>
                 </div>
                 ${seleccionar ? `<label style="display:flex;gap:8px;align-items:center;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:14px;font-size:13px;color:#1e40af;font-weight:bold;">
                     <input type="checkbox" id="nuevoCliAutoSeleccionar" checked>
@@ -599,18 +555,8 @@ function guardarClienteDesdeModal() {
         alert("⚠️ " + validacion.errores.join("\n"));
         return;
     }
-    let clientesBD = StorageService.get("clientes", []);
-    const nombreNorm = _clienteNormalizarBusqueda(nombre);
-    const telefonoNorm = String(telefono || '').replace(/\D/g, '');
-    const posibleDuplicado = clientesBD.find(c => {
-        const telC = String(c.telefono || '').replace(/\D/g, '');
-        if (telefonoNorm && telC && telefonoNorm === telC) return true;
-        return nombreNorm && _clienteNormalizarBusqueda(c.nombre) === nombreNorm;
-    });
-    if (posibleDuplicado && !confirm(`Posible cliente duplicado:\n\n${posibleDuplicado.nombre || 'Cliente'} ${posibleDuplicado.telefono ? '- ' + posibleDuplicado.telefono : ''}\n\nDeseas guardar un cliente nuevo de todos modos?`)) {
-        return;
-    }
     const nuevo = _clienteConBusqueda({ id: Date.now(), nombre, direccion, telefono, referencia, fechaRegistro: window.formatearFechaCortaMX(new Date()) });
+    let clientesBD = StorageService.get("clientes", []);
     clientesBD.push(nuevo);
     window.clientes = clientesBD;
     if (!StorageService.set("clientes", clientesBD)) return alert("❌ Error guardando cliente");
@@ -748,17 +694,6 @@ function enviarSolicitudCambioCliente() {
 
     pendientes.unshift(solicitud);
     StorageService.set('solicitudesClientesPendientes', pendientes);
-    if (typeof window.notificarBovedaAutorizacion === 'function') {
-        window.notificarBovedaAutorizacion({
-            tipo: 'cliente',
-            id: `cliente-${cliente.id}-${solicitud.id}`,
-            titulo: 'Cambio de cliente pendiente',
-            cuerpo: `${cliente.nombre} - ${cambios.join(', ')}`,
-            clienteId: cliente.id,
-            cliente: cliente.nombre,
-            cambios
-        });
-    }
     window.AuditService?.log?.({
         accion: 'CLIENTE_CAMBIO_SOLICITADO',
         modulo: 'Clientes',
@@ -774,95 +709,83 @@ function enviarSolicitudCambioCliente() {
 }
 
 function _clientesSincronizarDatosRelacionados(cliente) {
-    if (!cliente?.id) return 0;
-    const campos = { id: cliente.id, ..._clienteCamposBase(cliente) };
-    const foliosRelacionados = new Set();
-    const agregarFolio = item => {
-        [item?.folio, item?.folioVenta, item?.folioOrigen, item?.origenApartadoFolio, item?.datosVenta?.folio].forEach(f => {
-            if (f !== null && f !== undefined && String(f).trim()) foliosRelacionados.add(String(f));
-        });
-    };
-    const coincideCliente = item => _clienteMismoId(_clienteRefId(item), cliente.id);
-    const coincideFolio = item => {
-        const posibles = [item?.folio, item?.folioVenta, item?.folioOrigen, item?.origenApartadoFolio, item?.datosVenta?.folio];
-        return posibles.some(f => f !== null && f !== undefined && foliosRelacionados.has(String(f)));
-    };
-    const aplicarClienteAnidado = obj => {
-        if (!obj || typeof obj !== 'object') return false;
-        let cambio = false;
-        if (obj.cliente && typeof obj.cliente === 'object') {
-            const idAnidado = obj.cliente.id ?? obj.cliente.clienteId ?? obj.cliente.idCliente ?? null;
-            if (idAnidado === null || idAnidado === undefined || idAnidado === '' || _clienteMismoId(idAnidado, cliente.id)) {
-                obj.cliente = { ...obj.cliente, id: campos.id, nombre: campos.nombre, direccion: campos.direccion, telefono: campos.telefono, referencia: campos.referencia };
-                cambio = true;
-            }
-        }
-        if (obj.datosVenta?.cliente && typeof obj.datosVenta.cliente === 'object') {
-            const idAnidado = obj.datosVenta.cliente.id ?? obj.datosVenta.cliente.clienteId ?? obj.datosVenta.cliente.idCliente ?? null;
-            if (idAnidado === null || idAnidado === undefined || idAnidado === '' || _clienteMismoId(idAnidado, cliente.id)) {
-                obj.datosVenta.cliente = { ...obj.datosVenta.cliente, id: campos.id, nombre: campos.nombre, direccion: campos.direccion, telefono: campos.telefono, referencia: campos.referencia };
-                cambio = true;
-            }
-        }
-        return cambio;
-    };
-    const actualizarComun = (item, opciones = {}) => {
-        let cambio = false;
-        if (opciones.clienteId && item.clienteId !== campos.id) { item.clienteId = campos.id; cambio = true; }
-        if (opciones.nombre && item[opciones.nombre] !== campos.nombre) { item[opciones.nombre] = campos.nombre; cambio = true; }
-        if (opciones.clienteNombre && item.clienteNombre !== campos.nombre) { item.clienteNombre = campos.nombre; cambio = true; }
-        if (opciones.datosContacto) {
-            ['direccion', 'telefono', 'referencia'].forEach(k => {
-                if (item[k] !== campos[k]) { item[k] = campos[k]; cambio = true; }
-            });
-        }
-        return aplicarClienteAnidado(item) || cambio;
-    };
+    const campos = _clienteCamposBase(cliente);
+    const idStr = String(cliente.id);
 
-    ['cuentasPorCobrar', 'ventasRegistradas', 'ventasPendientes', 'apartados', 'salidasPendientesVenta', 'documentosEntrega'].forEach(key => {
-        const lista = StorageService.get(key, []);
-        if (!Array.isArray(lista)) return;
-        lista.forEach(item => { if (coincideCliente(item)) agregarFolio(item); });
-    });
-
-    const specs = [
-        { key: 'cuentasPorCobrar', matchFolio: false, opciones: { nombre: 'nombre', clienteNombre: true, clienteId: true, datosContacto: true } },
-        { key: 'pagaresSistema', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
-        { key: 'pagares', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
-        { key: 'apartados', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
-        { key: 'salidasPendientesVenta', matchFolio: true, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
-        { key: 'ventasRegistradas', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: false } },
-        { key: 'ventasPendientes', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: false } },
-        { key: 'documentosEntrega', matchFolio: true, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
-        { key: 'cotizaciones', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
-        { key: 'devoluciones', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
-        { key: 'garantias', matchFolio: false, opciones: { clienteId: true } }
+    // ── Tablas con objeto plano (clienteId al nivel raíz) ──────────────────
+    const maps = [
+        // cuentasPorCobrar guarda el nombre en el campo "nombre" (no "clienteNombre")
+        { key: 'cuentasPorCobrar', campoNombre: 'nombre' },
+        // pagaresSistema (era 'pagares' — nombre incorrecto, bug corregido)
+        { key: 'pagaresSistema', campoNombre: 'clienteNombre' },
+        { key: 'apartados',             campoNombre: 'clienteNombre' },
+        { key: 'salidasPendientesVenta', campoNombre: 'clienteNombre' },
+        // ventasRegistradas tiene clienteNombre plano y también objeto cliente anidado
+        { key: 'ventasRegistradas',     campoNombre: 'clienteNombre' },
+        // cotizaciones solo guarda el nombre (no hay teléfono ni dirección)
+        { key: 'cotizaciones',          campoNombre: 'clienteNombre', soloNombre: true },
     ];
 
-    let totalCambios = 0;
-    specs.forEach(({ key, matchFolio, opciones }) => {
+    maps.forEach(({ key, campoNombre, soloNombre }) => {
         const lista = StorageService.get(key, []);
         if (!Array.isArray(lista)) return;
         let cambio = false;
         lista.forEach(item => {
-            if (!coincideCliente(item) && !(matchFolio && coincideFolio(item))) return;
-            if (actualizarComun(item, opciones)) {
-                agregarFolio(item);
-                cambio = true;
-                totalCambios++;
+            if (String(item.clienteId || item.idCliente || '') !== idStr) return;
+            item[campoNombre] = campos.nombre;
+            if (!soloNombre) {
+                item.clienteDireccion = campos.direccion;
+                item.clienteTelefono  = campos.telefono;
+                item.referencia       = campos.referencia;
+                // Si el registro guarda también campos sin prefijo (cuentasPorCobrar)
+                if (item.direccion !== undefined) item.direccion = campos.direccion;
+                if (item.telefono  !== undefined) item.telefono  = campos.telefono;
             }
+            // ventasRegistradas: actualizar también el objeto cliente anidado
+            if (item.cliente && typeof item.cliente === 'object') {
+                item.cliente.nombre    = campos.nombre;
+                item.cliente.direccion = campos.direccion;
+                item.cliente.telefono  = campos.telefono;
+                item.cliente.referencia = campos.referencia;
+            }
+            cambio = true;
         });
         if (cambio) StorageService.set(key, lista);
     });
-    return totalCambios;
-}
 
-function _clientesSincronizarTodosLosDatosRelacionados() {
-    const lista = StorageService.get("clientes", []);
-    if (!Array.isArray(lista) || lista.length === 0) return 0;
-    let cambios = 0;
-    lista.forEach(c => { cambios += _clientesSincronizarDatosRelacionados(c) || 0; });
-    return cambios;
+    // ── documentosEntrega: el cliente vive en doc.cliente (objeto anidado) ──
+    (() => {
+        const docs = StorageService.get('documentosEntrega', []);
+        if (!Array.isArray(docs)) return;
+        let cambio = false;
+        docs.forEach(doc => {
+            if (!doc.cliente || String(doc.cliente.id || '') !== idStr) return;
+            doc.cliente.nombre    = campos.nombre;
+            doc.cliente.telefono  = campos.telefono;
+            doc.cliente.direccion = campos.direccion;
+            cambio = true;
+        });
+        if (cambio) StorageService.set('documentosEntrega', docs);
+    })();
+
+    // ── ventasPendientes (bóveda de cuarentena): cliente en datosVenta.cliente
+    (() => {
+        const pendientes = StorageService.get('ventasPendientes', []);
+        if (!Array.isArray(pendientes)) return;
+        let cambio = false;
+        pendientes.forEach(vp => {
+            // Nombre plano en el nivel raíz
+            if (vp.datosVenta?.cliente && String(vp.datosVenta.cliente.id || '') === idStr) {
+                vp.datosVenta.cliente.nombre    = campos.nombre;
+                vp.datosVenta.cliente.telefono  = campos.telefono;
+                vp.datosVenta.cliente.direccion = campos.direccion;
+                vp.datosVenta.cliente.referencia = campos.referencia;
+                vp.clienteNombre = campos.nombre;
+                cambio = true;
+            }
+        });
+        if (cambio) StorageService.set('ventasPendientes', pendientes);
+    })();
 }
 
 function renderSolicitudesClienteAutorizacion() {
@@ -1005,12 +928,3 @@ window.renderSolicitudesClienteAutorizacion = renderSolicitudesClienteAutorizaci
 window.revisarSolicitudCliente = revisarSolicitudCliente;
 window.aprobarSolicitudCliente = aprobarSolicitudCliente;
 window.rechazarSolicitudCliente = rechazarSolicitudCliente;
-window.obtenerClienteVigente = _clienteBuscarVigente;
-window.resolverNombreCliente = _clienteNombreVigente;
-window.sincronizarClientesConMovimientos = _clientesSincronizarTodosLosDatosRelacionados;
-
-try {
-    _clientesSincronizarTodosLosDatosRelacionados();
-} catch (error) {
-    console.warn('No se pudo sincronizar clientes con movimientos:', error);
-}
