@@ -326,36 +326,57 @@ function _actualizarPlanesCot() {
     const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, periodicidadSel);
 
     // Calcular los planes personalizados si estamos en modo auditoría
-    if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
-        window._customPlanesAuditoria.forEach(custom => {
-            let mult = 1;
-            if (periodicidadSel === 'quincenal') mult = 2;
-            if (periodicidadSel === 'mensual') mult = 4;
+if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
+    let mult = 1;
+    if (periodicidadSel === 'quincenal') mult = 2;
+    if (periodicidadSel === 'mensual') mult = 4;
 
-            const tasaDecimal = custom.tasa / 100;
-            let totalBase = saldo * (1 + (tasaDecimal * custom.meses));
-            let semanas = custom.meses * 4;
-            let pagoSemanal = totalBase / semanas;
-            pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
-            let totalFinal = (pagoSemanal * semanas) + enganche;
+    let totalAnteriorCustom = 0;
 
-            let pagos = Math.round(semanas / mult);
-            let abono = pagoSemanal * mult;
+    // Ordenar los plazos custom de menor a mayor ANTES de calcular,
+    // para que la lógica de progresividad funcione igual que en calcularCredito()
+    const customOrdenados = [...window._customPlanesAuditoria].sort((a, b) => a.meses - b.meses);
 
-            // Agregamos al arreglo de planes y le ponemos el badge de Custom
-            planes.push({
-                meses: custom.meses,
-                pagos: pagos,
-                abono: abono,
-                total: totalFinal,
-                enganche: enganche,
-                custom: true
-            });
+    customOrdenados.forEach(custom => {
+        const tasaDecimal = custom.tasa / 100;
+        const semanas = custom.meses * 4;
+
+        // ✅ Misma fórmula que calcularCredito()
+        let totalBase = saldo * (1 + (tasaDecimal * custom.meses));
+        let pagoSemanal = totalBase / semanas;
+
+        // ✅ Mismo redondeo que calcularCredito(): múltiplo de 10 superior
+        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+        let totalFinal = pagoSemanal * semanas;
+
+        // ✅ Misma lógica de progresividad que calcularCredito()
+        let intentos = 0;
+        while (totalFinal <= totalAnteriorCustom && intentos++ < 100) {
+            pagoSemanal += 5;
+            totalFinal = pagoSemanal * semanas;
+        }
+
+        // ✅ Mismo guard de seguridad que calcularCredito()
+        if (intentos >= 100) return;
+
+        totalAnteriorCustom = totalFinal;
+
+        // ✅ El abono se escala por periodicidad (igual que calcularCreditoConPeriodicidad())
+        const pagos = Math.round(semanas / mult);
+        const abono = pagoSemanal * mult;
+
+        planes.push({
+            meses: custom.meses,
+            pagos,
+            abono,
+            total: totalFinal,  // ✅ SIN sumar enganche — consistente con planes estándar
+            custom: true
         });
-        
-        // Ordenar todos los planes por meses (de menor a mayor) para que se vea ordenado en la tabla
-        planes.sort((a,b) => a.meses - b.meses);
-    }
+    });
+
+    // Ordenar todos los planes combinados por meses
+    planes.sort((a, b) => a.meses - b.meses);
+}
 
     let tablaHtml = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="background:#f3f4f6;">
