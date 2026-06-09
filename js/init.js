@@ -86,8 +86,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log("☁️ Esperando validación de credenciales en Firebase Auth...");
             
             // Firebase Auth controla el acceso antes de disparar cualquier petición a Firestore
-            firebase.auth().onAuthStateChanged((user) => {
+            firebase.auth().onAuthStateChanged(async (user) => {
                 if (user) {
+                    try {
+                        if (typeof window.validarUsuarioFirebaseActivo === 'function') {
+                            await window.validarUsuarioFirebaseActivo(user);
+                        }
+                    } catch (e) {
+                        console.warn("Sesion Firebase sin perfil activo; se omite sincronizacion de nube.", e);
+                        return;
+                    }
                     console.log(`☁️ Sesión confirmada para: ${user.email}. Iniciando motores de red...`);
                     
                     // 🚀 AHORA SÍ: Arrancamos el tiempo real de forma completamente autorizada
