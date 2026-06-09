@@ -641,35 +641,51 @@ function imprimirCotizacion(id) {
       const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
       
       // Recalcular TODOS los planes custom para impresión
-      if (c.customPlanes && c.customPlanes.length > 0) {
-          c.customPlanes.forEach(custom => {
-            let mult = 1;
-            if (c.periodicidad === 'quincenal') mult = 2;
-            if (c.periodicidad === 'mensual') mult = 4;
+if (c.customPlanes && c.customPlanes.length > 0) {
+    let mult = 1;
+    if (c.periodicidad === 'quincenal') mult = 2;
+    if (c.periodicidad === 'mensual') mult = 4;
 
-            const tasaDecimal = custom.tasa / 100;
-            let totalBase = c.saldoFinanciar * (1 + (tasaDecimal * custom.meses));
-            let semanas = custom.meses * 4;
-            let pagoSemanal = totalBase / semanas;
-            pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
-            let totalFinal = (pagoSemanal * semanas) + c.enganche;
+    let totalAnteriorCustom = 0;
 
-            let pagos = Math.round(semanas / mult);
-            let abono = pagoSemanal * mult;
+    // Ordenar ANTES de calcular para que la progresividad funcione correctamente
+    const customOrdenados = [...c.customPlanes].sort((a, b) => a.meses - b.meses);
 
-            planes.push({
-                meses: custom.meses,
-                pagos: pagos,
-                abono: abono,
-                total: totalFinal,
-                enganche: c.enganche,
-                custom: true
-            });
-            hasCustom = true;
-          });
-          
-          planes.sort((a,b) => a.meses - b.meses);
-      }
+    customOrdenados.forEach(custom => {
+        const tasaDecimal = custom.tasa / 100;
+        const semanas = custom.meses * 4;
+
+        // ✅ Misma fórmula que calcularCredito()
+        let totalBase = c.saldoFinanciar * (1 + (tasaDecimal * custom.meses));
+        let pagoSemanal = totalBase / semanas;
+
+        // ✅ Mismo redondeo: múltiplo de 10 superior
+        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+        let totalFinal = pagoSemanal * semanas;
+
+        // ✅ Progresividad con guard de seguridad
+        let intentos = 0;
+        while (totalFinal <= totalAnteriorCustom && intentos++ < 100) {
+            pagoSemanal += 5;
+            totalFinal = pagoSemanal * semanas;
+        }
+
+        if (intentos >= 100) return;
+
+        totalAnteriorCustom = totalFinal;
+
+        planes.push({
+            meses: custom.meses,
+            pagos: Math.round(semanas / mult),
+            abono: pagoSemanal * mult,
+            total: totalFinal,   // ✅ SIN sumar enganche
+            custom: true
+        });
+        hasCustom = true;
+    });
+
+    planes.sort((a, b) => a.meses - b.meses);
+}
 
       planeRows = planes.map(plan => `
         <tr>
