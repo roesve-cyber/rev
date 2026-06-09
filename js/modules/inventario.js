@@ -153,7 +153,7 @@ function _normalizarMovimientoKardex(m = {}, productosMap = new Map()) {
  destino: m.destino || '',
  color: m.color || m.colorElegido || '',
  referencia: m.referencia || m.compraId || m.ventaId || m.folio || '',
- proveedor: m.proveedor || '',
+ proveedor: _invProveedorMovimiento(m, p),
  usuario: m.usuario || m.vendedor || '',
  motivo: m.motivo || m.concepto || '',
  anulado: _kardexEstaAnulado(m),
@@ -166,6 +166,9 @@ function _kardexFiltrosUI() {
  return {
  q: String(document.getElementById('karQ')?.value || '').trim().toLowerCase(),
  tipo: document.getElementById('karTipo')?.value || '',
+ proveedor: document.getElementById('karProveedor')?.value || '',
+ categoria: document.getElementById('karCategoria')?.value || '',
+ subcategoria: document.getElementById('karSubcategoria')?.value || '',
  ubicacion: document.getElementById('karUbicacion')?.value || '',
  desde: document.getElementById('karDesde')?.value || '',
  hasta: document.getElementById('karHasta')?.value || ''
@@ -175,12 +178,15 @@ function _kardexFiltrosUI() {
 window.obtenerKardexNormalizado = function(filtros = {}) {
  const productosMap = new Map((window.productos || []).map(p => [String(p.id), p]));
  let rows = (window.movimientosInventario || []).map(m => _normalizarMovimientoKardex(m, productosMap));
- const f = { q: '', tipo: '', ubicacion: '', desde: '', hasta: '', incluirAnulados: false, ...filtros };
+ const f = { q: '', tipo: '', proveedor: '', categoria: '', subcategoria: '', ubicacion: '', desde: '', hasta: '', incluirAnulados: false, ...filtros };
  rows = rows.filter(r => {
  if (!f.incluirAnulados && r.anulado) return false;
  const text = `${r.productoNombre} ${r.categoria} ${r.subcategoria} ${r.tipoTexto} ${r.motivo} ${r.referencia} ${r.proveedor} ${r.usuario}`.toLowerCase();
  if (f.q && !text.includes(f.q)) return false;
  if (f.tipo && r.tipoBase !== f.tipo) return false;
+ if (f.proveedor && String(r.proveedor || '').trim().toLowerCase() !== String(f.proveedor || '').trim().toLowerCase()) return false;
+ if (f.categoria && r.categoria !== f.categoria) return false;
+ if (f.subcategoria && r.subcategoria !== f.subcategoria) return false;
  if (f.ubicacion && ![r.ubicacion, r.origen, r.destino].includes(f.ubicacion)) return false;
  const d = _kardexFechaClave(r.fecha);
  if (f.desde && d < f.desde) return false;
@@ -209,6 +215,31 @@ function _invStorageArray(key) {
  }
 }
 
+function _invProveedoresCatalogo() {
+ const lista = [
+ ..._invStorageArray('proveedores'),
+ ...(Array.isArray(window.proveedores) ? window.proveedores : [])
+ ];
+ const porId = new Map();
+ const porTexto = new Map();
+ lista.forEach(p => {
+ const label = String(p.nombre || p.nombreComercial || p.razonSocial || p.razon_social || p.proveedor || p.nombreProveedor || p.empresa || p.alias || '').trim();
+ if (!label) return;
+ if (p.id !== undefined && p.id !== null) porId.set(String(p.id), label);
+ [p.nombre, p.nombreComercial, p.razonSocial, p.razon_social, p.proveedor, p.nombreProveedor, p.empresa, p.alias].forEach(v => {
+ if (v) porTexto.set(_invTextoNormalizado(v), label);
+ });
+ });
+ return { porId, porTexto };
+}
+
+function _invResolverProveedor(value, maps = null) {
+ const raw = String(value || '').trim();
+ if (!raw) return '';
+ const m = maps || _invProveedoresCatalogo();
+ return m.porId.get(raw) || m.porTexto.get(_invTextoNormalizado(raw)) || raw;
+}
+
 function _invCostoHistoricoProducto(productoId) {
  if (!productoId) return 0;
  const historicos = _invStorageArray('historialCostos')
@@ -225,6 +256,103 @@ function _invCostoHistoricoProducto(productoId) {
 function _invTextoNormalizado(value) {
  return String(value || '').trim().toLowerCase();
 }
+
+function _invProveedorProducto(p = {}) {
+ const maps = _invProveedoresCatalogo();
+ const directo = p.proveedorNombre || p.nombreProveedor || p.proveedor || p.supplier || p.proveedorId || p.idProveedor || '';
+ if (directo) return _invResolverProveedor(directo, maps);
+ const historicos = _invStorageArray('historialCostos')
+ .filter(h => String(h.productoId || h.idProducto || '') === String(p.id))
+ .map(h => ({
+ proveedor: _invResolverProveedor(h.proveedorNombre || h.proveedor || h.proveedorId || '', maps),
+ fecha: h.fecha || h.fechaISO || h.createdAt || ''
+ }))
+ .filter(h => String(h.proveedor || '').trim())
+ .sort((a, b) => _kardexDateValue(b.fecha) - _kardexDateValue(a.fecha));
+ return String(historicos[0]?.proveedor || '').trim();
+}
+
+function _invProveedorMovimiento(m = {}, producto = {}) {
+ const maps = _invProveedoresCatalogo();
+ const directo = m.proveedorNombre || m.nombreProveedor || m.proveedor || m.supplier || m.proveedorId || m.idProveedor || '';
+ if (directo) return _invResolverProveedor(directo, maps);
+ const desdeProducto = _invProveedorProducto(producto);
+ if (desdeProducto) return desdeProducto;
+ const productoId = m.productoId || m.idProducto || producto.id || '';
+ if (!productoId) return '';
+ const historicos = _invStorageArray('historialCostos')
+ .filter(h => String(h.productoId || h.idProducto || '') === String(productoId))
+ .map(h => ({
+ proveedor: _invResolverProveedor(h.proveedorNombre || h.nombreProveedor || h.proveedor || h.proveedorId || h.idProveedor || '', maps),
+ fecha: h.fecha || h.fechaISO || h.createdAt || ''
+ }))
+ .filter(h => String(h.proveedor || '').trim())
+ .sort((a, b) => _kardexDateValue(b.fecha) - _kardexDateValue(a.fecha));
+ return String(historicos[0]?.proveedor || '').trim();
+}
+
+function _invProveedoresInventario() {
+ const maps = _invProveedoresCatalogo();
+ const labels = [
+ ..._invStorageArray('proveedores').map(p => p.nombre || p.nombreComercial || p.razonSocial || p.razon_social || p.proveedor || p.nombreProveedor || p.empresa || p.alias || p.id || ''),
+ ...(window.productos || []).map(_invProveedorProducto),
+ ...(window.movimientosInventario || []).map(m => _invProveedorMovimiento(m, (window.productos || []).find(p => String(p.id) === String(m.productoId)) || {})),
+ ..._invStorageArray('historialCostos').map(h => h.proveedorNombre || h.nombreProveedor || h.proveedor || h.proveedorId || h.idProveedor || ''),
+ ..._invStorageArray('ordenesCompra').map(o => o.proveedorNombre || o.nombreProveedor || o.proveedor || o.proveedorId || o.idProveedor || ''),
+ ..._invStorageArray('compras').map(c => c.proveedorNombre || c.nombreProveedor || c.proveedor || c.proveedorId || c.idProveedor || '')
+ ].map(v => _invResolverProveedor(v, maps)).map(v => String(v || '').trim()).filter(Boolean);
+ return [...new Set(labels)].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+function _invCategoriasInventario() {
+ const catsProductos = (window.productos || []).map(p => p.categoria).filter(Boolean);
+ const catsOrdenadas = (window.categoriasData || [])
+ .filter(c => catsProductos.includes(c.nombre))
+ .sort((a, b) => (a.posicion || 999) - (b.posicion || 999))
+ .map(c => c.nombre);
+ const resto = [...new Set(catsProductos)].filter(c => !catsOrdenadas.includes(c)).sort((a, b) => a.localeCompare(b, 'es'));
+ return [...catsOrdenadas, ...resto];
+}
+
+function _invSubcategoriasInventario(categoria = 'todos') {
+ const subs = [...new Set((window.productos || [])
+ .filter(p => categoria === 'todos' || categoria === 'todas' || p.categoria === categoria)
+ .map(p => p.subcategoria)
+ .filter(Boolean))];
+ const catData = (window.categoriasData || []).find(c => c.nombre === categoria);
+ const ordenadas = catData && Array.isArray(catData.subcategorias)
+ ? catData.subcategorias
+ .map(s => typeof s === 'string' ? s : s.nombre)
+ .filter(s => subs.includes(s))
+ : [];
+ return [...ordenadas, ...subs.filter(s => !ordenadas.includes(s)).sort((a, b) => a.localeCompare(b, 'es'))];
+}
+
+function _invOptions(values, selected, emptyValue = 'todos', emptyLabel = 'Todos') {
+ return [`<option value="${_kardexEsc(emptyValue)}" ${selected === emptyValue ? 'selected' : ''}>${_kardexEsc(emptyLabel)}</option>`]
+ .concat((values || []).map(v => `<option value="${_kardexEsc(v)}" ${String(selected) === String(v) ? 'selected' : ''}>${_kardexEsc(v)}</option>`))
+ .join('');
+}
+
+function _invActiveFilterChips(filters, specs, rendererName) {
+ const chips = specs
+ .filter(spec => {
+ const value = String(filters[spec.key] ?? spec.defaultValue ?? '').trim();
+ return value && value !== String(spec.defaultValue ?? '');
+ })
+ .map(spec => {
+ const value = String(filters[spec.key] || '').trim();
+ const label = spec.options?.[value] || value;
+ return `<button type="button" onclick="_invClearFilter('${_kardexEsc(spec.id)}','${_kardexEsc(spec.defaultValue ?? '')}','${_kardexEsc(rendererName)}')" style="display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;cursor:pointer;"><span>${_kardexEsc(spec.label)}: ${_kardexEsc(label)}</span><span style="color:#64748b;">x</span></button>`;
+ });
+ return chips.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;">${chips.join('')}</div>` : '';
+}
+
+window._invClearFilter = function(id, defaultValue, rendererName) {
+ const el = document.getElementById(id);
+ if (el) el.value = defaultValue;
+ if (rendererName && typeof window[rendererName] === 'function') window[rendererName]();
+};
 
 function _invItemProductoId(item = {}) {
  return item.productoId || item.idProducto || item.product_id || item.id || item.sku || '';
@@ -491,6 +619,10 @@ function renderConsultaKardexProfesional() {
  ...((StorageService.get('ubicacionesConfig', []) || []).map(u => u.nombre)),
  ...todas.flatMap(r => [r.ubicacion, r.origen, r.destino])
  ].filter(Boolean))].sort();
+ const proveedores = [...new Set([
+ ..._invProveedoresInventario(),
+ ...todas.map(r => r.proveedor)
+ ].filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'es'));
  const sum = (arr, fn) => arr.reduce((s, r) => s + fn(r), 0);
  const entradasOperativas = rows.filter(r => r.tipoBase === 'entrada');
  const salidasOperativas = rows.filter(r => r.tipoBase === 'salida');
@@ -510,6 +642,19 @@ function renderConsultaKardexProfesional() {
  ['otro', 'Otros']
  ].map(([v, l]) => `<option value="${v}" ${old.tipo === v ? 'selected' : ''}>${l}</option>`).join('');
  const ubiOpts = '<option value="">Todas</option>' + ubicaciones.map(u => `<option value="${_kardexEsc(u)}" ${old.ubicacion === u ? 'selected' : ''}>${_kardexEsc(u)}</option>`).join('');
+ const provOpts = '<option value="">Todos</option>' + proveedores.map(p => `<option value="${_kardexEsc(p)}" ${old.proveedor === p ? 'selected' : ''}>${_kardexEsc(p)}</option>`).join('');
+ const catOpts = '<option value="">Todas</option>' + _invCategoriasInventario().map(c => `<option value="${_kardexEsc(c)}" ${old.categoria === c ? 'selected' : ''}>${_kardexEsc(c)}</option>`).join('');
+ const subOpts = '<option value="">Todas</option>' + _invSubcategoriasInventario(old.categoria || 'todos').map(s => `<option value="${_kardexEsc(s)}" ${old.subcategoria === s ? 'selected' : ''}>${_kardexEsc(s)}</option>`).join('');
+ const chips = _invActiveFilterChips(old, [
+ { key: 'q', id: 'karQ', label: 'Buscar', defaultValue: '' },
+ { key: 'proveedor', id: 'karProveedor', label: 'Proveedor', defaultValue: '' },
+ { key: 'tipo', id: 'karTipo', label: 'Tipo', defaultValue: '' },
+ { key: 'categoria', id: 'karCategoria', label: 'Categoria', defaultValue: '' },
+ { key: 'subcategoria', id: 'karSubcategoria', label: 'Subcategoria', defaultValue: '' },
+ { key: 'ubicacion', id: 'karUbicacion', label: 'Ubicacion', defaultValue: '' },
+ { key: 'desde', id: 'karDesde', label: 'Desde', defaultValue: '' },
+ { key: 'hasta', id: 'karHasta', label: 'Hasta', defaultValue: '' }
+ ], 'refrescarKardexInventario');
  const filas = rows.slice(0, 500).map(r => {
  const color = r.cantidadFirmada < 0 ? '#b91c1c' : r.cantidadFirmada > 0 ? '#047857' : '#475569';
  const signo = r.cantidadFirmada > 0 ? '+' : r.cantidadFirmada < 0 ? '-' : '';
@@ -544,13 +689,23 @@ function renderConsultaKardexProfesional() {
  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><small style="color:#475569;font-weight:900;">TRANSFERENCIAS</small><br><b style="font-size:22px;color:#334155;">${transferencias.length}</b></div>
  <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px;"><small style="color:#475569;font-weight:900;">VALOR ENT/SAL</small><br><b style="font-size:15px;color:#0369a1;">${typeof dinero === 'function' ? `${dinero(valorEntrada)} / ${dinero(valorSalida)}` : `${valorEntrada.toFixed(2)} / ${valorSalida.toFixed(2)}`}</b></div>
  </div>
- <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:grid;grid-template-columns:2fr repeat(4,minmax(125px,1fr));gap:10px;align-items:end;">
+ <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:grid;grid-template-columns:minmax(240px,2fr) minmax(160px,1fr) auto;gap:10px;align-items:end;">
  <div><label style="font-size:11px;font-weight:900;color:#475569;">BUSCAR</label><input id="karQ" value="${_kardexEsc(old.q)}" oninput="refrescarKardexInventario()" placeholder="Producto, folio, proveedor, motivo..." style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">PROVEEDOR</label><select id="karProveedor" onchange="refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${provOpts}</select></div>
+ <button onclick="refrescarKardexInventario()" style="padding:10px 14px;background:#0f172a;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Filtrar</button>
+ <details ${old.tipo || old.categoria || old.subcategoria || old.ubicacion || old.desde || old.hasta ? 'open' : ''} style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+ <summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary>
+ <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:end;margin-top:10px;">
  <div><label style="font-size:11px;font-weight:900;color:#475569;">TIPO</label><select id="karTipo" onchange="refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${tipoOpts}</select></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">CATEGORIA</label><select id="karCategoria" onchange="document.getElementById('karSubcategoria').value='';refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${catOpts}</select></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">SUBCATEGORIA</label><select id="karSubcategoria" onchange="refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${subOpts}</select></div>
  <div><label style="font-size:11px;font-weight:900;color:#475569;">UBICACION</label><select id="karUbicacion" onchange="refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${ubiOpts}</select></div>
  <div><label style="font-size:11px;font-weight:900;color:#475569;">DESDE</label><input type="date" id="karDesde" value="${_kardexEsc(old.desde)}" onchange="refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></div>
  <div><label style="font-size:11px;font-weight:900;color:#475569;">HASTA</label><input type="date" id="karHasta" value="${_kardexEsc(old.hasta)}" onchange="refrescarKardexInventario()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></div>
  </div>
+ </details>
+ </div>
+ ${chips}
  <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:560px;">
  <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:1120px;">
  <thead style="position:sticky;top:0;background:#f8fafc;color:#475569;z-index:1;"><tr>
@@ -965,11 +1120,13 @@ window.renderConsultaInventario = function() {
  if (!cont) return;
 
  // 1. Obtencion de Filtros (Incluyendo el nuevo filtro de Ubicacion)
+ const q = String(document.getElementById('filtroBusquedaInv')?.value || '').trim().toLowerCase();
  const cat = document.getElementById('filtroCatInv')?.value || 'todos';
  const sub = document.getElementById('filtroSubInv')?.value || 'todos';
  const stockFiltro = document.getElementById('filtroStockInv')?.value || 'todos';
  const pedidoFiltro = document.getElementById('filtroPedidoInv')?.value || 'todos';
  const ubiFiltro = document.getElementById('filtroUbiInv')?.value || 'todos';
+ const provFiltro = document.getElementById('filtroProvInv')?.value || 'todos';
 
  // 2. Preparacion de Datos (Kardex y Ordenes de Compra)
  const productosConsulta = window.productos || [];
@@ -994,9 +1151,15 @@ window.renderConsultaInventario = function() {
 
  // 3. Filtrado de Productos
  let productosFiltrados = productosConsulta.filter(p => {
+ const proveedorProducto = _invProveedorProducto(p);
+ const texto = `${p.nombre || ''} ${p.categoria || ''} ${p.subcategoria || ''} ${p.marca || ''} ${p.modelo || ''} ${proveedorProducto}`.toLowerCase();
+ const coincideBusqueda = !q || texto.includes(q);
  const coincideCat = (cat === 'todos' || cat === 'todas' || p.categoria === cat);
  const coincideSub = (sub === 'todos' || sub === 'todas' || p.subcategoria === sub);
  const coincideStock = stockFiltro === 'todos' ? true : (stockFiltro === 'con' ? (p.stock > 0) : (p.stock <= 0));
+ const coincideProveedor = provFiltro === 'todos'
+ ? true
+ : (provFiltro === 'sin_proveedor' ? !_invTextoNormalizado(proveedorProducto) : _invTextoNormalizado(proveedorProducto) === _invTextoNormalizado(provFiltro));
  const estado = estadoPedidoPorProd[p.id] || 'ninguno';
  const coincidePedido = pedidoFiltro === 'todos' ? true : (pedidoFiltro === estado);
  
@@ -1009,14 +1172,33 @@ window.renderConsultaInventario = function() {
  coincideUbi = p.variantes && p.variantes.some(v => v.ubicacion === ubiFiltro && v.stock > 0);
  }
  
- return coincideCat && coincideSub && coincideStock && coincidePedido && coincideUbi;
+ return coincideBusqueda && coincideCat && coincideSub && coincideStock && coincideProveedor && coincidePedido && coincideUbi;
  });
 
  // ORDENAR ANTES DE DIBUJAR LA TABLA PRO
  productosFiltrados = window.aplicarOrdenamientoInteligente(productosFiltrados, sub);
 
  // 4. Renderizado de Estructura de Tabla
+ const chips = _invActiveFilterChips({
+ q,
+ provFiltro,
+ cat,
+ sub,
+ stockFiltro,
+ pedidoFiltro,
+ ubiFiltro
+ }, [
+ { key: 'q', id: 'filtroBusquedaInv', label: 'Buscar', defaultValue: '' },
+ { key: 'provFiltro', id: 'filtroProvInv', label: 'Proveedor', defaultValue: 'todos', options: { sin_proveedor: 'Sin proveedor' } },
+ { key: 'cat', id: 'filtroCatInv', label: 'Categoria', defaultValue: 'todos' },
+ { key: 'sub', id: 'filtroSubInv', label: 'Subcategoria', defaultValue: 'todos' },
+ { key: 'stockFiltro', id: 'filtroStockInv', label: 'Stock', defaultValue: 'todos', options: { con: 'Con stock', sin: 'Sin stock' } },
+ { key: 'pedidoFiltro', id: 'filtroPedidoInv', label: 'Pedido', defaultValue: 'todos', options: { pendiente: 'Pedido pendiente', baja: 'Pendiente baja' } },
+ { key: 'ubiFiltro', id: 'filtroUbiInv', label: 'Ubicacion', defaultValue: 'todos', options: { sin_asignar: 'Sin asignar' } }
+ ], 'renderConsultaInventario');
+
  let html = `
+ ${chips}
  <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:12px;">
  <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white; font-size:14px;">
  <thead>
@@ -1034,6 +1216,7 @@ window.renderConsultaInventario = function() {
  let totalGlobalPesos = 0;
 
  productosFiltrados.forEach(p => {
+ const proveedorProducto = _invProveedorProducto(p);
  // Logica de Costo Promedio
  const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipoBase === 'entrada');
  let totalCosto = 0, totalCantidadEntrada = 0;
@@ -1100,6 +1283,7 @@ window.renderConsultaInventario = function() {
  <td style="padding:12px;">
  <div style="font-weight:bold; color:#1e40af;">${p.nombre}</div>
  <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
+ <div style="font-size:11px; color:#475569; margin-top:3px;">Proveedor: <b>${_kardexEsc(proveedorProducto || 'Sin proveedor')}</b></div>
  </td>
  <td style="padding:12px; text-align:center;">
  <span style="font-size:18px; font-weight:bold; color:${stockGeneral>0?'#16a34a':'#dc2626'}">${stockGeneral}</span>
@@ -1204,6 +1388,15 @@ window.initConsultaInventario = function() {
  stockSel.parentNode.insertBefore(ubiSel, stockSel.nextSibling);
  }
 
+ let provSel = document.getElementById('filtroProvInv');
+ if (!provSel && stockSel && stockSel.parentNode) {
+ provSel = document.createElement('select');
+ provSel.id = 'filtroProvInv';
+ provSel.style = 'padding:8px; border-radius:6px; border:1px solid #d1d5db; margin-left:10px; font-size:14px;';
+ const anchor = ubiSel || stockSel;
+ stockSel.parentNode.insertBefore(provSel, anchor.nextSibling);
+ }
+
  if (!catSel || !subSel || !stockSel || !pedidoSel) return;
 
  // Llenar filtro de Ubicaciones
@@ -1213,6 +1406,16 @@ window.initConsultaInventario = function() {
  ubicaciones.forEach(u => ubiOpts += `<option value="${u.nombre}">${u.nombre}</option>`);
  ubiSel.innerHTML = ubiOpts;
  ubiSel.onchange = renderConsultaInventario;
+ }
+
+ if (provSel) {
+ const previoProv = provSel.value || 'todos';
+ let provOpts = '<option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option>';
+ _invProveedoresInventario().forEach(p => provOpts += `<option value="${_kardexEsc(p)}">${_kardexEsc(p)}</option>`);
+ provSel.innerHTML = provOpts;
+ provSel.value = previoProv;
+ if (!provSel.value) provSel.value = 'todos';
+ provSel.onchange = renderConsultaInventario;
  }
 
  let cats = [...new Set((window.productos||[]).map(p=>p.categoria).filter(Boolean))];
@@ -1306,13 +1509,19 @@ window.detectarYCorregirIdsDuplicados = function() {
 function aplicarFiltros() {
  const catFiltro = document.getElementById("filtroCategoria").value;
  const subFiltro = document.getElementById("filtroSubcategoria").value;
+ const provFiltro = document.getElementById("filtroProveedorInventario")?.value || "todos";
  const busqueda = document.getElementById("busquedaProducto").value.toLowerCase();
 
  let filtrados = window.productos.filter(p => {
+ const proveedorProducto = _invProveedorProducto(p);
  const coincideCat = (catFiltro === "todos" || p.categoria === catFiltro);
  const coincideSub = (subFiltro === "todos" || p.subcategoria === subFiltro);
- const coincideNombre = p.nombre.toLowerCase().includes(busqueda);
- return coincideCat && coincideSub && coincideNombre;
+ const coincideProveedor = provFiltro === "todos"
+ ? true
+ : (provFiltro === "sin_proveedor" ? !_invTextoNormalizado(proveedorProducto) : _invTextoNormalizado(proveedorProducto) === _invTextoNormalizado(provFiltro));
+ const texto = `${p.nombre || ''} ${p.categoria || ''} ${p.subcategoria || ''} ${p.marca || ''} ${p.modelo || ''} ${proveedorProducto}`.toLowerCase();
+ const coincideNombre = !busqueda || texto.includes(busqueda);
+ return coincideCat && coincideSub && coincideProveedor && coincideNombre;
  });
 
  // PASAR POR EL MOTOR ANTES DE RENDERIZAR
@@ -1342,16 +1551,20 @@ function limpiarFiltros() {
  document.getElementById("filtroCategoria").value = "todos";
  document.getElementById("filtroSubcategoria").innerHTML = '<option value="todos">-- Todas --</option>';
  document.getElementById("busquedaProducto").value = "";
+ const filtroProveedor = document.getElementById("filtroProveedorInventario");
+ if (filtroProveedor) filtroProveedor.value = "todos";
  renderInventario(window.productos);
 }
 
 function actualizarCombosFiltros() {
  const filtroCat = document.getElementById("filtroCategoria");
  const filtroSub = document.getElementById("filtroSubcategoria");
+ const filtroProveedor = document.getElementById("filtroProveedorInventario");
  if (!filtroCat) return;
 
  const catPrevia = filtroCat.value;
  const subPrevia = filtroSub ? filtroSub.value : "todos";
+ const provPrevio = filtroProveedor ? filtroProveedor.value : "todos";
 
  let htmlCat = '<option value="todos">-- Todas las Categorias --</option>';
  // Ordenar categorias por posicion
@@ -1377,6 +1590,16 @@ function actualizarCombosFiltros() {
  filtroSub.innerHTML = htmlSub;
  filtroSub.value = subPrevia || "todos";
  }
+
+ if (filtroProveedor) {
+ let htmlProv = '<option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option>';
+ _invProveedoresInventario().forEach(p => {
+ htmlProv += `<option value="${_kardexEsc(p)}">${_kardexEsc(p)}</option>`;
+ });
+ filtroProveedor.innerHTML = htmlProv;
+ filtroProveedor.value = provPrevio || "todos";
+ if (!filtroProveedor.value) filtroProveedor.value = "todos";
+ }
 }
 
 // ===== INVENTARIO =====
@@ -1385,8 +1608,21 @@ function renderInventario(listaAMostrar = window.productos) {
  if (!cont) return;
 
  actualizarCombosFiltros();
+ const filtrosControl = {
+ q: String(document.getElementById("busquedaProducto")?.value || ''),
+ proveedor: document.getElementById("filtroProveedorInventario")?.value || "todos",
+ categoria: document.getElementById("filtroCategoria")?.value || "todos",
+ subcategoria: document.getElementById("filtroSubcategoria")?.value || "todos"
+ };
+ const chipsControl = _invActiveFilterChips(filtrosControl, [
+ { key: 'q', id: 'busquedaProducto', label: 'Buscar', defaultValue: '' },
+ { key: 'proveedor', id: 'filtroProveedorInventario', label: 'Proveedor', defaultValue: 'todos', options: { sin_proveedor: 'Sin proveedor' } },
+ { key: 'categoria', id: 'filtroCategoria', label: 'Categoria', defaultValue: 'todos' },
+ { key: 'subcategoria', id: 'filtroSubcategoria', label: 'Subcategoria', defaultValue: 'todos' }
+ ], 'aplicarFiltros');
 
  let html = `
+ ${chipsControl}
  <table class="tabla-admin">
  <thead>
  <tr>

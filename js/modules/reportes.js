@@ -111,7 +111,10 @@ function _rvInputDate(d) {
 }
 
 function _rvCliente(v) {
-    return v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || "Público General";
+    const respaldo = v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || "Público General";
+    return typeof window.resolverNombreCliente === "function"
+        ? window.resolverNombreCliente(v, respaldo)
+        : respaldo;
 }
 
 function _rvMetodo(v) {

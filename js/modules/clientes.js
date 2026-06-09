@@ -71,6 +71,39 @@ function _clienteCamposBase(c = {}) {
     };
 }
 
+function _clienteRefId(ref = {}) {
+    return ref?.clienteId
+        ?? ref?.idCliente
+        ?? ref?.cliente?.id
+        ?? ref?.datosVenta?.cliente?.id
+        ?? ref?.datosCliente?.id
+        ?? null;
+}
+
+function _clienteMismoId(a, b) {
+    return a !== null && a !== undefined && b !== null && b !== undefined && String(a) === String(b);
+}
+
+function _clienteBuscarVigente(ref = {}) {
+    const id = _clienteRefId(ref);
+    if (id === null || id === undefined || id === '') return null;
+    const lista = Array.isArray(window.clientes) && window.clientes.length
+        ? window.clientes
+        : StorageService.get("clientes", []);
+    return lista.find(c => _clienteMismoId(c.id, id)) || null;
+}
+
+function _clienteDatosVigentes(ref = {}) {
+    const vigente = _clienteBuscarVigente(ref);
+    if (!vigente) return null;
+    return { id: vigente.id, ..._clienteCamposBase(vigente) };
+}
+
+function _clienteNombreVigente(ref = {}, respaldo = "Cliente") {
+    const vigente = _clienteDatosVigentes(ref);
+    return vigente?.nombre || respaldo || "Cliente";
+}
+
 function _clienteCambios(antes, despues) {
     return Object.keys(despues).filter(k => String(antes[k] || '') !== String(despues[k] || ''));
 }
@@ -160,6 +193,7 @@ function guardarCliente() {
             clientesBD[index].telefono = telefono;
             clientesBD[index].referencia = referencia;
             clientesBD[index] = _clienteConBusqueda(clientesBD[index]);
+            _clientesSincronizarDatosRelacionados(clientesBD[index]);
         }
         window.clienteEditandoId = null;
     } else {
@@ -335,6 +369,7 @@ function abrirPickerClienteVenta() {
     }
     window.abrirSelectorCliente({
         titulo: 'Seleccionar cliente para venta',
+        onNuevo: () => abrirModalNuevoCliente({ seleccionar: true }),
         onSeleccion: (cliente) => {
             window.clienteSeleccionado = cliente;
             renderSeleccionClienteVenta();
@@ -536,8 +571,9 @@ function abrirModalNuevoCliente(opciones = {}) {
                     <input type="tel" id="nuevoCliTelefono" placeholder="555-1234567" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:5px;">
                 </div>
                 <div class="campo" style="margin-bottom:20px;">
-                    <label>Referencia</label>
+                    <label>Referencia buscable</label>
                     <textarea id="nuevoCliReferencia" placeholder="Ej: Cerca del parque, casa azul" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:5px; height:60px;"></textarea>
+                    <small style="color:#64748b;">Incluye alias, colonia, punto cercano o dato que ayude a encontrarlo despues.</small>
                 </div>
                 ${seleccionar ? `<label style="display:flex;gap:8px;align-items:center;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:14px;font-size:13px;color:#1e40af;font-weight:bold;">
                     <input type="checkbox" id="nuevoCliAutoSeleccionar" checked>
@@ -563,8 +599,18 @@ function guardarClienteDesdeModal() {
         alert("⚠️ " + validacion.errores.join("\n"));
         return;
     }
-    const nuevo = _clienteConBusqueda({ id: Date.now(), nombre, direccion, telefono, referencia, fechaRegistro: window.formatearFechaCortaMX(new Date()) });
     let clientesBD = StorageService.get("clientes", []);
+    const nombreNorm = _clienteNormalizarBusqueda(nombre);
+    const telefonoNorm = String(telefono || '').replace(/\D/g, '');
+    const posibleDuplicado = clientesBD.find(c => {
+        const telC = String(c.telefono || '').replace(/\D/g, '');
+        if (telefonoNorm && telC && telefonoNorm === telC) return true;
+        return nombreNorm && _clienteNormalizarBusqueda(c.nombre) === nombreNorm;
+    });
+    if (posibleDuplicado && !confirm(`Posible cliente duplicado:\n\n${posibleDuplicado.nombre || 'Cliente'} ${posibleDuplicado.telefono ? '- ' + posibleDuplicado.telefono : ''}\n\nDeseas guardar un cliente nuevo de todos modos?`)) {
+        return;
+    }
+    const nuevo = _clienteConBusqueda({ id: Date.now(), nombre, direccion, telefono, referencia, fechaRegistro: window.formatearFechaCortaMX(new Date()) });
     clientesBD.push(nuevo);
     window.clientes = clientesBD;
     if (!StorageService.set("clientes", clientesBD)) return alert("❌ Error guardando cliente");
@@ -728,27 +774,95 @@ function enviarSolicitudCambioCliente() {
 }
 
 function _clientesSincronizarDatosRelacionados(cliente) {
-    const campos = _clienteCamposBase(cliente);
-    const maps = [
-        { key: 'cuentasPorCobrar', nombre: 'nombre' },
-        { key: 'pagares', nombre: 'clienteNombre' },
-        { key: 'apartados', nombre: 'clienteNombre' },
-        { key: 'salidasPendientesVenta', nombre: 'clienteNombre' }
+    if (!cliente?.id) return 0;
+    const campos = { id: cliente.id, ..._clienteCamposBase(cliente) };
+    const foliosRelacionados = new Set();
+    const agregarFolio = item => {
+        [item?.folio, item?.folioVenta, item?.folioOrigen, item?.origenApartadoFolio, item?.datosVenta?.folio].forEach(f => {
+            if (f !== null && f !== undefined && String(f).trim()) foliosRelacionados.add(String(f));
+        });
+    };
+    const coincideCliente = item => _clienteMismoId(_clienteRefId(item), cliente.id);
+    const coincideFolio = item => {
+        const posibles = [item?.folio, item?.folioVenta, item?.folioOrigen, item?.origenApartadoFolio, item?.datosVenta?.folio];
+        return posibles.some(f => f !== null && f !== undefined && foliosRelacionados.has(String(f)));
+    };
+    const aplicarClienteAnidado = obj => {
+        if (!obj || typeof obj !== 'object') return false;
+        let cambio = false;
+        if (obj.cliente && typeof obj.cliente === 'object') {
+            const idAnidado = obj.cliente.id ?? obj.cliente.clienteId ?? obj.cliente.idCliente ?? null;
+            if (idAnidado === null || idAnidado === undefined || idAnidado === '' || _clienteMismoId(idAnidado, cliente.id)) {
+                obj.cliente = { ...obj.cliente, id: campos.id, nombre: campos.nombre, direccion: campos.direccion, telefono: campos.telefono, referencia: campos.referencia };
+                cambio = true;
+            }
+        }
+        if (obj.datosVenta?.cliente && typeof obj.datosVenta.cliente === 'object') {
+            const idAnidado = obj.datosVenta.cliente.id ?? obj.datosVenta.cliente.clienteId ?? obj.datosVenta.cliente.idCliente ?? null;
+            if (idAnidado === null || idAnidado === undefined || idAnidado === '' || _clienteMismoId(idAnidado, cliente.id)) {
+                obj.datosVenta.cliente = { ...obj.datosVenta.cliente, id: campos.id, nombre: campos.nombre, direccion: campos.direccion, telefono: campos.telefono, referencia: campos.referencia };
+                cambio = true;
+            }
+        }
+        return cambio;
+    };
+    const actualizarComun = (item, opciones = {}) => {
+        let cambio = false;
+        if (opciones.clienteId && item.clienteId !== campos.id) { item.clienteId = campos.id; cambio = true; }
+        if (opciones.nombre && item[opciones.nombre] !== campos.nombre) { item[opciones.nombre] = campos.nombre; cambio = true; }
+        if (opciones.clienteNombre && item.clienteNombre !== campos.nombre) { item.clienteNombre = campos.nombre; cambio = true; }
+        if (opciones.datosContacto) {
+            ['direccion', 'telefono', 'referencia'].forEach(k => {
+                if (item[k] !== campos[k]) { item[k] = campos[k]; cambio = true; }
+            });
+        }
+        return aplicarClienteAnidado(item) || cambio;
+    };
+
+    ['cuentasPorCobrar', 'ventasRegistradas', 'ventasPendientes', 'apartados', 'salidasPendientesVenta', 'documentosEntrega'].forEach(key => {
+        const lista = StorageService.get(key, []);
+        if (!Array.isArray(lista)) return;
+        lista.forEach(item => { if (coincideCliente(item)) agregarFolio(item); });
+    });
+
+    const specs = [
+        { key: 'cuentasPorCobrar', matchFolio: false, opciones: { nombre: 'nombre', clienteNombre: true, clienteId: true, datosContacto: true } },
+        { key: 'pagaresSistema', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
+        { key: 'pagares', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
+        { key: 'apartados', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
+        { key: 'salidasPendientesVenta', matchFolio: true, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
+        { key: 'ventasRegistradas', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: false } },
+        { key: 'ventasPendientes', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: false } },
+        { key: 'documentosEntrega', matchFolio: true, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
+        { key: 'cotizaciones', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
+        { key: 'devoluciones', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
+        { key: 'garantias', matchFolio: false, opciones: { clienteId: true } }
     ];
-    maps.forEach(({ key, nombre }) => {
+
+    let totalCambios = 0;
+    specs.forEach(({ key, matchFolio, opciones }) => {
         const lista = StorageService.get(key, []);
         if (!Array.isArray(lista)) return;
         let cambio = false;
         lista.forEach(item => {
-            if (String(item.clienteId || item.idCliente || '') !== String(cliente.id)) return;
-            item[nombre] = campos.nombre;
-            item.direccion = campos.direccion;
-            item.telefono = campos.telefono;
-            item.referencia = campos.referencia;
-            cambio = true;
+            if (!coincideCliente(item) && !(matchFolio && coincideFolio(item))) return;
+            if (actualizarComun(item, opciones)) {
+                agregarFolio(item);
+                cambio = true;
+                totalCambios++;
+            }
         });
         if (cambio) StorageService.set(key, lista);
     });
+    return totalCambios;
+}
+
+function _clientesSincronizarTodosLosDatosRelacionados() {
+    const lista = StorageService.get("clientes", []);
+    if (!Array.isArray(lista) || lista.length === 0) return 0;
+    let cambios = 0;
+    lista.forEach(c => { cambios += _clientesSincronizarDatosRelacionados(c) || 0; });
+    return cambios;
 }
 
 function renderSolicitudesClienteAutorizacion() {
@@ -891,3 +1005,12 @@ window.renderSolicitudesClienteAutorizacion = renderSolicitudesClienteAutorizaci
 window.revisarSolicitudCliente = revisarSolicitudCliente;
 window.aprobarSolicitudCliente = aprobarSolicitudCliente;
 window.rechazarSolicitudCliente = rechazarSolicitudCliente;
+window.obtenerClienteVigente = _clienteBuscarVigente;
+window.resolverNombreCliente = _clienteNombreVigente;
+window.sincronizarClientesConMovimientos = _clientesSincronizarTodosLosDatosRelacionados;
+
+try {
+    _clientesSincronizarTodosLosDatosRelacionados();
+} catch (error) {
+    console.warn('No se pudo sincronizar clientes con movimientos:', error);
+}

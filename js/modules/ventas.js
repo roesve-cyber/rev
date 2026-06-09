@@ -12,6 +12,7 @@ window._estadoPago = window._estadoPago || {
     apartadoFechaCompromiso: "",
     apartadoCondiciones: ""
 };
+var plazoSeleccionado = window.plazoSeleccionado ?? null;
 
 function _ventaCuentaEfectivoDefault() {
     const cajas = StorageService.get("cuentasEfectivo", []);
@@ -827,6 +828,124 @@ function _opcionesUbicacionSalidaVenta(prod, colorElegido = '', seleccionActual 
     return opciones;
 }
 
+function _ubicacionesSalidaVentaDetalle(prod, colorElegido = '') {
+    if (!prod) return [];
+
+    const stockActual = Number(prod.stock || 0);
+    const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
+    const stockEnVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+    const stockGeneralSinAsignar = Math.max(0, stockActual - stockEnVariantes);
+    const colorNorm = _normalizarClaveInventario(colorElegido);
+    const mapa = new Map();
+
+    const agregar = (ubicacion, stock, nota = '', prioridad = 1) => {
+        const cantidad = Number(stock || 0);
+        if (cantidad <= 0) return;
+        const nombre = ubicacion || 'General';
+        const key = _normalizarClaveInventario(nombre);
+        const actual = mapa.get(key);
+        if (!actual || prioridad < actual.prioridad) {
+            mapa.set(key, { ubicacion: nombre, stock: cantidad, nota, prioridad });
+        }
+    };
+
+    if (stockGeneralSinAsignar > 0) {
+        agregar('Stock General', stockGeneralSinAsignar, 'Sin ubicacion/variante asignada', 0);
+    }
+
+    const porUbicacionColor = {};
+    const porUbicacionTotal = {};
+    variantes.forEach(v => {
+        const ubicacion = v.ubicacion || 'General';
+        const stock = Number(v.stock || 0);
+        if (stock <= 0) return;
+        porUbicacionTotal[ubicacion] = (porUbicacionTotal[ubicacion] || 0) + stock;
+        const coincideColor = !colorNorm || _normalizarClaveInventario(v.color || 'General') === colorNorm;
+        if (coincideColor) porUbicacionColor[ubicacion] = (porUbicacionColor[ubicacion] || 0) + stock;
+    });
+
+    Object.entries(porUbicacionColor).forEach(([ubicacion, stock]) => {
+        agregar(ubicacion, stock, colorNorm ? 'Coincide con el color vendido' : 'Salida posible desde esta ubicacion', 1);
+    });
+
+    if (colorNorm) {
+        Object.entries(porUbicacionTotal).forEach(([ubicacion, stock]) => {
+            if (porUbicacionColor[ubicacion]) return;
+            agregar(ubicacion, stock, 'Existe aqui, pero con otro color registrado', 2);
+        });
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => a.prioridad - b.prioridad || a.ubicacion.localeCompare(b.ubicacion));
+}
+
+function _ventaDomId(valor) {
+    return String(valor || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function _ventaJsArg(valor) {
+    return _escapeHtml(String(valor ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, ' '));
+}
+
+function _renderOpcionesOrigenVenta(prod, item) {
+    const colorElegido = item?.colorElegido || '';
+    const idProd = String(prod?.id ?? item?.id ?? item?.productoId ?? '');
+    const idProdArg = _ventaJsArg(idProd);
+    const idDom = _ventaDomId(idProd);
+    const opciones = _ubicacionesSalidaVentaDetalle(prod, colorElegido);
+    if (!opciones.length) {
+        return `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:10px;font-size:12px;">No hay ubicaciones con existencia disponible. Se ira directo a sobre pedido.</div>`;
+    }
+    return `
+        <div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;">
+            <div style="font-size:12px;color:#1e40af;font-weight:900;margin-bottom:8px;">Elige la ubicacion fisica de salida:</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+                ${opciones.map(op => `
+                    <button type="button"
+                        id="btn-origen-${idDom}-${_ventaDomId(op.ubicacion)}"
+                        data-origen-producto="${_escapeHtml(idDom)}"
+                        onclick="seleccionarOrigenInventario('${idProdArg}', '${_ventaJsArg(op.ubicacion)}')"
+                        style="text-align:left;padding:12px;border:2px solid #93c5fd;background:white;color:#0f172a;border-radius:8px;cursor:pointer;transition:all .15s ease;box-shadow:0 1px 2px rgba(15,23,42,.08);">
+                        <span style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+                            <strong style="font-size:14px;">${_escapeHtml(op.ubicacion)}</strong>
+                            <span style="background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:900;">${Number(op.stock || 0)} pza.</span>
+                        </span>
+                        ${op.nota ? `<br><small style="color:#64748b;">${_escapeHtml(op.nota)}</small>` : ''}
+                    </button>
+                `).join('')}
+            </div>
+            <div id="origen-seleccionado-${idDom}" style="margin-top:8px;font-size:12px;color:#92400e;font-weight:bold;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px;">Falta elegir ubicacion de salida.</div>
+        </div>`;
+}
+
+function _ventaDecisionesStockCompletas() {
+    if (!Array.isArray(carrito) || !Array.isArray(productos)) return true;
+    return carrito.every(item => {
+        const prod = productos.find(p => String(p.id) === String(item.id));
+        if (!prod) return true;
+        const tieneStock = _stockDisponibleParaSolicitudVenta(prod, item) >= Number(item?.cantidad || 1);
+        if (!tieneStock) return true;
+        const decision = decisionesInventario[item.id];
+        if (!decision || typeof decision.entregar !== 'boolean') return false;
+        if (decision.entregar === true) return !!(decision.ubicacion || item.ubicacionElegida);
+        return decision.confirmadoSobrePedido === true;
+    });
+}
+
+function _actualizarBotonProcesarInventario() {
+    const btn = document.getElementById('btnProcesarVentaInventario');
+    const aviso = document.getElementById('avisoDecisionesInventario');
+    if (!btn) return;
+    const completas = _ventaDecisionesStockCompletas();
+    btn.disabled = !completas;
+    btn.style.background = completas ? '#27ae60' : '#94a3b8';
+    btn.style.cursor = completas ? 'pointer' : 'not-allowed';
+    btn.style.opacity = completas ? '1' : '.72';
+    if (aviso) aviso.style.display = completas ? 'none' : 'block';
+}
+
 function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '', ubicacionElegida = '') {
     const cant = Number(cantidad || 0);
     if (!prod || cant <= 0) return false;
@@ -958,7 +1077,8 @@ function actualizarInterfazPago() {
         divCondicionesApartado?.classList.add("oculto");
     }
 
-    // CUENTA RECEPTORA / MODO DE COBRO (NUEVO MOTOR) const divUniversal = document.getElementById("divSelectorUniversal");
+    // CUENTA RECEPTORA / MODO DE COBRO
+    const divUniversal = document.getElementById("divSelectorUniversal");
     const engancheVal = parseFloat(document.getElementById("numEnganche")?.value) || 0;
 
     if (divUniversal) {
@@ -1031,6 +1151,7 @@ function actualizarInterfazPago() {
     capturarDatosCredito();
 
     // GUARDAR ESTADO DE PAGO para no depender del DOM después window._estadoPago.metodo      = metodo;
+    window._estadoPago.metodo      = metodo;
     window._estadoPago.enganche    = enganche;
     window._estadoPago.periodicidad = metodo === "credito"
         ? (document.getElementById("selPeriodicidad")?.value || "semanal")
@@ -1370,6 +1491,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         
         productosConStock.forEach(x => {
             const idProd = x.prod.id;
+            const idProdArg = _ventaJsArg(idProd);
             const cantRequerida = x.item.cantidad || 1;
 
             const colorElegido = x.item.colorElegido || '';
@@ -1379,9 +1501,17 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                 <div style="margin-top:6px;">
                     <label style="font-size:11px; color:#374151;">}Color:</label>
                     <input type="text" value="${_escapeHtml(colorElegido)}" 
-                        onchange="cambiarColorInventario(${idProd}, this.value)"
+                        onchange="cambiarColorInventario('${idProdArg}', this.value)"
                         placeholder="Ej. Rojo" 
                         style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; width:120px;">
+                </div>`;
+            colorSelectorHtml = `
+                <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <label style="font-size:11px;color:#374151;font-weight:bold;">Color vendido:</label>
+                    <input type="text" value="${_escapeHtml(colorElegido)}"
+                        onchange="cambiarColorInventario('${idProdArg}', this.value)"
+                        placeholder="Ej. Blanco"
+                        style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:140px;">
                 </div>`;
 
             // 1. Armar las opciones del Combo Box con INVENTARIO DINAMICO
@@ -1395,37 +1525,61 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             let ubicacionSelectorHtml = `
                 <div style="margin-top:6px;">
                     <label style="font-size:11px; color:#374151;">Ubicacion de salida:</label>
-                    <select onchange="cambiarUbicacionInventario(${idProd}, this.value)"
+                    <select onchange="cambiarUbicacionInventario('${idProdArg}', this.value)"
                         style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:230px; cursor:pointer;">
                         ${opcionesUbi}
                     </select>
                 </div>`;
-            const accionesInventario = metodoPago === "apartado"
+            ubicacionSelectorHtml = _renderOpcionesOrigenVenta(x.prod, x.item);
+            let accionesInventario = metodoPago === "apartado"
                 ? `<div style="padding:8px 12px; background:#fffbeb; color:#92400e; border:1px solid #fcd34d; border-radius:6px; font-size:12px; max-width:220px;">
                         Apartado: queda en resguardo. No se descuenta inventario ni se emite entrega hasta liquidar.
                    </div>`
-                : `<div style="display:flex; gap:8px;">
-                        <button onclick="setDecisionInventario(${idProd}, true)" 
+                : `<div style="display:flex; flex-direction:column; gap:8px; min-width:170px;">
+                        <button onclick="setDecisionInventario('${idProdArg}', true)" 
                                 id="btn-si-${idProd}"
-                                style="padding:8px 16px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
-                            Entregar
+                                style="padding:9px 12px; background:#94a3b8; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">
+                            Tomar inventario
                         </button>
-                        <button onclick="setDecisionInventario(${idProd}, false)" 
+                        <button onclick="setDecisionInventario('${idProdArg}', false)" 
                                 id="btn-no-${idProd}"
-                                style="padding:8px 16px; background:#f59e0b; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">
+                                style="padding:9px 12px; background:#f59e0b; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:0;">
+                            <span style="font-size:13px;">Sobre pedido</span>
                             ⏳ Pendiente
                         </button>
+                        <small style="color:#64748b; line-height:1.3;">Sobre pedido: no descuenta inventario y quedara pendiente/requisicion.</small>
                    </div>`;
+            if (metodoPago !== "apartado") {
+                accionesInventario = `
+                   <div style="display:flex; flex-direction:column; gap:8px; min-width:180px;">
+                        <button onclick="setDecisionInventario('${idProdArg}', true)"
+                                id="btn-si-${idProd}"
+                                style="padding:11px 12px; background:#94a3b8; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:none;">
+                            Tomar de inventario
+                        </button>
+                        <button onclick="setDecisionInventario('${idProdArg}', false)"
+                                id="btn-no-${idProd}"
+                                style="padding:11px 12px; background:#f59e0b; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:none;">
+                            Mandar sobre pedido
+                        </button>
+                        <small id="estado-decision-${idProd}" style="color:#92400e; line-height:1.3; font-weight:bold;">Decision pendiente.</small>
+                   </div>`;
+            }
 
             htmlProductos += `
-                <div style="background:white; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                    <div>
+                <div style="background:white; padding:14px; border-radius:8px; margin-bottom:12px; border:1px solid #bbf7d0; box-shadow:0 1px 4px rgba(15,23,42,.06);">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:270px;">
                         <strong>${x.prod.nombre}</strong><br>
                         <small style="color:#718096;">Stock disponible: ${_stockDisponibleParaSolicitudVenta(x.prod, x.item)} | Solicitado: ${cantRequerida}</small>
+                        <div style="margin-top:8px; padding:9px 10px; background:#ecfdf5; border:1px solid #86efac; border-radius:7px; color:#166534; font-size:12px; font-weight:bold;">
+                            Hay existencia. Antes de vender debes decidir si la tomaras de inventario y de que ubicacion saldra.
+                        </div>
                         ${colorSelectorHtml}
                         ${ubicacionSelectorHtml}
                     </div>
                     ${accionesInventario}
+                    </div>
                 </div>
             `;
         });
@@ -1441,7 +1595,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         
         productosSinStock.forEach(x => {
             const idProd = x.prod.id;
-            decisionesInventario[idProd] = { entregar: false }; 
+            decisionesInventario[idProd] = { entregar: false, sinStock: true, confirmadoSobrePedido: true }; 
             const colorElegido = x.item.colorElegido || 'Sin especificar';
             
             htmlProductos += `
@@ -1472,8 +1626,8 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                 ${htmlProductos}
                 
                 <div style="display:flex; gap:10px; margin-top:20px;">
-                    <button onclick="confirmarDecisionesInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar}, ${planSafeStr2})" 
-                            style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
+                    <button id="btnProcesarVentaInventario" disabled onclick="confirmarDecisionesInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar}, ${planSafeStr2})" 
+                            style="flex:1; padding:14px; background:#94a3b8; color:white; border:none; border-radius:6px; cursor:not-allowed; font-weight:bold; font-size:16px; opacity:.72;">
                         Procesar Venta
                     </button>
                     <button onclick="cancelarYVolverAlCarrito()" 
@@ -1481,30 +1635,121 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
                         S" Cancelar
                     </button>
                 </div>
+                <div id="avisoDecisionesInventario" style="display:block;margin-top:10px;background:#fffbeb;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px;font-size:13px;font-weight:bold;">
+                    Falta decidir la salida de inventario o confirmar sobre pedido para los productos con existencia.
+                </div>
             </div>
         </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+    _actualizarBotonProcesarInventario();
+}
+
+function seleccionarOrigenInventario(productoId, ubicacion) {
+    if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
+    decisionesInventario[productoId].ubicacion = ubicacion;
+    decisionesInventario[productoId].entregar = true;
+    decisionesInventario[productoId].confirmadoSobrePedido = false;
+
+    const idx = carrito.findIndex(item => String(item.id) === String(productoId));
+    if (idx !== -1) {
+        carrito[idx].ubicacionElegida = ubicacion;
+        StorageService.set("carrito", carrito);
+    }
+
+    setDecisionInventario(productoId, true, { saltarValidacionUbicacion: true });
+    const idDom = _ventaDomId(productoId);
+    document.querySelectorAll(`[data-origen-producto="${idDom}"]`).forEach(btn => {
+        btn.style.background = '#f8fafc';
+        btn.style.borderColor = '#cbd5e1';
+        btn.style.boxShadow = 'none';
+        btn.style.opacity = '0.42';
+        btn.style.transform = 'scale(.98)';
+    });
+    const btnOrigen = document.getElementById(`btn-origen-${idDom}-${_ventaDomId(ubicacion)}`);
+    if (btnOrigen) {
+        btnOrigen.style.background = '#dcfce7';
+        btnOrigen.style.borderColor = '#16a34a';
+        btnOrigen.style.boxShadow = '0 0 0 3px rgba(22,163,74,.18)';
+        btnOrigen.style.opacity = '1';
+        btnOrigen.style.transform = 'scale(1)';
+    }
+    const nota = document.getElementById(`origen-seleccionado-${idDom}`);
+    if (nota) {
+        nota.style.background = '#dcfce7';
+        nota.style.borderColor = '#86efac';
+        nota.style.color = '#166534';
+        nota.innerHTML = `<strong>Seleccionado para salida:</strong> ${_escapeHtml(ubicacion)}`;
+    }
+    const estado = document.getElementById(`estado-decision-${productoId}`);
+    if (estado) {
+        estado.style.color = '#166534';
+        estado.innerHTML = `Tomaras inventario de ${_escapeHtml(ubicacion)}.`;
+    }
+    _actualizarBotonProcesarInventario();
 }
 
 function setDecisionInventario(productoId, entregar) {
     if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
+    const decision = decisionesInventario[productoId];
+    const prod = productos.find(p => String(p.id) === String(productoId));
+    const item = carrito.find(i => String(i.id) === String(productoId));
+
+    if (entregar && !decision.ubicacion && !item?.ubicacionElegida) {
+        alert(`Selecciona primero la ubicacion de salida para "${prod?.nombre || item?.nombre || 'producto'}".`);
+        return;
+    }
+
+    if (!entregar) {
+        const tieneStock = prod && _stockDisponibleParaSolicitudVenta(prod, item || {}) >= Number(item?.cantidad || 1);
+        if (tieneStock && !confirm(`"${prod?.nombre || item?.nombre || 'Producto'}" tiene inventario disponible.\n\nConfirma que NO lo tomaras de inventario y que quedara sobre pedido/pendiente.`)) {
+            return;
+        }
+        decision.confirmadoSobrePedido = true;
+    }
+
     decisionesInventario[productoId].entregar = entregar;
     
     const btnSi = document.getElementById(`btn-si-${productoId}`);
     const btnNo = document.getElementById(`btn-no-${productoId}`);
+    if (!btnSi || !btnNo) return;
     
     if (entregar) {
         btnSi.style.background = '#27ae60';
         btnSi.style.opacity = '1';
+        btnSi.style.boxShadow = '0 0 0 3px rgba(39,174,96,.18)';
         btnNo.style.background = '#cbd5e0';
         btnNo.style.opacity = '0.5';
+        btnNo.style.boxShadow = 'none';
     } else {
         btnNo.style.background = '#f59e0b';
         btnNo.style.opacity = '1';
+        btnNo.style.boxShadow = '0 0 0 3px rgba(245,158,11,.20)';
         btnSi.style.background = '#cbd5e0';
         btnSi.style.opacity = '0.5';
+        btnSi.style.boxShadow = 'none';
+        const idDom = _ventaDomId(productoId);
+        document.querySelectorAll(`[data-origen-producto="${idDom}"]`).forEach(btn => {
+            btn.style.background = '#f8fafc';
+            btn.style.borderColor = '#e2e8f0';
+            btn.style.boxShadow = 'none';
+            btn.style.opacity = '0.28';
+            btn.style.transform = 'scale(.98)';
+        });
+        const nota = document.getElementById(`origen-seleccionado-${idDom}`);
+        if (nota) {
+            nota.style.background = '#fffbeb';
+            nota.style.borderColor = '#f59e0b';
+            nota.style.color = '#92400e';
+            nota.innerHTML = '<strong>Sobre pedido confirmado:</strong> no se descontara inventario en esta venta.';
+        }
+        const estado = document.getElementById(`estado-decision-${productoId}`);
+        if (estado) {
+            estado.style.color = '#92400e';
+            estado.innerHTML = 'Quedara como sobre pedido/pendiente.';
+        }
     }
+    _actualizarBotonProcesarInventario();
 }
 
 function cambiarColorInventario(productoId, nuevoColor) {
@@ -1572,6 +1817,16 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
         if (!prod || errorInventario) return;
         const decision = decisionesInventario[item.id];
         const tieneStock = _stockDisponibleParaSolicitudVenta(prod, item) >= (item.cantidad || 1);
+
+        if (metodoPago !== "apartado" && tieneStock && (!decision || typeof decision.entregar !== "boolean")) {
+            errorInventario = `Hay inventario disponible para "${prod.nombre || item.nombre}". Debes elegir la ubicacion de salida o confirmar que quedara sobre pedido.`;
+            return;
+        }
+
+        if (metodoPago !== "apartado" && tieneStock && decision && decision.entregar === false && decision.confirmadoSobrePedido !== true) {
+            errorInventario = `Confirma sobre pedido para "${prod.nombre || item.nombre}" antes de procesar la venta.`;
+            return;
+        }
         
         const puedeEntregarAhora = metodoPago !== "apartado" && tieneStock && decision && decision.entregar;
 
@@ -5193,6 +5448,7 @@ window.actualizarInterfazPago = actualizarInterfazPago;
 window.seleccionarPlan = seleccionarPlan;
 window.confirmarVentaFinal = confirmarVentaFinal;
 window.cancelarYVolverAlCarrito = cancelarYVolverAlCarrito;
+window.seleccionarOrigenInventario = seleccionarOrigenInventario;
 window.setDecisionInventario = setDecisionInventario;
 window.cambiarColorInventario = cambiarColorInventario;
 window.cambiarUbicacionInventario = cambiarUbicacionInventario;

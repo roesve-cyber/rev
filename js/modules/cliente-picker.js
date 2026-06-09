@@ -2,7 +2,8 @@
 window.abrirSelectorCliente = function(opciones) {
     const {
         titulo = "👤 Seleccionar Cliente",
-        onSeleccion = () => {}
+        onSeleccion = () => {},
+        onNuevo = null
     } = opciones || {};
 
     // Eliminar si ya existe uno abierto
@@ -24,6 +25,7 @@ window.abrirSelectorCliente = function(opciones) {
                        placeholder="🔍 Buscar por nombre o teléfono..."
                        oninput="window._filtrarClientesPicker(this.value)"
                        style="width:100%;padding:10px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;outline:none;">
+                <button onclick="window._nuevoClienteDesdePicker()" style="margin-top:10px;width:100%;padding:10px 12px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Nuevo cliente</button>
             </div>
 
             <div id="clientePickerContenido" style="padding:16px;overflow-y:auto;flex:1;"></div>
@@ -34,9 +36,21 @@ window.abrirSelectorCliente = function(opciones) {
 
     window._clientesPickerData = clientesLista;
     window._clientesPickerCb   = onSeleccion;
+    window._clientesPickerNuevo = onNuevo;
     window._filtrarClientesPicker('');
 
     setTimeout(() => document.getElementById('clientePickerBuscar')?.focus(), 60);
+};
+
+window._nuevoClienteDesdePicker = function() {
+    document.querySelector('[data-modal="universal-client-picker"]')?.remove();
+    if (typeof window._clientesPickerNuevo === 'function') {
+        window._clientesPickerNuevo();
+        return;
+    }
+    if (typeof window.abrirModalNuevoCliente === 'function') {
+        window.abrirModalNuevoCliente({ seleccionar: true });
+    }
 };
 
 window._filtrarClientesPicker = function(texto) {

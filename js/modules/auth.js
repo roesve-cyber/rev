@@ -67,6 +67,23 @@ function _sesionDesdePerfil({ uid, email, perfil = {}, fallbackNombre = '' }) {
     return base;
 }
 
+async function _obtenerPerfilFirebaseActivo(user) {
+    if (!window._firebaseActivo || !window._db || !user?.uid) return null;
+    const snap = await window._db.collection('usuarios').doc(user.uid).get();
+    if (!snap.exists) {
+        const err = new Error('Tu usuario existe en Firebase Auth, pero no tiene perfil autorizado en /usuarios. Pide a un administrador que lo active.');
+        err.code = 'mmp/profile-missing';
+        throw err;
+    }
+    const perfil = snap.data() || {};
+    if (perfil.activo === false) {
+        const err = new Error('Este usuario esta desactivado. Pide a un administrador que lo reactive.');
+        err.code = 'mmp/profile-disabled';
+        throw err;
+    }
+    return perfil;
+}
+
 // Escapa caracteres HTML para prevenir XSS al insertar datos de usuario en HTML
 function _esc(str) {
     if (str == null) return '';
@@ -154,6 +171,13 @@ function mostrarLoginScreen() {
     }
 }
 
+let _pinIntentosAdmin = 0;
+let _pinBloqueadoHasta = 0;
+
+function _pinAdminRestanteBloqueo() {
+    return Math.max(0, Math.ceil((_pinBloqueadoHasta - Date.now()) / 1000));
+}
+
 // ── requireAdmin ──────────────────────────────────────────────────────────────
 function requireAdmin(callback) {
     if (esAdmin()) { callback(); return; }
@@ -218,9 +242,16 @@ function requireAdmin(callback) {
 }
 
 function _verificarPinAdmin(pin) {
+    const errEl = document.getElementById('adminPinError');
+    if (Date.now() < _pinBloqueadoHasta) {
+        if (errEl) errEl.textContent = `Demasiados intentos. Espera ${_pinAdminRestanteBloqueo()}s.`;
+        return;
+    }
     const usuarios = _getUsuarios();
     const adminMatch = usuarios.find(u => u.rol === 'admin' && u.activo && u.pin === pin);
     if (adminMatch) {
+        _pinIntentosAdmin = 0;
+        _pinBloqueadoHasta = 0;
         document.querySelector('[data-modal="req-admin"]')?.remove();
         if (typeof window._adminCallback === 'function') {
             const cb = window._adminCallback;
@@ -228,10 +259,25 @@ function _verificarPinAdmin(pin) {
             cb();
         }
     } else {
-        const errEl = document.getElementById('adminPinError');
+        _pinIntentosAdmin++;
+        if (_pinIntentosAdmin >= 5) {
+            _pinBloqueadoHasta = Date.now() + 60000;
+            _pinIntentosAdmin = 0;
+            window.AuditService?.log?.({
+                accion: 'PIN_ADMIN_BLOQUEADO',
+                modulo: 'Seguridad',
+                entidad: 'requireAdmin',
+                detalle: 'Se bloqueo temporalmente la verificacion de PIN admin por intentos fallidos.',
+                severidad: 'alerta'
+            });
+            if (errEl) errEl.textContent = 'Demasiados intentos. Espera 60s.';
+        } else if (errEl) {
+            errEl.textContent = `PIN incorrecto. Intento ${_pinIntentosAdmin}/5.`;
+        }
+        const inputNuevo = document.getElementById('adminPinInput');
+        if (inputNuevo) { inputNuevo.value = ''; inputNuevo.focus(); }
+        return;
         if (errEl) errEl.textContent = '❌ PIN incorrecto.';
-        const input = document.getElementById('adminPinInput');
-        if (input) { input.value = ''; input.focus(); }
     }
 }
 
@@ -244,8 +290,7 @@ async function _verificarCredencialesAdmin(email, pass) {
     try {
         const cred = await window._auth.signInWithEmailAndPassword(email, pass);
         const uid = cred.user.uid;
-        const snap = await window._db.collection('usuarios').doc(uid).get();
-        const perfil = snap.exists ? snap.data() : null;
+        const perfil = await _obtenerPerfilFirebaseActivo(cred.user);
         if (!perfil || perfil.rol !== 'admin') {
             if (errEl) errEl.textContent = '❌ Este usuario no tiene permisos de administrador.';
             return;
@@ -337,15 +382,22 @@ function verificarSesionInicial() {
     if (window._firebaseActivo && window._auth) {
         window._auth.onAuthStateChanged(async (user) => {
             if (user) {
+                try {
                 let sesion = JSON.parse(sessionStorage.getItem('sesionActiva') || 'null');
                 if (!sesion || sesion.uid !== user.uid) {
-                    const snap = await window._db.collection('usuarios').doc(user.uid).get();
-                    const perfil = snap.exists ? snap.data() : { rol: 'vendedor', nombre: user.email };
+                    const perfil = await _obtenerPerfilFirebaseActivo(user);
                     sesion = _sesionDesdePerfil({ uid: user.uid, email: user.email, perfil, fallbackNombre: user.email });
                     sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
                 }
                 ocultarLoginScreen();
                 aplicarRolUI();
+                } catch (err) {
+                    console.warn('Sesion Firebase sin perfil autorizado:', err);
+                    sessionStorage.removeItem('sesionActiva');
+                    try { await window._auth.signOut(); } catch {}
+                    mostrarLoginScreen();
+                    mostrarErrorLogin(err.message || 'Tu usuario no esta autorizado en Firebase.');
+                }
             } else {
                 mostrarLoginScreen();
             }
@@ -370,8 +422,7 @@ async function iniciarSesion() {
         if (window._firebaseActivo && window._auth) {
             const cred = await window._auth.signInWithEmailAndPassword(email, pass);
             const uid = cred.user.uid;
-            const snap = await window._db.collection('usuarios').doc(uid).get();
-            const perfil = snap.exists ? snap.data() : { rol: 'vendedor', nombre: email };
+            const perfil = await _obtenerPerfilFirebaseActivo(cred.user);
             const sesion = _sesionDesdePerfil({ uid, email, perfil, fallbackNombre: email });
             sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
             ocultarLoginScreen();
@@ -403,6 +454,10 @@ async function iniciarSesion() {
         if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = 'Email o contraseña incorrectos';
         if (err.code === 'auth/invalid-email') msg = 'Email inválido';
         if (err.code === 'auth/too-many-requests') msg = 'Demasiados intentos. Intenta más tarde';
+        if (err.code === 'mmp/profile-missing' || err.code === 'mmp/profile-disabled') {
+            msg = err.message;
+            try { await window._auth.signOut(); } catch {}
+        }
         mostrarErrorLogin(msg);
         if (btnLogin) { btnLogin.disabled = false; btnLogin.textContent = '🔐 Entrar'; }
     }
@@ -740,6 +795,9 @@ async function guardarUsuarioFirebase() {
 }
 
 async function crearUsuarioFirebase(email, pass, nombre, rol, vendedorId = '') {
+    if (rol === 'admin') {
+        throw new Error('Por seguridad, los administradores no se crean directamente desde el cliente. Crea un vendedor y asciendelo con un flujo administrativo seguro.');
+    }
     // Guardar sesión actual del admin antes de crear el usuario
     let sesionAdmin = null;
     try { sesionAdmin = JSON.parse(sessionStorage.getItem('sesionActiva')); } catch { sesionAdmin = null; }
@@ -770,6 +828,7 @@ async function listarUsuariosFirebase() {
 // ── exportar al scope global ──────────────────────────────────────────────────
 window.getSesion = getSesion;
 window.esAdmin = esAdmin;
+window.validarUsuarioFirebaseActivo = _obtenerPerfilFirebaseActivo;
 window.obtenerVendedorDeUsuario = obtenerVendedorDeUsuario;
 window.requireAdmin = requireAdmin;
 window._verificarPinAdmin = _verificarPinAdmin;

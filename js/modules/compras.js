@@ -4544,8 +4544,18 @@ window.marcarConsignacionVendida = function(idConsig) {
     const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
     if (idx === -1) return;
     const c = consigArr[idx];
+    const sugerida = window._consigVentaSugerida && String(window._consigVentaSugerida.consignacionId) === String(idConsig)
+        ? window._consigVentaSugerida
+        : null;
+    window._consigVentaSugerida = null;
+    const cantidadSugerida = sugerida
+        ? String(Math.min(Number(sugerida.cantidad || 0) || 0, Number(c.cantidadPendiente || 0) || 0) || '')
+        : "";
 
+    /*
     const cantidadAVender = parseInt(prompt(`¿Cuántas piezas de "${c.producto}" vendiste?\n\nStock disponible: ${c.cantidadPendiente}`));
+    */
+    const cantidadAVender = parseInt(prompt(`Cuantas piezas de "${c.producto}" vendiste?\n\nStock disponible: ${c.cantidadPendiente}`, cantidadSugerida));
     if (isNaN(cantidadAVender) || cantidadAVender <= 0 || cantidadAVender > c.cantidadPendiente) {
         return alert("❌ Cantidad inválida.");
     }
@@ -4583,7 +4593,7 @@ window.marcarConsignacionVendida = function(idConsig) {
     }
 
     const montoCxp = Math.max(0, montoDeuda - montoCubiertoConAnticipos);
-    const folioVentaOrigen = (prompt("Si corresponde a una venta del POS, captura el folio (opcional):", "") || "").trim();
+    const folioVentaOrigen = (prompt("Si corresponde a una venta del POS, captura el folio (opcional):", sugerida?.folioVenta || "") || "").trim();
     const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("RCON") : `RCON-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     const fechaActual = new Date();
@@ -4694,19 +4704,219 @@ function _consigUiState() {
     return window._consigUiState;
 }
 
+function _consigAnticipoLectura(alcance = {}) {
+    const entregado = Number(alcance.anticiposTotal || 0);
+    const aplicado = Number(alcance.anticiposAplicados || 0);
+    const aplicadoDesdeGlobal = Math.max(0, aplicado - entregado);
+    const disponibleDirecto = Math.max(0, entregado - aplicado);
+    const lineaGlobal = aplicadoDesdeGlobal > 0.01
+        ? `<br><small style="color:#7c3aed;">Desde anticipo global: ${dinero(aplicadoDesdeGlobal)}</small>`
+        : '';
+    return { entregado, aplicado, aplicadoDesdeGlobal, disponibleDirecto, lineaGlobal };
+}
+
 function _consigResumenKPIs({ compraOriginal = 0, pagadoPorVentas = 0, anticiposTotal = 0, anticiposAplicados = 0, saldoNeto = 0 }) {
-    const anticipoEntregado = Number(anticiposTotal || 0);
-    const anticipoAplicado = Number(anticiposAplicados || 0);
-    const anticipoDisponible = Math.max(0, anticipoEntregado - anticipoAplicado);
+    const anticipo = _consigAnticipoLectura({ anticiposTotal, anticiposAplicados });
     return `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;">
             <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Compra original</small><br><strong style="font-size:20px;color:#1d4ed8;">${dinero(compraOriginal)}</strong></div>
             <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Pagado por ventas</small><br><strong style="font-size:20px;color:#15803d;">${dinero(pagadoPorVentas)}</strong></div>
-            <div style="background:#eef2ff;border:1px solid #c7d2fe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipo entregado</small><br><strong style="font-size:20px;color:#4338ca;">${dinero(anticipoEntregado)}</strong></div>
-            <div style="background:#ecfeff;border:1px solid #a5f3fc;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipo aplicado</small><br><strong style="font-size:20px;color:#0e7490;">${dinero(anticipoAplicado)}</strong><br><small style="color:#64748b;">Disp. ${dinero(anticipoDisponible)}</small></div>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipo entregado</small><br><strong style="font-size:20px;color:#4338ca;">${dinero(anticipo.entregado)}</strong></div>
+            <div style="background:#ecfeff;border:1px solid #a5f3fc;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Anticipo aplicado</small><br><strong style="font-size:20px;color:#0e7490;">${dinero(anticipo.aplicado)}</strong><br><small style="color:#64748b;">Disp. directo ${dinero(anticipo.disponibleDirecto)}</small>${anticipo.lineaGlobal}</div>
             <div style="background:#fff1f2;border:1px solid #fecdd3;padding:14px;border-radius:8px;"><small style="color:#64748b;font-weight:bold;">Saldo neto</small><br><strong style="font-size:20px;color:#be123c;">${dinero(saldoNeto)}</strong></div>
         </div>`;
 }
+
+function _consigNormTexto(valor) {
+    return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function _consigVentaFolio(v = {}) {
+    return String(v.folio || v.folioVenta || v.datosVenta?.folio || v.ticket || '').trim();
+}
+
+function _consigVentaFecha(v = {}) {
+    return v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaVenta || v.datosVenta?.fecha || '';
+}
+
+function _consigVentaItems(v = {}) {
+    const items = v.articulos || v.items || v.productos || v.datosVenta?.articulos || [];
+    return _comprasAsegurarArray(items);
+}
+
+function _consigItemProductoId(item = {}) {
+    return String(item.productoId || item.idProducto || item.product_id || item.id || '').trim();
+}
+
+function _consigItemNombre(item = {}) {
+    return String(item.nombre || item.productoNombre || item.producto || item.descripcion || '').trim();
+}
+
+function _consigItemColor(item = {}) {
+    return String(item.colorElegido || item.color || item.variante || '').trim();
+}
+
+function _consigItemCantidad(item = {}) {
+    return Number(item.cantidad || item.qty || item.piezas || 1) || 1;
+}
+
+function _consigVentaCancelada(v = {}) {
+    const estado = _consigNormTexto(`${v.estado || ''} ${v.estatus || ''} ${v.status || ''}`);
+    return estado.includes('cancelad') || estado.includes('anulad');
+}
+
+function _consigFoliosYaReportados(consignaciones = []) {
+    const set = new Set();
+    const agregar = folio => {
+        const limpio = String(folio || '').trim().toUpperCase();
+        if (limpio) set.add(limpio);
+    };
+    consignaciones.forEach(c => {
+        _comprasAsegurarArray(c.ventasReportadas).forEach(vr => {
+            agregar(vr.folioVentaPOS);
+            agregar(vr.folioVentaOrigen);
+            agregar(vr.folioVentaAsociada);
+            agregar(vr.folioVenta);
+            agregar(vr.folio);
+        });
+    });
+    _comprasAsegurarArray(StorageService.get("cuentasPorPagar", [])).forEach(cxp => {
+        if (!cxp?.origenConsignacion) return;
+        agregar(cxp.folioVentaAsociada);
+        agregar(cxp.folioVentaOrigen);
+        agregar(cxp.folioVenta);
+        agregar(cxp.folio);
+    });
+    return set;
+}
+
+function _consigScoreCoincidencia(consignacion = {}, item = {}) {
+    const consId = String(consignacion.productoId || consignacion.idProducto || '').trim();
+    const itemId = _consigItemProductoId(item);
+    const consNombre = _consigNormTexto(consignacion.producto || consignacion.nombre);
+    const itemNombre = _consigNormTexto(_consigItemNombre(item));
+    const consColor = _consigNormTexto(consignacion.color || '');
+    const itemColor = _consigNormTexto(_consigItemColor(item));
+    const itemCantidad = _consigItemCantidad(item);
+    const pendiente = Number(consignacion.cantidadPendiente || 0);
+    let score = 0;
+    const motivos = [];
+
+    if (consId && itemId && consId === itemId) {
+        score += 90;
+        motivos.push('ID de producto');
+    }
+    if (consNombre && itemNombre && consNombre === itemNombre) {
+        score += 55;
+        motivos.push('nombre exacto');
+    } else if (consNombre && itemNombre && consNombre.length >= 6 && itemNombre.length >= 6 && (consNombre.includes(itemNombre) || itemNombre.includes(consNombre))) {
+        score += 28;
+        motivos.push('nombre parecido');
+    }
+    if (consColor && itemColor && consColor === itemColor) {
+        score += 10;
+        motivos.push('color');
+    }
+    if (pendiente > 0 && itemCantidad <= pendiente) {
+        score += 5;
+        motivos.push('cantidad posible');
+    }
+    return { score, motivos };
+}
+
+function _consigVentasProbablesFolio(folio) {
+    const consignaciones = _comprasAsegurarArray(folio?.consignaciones).filter(c => Number(c.cantidadPendiente || 0) > 0);
+    if (!consignaciones.length) return [];
+    const foliosReportados = _consigFoliosYaReportados(consignaciones);
+    const ventas = _comprasAsegurarArray(StorageService.get("ventasRegistradas", []));
+    const resultados = [];
+    const vistos = new Set();
+
+    ventas.forEach(venta => {
+        if (_consigVentaCancelada(venta)) return;
+        const folioVenta = _consigVentaFolio(venta);
+        if (folioVenta && foliosReportados.has(folioVenta.toUpperCase())) return;
+        _consigVentaItems(venta).forEach((item, itemIndex) => {
+            consignaciones.forEach(c => {
+                const evalua = _consigScoreCoincidencia(c, item);
+                if (evalua.score < 55) return;
+                const key = `${folioVenta || 'SIN-FOLIO'}|${c.id}|${itemIndex}`;
+                if (vistos.has(key)) return;
+                vistos.add(key);
+                resultados.push({
+                    consignacionId: c.id,
+                    productoConsignado: c.producto || '',
+                    pendiente: Number(c.cantidadPendiente || 0),
+                    folioVenta,
+                    fechaVenta: _consigVentaFecha(venta),
+                    cliente: venta.clienteNombre || venta.cliente?.nombre || venta.nombre || '',
+                    productoVendido: _consigItemNombre(item),
+                    colorVendido: _consigItemColor(item),
+                    cantidad: _consigItemCantidad(item),
+                    score: evalua.score,
+                    motivos: evalua.motivos.join(', ')
+                });
+            });
+        });
+    });
+
+    return resultados
+        .sort((a, b) => (b.score - a.score) || String(b.fechaVenta || '').localeCompare(String(a.fechaVenta || '')))
+        .slice(0, 25);
+}
+
+function _consigVentasProbablesPanel(folio) {
+    const probables = _consigVentasProbablesFolio(folio);
+    const rows = probables.map(p => {
+        const payload = encodeURIComponent(JSON.stringify({
+            consignacionId: p.consignacionId,
+            folioVenta: p.folioVenta,
+            cantidad: p.cantidad
+        }));
+        const confianza = p.score >= 90 ? 'Alta' : 'Media';
+        const fecha = p.fechaVenta ? _comprasFechaVista(p.fechaVenta, '-') : '-';
+        return `
+            <tr style="border-bottom:1px solid #fde68a;">
+                <td style="padding:9px;"><strong>${_comprasEscHTML(p.folioVenta || 'Sin folio')}</strong><br><small style="color:#64748b;">${_comprasEscHTML(fecha)}</small></td>
+                <td style="padding:9px;">${_comprasEscHTML(p.cliente || '-')}</td>
+                <td style="padding:9px;"><strong>${_comprasEscHTML(p.productoVendido || '-')}</strong>${p.colorVendido ? `<br><small style="color:#64748b;">Color: ${_comprasEscHTML(p.colorVendido)}</small>` : ''}<br><small style="color:#64748b;">Cantidad vendida: ${Number(p.cantidad || 0)}</small></td>
+                <td style="padding:9px;">${_comprasEscHTML(p.productoConsignado || '-')}<br><small style="color:#64748b;">Pendiente: ${Number(p.pendiente || 0)} | ${_comprasEscHTML(p.motivos || '-')}</small></td>
+                <td style="padding:9px;text-align:center;"><span style="display:inline-block;padding:4px 8px;border-radius:999px;background:${p.score >= 90 ? '#dcfce7' : '#fef9c3'};color:${p.score >= 90 ? '#166534' : '#854d0e'};font-weight:bold;font-size:12px;">${confianza}</span></td>
+                <td style="padding:9px;text-align:center;"><button onclick="aplicarSugerenciaVentaConsignacion('${payload}')" style="padding:7px 10px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;">Reportar esta venta</button></td>
+            </tr>`;
+    }).join('');
+
+    return `
+        <div style="border-top:1px solid #fed7aa;background:#fff7ed;padding:14px;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px;">
+                <div>
+                    <div style="font-size:12px;font-weight:900;color:#9a3412;text-transform:uppercase;">Ventas posiblemente de consignacion</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">Sugerencias de lectura solamente. Para afectar consignacion y CxP se usa el mismo flujo de Reportar venta.</div>
+                </div>
+                <span style="background:white;border:1px solid #fed7aa;color:#9a3412;border-radius:999px;padding:5px 10px;font-size:12px;font-weight:bold;">${probables.length} coincidencia(s)</span>
+            </div>
+            ${probables.length ? `
+                <div style="overflow:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:840px;background:white;border:1px solid #fde68a;">
+                        <thead style="background:#fffbeb;color:#92400e;"><tr><th style="padding:9px;text-align:left;">Venta</th><th style="padding:9px;text-align:left;">Cliente</th><th style="padding:9px;text-align:left;">Producto vendido</th><th style="padding:9px;text-align:left;">Coincide con</th><th style="padding:9px;text-align:center;">Confianza</th><th style="padding:9px;text-align:center;">Accion</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>` : '<div style="background:white;border:1px dashed #fed7aa;border-radius:8px;padding:12px;color:#64748b;font-size:13px;">No encontre ventas POS pendientes que coincidan con los productos de este folio.</div>'}
+        </div>`;
+}
+
+window.aplicarSugerenciaVentaConsignacion = function(payload) {
+    let data = {};
+    try { data = JSON.parse(decodeURIComponent(payload || '')); } catch (e) { data = {}; }
+    if (!data.consignacionId) return alert("No se pudo identificar la consignacion sugerida.");
+    window._consigVentaSugerida = data;
+    window.marcarConsignacionVendida(data.consignacionId);
+};
 
 function _consigProductoRows(folio) {
     // 🛡️ Leer directo de la fuente maestra para evadir cualquier fallo de agrupacion
@@ -4802,15 +5012,13 @@ window.abrirGestorConsignaciones = function() {
     const foliosHtml = proveedor ? proveedor.folios.map(f => {
         const activo = f.key === state.folioKey;
         const productosPendientes = f.consignaciones.reduce((s, c) => s + Number(c.cantidadPendiente || 0), 0);
-        const anticipoEntregado = Number(f.anticiposTotal || 0);
-        const anticipoAplicado = Number(f.anticiposAplicados || 0);
-        const anticipoDisponible = Math.max(0, anticipoEntregado - anticipoAplicado);
+        const anticipo = _consigAnticipoLectura(f);
         return `
         <tr style="border-bottom:1px solid #e2e8f0;background:${activo ? '#eff6ff' : 'white'};">
             <td style="padding:10px;"><strong>${_comprasEscHTML(f.folioOrigen)}</strong><br><small style="color:#64748b;">${f.consignaciones.length} producto(s)</small></td>
             <td style="padding:10px;text-align:center;">${productosPendientes}</td>
             <td style="padding:10px;text-align:right;">${dinero(f.compraOriginal)}</td>
-            <td style="padding:10px;text-align:right;color:#2563eb;font-weight:bold;">${dinero(anticipoEntregado)}<br><small style="color:#0e7490;">Aplicado: ${dinero(anticipoAplicado)}</small><br><small style="color:#64748b;">Disp: ${dinero(anticipoDisponible)}</small></td>
+            <td style="padding:10px;text-align:right;color:#2563eb;font-weight:bold;">${dinero(anticipo.entregado)}<br><small style="color:#0e7490;">Aplicado: ${dinero(anticipo.aplicado)}</small><br><small style="color:#64748b;">Disp. directo: ${dinero(anticipo.disponibleDirecto)}</small>${anticipo.lineaGlobal}</td>
             <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(f.saldoNeto)}</td>
             <td style="padding:10px;text-align:center;white-space:nowrap;">
                 <button onclick="seleccionarFolioConsignacion('${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#1e40af;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Detalle</button>
@@ -4864,7 +5072,8 @@ window.abrirGestorConsignaciones = function() {
                     <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:10px;text-align:left;">Ingreso</th><th style="padding:10px;text-align:left;">Producto</th><th style="padding:10px;text-align:center;">Pend./Total</th><th style="padding:10px;text-align:right;">Costo</th><th style="padding:10px;text-align:right;">Importe</th><th style="padding:10px;text-align:center;">Accion</th></tr></thead>
                     <tbody>${_consigProductoRows(folio) || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#64748b;">Sin productos en este folio.</td></tr>'}</tbody>
                 </table>
-            </div>`;
+            </div>
+            ${_consigVentasProbablesPanel(folio)}`;
     }
 
     const html = `
@@ -4905,9 +5114,10 @@ window.abrirModalAbonoConsignacion = function(scopeKey) {
         : '<select id="abonoConsigCuenta" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo</option></select>';
 
     const titulo = folio ? `Anticipo a folio ${_comprasEscHTML(folio.folioOrigen)}` : 'Anticipo global a proveedor';
+    const lecturaAnticipo = _consigAnticipoLectura(folio || grupo);
     const resumenTexto = folio
-        ? `<span style="color:#475569;">${_comprasEscHTML(grupo.proveedor)}<br>Folio: <b>${_comprasEscHTML(folio.folioOrigen)}</b></span><br><small>Compra original: ${dinero(folio.compraOriginal)} | Entregado: ${dinero(folio.anticiposTotal || 0)} | Aplicado: ${dinero(folio.anticiposAplicados || 0)} | Disponible: ${dinero(Math.max(0, Number(folio.anticiposTotal || 0) - Number(folio.anticiposAplicados || 0)))}</small>`
-        : `<span style="color:#475569;">${grupo.folios.length} folio(s) en consignacion</span><br><small>Compra original: ${dinero(grupo.compraOriginal)} | Entregado: ${dinero(grupo.anticiposTotal || 0)} | Aplicado: ${dinero(grupo.anticiposAplicados || 0)} | Disponible: ${dinero(Math.max(0, Number(grupo.anticiposTotal || 0) - Number(grupo.anticiposAplicados || 0)))}</small>`;
+        ? `<span style="color:#475569;">${_comprasEscHTML(grupo.proveedor)}<br>Folio: <b>${_comprasEscHTML(folio.folioOrigen)}</b></span><br><small>Compra original: ${dinero(folio.compraOriginal)} | Entregado directo: ${dinero(lecturaAnticipo.entregado)} | Aplicado: ${dinero(lecturaAnticipo.aplicado)} | Disponible directo: ${dinero(lecturaAnticipo.disponibleDirecto)}${lecturaAnticipo.aplicadoDesdeGlobal > 0.01 ? ` | Desde global: ${dinero(lecturaAnticipo.aplicadoDesdeGlobal)}` : ''}</small>`
+        : `<span style="color:#475569;">${grupo.folios.length} folio(s) en consignacion</span><br><small>Compra original: ${dinero(grupo.compraOriginal)} | Entregado: ${dinero(lecturaAnticipo.entregado)} | Aplicado: ${dinero(lecturaAnticipo.aplicado)} | Disponible: ${dinero(lecturaAnticipo.disponibleDirecto)}</small>`;
 
     const html = `
     <div data-modal="abono-consignacion" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:10000;display:flex;justify-content:center;align-items:center;padding:18px;">
@@ -5099,6 +5309,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             </tr>`;
         }).join('');
 
+        const anticipo = _consigAnticipoLectura(f);
         return `
             <tr style="background:#f1f5f9; font-weight:bold; border-top:2px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">
                 <td style="padding:10px 12px; color:#1e293b;">
@@ -5108,7 +5319,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 <td style="padding:10px 12px; text-align:right; color:#0f172a;">${dinero(f.compraOriginal)}</td>
                 <td style="padding:10px 12px; text-align:right; color:#d97706;">${dinero(f.vendidoReportado)}</td>
                 <td style="padding:10px 12px; text-align:right; color:#16a34a;">${dinero(f.pagadoPorVentas)}</td>
-                <td style="padding:10px 12px; text-align:right; color:#2563eb;">${dinero(f.anticiposTotal || 0)}<br><small style="color:#0e7490;">Aplicado: ${dinero(f.anticiposAplicados || 0)}</small><br><small style="color:#64748b;">Disp: ${dinero(Math.max(0, Number(f.anticiposTotal || 0) - Number(f.anticiposAplicados || 0)))}</small></td>
+                <td style="padding:10px 12px; text-align:right; color:#2563eb;">${dinero(anticipo.entregado)}<br><small style="color:#0e7490;">Aplicado: ${dinero(anticipo.aplicado)}</small><br><small style="color:#64748b;">Disp. directo: ${dinero(anticipo.disponibleDirecto)}</small>${anticipo.lineaGlobal}</td>
                 <td style="padding:10px 12px; text-align:right; color:#be123c;">${dinero(f.saldoNeto)}</td>
             </tr>
             ${itemsHtml}

@@ -4,10 +4,137 @@
 (function() {
     const money = (v) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+    const supplierKey = (v) => String(v || '').trim().toLowerCase();
+
+    function supplierLabel(v) {
+        const txt = String(v || '').trim();
+        return txt || 'Sin proveedor';
+    }
+
+    function supplierOptions(selected, labels) {
+        const unique = [...new Set([...catalogSupplierLabels(), ...(labels || [])].map(supplierLabel))]
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        return ['<option value="">Todos</option>']
+            .concat(unique.map(label => `<option value="${esc(label)}" ${supplierKey(selected) === supplierKey(label) ? 'selected' : ''}>${esc(label)}</option>`))
+            .join('');
+    }
+
+    function optionList(selected, labels, emptyLabel = 'Todos') {
+        const unique = [...new Set((labels || []).map(v => String(v || '').trim()))]
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        return [`<option value="">${esc(emptyLabel)}</option>`]
+            .concat(unique.map(label => `<option value="${esc(label)}" ${supplierKey(selected) === supplierKey(label) ? 'selected' : ''}>${esc(label)}</option>`))
+            .join('');
+    }
+
+    function catalogSupplierLabels() {
+        return arr('proveedores')
+            .map(p => p.nombre || p.razonSocial || p.proveedor || p.alias || p.id || '')
+            .map(v => String(v || '').trim())
+            .filter(Boolean);
+    }
+
+    function supplierNameFromValue(value, maps = null) {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        const providerMaps = maps || productProviderMaps();
+        return providerMaps.suppliersById.get(raw)
+            || providerMaps.suppliersByKey.get(supplierKey(raw))
+            || raw;
+    }
+
+    function productProviderMaps() {
+        const products = arr('productos');
+        const byId = new Map(products.map(p => [String(p.id), p]));
+        const byName = new Map(products.map(p => [String(p.nombre || '').trim().toLowerCase(), p]).filter(([name]) => name));
+        const suppliersById = new Map();
+        const suppliersByKey = new Map();
+        arr('proveedores').forEach(p => {
+            const label = p.nombre || p.razonSocial || p.proveedor || p.alias || '';
+            if (!label) return;
+            if (p.id !== undefined && p.id !== null) suppliersById.set(String(p.id), label);
+            [p.nombre, p.razonSocial, p.proveedor, p.alias].forEach(v => {
+                if (v) suppliersByKey.set(supplierKey(v), label);
+            });
+        });
+        const latest = new Map();
+        arr('historialCostos').forEach(h => {
+            const id = String(h.productoId || h.idProducto || '').trim();
+            if (!id) return;
+            const date = parseDate(h.fecha || h.fechaISO || h.createdAt || 0).getTime() || 0;
+            const prev = latest.get(id);
+            if (!prev || date >= prev.date) {
+                latest.set(id, {
+                    date,
+                    label: supplierNameFromValue(h.proveedorNombre || h.proveedor || h.proveedorId || '', { suppliersById, suppliersByKey })
+                });
+            }
+        });
+        return { byId, byName, latest, suppliersById, suppliersByKey };
+    }
+
+    function itemSupplierLabel(item = {}, maps = productProviderMaps()) {
+        const direct = item.proveedorNombre || item.proveedor || item.supplier || item.nombreProveedor;
+        if (direct) return supplierLabel(supplierNameFromValue(direct, maps));
+        const id = String(item.productoId || item.idProducto || item.id || '').trim();
+        const name = String(item.nombre || item.productoNombre || '').trim().toLowerCase();
+        const product = (id && maps.byId.get(id)) || (name && maps.byName.get(name));
+        const fromProduct = product?.proveedorNombre || product?.proveedor || product?.proveedorId;
+        if (fromProduct) return supplierLabel(supplierNameFromValue(fromProduct, maps));
+        const historyId = id || (product?.id ? String(product.id) : '');
+        const fromHistory = historyId ? maps.latest.get(historyId)?.label : '';
+        return supplierLabel(supplierNameFromValue(fromHistory, maps));
+    }
+
+    function itemProduct(item = {}, maps = productProviderMaps()) {
+        const id = String(item.productoId || item.idProducto || item.id || '').trim();
+        const name = String(item.nombre || item.productoNombre || item.producto || '').trim().toLowerCase();
+        return (id && maps.byId.get(id)) || (name && maps.byName.get(name)) || null;
+    }
+
+    function itemCategoryLabel(item = {}, maps = productProviderMaps()) {
+        const product = itemProduct(item, maps);
+        return String(item.categoria || item.category || product?.categoria || product?.category || '').trim();
+    }
+
+    function itemSubcategoryLabel(item = {}, maps = productProviderMaps()) {
+        const product = itemProduct(item, maps);
+        return String(item.subcategoria || item.subcategory || product?.subcategoria || product?.subcategory || '').trim();
+    }
+
+    function productCategoryLabels() {
+        return arr('productos').map(p => p.categoria || p.category || '').filter(Boolean);
+    }
+
+    function productSubcategoryLabels(category = '') {
+        return arr('productos')
+            .filter(p => !category || supplierKey(p.categoria || p.category) === supplierKey(category))
+            .map(p => p.subcategoria || p.subcategory || '')
+            .filter(Boolean);
+    }
+
+    function rowsForCategoryOptions(rows, category = '') {
+        const rowSource = rows || [];
+        const categories = rowSource.flatMap(r => r.categories || []);
+        const subcategories = rowSource
+            .filter(r => !category || (r.categories || []).some(c => supplierKey(c) === supplierKey(category)))
+            .flatMap(r => r.subcategories || []);
+        return {
+            categories: [...productCategoryLabels(), ...categories],
+            subcategories: [...productSubcategoryLabels(category), ...subcategories]
+        };
+    }
+
+    function saleSuppliers(items = [], maps = productProviderMaps()) {
+        const labels = items.map(item => itemSupplierLabel(item, maps)).filter(label => supplierKey(label) && supplierKey(label) !== 'sin proveedor');
+        return [...new Set(labels)].sort((a, b) => a.localeCompare(b, 'es'));
+    }
 
     function arr(key) {
         const val = StorageService.get(key, []);
-        let lista = Array.isArray(val) ? val : [];
+        let lista = Array.isArray(val) ? val : (Array.isArray(window[key]) ? window[key] : []);
         
         if (key === 'cuentasPorPagar') {
             return lista.map(cxp => {
@@ -96,6 +223,24 @@
         }).join('');
     }
 
+    function activeFilterChips(filters, specs, rendererName) {
+        const chips = specs
+            .filter(spec => String(filters[spec.key] || '').trim())
+            .map(spec => {
+                const raw = String(filters[spec.key] || '').trim();
+                const label = spec.options?.[raw] || raw;
+                return `<button type="button" onclick="window._rplusClearFilter('${esc(spec.id)}','${esc(rendererName)}')" title="Quitar filtro" style="display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;cursor:pointer;"><span>${esc(spec.label)}: ${esc(label)}</span><span style="color:#64748b;">x</span></button>`;
+            });
+        if (!chips.length) return '';
+        return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-6px 0 16px;">${chips.join('')}</div>`;
+    }
+
+    window._rplusClearFilter = function(id, rendererName) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+        if (rendererName && typeof window[rendererName] === 'function') window[rendererName]();
+    };
+
     function groupTop(list, keyFn, valueFn, metaFn) {
         const map = new Map();
         list.forEach(item => {
@@ -154,7 +299,7 @@
         return fallback;
     }
 
-    function normalizeSale(v, source, index = null) {
+    function normalizeSale(v, source, index = null, providerMaps = productProviderMaps()) {
         const items = saleItems(v);
         const dateRaw = v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaIso || v.args?.[7] || '';
         const date = parseDate(dateRaw);
@@ -163,6 +308,11 @@
         const cost = items.reduce((s, a) => s + ((Number(a.costoUnitario || a.costo || a.precioCompra || 0) || 0) * (Number(a.cantidad || 1) || 1)), 0);
         const method = String(v.metodoPago || v.metodo || v.datosVenta?.metodo || v.args?.[0] || 'contado').toLowerCase();
         const folio = v.folio || v.datosVenta?.folio || v.args?.[5] || '-';
+        const suppliers = saleSuppliers(items, providerMaps);
+        const categories = [...new Set(items.map(item => itemCategoryLabel(item, providerMaps)).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        const subcategories = [...new Set(items.map(item => itemSubcategoryLabel(item, providerMaps)).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
         return {
             raw: v,
             index,
@@ -170,7 +320,9 @@
             folio,
             date,
             dateText: dateLabel(date, v.fecha || v.datosVenta?.fecha || '-'),
-            customer: v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || 'Publico general',
+            customer: typeof window.resolverNombreCliente === 'function'
+                ? window.resolverNombreCliente(v, v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || 'Publico general')
+                : (v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || 'Publico general'),
             method,
             totalMerch,
             totalDoc: Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || totalMerch || 0) || 0,
@@ -183,6 +335,9 @@
             cost,
             profit: cost > 0 ? Math.max(0, totalMerch - cost) : 0,
             seller: v.vendedor || v.vendedorNombre || v.vendedorSeleccionado?.nombre || '',
+            suppliers,
+            categories,
+            subcategories,
             status: source === 'cuarentena' ? 'En boveda' : (v.estado || v.estatus || 'Registrada')
         };
     }
@@ -193,18 +348,25 @@
             from: document.getElementById('rvFechaDesde')?.value || '',
             to: document.getElementById('rvFechaHasta')?.value || '',
             method: document.getElementById('rvMetodo')?.value || '',
+            supplier: document.getElementById('rvProveedor')?.value || '',
+            category: document.getElementById('rvCategoria')?.value || '',
+            subcategory: document.getElementById('rvSubcategoria')?.value || '',
             status: document.getElementById('rvEstado')?.value || 'activas',
             order: document.getElementById('rvOrden')?.value || 'fecha_desc'
         };
         window._rplusVentaFiltros = filters;
         const fromD = filters.from ? (window.fechaInicioDiaMX ? window.fechaInicioDiaMX(filters.from) : new Date(filters.from + 'T00:00:00')) : null;
         const toD = filters.to ? (window.fechaFinDiaMX ? window.fechaFinDiaMX(filters.to) : new Date(filters.to + 'T23:59:59')) : null;
+        const providerMaps = productProviderMaps();
         const rows = [
-            ...arr('ventasRegistradas').map(v => normalizeSale(v, 'registrada')),
-            ...arr('ventasPendientes').map((v, i) => normalizeSale(v, 'cuarentena', i))
+            ...arr('ventasRegistradas').map(v => normalizeSale(v, 'registrada', null, providerMaps)),
+            ...arr('ventasPendientes').map((v, i) => normalizeSale(v, 'cuarentena', i, providerMaps))
         ];
         return rows
             .filter(v => !filters.method || v.method === filters.method)
+            .filter(v => !filters.supplier || v.suppliers.some(s => supplierKey(s) === supplierKey(filters.supplier)))
+            .filter(v => !filters.category || v.categories.some(c => supplierKey(c) === supplierKey(filters.category)))
+            .filter(v => !filters.subcategory || v.subcategories.some(s => supplierKey(s) === supplierKey(filters.subcategory)))
             .filter(v => {
                 const canceled = String(v.status || '').toLowerCase().includes('cancel');
                 if (filters.status === 'todas') return true;
@@ -216,7 +378,7 @@
             .filter(v => v.date instanceof Date && !isNaN(v.date.getTime()) && v.date.getFullYear() >= 1990)
             .filter(v => !fromD || v.date >= fromD)
             .filter(v => !toD || v.date <= toD)
-            .filter(v => !filters.q || `${v.folio} ${v.customer} ${v.seller} ${v.method} ${v.status} ${v.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(filters.q))
+            .filter(v => !filters.q || `${v.folio} ${v.customer} ${v.seller} ${v.suppliers.join(' ')} ${v.categories.join(' ')} ${v.subcategories.join(' ')} ${v.method} ${v.status} ${v.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(filters.q))
             .sort((a, b) => {
                 if (filters.order === 'fecha_asc') return a.date - b.date;
                 if (filters.order === 'total_desc') return b.totalMerch - a.totalMerch;
@@ -248,6 +410,25 @@
 
         const topCustomers = groupTop(active, v => v.customer, v => v.totalMerch).map(x => ({ name: x.name, value: x.value, meta: `${x.count} venta(s)` }));
         const topSellers = groupTop(active, v => v.seller || 'Sin vendedor', v => v.totalMerch).map(x => ({ name: x.name, value: x.value, meta: `${x.count} venta(s)` }));
+        const saleProviderMaps = productProviderMaps();
+        const allSaleRows = [
+            ...arr('ventasRegistradas').map(v => normalizeSale(v, 'registrada', null, saleProviderMaps)),
+            ...arr('ventasPendientes').map((v, i) => normalizeSale(v, 'cuarentena', i, saleProviderMaps))
+        ];
+        const saleFilterState = window._rplusVentaFiltros || {};
+        const supplierSelectVentas = supplierOptions(saleFilterState.supplier || '', allSaleRows.flatMap(v => v.suppliers || []));
+        const saleCategoryOptions = rowsForCategoryOptions(allSaleRows, saleFilterState.category || '');
+        const categorySelectVentas = optionList(saleFilterState.category || '', saleCategoryOptions.categories, 'Todas');
+        const subcategorySelectVentas = optionList(saleFilterState.subcategory || '', saleCategoryOptions.subcategories, 'Todas');
+        const ventaChips = activeFilterChips(saleFilterState, [
+            { key: 'q', id: 'rvBusqueda', label: 'Buscar' },
+            { key: 'from', id: 'rvFechaDesde', label: 'Desde' },
+            { key: 'to', id: 'rvFechaHasta', label: 'Hasta' },
+            { key: 'supplier', id: 'rvProveedor', label: 'Proveedor' },
+            { key: 'category', id: 'rvCategoria', label: 'Categoria' },
+            { key: 'subcategory', id: 'rvSubcategoria', label: 'Subcategoria' },
+            { key: 'method', id: 'rvMetodo', label: 'Metodo', options: { contado: 'Contado', transferencia: 'Transferencia', credito: 'Credito', apartado: 'Apartado' } }
+        ], 'renderReporteVentas');
         const productMap = new Map();
         active.forEach(v => v.items.forEach(a => {
             const name = a.nombre || a.productoNombre || 'Producto';
@@ -269,7 +450,7 @@
 
         const table = rows.length ? `<table style="width:100%;border-collapse:collapse;min-width:1180px;">
             <thead><tr style="background:#f8fafc;color:#334155;text-align:left;">
-                <th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Cliente</th><th style="padding:12px;">Metodo</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Venta</th><th style="padding:12px;text-align:right;">Utilidad</th><th style="padding:12px;text-align:right;">Cobrado</th><th style="padding:12px;text-align:right;">Saldo</th>
+                <th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Cliente</th><th style="padding:12px;">Proveedor</th><th style="padding:12px;">Metodo</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Venta</th><th style="padding:12px;text-align:right;">Utilidad</th><th style="padding:12px;text-align:right;">Cobrado</th><th style="padding:12px;text-align:right;">Saldo</th>
             </tr></thead><tbody>${rows.map(v => {
                 const itemText = v.items.length ? v.items.slice(0, 3).map(a => `${a.cantidad || 1}x ${esc(a.nombre || a.productoNombre || '-')}`).join('<br>') : '<span style="color:#94a3b8;">Sin detalle</span>';
                 const source = v.source === 'cuarentena' ? badge('Boveda', '#fff7ed', '#c2410c') : badge('Registrada', '#ecfdf5', '#047857');
@@ -278,6 +459,7 @@
                     <td style="padding:12px;vertical-align:top;"><strong>${esc(v.folio)}</strong><br>${source}<br>${status}</td>
                     <td style="padding:12px;vertical-align:top;white-space:nowrap;">${esc(v.dateText)}</td>
                     <td style="padding:12px;vertical-align:top;"><strong>${esc(v.customer)}</strong>${v.seller ? `<br><small style="color:#64748b;">Vendedor: ${esc(v.seller)}</small>` : ''}</td>
+                    <td style="padding:12px;vertical-align:top;">${v.suppliers.length ? v.suppliers.map(s => `<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 7px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:800;">${esc(s)}</span>`).join('') : '<span style="color:#94a3b8;">Sin proveedor</span>'}</td>
                     <td style="padding:12px;vertical-align:top;">${badge(v.method, '#f1f5f9', '#334155')}</td>
                     <td style="padding:12px;vertical-align:top;font-size:12px;">${itemText}${v.items.length > 3 ? `<br><small style="color:#64748b;">+${v.items.length - 3} mas</small>` : ''}</td>
                     <td style="padding:12px;vertical-align:top;text-align:center;font-weight:900;">${v.units}</td>
@@ -297,11 +479,20 @@
                 <div style="grid-column:span 2;"><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">BUSCAR</label><input type="search" id="rvBusqueda" value="${esc(document.getElementById('rvBusqueda')?.value || '')}" placeholder="Cliente, folio, vendedor o producto" onkeydown="if(event.key==='Enter')renderReporteVentas()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div>
                 <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">DESDE</label><input type="date" id="rvFechaDesde" value="${esc(document.getElementById('rvFechaDesde')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div>
                 <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">HASTA</label><input type="date" id="rvFechaHasta" value="${esc(document.getElementById('rvFechaHasta')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div>
-                <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">METODO</label><select id="rvMetodo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="">Todos</option><option value="contado">Contado</option><option value="transferencia">Transferencia</option><option value="credito">Credito</option><option value="apartado">Apartado</option></select></div>
-                <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rvEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="activas">Activas</option><option value="todas">Todas</option><option value="registradas">Registradas</option><option value="boveda">Boveda</option><option value="canceladas">Canceladas</option></select></div>
-                <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rvOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="cliente">Cliente A-Z</option><option value="metodo">Metodo</option></select></div>
+                <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">PROVEEDOR</label><select id="rvProveedor" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${supplierSelectVentas}</select></div>
                 <button onclick="renderReporteVentas()" style="padding:10px 18px;background:#0f172a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Filtrar</button>
+                <details ${saleFilterState.method || saleFilterState.category || saleFilterState.subcategory || (saleFilterState.status && saleFilterState.status !== 'activas') || (saleFilterState.order && saleFilterState.order !== 'fecha_desc') ? 'open' : ''} style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                    <summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;margin-top:12px;">
+                        <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">METODO</label><select id="rvMetodo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="">Todos</option><option value="contado">Contado</option><option value="transferencia">Transferencia</option><option value="credito">Credito</option><option value="apartado">Apartado</option></select></div>
+                        <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CATEGORIA</label><select id="rvCategoria" onchange="document.getElementById('rvSubcategoria').value='';renderReporteVentas()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${categorySelectVentas}</select></div>
+                        <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">SUBCATEGORIA</label><select id="rvSubcategoria" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${subcategorySelectVentas}</select></div>
+                        <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rvEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="activas">Activas</option><option value="todas">Todas</option><option value="registradas">Registradas</option><option value="boveda">Boveda</option><option value="canceladas">Canceladas</option></select></div>
+                        <div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rvOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="cliente">Cliente A-Z</option><option value="metodo">Metodo</option></select></div>
+                    </div>
+                </details>
             </div>
+            ${ventaChips}
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Ventas registradas', active.length, '#0f172a')}${kpi('Mercancia vendida', money(total), '#2563eb')}${kpi('Cobro inicial', money(collected), '#16a34a')}${kpi('Cartera originada', money(credit), '#7c3aed')}${kpi('Ticket promedio', money(avg), '#0f766e')}${kpi('Utilidad estimada', cost > 0 ? `${money(profit)} (${margin.toFixed(1)}%)` : 'Sin costo', '#dc2626')}</div>
             <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Lectura rapida</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;color:#334155;font-size:13px;"><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Piezas vendidas</strong>${units}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Venta documental</strong>${money(docTotal)}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">En boveda</strong>${inVault}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Canceladas visibles</strong>${canceled}</div></div></div><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Mix de venta</h3>${methodBars}</div></div>
             <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;margin-bottom:20px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Ventas registradas por mes</h3>${chartByMonth(active, v => v.totalMerch, '#2563eb', '#0f766e')}</div>
@@ -309,16 +500,19 @@
             <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Detalle de Ventas</h3><div style="overflow-x:auto;">${table}</div></div>`;
         const sf = window._rplusVentaFiltros || {};
         if (document.getElementById('rvMetodo')) document.getElementById('rvMetodo').value = sf.method || '';
+        if (document.getElementById('rvProveedor')) document.getElementById('rvProveedor').value = sf.supplier || '';
+        if (document.getElementById('rvCategoria')) document.getElementById('rvCategoria').value = sf.category || '';
+        if (document.getElementById('rvSubcategoria')) document.getElementById('rvSubcategoria').value = sf.subcategory || '';
         if (document.getElementById('rvEstado')) document.getElementById('rvEstado').value = sf.status || 'activas';
         if (document.getElementById('rvOrden')) document.getElementById('rvOrden').value = sf.order || 'fecha_desc';
     };
 
     window.exportarReporteVentas = function() {
         const rows = filteredSales();
-        let csv = 'Origen,Folio,Fecha,Cliente,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,CostoEstimado,UtilidadEstimada,EngancheCobrado,Saldo,Vendedor,Estado\n';
+        let csv = 'Origen,Folio,Fecha,Cliente,Proveedor,Categoria,Subcategoria,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,CostoEstimado,UtilidadEstimada,EngancheCobrado,Saldo,Vendedor,Estado\n';
         rows.forEach(v => {
             const items = v.items.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || ''}`).join(' | ');
-            csv += `"${v.source}","${v.folio}","${v.dateText}","${v.customer}","${v.method}","${items}",${v.units},${v.totalMerch},${v.totalDoc},${v.cost},${v.profit},${v.initialCollected || v.downPayment},${v.balance},"${v.seller}","${v.status}"\n`;
+            csv += `"${v.source}","${v.folio}","${v.dateText}","${v.customer}","${(v.suppliers || []).join(' | ')}","${(v.categories || []).join(' | ')}","${(v.subcategories || []).join(' | ')}","${v.method}","${items}",${v.units},${v.totalMerch},${v.totalDoc},${v.cost},${v.profit},${v.initialCollected || v.downPayment},${v.balance},"${v.seller}","${v.status}"\n`;
         });
         downloadCsv('reporte_ventas', csv);
     };
@@ -334,7 +528,7 @@
         return [];
     }
 
-    function normalizePurchase(doc, source) {
+    function normalizePurchase(doc, source, providerMaps = productProviderMaps()) {
         const items = purchaseItems(doc);
         const dateRaw = doc.fechaISO || doc.fechaIso || doc.fechaRecepcion || doc.fechaEmision || doc.fecha || doc.fechaPedido || '';
         const date = parseDate(dateRaw);
@@ -345,6 +539,10 @@
         }, 0);
         const method = String(doc.metodo || doc.metodoPago || doc.condicionesComerciales?.metodoPago || doc.formaPagoTexto || '').toLowerCase();
         const total = Number(doc.total || doc.totalCompra || itemTotal || 0) || 0;
+        const categories = [...new Set(items.map(item => itemCategoryLabel(item, providerMaps)).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
+        const subcategories = [...new Set(items.map(item => itemSubcategoryLabel(item, providerMaps)).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es'));
         let paid = Number(doc.totalPagado ?? doc.montoPagadoTotal ?? doc.pagado ?? doc.montoPagado ?? doc.anticipo_pagado ?? doc.anticipo ?? doc.pago?.monto ?? 0) || 0;
         if (doc.anticipoEsTransferido) paid = 0;
         if (paid <= 0 && (method === 'contado' || method.includes('contado')) && !doc.esConsignacion) {
@@ -355,7 +553,7 @@
             folio: doc.folio || doc.id || '-',
             date,
             dateText: dateLabel(date, String(dateRaw || '-')),
-            supplier: doc.proveedorNombre || doc.proveedor || 'Proveedor',
+            supplier: supplierNameFromValue(doc.proveedorNombre || doc.proveedor || doc.proveedorId || '', providerMaps) || 'Proveedor',
             type: source === 'orden' ? 'Orden de compra' : (doc.ordenCompraId ? 'Recepcion OC' : 'Compra directa'),
             method: method || (doc.esConsignacion ? 'consignacion' : 'contado'),
             status: doc.estado || doc.estatus || (source === 'compra' ? 'Recibido' : 'Pendiente'),
@@ -363,6 +561,8 @@
             paid: Math.min(total, paid),
             balance: Math.max(0, Number(doc.saldoPendiente ?? doc.saldo ?? 0) || 0),
             items,
+            categories,
+            subcategories,
             units: items.reduce((s, a) => s + (Number(a.cantidadRec ?? a.cantidad ?? a.cant ?? 1) || 1), 0),
             consignment: doc.esConsignacion === true || method === 'consignacion',
             ref: doc.ordenCompraId || doc.compraId || doc.id || ''
@@ -371,21 +571,28 @@
 
     function filteredPurchases() {
         const q = String(document.getElementById('rcProveedor')?.value || '').trim().toLowerCase();
+        const supplier = document.getElementById('rcProveedorFiltro')?.value || '';
         const from = document.getElementById('rcFechaDesde')?.value || '';
         const to = document.getElementById('rcFechaHasta')?.value || '';
+        const category = document.getElementById('rcCategoria')?.value || '';
+        const subcategory = document.getElementById('rcSubcategoria')?.value || '';
         const type = document.getElementById('rcTipo')?.value || 'todos';
         const status = document.getElementById('rcEstado')?.value || 'operativas';
         const order = document.getElementById('rcOrden')?.value || 'fecha_desc';
-        window._rplusCompraFiltros = { q, from, to, type, status, order };
+        window._rplusCompraFiltros = { q, supplier, from, to, category, subcategory, type, status, order };
         const fromD = from ? (window.fechaInicioDiaMX ? window.fechaInicioDiaMX(from) : new Date(from + 'T00:00:00')) : null;
         const toD = to ? (window.fechaFinDiaMX ? window.fechaFinDiaMX(to) : new Date(to + 'T23:59:59')) : null;
+        const providerMaps = productProviderMaps();
         return [
-            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden')),
-            ...arr('compras').map(c => normalizePurchase(c, 'compra'))
+            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', providerMaps)),
+            ...arr('compras').map(c => normalizePurchase(c, 'compra', providerMaps))
         ].filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && d.date.getFullYear() >= 1990)
+            .filter(d => !supplier || supplierKey(d.supplier) === supplierKey(supplier))
+            .filter(d => !category || d.categories.some(c => supplierKey(c) === supplierKey(category)))
+            .filter(d => !subcategory || d.subcategories.some(s => supplierKey(s) === supplierKey(subcategory)))
             .filter(d => !fromD || d.date >= fromD)
             .filter(d => !toD || d.date <= toD)
-            .filter(d => !q || `${d.supplier} ${d.folio} ${d.status} ${d.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(q))
+            .filter(d => !q || `${d.supplier} ${d.folio} ${d.status} ${d.categories.join(' ')} ${d.subcategories.join(' ')} ${d.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(q))
             .filter(d => {
                 if (type === 'todos') return true;
                 if (type === 'orden') return d.source === 'orden';
@@ -428,6 +635,25 @@
         const avg = real.length ? receivedTotal / real.length : 0;
         const topSuppliers = groupTop(real, d => d.supplier, d => d.total).map(x => ({ name: x.name, value: x.value, meta: `${x.count} doc(s)` }));
         const topMethods = groupTop(real, d => d.consignment ? 'Consignacion' : d.method, d => d.total).map(x => ({ name: x.name, value: x.value, meta: `${x.count} doc(s)` }));
+        const compraFilterState = window._rplusCompraFiltros || {};
+        const purchaseProviderMaps = productProviderMaps();
+        const allPurchaseRows = [
+            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', purchaseProviderMaps)),
+            ...arr('compras').map(c => normalizePurchase(c, 'compra', purchaseProviderMaps))
+        ];
+        const supplierSelectCompras = supplierOptions(compraFilterState.supplier || '', allPurchaseRows.map(d => d.supplier));
+        const purchaseCategoryOptions = rowsForCategoryOptions(allPurchaseRows, compraFilterState.category || '');
+        const categorySelectCompras = optionList(compraFilterState.category || '', purchaseCategoryOptions.categories, 'Todas');
+        const subcategorySelectCompras = optionList(compraFilterState.subcategory || '', purchaseCategoryOptions.subcategories, 'Todas');
+        const compraChips = activeFilterChips(compraFilterState, [
+            { key: 'q', id: 'rcProveedor', label: 'Buscar' },
+            { key: 'from', id: 'rcFechaDesde', label: 'Desde' },
+            { key: 'to', id: 'rcFechaHasta', label: 'Hasta' },
+            { key: 'supplier', id: 'rcProveedorFiltro', label: 'Proveedor' },
+            { key: 'category', id: 'rcCategoria', label: 'Categoria' },
+            { key: 'subcategory', id: 'rcSubcategoria', label: 'Subcategoria' },
+            { key: 'type', id: 'rcTipo', label: 'Tipo', options: { compra: 'Compras/recepciones', orden: 'Ordenes', consignacion: 'Consignacion', credito: 'Credito proveedor', contado: 'Contado/debito' } }
+        ], 'renderReporteCompras');
 
         const table = rows.length ? `<table style="width:100%;border-collapse:collapse;min-width:1080px;"><thead><tr style="background:#f8fafc;color:#334155;text-align:left;"><th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Proveedor</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Total / Pagado</th><th style="padding:12px;text-align:right;">Saldo</th><th style="padding:12px;">Estado</th></tr></thead><tbody>${rows.map(d => {
             const items = d.items.length ? d.items.slice(0, 3).map(a => `${a.cantidadRec ?? a.cantidad ?? 1}x ${esc(a.nombre || a.productoNombre || a.producto || '-')}`).join('<br>') : '<span style="color:#94a3b8;">Sin detalle</span>';
@@ -438,12 +664,16 @@
         }).join('')}</tbody></table>` : `<div style="padding:34px;text-align:center;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;">No hay compras para mostrar con los filtros actuales.</div>`;
 
         app.innerHTML = `<div class="vista-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:14px;flex-wrap:wrap;"><div><h2 style="margin:0;color:#0f172a;">Reporte de Compras</h2><p style="color:#64748b;margin:4px 0 0;">Abastecimiento, recepciones, compromisos y saldos por proveedor.</p></div><div style="display:flex;gap:10px;flex-wrap:wrap;"><button onclick="exportarReporteCompras()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Exportar CSV</button><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Actualizar</button></div></div>
-        <div style="background:white;border:1px solid #e2e8f0;padding:16px;border-radius:10px;margin-bottom:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;"><div style="grid-column:span 2;"><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">BUSCAR</label><input type="search" id="rcProveedor" value="${esc(document.getElementById('rcProveedor')?.value || '')}" placeholder="Proveedor, folio o producto" onkeydown="if(event.key==='Enter')renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">DESDE</label><input type="date" id="rcFechaDesde" value="${esc(document.getElementById('rcFechaDesde')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">HASTA</label><input type="date" id="rcFechaHasta" value="${esc(document.getElementById('rcFechaHasta')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">TIPO</label><select id="rcTipo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos</option><option value="compra">Compras/recepciones</option><option value="orden">Ordenes</option><option value="consignacion">Consignacion</option><option value="credito">Credito proveedor</option><option value="contado">Contado/debito</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rcEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="operativas">Operativas</option><option value="todas">Todas</option><option value="pendientes">Pendientes</option><option value="recibidas">Recibidas</option><option value="canceladas">Canceladas</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rcOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="saldo_desc">Mayor saldo</option><option value="proveedor">Proveedor A-Z</option></select></div><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#0f172a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Filtrar</button></div>
+        <div style="background:white;border:1px solid #e2e8f0;padding:16px;border-radius:10px;margin-bottom:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;"><div style="grid-column:span 2;"><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">BUSCAR</label><input type="search" id="rcProveedor" value="${esc(document.getElementById('rcProveedor')?.value || '')}" placeholder="Proveedor, folio o producto" onkeydown="if(event.key==='Enter')renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">PROVEEDOR</label><select id="rcProveedorFiltro" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${supplierSelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">DESDE</label><input type="date" id="rcFechaDesde" value="${esc(document.getElementById('rcFechaDesde')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">HASTA</label><input type="date" id="rcFechaHasta" value="${esc(document.getElementById('rcFechaHasta')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#0f172a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Filtrar</button><details ${compraFilterState.type && compraFilterState.type !== 'todos' || compraFilterState.category || compraFilterState.subcategory || compraFilterState.status && compraFilterState.status !== 'operativas' || compraFilterState.order && compraFilterState.order !== 'fecha_desc' ? 'open' : ''} style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;"><summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;margin-top:12px;"><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CATEGORIA</label><select id="rcCategoria" onchange="document.getElementById('rcSubcategoria').value='';renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${categorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">SUBCATEGORIA</label><select id="rcSubcategoria" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${subcategorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">TIPO</label><select id="rcTipo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos</option><option value="compra">Compras/recepciones</option><option value="orden">Ordenes</option><option value="consignacion">Consignacion</option><option value="credito">Credito proveedor</option><option value="contado">Contado/debito</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rcEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="operativas">Operativas</option><option value="todas">Todas</option><option value="pendientes">Pendientes</option><option value="recibidas">Recibidas</option><option value="canceladas">Canceladas</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rcOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="saldo_desc">Mayor saldo</option><option value="proveedor">Proveedor A-Z</option></select></div></div></details></div>
+        ${compraChips}
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Compras recibidas', money(receivedTotal), '#0f766e')}${kpi('Ordenes abiertas', `${openOrders.length} (${money(openOrders.reduce((s, d) => s + d.total, 0))})`, '#1e40af')}${kpi('Saldo pendiente', money(pending), '#dc2626')}${kpi('Consignacion', money(consignment), '#7c3aed')}${kpi('Piezas recibidas', units, '#334155')}${kpi('Ticket promedio', money(avg), '#d97706')}</div>
         <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Compras recibidas por mes</h3>${chartByMonth(real, d => d.total, '#0f766e', '#1e40af')}</div><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Por metodo / politica</h3>${bars(topMethods, receivedTotal, '#0f766e')}</div></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top proveedores</h3>${bars(topSuppliers, receivedTotal, '#1e40af')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Lectura de control</h3><div style="display:grid;gap:10px;font-size:13px;color:#334155;"><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Documentos mostrados</strong>${rows.length}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Recepciones / directas</strong>${real.length}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Saldo vs recibido</strong>${receivedTotal > 0 ? ((pending / receivedTotal) * 100).toFixed(1) : '0.0'}%</div></div></div></div>
         <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Detalle de Compras</h3><div style="overflow-x:auto;">${table}</div></div>`;
         const cf = window._rplusCompraFiltros || {};
+        if (document.getElementById('rcProveedorFiltro')) document.getElementById('rcProveedorFiltro').value = cf.supplier || '';
+        if (document.getElementById('rcCategoria')) document.getElementById('rcCategoria').value = cf.category || '';
+        if (document.getElementById('rcSubcategoria')) document.getElementById('rcSubcategoria').value = cf.subcategory || '';
         if (document.getElementById('rcTipo')) document.getElementById('rcTipo').value = cf.type || 'todos';
         if (document.getElementById('rcEstado')) document.getElementById('rcEstado').value = cf.status || 'operativas';
         if (document.getElementById('rcOrden')) document.getElementById('rcOrden').value = cf.order || 'fecha_desc';
@@ -451,10 +681,10 @@
 
     window.exportarReporteCompras = function() {
         const rows = filteredPurchases();
-        let csv = 'Folio,Fecha,Proveedor,Tipo,Metodo,Articulos,Unidades,Total,Pagado,Saldo,Estatus,Consignacion,Referencia\n';
+        let csv = 'Folio,Fecha,Proveedor,Categoria,Subcategoria,Tipo,Metodo,Articulos,Unidades,Total,Pagado,Saldo,Estatus,Consignacion,Referencia\n';
         rows.forEach(d => {
             const items = d.items.map(a => `${a.cantidadRec ?? a.cantidad ?? 1}x ${a.nombre || a.productoNombre || a.producto || ''}`).join(' | ');
-            csv += `"${d.folio}","${d.dateText}","${d.supplier}","${d.type}","${d.method}","${items}",${d.units},${d.total},${d.paid},${d.balance},"${d.status}","${d.consignment ? 'Si' : 'No'}","${d.ref}"\n`;
+            csv += `"${d.folio}","${d.dateText}","${d.supplier}","${(d.categories || []).join(' | ')}","${(d.subcategories || []).join(' | ')}","${d.type}","${d.method}","${items}",${d.units},${d.total},${d.paid},${d.balance},"${d.status}","${d.consignment ? 'Si' : 'No'}","${d.ref}"\n`;
         });
         downloadCsv('reporte_compras', csv);
     };
