@@ -20,7 +20,7 @@ service cloud.firestore {
     }
 
     function activeUser() {
-      return hasUserProfile() && userProfile().activo == true;
+      return hasUserProfile() && userProfile().activo != false;
     }
 
     function isAdmin() {
@@ -49,9 +49,11 @@ service cloud.firestore {
           'rol',
           'email',
           'creadoEn',
-          'activo'
+          'activo',
+          'vendedorId',
+          'vendedorNombre'
         ])
-        && request.resource.data.rol in ['admin', 'vendedor']
+        && request.resource.data.rol == 'vendedor'
         && request.resource.data.activo is bool;
 
       allow update, delete: if isAdmin();
@@ -69,6 +71,20 @@ service cloud.firestore {
       // Los permisos finos por rol se aplican hoy en la UI.
       allow create, update: if activeUser();
       allow delete: if isAdmin();
+    }
+
+    match /pushTokens/{tokenId} {
+      allow create, update: if activeUser()
+        && request.resource.data.rol == userProfile().rol
+        && request.resource.data.token is string;
+      allow get, list, delete: if isAdmin();
+    }
+
+    match /pushOutbox/{pushId} {
+      allow create: if activeUser()
+        && request.resource.data.type == 'autorizacion_boveda'
+        && request.resource.data.status == 'pending';
+      allow get, list, update, delete: if isAdmin();
     }
 
     match /{document=**} {

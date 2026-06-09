@@ -19,7 +19,7 @@
     <!-- MSAL.js para autenticación OneDrive -->
     <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
     <!-- Configuración Firebase -->
-    <script src="/js/services/firebase-config.js?v=2"></script>
+    <script src="/js/services/firebase-config.js"></script>
 </head>
 <body>
 <!-- ===== HEADER ===== -->
@@ -222,12 +222,20 @@
 <div id="consulta-inventario" class="vista oculto" style="display:none;">
  <div style="padding:24px;max-width:1280px;margin:0 auto;">
  <h2 style="margin:0 0 14px;color:#0f172a;">Consulta de Inventario</h2>
- <div id="filtrosConsultaInventario" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
- <select id="filtroCatInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></select>
- <select id="filtroSubInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></select>
- <select id="filtroStockInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todo stock</option><option value="con">Con stock</option><option value="sin">Sin stock</option></select>
- <select id="filtroPedidoInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todo pedido</option><option value="pendiente">Pedido pendiente</option><option value="baja">Pendiente baja</option></select>
- <select id="filtroUbiInv" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todas ubicaciones</option><option value="sin_asignar">Sin asignar</option></select>
+ <div id="filtrosConsultaInventario" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:grid;grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) auto;gap:10px;align-items:end;">
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">BUSCAR</label><input type="search" id="filtroBusquedaInv" oninput="renderConsultaInventario()" placeholder="Producto, categoria, proveedor..." style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">PROVEEDOR</label><select id="filtroProvInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select></div>
+ <button onclick="renderConsultaInventario()" style="padding:10px 14px;background:#0f172a;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Filtrar</button>
+ <details style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+ <summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary>
+ <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:end;margin-top:10px;">
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">CATEGORIA</label><select id="filtroCatInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></select></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">SUBCATEGORIA</label><select id="filtroSubInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"></select></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">STOCK</label><select id="filtroStockInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todo stock</option><option value="con">Con stock</option><option value="sin">Sin stock</option></select></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">PEDIDO</label><select id="filtroPedidoInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todo pedido</option><option value="pendiente">Pedido pendiente</option><option value="baja">Pendiente baja</option></select></div>
+ <div><label style="font-size:11px;font-weight:900;color:#475569;">UBICACION</label><select id="filtroUbiInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todas ubicaciones</option><option value="sin_asignar">Sin asignar</option></select></div>
+ </div>
+ </details>
  </div>
  <div id="tablaConsultaInventario"></div>
  </div>
@@ -495,11 +503,18 @@
  <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  </div>
- <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+ <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:grid; grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) auto auto; gap:10px; align-items:end;">
+ <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar producto, categoria..." style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;box-sizing:border-box;"></div>
+ <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Proveedor:</label><select id="filtroProveedorInventario" onchange="aplicarFiltros()" style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select></div>
+ <button onclick="aplicarFiltros()" style="padding:9px 15px; background:#2d3748; color:white; border:none; border-radius:5px; cursor:pointer;font-weight:bold;">Filtrar</button>
+ <button onclick="limpiarFiltros()" style="padding:9px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Limpiar</button>
+ <details style="grid-column:1/-1;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+ <summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary>
+ <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:10px;">
  <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Categoria:</label><select id="filtroCategoria" onchange="actualizarSubcategoriasFiltro('filtroCategoria', 'filtroSubcategoria')" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
  <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Subcategoria:</label><select id="filtroSubcategoria" onchange="aplicarFiltros()" style="padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">-- Todas --</option></select></div>
- <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar..." style="padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
- <button onclick="limpiarFiltros()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Limpiar</button>
+ </div>
+ </details>
  </div>
  <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px;"></div>
  </div>
@@ -641,29 +656,7 @@
 
     <!-- REPORTE COMPRAS -->
     <div id="reporte-compras" class="vista oculto">
- <div class="vista-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
- <div>
- <h2>Reporte de Compras</h2>
- <p style="color:#718096; margin:0;">Consulta y analisis de compras a proveedores</p>
- </div>
- <div style="display:flex; gap:10px;">
- <button onclick="exportarReporteCompras()" style="padding:10px 18px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Exportar CSV</button>
- <button onclick="renderReporteCompras()" style="padding:10px 18px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Actualizar</button>
- </div>
- </div>
- <!-- Filtros -->
- <div style="background:white; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:20px; display:grid; grid-template-columns:1fr 1fr auto; gap:10px; align-items:end;">
- <div><label style="font-size:11px; font-weight:bold; color:#555;">DESDE</label><input type="date" id="rcFechaDesde" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
- <div><label style="font-size:11px; font-weight:bold; color:#555;">HASTA</label><input type="date" id="rcFechaHasta" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px;"></div>
- <button onclick="renderReporteCompras()" style="padding:9px 18px; background:#2c3e50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Filtrar</button>
- </div>
- <!-- KPIs -->
- <div id="rcKpis" style="display:grid; grid-template-columns:repeat(3,1fr); gap:15px; margin-bottom:20px;"></div>
- <!-- Tabla -->
- <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
- <h3 style="margin:0 0 15px 0; color:#2c3e50;">Detalle de Compras</h3>
- <div id="rcTabla" style="overflow-x:auto;"></div>
- </div>
+ <div id="reporteComprasApp"></div>
  </div>
 
     <div id="reporte-flujo" class="vista oculto"></div>
@@ -1129,17 +1122,17 @@
 <script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 
-<script src="js/modules/auth.js"></script>
-<script src="js/modules/inventario.js?v=18"></script>
+<script src="js/modules/auth.js?v=2"></script>
+<script src="js/modules/inventario.js?v=20"></script>
 <script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js?v=23"></script>
-<script src="js/modules/clientes.js"></script>
+<script src="js/modules/ventas.js?v=29"></script>
+<script src="js/modules/clientes.js?v=3"></script>
 <script src="js/modules/cxc.js?v=21"></script>
 <script src="js/modules/apartados.js?v=8"></script>
-<script src="js/modules/compras.js?v=27"></script>
+<script src="js/modules/compras.js?v=29"></script>
 <script src="js/modules/bancos.js?v=9"></script>
-<script src="js/modules/reportes.js?v=18"></script>
-<script src="js/modules/reportes-plus.js?v=6"></script>
+<script src="js/modules/reportes.js?v=19"></script>
+<script src="js/modules/reportes-plus.js?v=8"></script>
 <script src="js/modules/reportes-credito.js?v=3"></script>
 <script src="js/modules/dashboard.js?v=4"></script>
 <script src="js/modules/cotizaciones.js?v=4"></script>
@@ -1152,13 +1145,13 @@
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/agenda.js"></script>
 <script src="js/modules/producto-picker.js?v=2"></script>
-<script src="js/modules/cliente-picker.js"></script>
+<script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=2"></script>
 <script src="js/modules/push-autorizaciones.js?v=1"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/core/navigation.js?v=8"></script>
-<script src="js/init.js?v=7"></script>
+<script src="js/init.js?v=8"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {
