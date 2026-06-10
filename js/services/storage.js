@@ -244,7 +244,7 @@ const StorageService = {
         return defaultValue;
     },
 
-        set(key, value) {
+    set(key, value) {
         // 1. Guardar en RAM al instante
         this._cache[key] = value;
 
@@ -332,7 +332,8 @@ const StorageService = {
         }
     },
 
-    // 🚀 NUEVO: MOTOR DE TRANSACCIONES ATÓMICAS PARA LA BÓVEDA
+    // 🚀 MOTOR DE TRANSACCIONES ATÓMICAS PARA LA BÓVEDA
+    // Agrega un item a una tabla crítica con sincronización inmediata a Firebase
     async pushAtomo(key, item) {
         // 1. Guardado local instantáneo para que la pantalla del usuario no se congele
         let currentList = this.get(key, []);
@@ -340,7 +341,12 @@ const StorageService = {
         currentList.push(item);
         await this._guardarLocalDirecto(key, currentList);
 
-        // 2. Transacción Quirúrgica en Firebase
+        // 🛡️ Registrar timestamp local INMEDIATAMENTE
+        const tsAhora = Date.now();
+        this._cache[`_ts_${key}`] = tsAhora;
+        await localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
+
+        // 2. Transacción Quirúrgica en Firebase (SIN DEBOUNCE)
         if (window._firebaseActivo && window._db) {
             const itemLimpio = this._limpiarParaFirestore(item, true);
             const docRef = window._db.collection('posData').doc(key);
@@ -348,17 +354,21 @@ const StorageService = {
                 await window._db.runTransaction(async (transaction) => {
                     const doc = await transaction.get(docRef);
                     if (!doc.exists) {
-                        transaction.set(docRef, { data: [itemLimpio], _updatedAt: Date.now() });
+                        transaction.set(docRef, { data: [itemLimpio], _updatedAt: tsAhora });
                     } else {
                         let data = doc.data().data || [];
                         data.push(itemLimpio);
-                        transaction.update(docRef, { data: data, _updatedAt: Date.now() });
+                        transaction.update(docRef, { data: data, _updatedAt: tsAhora });
                     }
                 });
-            } catch (e) { console.warn("Fallo Transacción Atómica (Push):", e); }
+                console.log(`✅ pushAtomo: ${key} sincronizado INMEDIATAMENTE a Firebase`);
+            } catch (e) { 
+                console.warn(`⚠️ pushAtomo fallo para ${key}, pero datos guardados localmente:`, e); 
+            }
         }
     },
 
+    // Elimina un item de una tabla crítica con sincronización inmediata a Firebase
     async removeAtomo(key, idValue) {
         // 1. Limpieza local
         let currentList = this.get(key, []);
@@ -366,7 +376,12 @@ const StorageService = {
         currentList = currentList.filter(i => String(i.idCuarentena || i.id) !== String(idValue));
         await this._guardarLocalDirecto(key, currentList);
 
-        // 2. Transacción Quirúrgica en Firebase
+        // 🛡️ Registrar timestamp local INMEDIATAMENTE
+        const tsAhora = Date.now();
+        this._cache[`_ts_${key}`] = tsAhora;
+        await localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
+
+        // 2. Transacción Quirúrgica en Firebase (SIN DEBOUNCE)
         if (window._firebaseActivo && window._db) {
             const docRef = window._db.collection('posData').doc(key);
             try {
@@ -375,9 +390,12 @@ const StorageService = {
                     if (!doc.exists) return;
                     let data = doc.data().data || [];
                     const filtrado = data.filter(i => String(i.idCuarentena || i.id) !== String(idValue));
-                    transaction.update(docRef, { data: filtrado, _updatedAt: Date.now() });
+                    transaction.update(docRef, { data: filtrado, _updatedAt: tsAhora });
                 });
-            } catch (e) { console.warn("Fallo Transacción Atómica (Remove):", e); }
+                console.log(`✅ removeAtomo: ${key} item ${idValue} eliminado INMEDIATAMENTE en Firebase`);
+            } catch (e) { 
+                console.warn(`⚠️ removeAtomo fallo para ${key}, pero datos limpiados localmente:`, e); 
+            }
         }
     },
     // -----------------------------------------------------------
@@ -420,7 +438,7 @@ const StorageService = {
                     omitidas++;
                     continue;
                 }
-                // ──────────────────────────────────────────────────────────────
+                // ──────────────────────────────────────────────────────────
 
                 const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
                     ? payload.data
@@ -451,8 +469,6 @@ const StorageService = {
             throw error;
         }
     },
-
-    // Dentro de StorageService en js/services/storage.js
 
     async uploadAll() {
         if (!window._firebaseActivo || !window._db) {
