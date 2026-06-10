@@ -948,9 +948,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     const esDirecto = modoAplicacion === 'directo';
     if (!esDirecto) {
-        let abonosP = StorageService.get("abonosPendientes", []);
-        abonosP.push(cuarentena);
-        StorageService.set("abonosPendientes", abonosP);
+        StorageService.pushAtomo("abonosPendientes", cuarentena);
         if (typeof window.notificarBovedaAutorizacion === 'function') {
             window.notificarBovedaAutorizacion({
                 tipo: 'abono',
@@ -1039,6 +1037,18 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         alert("Este abono pendiente fue cancelado o ya no es valido.");
         return false;
     }
+
+    // ── CAPA 0: Lista local de IDs ya aprobados ────────────────────────────
+    // Esta lista empieza con "_" → StorageService NUNCA la sube ni la baja de
+    // Firebase. Sobrevive a cualquier syncAll() con datos viejos de la nube.
+    // Es la barrera definitiva contra dobles autorizaciones por conflicto de sync.
+    const _idsAprobados = StorageService.get('_idsAprobadosLocal', []);
+    const _idOp = String(a.idCuarentena || a.id || a.idOperacion || '');
+    if (_idOp && _idsAprobados.includes(_idOp)) {
+        alert("⚠️ Este abono ya fue autorizado anteriormente en este dispositivo.\n\nNo se duplicará.");
+        return false;
+    }
+    // ──────────────────────────────────────────────────────────────────────
     const _folioGuard = a.folioApartado || a.folioCXC || '';
     const _montoGuard = Number(a.montoAbonado || a.monto || 0);
     const _fechaGuard = String(a.fechaAbonoIso || a.fecha || '').slice(0, 10);
@@ -1151,6 +1161,17 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
     if (typeof window.registrarComisionAbono === 'function' && a.vendedorId) {
         window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId);
     }
+
+    // ── Marcar como aprobado en la lista local persistente ────────────────
+    if (_idOp) {
+        const lista = StorageService.get('_idsAprobadosLocal', []);
+        if (!lista.includes(_idOp)) {
+            lista.push(_idOp);
+            // Mantener solo los últimos 2000 IDs para no crecer indefinidamente
+            StorageService.set('_idsAprobadosLocal', lista.slice(-2000));
+        }
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     return true;
 };

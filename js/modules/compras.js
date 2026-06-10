@@ -1176,6 +1176,15 @@ function procesarRecepcionFisica(idRecepcion) {
 
 // Lógica de ejecución atada al botón del modal
 window.ejecutarRecepcionFisica = function(idRecepcion) {
+    // ── CAPA 0: Lista local de recepciones ya procesadas ──────────────────
+    const _recAprobadas = StorageService.get('_idsAprobadosLocal', []);
+    const _claveRec = `recepcion-${idRecepcion}`;
+    if (_recAprobadas.includes(_claveRec)) {
+        alert(`⚠️ Esta recepción ya fue procesada en este dispositivo.\n\nNo se duplicará el inventario.`);
+        return;
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
     const cantidad = parseInt(document.getElementById('rfCantidad').value);
     const colorRecepcion = document.getElementById('rfColor').value.trim() || 'General';
     const ubicacionRecepcion = document.getElementById('rfUbicacion').value;
@@ -1272,6 +1281,14 @@ window.ejecutarRecepcionFisica = function(idRecepcion) {
     StorageService.set("recepciones", recs);
     StorageService.set("productos", productos);
     StorageService.set("movimientosInventario", movimientosInventario);
+
+    // ── Marcar recepción como procesada en lista local persistente ────────
+    const listaRec = StorageService.get('_idsAprobadosLocal', []);
+    if (!listaRec.includes(_claveRec)) {
+        listaRec.push(_claveRec);
+        StorageService.set('_idsAprobadosLocal', listaRec.slice(-2000));
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     document.querySelector('[data-modal="recepcion-fisica"]').remove();
     alert(`✅ Recepción procesada exitosamente.\nInventario sumado a la bodega: [${ubicacionRecepcion}].`);

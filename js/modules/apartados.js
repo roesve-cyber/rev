@@ -338,7 +338,7 @@ function registrarAbonoApartadoDesdeModal() {
 
     const fechaIso = window.localISO ? window.localISO(fecha + 'T12:00:00') : new Date(fecha + 'T12:00:00').toISOString();
     const nuevoSaldoEstimado = Math.max(0, saldoDisponible - monto);
-    abonosPendientes.push({
+    const cuarentenaAbono = {
         id: Date.now(),
         tipo: 'apartado',
         origen: 'apartados',
@@ -357,8 +357,8 @@ function registrarAbonoApartadoDesdeModal() {
         pendientePrevioPorAutorizar: pendientePorAutorizar,
         nuevoSaldoEstimado,
         estado: 'Pendiente'
-    });
-    StorageService.set("abonosPendientes", abonosPendientes);
+    };
+    StorageService.pushAtomo("abonosPendientes", cuarentenaAbono);
 
     imprimirTicketAbonoApartado({ ...ap, saldoPendiente: nuevoSaldoEstimado }, monto, etiquetaCuenta, fechaIso, { provisional: true });
     alert('⏳ Abono enviado a la Bóveda de Autorizaciones. El saldo y caja se moverán cuando Auditoría lo apruebe.');

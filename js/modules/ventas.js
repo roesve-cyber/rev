@@ -1968,6 +1968,17 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     // La cuarentena es administrativa; no debe detener caja ni entrega.
     generarTicketMediaHoja(datosVenta);
 
+    // Recibo de enganche/anticipo — se imprime automáticamente cuando la venta
+    // es a crédito o apartado y el cliente entregó un enganche mayor a $0.
+    if ((datosVenta.metodo === 'credito' || datosVenta.metodo === 'apartado') &&
+        Number(datosVenta.enganche || 0) > 0) {
+        generarTicketEnganche(
+            datosVenta,
+            window._estadoPago?.modoEnganche,
+            window._estadoPago?.etiquetaCuenta
+        );
+    }
+
     if (articulosEntregaOperativa.length > 0 && typeof window.generarValeEntrega === "function") {
         const clienteEntrega = { ...(clienteSeleccionado || {}) };
         window.generarValeEntrega({
@@ -2008,6 +2019,18 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     productosSinStock = _desenvolverListaVentaPendiente(productosSinStock);
 
     const folioNormalizado = String(folioVenta || '').trim();
+
+    // ── CAPA 0: Lista local de folios ya autorizados ───────────────────────
+    // Clave con prefijo "_": nunca sube ni baja de Firebase.
+    // Sobrevive a cualquier syncAll() con datos viejos de la nube.
+    const _ventasAprobadas = StorageService.get('_idsAprobadosLocal', []);
+    const _claveVenta = `venta-${folioNormalizado}`;
+    if (folioNormalizado && _ventasAprobadas.includes(_claveVenta)) {
+        alert(`⚠️ La venta ${folioNormalizado} ya fue autorizada en este dispositivo.\n\nNo se duplicará.`);
+        return false;
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
     const esConversionApartado = !!datosVentaP?.origenApartadoFolio &&
         String(datosVentaP.origenApartadoFolio || '').trim() === folioNormalizado;
     const ventaExistente = StorageService.get('ventasRegistradas', [])
@@ -2313,6 +2336,17 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     if (typeof window.acumularPuntosCliente === "function" && montoIngresoHoy > 0) {
         window.acumularPuntosCliente(datosVentaP.cliente.id, montoIngresoHoy);
     }
+
+    // ── Marcar folio como autorizado en lista local persistente ───────────
+    if (folioNormalizado) {
+        const listaAprobados = StorageService.get('_idsAprobadosLocal', []);
+        if (!listaAprobados.includes(_claveVenta)) {
+            listaAprobados.push(_claveVenta);
+            StorageService.set('_idsAprobadosLocal', listaAprobados.slice(-2000));
+        }
+    }
+    // ──────────────────────────────────────────────────────────────────────
+
     return true;
 };
 
@@ -3785,17 +3819,25 @@ window.renderReimprimirVenta = function() {
         if (item._origen === 'apartado') colorTipo = '#7c3aed'; // Morado
         if (item._origen === 'entrega_mcia') colorTipo = '#0f766e'; // Teal
 
+        const tieneEnganche = (item._origen === 'credito' || item._origen === 'apartado');
+        const botonesAccion = `
+            <button onclick="reimprimirConAutorizacion('${folio}', '${item._origen}')"
+                    style="background:#475569; color:white; border:none; padding:7px 11px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1); font-size:12px;">
+                🖨️ Ticket
+            </button>
+            ${tieneEnganche ? `
+            <button onclick="reimprimirConAutorizacion('${folio}', 'enganche')"
+                    style="background:#0f766e; color:white; border:none; padding:7px 11px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1); font-size:12px; margin-left:4px;">
+                🖨️ Enganche
+            </button>` : ''}`;
+
         html += `<tr>
             <td><strong>${folio}</strong>${item.folioVenta ? `<br><small style="color:#64748b;">Venta: ${item.folioVenta}</small>` : ''}</td>
             <td>${fechaLimpia}</td>
             <td>${cliente}</td>
             <td><span style="background:${colorTipo}; color:white; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:bold;">${tipo}</span></td>
             <td>${fmtDinero(total)}</td>
-            <td style="text-align:center;">
-                <button onclick="reimprimirFolioUnificado('${folio}', '${item._origen}')" style="background:#475569; color:white; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                    Reimprimir
-                </button>
-            </td>
+            <td style="text-align:center;">${botonesAccion}</td>
         </tr>`;
     });
     
@@ -5444,6 +5486,209 @@ window.actualizarCantidadCarrito = actualizarCantidadCarrito;
 window.cambiarPrecioCarrito = cambiarPrecioCarrito;
 window.actualizarColorCarrito = actualizarColorCarrito;
 window.actualizarUbicacionCarrito = actualizarUbicacionCarrito;
+// ═══════════════════════════════════════════════════════════════════════════
+// RECIBO DE ENGANCHE / ANTICIPO
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Genera e imprime un recibo térmico (80mm) para el enganche o anticipo
+ * entregado al momento de una venta a crédito o apartado.
+ * @param {object} datosVenta  – objeto datosVenta completo de la venta
+ * @param {string} modoEnganche – forma de pago del enganche (p.ej. "efectivo", "transferencia")
+ * @param {string} etiquetaCuenta – texto legible de la cuenta receptora
+ */
+function generarTicketEnganche(datosVenta, modoEnganche, etiquetaCuenta) {
+    const enganche = Number(datosVenta?.enganche || 0);
+    if (enganche <= 0) return;
+
+    const esc      = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const fmt      = v => '$' + Number(v).toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+    const folio    = datosVenta.folio    || 'S/F';
+    const fecha    = datosVenta.fecha    || new Date().toLocaleDateString('es-MX');
+    const cliente  = datosVenta.cliente  || {};
+    const metodo   = String(datosVenta.metodo || '');
+    const saldo    = Number(datosVenta.saldoPendiente || 0);
+    const arts     = Array.isArray(datosVenta.articulos) ? datosVenta.articulos : [];
+
+    const esApartado  = metodo === 'apartado';
+    const tipoRecibo  = esApartado ? 'RECIBO DE ANTICIPO' : 'RECIBO DE ENGANCHE';
+    const labelMonto  = esApartado ? 'ANTICIPO RECIBIDO:' : 'ENGANCHE RECIBIDO:';
+
+    const articulosHTML = arts.length ? `
+        <div class="seccion-titulo">ARTÍCULOS</div>
+        <table>
+            <tbody>
+                ${arts.map(a => `
+                <tr>
+                    <td style="font-size:10px;">${esc(a.nombre || '-')}</td>
+                    <td style="text-align:right;font-size:10px;white-space:nowrap;">x${a.cantidad || 1}</td>
+                    <td style="text-align:right;font-size:10px;white-space:nowrap;">${fmt((a.precioContado || 0) * (a.cantidad || 1))}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>` : '';
+
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+
+    const ticketHTML = `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>${tipoRecibo} – ${folio}</title>
+    <base href="${baseUrl}">
+    <style>
+        @page { size: 80mm auto; margin: 0; }
+        body { font-family: 'Courier New', monospace; font-size: 11px; width: 72mm; margin: 4mm auto; color: #000; background: #f3f4f6; }
+        .centro { text-align: center; }
+        .negrita { font-weight: bold; }
+        hr { border: none; border-top: 1px dashed #333; margin: 6px 0; }
+        .monto-grande { font-size: 20px; font-weight: bold; text-align: center; margin: 8px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        .seccion-titulo { background: #000; color: #fff; padding: 3px 6px; font-weight: bold; font-size: 10px; margin: 5px 0 3px 0; }
+        .fila { display: flex; justify-content: space-between; font-size: 11px; margin: 2px 0; }
+        #ticket-contenido { background: #ffffff; padding: 10px; padding-bottom: 20px; box-sizing: border-box; }
+        .firma-linea { border-top: 1px solid #333; width: 70%; margin: 14px auto 3px; }
+        @media print { .no-print { display: none !important; } body { background: white; margin: 0; } #ticket-contenido { padding: 0; } }
+    </style>
+</head>
+<body>
+<div id="ticket-contenido">
+    <div class="centro">
+        <img src="img/Logo.svg" style="width:60px; height:60px; object-fit:contain;"
+             onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
+        <div class="negrita" style="font-size:14px; margin-top:4px;">MUEBLERÍA MI PUEBLITO</div>
+        <div>Santiago Cuaula, Tlaxcala</div>
+    </div>
+    <hr>
+    <div class="centro negrita" style="font-size:13px;">── ${tipoRecibo} ──</div>
+    <div class="fila"><span>Folio Venta:</span><span class="negrita">${esc(folio)}</span></div>
+    <div class="fila"><span>Fecha:</span><span>${esc(fecha)}</span></div>
+    <hr>
+    <div class="negrita">CLIENTE</div>
+    <div>${esc(cliente.nombre || '—')}</div>
+    ${cliente.telefono ? `<div style="font-size:10px;">Tel: ${esc(cliente.telefono)}</div>` : ''}
+    ${arts.length ? `<hr>${articulosHTML}` : ''}
+    <hr>
+    <div class="seccion-titulo">${labelMonto}</div>
+    <div class="monto-grande">${fmt(enganche)}</div>
+    <div class="fila"><span>Saldo pendiente:</span><span class="negrita">${fmt(saldo)}</span></div>
+    <div class="fila"><span>Forma de pago:</span><span>${esc(etiquetaCuenta || modoEnganche || 'Efectivo')}</span></div>
+    <hr>
+    <div class="centro" style="margin-top:10px;">
+        <div class="firma-linea"></div>
+        <div class="negrita" style="font-size:10px;">FIRMA DEL CLIENTE</div>
+    </div>
+    <div class="centro" style="margin-top:10px; font-size:10px;">★ Gracias por su preferencia ★</div>
+</div>
+<div class="no-print" style="text-align:center; padding:14px; margin-top:8px;">
+    <button onclick="window.print()"
+            style="padding:10px 18px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">
+        🖨️ Imprimir recibo
+    </button>
+</div>
+</body>
+</html>`;
+
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(ticketHTML, { title: `${tipoRecibo} ${folio}` });
+        return;
+    }
+    const w = window.open('', '_blank', 'width=440,height=620');
+    if (!w) { alert('Habilita las ventanas emergentes para imprimir el recibo de enganche.'); return; }
+    w.document.write(ticketHTML);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try { w.print(); } catch(e) {} }, 350);
+}
+
+/**
+ * Reimprime el recibo de enganche de una venta ya registrada,
+ * leyendo los datos desde cuentasPorCobrar o apartados según el tipo.
+ * @param {string} folio  – folio de la venta
+ */
+function reimprimirTicketEnganche(folio) {
+    const folioStr = String(folio || '').trim();
+    let datosVenta = null, modoEnganche = 'Efectivo', etiquetaCuenta = 'Efectivo';
+
+    // Intentar desde cuentasPorCobrar (ventas a crédito)
+    const cuentas = StorageService.get('cuentasPorCobrar', []);
+    const cuenta  = cuentas.find(c => String(c.folio || c.folioVenta || '') === folioStr);
+    if (cuenta) {
+        datosVenta = {
+            folio:          cuenta.folio || cuenta.folioVenta || folioStr,
+            fecha:          cuenta.fechaVenta || cuenta.fecha || '',
+            cliente:        { nombre: cuenta.nombre || cuenta.clienteNombre || '—', telefono: cuenta.telefono || '' },
+            metodo:         'credito',
+            enganche:       Number(cuenta.enganche || cuenta.anticipo || 0),
+            saldoPendiente: Number(cuenta.saldoActual ?? cuenta.saldoPendiente ?? cuenta.importeTotal ?? 0),
+            articulos:      cuenta.articulos || []
+        };
+        modoEnganche  = cuenta.modoEnganche || 'Efectivo';
+        etiquetaCuenta = cuenta.etiquetaCuentaEnganche || cuenta.etiquetaCuenta || 'Efectivo';
+    }
+
+    // Intentar desde apartados
+    if (!datosVenta) {
+        const apartados = StorageService.get('apartados', []);
+        const apt = apartados.find(a => String(a.folio || '') === folioStr);
+        if (apt) {
+            datosVenta = {
+                folio:          apt.folio || folioStr,
+                fecha:          apt.fechaApartado || apt.fecha || '',
+                cliente:        { nombre: apt.clienteNombre || apt.cliente?.nombre || '—', telefono: apt.clienteTelefono || '' },
+                metodo:         'apartado',
+                enganche:       Number(apt.anticipo || apt.enganche || apt.importeApartado || 0),
+                saldoPendiente: Number(apt.saldoPendiente ?? apt.saldo ?? 0),
+                articulos:      apt.articulos || []
+            };
+            modoEnganche  = apt.modoEnganche  || 'Efectivo';
+            etiquetaCuenta = apt.etiquetaCuentaEnganche || 'Efectivo';
+        }
+    }
+
+    if (!datosVenta || Number(datosVenta.enganche || 0) <= 0) {
+        alert(`No se encontró información de enganche/anticipo para el folio ${folioStr}.\n\nVerifica que la venta sea a crédito o apartado y que haya tenido enganche.`);
+        return;
+    }
+
+    generarTicketEnganche(datosVenta, modoEnganche, etiquetaCuenta);
+}
+
+/**
+ * Punto de entrada unificado para reimpresiones desde el panel de Operación.
+ * Si el usuario no es admin, solicita PIN de autorización antes de proceder.
+ * @param {string} folio   – folio del documento a reimprimir
+ * @param {string} origen  – tipo: 'contado' | 'credito' | 'apartado' | 'entrega_mcia' |
+ *                           'devolucion_cancelacion' | 'enganche'
+ */
+window.reimprimirConAutorizacion = function(folio, origen) {
+    const _ejecutar = () => {
+        if (origen === 'enganche') {
+            reimprimirTicketEnganche(folio);
+        } else if (typeof reimprimirFolioUnificado === 'function') {
+            reimprimirFolioUnificado(folio, origen);
+        } else {
+            reimprimirTicketVenta(folio);
+        }
+    };
+
+    // Admin directo: sin PIN
+    if (typeof _esAdmin === 'function' && _esAdmin()) {
+        _ejecutar();
+        return;
+    }
+
+    // No admin: pedir autorización
+    if (typeof window.requireAdmin === 'function') {
+        window.requireAdmin(_ejecutar);
+    } else {
+        // Fallback: ejecutar de todas formas (requireAdmin no disponible)
+        _ejecutar();
+    }
+};
+
+window.reimprimirTicketEnganche = reimprimirTicketEnganche;
+window.generarTicketEnganche    = generarTicketEnganche;
+
 window.actualizarInterfazPago = actualizarInterfazPago;
 window.seleccionarPlan = seleccionarPlan;
 window.confirmarVentaFinal = confirmarVentaFinal;
