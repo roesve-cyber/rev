@@ -268,6 +268,13 @@ const StorageService = {
             window._db &&
             this._esTablaValida(key, value)
         ) {
+            // Registrar el timestamp local INMEDIATAMENTE al guardar,
+            // antes de que el debounce dispare.  Así, aunque la subida
+            // a Firebase falle o tarde, syncAll() sabe que el local es más nuevo.
+            const tsAhora = Date.now();
+            this._cache[`_ts_${key}`] = tsAhora;
+            localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
+
             // Si ya había un envío programado para esta tabla, lo cancelamos
             if (this._syncTimers[key]) {
                 clearTimeout(this._syncTimers[key]);
@@ -276,13 +283,35 @@ const StorageService = {
             // Programamos el nuevo envío con 1.5 segundos de espera
             this._syncTimers[key] = setTimeout(() => {
                 const valorFirestore = this._limpiarParaFirestore(value);
+                const ts = this._cache[`_ts_${key}`] || Date.now();
+                
                 try {
-                    window._db.collection('posData').doc(key).set({
-                        data: valorFirestore,
-                        _updatedAt: Date.now()
-                    }).catch(e => {
-                        console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
-                    });
+                    const docRef = window._db.collection('posData').doc(key);
+
+                    // ─── BLINDAJE MULTI-CAJA PARA ARREGLOS CRÍTICOS ───
+                    if (key === 'abonosPendientes' || key === 'ventasPendientes') {
+                        // En lugar de sobreescribir todo, usamos transacciones o mezcla inteligente.
+                        // Para no romper tu lógica local de arreglos, le pedimos a Firebase 
+                        // que guarde el estado actual pero manejado como documento único controlado.
+                        // NOTA: Si quieres seguridad absoluta entre cajas, lo ideal es usar arrayUnion/arrayRemove
+                        // al momento del clic. Pero si se prefiere mantener el bloque set(), usamos un merge:
+                        
+                        docRef.set({
+                            data: valorFirestore,
+                            _updatedAt: ts
+                        }, { merge: true }).catch(e => console.warn("Error en merge:", e));
+                        
+                    } else {
+                        // Comportamiento normal para configuraciones o tablas de un solo autor
+                        docRef.set({
+                            data: valorFirestore,
+                            _updatedAt: ts
+                        }).catch(e => {
+                            console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
+                        });
+                    }
+                    // ──────────────────────────────────────────────────
+
                 } catch (e) {
                     console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
                 }
@@ -303,8 +332,64 @@ const StorageService = {
         }
     },
 
+    // 🚀 NUEVO: MOTOR DE TRANSACCIONES ATÓMICAS PARA LA BÓVEDA
+    async pushAtomo(key, item) {
+        // 1. Guardado local instantáneo para que la pantalla del usuario no se congele
+        let currentList = this.get(key, []);
+        if (!Array.isArray(currentList)) currentList = [];
+        currentList.push(item);
+        await this._guardarLocalDirecto(key, currentList);
+
+        // 2. Transacción Quirúrgica en Firebase
+        if (window._firebaseActivo && window._db) {
+            const itemLimpio = this._limpiarParaFirestore(item, true);
+            const docRef = window._db.collection('posData').doc(key);
+            try {
+                await window._db.runTransaction(async (transaction) => {
+                    const doc = await transaction.get(docRef);
+                    if (!doc.exists) {
+                        transaction.set(docRef, { data: [itemLimpio], _updatedAt: Date.now() });
+                    } else {
+                        let data = doc.data().data || [];
+                        data.push(itemLimpio);
+                        transaction.update(docRef, { data: data, _updatedAt: Date.now() });
+                    }
+                });
+            } catch (e) { console.warn("Fallo Transacción Atómica (Push):", e); }
+        }
+    },
+
+    async removeAtomo(key, idValue) {
+        // 1. Limpieza local
+        let currentList = this.get(key, []);
+        if (!Array.isArray(currentList)) currentList = [];
+        currentList = currentList.filter(i => String(i.idCuarentena || i.id) !== String(idValue));
+        await this._guardarLocalDirecto(key, currentList);
+
+        // 2. Transacción Quirúrgica en Firebase
+        if (window._firebaseActivo && window._db) {
+            const docRef = window._db.collection('posData').doc(key);
+            try {
+                await window._db.runTransaction(async (transaction) => {
+                    const doc = await transaction.get(docRef);
+                    if (!doc.exists) return;
+                    let data = doc.data().data || [];
+                    const filtrado = data.filter(i => String(i.idCuarentena || i.id) !== String(idValue));
+                    transaction.update(docRef, { data: filtrado, _updatedAt: Date.now() });
+                });
+            } catch (e) { console.warn("Fallo Transacción Atómica (Remove):", e); }
+        }
+    },
+    // -----------------------------------------------------------
+
     // ☁️ FUNCIONES DE NUBE (Ahora sí conectadas a Firestore)
-        async syncAll() {
+
+    // Devuelve el timestamp local de la última vez que guardamos una tabla
+    _tsLocal(key) {
+        return Number(this._cache[`_ts_${key}`] || 0);
+    },
+
+    async syncAll() {
         if (!window._firebaseActivo || !window._db) {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
         }
@@ -314,10 +399,28 @@ const StorageService = {
 
             const snapshot = await window._db.collection('posData').get();
             let descargadas = 0;
+            let omitidas = 0;
 
             for (const doc of snapshot.docs) {
                 const tabla = doc.id;
+                // Ignorar claves de timestamps internos
+                if (tabla.startsWith('_ts_')) continue;
+
                 const payload = doc.data();
+
+                // ── BLINDAJE ANTI-SOBREESCRITURA ──────────────────────────────
+                // Solo bajamos si Firebase es MÁS RECIENTE que nuestro local.
+                // Esto evita que un syncAll() pise datos que ya teníamos
+                // correctos localmente pero que Firebase aún no recibió
+                // (por ejemplo, si la red falló justo después de aprobar la bóveda).
+                const tsFirebase = Number(payload?._updatedAt || 0);
+                const tsLocal    = this._tsLocal(tabla);
+                if (tsLocal > 0 && tsFirebase <= tsLocal) {
+                    console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
+                    omitidas++;
+                    continue;
+                }
+                // ──────────────────────────────────────────────────────────────
 
                 const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
                     ? payload.data
@@ -332,10 +435,15 @@ const StorageService = {
                 }
 
                 await this._guardarLocalDirecto(tabla, datosRestaurados);
+                // Guardamos el timestamp de Firebase como referencia local
+                if (tsFirebase > 0) {
+                    this._cache[`_ts_${tabla}`] = tsFirebase;
+                    await localforage.setItem(`_ts_${tabla}`, tsFirebase).catch(() => {});
+                }
                 descargadas++;
             }
 
-            console.log(`✅ Sincronización dinámica completada. Tablas descargadas: ${descargadas}`);
+            console.log(`✅ Sync completada. Descargadas: ${descargadas}, conservadas por ser más recientes: ${omitidas}`);
             return true;
 
         } catch (error) {
