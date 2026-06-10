@@ -83,7 +83,7 @@ window.formatearFechaCortaMX = function(fecha) {
  */
 window.formatearFechaVistaMX = function(fecha, opciones = {}) {
     const d = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fecha) : (fecha instanceof Date ? fecha : new Date(fecha));
-    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : 'â€”');
+    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : '—');
     const dias = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
     const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
     return `${dias[d.getDay()]} ${String(d.getDate()).padStart(2, '0')} de ${meses[d.getMonth()]} ${d.getFullYear()}`;
@@ -91,7 +91,7 @@ window.formatearFechaVistaMX = function(fecha, opciones = {}) {
 
 window.formatearFechaHoraVistaMX = function(fecha, opciones = {}) {
     const d = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fecha) : (fecha instanceof Date ? fecha : new Date(fecha));
-    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : 'â€”');
+    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : '—');
     const hora = new Intl.DateTimeFormat('es-MX', {
         timeZone: 'America/Mexico_City',
         hour: '2-digit',
@@ -318,8 +318,8 @@ window.revisarVentaPendiente = function(index) {
             <input type="date" id="authFechaVenta" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; margin-top:5px;">
 
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Autorizar a DB</button>
-                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">🗑️ Eliminar</button>
+                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Aprobar</button>
+                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Rechazar</button>
                 <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
@@ -341,20 +341,33 @@ window.aprobarVentaCuarentena = function(index) {
     window._vendedorSeleccionado = v.vendedorSeleccionado;
     window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
     
-    ventasP.splice(index, 1);
-    StorageService.set("ventasPendientes", ventasP);
-    document.querySelector('[data-modal=auth-venta]').remove();
-    alert("✅ Venta autorizada e ingresada al sistema financiero oficial.");
-    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    // 🛡️ CAMBIO CRÍTICO: Usar removeAtomo() para transacción atómica inmediata
+    const ventaIdCuarentena = v.idCuarentena || v.args[5]; // Usar idCuarentena si existe, sino folio
+    StorageService.removeAtomo("ventasPendientes", ventaIdCuarentena).then(() => {
+        document.querySelector('[data-modal=auth-venta]').remove();
+        alert("✅ Venta autorizada e ingresada al sistema financiero oficial.");
+        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    }).catch(e => {
+        console.error("Error al eliminar venta de cuarentena:", e);
+        alert("⚠️ La venta se aprobó pero hubo un error al actualizar la lista. Recarga la página.");
+    });
 };
 
 window.rechazarVentaCuarentena = function(index) {
     if (!confirm("¿Deseas eliminar permanentemente esta venta provisional sin afectar el sistema?")) return;
+    
+    // 🛡️ CAMBIO CRÍTICO: Usar removeAtomo() para transacción atómica inmediata
     const ventasP = StorageService.get("ventasPendientes", []);
-    ventasP.splice(index, 1);
-    StorageService.set("ventasPendientes", ventasP);
-    document.querySelector('[data-modal=auth-venta]').remove();
-    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    const v = ventasP[index];
+    const ventaIdCuarentena = v.idCuarentena || v.args[5];
+    
+    StorageService.removeAtomo("ventasPendientes", ventaIdCuarentena).then(() => {
+        document.querySelector('[data-modal=auth-venta]').remove();
+        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    }).catch(e => {
+        console.error("Error al rechazar venta:", e);
+        alert("⚠️ No se pudo procesar el rechazo. Intenta nuevamente.");
+    });
 };
 
 window.revisarAbonoPendiente = function(index) {
@@ -376,8 +389,8 @@ window.revisarAbonoPendiente = function(index) {
             <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; margin-top:5px;">
 
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Ingresar a Caja</button>
-                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">🗑️ Eliminar</button>
+                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Aprobar</button>
+                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Rechazar</button>
                 <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
@@ -396,20 +409,33 @@ window.aprobarAbonoCuarentena = function(index) {
 
     window.ejecutarAbonoAutorizadoReal(a);
     
-    abonosP.splice(index, 1);
-    StorageService.set("abonosPendientes", abonosP);
-    document.querySelector('[data-modal=auth-abono]').remove();
-    alert("✅ Abono aprobado y registrado en flujo de caja.");
-    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    // 🛡️ CAMBIO CRÍTICO: Usar removeAtomo() para transacción atómica inmediata
+    const abonoIdCuarentena = a.idCuarentena || a.id;
+    StorageService.removeAtomo("abonosPendientes", abonoIdCuarentena).then(() => {
+        document.querySelector('[data-modal=auth-abono]').remove();
+        alert("✅ Abono aprobado y registrado en flujo de caja.");
+        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    }).catch(e => {
+        console.error("Error al eliminar abono de cuarentena:", e);
+        alert("⚠️ El abono se aprobó pero hubo un error al actualizar la lista. Recarga la página.");
+    });
 };
 
 window.rechazarAbonoCuarentena = function(index) {
     if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
+    
+    // 🛡️ CAMBIO CRÍTICO: Usar removeAtomo() para transacción atómica inmediata
     const abonosP = StorageService.get("abonosPendientes", []);
-    abonosP.splice(index, 1);
-    StorageService.set("abonosPendientes", abonosP);
-    document.querySelector('[data-modal=auth-abono]').remove();
-    if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    const a = abonosP[index];
+    const abonoIdCuarentena = a.idCuarentena || a.id;
+    
+    StorageService.removeAtomo("abonosPendientes", abonoIdCuarentena).then(() => {
+        document.querySelector('[data-modal=auth-abono]').remove();
+        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
+    }).catch(e => {
+        console.error("Error al rechazar abono:", e);
+        alert("⚠️ No se pudo procesar el rechazo. Intenta nuevamente.");
+    });
 };
 
 // 🛡️ Alias global para módulos que usen la versión corta
