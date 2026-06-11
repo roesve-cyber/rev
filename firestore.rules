@@ -75,6 +75,7 @@ service cloud.firestore {
 
     match /pushTokens/{tokenId} {
       allow create, update: if activeUser()
+        && request.resource.data.usuarioUid == request.auth.uid
         && request.resource.data.rol == userProfile().rol
         && request.resource.data.token is string;
       allow get, list, delete: if isAdmin();
