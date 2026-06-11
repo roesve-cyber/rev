@@ -24,7 +24,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return activeUser() && userProfile().rol == 'admin';
+      return activeUser() && userProfile().rol in ['admin', 'Admin', 'ADMIN', 'administrador', 'Administrador'];
     }
 
     function publicCatalogDoc(tabla) {
@@ -76,16 +76,17 @@ service cloud.firestore {
     match /pushTokens/{tokenId} {
       allow create, update: if activeUser()
         && request.resource.data.usuarioUid == request.auth.uid
-        && request.resource.data.rol == userProfile().rol
         && request.resource.data.token is string;
-      allow get, list, delete: if isAdmin();
+      allow get, list: if activeUser();
+      allow delete: if isAdmin();
     }
 
     match /pushOutbox/{pushId} {
       allow create: if activeUser()
         && request.resource.data.type == 'autorizacion_boveda'
         && request.resource.data.status == 'pending';
-      allow get, list, update, delete: if isAdmin();
+      allow get, list: if activeUser();
+      allow update, delete: if isAdmin();
     }
 
     match /{document=**} {
