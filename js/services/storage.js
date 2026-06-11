@@ -407,7 +407,7 @@ const StorageService = {
         return Number(this._cache[`_ts_${key}`] || 0);
     },
 
-    async syncAll() {
+    async syncAll(opciones = {}) {
         if (!window._firebaseActivo || !window._db) {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
         }
@@ -415,6 +415,7 @@ const StorageService = {
         try {
             console.log("⬇️ Descargando datos dinámicos de Firebase...");
 
+            const forzarDescarga = !!(opciones && opciones.forzarDescarga);
             const snapshot = await window._db.collection('posData').get();
             let descargadas = 0;
             let omitidas = 0;
@@ -437,7 +438,7 @@ const StorageService = {
                 const localTieneDatos = Array.isArray(datosLocalesAntes)
                     ? datosLocalesAntes.length > 0
                     : !!(datosLocalesAntes && typeof datosLocalesAntes === 'object' && Object.keys(datosLocalesAntes).length > 0);
-                if (localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
+                if (!forzarDescarga && localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
                     console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
                     omitidas++;
                     continue;
@@ -458,6 +459,7 @@ const StorageService = {
 
                 const datosLocalesActuales = this.get(tabla, null);
                 if (
+                    !forzarDescarga &&
                     Array.isArray(datosRestaurados) &&
                     datosRestaurados.length === 0 &&
                     Array.isArray(datosLocalesActuales) &&
