@@ -86,6 +86,73 @@ const StorageService = {
         return value;
     },
 
+    _objetoConIndicesNumericos(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+        const keys = Object.keys(value).filter(key => !key.startsWith('_'));
+        if (!keys.length || !keys.every(key => /^\d+$/.test(key))) return null;
+
+        return keys
+            .sort((a, b) => Number(a) - Number(b))
+            .map(key => this._restaurarDesdeFirestore(value[key]));
+    },
+
+    _extraerListaFirestore(value, profundidad = 0) {
+        if (value === null || value === undefined || profundidad > 5) return null;
+
+        if (Array.isArray(value)) {
+            return value.map(item => this._restaurarDesdeFirestore(item));
+        }
+
+        if (!value || typeof value !== 'object') return null;
+
+        if (Array.isArray(value.__mmpArray)) {
+            return value.__mmpArray.map(item => this._restaurarDesdeFirestore(item));
+        }
+
+        const listaPorIndice = this._objetoConIndicesNumericos(value);
+        if (listaPorIndice) return listaPorIndice;
+
+        const camposContenedor = ['data', 'datos', 'items', 'registros', 'records', 'rows', 'lista', 'value'];
+        for (const campo of camposContenedor) {
+            if (Object.prototype.hasOwnProperty.call(value, campo)) {
+                const lista = this._extraerListaFirestore(value[campo], profundidad + 1);
+                if (lista) return lista;
+            }
+        }
+
+        return null;
+    },
+
+    _normalizarTablaDesdeFirestore(tabla, payload) {
+        const lista = this._extraerListaFirestore(payload);
+        if (lista) return lista;
+
+        const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
+            ? payload.data
+            : payload;
+
+        return this._restaurarDesdeFirestore(datosNube);
+    },
+
+    _logTablaFirebase(tabla, datos) {
+        const tablasClave = new Set([
+            'productos',
+            'clientes',
+            'cuentasPorCobrar',
+            'pagaresSistema',
+            'ventasRegistradas',
+            'movimientosCaja'
+        ]);
+        if (!tablasClave.has(tabla)) return;
+
+        const resumen = Array.isArray(datos)
+            ? `${datos.length} registros`
+            : (datos && typeof datos === 'object' ? `${Object.keys(datos).length} campos` : typeof datos);
+
+        console.log(`Firebase -> ${tabla}: ${resumen}`);
+    },
+
     // Obtiene dinámicamente todas las tablas reales guardadas
     async getTablasDinamicas() {
         const tablas = new Set();
@@ -445,10 +512,8 @@ const StorageService = {
                 }
                 // ──────────────────────────────────────────────────────────
 
-                const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
-                    ? payload.data
-                    : payload;
-                const datosRestaurados = this._restaurarDesdeFirestore(datosNube);
+                const datosRestaurados = this._normalizarTablaDesdeFirestore(tabla, payload);
+                this._logTablaFirebase(tabla, datosRestaurados);
 
                 if (!this._esTablaValida(tabla, datosRestaurados)) {
                     if (!this._clavesIgnoradas.has(tabla)) {
