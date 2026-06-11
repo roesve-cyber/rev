@@ -12,6 +12,54 @@ const StorageService = {
         'carrito'
     ]),
 
+    _tablasTipoLista: new Set([
+        'abonosPendientes',
+        'anticiposConsignacion',
+        'apartados',
+        'bitacoraAuditoria',
+        'categoriasData',
+        'categoriasGasto',
+        'clientes',
+        'clientesSistema',
+        'comisionesRegistradas',
+        'compras',
+        'configuracionPos',
+        'consignacionesActivas',
+        'cortesCaja',
+        'cotizaciones',
+        'cuentas-bancarias',
+        'cuentasEfectivo',
+        'cuentasMSI',
+        'cuentasPorCobrar',
+        'cuentasPorPagar',
+        'deudasMSI',
+        'documentosEntrega',
+        'gastos',
+        'gastosOperativos',
+        'historialCancelaciones',
+        'historialCostos',
+        'historialSolicitudesClientes',
+        'movimientosCaja',
+        'movimientosInventario',
+        'notificacionesAutorizacion',
+        'ordenesCompra',
+        'pagaresSistema',
+        'productos',
+        'proveedores',
+        'puntosPorCliente',
+        'recepciones',
+        'registroTickets',
+        'requisicionesCompra',
+        'salidasPendientesVenta',
+        'solicitudesClientesPendientes',
+        'tarjetasConfig',
+        'ubicacionesConfig',
+        'usuariosConfig',
+        'vendedores',
+        'ventasPendientes',
+        'ventasRegistradas'
+    ]),
+
     // Decide si una clave puede tratarse como tabla real del sistema
     _esTablaValida(key, value) {
         if (!key || typeof key !== 'string') return false;
@@ -97,6 +145,15 @@ const StorageService = {
             .map(key => this._restaurarDesdeFirestore(value[key]));
     },
 
+    _objetoMapaALista(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+        const keys = Object.keys(value).filter(key => !key.startsWith('_'));
+        if (!keys.length) return [];
+
+        return keys.map(key => this._restaurarDesdeFirestore(value[key]));
+    },
+
     _extraerListaFirestore(value, profundidad = 0) {
         if (value === null || value === undefined || profundidad > 5) return null;
 
@@ -131,6 +188,11 @@ const StorageService = {
         const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
             ? payload.data
             : payload;
+
+        if (this._tablasTipoLista.has(tabla)) {
+            const listaDesdeMapa = this._objetoMapaALista(datosNube);
+            if (listaDesdeMapa) return listaDesdeMapa;
+        }
 
         return this._restaurarDesdeFirestore(datosNube);
     },
