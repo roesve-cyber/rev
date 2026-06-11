@@ -4,10 +4,10 @@
 
 function _navGrupoVista(vistaId) {
     const operacion = new Set([
-        'tienda', 'carrito', 'seleccionarcliente', 'apartados', 'entregas',
-        'cotizaciones', 'listaprecios', 'devoluciones', 'garantias',
-        'cuentasxcobrar', 'gestion-datos-cliente'
-    ]);
+    'tienda', 'carrito', 'seleccionarcliente', 'apartados', 'entregas',
+    'cotizaciones', 'listaprecios', 'devoluciones', 'garantias',
+    'cuentasxcobrar', 'gestion-datos-cliente', 'estadoCuentaCliente', 'abonosdirectos'
+]);
     if (operacion.has(vistaId)) return 'operacion';
     return 'otro';
 }
@@ -61,6 +61,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'clientes' && typeof renderClientes === 'function') renderClientes();
         if (vistaId === 'proveedores' && typeof renderProveedores === 'function') renderProveedores();
         if (vistaId === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+        if (vistaId === 'estadoCuentaCliente' && typeof window.renderEstadoCuentaClienteConsolidado === 'function') window.renderEstadoCuentaClienteConsolidado();
         if (vistaId === 'abonosdirectos' && typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
         if (vistaId === 'visor-creditos' && typeof renderVisorCreditosCobranza === 'function') renderVisorCreditosCobranza();
         if (vistaId === 'cobranzaesperada' && typeof renderCobranzaEsperada === 'function') renderCobranzaEsperada();
@@ -73,6 +74,8 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'entregas' && typeof renderEntregas === 'function') renderEntregas();
         if (vistaId === 'apartados' && typeof renderApartados === 'function') renderApartados();
         if (vistaId === 'carrito' && typeof renderCarrito === 'function') renderCarrito();
+        if (vistaId === 'devoluciones' && typeof renderHistorialDevoluciones === 'function') renderHistorialDevoluciones();
+        if (vistaId === 'garantias' && typeof renderControlGarantias === 'function') renderControlGarantias();
         if (vistaId === 'cuentas-bancarias' && typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
         if (vistaId === 'bancos' && typeof renderBancosConfig === 'function') renderBancosConfig();
         if (vistaId === 'flujo-msi' && typeof renderDashboardMSI === 'function') renderDashboardMSI('Todos');
