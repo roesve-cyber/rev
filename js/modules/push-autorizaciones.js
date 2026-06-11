@@ -31,6 +31,10 @@ function _pushAuthMessagingDisponible() {
     return !!(window._firebaseActivo && (window._messaging || (window.firebase && firebase.messaging)) && navigator.serviceWorker && window.Notification);
 }
 
+function _pushAuthUsuarioFirebaseActual() {
+    return window._auth?.currentUser || null;
+}
+
 function renderPushAutorizacionesConfig() {
     const cont = document.getElementById('configPushAutorizaciones');
     if (!cont) return;
@@ -89,6 +93,8 @@ async function activarPushAutorizaciones() {
     const vapidKey = document.getElementById('pushAuthVapidKey')?.value.trim() || config.vapidKey || '';
     if (!vapidKey) return alert('Primero pega y guarda la llave VAPID publica de Firebase Messaging.');
     if (!_pushAuthMessagingDisponible()) return alert('Este entorno no soporta push o Firebase Messaging no esta activo.');
+    const firebaseUser = _pushAuthUsuarioFirebaseActual();
+    if (!firebaseUser) return alert('Para registrar este celular necesitas iniciar sesion con un usuario de Firebase Auth, no con usuario/PIN local.');
     if (!window._messaging && window.firebase && firebase.messaging) {
         window._messaging = firebase.messaging();
     }
@@ -112,11 +118,17 @@ async function activarPushAutorizaciones() {
         actualizadoEn: Date.now()
     };
 
-    localStorage.setItem(PUSH_AUTH_TOKEN_KEY, token);
-    _pushAuthGuardarConfig({ activo: true, vapidKey, ultimoToken: token, ultimoRegistro: new Date().toISOString() });
-
-    if (window._db) {
-        await window._db.collection('pushTokens').doc(_pushAuthTokenId(token)).set(payload, { merge: true });
+    try {
+        if (window._db) {
+            await window._db.collection('pushTokens').doc(_pushAuthTokenId(token)).set(payload, { merge: true });
+        }
+        localStorage.setItem(PUSH_AUTH_TOKEN_KEY, token);
+        _pushAuthGuardarConfig({ activo: true, vapidKey, ultimoToken: token, ultimoRegistro: new Date().toISOString() });
+    } catch (err) {
+        localStorage.removeItem(PUSH_AUTH_TOKEN_KEY);
+        _pushAuthGuardarConfig({ activo: false, ultimoToken: '', ultimoRegistro: '' });
+        renderPushAutorizacionesConfig();
+        return alert('Firebase rechazo el registro del celular: ' + err.message + '\n\nInicia sesion con un usuario Firebase activo y con perfil en Usuarios.');
     }
 
     if (window._messaging.onMessage) {
@@ -158,11 +170,13 @@ async function probarPushAutorizaciones() {
 async function diagnosticarPushAutorizaciones() {
     const config = _pushAuthConfig();
     const sesion = _pushAuthSesion() || {};
+    const firebaseUser = _pushAuthUsuarioFirebaseActual();
     const token = localStorage.getItem(PUSH_AUTH_TOKEN_KEY) || '';
     const lineas = [];
 
     lineas.push(`Firebase: ${window._firebaseActivo && window._db ? 'activo' : 'inactivo/no conectado'}`);
     lineas.push(`Sesion: ${sesion?.rol || 'sin rol'} (${sesion?.email || sesion?.usuario || sesion?.nombre || '-'})`);
+    lineas.push(`Firebase Auth: ${firebaseUser ? firebaseUser.email || firebaseUser.uid : 'sin usuario autenticado'}`);
     lineas.push(`Service Worker: ${'serviceWorker' in navigator ? 'soportado' : 'no soportado'}`);
     lineas.push(`Notificaciones navegador: ${window.Notification ? Notification.permission : 'no soportadas'}`);
     lineas.push(`Firebase Messaging: ${window._messaging ? 'disponible' : 'no disponible aun'}`);
@@ -215,6 +229,10 @@ async function probarPushAutorizacionesNube() {
     if (!window._firebaseActivo || !window._db) return alert('La prueba real requiere Firebase activo en produccion.');
     const sesion = _pushAuthSesion() || {};
     if (!sesion.rol) return alert('No hay sesion activa para crear la prueba.');
+    const firebaseUser = _pushAuthUsuarioFirebaseActual();
+    if (!firebaseUser) {
+        return alert('No se puede crear pushOutbox porque no hay usuario autenticado en Firebase Auth.\n\nCierra sesion e inicia con email/contrasena de Firebase, no con usuario/PIN local.');
+    }
 
     let ref;
     try {
@@ -229,7 +247,7 @@ async function probarPushAutorizacionesNube() {
             payload: { prueba: true, creadoPor: sesion.uid || sesion.id || sesion.usuario || '' }
         });
     } catch (err) {
-        return alert('No se pudo crear pushOutbox: ' + err.message);
+        return alert('No se pudo crear pushOutbox: ' + err.message + '\n\nSi el error es permission-denied, revisa que tu usuario exista en Firebase Auth y en la coleccion usuarios con rol activo.');
     }
 
     const inicio = Date.now();
