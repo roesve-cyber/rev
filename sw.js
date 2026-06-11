@@ -6,7 +6,7 @@ try {
   console.warn('No se pudieron cargar scripts de Firebase Messaging:', err);
 }
 
-var CACHE_NAME = 'mmp-pos-v32';
+var CACHE_NAME = 'mmp-pos-v33';
 var ASSETS = [
   '/',
   '/index.html',

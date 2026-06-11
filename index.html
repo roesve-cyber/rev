@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -85,13 +85,18 @@
         <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-ventas')">⚙️ OPERACION <span>▾</span></button>
             <div id="sub-ventas" class="submenu oculto-submenu">
-                <button onclick="navA('cuentasxcobrar')">💰 Saldos crédito y abonos</button>
-                <button onclick="navA('tienda'); mostrarProductos();">🖼️ Catálogo</button>
-                <button onclick="navA('apartados'); renderApartados();">📦 Mis Apartados</button> 
-                <button onclick="navA('entregas')">🚚 Entregas</button>
-                <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
+                <div class="submenu-grupo">Venta</div>
+                <button onclick="navA('tienda'); mostrarProductos();">🖼️ Tienda-Catálogo</button>
                 <button onclick="navA('cotizaciones')">📄 Cotizaciones</button>
                 <button onclick="navA('listaprecios')">📊 Lista de Precios</button>
+                <div class="submenu-grupo">Seguimiento</div>
+                <button onclick="navA('apartados'); renderApartados();">📦 Mis Apartados</button> 
+                <button onclick="navA('entregas')">🚚 Entregas</button>
+                <div class="submenu-grupo">Clientes y crédito</div>
+                <button onclick="navA('cuentasxcobrar')">💰 Aplicar abonos cliente</button>
+                <button onclick="navA('estadoCuentaCliente')">📊 Estado de Cuenta Cliente</button>
+                <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
+                <div class="submenu-grupo">Postventa</div>
                 <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
                 <button onclick="navA('garantias')">🛡️ Garantías</button>
             </div>
@@ -183,7 +188,6 @@
         <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin:15px 0;">
         <div style="padding: 0 20px;">
             <small style="color: rgba(255,255,255,0.5); display: block; margin-bottom: 10px;">SISTEMA</small>
-            <a href="#" onclick="navA('configuracion')" style="color: white; text-decoration: none; font-size: 14px; display: block;">⚙️ Configuración</a>
         </div>
 
     </nav>
@@ -297,9 +301,11 @@
     <!-- CUENTAS POR COBRAR (MEJORADA) -->
     <div id="cuentasxcobrar" class="vista oculto">
  <div class="vista-header">
+ <div>
  <h2>Cuentas por Cobrar (Pagares y Seguimiento)</h2>
  <p>Control de ventas a credito, pagares, atrasos y abonos.</p>
  </div>
+</div>
  <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
  <input type="text" id="filtroClienteCobranza" placeholder="Buscar cliente..." 
  onkeyup="filtrarCuentasCobranza()" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
@@ -314,6 +320,10 @@
  </div>
  <div id="tablaCuentasXCobrar"></div>
  </div>
+
+    <div id="estadoCuentaCliente" class="vista oculto">
+        <div id="contenidoEstadoCuentaCliente"></div>
+    </div>
 
     <div id="abonosdirectos" class="vista oculto">
  <div class="vista-header">
@@ -1117,18 +1127,18 @@
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=3"></script>
 <script src="js/services/calculator.js"></script>
-<script src="js/services/ticket-service.js?v=2"></script>
+<script src="js/services/ticket-service.js?v=3"></script>
 <script src="js/services/audit-service.js?v=1"></script>
 <script src="js/services/folio-service.js?v=1"></script>
 <script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 
-<script src="js/modules/auth.js?v=2"></script>
+<script src="js/modules/auth.js?v=2.1"></script>
 <script src="js/modules/inventario.js?v=20"></script>
 <script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js?v=29"></script>
+<script src="js/modules/ventas.js?v=2.1"></script>
 <script src="js/modules/clientes.js?v=3"></script>
-<script src="js/modules/cxc.js?v=21"></script>
+<script src="js/modules/cxc.js?v=22"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=29"></script>
 <script src="js/modules/bancos.js?v=9"></script>
@@ -1148,17 +1158,20 @@
 <script src="js/modules/producto-picker.js?v=2"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=2"></script>
-<script src="js/modules/push-autorizaciones.js?v=1"></script>
+<script src="js/modules/push-autorizaciones.js?v=2"></script>
+<script src="js/modules/estadoCuentaCliente.js?v=1"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/core/navigation.js?v=8"></script>
-<script src="js/ventas.js?v=2.1"></script>
-<script src="js/auth.js?v=2.1"></script>
+<script src="js/init.js?v=3"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
 if ("serviceWorker" in navigator) {
  navigator.serviceWorker.register("/sw.js")
- .then(() => console.log("SW registrado"))
+ .then(reg => {
+   console.log("SW registrado");
+   try { reg.update(); } catch(e) {}
+ })
  .catch(err => console.log("Error SW:", err));
 }
 </script>

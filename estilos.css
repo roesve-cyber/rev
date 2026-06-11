@@ -219,15 +219,28 @@ button[onclick="abrirPanelNotificaciones()"]:hover { background: var(--bg-surfac
 .btn-desplegable > span:last-child { color: var(--sb-muted); font-size: 9px; transition: transform 0.2s var(--ease); flex-shrink: 0; }
 .btn-desplegable.open > span:last-child { transform: rotate(180deg); }
 
-.submenu { background: rgba(0,0,0,0.18); border-left: 3px solid rgba(255,255,255,0.04); margin-left: 3px; overflow: hidden; }
+.submenu { background: rgba(0,0,0,0.14); border-left: 2px solid rgba(255,255,255,0.04); margin-left: 3px; overflow: hidden; }
 .submenu button {
-  width: 100%; text-align: left; padding: 8px 18px 8px 28px;
-  background: transparent; color: #94a3b8; border: none;
-  font-size: 12.5px; font-weight: 400; cursor: pointer; transition: var(--tr);
+  width: 100%; text-align: left; padding: 6px 14px 6px 22px;
+  background: transparent; color: #cbd5e1; border: none;
+  font-size: 12px; font-weight: 500; cursor: pointer; transition: var(--tr);
   display: block; border-left: 2px solid transparent; position: relative; font-family: inherit;
 }
 .submenu button::before { content: none; display: none; }
-.submenu button:hover { color: white; background: var(--sb-hover); border-left-color: var(--sb-accent); padding-left: 32px; }
+.submenu button:hover { color: white; background: rgba(255,255,255,0.07); border-left-color: rgba(255,255,255,0.22); padding-left: 24px; }
+.submenu-grupo {
+  margin: 7px 12px 2px 18px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(148,163,184,0.12);
+  color: #94a3b8;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.submenu-grupo:first-child { margin-top: 3px; padding-top: 2px; border-top: 0; }
+#sub-ventas { max-height: min(68vh, 520px); overflow-y: auto; padding-bottom: 4px; }
+#sub-ventas button { border-left-color: transparent; }
 .oculto-submenu { display: none !important; }
 
 .sidebar hr, .sidebar [style*="border-top"] {
@@ -470,7 +483,7 @@ div[style*="border-left:5px"]:hover, div[style*="border-left: 5px"]:hover {
 }
 
 /* ===== MODALES ===== */
-.modal, div[data-modal] {
+.modal, div[data-modal]:not([data-modal="menu-usuario"]) {
   position: fixed !important; inset: 0 !important;
   background: rgba(10,17,36,0.62) !important;
   backdrop-filter: blur(5px) !important; -webkit-backdrop-filter: blur(5px) !important;
@@ -478,13 +491,118 @@ div[style*="border-left:5px"]:hover, div[style*="border-left: 5px"]:hover {
   padding: 24px 16px !important; overflow-y: auto !important;
 }
 /* El JS controla display:flex/block al abrir y display:none al cerrar; no forzar aqui */
-.modal-content, div[data-modal] > div {
+.modal-content, div[data-modal]:not([data-modal="menu-usuario"]) > div {
   background: white !important; padding: 24px !important;
   border-radius: var(--r-lg) !important; width: 100% !important; max-width: 780px !important;
   max-height: none !important; overflow-y: visible !important;
   box-shadow: var(--sh-modal) !important;
   animation: popIn 0.26s cubic-bezier(0.16, 1, 0.3, 1) !important;
   border: 1px solid var(--border) !important; position: relative; margin: auto;
+}
+
+/* ===== MENÚ TU CUENTA (panel compacto) ===== */
+div[data-modal="menu-usuario"] {
+  position: fixed !important;
+  inset: auto !important;
+  top: calc(var(--header-h) + 8px) !important;
+  right: 14px !important;
+  left: auto !important;
+  bottom: auto !important;
+  width: auto !important;
+  height: auto !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  display: block !important;
+  justify-content: unset !important;
+  align-items: unset !important;
+  z-index: 99998 !important;
+}
+.menu-usuario-card {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(226, 232, 240, 0.5);
+  min-width: 228px;
+  max-width: 280px;
+  overflow: hidden;
+  animation: popIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.menu-usuario-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+}
+.menu-usuario-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.menu-usuario-nombre {
+  font-weight: 700;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-usuario-rol {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+.menu-usuario-actions {
+  padding: 6px;
+}
+.menu-usuario-btn {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: var(--tr);
+  font-family: inherit;
+}
+.menu-usuario-btn:hover {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--primary);
+}
+.menu-usuario-btn--danger { color: var(--danger); }
+.menu-usuario-btn--danger:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--danger);
+}
+.menu-usuario-btn--muted {
+  color: var(--text-3);
+  border-top: 1px solid rgba(226, 232, 240, 0.7);
+  margin-top: 2px;
+  border-radius: 0 0 8px 8px;
+}
+.menu-usuario-btn--muted:hover {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-2);
 }
 
 /* ===== PANEL CLIENTES LATERAL ===== */
