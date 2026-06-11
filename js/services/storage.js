@@ -452,6 +452,18 @@ const StorageService = {
                     continue;
                 }
 
+                const datosLocalesActuales = this.get(tabla, null);
+                if (
+                    Array.isArray(datosRestaurados) &&
+                    datosRestaurados.length === 0 &&
+                    Array.isArray(datosLocalesActuales) &&
+                    datosLocalesActuales.length > 0
+                ) {
+                    console.warn(`${tabla}: nube vacia y local con ${datosLocalesActuales.length} registros; se conserva local.`);
+                    omitidas++;
+                    continue;
+                }
+
                 await this._guardarLocalDirecto(tabla, datosRestaurados);
                 // Guardamos el timestamp de Firebase como referencia local
                 if (tsFirebase > 0) {
