@@ -433,7 +433,11 @@ const StorageService = {
                 // (por ejemplo, si la red falló justo después de aprobar la bóveda).
                 const tsFirebase = Number(payload?._updatedAt || 0);
                 const tsLocal    = this._tsLocal(tabla);
-                if (tsLocal > 0 && tsFirebase <= tsLocal) {
+                const datosLocalesAntes = this.get(tabla, null);
+                const localTieneDatos = Array.isArray(datosLocalesAntes)
+                    ? datosLocalesAntes.length > 0
+                    : !!(datosLocalesAntes && typeof datosLocalesAntes === 'object' && Object.keys(datosLocalesAntes).length > 0);
+                if (localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
                     console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
                     omitidas++;
                     continue;
