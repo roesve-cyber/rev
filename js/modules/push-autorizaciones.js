@@ -95,6 +95,15 @@ async function activarPushAutorizaciones() {
     if (!_pushAuthMessagingDisponible()) return alert('Este entorno no soporta push o Firebase Messaging no esta activo.');
     const firebaseUser = _pushAuthUsuarioFirebaseActual();
     if (!firebaseUser) return alert('Para registrar este celular necesitas iniciar sesion con un usuario de Firebase Auth, no con usuario/PIN local.');
+    let perfilFirebase = {};
+    try {
+        const perfilSnap = await window._db.collection('usuarios').doc(firebaseUser.uid).get();
+        perfilFirebase = perfilSnap.exists ? (perfilSnap.data() || {}) : {};
+    } catch (err) {
+        return alert('No se pudo validar tu perfil Firebase para registrar push: ' + err.message);
+    }
+    if (perfilFirebase.activo === false) return alert('Tu usuario Firebase esta desactivado.');
+    if (!perfilFirebase.rol) return alert('Tu usuario Firebase no tiene rol configurado en /usuarios.');
     if (!window._messaging && window.firebase && firebase.messaging) {
         window._messaging = firebase.messaging();
     }
@@ -110,9 +119,11 @@ async function activarPushAutorizaciones() {
     const sesion = _pushAuthSesion() || {};
     const payload = {
         token,
-        usuarioId: sesion.uid || sesion.id || sesion.usuario || '',
-        usuarioNombre: sesion.nombre || sesion.email || sesion.usuario || 'Usuario',
-        rol: sesion.rol || '',
+        usuarioUid: firebaseUser.uid,
+        usuarioId: firebaseUser.uid,
+        usuarioEmail: firebaseUser.email || sesion.email || '',
+        usuarioNombre: perfilFirebase.nombre || sesion.nombre || firebaseUser.email || sesion.usuario || 'Usuario',
+        rol: perfilFirebase.rol,
         activo: true,
         userAgent: navigator.userAgent,
         actualizadoEn: Date.now()
