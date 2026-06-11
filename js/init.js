@@ -69,7 +69,7 @@ async function _bootstrapFirebaseSiLocalVacio() {
 
     console.warn("Almacen local vacio; descargando datos iniciales desde Firebase.");
     try {
-        await StorageService.syncAll();
+        await StorageService.syncAll({ forzarDescarga: true });
         _recargarRAMInicial();
         return true;
     } catch (err) {
