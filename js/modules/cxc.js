@@ -12,6 +12,10 @@ function _cxcEscHTML(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function _cxcNormalizarTexto(s) {
+    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function _cxcFechaClave(fecha) {
     if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
     if (!fecha) return '';
@@ -344,11 +348,10 @@ function renderCuentasXCobrar(filtroCliente = "") {
             <td>${estadoCta.pagaresPendientes.length} pendiente(s)${textoPromesa}</td>
             <td>${c.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</td>
             <td>
-                <div style="display:flex; gap:4px;">
-                    <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer;" title="Abonar">💰</button>
-                    <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 10px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer;" title="Promesa">📝</button>
-                    <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="padding:6px 10px; background:#3b82f6; color:white; border:none; border-radius:4px; cursor:pointer;" title="Estado">📋</button>
-                    <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 10px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer;" title="WhatsApp">💬</button>
+                <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                    <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
+                    <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
+                    <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
                 </div>
             </td>
         </tr>`;
@@ -463,7 +466,6 @@ function renderVisorCreditosCobranza() {
                         <th>Vencido</th>
                         <th>Pagares</th>
                         <th>Estado</th>
-                        <th style="text-align:right;">Consulta</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -479,11 +481,8 @@ function renderVisorCreditosCobranza() {
                                 <td style="font-weight:800;color:${estado.montoVencido > 0 ? '#c2410c' : '#64748b'};">${_cxcDinero(estado.montoVencido)}</td>
                                 <td>${estado.pagaresPendientes.length} pend. / ${estado.pagares.length} total</td>
                                 <td>${badge(estado.estadoGeneral)}</td>
-                                <td style="text-align:right;">
-                                    <button onclick="abrirEstadoCuentaFolio('${_cxcEscHTML(cuenta.folio)}')" style="padding:7px 11px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:800;">Estado</button>
-                                </td>
                             </tr>`;
-                    }).join('') || '<tr><td colspan="9" style="padding:24px;text-align:center;color:#94a3b8;">Sin créditos con estos filtros.</td></tr>'}
+                    }).join('') || '<tr><td colspan="8" style="padding:24px;text-align:center;color:#94a3b8;">Sin créditos con estos filtros.</td></tr>'}
                 </tbody>
             </table>
         </div>`;
@@ -2067,6 +2066,8 @@ function _cxcEstadoCuentaCss() {
     return `<style>
         .mmp-edo-wrap{font-family:Arial,Helvetica,sans-serif;color:#172033;background:#fff;max-width:860px;margin:0 auto;line-height:1.35;}
         .mmp-edo-head{background:#0f172a;color:white;padding:22px 26px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;}
+        .mmp-edo-brandbox{display:flex;align-items:center;gap:13px;}
+        .mmp-edo-logo{width:56px;height:56px;object-fit:contain;background:white;border-radius:8px;padding:5px;flex:0 0 auto;}
         .mmp-edo-brand{font-size:22px;font-weight:900;letter-spacing:.03em;text-transform:uppercase;}
         .mmp-edo-sub{font-size:12px;color:#cbd5e1;margin-top:4px;}
         .mmp-edo-folio{text-align:right;font-size:13px;color:#dbeafe;}
@@ -2140,7 +2141,10 @@ function _cxcEstadoCuentaHtml(m, opts = {}) {
     return `${_cxcEstadoCuentaCss()}
     <div class="mmp-edo-wrap">
         <header class="mmp-edo-head">
-            <div><div class="mmp-edo-brand">Muebleria Mi Pueblito</div><div class="mmp-edo-sub">Estado de cuenta de cliente</div></div>
+            <div class="mmp-edo-brandbox">
+                <img class="mmp-edo-logo" src="img/Logo.svg" alt="Mi Pueblito" onerror="this.style.display='none'">
+                <div><div class="mmp-edo-brand">Muebleria Mi Pueblito</div><div class="mmp-edo-sub">Estado de cuenta de cliente</div></div>
+            </div>
             <div class="mmp-edo-folio">Folio de venta<b>${_cxcEscHTML(m.folio)}</b><div>Emision: ${_cxcEstadoCuentaFecha(new Date())}</div></div>
         </header>
         <section class="mmp-edo-band">
@@ -2180,6 +2184,7 @@ function _cxcEstadoCuentaTicketBody(m) {
         ? m.abonos.map((a, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(a))}  ${_cxcDinero(a.monto || a.montoAbonado || 0)}`).join('\n')
         : 'Sin abonos registrados';
     return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.25;color:#000;">
+        <div style="text-align:center;"><img src="img/Logo.svg" alt="Mi Pueblito" style="width:48px;height:48px;object-fit:contain;" onerror="this.style.display='none'"></div>
         <div style="text-align:center;font-weight:bold;">MUEBLERIA MI PUEBLITO</div>
         <div style="text-align:center;">ESTADO DE CUENTA</div>
         <div>${linea}</div>
@@ -2210,12 +2215,14 @@ function abrirEstadoCuentaFolio(folio) {
     const modelo = _cxcEstadoCuentaModelo(folio);
     if (!modelo) return alert("No se encontro informacion de este folio.");
     const htmlDoc = _cxcEstadoCuentaHtml(modelo);
+    const safeFolioId = String(folio).replace(/[^a-zA-Z0-9_-]/g, '-');
     const modalHTML = `
         <div data-modal="estado-cuenta-folio" style="position:fixed; inset:0; background:rgba(15,23,42,0.86); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:18px;">
             <div style="width:100%; max-width:930px; margin:auto;">
                 <div class="mmp-edo-actions no-print">
                     <button class="mmp-edo-blue" onclick="emitirEstadoCuentaFolioTicket('${_cxcEscHTML(folio)}')">Imprimir ticket</button>
-                    <button class="mmp-edo-green" onclick="emitirEstadoCuentaFolioProfesional('${_cxcEscHTML(folio)}')">PDF / Imagen profesional</button>
+                    <button class="mmp-edo-blue" onclick="emitirEstadoCuentaFolioPdf('${_cxcEscHTML(folio)}')">PDF / A4</button>
+                    <button id="btn-img-estado-folio-${safeFolioId}" class="mmp-edo-green" onclick="descargarImagenEstadoCuentaFolio('${_cxcEscHTML(folio)}')">Guardar imagen</button>
                     <button class="mmp-edo-gray" onclick="document.querySelector('[data-modal=estado-cuenta-folio]')?.remove()">Cerrar</button>
                 </div>
                 <div id="estadoCuentaFolioDoc">${htmlDoc}</div>
@@ -2238,23 +2245,117 @@ function emitirEstadoCuentaFolioTicket(folio) {
     w.focus();
 }
 
-function emitirEstadoCuentaFolioProfesional(folio) {
+function _cxcClonarDocEstadoCuentaFolio(folio) {
+    const docEl = document.getElementById('estadoCuentaFolioDoc');
+    if (docEl?.querySelector('.mmp-edo-wrap')) {
+        const clone = docEl.cloneNode(true);
+        clone.removeAttribute('id');
+        clone.style.width = '860px';
+        clone.style.maxWidth = '860px';
+        clone.style.background = '#ffffff';
+        clone.style.boxSizing = 'border-box';
+        return clone;
+    }
+    const modelo = _cxcEstadoCuentaModelo(folio);
+    if (!modelo) return null;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _cxcEstadoCuentaHtml(modelo);
+    wrap.style.width = '860px';
+    wrap.style.maxWidth = '860px';
+    wrap.style.background = '#ffffff';
+    wrap.style.boxSizing = 'border-box';
+    return wrap;
+}
+
+function _cxcCargarHtml2CanvasEstadoFolio(cb) {
+    if (typeof html2canvas !== 'undefined') return cb();
+    const existente = document.getElementById('html2canvas-estado-folio-cxc');
+    if (existente) {
+        existente.addEventListener('load', cb, { once: true });
+        return;
+    }
+    const script = document.createElement('script');
+    script.id = 'html2canvas-estado-folio-cxc';
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = cb;
+    script.onerror = () => alert('No se pudo cargar el motor de imagen. Revisa tu conexion o usa PDF / A4.');
+    document.head.appendChild(script);
+}
+
+function emitirEstadoCuentaFolioPdf(folio) {
     const modelo = _cxcEstadoCuentaModelo(folio);
     if (!modelo) return alert("No se encontro informacion de este folio.");
     const htmlDoc = _cxcEstadoCuentaHtml(modelo);
+    const opts = {
+        title: `Estado de Cuenta ${folio}`,
+        filename: `estado_cuenta_${folio}`,
+        pageSize: 'letter',
+        autoPrint: true
+    };
     if (window.TicketService?.openDocument) {
-        return window.TicketService.openDocument(htmlDoc, { title: `Estado de Cuenta ${folio}`, filename: `estado_cuenta_${folio}`, pageSize: 'letter' });
+        return window.TicketService.openDocument(htmlDoc, opts);
     }
     const w = window.open('', '_blank');
-    if (!w) return alert('Habilita ventanas emergentes para abrir el documento.');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Estado de Cuenta ${_cxcEscHTML(folio)}</title></head><body>${htmlDoc}</body></html>`);
+    if (!w) return alert('Habilita ventanas emergentes para generar el PDF.');
+    w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Estado de Cuenta ${_cxcEscHTML(folio)}</title>
+        <style>@page{size:letter portrait;margin:12mm}body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#0f172a;background:#fff}</style>
+        </head><body>${htmlDoc}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},450);});<\/script></body></html>`);
     w.document.close();
     w.focus();
 }
 
+function descargarImagenEstadoCuentaFolio(folio) {
+    const clone = _cxcClonarDocEstadoCuentaFolio(folio);
+    if (!clone) return alert("No se encontro informacion de este folio.");
+    const safeFolio = String(folio).replace(/[^a-zA-Z0-9_-]/g, '-');
+    const btn = document.getElementById(`btn-img-estado-folio-${safeFolio}`);
+    const textoOriginal = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+    }
+
+    _cxcCargarHtml2CanvasEstadoFolio(() => {
+        const host = document.createElement('div');
+        host.style.position = 'fixed';
+        host.style.left = '-10000px';
+        host.style.top = '0';
+        host.style.background = '#ffffff';
+        host.style.padding = '0';
+        host.appendChild(clone);
+        document.body.appendChild(host);
+
+        html2canvas(clone, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false
+        }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = `estado_cuenta_${safeFolio}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }).catch(err => {
+            console.error('Error generando imagen estado de cuenta folio:', err);
+            alert('No se pudo generar la imagen. Intenta con PDF / A4.');
+        }).finally(() => {
+            host.remove();
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = textoOriginal || 'Guardar imagen';
+            }
+        });
+    });
+}
+
+function emitirEstadoCuentaFolioProfesional(folio) {
+    emitirEstadoCuentaFolioPdf(folio);
+}
+
 function guardarImagenEstadoCuenta() {
     const folio = document.querySelector('[data-modal="estado-cuenta-folio"]')?.querySelector('.mmp-edo-folio b')?.textContent?.trim();
-    if (folio) return emitirEstadoCuentaFolioProfesional(folio);
+    if (folio) return descargarImagenEstadoCuentaFolio(folio);
     alert('Abre primero un estado de cuenta.');
 }
 
@@ -2272,13 +2373,33 @@ function abrirEstadoCuentaCliente(clienteId) {
 }
 window.enviarRecordatorioWhatsApp = function(folio) {
     const est = window._calcularEstadoCuenta(folio);
-    const cli = StorageService.get("clientes", []).find(x => String(x.id) === String(est.cuenta.clienteId));
-    if (!cli || !cli.telefono) return alert("El cliente no tiene teléfono registrado.");
+    if (!est || !est.cuenta) return alert("No se encontro informacion de este folio.");
 
-    let msj = `Hola *${cli.nombre}*, de Mueblería Mi Pueblito 🛋️. Te recordamos tu saldo de *$${est.saldoTotal.toFixed(2)}* (Folio ${folio}).`;
-    if (est.montoVencido > 0) msj += `\nTienes un vencido de *$${est.montoVencido.toFixed(2)}*.`;
-    
-    window.open(`https://api.whatsapp.com/send?phone=52${cli.telefono.replace(/\D/g,'')}&text=${encodeURIComponent(msj)}`, '_blank');
+    const clientes = StorageService.get("clientes", []);
+    const cli = clientes.find(x => String(x.id) === String(est.cuenta.clienteId)) ||
+        clientes.find(x => _cxcNormalizarTexto(x.nombre) === _cxcNormalizarTexto(est.cuenta.nombre || est.cuenta.clienteNombre));
+    const nombre = cli?.nombre || est.cuenta.nombre || est.cuenta.clienteNombre || 'cliente';
+    const telefonoRaw = cli?.telefono || est.cuenta.telefono || '';
+    const telefono = String(telefonoRaw).replace(/\D/g, '');
+    if (!telefono) return alert("El cliente no tiene telefono registrado.");
+
+    const phoneParam = telefono.startsWith('52') ? telefono : `52${telefono}`;
+    const saldo = _cxcDinero(est.saldoTotal);
+    const vencido = _cxcDinero(est.montoVencido || 0);
+    const pagosVencidos = est.pagaresVencidos?.length || 0;
+    const atrasoTxt = est.diasMaxAtraso > 0 ? `, con atraso de hasta ${est.diasMaxAtraso} dia(s)` : '';
+
+    let msj = `Hola ${nombre}, le saludamos de Muebleria Mi Pueblito.\n\n`;
+    msj += `Le compartimos el estado de su cuenta del folio ${folio}: saldo pendiente ${saldo}.`;
+    if (est.montoVencido > 0) {
+        msj += `\nActualmente registra ${pagosVencidos} pago(s) vencido(s) por ${vencido}${atrasoTxt}.`;
+        msj += `\nLe agradecemos que pueda apoyarnos regularizando el pago o confirmandonos una fecha de abono.`;
+    } else {
+        msj += `\nAgradecemos nos apoye manteniendo sus pagos al corriente o confirmandonos su proxima fecha de abono.`;
+    }
+    msj += `\n\nGracias por su atencion.`;
+
+    window.open(`https://api.whatsapp.com/send?phone=${phoneParam}&text=${encodeURIComponent(msj)}`, '_blank');
 };
 
 window.abrirModalPromesaPago = function(folio) {
@@ -2964,7 +3085,8 @@ window.reimprimirTicketAbono = reimprimirTicketAbono;
 window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
 window.emitirEstadoCuentaFolioTicket = emitirEstadoCuentaFolioTicket;
 window.emitirEstadoCuentaFolioProfesional = emitirEstadoCuentaFolioProfesional;
+window.emitirEstadoCuentaFolioPdf = emitirEstadoCuentaFolioPdf;
+window.descargarImagenEstadoCuentaFolio = descargarImagenEstadoCuentaFolio;
 window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
 window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
 window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
-

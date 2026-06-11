@@ -66,10 +66,6 @@ function buscarVentaDevolucion() {
     </div>
     <div>
       <label style="font-size:12px;font-weight:bold;color:#374151;">NOTAS ADICIONALES</label>
-      ${window._buildSelectorCuentas ? window._buildSelectorCuentas('devCuentaReembolso', false) : '<select id="devCuentaReembolso" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;"><option value="efectivo">💵 Efectivo Principal</option></select>'}
-    </div>
-    <div>
-      <label style="font-size:12px;font-weight:bold;color:#374151;">NOTAS ADICIONALES</label>
           <textarea id="devNotas" rows="2" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;"></textarea>
         </div>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">

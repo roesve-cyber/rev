@@ -9,7 +9,81 @@ function _escCuenta(s) {
 }
 
 function _dinéroCuenta(v) {
+    return _dineroCuenta(v);
+}
+
+function _dineroCuenta(v) {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
+}
+
+function _normalizarCuentaTexto(valor) {
+    return String(valor || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
+function _clienteIdCuenta(cuenta = {}) {
+    return cuenta.clienteId ?? cuenta.cliente?.id ?? cuenta.idCliente ?? cuenta.cliente?.clienteId ?? '';
+}
+
+function _clienteNombreCuenta(cuenta = {}) {
+    return cuenta.clienteNombre || cuenta.nombre || cuenta.cliente?.nombre || cuenta.datosVenta?.cliente?.nombre || '';
+}
+
+function _clienteTelefonoCuenta(cuenta = {}) {
+    return cuenta.clienteTelefono || cuenta.telefono || cuenta.cliente?.telefono || cuenta.datosVenta?.cliente?.telefono || '-';
+}
+
+function _clienteDireccionCuenta(cuenta = {}) {
+    return cuenta.clienteDireccion || cuenta.direccion || cuenta.cliente?.direccion || cuenta.datosVenta?.cliente?.direccion || '-';
+}
+
+function _montoAbonoCuenta(abono = {}) {
+    return Number(abono.monto ?? abono.montoAbono ?? abono.montoAbonado ?? abono.importe ?? 0) || 0;
+}
+
+function _fechaAbonoCuenta(abono = {}) {
+    return abono.fechaAbonoIso || abono.fechaIso || abono.fechaAbonoRaw || abono.fechaAbono || abono.fecha || abono.fechaCapturaIso || abono.fechaCaptura || null;
+}
+
+function _abonosCuenta(cuenta = {}) {
+    return Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
+}
+
+function _saldoCuenta(cuenta = {}) {
+    const tieneSaldoDirecto = cuenta.saldoActual !== undefined || cuenta.saldoPendiente !== undefined || cuenta.saldo !== undefined;
+    const directo = Number(cuenta.saldoActual ?? cuenta.saldoPendiente ?? cuenta.saldo ?? 0);
+    if (tieneSaldoDirecto && Number.isFinite(directo)) return Math.max(0, directo);
+
+    const total = _totalCuenta(cuenta);
+    const enganche = Number(cuenta.engancheRecibido ?? cuenta.enganche ?? 0) || 0;
+    const abonado = _abonosCuenta(cuenta).reduce((s, a) => s + _montoAbonoCuenta(a), 0);
+    return Math.max(0, total - enganche - abonado);
+}
+
+function _totalCuenta(cuenta = {}) {
+    const candidatos = [
+        cuenta.plan?.total,
+        cuenta.totalCredito,
+        cuenta.montoTotal,
+        cuenta.saldoOriginal,
+        cuenta.totalContadoOriginal,
+        cuenta.totalMercancia,
+        cuenta.totalVenta,
+        cuenta.total,
+        cuenta.importeApartado
+    ];
+    const mayorCandidato = candidatos
+        .map(Number)
+        .filter(v => Number.isFinite(v) && v > 0)
+        .reduce((max, v) => Math.max(max, v), 0);
+
+    const saldo = Number(cuenta.saldoActual ?? cuenta.saldoPendiente ?? cuenta.saldo ?? 0) || 0;
+    const enganche = Number(cuenta.engancheRecibido ?? cuenta.enganche ?? 0) || 0;
+    const abonado = _abonosCuenta(cuenta).reduce((s, a) => s + _montoAbonoCuenta(a), 0);
+    return Math.max(mayorCandidato, saldo + enganche + abonado);
 }
 
 function _fechaCortaCuenta(fecha) {
@@ -44,7 +118,8 @@ function _analizarFrecuencia(abonos) {
     
     const fechas = abonos
         .map(a => {
-            const d = window.parseFechaMX ? window.parseFechaMX(a.fechaAbonoIso || a.fecha) : new Date(a.fechaAbonoIso || a.fecha);
+            const fecha = _fechaAbonoCuenta(a);
+            const d = window.parseFechaMX ? window.parseFechaMX(fecha) : new Date(fecha);
             return d instanceof Date && !isNaN(d.getTime()) ? d : null;
         })
         .filter(Boolean)
@@ -69,12 +144,15 @@ function _analizarFrecuencia(abonos) {
 // 🎯 FUNCIÓN PRINCIPAL: Obtener estado consolidado de cliente
 window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '') {
     const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
-    const ventasReg = StorageService.get('ventasRegistradas', []);
+    const idBuscado = String(clienteId || '').trim();
+    const nombreBuscado = _normalizarCuentaTexto(clienteNombre);
     
     // Filtrar cuentas del cliente
     const cuentasCliente = cuentasCxC.filter(c => {
-        return String(c.clienteId || c.cliente?.id || '') === String(clienteId) ||
-               String(c.clienteNombre || c.cliente?.nombre || '').toLowerCase() === String(clienteNombre || '').toLowerCase();
+        const idCuenta = String(_clienteIdCuenta(c) || '').trim();
+        const nombreCuenta = _normalizarCuentaTexto(_clienteNombreCuenta(c));
+        return (idBuscado && idCuenta && idCuenta === idBuscado) ||
+               (nombreBuscado && nombreCuenta && nombreCuenta === nombreBuscado);
     });
     
     if (cuentasCliente.length === 0) {
@@ -95,12 +173,14 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
     
     const detallesCuentas = cuentasCliente.map(cuenta => {
         const folio = cuenta.folio;
-        const saldo = Number(cuenta.saldoActual || 0);
-        const totalCredito = Number(cuenta.totalCredito || cuenta.montoTotal || 0);
-        const abonos = cuenta.abonos || [];
+        const saldo = _saldoCuenta(cuenta);
+        const totalCredito = _totalCuenta(cuenta);
+        const abonos = _abonosCuenta(cuenta);
+        const enganche = Number(cuenta.engancheRecibido ?? cuenta.enganche ?? 0) || 0;
         
         totalSaldoConsolidado += saldo;
         totalVendido += totalCredito;
+        totalAbonado += enganche;
         
         // Acumular abonos para análisis consolidado
         abonos.forEach(a => {
@@ -108,7 +188,7 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
                 ...a,
                 folioReferencia: folio
             });
-            totalAbonado += Number(a.monto || 0);
+            totalAbonado += _montoAbonoCuenta(a);
         });
         
         // Encontrar fecha más antigua
@@ -133,7 +213,7 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
             saldo,
             diasAntiguo,
             abonos: abonos.length,
-            ultimoAbono: abonos.length > 0 ? _fechaCortaCuenta(abonos[abonos.length - 1].fechaAbonoIso || abonos[abonos.length - 1].fecha) : '-',
+            ultimoAbono: abonos.length > 0 ? _fechaCortaCuenta(_fechaAbonoCuenta(abonos[abonos.length - 1])) : '-',
             estado: estadoEstatus.estado
         };
     });
@@ -145,9 +225,9 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
     return {
         existe: true,
         clienteId,
-        clienteNombre: cuentasCliente[0].clienteNombre || cuentasCliente[0].cliente?.nombre || clienteNombre,
-        clienteTelefono: cuentasCliente[0].clienteTelefono || cuentasCliente[0].cliente?.telefono || '-',
-        clienteDireccion: cuentasCliente[0].clienteDireccion || cuentasCliente[0].cliente?.direccion || '-',
+        clienteNombre: _clienteNombreCuenta(cuentasCliente[0]) || clienteNombre,
+        clienteTelefono: _clienteTelefonoCuenta(cuentasCliente[0]),
+        clienteDireccion: _clienteDireccionCuenta(cuentasCliente[0]),
         
         // CONSOLIDADOS
         totalVendido,
@@ -175,7 +255,8 @@ function _estimarProximaCobro(abonos) {
     
     const fechas = abonos
         .map(a => {
-            const d = window.parseFechaMX ? window.parseFechaMX(a.fechaAbonoIso || a.fecha) : new Date(a.fechaAbonoIso || a.fecha);
+            const fecha = _fechaAbonoCuenta(a);
+            const d = window.parseFechaMX ? window.parseFechaMX(fecha) : new Date(fecha);
             return d instanceof Date && !isNaN(d.getTime()) ? d : null;
         })
         .filter(Boolean)
@@ -210,12 +291,13 @@ window.renderEstadoCuentaClienteSelector = function() {
     const clientesMap = new Map();
     
     cuentasCxC.forEach(c => {
-        const id = c.clienteId || c.cliente?.id;
-        const nombre = c.clienteNombre || c.cliente?.nombre;
+        const id = _clienteIdCuenta(c);
+        const nombre = _clienteNombreCuenta(c);
+        const key = id ? `id:${String(id)}` : `nombre:${_normalizarCuentaTexto(nombre)}`;
         
-        if (id && !clientesMap.has(String(id))) {
-            clientesMap.set(String(id), { id, nombre });
-            clientesUnicos.push({ id, nombre });
+        if (nombre && !clientesMap.has(key)) {
+            clientesMap.set(key, { id, nombre, key });
+            clientesUnicos.push({ id, nombre, key });
         }
     });
     
@@ -233,18 +315,19 @@ window.renderEstadoCuentaClienteSelector = function() {
             <label style="display:block; font-weight:bold; margin-bottom:8px; color:#1e293b;">👥 Seleccionar:</label>
             <select id="selectClienteECC" style="width:100%; padding:12px; border:2px solid #cbd5e1; border-radius:8px; font-size:14px;">
                 <option value="">-- Elige un cliente --</option>
-                ${clientesUnicos.map(c => `<option value="${c.id}">${_escCuenta(c.nombre)}</option>`).join('')}
+                ${clientesUnicos.map(c => `<option value="${_escCuenta(c.key)}" data-id="${_escCuenta(c.id || '')}" data-nombre="${_escCuenta(c.nombre || '')}">${_escCuenta(c.nombre)}</option>`).join('')}
             </select>
         </div>
-        <div style="display:flex; align-items:flex-end; gap:10px;">
+        <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
             <button onclick="generarEstadoCuentaClienteConsolidado()" 
                     style="padding:12px 24px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">
                 📄 Generar Reporte
             </button>
-            <button onclick="imprimirEstadoCuentaClienteConsolidado()" 
-                    style="padding:12px 24px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px; display:none;" id="btnImprimirECC">
-                🖨️ Imprimir
-            </button>
+            <div id="btnGroupImpresionECC" style="display:none; gap:10px; flex-wrap:wrap;">
+                <button onclick="imprimirTicketEstadoCuentaCliente()" style="padding:12px 18px; background:#3b82f6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">🖨️ Ticket Térmico</button>
+                <button onclick="imprimirPdfEstadoCuentaCliente()" style="padding:12px 18px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📄 PDF / A4</button>
+                <button id="btnImgECC" onclick="descargarImagenEstadoCuentaCliente()" style="padding:12px 18px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📷 Guardar Imagen</button>
+            </div>
         </div>
     </div>
     
@@ -269,14 +352,16 @@ window.filtrarClientesECC = function() {
 
 window.generarEstadoCuentaClienteConsolidado = function() {
     const selectCliente = document.getElementById('selectClienteECC');
-    const clienteId = selectCliente?.value;
+    const selectedOption = selectCliente?.selectedOptions?.[0];
+    const clienteId = selectedOption?.dataset?.id || '';
+    const clienteNombre = selectedOption?.dataset?.nombre || '';
     
-    if (!clienteId) {
+    if (!selectCliente?.value) {
         alert('⚠️ Selecciona un cliente primero.');
         return;
     }
     
-    const estado = window.obtenerEstadoClienteConsolidado(clienteId);
+    const estado = window.obtenerEstadoClienteConsolidado(clienteId, clienteNombre);
     
     if (!estado.existe) {
         alert('❌ No se encontraron cuentas para este cliente.');
@@ -289,9 +374,9 @@ window.generarEstadoCuentaClienteConsolidado = function() {
     // Guardar estado global para impresión
     window._estadoClienteActual = estado;
     
-    // Mostrar botón de impresión
-    const btnImprimir = document.getElementById('btnImprimirECC');
-    if (btnImprimir) btnImprimir.style.display = 'inline-block';
+    // Mostrar botones de impresión
+    const btnGroup = document.getElementById('btnGroupImpresionECC');
+    if (btnGroup) btnGroup.style.display = 'flex';
     
     const colorEstado = estado.colorEstatus;
     
@@ -305,9 +390,12 @@ window.generarEstadoCuentaClienteConsolidado = function() {
         
         <!-- ENCABEZADO -->
         <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:30px; border-bottom:3px solid #1e40af; padding-bottom:20px;">
-            <div>
-                <h2 style="margin:0 0 5px 0; color:#1e293b; font-size:24px;">📊 ESTADO DE CUENTA CONSOLIDADO</h2>
-                <p style="margin:5px 0 0 0; color:#64748b; font-size:13px;">Fecha de Generación: ${_fechaCortaCuenta(new Date())}</p>
+            <div style="display:flex; align-items:center; gap:14px;">
+                <img src="img/Logo.svg" alt="Mi Pueblito" style="width:62px; height:62px; object-fit:contain;" onerror="this.style.display='none'">
+                <div>
+                    <h2 style="margin:0 0 5px 0; color:#1e293b; font-size:24px;">📊 ESTADO DE CUENTA CONSOLIDADO</h2>
+                    <p style="margin:5px 0 0 0; color:#64748b; font-size:13px;">Fecha de Generación: ${_fechaCortaCuenta(new Date())}</p>
+                </div>
             </div>
             <div style="text-align:right;">
                 <div style="background:${colorEstado}; color:white; padding:12px 20px; border-radius:8px; font-weight:bold; font-size:16px; margin-bottom:10px;">
@@ -420,60 +508,54 @@ window.generarEstadoCuentaClienteConsolidado = function() {
 };
 
 window.abrirDetalleVentaECC = function(folio) {
-    // Aquí puedes abrir la vista de detalle de venta si necesitas
-    alert(`📄 Detalle de folio: ${folio}\n\nPróximamente: Vista detallada de esta venta.`);
+    if (typeof window.abrirEstadoCuentaFolio === 'function') {
+        return window.abrirEstadoCuentaFolio(folio);
+    }
+    alert(`📄 Detalle de folio: ${folio}\n\nEl modulo de estado por folio no esta disponible.`);
 };
 
-window.imprimirEstadoCuentaClienteConsolidado = function() {
-    if (!window._estadoClienteActual) {
-        alert('⚠️ Genera un reporte primero.');
-        return;
-    }
-    
+window.imprimirPdfEstadoCuentaCliente = function() {
+    if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
     const estado = window._estadoClienteActual;
     const contenido = document.getElementById('contenidoReporteECC');
     if (!contenido) return;
     
-    const ventana = window.open('', '_blank');
-    if (!ventana) {
-        alert('⚠️ Habilita las ventanas emergentes para imprimir.');
-        return;
-    }
-    
-    const html = `
+    const htmlDoc = `
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Estado de Cuenta - ${estado.clienteNombre}</title>
         <style>
             * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family:Arial, sans-serif; color:#1e293b; background:white; }
-            .contenedor { max-width:800px; margin:0 auto; padding:20px; }
+            body { font-family:Arial, sans-serif; color:#1e293b; background:white; padding:20px; }
+            .contenedor { max-width:800px; margin:0 auto; }
             h1 { font-size:20px; text-align:center; margin-bottom:5px; border-bottom:3px solid #1e40af; padding-bottom:15px; }
             .fecha { text-align:center; color:#64748b; font-size:12px; margin-bottom:20px; }
             .cliente-info { background:#f1f5f9; padding:15px; border-radius:8px; margin-bottom:20px; }
             .cliente-info p { margin:5px 0; }
             .metricas { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; }
             .metrica { border:2px solid #cbd5e1; padding:10px; border-radius:6px; }
-            .metrica-label { font-size:10px; color:#64748b; font-weight:bold; }
+            .metrica-label { font-size:10px; color:#64748b; font-weight:bold; text-transform:uppercase; }
             .metrica-valor { font-size:16px; font-weight:bold; color:#1e293b; margin-top:5px; }
             table { width:100%; border-collapse:collapse; margin:20px 0; font-size:12px; }
-            th { background:#1e40af; color:white; padding:8px; text-align:left; font-weight:bold; }
-            td { padding:8px; border-bottom:1px solid #e2e8f0; }
+            th { background:#1e40af; color:white; padding:8px; text-align:left; font-weight:bold; border:1px solid #cbd5e1; }
+            td { padding:8px; border-bottom:1px solid #e2e8f0; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; }
             tr:nth-child(even) { background:#f8fafc; }
             @media print {
                 body { margin:0; padding:0; }
                 .contenedor { margin:0; padding:0; }
-                * { box-shadow:none !important; }
+                * { box-shadow:none !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             }
         </style>
     </head>
     <body>
         <div class="contenedor">
+            <div style="text-align:center; margin-bottom:10px;">
+                <img src="img/Logo.svg" alt="Mi Pueblito" style="width:62px; height:62px; object-fit:contain;" onerror="this.style.display='none'">
+            </div>
             <h1>📊 ESTADO DE CUENTA CONSOLIDADO</h1>
-            <div class="fecha">Fecha: ${_fechaCortaCuenta(new Date())}</div>
+            <div class="fecha">Fecha de Emisión: ${_fechaCortaCuenta(new Date())}</div>
             
             <div class="cliente-info">
                 <p><strong>Cliente:</strong> ${_escCuenta(estado.clienteNombre)}</p>
@@ -482,63 +564,159 @@ window.imprimirEstadoCuentaClienteConsolidado = function() {
             </div>
             
             <div class="metricas">
-                <div class="metrica">
-                    <div class="metrica-label">Total Vendido</div>
-                    <div class="metrica-valor">${_dinéroCuenta(estado.totalVendido)}</div>
-                </div>
-                <div class="metrica">
-                    <div class="metrica-label">Total Abonado</div>
-                    <div class="metrica-valor">${_dinéroCuenta(estado.totalAbonado)}</div>
-                </div>
-                <div class="metrica">
-                    <div class="metrica-label">Saldo Pendiente</div>
-                    <div class="metrica-valor">${_dinéroCuenta(estado.totalSaldo)}</div>
-                </div>
-                <div class="metrica">
-                    <div class="metrica-label">Estatus</div>
-                    <div class="metrica-valor">${estado.estadoEstatus}</div>
-                </div>
+                <div class="metrica"><div class="metrica-label">Total Vendido</div><div class="metrica-valor">${_dinéroCuenta(estado.totalVendido)}</div></div>
+                <div class="metrica"><div class="metrica-label">Total Abonado</div><div class="metrica-valor" style="color:#059669;">${_dinéroCuenta(estado.totalAbonado)}</div></div>
+                <div class="metrica"><div class="metrica-label">Saldo Pendiente</div><div class="metrica-valor" style="color:#dc2626;">${_dinéroCuenta(estado.totalSaldo)}</div></div>
+                <div class="metrica"><div class="metrica-label">Estatus Global</div><div class="metrica-valor">${estado.estadoEstatus}</div></div>
             </div>
             
             <table>
                 <thead>
                     <tr>
                         <th>Folio</th>
-                        <th>Fecha</th>
-                        <th>Total</th>
-                        <th>Saldo</th>
-                        <th>Días</th>
-                        <th>Estatus</th>
+                        <th style="text-align:center;">Fecha</th>
+                        <th style="text-align:right;">Total</th>
+                        <th style="text-align:right;">Saldo</th>
+                        <th style="text-align:center;">Días</th>
+                        <th style="text-align:center;">Estatus</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${estado.cuentas.map(c => `
                         <tr>
-                            <td>${_escCuenta(c.folio)}</td>
-                            <td>${c.fechaVentaCorta}</td>
-                            <td>${_dinéroCuenta(c.totalVenta)}</td>
-                            <td>${_dinéroCuenta(c.saldo)}</td>
-                            <td>${c.diasAntiguo}</td>
-                            <td>${c.estado}</td>
+                            <td><strong>${_escCuenta(c.folio)}</strong></td>
+                            <td style="text-align:center;">${c.fechaVentaCorta}</td>
+                            <td style="text-align:right;">${_dinéroCuenta(c.totalVenta)}</td>
+                            <td style="text-align:right; font-weight:bold; color:${c.saldo > 0 ? '#dc2626' : '#059669'};">${_dinéroCuenta(c.saldo)}</td>
+                            <td style="text-align:center;">${c.diasAntiguo}</td>
+                            <td style="text-align:center;">${c.estado}</td>
                         </tr>
                     `).join('')}
                 </tbody>
             </table>
             
             <p style="text-align:center; margin-top:40px; font-size:11px; color:#64748b;">
-                Mueblaría Mi Pueblito | Estado de Cuenta Generado Automáticamente
+                Mueblería Mi Pueblito | Documento Informativo de Saldo
             </p>
         </div>
-        <script>
-            window.print();
-            setTimeout(() => window.close(), 500);
-        </script>
     </body>
-    </html>
-    `;
+    </html>`;
+
+    if (window.TicketService?.openDocument) {
+        window.TicketService.openDocument(htmlDoc, { title: `Estado Cuenta ${estado.clienteNombre}`, filename: `estado_cuenta_consolidado_${estado.clienteNombre}`, pageSize: 'letter' });
+    } else {
+        const win = window.open('', '_blank');
+        win.document.write(htmlDoc);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 500);
+    }
+};
+
+window.imprimirTicketEstadoCuentaCliente = function() {
+    if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
+    const estado = window._estadoClienteActual;
     
-    ventana.document.write(html);
-    ventana.document.close();
+    const lineasCuentas = estado.cuentas.map(c => `
+        <div><b>FOLIO: ${c.folio}</b></div>
+        <div style="display:flex; justify-content:space-between;"><span>Total:</span><span>${_dinéroCuenta(c.totalVenta)}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span>Saldo:</span><span style="font-weight:bold;">${_dinéroCuenta(c.saldo)}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span>Estatus:</span><span>${c.estado}</span></div>
+        <hr style="border-top:1px dashed #ccc; margin:4px 0;">
+    `).join('');
+
+    const ticketHTML = `<!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @page { size: 80mm auto; margin: 0; }
+            body { font-family: 'Courier New', monospace; font-size: 11px; width: 72mm; margin: 4mm auto; color: #000; background: #fff; line-height:1.2; }
+            .centro { text-align: center; }
+            .negrita { font-weight: bold; }
+            hr { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+            .no-print { background: #eee; padding: 10px; text-align: center; margin-bottom: 10px; }
+            @media print { .no-print { display: none !important; } }
+        </style>
+    </head>
+    <body>
+        <div class="no-print"><button onclick="window.print()" style="padding:10px; font-weight:bold;">IMPRIMIR TICKET</button></div>
+        <div class="centro">
+            <img src="img/Logo.svg" alt="Mi Pueblito" style="width:50px; height:50px; object-fit:contain;" onerror="this.style.display='none'">
+            <div class="negrita" style="font-size:14px;">MUEBLERÍA MI PUEBLITO</div>
+            <div class="negrita" style="font-size:12px; margin-top:4px;">ESTADO DE CUENTA<br>CONSOLIDADO</div>
+            <div style="font-size:10px; margin-top:3px;">Emisión: ${_fechaCortaCuenta(new Date())}</div>
+        </div>
+        <hr>
+        <div><b>CLIENTE:</b> ${_escCuenta(estado.clienteNombre)}</div>
+        ${estado.clienteTelefono !== '-' ? `<div><b>TEL:</b> ${_escCuenta(estado.clienteTelefono)}</div>` : ''}
+        <hr>
+        <div class="centro negrita" style="margin-bottom:4px;">RESUMEN GLOBAL</div>
+        <div style="display:flex; justify-content:space-between;"><span>Total Vendido:</span><span>${_dinéroCuenta(estado.totalVendido)}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span>Total Abonado:</span><span>${_dinéroCuenta(estado.totalAbonado)}</span></div>
+        <div style="display:flex; justify-content:space-between;" class="negrita"><span>SALDO ACTUAL:</span><span>${_dinéroCuenta(estado.totalSaldo)}</span></div>
+        <div style="display:flex; justify-content:space-between; margin-top:4px;"><span>Estatus:</span><span>${estado.estadoEstatus}</span></div>
+        <hr>
+        <div class="centro negrita" style="margin-bottom:6px;">DETALLE POR FOLIO</div>
+        ${lineasCuentas}
+        <div class="centro" style="margin-top:12px; font-size:9px;">Documento informativo de saldos.</div>
+    </body>
+    </html>`;
+
+    if (window.TicketService?.openHtml) {
+        window.TicketService.openHtml(ticketHTML, { title: `Estado Cuenta ${estado.clienteNombre}`, filename: `ticket_ecc_${estado.clienteNombre}` });
+    } else {
+        const win = window.open('', '_blank');
+        win.document.write(ticketHTML);
+        win.document.close();
+        win.focus();
+    }
+};
+
+window.descargarImagenEstadoCuentaCliente = function() {
+    if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
+    const contenedor = document.getElementById('contenidoReporteECC');
+    if (!contenedor) return;
+
+    const btn = document.getElementById('btnImgECC');
+    const txtOriginal = btn.innerHTML;
+    btn.innerHTML = '⏳ Generando...';
+    btn.disabled = true;
+
+    // Cargar html2canvas dinámicamente si no existe
+    const loadScript = (cb) => {
+        if (typeof html2canvas !== 'undefined') return cb();
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        s.onload = cb;
+        s.onerror = () => { alert("Error al cargar motor de imágenes."); btn.innerHTML = txtOriginal; btn.disabled = false; };
+        document.head.appendChild(s);
+    };
+
+    loadScript(() => {
+        const clon = contenedor.cloneNode(true);
+        // Ajustamos el clon para la foto
+        clon.style.width = '850px';
+        clon.style.padding = '20px';
+        clon.style.background = 'white';
+        clon.style.position = 'absolute';
+        clon.style.left = '-9999px';
+        document.body.appendChild(clon);
+
+        html2canvas(clon, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = `Estado_Cuenta_${window._estadoClienteActual.clienteNombre.replace(/\s+/g, '_')}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }).catch(e => {
+            console.error("Error html2canvas:", e);
+            alert('Hubo un error al generar la imagen.');
+        }).finally(() => {
+            clon.remove();
+            btn.innerHTML = txtOriginal;
+            btn.disabled = false;
+        });
+    });
 };
 
 // 🎯 FUNCIÓN DE INICIALIZACIÓN PARA VISTA

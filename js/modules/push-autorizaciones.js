@@ -67,6 +67,8 @@ function renderPushAutorizacionesConfig() {
                 <button onclick="guardarConfigPushAutorizaciones()" style="padding:10px 16px; background:#475569; color:white; border:none; border-radius:7px; font-weight:bold; cursor:pointer;">Guardar llave</button>
                 <button onclick="activarPushAutorizaciones()" ${puedeActivar ? '' : 'disabled'} style="padding:10px 16px; background:${puedeActivar ? '#c2410c' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${puedeActivar ? 'pointer' : 'not-allowed'};">Activar en este celular</button>
                 <button onclick="probarPushAutorizaciones()" ${tokenLocal ? '' : 'disabled'} style="padding:10px 16px; background:${tokenLocal ? '#2563eb' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${tokenLocal ? 'pointer' : 'not-allowed'};">Probar aviso local</button>
+                <button onclick="probarPushAutorizacionesNube()" ${window._firebaseActivo ? '' : 'disabled'} style="padding:10px 16px; background:${window._firebaseActivo ? '#0f766e' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${window._firebaseActivo ? 'pointer' : 'not-allowed'};">Probar push real</button>
+                <button onclick="diagnosticarPushAutorizaciones()" style="padding:10px 16px; background:#334155; color:white; border:none; border-radius:7px; font-weight:bold; cursor:pointer;">Diagnosticar</button>
             </div>
             <div style="font-size:12px; color:#64748b; line-height:1.45;">
                 Usuario actual: <b>${sesion?.nombre || sesion?.email || sesion?.usuario || '-'}</b> (${sesion?.rol || '-'})
@@ -95,6 +97,7 @@ async function activarPushAutorizaciones() {
     if (permiso !== 'granted') return alert('El celular/navegador no concedio permiso para notificaciones.');
 
     const registration = await navigator.serviceWorker.register('/sw.js');
+    try { await registration.update(); } catch {}
     const token = await window._messaging.getToken({ vapidKey, serviceWorkerRegistration: registration });
     if (!token) return alert('Firebase no devolvio token. Revisa la llave VAPID y que la app este en HTTPS.');
 
@@ -152,6 +155,104 @@ async function probarPushAutorizaciones() {
     if (!mostrado) alert('No se pudo mostrar la prueba. Revisa permisos de notificacion.');
 }
 
+async function diagnosticarPushAutorizaciones() {
+    const config = _pushAuthConfig();
+    const sesion = _pushAuthSesion() || {};
+    const token = localStorage.getItem(PUSH_AUTH_TOKEN_KEY) || '';
+    const lineas = [];
+
+    lineas.push(`Firebase: ${window._firebaseActivo && window._db ? 'activo' : 'inactivo/no conectado'}`);
+    lineas.push(`Sesion: ${sesion?.rol || 'sin rol'} (${sesion?.email || sesion?.usuario || sesion?.nombre || '-'})`);
+    lineas.push(`Service Worker: ${'serviceWorker' in navigator ? 'soportado' : 'no soportado'}`);
+    lineas.push(`Notificaciones navegador: ${window.Notification ? Notification.permission : 'no soportadas'}`);
+    lineas.push(`Firebase Messaging: ${window._messaging ? 'disponible' : 'no disponible aun'}`);
+    lineas.push(`VAPID key: ${config.vapidKey ? 'guardada' : 'faltante'}`);
+    lineas.push(`Token local: ${token ? 'guardado' : 'faltante'}`);
+
+    try {
+        if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+            lineas.push(`SW /sw.js: ${reg ? 'registrado' : 'sin registro'}`);
+            if (reg) {
+                try { await reg.update(); } catch {}
+            }
+        }
+    } catch (err) {
+        lineas.push(`SW error: ${err.message}`);
+    }
+
+    if (window._firebaseActivo && window._db) {
+        try {
+            if (token) {
+                const tokenDoc = await window._db.collection('pushTokens').doc(_pushAuthTokenId(token)).get();
+                lineas.push(`Token en Firestore: ${tokenDoc.exists ? 'si' : 'no'}`);
+                if (tokenDoc.exists) {
+                    const d = tokenDoc.data() || {};
+                    lineas.push(`Token activo/rol: ${d.activo !== false ? 'activo' : 'inactivo'} / ${d.rol || '-'}`);
+                }
+            }
+            if (sesion.rol === 'admin') {
+                const snap = await window._db.collection('pushTokens').where('activo', '==', true).where('rol', '==', 'admin').get();
+                lineas.push(`Tokens admin activos: ${snap.size}`);
+            }
+            const outbox = await window._db.collection('pushOutbox').orderBy('createdAt', 'desc').limit(1).get();
+            if (!outbox.empty) {
+                const d = outbox.docs[0].data() || {};
+                lineas.push(`Ultimo pushOutbox: ${d.status || 'sin status'} (${outbox.docs[0].id})`);
+            } else {
+                lineas.push('Ultimo pushOutbox: ninguno');
+            }
+        } catch (err) {
+            lineas.push(`Firestore diagnostico: ${err.message}`);
+        }
+    }
+
+    alert(lineas.join('\n'));
+    console.log('Diagnostico push autorizaciones:', lineas);
+}
+
+async function probarPushAutorizacionesNube() {
+    if (!window._firebaseActivo || !window._db) return alert('La prueba real requiere Firebase activo en produccion.');
+    const sesion = _pushAuthSesion() || {};
+    if (!sesion.rol) return alert('No hay sesion activa para crear la prueba.');
+
+    let ref;
+    try {
+        ref = await window._db.collection('pushOutbox').add({
+            type: 'autorizacion_boveda',
+            title: 'Prueba real de notificacion',
+            body: `Prueba enviada desde ${sesion.nombre || sesion.email || sesion.usuario || 'el sistema'}.`,
+            url: _pushAuthUrlBoveda(),
+            targetRoles: ['admin'],
+            status: 'pending',
+            createdAt: Date.now(),
+            payload: { prueba: true, creadoPor: sesion.uid || sesion.id || sesion.usuario || '' }
+        });
+    } catch (err) {
+        return alert('No se pudo crear pushOutbox: ' + err.message);
+    }
+
+    const inicio = Date.now();
+    let ultimo = null;
+    while (Date.now() - inicio < 12000) {
+        await new Promise(r => setTimeout(r, 1500));
+        const snap = await ref.get();
+        ultimo = snap.data() || {};
+        if (ultimo.status && ultimo.status !== 'pending') break;
+    }
+
+    if (!ultimo || !ultimo.status || ultimo.status === 'pending') {
+        return alert(`Se creo la prueba (${ref.id}), pero sigue pendiente.\n\nEso normalmente significa que la Cloud Function enviarPushBoveda no esta desplegada o no esta ejecutandose.`);
+    }
+    if (ultimo.status === 'no_admin_tokens') {
+        return alert(`La Function si corrio, pero no encontro celulares admin registrados.\n\nActiva las notificaciones desde el celular/admin que debe recibirlas.`);
+    }
+    if (ultimo.status === 'sent') {
+        return alert(`Push procesado.\nEnviados: ${ultimo.successCount || 0}\nFallidos: ${ultimo.failureCount || 0}\n\nSi enviados es 0 o no aparecio en el celular, revisa permisos del navegador o token.`);
+    }
+    alert(`Resultado de pushOutbox: ${ultimo.status}`);
+}
+
 async function notificarBovedaAutorizacion(payload = {}) {
     const tipo = payload.tipo || 'autorizacion';
     const titulo = payload.titulo || 'Pendiente en Boveda de autorizaciones';
@@ -200,4 +301,6 @@ window.renderPushAutorizacionesConfig = renderPushAutorizacionesConfig;
 window.guardarConfigPushAutorizaciones = guardarConfigPushAutorizaciones;
 window.activarPushAutorizaciones = activarPushAutorizaciones;
 window.probarPushAutorizaciones = probarPushAutorizaciones;
+window.diagnosticarPushAutorizaciones = diagnosticarPushAutorizaciones;
+window.probarPushAutorizacionesNube = probarPushAutorizacionesNube;
 window.notificarBovedaAutorizacion = notificarBovedaAutorizacion;

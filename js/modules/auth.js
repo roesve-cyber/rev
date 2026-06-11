@@ -317,7 +317,7 @@ function aplicarRolUI() {
     if (spanNombre) spanNombre.textContent = sesion.nombre || sesion.email || sesion.usuario || '-';
 
     if (sesion.rol === 'vendedor') {
-        // Ocultar todas las secciones del sidebar excepto VENTAS
+        // Ocultar todas las secciones del sidebar excepto OPERACION
         document.querySelectorAll('#sidebar .menu-item').forEach(item => {
             if (!item.querySelector('#sub-ventas')) item.style.display = 'none';
         });
@@ -524,6 +524,24 @@ async function recuperarContrasena() {
 }
 
 // ── cerrar sesión ─────────────────────────────────────────────────────────────
+async function cambiarContrasenaUsuarioActual() {
+    const sesion = getSesion();
+    const email = window._auth?.currentUser?.email || sesion?.email || '';
+    if (!window._firebaseActivo || !window._auth) {
+        return alert('Cambiar contrasena requiere Firebase Auth activo. En modo local/PIN no esta disponible.');
+    }
+    if (!email) {
+        return alert('Este usuario no tiene email de Firebase asociado. No se puede enviar cambio de contrasena.');
+    }
+    if (!confirm(`Se enviara un correo para cambiar la contrasena a:\n${email}\n\nDeseas continuar?`)) return;
+    try {
+        await window._auth.sendPasswordResetEmail(email);
+        alert(`Se envio un correo para cambiar la contrasena a ${email}.`);
+    } catch (err) {
+        alert('No se pudo enviar el correo: ' + err.message);
+    }
+}
+
 async function cerrarSesion() {
     if (!confirm('¿Cerrar sesión?')) return;
     if (window._firebaseActivo && window._auth) {
@@ -534,7 +552,7 @@ async function cerrarSesion() {
 }
 
 // ── menú de usuario en header ─────────────────────────────────────────────────
-function abrirMenuUsuario() {
+function abrirMenuUsuarioLegacy() {
     const existing = document.querySelector('[data-modal="menu-usuario"]');
     if (existing) { existing.remove(); return; }
     const sesion = getSesion();
@@ -545,6 +563,10 @@ function abrirMenuUsuario() {
         <div style="font-weight:bold;color:#1e40af;">${_esc(displayName)}</div>
         <div style="font-size:12px;color:#6b7280;text-transform:capitalize;">${_esc(sesion?.rol || '-')}</div>
       </div>
+      <button onclick="document.querySelector('[data-modal=menu-usuario]')?.remove(); cambiarContrasenaUsuarioActual();"
+        style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#1e40af;display:flex;align-items:center;gap:8px;">
+        Cambiar contrasena
+      </button>
       <button onclick="document.querySelector('[data-modal=menu-usuario]')?.remove(); cerrarSesion();"
         style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#dc2626;display:flex;align-items:center;gap:8px;">
         🚪 Cerrar sesión
@@ -563,6 +585,45 @@ function abrirMenuUsuario() {
 }
 
 // ── gestión de usuarios ───────────────────────────────────────────────────────
+function abrirMenuUsuario() {
+    const existing = document.querySelector('[data-modal="menu-usuario"]');
+    if (existing) { existing.remove(); return; }
+    const sesion = getSesion();
+    const displayName = sesion?.nombre || sesion?.email || sesion?.usuario || '-';
+    const html = `
+    <div data-modal="menu-usuario">
+      <div class="menu-usuario-card">
+        <div class="menu-usuario-header">
+          <div class="menu-usuario-avatar">👤</div>
+          <div style="min-width:0;flex:1;">
+            <div class="menu-usuario-nombre">${_esc(displayName)}</div>
+            <div class="menu-usuario-rol">${_esc(sesion?.rol || '-')}</div>
+          </div>
+        </div>
+        <div class="menu-usuario-actions">
+          <button class="menu-usuario-btn" onclick="document.querySelector('[data-modal=menu-usuario]')?.remove(); cambiarContrasenaUsuarioActual();">
+            🔑 Cambiar contrasena
+          </button>
+          <button class="menu-usuario-btn menu-usuario-btn--danger" onclick="document.querySelector('[data-modal=menu-usuario]')?.remove(); cerrarSesion();">
+            🚪 Cerrar sesion
+          </button>
+          <button class="menu-usuario-btn menu-usuario-btn--muted" onclick="document.querySelector('[data-modal=menu-usuario]')?.remove();">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    setTimeout(() => {
+        document.addEventListener('click', function _close(e) {
+            if (!e.target.closest('[data-modal="menu-usuario"]') && !e.target.closest('#infoUsuarioActivo')) {
+                document.querySelector('[data-modal="menu-usuario"]')?.remove();
+                document.removeEventListener('click', _close);
+            }
+        });
+    }, 10);
+}
+
 function _opcionesVendedoresUsuario(vendedorId = '') {
     const vendedores = StorageService.get('vendedores', []).filter(v => v.activo !== false);
     return `<option value="">Sin vendedor vinculado</option>` + vendedores
@@ -836,6 +897,7 @@ window._verificarCredencialesAdmin = _verificarCredencialesAdmin;
 window.verificarSesionInicial = verificarSesionInicial;
 window.iniciarSesion = iniciarSesion;
 window.recuperarContrasena = recuperarContrasena;
+window.cambiarContrasenaUsuarioActual = cambiarContrasenaUsuarioActual;
 window.cerrarSesion = cerrarSesion;
 window.aplicarRolUI = aplicarRolUI;
 window.abrirMenuUsuario = abrirMenuUsuario;
