@@ -151,7 +151,37 @@ const StorageService = {
         const keys = Object.keys(value).filter(key => !key.startsWith('_'));
         if (!keys.length) return [];
 
-        return keys.map(key => this._restaurarDesdeFirestore(value[key]));
+        const values = keys.map(key => value[key]);
+        if (!values.some(item => item && typeof item === 'object')) return null;
+
+        return values.map(item => this._restaurarDesdeFirestore(item));
+    },
+
+    _forzarListaFirestore(value, profundidad = 0) {
+        if (value === null || value === undefined || profundidad > 6) return null;
+
+        if (Array.isArray(value)) {
+            return value.map(item => this._restaurarDesdeFirestore(item));
+        }
+
+        if (!value || typeof value !== 'object') return null;
+
+        if (Array.isArray(value.__mmpArray)) {
+            return value.__mmpArray.map(item => this._restaurarDesdeFirestore(item));
+        }
+
+        const camposContenedor = ['data', 'datos', 'items', 'registros', 'records', 'rows', 'lista', 'value'];
+        for (const campo of camposContenedor) {
+            if (Object.prototype.hasOwnProperty.call(value, campo)) {
+                const lista = this._forzarListaFirestore(value[campo], profundidad + 1);
+                if (lista) return lista;
+            }
+        }
+
+        const listaNumerica = this._objetoConIndicesNumericos(value);
+        if (listaNumerica) return listaNumerica;
+
+        return this._objetoMapaALista(value);
     },
 
     _extraerListaFirestore(value, profundidad = 0) {
@@ -182,17 +212,20 @@ const StorageService = {
     },
 
     _normalizarTablaDesdeFirestore(tabla, payload) {
-        const lista = this._extraerListaFirestore(payload);
-        if (lista) return lista;
-
         const datosNube = payload && Object.prototype.hasOwnProperty.call(payload, 'data')
             ? payload.data
             : payload;
 
         if (this._tablasTipoLista.has(tabla)) {
-            const listaDesdeMapa = this._objetoMapaALista(datosNube);
-            if (listaDesdeMapa) return listaDesdeMapa;
+            const listaForzada = this._forzarListaFirestore(payload);
+            if (listaForzada) return listaForzada;
+
+            const listaDesdeDatos = this._forzarListaFirestore(datosNube);
+            if (listaDesdeDatos) return listaDesdeDatos;
         }
+
+        const lista = this._extraerListaFirestore(payload);
+        if (lista) return lista;
 
         return this._restaurarDesdeFirestore(datosNube);
     },
