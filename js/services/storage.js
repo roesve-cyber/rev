@@ -149,7 +149,7 @@ const StorageService = {
         if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
         const keys = Object.keys(value).filter(key => !key.startsWith('_'));
-        if (!keys.length) return [];
+        if (!keys.length) return null;
 
         const values = keys.map(key => value[key]);
         if (!values.some(item => item && typeof item === 'object')) return null;
@@ -170,18 +170,25 @@ const StorageService = {
             return value.__mmpArray.map(item => this._restaurarDesdeFirestore(item));
         }
 
-        const camposContenedor = ['data', 'datos', 'items', 'registros', 'records', 'rows', 'lista', 'value'];
+        let listaVacia = null;
+        const camposContenedor = ['data', 'datos', 'items', 'registros', 'records', 'rows', 'lista', 'value', 'valores', 'values'];
         for (const campo of camposContenedor) {
             if (Object.prototype.hasOwnProperty.call(value, campo)) {
                 const lista = this._forzarListaFirestore(value[campo], profundidad + 1);
-                if (lista) return lista;
+                if (Array.isArray(lista) && lista.length > 0) return lista;
+                if (Array.isArray(lista) && !listaVacia) listaVacia = lista;
             }
         }
 
         const listaNumerica = this._objetoConIndicesNumericos(value);
-        if (listaNumerica) return listaNumerica;
+        if (Array.isArray(listaNumerica) && listaNumerica.length > 0) return listaNumerica;
+        if (Array.isArray(listaNumerica) && !listaVacia) listaVacia = listaNumerica;
 
-        return this._objetoMapaALista(value);
+        const listaMapa = this._objetoMapaALista(value);
+        if (Array.isArray(listaMapa) && listaMapa.length > 0) return listaMapa;
+        if (Array.isArray(listaMapa) && !listaVacia) listaVacia = listaMapa;
+
+        return listaVacia;
     },
 
     _extraerListaFirestore(value, profundidad = 0) {
@@ -200,15 +207,17 @@ const StorageService = {
         const listaPorIndice = this._objetoConIndicesNumericos(value);
         if (listaPorIndice) return listaPorIndice;
 
-        const camposContenedor = ['data', 'datos', 'items', 'registros', 'records', 'rows', 'lista', 'value'];
+        let listaVacia = null;
+        const camposContenedor = ['data', 'datos', 'items', 'registros', 'records', 'rows', 'lista', 'value', 'valores', 'values'];
         for (const campo of camposContenedor) {
             if (Object.prototype.hasOwnProperty.call(value, campo)) {
                 const lista = this._extraerListaFirestore(value[campo], profundidad + 1);
-                if (lista) return lista;
+                if (Array.isArray(lista) && lista.length > 0) return lista;
+                if (Array.isArray(lista) && !listaVacia) listaVacia = lista;
             }
         }
 
-        return null;
+        return listaVacia;
     },
 
     _normalizarTablaDesdeFirestore(tabla, payload) {
@@ -218,14 +227,16 @@ const StorageService = {
 
         if (this._tablasTipoLista.has(tabla)) {
             const listaForzada = this._forzarListaFirestore(payload);
-            if (listaForzada) return listaForzada;
+            if (Array.isArray(listaForzada) && listaForzada.length > 0) return listaForzada;
 
             const listaDesdeDatos = this._forzarListaFirestore(datosNube);
-            if (listaDesdeDatos) return listaDesdeDatos;
+            if (Array.isArray(listaDesdeDatos) && listaDesdeDatos.length > 0) return listaDesdeDatos;
+            if (Array.isArray(listaForzada)) return listaForzada;
+            if (Array.isArray(listaDesdeDatos)) return listaDesdeDatos;
         }
 
         const lista = this._extraerListaFirestore(payload);
-        if (lista) return lista;
+        if (Array.isArray(lista)) return lista;
 
         return this._restaurarDesdeFirestore(datosNube);
     },
@@ -292,6 +303,17 @@ const StorageService = {
             : (datos && typeof datos === 'object' ? `${Object.keys(datos).length} campos` : typeof datos);
 
         console.log(`Firebase -> ${tabla}: ${resumen}`);
+    },
+
+    _logPayloadVacio(tabla, payload) {
+        if (!this._tablasTipoLista.has(tabla)) return;
+        const camposDoc = payload && typeof payload === 'object' ? Object.keys(payload).slice(0, 12) : [];
+        const data = payload && typeof payload === 'object' ? payload.data : null;
+        const camposData = data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : [];
+        const tiposData = data && typeof data === 'object'
+            ? Object.entries(data).slice(0, 6).map(([key, value]) => `${key}:${Array.isArray(value) ? 'array' : typeof value}`)
+            : [];
+        console.warn(`Firebase -> ${tabla} llego sin registros. camposDoc=${camposDoc.join('|')} camposData=${camposData.join('|')} tiposData=${tiposData.join('|')}`);
     },
 
     // Obtiene dinámicamente todas las tablas reales guardadas
@@ -658,6 +680,9 @@ const StorageService = {
                     this._normalizarTablaDesdeFirestore(tabla, payload)
                 );
                 this._logTablaFirebase(tabla, datosRestaurados);
+                if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
+                    this._logPayloadVacio(tabla, payload);
+                }
 
                 if (!this._esTablaValida(tabla, datosRestaurados)) {
                     if (!this._clavesIgnoradas.has(tabla)) {
