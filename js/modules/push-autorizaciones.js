@@ -35,6 +35,17 @@ function _pushAuthUsuarioFirebaseActual() {
     return window._auth?.currentUser || null;
 }
 
+function _pushAuthRolCanonico(rol) {
+    const normalizado = String(rol || '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    if (normalizado === 'admin' || normalizado === 'administrador') return 'admin';
+    if (normalizado === 'vendedor') return 'vendedor';
+    return normalizado || '';
+}
+
 function renderPushAutorizacionesConfig() {
     const cont = document.getElementById('configPushAutorizaciones');
     if (!cont) return;
@@ -104,6 +115,7 @@ async function activarPushAutorizaciones() {
     }
     if (perfilFirebase.activo === false) return alert('Tu usuario Firebase esta desactivado.');
     if (!perfilFirebase.rol) return alert('Tu usuario Firebase no tiene rol configurado en /usuarios.');
+    const rolCanonico = _pushAuthRolCanonico(perfilFirebase.rol);
     if (!window._messaging && window.firebase && firebase.messaging) {
         window._messaging = firebase.messaging();
     }
@@ -123,7 +135,8 @@ async function activarPushAutorizaciones() {
         usuarioId: firebaseUser.uid,
         usuarioEmail: firebaseUser.email || sesion.email || '',
         usuarioNombre: perfilFirebase.nombre || sesion.nombre || firebaseUser.email || sesion.usuario || 'Usuario',
-        rol: perfilFirebase.rol,
+        rol: rolCanonico,
+        rolPerfil: perfilFirebase.rol,
         activo: true,
         userAgent: navigator.userAgent,
         actualizadoEn: Date.now()
