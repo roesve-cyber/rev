@@ -157,12 +157,15 @@ function _hayDatosOperativosAuth() {
     });
 }
 
+let _syncFirebasePostLoginPromise = null;
+
 async function _sincronizarFirebaseDespuesDeLogin() {
     if (!window._firebaseActivo || !window._db || !window._auth?.currentUser || !window.StorageService?.syncAll) {
         return false;
     }
+    if (_syncFirebasePostLoginPromise) return _syncFirebasePostLoginPromise;
 
-    try {
+    _syncFirebasePostLoginPromise = (async () => {
         if (!_hayDatosOperativosAuth()) {
             console.warn('Almacen local vacio; descargando datos iniciales desde Firebase despues de login.');
             await StorageService.syncAll({ forzarDescarga: true });
@@ -174,9 +177,15 @@ async function _sincronizarFirebaseDespuesDeLogin() {
 
         _recargarVariablesGlobales();
         return true;
+    })();
+
+    try {
+        return await _syncFirebasePostLoginPromise;
     } catch (err) {
         console.warn('No se pudo sincronizar Firebase despues de login:', err);
         return false;
+    } finally {
+        _syncFirebasePostLoginPromise = null;
     }
 }
 
