@@ -352,6 +352,9 @@ function mmpGuardarDocumentoImagen(){
         if (!/mmp-document-toolbar/.test(out)) {
             out = out.replace(/<body[^>]*>/i, match => `${match}\n${documentToolbar(options)}`);
         }
+        if (options.autoPrint && !/mmp-auto-print/.test(out)) {
+            out = out.replace(/<\/body>/i, `<script id="mmp-auto-print">window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},450);});<\/script></body>`);
+        }
         return out;
     }
 

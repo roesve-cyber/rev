@@ -219,3 +219,126 @@ console.log("  - verificarDatos(): Verificar estado actual de los datos");
 console.log("  - diagnosticarAlmacenamiento(): Ver todas las claves en storage");
 console.log("  - recuperarDatosEmergencia(): Intentar recuperar datos perdidos");
 console.log("  - recargarVariablesGlobales(): Forzar recarga de variables desde storage");
+
+window.repararIdsClientesAntiguos = async function(opciones = {}) {
+    const dryRun = opciones.dryRun === true;
+    const normalizar = valor => String(valor || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const hashTexto = texto => {
+        let hash = 2166136261;
+        for (let i = 0; i < texto.length; i++) {
+            hash ^= texto.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(36).toUpperCase();
+    };
+    const getNombre = item => item?.clienteNombre || item?.nombre || item?.cliente?.nombre || item?.datosVenta?.cliente?.nombre || item?.venta?.cliente?.nombre || '';
+    const getId = item => item?.clienteId || item?.cliente?.id || item?.datosVenta?.cliente?.id || item?.venta?.cliente?.id || '';
+    const setClienteId = (item, id) => {
+        if (!item || typeof item !== 'object') return false;
+        let cambio = false;
+        if (!item.clienteId) { item.clienteId = id; cambio = true; }
+        if (item.cliente && typeof item.cliente === 'object' && !item.cliente.id) { item.cliente.id = id; cambio = true; }
+        if (item.datosVenta?.cliente && typeof item.datosVenta.cliente === 'object' && !item.datosVenta.cliente.id) { item.datosVenta.cliente.id = id; cambio = true; }
+        if (item.venta?.cliente && typeof item.venta.cliente === 'object' && !item.venta.cliente.id) { item.venta.cliente.id = id; cambio = true; }
+        return cambio;
+    };
+    const guardarLocal = async (key, value) => {
+        if (StorageService._guardarLocalDirecto) return StorageService._guardarLocalDirecto(key, value);
+        StorageService._cache[key] = value;
+        window[key] = value;
+        if (StorageService._usandoLocalForage && typeof localforage !== 'undefined') return localforage.setItem(key, value);
+        localStorage.setItem(key, JSON.stringify(value));
+    };
+
+    if (StorageService.init && !StorageService._isReady) await StorageService.init();
+
+    const clientes = StorageService.get('clientes', []);
+    if (!Array.isArray(clientes) || clientes.length === 0) {
+        console.warn('No hay clientes para reparar.');
+        return { ok: false, motivo: 'sin_clientes' };
+    }
+
+    const respaldo = { clientes: JSON.parse(JSON.stringify(clientes)) };
+    const idsUsados = new Set(clientes.map(c => String(c.id || '')).filter(Boolean));
+    const clientesPorNombre = new Map();
+    let clientesActualizados = 0;
+
+    clientes.forEach((cliente, index) => {
+        const nombreKey = normalizar(cliente.nombre || cliente.clienteNombre || cliente.razonSocial);
+        const telefonoKey = normalizar(cliente.telefono || cliente.celular || '');
+        if (!cliente.id) {
+            let nuevoId = `CLI-${hashTexto(`${nombreKey}|${telefonoKey}|${index}`)}`;
+            let contador = 1;
+            while (idsUsados.has(nuevoId)) {
+                contador++;
+                nuevoId = `CLI-${hashTexto(`${nombreKey}|${telefonoKey}|${index}|${contador}`)}`;
+            }
+            cliente.id = nuevoId;
+            idsUsados.add(nuevoId);
+            clientesActualizados++;
+        }
+        if (nombreKey && !clientesPorNombre.has(nombreKey)) clientesPorNombre.set(nombreKey, cliente.id);
+    });
+
+    const tablasRelacionadas = [
+        'cuentasPorCobrar',
+        'pagaresSistema',
+        'pagares',
+        'apartados',
+        'salidasPendientesVenta',
+        'documentosEntrega',
+        'cotizaciones',
+        'ventasRegistradas',
+        'ventasPendientes',
+        'abonosPendientes',
+        'registroTickets',
+        'historialDevoluciones',
+        'garantiasProductos',
+        'documentosCancelacion',
+        'solicitudesClientesPendientes',
+        'historialSolicitudesClientes'
+    ];
+    const cambiosPorTabla = {};
+
+    tablasRelacionadas.forEach(tabla => {
+        const lista = StorageService.get(tabla, []);
+        if (!Array.isArray(lista)) return;
+        respaldo[tabla] = JSON.parse(JSON.stringify(lista));
+        let cambios = 0;
+
+        lista.forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            if (getId(item)) return;
+            const idCliente = clientesPorNombre.get(normalizar(getNombre(item)));
+            if (idCliente && setClienteId(item, idCliente)) cambios++;
+        });
+
+        if (cambios > 0) cambiosPorTabla[tabla] = cambios;
+    });
+
+    const totalRelacionados = Object.values(cambiosPorTabla).reduce((s, n) => s + n, 0);
+    const resultado = { ok: true, dryRun, clientesActualizados, documentosRelacionadosActualizados: totalRelacionados, cambiosPorTabla };
+
+    if (dryRun) {
+        console.table(cambiosPorTabla);
+        console.log('Simulacion repararIdsClientesAntiguos:', resultado);
+        return resultado;
+    }
+
+    const backupKey = `_backup_reparar_ids_clientes_${Date.now()}`;
+    await guardarLocal(backupKey, respaldo);
+    await guardarLocal('clientes', clientes);
+    for (const tabla of Object.keys(cambiosPorTabla)) await guardarLocal(tabla, StorageService.get(tabla, []));
+
+    if (typeof recargarVariablesGlobales === 'function') await recargarVariablesGlobales();
+    if (typeof renderClientes === 'function') renderClientes();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+
+    console.log(`Respaldo local previo guardado en ${backupKey}`);
+    console.table(cambiosPorTabla);
+    console.log('Reparacion de IDs completada:', resultado);
+    alert(`IDs de clientes reparados.\n\nClientes actualizados: ${clientesActualizados}\nDocumentos relacionados: ${totalRelacionados}\n\nRespaldo local: ${backupKey}`);
+    return { ...resultado, backupKey };
+};
+
+console.log("  - repararIdsClientesAntiguos(): Asignar IDs a clientes viejos y relacionarlos localmente");
