@@ -48,6 +48,36 @@ function _recargarRAMInicial() {
     window.cuentasEfectivo = StorageService.get("cuentasEfectivo", window.cuentasEfectivo || []) || [];
 }
 
+function _hayDatosLocalesOperativos() {
+    const tablas = [
+        "productos",
+        "clientes",
+        "cuentasPorCobrar",
+        "ventasRegistradas",
+        "pagaresSistema",
+        "movimientosCaja"
+    ];
+    return tablas.some(tabla => {
+        const datos = StorageService.get(tabla, []);
+        return Array.isArray(datos) && datos.length > 0;
+    });
+}
+
+async function _bootstrapFirebaseSiLocalVacio() {
+    if (!window._firebaseActivo || !window._db || !window.StorageService?.syncAll) return false;
+    if (_hayDatosLocalesOperativos()) return false;
+
+    console.warn("Almacen local vacio; descargando datos iniciales desde Firebase.");
+    try {
+        await StorageService.syncAll();
+        _recargarRAMInicial();
+        return true;
+    } catch (err) {
+        console.warn("No se pudo descargar datos iniciales desde Firebase:", err);
+        return false;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.pathname.includes("catalogo.html")) {
         console.log("Modo catalogo publico");
@@ -59,6 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             await StorageService.init();
         }
 
+        await _bootstrapFirebaseSiLocalVacio();
         _recargarRAMInicial();
 
         if (typeof migrarStorageCuentasPorCobrar === 'function') migrarStorageCuentasPorCobrar();
@@ -76,7 +107,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             window._actualizarEstadoFirebaseUI();
         }
 
-        console.log("Sistema local inicializado. Firebase no se sincroniza automaticamente.");
+        console.log("Sistema inicializado. Firebase solo descarga automaticamente si el dispositivo esta vacio.");
     } catch (e) {
         console.error("Error critico en carga inicial:", e);
     }
