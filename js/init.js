@@ -63,13 +63,66 @@ function _hayDatosLocalesOperativos() {
     });
 }
 
+function _listaDesdeObjetoFirebase(valor, profundidad = 0) {
+    if (valor === null || valor === undefined || profundidad > 6) return null;
+    if (Array.isArray(valor)) return valor;
+    if (!valor || typeof valor !== "object") return null;
+
+    if (Array.isArray(valor.__mmpArray)) return valor.__mmpArray;
+
+    const campos = ["data", "datos", "items", "registros", "records", "rows", "lista", "value"];
+    for (const campo of campos) {
+        if (Object.prototype.hasOwnProperty.call(valor, campo)) {
+            const lista = _listaDesdeObjetoFirebase(valor[campo], profundidad + 1);
+            if (lista) return lista;
+        }
+    }
+
+    const entradas = Object.entries(valor).filter(([key]) => !key.startsWith("_"));
+    if (!entradas.length) return [];
+
+    const valores = entradas.map(([, item]) => item);
+    if (!valores.some(item => item && typeof item === "object")) return null;
+
+    return valores;
+}
+
+async function _forzarListasLocalesOperativas() {
+    if (typeof StorageService.normalizarListasLocales === "function") {
+        await StorageService.normalizarListasLocales();
+        return;
+    }
+
+    const tablas = [
+        "productos",
+        "clientes",
+        "cuentasPorCobrar",
+        "ventasRegistradas",
+        "pagaresSistema",
+        "movimientosCaja"
+    ];
+
+    for (const tabla of tablas) {
+        const actual = StorageService.get(tabla, null);
+        if (Array.isArray(actual)) continue;
+
+        const lista = _listaDesdeObjetoFirebase(actual);
+        if (!lista) continue;
+
+        await StorageService._guardarLocalDirecto(tabla, lista);
+        console.warn(`Tabla ${tabla} normalizada localmente: ${lista.length} registros.`);
+    }
+}
+
 async function _bootstrapFirebaseSiLocalVacio() {
     if (!window._firebaseActivo || !window._db || !window.StorageService?.syncAll) return false;
+    if (window._auth && !window._auth.currentUser) return false;
     if (_hayDatosLocalesOperativos()) return false;
 
     console.warn("Almacen local vacio; descargando datos iniciales desde Firebase.");
     try {
         await StorageService.syncAll({ forzarDescarga: true });
+        await _forzarListasLocalesOperativas();
         _recargarRAMInicial();
         return true;
     } catch (err) {
@@ -115,6 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         await _bootstrapFirebaseSiLocalVacio();
+        await _forzarListasLocalesOperativas();
         _recargarRAMInicial();
         _logConteosArranque();
 
