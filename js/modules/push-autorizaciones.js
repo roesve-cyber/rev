@@ -103,6 +103,14 @@ async function activarPushAutorizaciones() {
     const config = _pushAuthConfig();
     const vapidKey = document.getElementById('pushAuthVapidKey')?.value.trim() || config.vapidKey || '';
     if (!vapidKey) return alert('Primero pega y guarda la llave VAPID publica de Firebase Messaging.');
+
+    // Esperar a que Firebase (persistencia + messaging) esté completamente listo
+    // antes de tocar Firestore o getToken(). Evita "Missing or insufficient permissions"
+    // causado por condición de carrera con enablePersistence().
+    if (window._firebaseReady) {
+        try { await window._firebaseReady; } catch {}
+    }
+
     if (!_pushAuthMessagingDisponible()) return alert('Este entorno no soporta push o Firebase Messaging no esta activo.');
     const firebaseUser = _pushAuthUsuarioFirebaseActual();
     if (!firebaseUser) return alert('Para registrar este celular necesitas iniciar sesion con un usuario de Firebase Auth, no con usuario/PIN local.');
@@ -116,6 +124,7 @@ async function activarPushAutorizaciones() {
     if (perfilFirebase.activo === false) return alert('Tu usuario Firebase esta desactivado.');
     if (!perfilFirebase.rol) return alert('Tu usuario Firebase no tiene rol configurado en /usuarios.');
     const rolCanonico = _pushAuthRolCanonico(perfilFirebase.rol);
+    // _messaging ya está inicializado en _firebaseReady; esta línea es fallback.
     if (!window._messaging && window.firebase && firebase.messaging) {
         window._messaging = firebase.messaging();
     }
@@ -198,6 +207,11 @@ async function diagnosticarPushAutorizaciones() {
     const token = localStorage.getItem(PUSH_AUTH_TOKEN_KEY) || '';
     const lineas = [];
 
+    // Esperar init completo antes de consultar Firestore
+    if (window._firebaseReady) {
+        try { await window._firebaseReady; } catch {}
+    }
+
     lineas.push(`Firebase: ${window._firebaseActivo && window._db ? 'activo' : 'inactivo/no conectado'}`);
     lineas.push(`Sesion: ${sesion?.rol || 'sin rol'} (${sesion?.email || sesion?.usuario || sesion?.nombre || '-'})`);
     lineas.push(`Firebase Auth: ${firebaseUser ? firebaseUser.email || firebaseUser.uid : 'sin usuario autenticado'}`);
@@ -251,6 +265,9 @@ async function diagnosticarPushAutorizaciones() {
 
 async function probarPushAutorizacionesNube() {
     if (!window._firebaseActivo || !window._db) return alert('La prueba real requiere Firebase activo en produccion.');
+    if (window._firebaseReady) {
+        try { await window._firebaseReady; } catch {}
+    }
     const sesion = _pushAuthSesion() || {};
     if (!sesion.rol) return alert('No hay sesion activa para crear la prueba.');
     const firebaseUser = _pushAuthUsuarioFirebaseActual();
