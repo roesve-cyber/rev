@@ -1,5 +1,8 @@
 name: Deploy Firebase Functions
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
   push:
@@ -30,10 +33,15 @@ jobs:
         run: npm install --prefix functions
 
       - name: Write Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MMPUEBLITO }}
         run: |
-          cat > "$RUNNER_TEMP/firebase-service-account.json" <<'EOF'
-          ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MMPUEBLITO }}
-          EOF
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Falta el secret FIREBASE_SERVICE_ACCOUNT_MMPUEBLITO"
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase-service-account.json"
+          node -e "JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP + '/firebase-service-account.json', 'utf8')); console.log('Service account JSON OK')"
 
       - name: Deploy functions and Firestore rules
         env:
