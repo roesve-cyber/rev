@@ -1,4 +1,4 @@
-// ===== AUTENTICACIÓN Y ROLES =====
+﻿// ===== AUTENTICACIÓN Y ROLES =====
 
 const _USUARIOS_DEFAULT = [
     { id: 1, usuario: 'admin', pin: '1234', rol: 'admin', activo: true },
@@ -147,6 +147,36 @@ function _recargarVariablesGlobales() {
         console.log('✅ Variables globales recargadas desde localStorage (post-sync)');
     } catch(e) {
         console.warn('⚠️ Error recargando variables globales:', e.message);
+    }
+}
+
+function _hayDatosOperativosAuth() {
+    return ['productos', 'clientes', 'cuentasPorCobrar', 'pagaresSistema', 'ventasRegistradas', 'movimientosCaja'].some(tabla => {
+        const datos = StorageService.get(tabla, []);
+        return Array.isArray(datos) && datos.length > 0;
+    });
+}
+
+async function _sincronizarFirebaseDespuesDeLogin() {
+    if (!window._firebaseActivo || !window._db || !window._auth?.currentUser || !window.StorageService?.syncAll) {
+        return false;
+    }
+
+    try {
+        if (!_hayDatosOperativosAuth()) {
+            console.warn('Almacen local vacio; descargando datos iniciales desde Firebase despues de login.');
+            await StorageService.syncAll({ forzarDescarga: true });
+        }
+
+        if (typeof StorageService.normalizarListasLocales === 'function') {
+            await StorageService.normalizarListasLocales();
+        }
+
+        _recargarVariablesGlobales();
+        return true;
+    } catch (err) {
+        console.warn('No se pudo sincronizar Firebase despues de login:', err);
+        return false;
     }
 }
 
@@ -391,6 +421,7 @@ function verificarSesionInicial() {
                 }
                 ocultarLoginScreen();
                 aplicarRolUI();
+                await _sincronizarFirebaseDespuesDeLogin();
                 } catch (err) {
                     console.warn('Sesion Firebase sin perfil autorizado:', err);
                     sessionStorage.removeItem('sesionActiva');
@@ -427,13 +458,9 @@ async function iniciarSesion() {
             sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
             ocultarLoginScreen();
             aplicarRolUI();
-            // Sincronizar desde Firestore y recargar variables globales + vistas
-            if (typeof StorageService?.syncAll === 'function') {
-                StorageService.syncAll().then(() => {
-                    _recargarVariablesGlobales();
-                    if (typeof navA === 'function') navA('dashboard');
-                }).catch(e => console.warn('⚠️ syncAll error:', e));
-            }
+            await _sincronizarFirebaseDespuesDeLogin();
+            _recargarVariablesGlobales();
+            if (typeof navA === 'function') navA('dashboard');
             // Respaldo automático diario a OneDrive (solo admin)
             if (sesion.rol === 'admin') {
                 const hoy = window.obtenerHoyInputMX();
@@ -490,13 +517,8 @@ function _iniciarSesionLocalFallback(email, pass) {
     sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
     ocultarLoginScreen();
     aplicarRolUI();
-    if (window._firebaseActivo) {
-        StorageService.syncAll().then(() => {
-            _recargarVariablesGlobales();
-            if (typeof navA === 'function') navA('dashboard');
-            console.log('✅ Sync completado y variables recargadas');
-        }).catch(e => console.warn('⚠️ syncAll error:', e));
-    }
+    _recargarVariablesGlobales();
+    if (typeof navA === 'function') navA('dashboard');
     if (match.rol === 'admin') {
         const hoy = window.obtenerHoyInputMX();
         const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoOneDrive');
