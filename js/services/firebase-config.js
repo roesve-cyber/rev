@@ -27,38 +27,50 @@ if (
     // ==== ENTORNO PRODUCCIÓN (WEB/VERCEL) ====
     window._firebaseActivo = true;
     console.log('✅ Firebase activo — entorno producción/nube');
-    
-    // Inicializar Firebase SDK
-    if (typeof firebase !== 'undefined') {
-        firebase.initializeApp(firebaseConfig);
-        window._auth = firebase.auth();
-        window._db = firebase.firestore();
-        window.db = window._db;
-        if (firebase.messaging) {
-            const soporteMessaging = firebase.messaging.isSupported ? firebase.messaging.isSupported() : true;
-            Promise.resolve(soporteMessaging)
-                .then(soportado => {
-                    if (soportado) window._messaging = firebase.messaging();
-                })
-                .catch(err => console.warn('Firebase Messaging no soportado en este navegador:', err));
+
+    // Promesa que resuelve cuando Firebase (persistencia + messaging) está listo.
+    // Úsala con: await window._firebaseReady  antes de cualquier operación Firestore/Messaging.
+    window._firebaseReady = (async () => {
+        if (typeof firebase === 'undefined') {
+            console.error('❌ Firebase SDK no cargado');
+            return;
         }
 
-        // 🚀 MAGIA PWA: Activamos persistencia offline SOLO EN PRODUCCIÓN
-        // Esto permite que el guardado sea "al momento" y soporte pérdidas de conexión
-        window._db.enablePersistence()
-            .then(() => {
-                console.log("✅ Persistencia offline (caché) activada con éxito.");
-            })
-            .catch((err) => {
-                if (err.code == 'failed-precondition') {
-                    console.warn("⚠️ Persistencia falló: Múltiples pestañas abiertas.");
-                } else if (err.code == 'unimplemented') {
-                    console.warn("⚠️ El navegador no soporta persistencia offline.");
+        firebase.initializeApp(firebaseConfig);
+        window._auth = firebase.auth();
+        window._db   = firebase.firestore();
+        window.db    = window._db;
+
+        // Persistencia offline — esperamos el resultado antes de continuar
+        try {
+            await window._db.enablePersistence({ synchronizeTabs: true });
+            console.log('✅ Persistencia offline activada.');
+        } catch (err) {
+            if (err.code === 'failed-precondition') {
+                // Varias pestañas abiertas: la persistencia solo funciona en una,
+                // pero Firestore sigue operativo sin caché local.
+                console.warn('⚠️ Persistencia desactivada: múltiples pestañas. Firestore sigue activo.');
+            } else if (err.code === 'unimplemented') {
+                console.warn('⚠️ El navegador no soporta persistencia offline.');
+            }
+            // No relanzar — Firestore es funcional aunque no haya caché.
+        }
+
+        // Messaging — también esperado para que _messaging esté listo antes de getToken()
+        if (firebase.messaging) {
+            try {
+                const soportado = firebase.messaging.isSupported
+                    ? await Promise.resolve(firebase.messaging.isSupported())
+                    : true;
+                if (soportado) {
+                    window._messaging = firebase.messaging();
+                    console.log('✅ Firebase Messaging inicializado.');
                 }
-            });
-    } else {
-        console.error('❌ Firebase SDK no cargado');
-    }
+            } catch (err) {
+                console.warn('Firebase Messaging no soportado en este navegador:', err);
+            }
+        }
+    })();
 }
 
 // Actualiza el indicador de estado de Firebase en el panel de nube
