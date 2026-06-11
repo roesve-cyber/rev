@@ -230,6 +230,52 @@ const StorageService = {
         return this._restaurarDesdeFirestore(datosNube);
     },
 
+    _asegurarTablaLista(tabla, datos) {
+        if (!this._tablasTipoLista.has(tabla)) return datos;
+        if (Array.isArray(datos)) return datos;
+        if (datos === null || datos === undefined) return [];
+
+        const listaForzada = this._forzarListaFirestore(datos);
+        if (Array.isArray(listaForzada)) return listaForzada;
+
+        if (typeof datos === 'object') {
+            const entradas = Object.entries(datos).filter(([key]) => !key.startsWith('_'));
+            if (!entradas.length) return [];
+
+            const valores = entradas.map(([, value]) => this._restaurarDesdeFirestore(value));
+            if (valores.some(value => value && typeof value === 'object')) {
+                return valores;
+            }
+
+            return [this._restaurarDesdeFirestore(datos)];
+        }
+
+        return [];
+    },
+
+    async normalizarListasLocales() {
+        const tablas = Array.from(this._tablasTipoLista);
+        let normalizadas = 0;
+
+        for (const tabla of tablas) {
+            const actual = this.get(tabla, null);
+            if (Array.isArray(actual)) continue;
+            if (actual === null || actual === undefined) continue;
+
+            const lista = this._asegurarTablaLista(tabla, actual);
+            if (!Array.isArray(lista)) continue;
+
+            await this._guardarLocalDirecto(tabla, lista);
+            normalizadas++;
+
+            if (['productos', 'clientes', 'cuentasPorCobrar', 'pagaresSistema', 'ventasRegistradas', 'movimientosCaja'].includes(tabla)) {
+                console.warn(`Tabla ${tabla} normalizada localmente: ${lista.length} registros.`);
+            }
+        }
+
+        return normalizadas;
+    },
+
     _logTablaFirebase(tabla, datos) {
         const tablasClave = new Set([
             'productos',
@@ -607,7 +653,10 @@ const StorageService = {
                 }
                 // ──────────────────────────────────────────────────────────
 
-                const datosRestaurados = this._normalizarTablaDesdeFirestore(tabla, payload);
+                const datosRestaurados = this._asegurarTablaLista(
+                    tabla,
+                    this._normalizarTablaDesdeFirestore(tabla, payload)
+                );
                 this._logTablaFirebase(tabla, datosRestaurados);
 
                 if (!this._esTablaValida(tabla, datosRestaurados)) {
