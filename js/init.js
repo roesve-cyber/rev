@@ -78,6 +78,31 @@ async function _bootstrapFirebaseSiLocalVacio() {
     }
 }
 
+function _logConteosArranque() {
+    const resumen = {
+        productos: StorageService.get("productos", []).length,
+        clientes: StorageService.get("clientes", []).length,
+        cuentasPorCobrar: StorageService.get("cuentasPorCobrar", []).length,
+        pagaresSistema: StorageService.get("pagaresSistema", []).length,
+        ventasRegistradas: StorageService.get("ventasRegistradas", []).length,
+        movimientosCaja: StorageService.get("movimientosCaja", []).length
+    };
+    console.log("Conteos storage post-arranque:", resumen);
+    return resumen;
+}
+
+function _renderVistaActualInicial(vistaId) {
+    if (typeof navA === 'function') navA(vistaId || 'inicio');
+    setTimeout(() => {
+        const actual = window._vistaActualSistema || vistaId || 'inicio';
+        if (typeof navA === 'function') navA(actual, true);
+        if (actual === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+        if (actual === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
+        if (actual === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+        if (actual === 'clientes' && typeof renderClientes === 'function') renderClientes();
+    }, 250);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     if (window.location.pathname.includes("catalogo.html")) {
         console.log("Modo catalogo publico");
@@ -91,6 +116,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         await _bootstrapFirebaseSiLocalVacio();
         _recargarRAMInicial();
+        _logConteosArranque();
 
         if (typeof migrarStorageCuentasPorCobrar === 'function') migrarStorageCuentasPorCobrar();
         if (typeof inicializarNotificaciones === 'function') inicializarNotificaciones();
@@ -99,7 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const params = new URLSearchParams(window.location.search || '');
         const vistaInicial = params.get('view') || (window.location.hash ? window.location.hash.replace('#', '') : '') || 'inicio';
-        if (typeof navA === 'function') navA(vistaInicial);
+        _renderVistaActualInicial(vistaInicial);
         if (typeof actualizarContadorCarrito === 'function') actualizarContadorCarrito();
         if (typeof verificarAlertasPagares === 'function') verificarAlertasPagares();
 
