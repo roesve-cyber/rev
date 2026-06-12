@@ -44,6 +44,23 @@ function recopilarNotificaciones() {
     const hoy = new Date();
     const en3dias = new Date(hoy.getTime() + 3 * 24 * 3600 * 1000);
     const notifs = [];
+    if (window.CobranzaRiskService) {
+        const vistasCobranza = getNotificacionesVistas();
+        const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+        const pagaresCxC = StorageService.get('pagaresSistema', []);
+        const cartera = window.CobranzaRiskService.analizarCartera(cuentasCxC, pagaresCxC, { hoy });
+        cartera.alertas.forEach(r => {
+            const folio = r.cuenta?.folio || '-';
+            const cliente = r.cuenta?.nombre || r.cuenta?.clienteNombre || 'Cliente';
+            const id = `cxc_${folio}_${r.key}${r.promesa.vencida ? '_promesa' : ''}`;
+            if (vistasCobranza.includes(id)) return;
+            const msgBase = r.sinPrimerPago
+                ? `${cliente}: sin primer pago, ${r.diasSinPago} dia(s), saldo ${dinero(r.saldo)}`
+                : `${cliente}: ${r.diasSinPago} dia(s) desde ultimo pago, saldo ${dinero(r.saldo)}`;
+            const msg = r.promesa.vencida ? `${msgBase}. Promesa vencida.` : `${msgBase}. ${r.nivelRiesgo}.`;
+            notifs.push({ tipo: 'cobranza', icono: '!', color: r.borde || r.color, msg, folio, id });
+        });
+    }
     const vistas = getNotificacionesVistas();
 
     // Pagarés vencidos o por vencer en ≤3 días
@@ -105,9 +122,10 @@ function renderBadgeNotificaciones() {
 
 function abrirPanelNotificaciones() {
     const notifs = recopilarNotificaciones();
-    const tipos = ['pagare', 'stock', 'cxp'];
+    const tipos = ['cobranza', 'pagare', 'stock', 'cxp'];
     const titulos = { pagare: '📋 Cobranza', stock: '📦 Inventario', cxp: '💳 Cuentas por Pagar' };
 
+    titulos.cobranza = 'Cobranza por ultimo pago';
     let contenido = '';
     
     if (notifs.length === 0) {

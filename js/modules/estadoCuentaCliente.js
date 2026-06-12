@@ -603,7 +603,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
     </html>`;
 
     if (window.TicketService?.openDocument) {
-        window.TicketService.openDocument(htmlDoc, { title: `Estado Cuenta ${estado.clienteNombre}`, filename: `estado_cuenta_consolidado_${estado.clienteNombre}`, pageSize: 'letter' });
+        window.TicketService.openDocument(htmlDoc, { title: `Estado Cuenta ${estado.clienteNombre}`, filename: `estado_cuenta_consolidado_${estado.clienteNombre}`, pageSize: 'letter', autoPrint: true });
     } else {
         const win = window.open('', '_blank');
         win.document.write(htmlDoc);

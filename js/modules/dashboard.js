@@ -11,7 +11,7 @@ function renderDashboard() {
     const ventasRegistradas = StorageService.get("ventasRegistradas", [])
         .filter(v => !String(v.estado || v.estatus || '').toLowerCase().includes('cancel'));
     const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", [])
-        .filter(c => !_dashboardCuentaCancelada(c));
+        .filter(c => !_dashboardCuentaCancelada(c) && !c.incobrable);
     const pagaresSistema = StorageService.get("pagaresSistema", []);
     const movimientosCaja = StorageService.get("movimientosCaja", []);
 

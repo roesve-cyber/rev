@@ -62,6 +62,13 @@ function _cxcCuentaCancelada(cuenta) {
     return String(cuenta?.estado || cuenta?.estatus || '').toLowerCase().includes('cancel');
 }
 
+// Devuelve true si la cuenta esta marcada como incobrable.
+// Las cuentas incobrables se excluyen de proyecciones y cobranza automatica
+// pero conservan su saldo e historial completo.
+function _cxcEsIncobrable(cuenta) {
+    return cuenta?.incobrable === true;
+}
+
 function _cxcTotalCreditoCuenta(cuenta, estadoCta = null) {
     const estado = estadoCta || (cuenta?.folio ? window._calcularEstadoCuenta?.(cuenta.folio) : null);
     const pagares = estado?.pagares || [];
@@ -289,13 +296,13 @@ window._pestanaCobranzaActiva = 'todas';
 function renderCuentasXCobrar(filtroCliente = "") {
     const contenedor = document.getElementById("tablaCuentasXCobrar");
     if (!contenedor) return;
-    if (!['todas', 'al_corriente', 'morosos', 'promesas'].includes(window._pestanaCobranzaActiva)) {
+    if (!['todas', 'al_corriente', 'morosos', 'promesas', 'incobrables'].includes(window._pestanaCobranzaActiva)) {
         window._pestanaCobranzaActiva = 'todas';
     }
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
     
-    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c));
+    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c) && !_cxcEsIncobrable(c));
 
     if (cuentas.length === 0) {
         contenedor.innerHTML = `<div style="background:#f0fdf4; padding:40px; text-align:center; border-radius:10px;"><p style="font-size:18px; color:#27ae60; font-weight:bold;">✅ ¡No hay cuentas registradas!</p></div>`;
@@ -303,8 +310,8 @@ function renderCuentasXCobrar(filtroCliente = "") {
     }
     let htmlTabs = `
     <div style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
-        ${['todas', 'al_corriente', 'morosos', 'promesas'].map(p => {
-            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas'};
+        ${['todas', 'al_corriente', 'morosos', 'promesas', 'incobrables'].map(p => {
+            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas', incobrables:'🚫 Incobrables'};
             const bg = window._pestanaCobranzaActiva === p ? '#1e40af' : '#f3f4f6';
             const col = window._pestanaCobranzaActiva === p ? 'white' : '#4b5563';
             return `<button onclick="cambiarPestanaCobranza('${p}')" style="flex:1; min-width:120px; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; border:none; background:${bg}; color:${col};">${labels[p]}</button>`;
@@ -328,6 +335,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
             case 'al_corriente': mostrar = estadoCta.estadoGeneral === "Al corriente"; break;
             case 'morosos': mostrar = (estadoCta.estadoGeneral === "Atrasado" || estadoCta.estadoGeneral === "Crítico"); break;
             case 'promesas': mostrar = estadoCta.estadoGeneral === "Promesa"; break;
+            case 'incobrables': mostrar = false; break; // manejado por renderCuentasIncobrables
         }
 
         if (!mostrar) return;
@@ -352,10 +360,18 @@ function renderCuentasXCobrar(filtroCliente = "") {
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
                     <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
+                    <button onclick="marcarIncobrable('${c.folio}')" style="padding:6px 9px; background:#6b7280; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Marcar como incobrable">🚫 Incobrable</button>
                 </div>
             </td>
         </tr>`;
     });
+
+    // Pestaña incobrables: render separado con su propio contenedor
+    if (window._pestanaCobranzaActiva === 'incobrables') {
+        contenedor.innerHTML = htmlTabs + '<div id="tablaIncobrables"></div>';
+        renderCuentasIncobrables();
+        return;
+    }
 
     contenedor.innerHTML = htmlTabs + (cuentasMostradas === 0 ? `<p style="text-align:center; padding:20px;">Sin resultados.</p>` : htmlTabla + `</tbody></table></div>`);
 }
@@ -365,7 +381,7 @@ function renderAbonosDirectos(filtroCliente = "") {
     if (!contenedor) return;
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteAbonoDirecto")?.value || "").trim().toLowerCase();
-    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c));
+    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c) && !_cxcEsIncobrable(c));
     const filas = cuentas
         .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
         .filter(x => x.estado && x.estado.saldoTotal > 0.01)
@@ -3090,3 +3106,117 @@ window.descargarImagenEstadoCuentaFolio = descargarImagenEstadoCuentaFolio;
 window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
 window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
 window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
+
+
+// ═══════════════════════════════════════════════════════════════════
+// GESTIÓN DE CUENTAS INCOBRABLES
+// ═══════════════════════════════════════════════════════════════════
+
+window.marcarIncobrable = function(folio) {
+    if (!folio) return;
+    const cuentas = StorageService.get('cuentasPorCobrar', []);
+    const idx = cuentas.findIndex(c => c.folio === folio);
+    if (idx === -1) return alert('No se encontró la cuenta.');
+
+    const cuenta = cuentas[idx];
+    const sesion = StorageService.get('sesionActiva', {});
+
+    if (cuenta.incobrable) {
+        // Revertir
+        if (!confirm(`¿Reactivar la cuenta ${folio} de ${cuenta.nombre || cuenta.clienteNombre}?\nVolverá a aparecer en proyecciones y cobranza.`)) return;
+        delete cuentas[idx].incobrable;
+        delete cuentas[idx].incobrableFecha;
+        delete cuentas[idx].incobrableMotivo;
+        delete cuentas[idx].incobrablePor;
+        StorageService.set('cuentasPorCobrar', cuentas);
+        if (window.AuditService?.log) window.AuditService.log({
+            accion: 'INCOBRABLE_REVERTIDO', modulo: 'CxC', entidad: 'cuenta', entidadId: folio,
+            detalle: `Cuenta ${folio} reactivada`, severidad: 'info'
+        });
+        alert('Cuenta reactivada. Ya aparecerá en proyecciones.');
+        renderCuentasIncobrables();
+        return;
+    }
+
+    const motivo = prompt(`Motivo para marcar ${folio} como incobrable:\n(Ej: "Sin contacto 3 meses", "Domicilio cambiado", "Acuerdo verbal")`, '');
+    if (motivo === null) return;
+    if (!motivo.trim()) return alert('El motivo es obligatorio.');
+
+    cuentas[idx].incobrable = true;
+    cuentas[idx].incobrableFecha = new Date().toISOString();
+    cuentas[idx].incobrableMotivo = motivo.trim();
+    cuentas[idx].incobrablePor = sesion.nombre || sesion.usuario || 'admin';
+    StorageService.set('cuentasPorCobrar', cuentas);
+
+    if (window.AuditService?.log) window.AuditService.log({
+        accion: 'CUENTA_INCOBRABLE', modulo: 'CxC', entidad: 'cuenta', entidadId: folio,
+        detalle: `Cuenta ${folio} marcada como incobrable. Motivo: ${motivo}`,
+        severidad: 'riesgo', datos: { motivo, marcadoPor: cuentas[idx].incobrablePor }
+    });
+
+    alert(`Cuenta marcada como incobrable.\nYa no aparecerá en proyecciones de efectivo.`);
+    // Refrescar vistas
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    renderCuentasIncobrables();
+};
+
+window.renderCuentasIncobrables = function() {
+    const contenedor = document.getElementById('tablaIncobrables');
+    if (!contenedor) return;
+
+    const cuentas = StorageService.get('cuentasPorCobrar', [])
+        .filter(c => c.incobrable === true && !_cxcCuentaCancelada(c));
+
+    if (cuentas.length === 0) {
+        contenedor.innerHTML = `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:40px; border-radius:10px; text-align:center; color:#64748b; font-size:15px;">
+            Sin cuentas marcadas como incobrables.</div>`;
+        return;
+    }
+
+    const totalSaldo = cuentas.reduce((s, c) => {
+        const est = window._calcularEstadoCuenta?.(c.folio);
+        return s + Number(est?.saldoTotal || c.saldoActual || 0);
+    }, 0);
+
+    let html = `
+    <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:14px 18px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:bold; color:#991b1b;">📋 ${cuentas.length} cuenta(s) incobrable(s)</span>
+        <span style="font-weight:800; color:#dc2626; font-size:16px;">Saldo total: ${_cxcDinero(totalSaldo)}</span>
+    </div>
+    <div style="overflow-x:auto; background:white; border:1px solid #e5e7eb; border-radius:10px;">
+    <table class="tabla-admin" style="margin:0;">
+        <thead><tr>
+            <th>Cliente / Folio</th>
+            <th>Saldo</th>
+            <th>Motivo</th>
+            <th>Marcado</th>
+            <th>Por</th>
+            <th style="text-align:right;">Acción</th>
+        </tr></thead>
+        <tbody>`;
+
+    cuentas.forEach(c => {
+        const est = window._calcularEstadoCuenta?.(c.folio);
+        const saldo = _cxcDinero(est?.saldoTotal || c.saldoActual || 0);
+        const fecha = c.incobrableFecha ? new Date(c.incobrableFecha).toLocaleDateString('es-MX') : '-';
+        html += `<tr>
+            <td><strong>${_cxcEscHTML(c.nombre || c.clienteNombre || 'Cliente')}</strong><br>
+                <small style="color:#64748b;">${_cxcEscHTML(c.folio)}</small></td>
+            <td style="font-weight:800; color:#dc2626;">${saldo}</td>
+            <td style="max-width:200px; font-size:12px; color:#6b7280;">${_cxcEscHTML(c.incobrableMotivo || '-')}</td>
+            <td style="font-size:12px;">${fecha}</td>
+            <td style="font-size:12px;">${_cxcEscHTML(c.incobrablePor || '-')}</td>
+            <td style="text-align:right;">
+                <button onclick="abrirEstadoCuenta('${_cxcEscHTML(c.folio)}')"
+                    style="padding:6px 9px; background:#1e40af; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700; margin-right:4px;">
+                    👁 Ver</button>
+                <button onclick="marcarIncobrable('${_cxcEscHTML(c.folio)}')"
+                    style="padding:6px 9px; background:#059669; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;">
+                    ↩ Reactivar</button>
+            </td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    contenedor.innerHTML = html;
+};

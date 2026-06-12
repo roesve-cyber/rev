@@ -1572,7 +1572,7 @@ window.imprimirEstadoCuentaProveedor = function(idCuenta) {
     const clone = _clonarEstadoCuentaProveedor(idCuenta);
     if (!clone) return alert('Abre primero el estado de cuenta para imprimirlo.');
     if (window.TicketService?.openDocument) {
-        window.TicketService.openDocument(clone.outerHTML, { title: 'Estado de cuenta proveedor', filename: `estado_proveedor_${idCuenta}`, pageSize: 'letter' });
+        window.TicketService.openDocument(clone.outerHTML, { title: 'Estado de cuenta proveedor', filename: `estado_proveedor_${idCuenta}`, pageSize: 'letter', autoPrint: true });
         return;
     }
     const w = window.open('', '_blank', 'width=900,height=1000');
@@ -5363,7 +5363,9 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                     <p style="margin:2px 0 0; color:#64748b; font-size:12px;">Filtro de Alcance: <strong style="color:#334155;">${scope.toUpperCase()}</strong></p>
                 </div>
                 <div style="text-align:right; min-width:200px;">
-                    <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}')" style="background:#0f766e; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">🖨️ Imprimir Hoja</button>
+                    <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}', 'pdf')" style="background:#1e40af; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">PDF</button>
+                    <button id="btn-img-consig-${safeDomId}" onclick="window.descargarImagenEstadoCuentaConsignacion('${scope}', '${key}')" style="background:#047857; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">Imagen</button>
+                    <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}', 'ticket')" style="background:#7c3aed; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">Ticket termico</button>
                     <button onclick="if(document.getElementById('panelEstadoConsignaciones')){document.getElementById('panelEstadoConsignaciones').innerHTML=''}else{document.querySelector('[data-modal=estado-consignaciones]')?.remove()}" style="background:#f1f5f9; border:1px solid #cbd5e1; color:#475569; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px;">✕ Cerrar</button>
                     <p style="margin:0; color:#64748b; font-size:12px;">Fecha Emisión: <strong style="color:#334155;">${_comprasFechaVista(new Date())}</strong></p>
                     <p style="margin:2px 0 0; color:#64748b; font-size:11px;">Hora: <strong>${new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})}</strong></p>
@@ -5438,6 +5440,62 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
     const panel = document.getElementById('panelEstadoConsignaciones');
     if (panel) { panel.innerHTML = html; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else { document.body.insertAdjacentHTML('beforeend', `<div data-modal="estado-consignaciones" style="position:fixed; inset:0; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); z-index:10001; display:flex; justify-content:center; align-items:flex-start; padding:20px; overflow-y:auto;"><div style="max-width:1120px; width:100%; background:#ffffff; border-radius:12px; overflow:hidden;">${html}</div></div>`); }
+};
+
+window.descargarImagenEstadoCuentaConsignacion = function(scope = 'actual', key = '') {
+    const state = _consigUiState();
+    if (scope === 'actual') {
+        if (state.folioKey) { scope = 'folio'; key = state.folioKey; }
+        else if (state.proveedorKey) { scope = 'proveedor'; key = state.proveedorKey; }
+        else { scope = 'global'; key = ''; }
+    }
+
+    const safeDomId = `panel-consignacion-print-${scope}-${String(key).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const origen = document.getElementById(safeDomId);
+    if (!origen) return alert('Abre primero el estado de cuenta de consignacion.');
+
+    const btn = document.getElementById(`btn-img-consig-${safeDomId}`);
+    const textoOriginal = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+    }
+
+    _cargarHtml2CanvasEstadoProveedor(() => {
+        const clone = origen.cloneNode(true);
+        clone.querySelectorAll('button, script, .no-print, .mmp-document-toolbar, .mmp-print-toolbar').forEach(el => el.remove());
+        clone.style.width = `${Math.max(origen.offsetWidth || 960, 960)}px`;
+        clone.style.background = '#ffffff';
+
+        const wrap = document.createElement('div');
+        wrap.style.position = 'fixed';
+        wrap.style.left = '-12000px';
+        wrap.style.top = '0';
+        wrap.style.background = '#ffffff';
+        wrap.style.padding = '0';
+        wrap.appendChild(clone);
+        document.body.appendChild(wrap);
+
+        html2canvas(clone, { scale: 2, backgroundColor: '#ffffff', useCORS: true, allowTaint: false, logging: false })
+            .then(canvas => {
+                const link = document.createElement('a');
+                const nombre = `estado_consignacion_${scope}_${String(key || 'general').replace(/[^\w-]+/g, '_')}.png`;
+                link.download = nombre;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            })
+            .catch(err => {
+                console.error('Error generando imagen de consignacion:', err);
+                alert('No se pudo generar la imagen. Intenta con PDF.');
+            })
+            .finally(() => {
+                wrap.remove();
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = textoOriginal || 'Imagen';
+                }
+            });
+    });
 };
 
 window.imprimirEstadoCuentaClean = function(divId) {
@@ -5522,7 +5580,7 @@ window.imprimirEstadoCuentaClean = function(divId) {
     }, 5000);
 };
 
-window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
+window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo = 'documento') {
     const resumen = _consigResumenGlobal();
     const state = _consigUiState();
     
@@ -5550,6 +5608,10 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
 
     const proveedorNombre = folio ? folio.proveedor : (grupo ? grupo.proveedor : 'Estado General');
     const foliosEstado = folio ? [folio] : (grupo ? grupo.folios : resumen.folios);
+    const tituloDocumento = folio
+        ? `Folio ${folio.folioOrigen || folio.folio || key}`
+        : (grupo ? `Proveedor ${proveedorNombre}` : 'Estado general');
+    const nombreArchivo = `estado_consignacion_${String(tituloDocumento).replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'general'}`;
     
     const filasHtml = foliosEstado.map(f => {
         const itemsHtml = f.consignaciones.map(c => {
@@ -5725,18 +5787,28 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '') {
             </tr>
         </table>
 
-        <script>
-            window.onload = function() {
-                window.print();
-                setTimeout(function() { window.close(); }, 1000);
-            }
-        </script>
     </body>
     </html>
     `;
 
+    if (modo === 'ticket' && window.TicketService?.openThermal) {
+        const bodyMatch = htmlDocumento.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        window.TicketService.openThermal({
+            title: `Estado consignacion ${tituloDocumento}`,
+            filename: nombreArchivo,
+            body: bodyMatch ? bodyMatch[1] : htmlDocumento
+        });
+        return;
+    }
+
     if (window.TicketService?.openDocument) {
-        window.TicketService.openDocument(htmlDocumento, { title: `Estado consignacion ${titulo}`, filename: `estado_consignacion_${titulo}`, pageSize: 'letter' });
+        window.TicketService.openDocument(htmlDocumento, {
+            title: `Estado consignacion ${tituloDocumento}`,
+            filename: nombreArchivo,
+            pageSize: 'letter',
+            autoPrint: modo === 'pdf',
+            autoImage: modo === 'imagen'
+        });
         return;
     }
     const ventanaNueva = window.open('', '_blank');

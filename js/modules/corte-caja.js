@@ -230,7 +230,7 @@
             .filter(m => !yaCortados.has(String(m._corteId)) && !yaCortados.has(String(m.id || '')))
             .filter(m => coincideCuenta(m, cuenta))
             .filter(m => m._fechaObj >= inicio && m._fechaObj <= fin)
-            .sort((a, b) => b._fechaObj - a._fechaObj);
+            .sort((a, b) => a._fechaObj - b._fechaObj);
 
         const ingresos = movimientos.filter(m => m._tipo === 'ingreso').reduce((s, m) => s + m._monto, 0);
         const egresos = movimientos.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);

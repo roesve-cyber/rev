@@ -2996,7 +2996,7 @@ function renderReimprimirVenta() {
         if (total < montoMin) return false;
         if (montoMax !== Infinity && total > montoMax) return false;
         return true;
-    }).sort((a, b) => new Date(b.fechaVenta || b.fechaIso || b.fechaEmision || 0) - new Date(a.fechaVenta || a.fechaIso || a.fechaEmision || 0));
+    }).sort((a, b) => new Date(a.fechaVenta || a.fechaIso || a.fechaEmision || 0) - new Date(b.fechaVenta || b.fechaIso || b.fechaEmision || 0));
 
     const foliosUnicos = new Set();
     filtrados = filtrados.filter(t => {
@@ -3790,7 +3790,7 @@ window.renderReimprimirVenta = function() {
     filtrados.sort((a, b) => {
         const fa = new Date(a.fechaVenta || a.fechaApartado || a.fechaEmision || a.fecha || 0);
         const fb = new Date(b.fechaVenta || b.fechaApartado || b.fechaEmision || b.fecha || 0);
-        return fb - fa;
+        return fa - fb;
     });
 
     // 5. Dibujar la Tabla
@@ -4950,7 +4950,7 @@ function _renderCancelacionesVentas(filtro) {
             return !filtro || txt.includes(filtro);
         })
         .slice()
-        .sort((a,b) => new Date(b.fechaVenta || b.fechaIso || 0) - new Date(a.fechaVenta || a.fechaIso || 0));
+        .sort((a,b) => new Date(a.fechaVenta || a.fechaIso || 0) - new Date(b.fechaVenta || b.fechaIso || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin ventas para cancelar.</div>';
     return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Origen</th><th>Acción</th></tr></thead><tbody>${filas.map(v => `
         <tr>
@@ -4975,7 +4975,7 @@ function _renderCancelacionesAbonos(filtro) {
         if (String(a.estado || '').toLowerCase().includes('cancel') || ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
         filas.push({ origen: 'apartado', folio: a.folio, cliente: a.clienteNombre, fecha: ab.fechaAbono || ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.cuentaId, idx });
     }));
-    const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
+    const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(a.fecha || 0) - new Date(b.fecha || 0));
     if (!filtradas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin abonos para cancelar.</div>';
     return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead><tbody>${filtradas.map(a => `
         <tr>
@@ -4991,7 +4991,7 @@ function _renderCancelacionesAbonos(filtro) {
 
 function _renderCancelacionesApartados(filtro) {
     const apartados = StorageService.get("apartados", []).filter(a => a.estado !== 'Cancelado');
-    const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fechaApartado || 0) - new Date(a.fechaApartado || 0));
+    const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(a.fechaApartado || 0) - new Date(b.fechaApartado || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin apartados para cancelar.</div>';
     return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Total</th><th>Pagado</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${filas.map(a => {
         const pagado = Number(a.enganche || 0) + (a.abonos || []).reduce((s, ab) => s + Number(ab.monto || 0), 0);

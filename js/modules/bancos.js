@@ -508,7 +508,7 @@ window.abrirHistorialMSI = function(id) {
     const abonosDeEsteBanco = movimientos.filter(m => 
         m.referencia === `PAGO-TC-${deuda.banco}` || 
         (m.concepto && m.concepto.includes('Tarjeta de Crédito') && m.concepto.includes(deuda.banco))
-    ).sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+    ).sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
 
     let htmlAbonos = '';
     if(abonosDeEsteBanco.length > 0) {
@@ -809,7 +809,7 @@ function renderFlujoCaja() {
         const movsOrdenados = [...movimientos].sort((a, b) => {
             const dateA = new Date(a.fecha || 0);
             const dateB = new Date(b.fecha || 0);
-            return dateB - dateA;
+            return dateA - dateB;
         });
 
         movsOrdenados.forEach(m => {
@@ -970,7 +970,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     let movimientosFiltrados = movimientos.slice().sort((a, b) => {
         const dateA = new Date(a.fecha || 0);
         const dateB = new Date(b.fecha || 0);
-        return dateB - dateA;
+        return dateA - dateB;
     });
     
     // 1. Filtro por Cuenta

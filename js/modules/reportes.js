@@ -946,7 +946,7 @@ window.renderReporteFlujo = function() {
         if (ordenMovimientos === 'nombre_asc') return String(a.concepto || '').localeCompare(String(b.concepto || ''), 'es-MX');
         if (ordenMovimientos === 'nombre_desc') return String(b.concepto || '').localeCompare(String(a.concepto || ''), 'es-MX');
         if (ordenMovimientos === 'fecha_asc') return _repParseDate(a.fecha).getTime() - _repParseDate(b.fecha).getTime();
-        return _repParseDate(b.fecha).getTime() - _repParseDate(a.fecha).getTime();
+        return _repParseDate(a.fecha).getTime() - _repParseDate(b.fecha).getTime();
     });
 
             const normalizarCuentaId = (valor) => {

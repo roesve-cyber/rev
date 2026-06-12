@@ -505,12 +505,20 @@ window.renderListaPrecios = function() {
 window.imprimirListaPrecios = function() {
     const contenido = document.getElementById("listaPrecios").innerHTML;
     if (!contenido) return alert("⚠️ No hay contenido para imprimir");
-    const ventanaImpresion = window.open('', '_blank');
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = contenido;
+    wrapper.querySelectorAll('button').forEach(btn => btn.remove());
+    const contenidoLimpio = wrapper.innerHTML;
     const htmlCompleto = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Lista de Precios</title><style>
         body{font-family:Arial,sans-serif;padding:8mm;font-size:11px;} table{width:100%;border-collapse:collapse;margin-bottom:15px;}
         th,td{padding:5px;border:1px solid #ddd;text-align:right;} td:first-child{text-align:left;}
         th{background:#f4f4f4;text-align:center;} h2,h3{margin:10px 0;} @media print { body{padding:0;} }
-    </style></head><body>${contenido}</body></html>`;
+    </style></head><body>${contenidoLimpio}</body></html>`;
+    if (window.TicketService?.openDocument) {
+        window.TicketService.openDocument(htmlCompleto, { title: 'Lista de Precios', filename: 'lista_precios', pageSize: 'letter' });
+        return;
+    }
+    const ventanaImpresion = window.open('', '_blank');
     ventanaImpresion.document.write(htmlCompleto);
     ventanaImpresion.document.close();
     ventanaImpresion.focus();

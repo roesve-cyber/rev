@@ -193,7 +193,7 @@ window.obtenerKardexNormalizado = function(filtros = {}) {
  if (f.hasta && d > f.hasta) return false;
  return true;
  });
- return rows.sort((a, b) => _kardexDateValue(b.fecha) - _kardexDateValue(a.fecha));
+ return rows.sort((a, b) => _kardexDateValue(a.fecha) - _kardexDateValue(b.fecha));
 };
 
 function _invDinero(valor) {

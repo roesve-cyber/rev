@@ -168,12 +168,27 @@ const _rc = {
             nivelRiesgo = 'CRÍTICO'; colorRiesgo = '#7f1d1d'; emojiRiesgo = '🚨';
         }
 
+        const riesgoUltimoPago = window.CobranzaRiskService
+            ? window.CobranzaRiskService.analizarCuenta(cuenta, {
+                hoy,
+                pagaresSistema: pagaresCuenta,
+                saldoPreferente: saldoVivo || cuenta.saldoActual || 0
+            })
+            : null;
+        if (riesgoUltimoPago && riesgoUltimoPago.key !== 'saldado') {
+            nivelRiesgo = riesgoUltimoPago.nivelRiesgo;
+            colorRiesgo = riesgoUltimoPago.color;
+            emojiRiesgo = riesgoUltimoPago.key === 'alerta' ? '!' : riesgoUltimoPago.key === 'alto' ? '!!' : riesgoUltimoPago.key === 'riesgo' ? '!' : 'OK';
+            ultimaFechaAbono = riesgoUltimoPago.fechaUltimoPago;
+            diasSinPagar = riesgoUltimoPago.diasSinPago;
+        }
+
         return {
             excedente, deficitPct, montoEsperado, totalPagado,
             pagaresVencidos, pagaresProximos, totalPlazo,
             fechaUltimoVenc, ultimaFechaAbono, diasSinPagar,
             promedioAbono90, numAbonos: abonos.length,
-            nivelRiesgo, colorRiesgo, emojiRiesgo,
+            nivelRiesgo, colorRiesgo, emojiRiesgo, riesgoUltimoPago,
             saldoActual: saldoVivo || cuenta.saldoActual || 0,
             totalVenta: cuenta.totalContadoOriginal || cuenta.totalMercancia || totalPlazo
         };
@@ -224,6 +239,10 @@ window.renderARC_v3 = function() {
     // ── Agrupar por nivel ──────────────────────────────────────────
     const grupos = {
         'INCOBRABLE': cuentasSNE.filter(c => c.sne.nivelRiesgo === 'INCOBRABLE'),
+        'Alerta total': cuentasSNE.filter(c => c.sne.nivelRiesgo === 'Alerta total'),
+        'Alto riesgo': cuentasSNE.filter(c => c.sne.nivelRiesgo === 'Alto riesgo'),
+        'Riesgo': cuentasSNE.filter(c => c.sne.nivelRiesgo === 'Riesgo'),
+        'Bajo riesgo': cuentasSNE.filter(c => c.sne.nivelRiesgo === 'Bajo riesgo'),
         'CRÍTICO':    cuentasSNE.filter(c => c.sne.nivelRiesgo === 'CRÍTICO'),
         'EN MORA':    cuentasSNE.filter(c => c.sne.nivelRiesgo === 'EN MORA'),
         'MODERADO':   cuentasSNE.filter(c => c.sne.nivelRiesgo === 'MODERADO'),
@@ -232,6 +251,10 @@ window.renderARC_v3 = function() {
     };
 
     const cfgGrupos = [
+        { id: 'Alerta total', label: 'ALERTA TOTAL', bg: '#f3e8ff', col: '#581c87', borde: '#7e22ce' },
+        { id: 'Alto riesgo', label: 'ALTO RIESGO', bg: '#fef2f2', col: '#991b1b', borde: '#ef4444' },
+        { id: 'Riesgo', label: 'RIESGO', bg: '#fffbeb', col: '#92400e', borde: '#f59e0b' },
+        { id: 'Bajo riesgo', label: 'BAJO RIESGO', bg: '#f0fdf4', col: '#14532d', borde: '#22c55e' },
         { id: 'INCOBRABLE', label: '⚫ INCOBRABLE', bg: '#1e293b', col: 'white',  borde: '#475569' },
         { id: 'CRÍTICO',    label: '🚨 CRÍTICO',    bg: '#fef2f2', col: '#7f1d1d', borde: '#dc2626' },
         { id: 'EN MORA',    label: '🔴 EN MORA',    bg: '#fff7f7', col: '#991b1b', borde: '#f87171' },
@@ -471,7 +494,7 @@ window.renderARCTablaExcel = function() {
     cuentasActivas.sort((a, b) => {
         let valA, valB;
         if (window._arcExSort === 'riesgo') {
-            const riskOrder = { 'CRÍTICO': 1, 'INCOBRABLE': 1, 'EN MORA': 2, 'MODERADO': 3, 'LEVE': 4, 'AL CORRIENTE': 5 };
+            const riskOrder = { 'Alerta total': 1, 'CRÍTICO': 1, 'INCOBRABLE': 1, 'Alto riesgo': 2, 'EN MORA': 2, 'Riesgo': 3, 'MODERADO': 3, 'Bajo riesgo': 4, 'LEVE': 4, 'AL CORRIENTE': 5 };
             valA = riskOrder[a.sne.nivelRiesgo] || 99;
             valB = riskOrder[b.sne.nivelRiesgo] || 99;
             if (valA === valB) return sortDir * (b.sne.saldoActual - a.sne.saldoActual); // Desempate por saldo
@@ -842,7 +865,7 @@ window.renderComportamiento = function() {
 
     let lista = cuentasSNE;
     if (filtro === 'alCorriente') lista = lista.filter(c => c.sne.excedente >= 0);
-    if (filtro === 'enMora')      lista = lista.filter(c => c.sne.nivelRiesgo === 'EN MORA' || c.sne.nivelRiesgo === 'CRÍTICO');
+    if (filtro === 'enMora')      lista = lista.filter(c => ['Riesgo', 'Alto riesgo', 'Alerta total', 'EN MORA', 'CRÍTICO'].includes(c.sne.nivelRiesgo));
     if (filtro === 'sinAbono60')  lista = lista.filter(c => c.sne.diasSinPagar > 60);
     if (filtro === 'subiendo')    lista = lista.filter(c => c.tendencia === 'subiendo');
 

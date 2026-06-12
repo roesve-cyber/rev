@@ -168,7 +168,10 @@ async function _sincronizarFirebaseDespuesDeLogin() {
     _syncFirebasePostLoginPromise = (async () => {
         if (!_hayDatosOperativosAuth()) {
             console.warn('Almacen local vacio; descargando datos iniciales desde Firebase despues de login.');
-            await StorageService.syncAll({ forzarDescarga: true });
+            await StorageService.syncAll({ forzarDescarga: true, source: 'server' });
+        } else {
+            console.warn('Verificando cambios remotos de Firebase despues de login.');
+            await StorageService.syncAll({ source: 'server', forzarDescarga: true });
         }
 
         if (typeof StorageService.normalizarListasLocales === 'function') {
@@ -176,6 +179,12 @@ async function _sincronizarFirebaseDespuesDeLogin() {
         }
 
         _recargarVariablesGlobales();
+        if (typeof StorageService._refrescarVistaActualPostSync === 'function') {
+            StorageService._refrescarVistaActualPostSync();
+        }
+        if (typeof StorageService.startRealtimeSync === 'function') {
+            StorageService.startRealtimeSync();
+        }
         return true;
     })();
 
