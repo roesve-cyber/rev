@@ -3,6 +3,9 @@ const StorageService = {
         _cache: {}, 
     _isReady: false,
     _usandoLocalForage: true,
+    _syncStatusUnsubscribe: null,
+    _syncRemotoEnCurso: null,
+    _syncRemotoTimer: null,
     _syncTimers: {}, // <-- AGREGAR ESTO PARA CONTROLAR EL TRÁFICO A FIREBASE
 
     // Claves que NO deben considerarse tablas de base de datos
@@ -58,6 +61,15 @@ const StorageService = {
         'vendedores',
         'ventasPendientes',
         'ventasRegistradas'
+    ]),
+
+    _tablasCriticasConDatos: new Set([
+        'productos',
+        'clientes',
+        'cuentasPorCobrar',
+        'pagaresSistema',
+        'ventasRegistradas',
+        'movimientosCaja'
     ]),
 
     // Decide si una clave puede tratarse como tabla real del sistema
@@ -316,6 +328,83 @@ const StorageService = {
         console.warn(`Firebase -> ${tabla} llego sin registros. camposDoc=${camposDoc.join('|')} camposData=${camposData.join('|')} tiposData=${tiposData.join('|')}`);
     },
 
+    _esTablaCriticaVacia(tabla, datos) {
+        return this._tablasCriticasConDatos.has(tabla) && Array.isArray(datos) && datos.length === 0;
+    },
+
+    _hayBaseOperativaLocal() {
+        return Array.from(this._tablasCriticasConDatos).some(tabla => {
+            const datos = this.get(tabla, []);
+            return Array.isArray(datos) && datos.length > 0;
+        });
+    },
+
+    _fechaOrdenValor(item) {
+        if (!item || typeof item !== 'object') return null;
+
+        const camposFecha = [
+            'fecha',
+            'fechaIso',
+            'fechaVenta',
+            'fechaEmision',
+            'fechaRegistro',
+            'fechaCreacion',
+            'fechaCapturaIso',
+            'fechaCaptura',
+            'fechaSolicitud',
+            'fechaResolucion',
+            'fechaVencimiento',
+            'fechaApartado',
+            'fechaCompromiso',
+            'fechaAbonoIso',
+            'fechaAbono',
+            'fechaPago',
+            'fechaCompra',
+            'fechaRecepcion',
+            'fechaEntrega',
+            'fechaCancelacion',
+            'createdAt',
+            'actualizadoEn',
+            'ultimaActualizacion'
+        ];
+
+        for (const campo of camposFecha) {
+            const valor = item[campo];
+            if (valor === null || valor === undefined || valor === '') continue;
+
+            if (typeof valor === 'number' && Number.isFinite(valor)) return valor;
+
+            const fecha = window.parseFechaMXOrNull
+                ? window.parseFechaMXOrNull(valor)
+                : (valor instanceof Date ? valor : new Date(valor));
+            if (fecha && !isNaN(fecha.getTime())) return fecha.getTime();
+        }
+
+        return null;
+    },
+
+    _ordenarCronologicoSiTieneFechas(key, value) {
+        if (!Array.isArray(value) || value.length < 2) return value;
+        if (key === 'carrito') return value;
+
+        const conIndice = value.map((item, index) => ({
+            item,
+            index,
+            fecha: this._fechaOrdenValor(item)
+        }));
+
+        if (conIndice.filter(row => row.fecha !== null).length < 2) return value;
+
+        return conIndice
+            .sort((a, b) => {
+                if (a.fecha === null && b.fecha === null) return a.index - b.index;
+                if (a.fecha === null) return 1;
+                if (b.fecha === null) return -1;
+                return a.fecha - b.fecha || a.index - b.index;
+            })
+            .map(row => row.item);
+    },
+
     // Obtiene dinámicamente todas las tablas reales guardadas
     async getTablasDinamicas() {
         const tablas = new Set();
@@ -380,8 +469,74 @@ const StorageService = {
         window[key] = value;
     },
 
+    _idDispositivoSync() {
+        let id = this._cache._syncDeviceId;
+        try { id = id || localStorage.getItem('_syncDeviceId'); } catch(e) {}
+        if (!id) {
+            id = `dev_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+            this._cache._syncDeviceId = id;
+            try { localStorage.setItem('_syncDeviceId', id); } catch(e) {}
+        }
+        return id;
+    },
+
+    async _marcarCambioRemoto(tabla, ts = Date.now()) {
+        if (!window._firebaseActivo || !window._db) return;
+        try {
+            await window._db.collection('posData').doc('_syncStatus').set({
+                _updatedAt: ts,
+                tabla: tabla || '',
+                deviceId: this._idDispositivoSync()
+            }, { merge: true });
+        } catch (e) {
+            console.warn('No se pudo marcar estado global de sincronizacion:', e);
+        }
+    },
+
+    _refrescarVistaActualPostSync() {
+        try {
+            if (typeof window._recargarVariablesGlobales === 'function') window._recargarVariablesGlobales();
+            const actual = window._vistaActualSistema || (window.location.hash ? window.location.hash.replace('#', '') : '');
+            if (typeof navA === 'function' && actual) navA(actual, true);
+            if (actual === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+            if (actual === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
+            if (actual === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+            if (actual === 'clientes' && typeof renderClientes === 'function') renderClientes();
+            if (actual === 'compras' && typeof renderCompras === 'function') renderCompras();
+            if (typeof renderBadgeNotificaciones === 'function') renderBadgeNotificaciones();
+        } catch (e) {
+            console.warn('No se pudo refrescar vista post-sync:', e);
+        }
+    },
+
+    async sincronizarCambiosRemotos(motivo = 'manual') {
+        if (!window._firebaseActivo || !window._db || !window._auth?.currentUser) return false;
+        if (this._syncRemotoEnCurso) return this._syncRemotoEnCurso;
+
+        this._syncRemotoEnCurso = (async () => {
+            console.log(`Sincronizando cambios remotos (${motivo})...`);
+            const ok = await this.syncAll({ source: 'server', forzarDescarga: true });
+            this._refrescarVistaActualPostSync();
+            return ok;
+        })();
+
+        try {
+            return await this._syncRemotoEnCurso;
+        } finally {
+            this._syncRemotoEnCurso = null;
+        }
+    },
+
+    solicitarSyncRemoto(motivo = 'remoto', delay = 1200) {
+        if (this._syncRemotoTimer) clearTimeout(this._syncRemotoTimer);
+        this._syncRemotoTimer = setTimeout(() => {
+            this.sincronizarCambiosRemotos(motivo).catch(e => console.warn('Sync remoto fallido:', e));
+        }, delay);
+    },
+
     // Guarda localmente sin volver a disparar sincronización Firebase
     async _guardarLocalDirecto(key, value) {
+        value = this._ordenarCronologicoSiTieneFechas(key, value);
         this._cache[key] = value;
         this._actualizarVariableGlobal(key, value);
 
@@ -414,6 +569,7 @@ const StorageService = {
             const keys = await localforage.keys();
             for (let key of keys) {
                 this._cache[key] = await localforage.getItem(key);
+                this._cache[key] = this._ordenarCronologicoSiTieneFechas(key, this._cache[key]);
             }
             console.log("🚀 Sistema blindado: Base de datos local cargada.");
 
@@ -453,6 +609,7 @@ const StorageService = {
                 const key = localStorage.key(i);
                 try {
                     this._cache[key] = JSON.parse(localStorage.getItem(key));
+                    this._cache[key] = this._ordenarCronologicoSiTieneFechas(key, this._cache[key]);
                 } catch(e) {}
             }
         }
@@ -475,6 +632,7 @@ const StorageService = {
     },
 
     set(key, value) {
+        value = this._ordenarCronologicoSiTieneFechas(key, value);
         // 1. Guardar en RAM al instante
         this._cache[key] = value;
 
@@ -514,7 +672,12 @@ const StorageService = {
             this._syncTimers[key] = setTimeout(() => {
                 const valorFirestore = this._limpiarParaFirestore(value);
                 const ts = this._cache[`_ts_${key}`] || Date.now();
-                
+
+                if (this._esTablaCriticaVacia(key, value)) {
+                    console.warn(`Firebase protegido: no se sube ${key} vacia.`);
+                    return;
+                }
+                 
                 try {
                     const docRef = window._db.collection('posData').doc(key);
 
@@ -529,14 +692,18 @@ const StorageService = {
                         docRef.set({
                             data: valorFirestore,
                             _updatedAt: ts
-                        }, { merge: true }).catch(e => console.warn("Error en merge:", e));
+                        }, { merge: true })
+                            .then(() => this._marcarCambioRemoto(key, ts))
+                            .catch(e => console.warn("Error en merge:", e));
                         
                     } else {
                         // Comportamiento normal para configuraciones o tablas de un solo autor
                         docRef.set({
                             data: valorFirestore,
                             _updatedAt: ts
-                        }).catch(e => {
+                        })
+                            .then(() => this._marcarCambioRemoto(key, ts))
+                            .catch(e => {
                             console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
                         });
                     }
@@ -591,6 +758,7 @@ const StorageService = {
                         transaction.update(docRef, { data: data, _updatedAt: tsAhora });
                     }
                 });
+                await this._marcarCambioRemoto(key, tsAhora);
                 console.log(`✅ pushAtomo: ${key} sincronizado INMEDIATAMENTE a Firebase`);
             } catch (e) { 
                 console.warn(`⚠️ pushAtomo fallo para ${key}, pero datos guardados localmente:`, e); 
@@ -622,6 +790,7 @@ const StorageService = {
                     const filtrado = data.filter(i => String(i.idCuarentena || i.id) !== String(idValue));
                     transaction.update(docRef, { data: filtrado, _updatedAt: tsAhora });
                 });
+                await this._marcarCambioRemoto(key, tsAhora);
                 console.log(`✅ removeAtomo: ${key} item ${idValue} eliminado INMEDIATAMENTE en Firebase`);
             } catch (e) { 
                 console.warn(`⚠️ removeAtomo fallo para ${key}, pero datos limpiados localmente:`, e); 
@@ -646,14 +815,17 @@ const StorageService = {
             console.log("⬇️ Descargando datos dinámicos de Firebase...");
 
             const forzarDescarga = !!(opciones && opciones.forzarDescarga);
-            const snapshot = await window._db.collection('posData').get();
+            const source = opciones && opciones.source ? { source: opciones.source } : undefined;
+            const snapshot = source
+                ? await window._db.collection('posData').get(source)
+                : await window._db.collection('posData').get();
             let descargadas = 0;
             let omitidas = 0;
 
             for (const doc of snapshot.docs) {
                 const tabla = doc.id;
                 // Ignorar claves de timestamps internos
-                if (tabla.startsWith('_ts_')) continue;
+                if (tabla.startsWith('_ts_') || tabla === '_syncStatus') continue;
 
                 const payload = doc.data();
 
@@ -682,6 +854,11 @@ const StorageService = {
                 this._logTablaFirebase(tabla, datosRestaurados);
                 if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
                     this._logPayloadVacio(tabla, payload);
+                    if (this._tablasCriticasConDatos.has(tabla)) {
+                        console.warn(`${tabla}: Firebase esta vacio; no se guarda local ni se marca como descargado.`);
+                        omitidas++;
+                        continue;
+                    }
                 }
 
                 if (!this._esTablaValida(tabla, datosRestaurados)) {
@@ -722,7 +899,7 @@ const StorageService = {
         }
     },
 
-    async uploadAll() {
+    async uploadAll(opciones = {}) {
         if (!window._firebaseActivo || !window._db) {
             return Promise.reject(new Error("Firebase no está configurado o activo."));
         }
@@ -730,8 +907,14 @@ const StorageService = {
         try {
             console.log("⬆️ Subiendo datos dinámicos a Firebase...");
 
+            const permitirVacio = !!(opciones && opciones.permitirVacio);
+            if (!permitirVacio && !this._hayBaseOperativaLocal()) {
+                throw new Error("Cancelado: este dispositivo no tiene datos operativos locales. No se suben vacios a Firebase.");
+            }
+
             const tablas = await this.getTablasDinamicas();
             let subidas = 0;
+            let omitidasVacias = 0;
 
             for (let tabla of tablas) {
                 const datosLocales = this.get(tabla, null);
@@ -743,12 +926,20 @@ const StorageService = {
                     continue;
                 }
 
+                if (!permitirVacio && this._esTablaCriticaVacia(tabla, datosLocales)) {
+                    console.warn(`Firebase protegido: no se sube ${tabla} vacia.`);
+                    omitidasVacias++;
+                    continue;
+                }
+
                 const datosFirestore = this._limpiarParaFirestore(datosLocales);
 
+                const tsSubida = Date.now();
                 await window._db.collection('posData').doc(tabla).set({
                     data: datosFirestore,
-                    _updatedAt: Date.now()
+                    _updatedAt: tsSubida
                 });
+                await this._marcarCambioRemoto(tabla, tsSubida);
 
                 subidas++;
             }
@@ -762,10 +953,41 @@ const StorageService = {
         }
     },
 
-    startRealtimeSync() {
+    _logFirebaseLink() {
         if (window._firebaseActivo && window._db) {
             console.log("📡 Módulo de Firebase enlazado correctamente.");
         }
+    },
+    startRealtimeSync() {
+        if (!window._firebaseActivo || !window._db) return;
+        if (this._syncStatusUnsubscribe) return;
+
+        console.log("Modulo de Firebase enlazado correctamente. Escuchando cambios remotos.");
+        const vistoInicial = Number(this._cache._syncStatusVisto || localStorage.getItem('_syncStatusVisto') || 0);
+        this._cache._syncStatusVisto = vistoInicial;
+
+        this._syncStatusUnsubscribe = window._db.collection('posData').doc('_syncStatus').onSnapshot((doc) => {
+            if (!doc.exists) return;
+            const data = doc.data() || {};
+            const ts = Number(data._updatedAt || 0);
+            const visto = Number(this._cache._syncStatusVisto || 0);
+            if (!ts || ts <= visto) return;
+
+            this._cache._syncStatusVisto = ts;
+            try { localStorage.setItem('_syncStatusVisto', String(ts)); } catch(e) {}
+
+            // Tambien verificamos en el mismo dispositivo: puede haber Chrome y PWA abiertos a la vez.
+            this.solicitarSyncRemoto(`cambio remoto ${data.tabla || ''}`.trim(), 800);
+        }, (err) => {
+            console.warn('No se pudo escuchar cambios remotos de Firebase:', err);
+        });
+
+        window.addEventListener('focus', () => this.solicitarSyncRemoto('focus', 3000));
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) this.solicitarSyncRemoto('visibility', 1500);
+        });
+        window.addEventListener('online', () => this.solicitarSyncRemoto('online', 1000));
+        setInterval(() => this.solicitarSyncRemoto('intervalo', 1000), 60000);
     }
 };
 

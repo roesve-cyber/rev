@@ -48,6 +48,14 @@ body { box-sizing: border-box !important; }
     box-sizing: border-box !important;
 }
 * { box-sizing: border-box !important; }
+#ticket-contenido > .no-print,
+.ticket-contenido > .no-print,
+.mmp-ticket-body > .no-print,
+#ticket-contenido > .controles,
+.ticket-contenido > .controles,
+.mmp-ticket-body > .controles {
+    display: none !important;
+}
 img { max-width: 22mm !important; max-height: 18mm !important; object-fit: contain !important; }
 table { width: 100% !important; border-collapse: collapse !important; font-size: 10px !important; }
 th, td { padding: 2px 1px !important; word-break: break-word !important; }
@@ -235,6 +243,12 @@ body { box-sizing: border-box; }
 }
 .mmp-btn-print { background: #1e40af; color: #fff; }
 .mmp-btn-image { background: #047857; color: #fff; }
+.mmp-document-body .no-print,
+.mmp-document-body .controles,
+.mmp-document-body button[onclick="window.print()"],
+.mmp-document-body button[onclick='window.print()'] {
+    display: none !important;
+}
 table { max-width: 100%; }
 img { max-width: 100%; }
 @media print {
@@ -279,15 +293,41 @@ function mmpGuardarDocumentoImagen(){
         });
     });
 }
+function mmpDocBase64Url(text){
+    var utf8 = unescape(encodeURIComponent(text || ''));
+    return btoa(utf8).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
+}
+function mmpAbrirDocumentoTermico(){
+    var source = document.querySelector('.mmp-document-body') || document.body;
+    var clone = source.cloneNode(true);
+    clone.querySelectorAll('script,style,button,.no-print,.mmp-document-toolbar,.mmp-print-toolbar').forEach(function(el){ el.remove(); });
+    var titulo = document.title || 'Ticket termico';
+    var css = ${JSON.stringify(thermalCss())};
+    var file = '${file}_termico';
+    var script = '<script>' +
+        'function mmpCargarHtml2Canvas(cb){if(typeof html2canvas!==\"undefined\")return cb();var s=document.createElement(\"script\");s.src=\"https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.\");};document.head.appendChild(s);}' +
+        'function mmpGuardarTicketImagen(){mmpCargarHtml2Canvas(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var a=document.createElement(\"a\");a.download=\"' + file + '.png\";a.href=canvas.toDataURL(\"image/png\");a.click();}).catch(function(){alert(\"No se pudo generar la imagen. Intenta imprimirlo a PDF.\");});});}' +
+        'function mmpBase64Url(text){var utf8=unescape(encodeURIComponent(text||\"\"));return btoa(utf8).replace(/\\\\+/g,\"-\").replace(/\\\\//g,\"_\").replace(/=+$/g,\"\");}' +
+        'function mmpTextoTicket(){var node=document.getElementById(\"ticket-contenido\")||document.body;var c=node.cloneNode(true);c.querySelectorAll(\"script,style,button,.no-print,.mmp-print-toolbar\").forEach(function(el){el.remove();});return (c.innerText||c.textContent||\"\").replace(/\\\\n{3,}/g,\"\\\\n\\\\n\").trim();}' +
+        'function mmpImprimirBluetooth(){var text=mmpTextoTicket();if(!text){alert(\"No se encontro texto imprimible.\");return;}if(text.length>7000&&!confirm(\"El ticket es largo y Android puede rechazar el envio por enlace. Intentar de todos modos?\"))return;window.location.href=\"mmpprinter://print?b64=\"+mmpBase64Url(text);}' +
+        '<\\/script>';
+    var win = window.open('', '_blank');
+    if (!win) { alert('Habilita las ventanas emergentes para abrir el ticket termico.'); return; }
+    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' termico</title>' + css + script + '</head><body><div class="mmp-print-toolbar no-print"><button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button><button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button><button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button></div><div id="ticket-contenido" class="mmp-ticket-body">' + clone.innerHTML + '</div></body></html>');
+    win.document.close();
+    win.focus();
+}
 <\/script>`;
     }
 
-    function documentToolbar(options = {}) {
+function documentToolbar(options = {}) {
         const imageButton = options.image === false ? '' : `<button id="mmp-doc-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarDocumentoImagen()">Guardar imagen</button>`;
+        const thermalButton = options.thermal === false ? '' : `<button class="mmp-btn-print" onclick="mmpAbrirDocumentoTermico()">Ticket termico</button>`;
         return `
 <div class="mmp-document-toolbar no-print">
     <button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button>
     ${imageButton}
+    ${thermalButton}
 </div>`;
     }
 
@@ -309,7 +349,7 @@ function mmpGuardarDocumentoImagen(){
         if (!/mmp-thermal-80-style/.test(out)) {
             out = out.replace(/<\/head>/i, `${thermalCss()}\n${imageScript(filename)}\n</head>`);
         }
-        if (!/mmp-print-toolbar/.test(out)) {
+        if (!/class=["'][^"']*\bmmp-print-toolbar\b/i.test(out)) {
             out = out.replace(/<body[^>]*>/i, match => `${match}\n${toolbar()}`);
         }
         return out;
@@ -349,11 +389,14 @@ function mmpGuardarDocumentoImagen(){
             out = out.replace(/<body([^>]*)>/i, '<body$1><div class="mmp-document-body">')
                      .replace(/<\/body>/i, '</div></body>');
         }
-        if (!/mmp-document-toolbar/.test(out)) {
+        if (!/class=["'][^"']*\bmmp-document-toolbar\b/i.test(out)) {
             out = out.replace(/<body[^>]*>/i, match => `${match}\n${documentToolbar(options)}`);
         }
         if (options.autoPrint && !/mmp-auto-print/.test(out)) {
             out = out.replace(/<\/body>/i, `<script id="mmp-auto-print">window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},450);});<\/script></body>`);
+        }
+        if (options.autoImage && !/mmp-auto-image/.test(out)) {
+            out = out.replace(/<\/body>/i, `<script id="mmp-auto-image">window.addEventListener('load',function(){setTimeout(function(){if(typeof mmpGuardarDocumentoImagen==='function')mmpGuardarDocumentoImagen();},650);});<\/script></body>`);
         }
         return out;
     }
