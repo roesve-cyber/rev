@@ -302,8 +302,8 @@
     <div id="cuentasxcobrar" class="vista oculto">
  <div class="vista-header">
  <div>
- <h2>Cuentas por Cobrar (Pagares y Seguimiento)</h2>
- <p>Control de ventas a credito, pagares, atrasos y abonos.</p>
+ <h2>Cuentas por Cobrar</h2>
+ <p>Seguimiento de cartera por ultimo pago, saldo y riesgo de cobranza.</p>
  </div>
 </div>
  <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
@@ -311,9 +311,11 @@
  onkeyup="filtrarCuentasCobranza()" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
  <select id="filtroEstadoCobranza" onchange="filtrarCuentasCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
  <option value="">-- Todos los estados --</option>
- <option value="Al corriente">Al corriente</option>
- <option value="Atrasado">Atrasado</option>
- <option value="Critico">Critico</option>
+ <option value="Bajo riesgo">Bajo riesgo</option>
+ <option value="Riesgo">Riesgo</option>
+ <option value="Alto riesgo">Alto riesgo</option>
+ <option value="Alerta total">Alerta total</option>
+ <option value="Sin primer pago">Sin primer pago</option>
  <option value="Promesa">Promesa</option>
  </select>
  <button onclick="renderCuentasXCobrar()" style="padding:10px 20px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
@@ -1123,43 +1125,44 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
-<script src="js/services/storage.js?v=13"></script>
+<script src="js/services/storage.js?v=17"></script>
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=3"></script>
 <script src="js/services/calculator.js"></script>
-<script src="js/services/ticket-service.js?v=3"></script>
+<script src="js/services/ticket-service.js?v=7"></script>
 <script src="js/services/audit-service.js?v=1"></script>
 <script src="js/services/folio-service.js?v=1"></script>
+<script src="js/services/cobranza-risk-service.js?v=1"></script>
 <script src="js/services/onedrive-backup.js"></script>
 <script src="js/core/data.js"></script>
 
-<script src="js/modules/auth.js?v=2.4"></script>
-<script src="js/modules/inventario.js?v=20"></script>
-<script src="js/modules/tienda.js?v=3"></script>
-<script src="js/modules/ventas.js?v=2.1"></script>
+<script src="js/modules/auth.js?v=2.6"></script>
+<script src="js/modules/inventario.js?v=21"></script>
+<script src="js/modules/tienda.js?v=4"></script>
+<script src="js/modules/ventas.js?v=2.2"></script>
 <script src="js/modules/clientes.js?v=3"></script>
-<script src="js/modules/cxc.js?v=22"></script>
+<script src="js/modules/cxc.js?v=24"></script>
 <script src="js/modules/apartados.js?v=8"></script>
-<script src="js/modules/compras.js?v=29"></script>
-<script src="js/modules/bancos.js?v=9"></script>
-<script src="js/modules/reportes.js?v=19"></script>
+<script src="js/modules/compras.js?v=34"></script>
+<script src="js/modules/bancos.js?v=10"></script>
+<script src="js/modules/reportes.js?v=20"></script>
 <script src="js/modules/reportes-plus.js?v=8"></script>
-<script src="js/modules/reportes-credito.js?v=3"></script>
-<script src="js/modules/dashboard.js?v=4"></script>
+<script src="js/modules/reportes-credito.js?v=4"></script>
+<script src="js/modules/dashboard.js?v=6"></script>
 <script src="js/modules/cotizaciones.js?v=4"></script>
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
-<script src="js/modules/corte-caja.js?v=1"></script>
+<script src="js/modules/corte-caja.js?v=2"></script>
 <script src="js/modules/gastos.js"></script>
 <script src="js/modules/proyeccion.js?v=2"></script>
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/agenda.js"></script>
 <script src="js/modules/producto-picker.js?v=2"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
-<script src="js/modules/notificaciones.js?v=2"></script>
+<script src="js/modules/notificaciones.js?v=3"></script>
 <script src="js/modules/push-autorizaciones.js?v=5"></script>
-<script src="js/modules/estadoCuentaCliente.js?v=1"></script>
+<script src="js/modules/estadoCuentaCliente.js?v=2"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/core/navigation.js?v=8"></script>
