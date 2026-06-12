@@ -296,7 +296,7 @@ window._pestanaCobranzaActiva = 'todas';
 function renderCuentasXCobrar(filtroCliente = "") {
     const contenedor = document.getElementById("tablaCuentasXCobrar");
     if (!contenedor) return;
-    if (!['todas', 'al_corriente', 'morosos', 'promesas', 'incobrables'].includes(window._pestanaCobranzaActiva)) {
+    if (!['todas', 'al_corriente', 'morosos', 'promesas'].includes(window._pestanaCobranzaActiva)) {
         window._pestanaCobranzaActiva = 'todas';
     }
 
@@ -310,8 +310,8 @@ function renderCuentasXCobrar(filtroCliente = "") {
     }
     let htmlTabs = `
     <div style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
-        ${['todas', 'al_corriente', 'morosos', 'promesas', 'incobrables'].map(p => {
-            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas', incobrables:'🚫 Incobrables'};
+        ${['todas', 'al_corriente', 'morosos', 'promesas'].map(p => {
+            const labels = {todas:'🏠 Todas', al_corriente:'✅ Al Corriente', morosos:'🔴 Morosos', promesas:'📝 Promesas'};
             const bg = window._pestanaCobranzaActiva === p ? '#1e40af' : '#f3f4f6';
             const col = window._pestanaCobranzaActiva === p ? 'white' : '#4b5563';
             return `<button onclick="cambiarPestanaCobranza('${p}')" style="flex:1; min-width:120px; padding:12px; border-radius:8px; font-weight:bold; cursor:pointer; border:none; background:${bg}; color:${col};">${labels[p]}</button>`;
@@ -335,7 +335,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
             case 'al_corriente': mostrar = estadoCta.estadoGeneral === "Al corriente"; break;
             case 'morosos': mostrar = (estadoCta.estadoGeneral === "Atrasado" || estadoCta.estadoGeneral === "Crítico"); break;
             case 'promesas': mostrar = estadoCta.estadoGeneral === "Promesa"; break;
-            case 'incobrables': mostrar = false; break; // manejado por renderCuentasIncobrables
         }
 
         if (!mostrar) return;
@@ -360,18 +359,10 @@ function renderCuentasXCobrar(filtroCliente = "") {
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
                     <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
-                    <button onclick="marcarIncobrable('${c.folio}')" style="padding:6px 9px; background:#6b7280; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Marcar como incobrable">🚫 Incobrable</button>
                 </div>
             </td>
         </tr>`;
     });
-
-    // Pestaña incobrables: render separado con su propio contenedor
-    if (window._pestanaCobranzaActiva === 'incobrables') {
-        contenedor.innerHTML = htmlTabs + '<div id="tablaIncobrables"></div>';
-        renderCuentasIncobrables();
-        return;
-    }
 
     contenedor.innerHTML = htmlTabs + (cuentasMostradas === 0 ? `<p style="text-align:center; padding:20px;">Sin resultados.</p>` : htmlTabla + `</tbody></table></div>`);
 }
@@ -391,13 +382,9 @@ function renderAbonosDirectos(filtroCliente = "") {
         })
         .sort((a, b) => String(a.cuenta.nombre || a.cuenta.clienteNombre || '').localeCompare(String(b.cuenta.nombre || b.cuenta.clienteNombre || ''), 'es'));
 
-    if (filas.length === 0) {
-        contenedor.innerHTML = `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b;">Sin cuentas con saldo para abono directo.</div>`;
-        return;
-    }
-
     contenedor.innerHTML = `
-        <div style="overflow-x:auto; background:white; border:1px solid #e5e7eb; border-radius:10px;">
+        ${filas.length === 0 ? `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b; margin-bottom:16px;">Sin cuentas con saldo para abono directo.</div>` : `
+        <div style="overflow-x:auto; background:white; border:1px solid #e5e7eb; border-radius:10px; margin-bottom:18px;">
             <table class="tabla-admin" style="margin:0;">
                 <thead>
                     <tr>
@@ -405,7 +392,7 @@ function renderAbonosDirectos(filtroCliente = "") {
                         <th>Saldo</th>
                         <th>Pagares</th>
                         <th>Estado</th>
-                        <th style="text-align:right;">Accion</th>
+                        <th style="text-align:right;">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -416,13 +403,24 @@ function renderAbonosDirectos(filtroCliente = "") {
                             <td>${estado.pagaresPendientes.length} pendiente(s)</td>
                             <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2'}; color:${estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b'}; font-weight:bold; font-size:12px;">${_cxcEscHTML(estado.estadoGeneral)}</span></td>
                             <td style="text-align:right;">
-                                <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: 'directo' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">Aplicar</button>
+                                <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
+                                    <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: 'directo' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">Aplicar</button>
+                                    <button onclick="marcarIncobrable('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#475569; color:white; font-weight:bold; cursor:pointer;">Incobrable</button>
+                                </div>
                             </td>
                         </tr>
                     `).join('')}
                 </tbody>
             </table>
+        </div>`}
+        <div style="margin-top:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+                <h3 style="margin:0; color:#991b1b; font-size:18px;">Cuentas incobrables</h3>
+                <button onclick="renderAbonosDirectos()" style="padding:8px 12px; border:none; border-radius:7px; background:#e2e8f0; color:#334155; font-weight:bold; cursor:pointer;">Actualizar lista</button>
+            </div>
+            <div id="tablaIncobrables"></div>
         </div>`;
+    renderCuentasIncobrables();
 }
 
 function renderVisorCreditosCobranza() {
@@ -3112,14 +3110,31 @@ window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
 // GESTIÓN DE CUENTAS INCOBRABLES
 // ═══════════════════════════════════════════════════════════════════
 
+function _cxcSesionActual() {
+    if (typeof getSesion === 'function') return getSesion();
+    try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; }
+}
+
+function _cxcPuedeGestionarIncobrables() {
+    if (typeof esAdmin === 'function') return esAdmin();
+    return _cxcSesionActual()?.rol === 'admin';
+}
+
 window.marcarIncobrable = function(folio) {
     if (!folio) return;
+    if (!_cxcPuedeGestionarIncobrables()) {
+        if (typeof requireAdmin === 'function') {
+            return requireAdmin(() => window.marcarIncobrable(folio));
+        }
+        return alert('Acceso restringido. Solo administrador puede gestionar cuentas incobrables.');
+    }
+
     const cuentas = StorageService.get('cuentasPorCobrar', []);
     const idx = cuentas.findIndex(c => c.folio === folio);
     if (idx === -1) return alert('No se encontró la cuenta.');
 
     const cuenta = cuentas[idx];
-    const sesion = StorageService.get('sesionActiva', {});
+    const sesion = _cxcSesionActual() || {};
 
     if (cuenta.incobrable) {
         // Revertir
@@ -3134,6 +3149,7 @@ window.marcarIncobrable = function(folio) {
             detalle: `Cuenta ${folio} reactivada`, severidad: 'info'
         });
         alert('Cuenta reactivada. Ya aparecerá en proyecciones.');
+        if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
         renderCuentasIncobrables();
         return;
     }
@@ -3157,6 +3173,7 @@ window.marcarIncobrable = function(folio) {
     alert(`Cuenta marcada como incobrable.\nYa no aparecerá en proyecciones de efectivo.`);
     // Refrescar vistas
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
     renderCuentasIncobrables();
 };
 

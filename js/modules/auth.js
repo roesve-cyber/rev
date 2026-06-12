@@ -13,6 +13,96 @@ function getSesion() {
     try { return JSON.parse(sessionStorage.getItem('sesionActiva')); } catch { return null; }
 }
 
+const AUTH_INACTIVITY_LIMIT_MS = 20 * 60 * 1000;
+const AUTH_ACTIVITY_EVENTS = ['click', 'keydown', 'touchstart', 'mousemove', 'scroll'];
+let _authInactivityTimer = null;
+let _authActivityListenersReady = false;
+let _authLastActivityMs = 0;
+let _authLastPersistMs = 0;
+let _authLoginManualEnCurso = false;
+
+function _guardarSesionActiva(sesion) {
+    if (!sesion) return;
+    const ahora = Date.now();
+    const sesionConActividad = { ...sesion, _lastActivity: ahora };
+    sessionStorage.setItem('sesionActiva', JSON.stringify(sesionConActividad));
+    _authLastActivityMs = ahora;
+    _authLastPersistMs = ahora;
+    _activarControlInactividad();
+}
+
+function _programarCierrePorInactividad() {
+    clearTimeout(_authInactivityTimer);
+    const restante = Math.max(1000, AUTH_INACTIVITY_LIMIT_MS - (Date.now() - _authLastActivityMs));
+    _authInactivityTimer = setTimeout(() => _cerrarSesionPorInactividad(), restante);
+}
+
+function _registrarActividadSesion() {
+    if (!getSesion()) return;
+    const ahora = Date.now();
+    if (ahora - _authLastActivityMs < 1000) return;
+    _authLastActivityMs = ahora;
+    if (ahora - _authLastPersistMs > 60000) {
+        const sesion = getSesion();
+        if (sesion) {
+            sesion._lastActivity = ahora;
+            sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
+            _authLastPersistMs = ahora;
+        }
+    }
+    _programarCierrePorInactividad();
+}
+
+function _activarControlInactividad() {
+    const sesion = getSesion();
+    if (!sesion) return;
+    _authLastActivityMs = Number(sesion._lastActivity || Date.now());
+    _authLastPersistMs = _authLastActivityMs;
+
+    if (Date.now() - _authLastActivityMs >= AUTH_INACTIVITY_LIMIT_MS) {
+        _cerrarSesionPorInactividad();
+        return;
+    }
+
+    if (!_authActivityListenersReady) {
+        AUTH_ACTIVITY_EVENTS.forEach(evt => {
+            window.addEventListener(evt, _registrarActividadSesion, { passive: true });
+        });
+        window.addEventListener('focus', _registrarActividadSesion);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) return;
+            const sesionActual = getSesion();
+            const ultima = Number(sesionActual?._lastActivity || _authLastActivityMs || 0);
+            if (ultima && Date.now() - ultima >= AUTH_INACTIVITY_LIMIT_MS) {
+                _cerrarSesionPorInactividad();
+            } else {
+                _registrarActividadSesion();
+            }
+        });
+        _authActivityListenersReady = true;
+    }
+
+    _programarCierrePorInactividad();
+}
+
+async function _cerrarSesionInterno({ confirmar = false, motivo = '' } = {}) {
+    if (confirmar && !confirm('¿Cerrar sesión?')) return;
+    clearTimeout(_authInactivityTimer);
+    sessionStorage.removeItem('sesionActiva');
+    if (window._firebaseActivo && window._auth) {
+        try { await window._auth.signOut(); } catch (e) { console.warn('No se pudo cerrar Firebase Auth:', e); }
+    }
+    if (motivo) {
+        try { sessionStorage.setItem('_loginMensaje', motivo); } catch(e) {}
+    }
+    location.reload();
+}
+
+async function _cerrarSesionPorInactividad() {
+    if (!getSesion() && !(window._firebaseActivo && window._auth?.currentUser)) return;
+    await _cerrarSesionInterno({ confirmar: false, motivo: 'Sesion cerrada por inactividad.' });
+}
+
 function esAdmin() {
     return getSesion()?.rol === 'admin';
 }
@@ -336,6 +426,7 @@ async function _verificarCredencialesAdmin(email, pass) {
         return;
     }
     try {
+        _authLoginManualEnCurso = true;
         const cred = await window._auth.signInWithEmailAndPassword(email, pass);
         const uid = cred.user.uid;
         const perfil = await _obtenerPerfilFirebaseActivo(cred.user);
@@ -344,7 +435,8 @@ async function _verificarCredencialesAdmin(email, pass) {
             return;
         }
         const sesion = _sesionDesdePerfil({ uid, email: cred.user.email, perfil: { ...perfil, rol: 'admin' }, fallbackNombre: cred.user.email });
-        sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
+        _guardarSesionActiva(sesion);
+        _authLoginManualEnCurso = false;
         aplicarRolUI();
         document.querySelector('[data-modal="req-admin"]')?.remove();
         if (typeof window._adminCallback === 'function') {
@@ -353,6 +445,7 @@ async function _verificarCredencialesAdmin(email, pass) {
             cb();
         }
     } catch (err) {
+        _authLoginManualEnCurso = false;
         if (errEl) errEl.textContent = '❌ Credenciales incorrectas.';
     }
 }
@@ -422,6 +515,11 @@ function _crearPantallaLogin() {
       </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    const mensajeLogin = sessionStorage.getItem('_loginMensaje');
+    if (mensajeLogin) {
+        sessionStorage.removeItem('_loginMensaje');
+        mostrarErrorLogin(mensajeLogin);
+    }
     document.getElementById('loginEmail')?.focus();
 }
 
@@ -432,10 +530,22 @@ function verificarSesionInicial() {
             if (user) {
                 try {
                 let sesion = JSON.parse(sessionStorage.getItem('sesionActiva') || 'null');
+                if (!sesion && !_authLoginManualEnCurso) {
+                    await window._auth.signOut();
+                    mostrarLoginScreen();
+                    return;
+                }
+                if (!sesion && _authLoginManualEnCurso) return;
+                if (Date.now() - Number(sesion._lastActivity || 0) >= AUTH_INACTIVITY_LIMIT_MS) {
+                    await _cerrarSesionPorInactividad();
+                    return;
+                }
                 if (!sesion || sesion.uid !== user.uid) {
                     const perfil = await _obtenerPerfilFirebaseActivo(user);
                     sesion = _sesionDesdePerfil({ uid: user.uid, email: user.email, perfil, fallbackNombre: user.email });
-                    sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
+                    _guardarSesionActiva(sesion);
+                } else {
+                    _activarControlInactividad();
                 }
                 ocultarLoginScreen();
                 aplicarRolUI();
@@ -448,12 +558,16 @@ function verificarSesionInicial() {
                     mostrarErrorLogin(err.message || 'Tu usuario no esta autorizado en Firebase.');
                 }
             } else {
+                sessionStorage.removeItem('sesionActiva');
                 mostrarLoginScreen();
             }
         });
     } else {
-        const sesion = sessionStorage.getItem('sesionActiva');
-        if (sesion) { aplicarRolUI(); }
+        const sesion = getSesion();
+        if (sesion && Date.now() - Number(sesion._lastActivity || 0) < AUTH_INACTIVITY_LIMIT_MS) {
+            aplicarRolUI();
+            _activarControlInactividad();
+        }
         else { mostrarLoginScreen(); }
     }
 }
@@ -469,11 +583,13 @@ async function iniciarSesion() {
 
     try {
         if (window._firebaseActivo && window._auth) {
+            _authLoginManualEnCurso = true;
             const cred = await window._auth.signInWithEmailAndPassword(email, pass);
             const uid = cred.user.uid;
             const perfil = await _obtenerPerfilFirebaseActivo(cred.user);
             const sesion = _sesionDesdePerfil({ uid, email, perfil, fallbackNombre: email });
-            sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
+            _guardarSesionActiva(sesion);
+            _authLoginManualEnCurso = false;
             ocultarLoginScreen();
             aplicarRolUI();
             await _sincronizarFirebaseDespuesDeLogin();
@@ -495,6 +611,7 @@ async function iniciarSesion() {
             _iniciarSesionLocalFallback(email, pass);
         }
     } catch(err) {
+        _authLoginManualEnCurso = false;
         let msg = 'Error al iniciar sesión';
         if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = 'Email o contraseña incorrectos';
         if (err.code === 'auth/invalid-email') msg = 'Email inválido';
@@ -532,7 +649,7 @@ function _iniciarSesionLocalFallback(email, pass) {
         sesion.vendedorId = vendedorSesion.id;
         sesion.vendedorNombre = vendedorSesion.nombre;
     }
-    sessionStorage.setItem('sesionActiva', JSON.stringify(sesion));
+    _guardarSesionActiva(sesion);
     ocultarLoginScreen();
     aplicarRolUI();
     _recargarVariablesGlobales();
@@ -583,12 +700,7 @@ async function cambiarContrasenaUsuarioActual() {
 }
 
 async function cerrarSesion() {
-    if (!confirm('¿Cerrar sesión?')) return;
-    if (window._firebaseActivo && window._auth) {
-        await window._auth.signOut();
-    }
-    sessionStorage.removeItem('sesionActiva');
-    location.reload();
+    await _cerrarSesionInterno({ confirmar: true });
 }
 
 // ── menú de usuario en header ─────────────────────────────────────────────────
@@ -915,7 +1027,7 @@ async function crearUsuarioFirebase(email, pass, nombre, rol, vendedorId = '') {
     }
     // Restaurar sesión del admin en sessionStorage
     if (sesionAdmin) {
-        sessionStorage.setItem('sesionActiva', JSON.stringify(sesionAdmin));
+        _guardarSesionActiva(sesionAdmin);
     }
     return uid;
 }

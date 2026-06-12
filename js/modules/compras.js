@@ -4753,6 +4753,25 @@ function _consigNormTexto(valor) {
         .trim();
 }
 
+function _consigFechaOrdenDoc(valor) {
+    const raw = String(valor || '').trim();
+    if (!raw) return 0;
+    const directo = new Date(raw).getTime();
+    if (!Number.isNaN(directo)) return directo;
+    const limpio = _consigNormTexto(raw).replace(/\b(lun|mar|mie|jue|vie|sab|dom)\b/g, '').trim();
+    const meses = { ene:0, enero:0, feb:1, febrero:1, mar:2, marzo:2, abr:3, abril:3, may:4, mayo:4, jun:5, junio:5, jul:6, julio:6, ago:7, agosto:7, sep:8, sept:8, septiembre:8, oct:9, octubre:9, nov:10, noviembre:10, dic:11, diciembre:11 };
+    const m = limpio.match(/(\d{1,2})\s+de\s+([a-z]+)\s+(\d{4})/);
+    if (m && meses[m[2]] !== undefined) return new Date(Number(m[3]), meses[m[2]], Number(m[1])).getTime();
+    const normal = _comprasFechaVista(raw, raw);
+    const vist = new Date(normal).getTime();
+    return Number.isNaN(vist) ? 0 : vist;
+}
+
+function _consigValorPublico(valor) {
+    const txt = String(valor || '').trim();
+    return (!txt || _consigNormTexto(txt) === 'general') ? '' : txt;
+}
+
 function _consigVentaFolio(v = {}) {
     return String(v.folio || v.folioVenta || v.datosVenta?.folio || v.ticket || '').trim();
 }
@@ -5270,27 +5289,27 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
 
     const filas = foliosEstado.map(f => {
         const itemsHtml = f.consignaciones.map(c => `
-            <tr style="border-bottom: 1px dashed #e2e8f0; font-size:12px; background:#ffffff;">
-                <td style="padding:8px 12px 8px 28px; color:#475569; max-width:280px; word-wrap:break-word;">
+            <tr style="border-bottom:1px dashed #e2e8f0;font-size:11px;background:#ffffff;line-height:1.2;">
+                <td style="padding:4px 8px 4px 18px; color:#475569; max-width:280px; word-wrap:break-word;">
                     <span style="color:#0f766e; font-weight:bold;">📦</span> ${_comprasEscHTML(c.producto)}
                     <br><small style="color:#94a3b8; font-weight:500;">🎨 Variedad: ${_comprasEscHTML(c.color || 'General')} | 📍 Bodega: ${_comprasEscHTML(c.ubicacion || 'General')}</small>
                 </td>
-                <td style="padding:8px 12px; text-align:right; color:#475569; font-weight:500;">${dinero(c.costoUnitario)}</td>
-                <td style="padding:8px 12px; text-align:center; color:#334155; font-weight:600;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)} u</td>
-                <td style="padding:8px 12px; text-align:right; color:#0f172a; font-weight:600;">${dinero(_consigImporte(c))}</td>
+                <td style="padding:4px 8px; text-align:right; color:#475569; font-weight:500;">${dinero(c.costoUnitario)}</td>
+                <td style="padding:4px 8px; text-align:center; color:#334155; font-weight:600;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)} u</td>
+                <td style="padding:4px 8px; text-align:right; color:#0f172a; font-weight:600;">${dinero(_consigImporte(c))}</td>
                 <td colspan="2" style="background:#f8fafc; border-bottom: 1px dashed #e2e8f0;"></td>
             </tr>
         `).join('');
 
         const anticiposHtml = f.anticipos.map(a => `
-            <tr style="background:#f0fdf4; border-bottom:1px solid #e2e8f0; font-size:12px;">
-                <td style="padding:6px 12px 6px 28px; color:#15803d; font-weight:600;">
+            <tr style="background:#f0fdf4;border-bottom:1px solid #e2e8f0;font-size:11px;line-height:1.2;">
+                <td style="padding:4px 8px 4px 18px; color:#15803d; font-weight:600;">
                     <span style="color:#16a34a;">💰</span> Anticipo registrado (${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))})
                 </td>
-                <td colspan="3" style="padding:6px 12px; color:#64748b; font-style:italic; max-width:250px; word-wrap:break-word;">
+                <td colspan="3" style="padding:4px 8px; color:#64748b; font-style:italic; max-width:250px; word-wrap:break-word;">
                     Resguardo en Bolsa General
                 </td>
-                <td style="padding:6px 12px; text-align:right; color:#15803d; font-weight:bold;">${dinero(a.monto || 0)}</td>
+                <td style="padding:4px 8px; text-align:right; color:#15803d; font-weight:bold;">${dinero(a.monto || 0)}</td>
                 <td style="background:#f0fdf4; border-bottom:1px solid #e2e8f0;"></td>
             </tr>
         `).join('');
@@ -5310,16 +5329,16 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 ? `<br><span style="color:#b91c1c; font-weight:bold; font-size:11px;">⚠️ Pendiente de Pago</span>`
                 : '<br><span style="color:#166534; font-weight:bold; font-size:11px;">✔️ Liquidada al 100%</span>';
             return `
-            <tr style="background:#fff5f5; border-bottom:1px solid #fecdd3; font-size:12px;">
-                <td style="padding:6px 12px 6px 28px; color:#b91c1c;">
+            <tr style="background:#fff5f5;border-bottom:1px solid #fecdd3;font-size:11px;line-height:1.2;">
+                <td style="padding:4px 8px 4px 18px; color:#b91c1c;">
                     <span style="color:#ef4444;">📑</span> <b>Reporte de Venta</b> (${_comprasEscHTML(_comprasFechaVista(cxp.fecha || cxp.fechaISO || cxp.fechaIso, '-'))})
                     <br><small style="color:#475569;">${_comprasEscHTML(cxp.producto)}</small>
                 </td>
-                <td style="padding:6px 12px; text-align:right; color:#475569;">${dinero(cxp.articulos?.[0]?.costo || 0)}</td>
-                <td style="padding:6px 12px; text-align:center; color:#334155;">${cxp.articulos?.[0]?.cantidad || 1} u</td>
-                <td style="padding:6px 12px; text-align:right; color:#0f172a; font-weight:bold;">${dinero(cxp.total || 0)}</td>
-                <td style="padding:6px 12px; text-align:right; color:#16a34a;">${dinero(pagosEfectivosVenta)}<br>${anticiposAplicadosVenta > 0.01 ? `<small style="color:#0e7490;">Anticipo aplicado: ${dinero(anticiposAplicadosVenta)}</small>` : ''}</td>
-                <td style="padding:6px 12px; text-align:right; color:#b91c1c; font-weight:bold;">
+                <td style="padding:4px 8px; text-align:right; color:#475569;">${dinero(cxp.articulos?.[0]?.costo || 0)}</td>
+                <td style="padding:4px 8px; text-align:center; color:#334155;">${cxp.articulos?.[0]?.cantidad || 1} u</td>
+                <td style="padding:4px 8px; text-align:right; color:#0f172a; font-weight:bold;">${dinero(cxp.total || 0)}</td>
+                <td style="padding:4px 8px; text-align:right; color:#16a34a;">${dinero(pagosEfectivosVenta)}<br>${anticiposAplicadosVenta > 0.01 ? `<small style="color:#0e7490;font-size:10px;">Anticipo: ${dinero(anticiposAplicadosVenta)}</small>` : ''}</td>
+                <td style="padding:4px 8px; text-align:right; color:#b91c1c; font-weight:bold;">
                     ${dinero(saldoFijoRenglon)}
                     ${controlPagoHtml}
                 </td>
@@ -5328,16 +5347,16 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
 
         const anticipo = _consigAnticipoLectura(f);
         return `
-            <tr style="background:#f1f5f9; font-weight:bold; border-top:2px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">
-                <td style="padding:10px 12px; color:#1e293b;">
+            <tr style="background:#f1f5f9;font-weight:bold;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1;font-size:11px;line-height:1.2;">
+                <td style="padding:6px 8px; color:#1e293b;">
                     <span style="color:#475569;">📄</span> Folio: ${_comprasEscHTML(f.folioOrigen)}
                     <br><small style="color:#64748b; font-weight:normal;">Proveedor: ${_comprasEscHTML(f.proveedor)}</small>
                 </td>
-                <td style="padding:10px 12px; text-align:right; color:#0f172a;">${dinero(f.compraOriginal)}</td>
-                <td style="padding:10px 12px; text-align:right; color:#d97706;">${dinero(f.vendidoReportado)}</td>
-                <td style="padding:10px 12px; text-align:right; color:#16a34a;">${dinero(f.pagadoPorVentas)}</td>
-                <td style="padding:10px 12px; text-align:right; color:#2563eb;">${dinero(anticipo.entregado)}<br><small style="color:#0e7490;">Aplicado: ${dinero(anticipo.aplicado)}</small><br><small style="color:#64748b;">Disp. directo: ${dinero(anticipo.disponibleDirecto)}</small>${anticipo.lineaGlobal}</td>
-                <td style="padding:10px 12px; text-align:right; color:#be123c;">${dinero(f.saldoNeto)}</td>
+                <td style="padding:6px 8px; text-align:right; color:#0f172a;">${dinero(f.compraOriginal)}</td>
+                <td style="padding:6px 8px; text-align:right; color:#d97706;">${dinero(f.vendidoReportado)}</td>
+                <td style="padding:6px 8px; text-align:right; color:#16a34a;">${dinero(f.pagadoPorVentas)}</td>
+                <td style="padding:6px 8px; text-align:right; color:#2563eb;">${dinero(anticipo.entregado)}<br><small style="color:#0e7490;font-size:10px;">Aplicado: ${dinero(anticipo.aplicado)}</small><br><small style="color:#64748b;font-size:10px;">Disp: ${dinero(anticipo.disponibleDirecto)}</small>${anticipo.lineaGlobal}</td>
+                <td style="padding:6px 8px; text-align:right; color:#be123c;">${dinero(f.saldoNeto)}</td>
             </tr>
             ${itemsHtml}
             ${anticiposHtml}
@@ -5345,24 +5364,92 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         `;
     }).join('');
 
+    const _consigFechaOrdenDoc = (valor) => {
+        const raw = String(valor || '').trim();
+        if (!raw) return 0;
+        const directo = new Date(raw).getTime();
+        if (!Number.isNaN(directo)) return directo;
+        const limpio = _consigNormTexto(raw).replace(/\b(lun|mar|mie|jue|vie|sab|dom)\b/g, '').trim();
+        const meses = { ene:0, enero:0, feb:1, febrero:1, mar:2, marzo:2, abr:3, abril:3, may:4, mayo:4, jun:5, junio:5, jul:6, julio:6, ago:7, agosto:7, sep:8, sept:8, septiembre:8, oct:9, octubre:9, nov:10, noviembre:10, dic:11, diciembre:11 };
+        const m = limpio.match(/(\d{1,2})\s+de\s+([a-z]+)\s+(\d{4})/);
+        if (m && meses[m[2]] !== undefined) return new Date(Number(m[3]), meses[m[2]], Number(m[1])).getTime();
+        const normal = _comprasFechaVista(raw, raw);
+        const vist = new Date(normal).getTime();
+        return Number.isNaN(vist) ? 0 : vist;
+    };
+    const _consigValorPublico = (valor) => {
+        const txt = String(valor || '').trim();
+        return (!txt || _consigNormTexto(txt) === 'general') ? '' : txt;
+    };
+
+    const bloquesConsignacion = foliosEstado.map(f => {
+        const productos = _comprasAsegurarArray(f.consignaciones).map(c => {
+            const cantTotal = Number(c.cantidadTotal || 0);
+            const cantPendiente = Number(c.cantidadPendiente || 0);
+            const cantVendida = Math.max(0, cantTotal - cantPendiente);
+            const variante = _consigValorPublico(c.color);
+            return `
+                <div style="border:1px solid #e2e8f0;border-radius:9px;padding:9px;background:#fff;break-inside:avoid;box-shadow:0 1px 2px rgba(15,23,42,.04);">
+                    <div style="font-size:13px;font-weight:900;color:#0f172a;line-height:1.2;overflow-wrap:anywhere;">${_comprasEscHTML(c.producto || 'Producto')}</div>
+                    <div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:10px;align-items:center;margin-top:6px;font-size:12px;">
+                    <span style="color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_comprasEscHTML(variante)}</span>
+                    <span style="color:#475569;">Costo <b style="color:#0f172a;">${dinero(c.costoUnitario)}</b></span>
+                    <span style="color:#475569;">Stock <b style="color:#0f172a;">${cantPendiente}/${cantTotal} u</b></span>
+                    <span style="color:#475569;">Vend. <b style="color:#b45309;">${cantVendida} u</b></span>
+                    <strong style="text-align:right;color:#0f766e;font-size:13px;white-space:nowrap;">${dinero(_consigImporte(c))}</strong>
+                    </div>
+                </div>`;
+        }).join('');
+
+        const anticiposBloque = _comprasAsegurarArray(f.anticipos)
+            .slice()
+            .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaStr) - _consigFechaOrdenDoc(b.fecha || b.fechaStr))
+            .map(a =>
+            `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;font-size:12px;border-top:1px solid #e2e8f0;padding:6px 0;color:#15803d;"><span>${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))}</span><strong>${dinero(a.monto || 0)}</strong></div>`
+        ).join('');
+        const ventasBloque = _comprasAsegurarArray(f.cuentasCxp)
+            .slice()
+            .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaISO || a.fechaIso) - _consigFechaOrdenDoc(b.fecha || b.fechaISO || b.fechaIso))
+            .map(cxp =>
+            `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;font-size:12px;border-top:1px solid #e2e8f0;padding:6px 0;color:#b45309;"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_comprasEscHTML(cxp.producto || '-')}</span><strong>${dinero(cxp.total || 0)}</strong></div>`
+        ).join('');
+        const subtotalProductos = _comprasAsegurarArray(f.consignaciones).reduce((s, c) => s + Number(_consigImporte(c) || 0), 0);
+        const subtotalAnticipos = _comprasAsegurarArray(f.anticipos).reduce((s, a) => s + Number(a.monto || 0), 0);
+        const subtotalVentas = _comprasAsegurarArray(f.cuentasCxp).reduce((s, cxp) => s + Number(cxp.total || 0), 0);
+        const tituloBloque = scope === 'folio'
+            ? ''
+            : `<div style="background:#f8fafc;border-bottom:1px solid #dbe4ee;padding:8px 10px;"><strong style="font-size:14px;color:#0f172a;">Folio ${_comprasEscHTML(f.folioOrigen || '-')}</strong><span style="font-size:12px;color:#64748b;margin-left:8px;">${_comprasEscHTML(f.proveedor || '')}</span></div>`;
+
+        return `
+            <section style="border:1px solid #dbe4ee;border-radius:9px;margin:10px 0;overflow:hidden;background:#fff;">
+                ${tituloBloque}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:10px;">${productos || '<div style="color:#94a3b8;">Sin productos.</div>'}</div>
+                <div style="margin:0 10px 10px;padding:8px 10px;border-top:2px solid #0f766e;background:#ecfdf5;border-radius:7px;text-align:right;font-size:13px;color:#0f766e;font-weight:900;">Subtotal productos: ${dinero(subtotalProductos)}</div>
+                ${(anticiposBloque || ventasBloque) ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 10px 10px;">
+                    <div style="border:1px solid #dcfce7;border-radius:9px;padding:9px;background:#f0fdf4;"><div style="font-size:14px;font-weight:900;color:#15803d;margin-bottom:4px;">Anticipos</div>${anticiposBloque || '<div style="font-size:12px;color:#94a3b8;">Sin anticipos.</div>'}<div style="border-top:2px solid #86efac;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#15803d;">Subtotal anticipos: ${dinero(subtotalAnticipos)}</div></div>
+                    <div style="border:1px solid #fed7aa;border-radius:9px;padding:9px;background:#fff7ed;"><div style="font-size:14px;font-weight:900;color:#b45309;margin-bottom:4px;">Ventas reportadas</div>${ventasBloque || '<div style="font-size:12px;color:#94a3b8;">Sin ventas.</div>'}<div style="border-top:2px solid #fdba74;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#b45309;">Subtotal ventas: ${dinero(subtotalVentas)}</div></div>
+                </div>` : ''}
+            </section>`;
+    }).join('');
+
     const safeDomId = `panel-consignacion-print-${scope}-${String(key).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
     const html = `
-        <div id="${safeDomId}" style="background:#ffffff; padding:24px; color:#0f172a; font-family:Arial, sans-serif; box-sizing:border-box;">
-            <div style="border-bottom:3px solid #0f766e; padding-bottom:14px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:flex-start; gap:16px;">
+        <div id="${safeDomId}" style="background:#ffffff; padding:16px; color:#0f172a; font-family:Arial, sans-serif; box-sizing:border-box;">
+            <div style="border-bottom:2px solid #0f766e; padding-bottom:9px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                 <div style="flex:1;">
-                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                    <div style="display:flex; align-items:center; gap:9px; margin-bottom:4px;">
                         <span style="font-size:28px;">🏛️</span>
                         <div>
-                            <div style="font-size:18px; font-weight:900; color:#0f766e; letter-spacing:-0.5px;">${empresaNombre.toUpperCase()}</div>
+                            <div style="font-size:15px; font-weight:900; color:#0f766e; letter-spacing:-0.5px;">${empresaNombre.toUpperCase()}</div>
                             ${empresaDir ? `<div style="font-size:11px; color:#64748b; margin-top:1px;">${empresaDir}</div>` : ''}
                             ${empresaTel ? `<div style="font-size:11px; color:#64748b;">Tel/Cel: ${empresaTel}</div>` : ''}
                         </div>
                     </div>
-                    <h2 style="margin:4px 0 0; color:#0f766e; font-size:20px; font-weight:800; letter-spacing:-0.5px;">${titulo}</h2>
+                    <h2 style="margin:2px 0 0; color:#0f766e; font-size:16px; font-weight:800; letter-spacing:-0.5px;">${titulo}</h2>
                     <p style="margin:2px 0 0; color:#64748b; font-size:12px;">Filtro de Alcance: <strong style="color:#334155;">${scope.toUpperCase()}</strong></p>
                 </div>
-                <div style="text-align:right; min-width:200px;">
+                <div style="text-align:right; min-width:180px;">
                     <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}', 'pdf')" style="background:#1e40af; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">PDF</button>
                     <button id="btn-img-consig-${safeDomId}" onclick="window.descargarImagenEstadoCuentaConsignacion('${scope}', '${key}')" style="background:#047857; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:6px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">Imagen</button>
                     <button onclick="window.emitirEstadoCuentaProveedor('${scope}', '${key}', 'ticket')" style="background:#7c3aed; border:none; color:white; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-bottom:8px; margin-right:8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">Ticket termico</button>
@@ -5372,37 +5459,39 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 </div>
             </div>
 
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:18px; font-size:11px; color:#475569; line-height:1.4;">
+            <div style="display:none;background:#f8fafc; border:1px solid #e2e8f0; border-radius:7px; padding:7px 10px; margin-bottom:10px; font-size:10.5px; color:#475569; line-height:1.25;">
                 📌 <strong>Regla de Auditoría Consolidada:</strong> Balance Pendiente Exigible = Compra Recibida − Pagos Liquidados − Bolsa de Anticipos Libres.
             </div>
 
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:22px;">
-                <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:12px; border-radius:8px;">
+            <div style="display:none; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:12px;">
+                <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:8px; border-radius:7px;">
                     <small style="color:#1e40af; font-weight:bold; font-size:11px; text-transform:uppercase;">Compra Original</small><br>
-                    <strong style="font-size:18px; color:#1d4ed8;">${dinero(kpiOriginal)}</strong>
+                    <strong style="font-size:15px; color:#1d4ed8;">${dinero(kpiOriginal)}</strong>
                 </div>
-                <div style="background:#fef3c7; border:1px solid #fde68a; padding:12px; border-radius:8px;">
+                <div style="background:#fef3c7; border:1px solid #fde68a; padding:8px; border-radius:7px;">
                     <small style="color:#92400e; font-weight:bold; font-size:11px; text-transform:uppercase;">Vendido / Reportado</small><br>
-                    <strong style="font-size:18px; color:#b45309;">${dinero(kpiVendido)}</strong>
+                    <strong style="font-size:15px; color:#b45309;">${dinero(kpiVendido)}</strong>
                 </div>
-                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px;">
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:8px; border-radius:7px;">
                     <small style="color:#166534; font-weight:bold; font-size:11px; text-transform:uppercase;">Pagado por Ventas</small><br>
-                    <strong style="font-size:18px; color:#15803d;">${dinero(kpiPagadoVentas)}</strong>
+                    <strong style="font-size:15px; color:#15803d;">${dinero(kpiPagadoVentas)}</strong>
                 </div>
-                <div style="background:#f5f3ff; border:1px solid #ddd6fe; padding:12px; border-radius:8px;">
+                <div style="background:#f5f3ff; border:1px solid #ddd6fe; padding:8px; border-radius:7px;">
                     <small style="color:#5b21b6; font-weight:bold; font-size:11px; text-transform:uppercase;">Anticipo Entregado</small><br>
-                    <strong style="font-size:18px; color:#6d28d9;">${dinero(kpiAnticiposEntregados)}</strong><br>
+                    <strong style="font-size:15px; color:#6d28d9;">${dinero(kpiAnticiposEntregados)}</strong><br>
                     <small style="color:#0e7490;">Aplicado: ${dinero(kpiAnticiposAplicados)}</small><br>
                     <small style="color:#64748b;">Disponible: ${dinero(kpiAnticiposDisponibles)}</small>
                 </div>
-                <div style="background:#fff1f2; border:1px solid #fecdd3; padding:12px; border-radius:8px;">
+                <div style="background:#fff1f2; border:1px solid #fecdd3; padding:8px; border-radius:7px;">
                     <small style="color:#991b1b; font-weight:bold; font-size:11px; text-transform:uppercase;">Saldo Neto Real</small><br>
-                    <strong style="font-size:18px; color:#be123c;">${dinero(kpiSaldoNeto)}</strong>
+                    <strong style="font-size:15px; color:#be123c;">${dinero(kpiSaldoNeto)}</strong>
                 </div>
             </div>
 
-            <div style="width:100%; overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:24px; box-sizing:border-box;">
-                <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:800px; table-layout:fixed;">
+            ${bloquesConsignacion || '<div style="padding:16px;text-align:center;color:#94a3b8;">No hay registros.</div>'}
+
+            <div style="display:none;width:100%; overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:14px; box-sizing:border-box;">
+                <table style="width:100%; border-collapse:collapse; font-size:11px; min-width:760px; table-layout:fixed;">
                     <colgroup>
                         <col style="width: 35%;">
                         <col style="width: 13%;">
@@ -5413,12 +5502,12 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                     </colgroup>
                     <thead style="background:#f8fafc; color:#475569; border-bottom:2px solid #e2e8f0;">
                         <tr>
-                            <th style="padding:12px 10px; text-align:left; font-weight:700; text-transform:uppercase; font-size:11px;">Origen / Producto / Variante</th>
-                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Costo base</th>
-                            <th style="padding:12px 10px; text-align:center; font-weight:700; text-transform:uppercase; font-size:11px;">Stock Activo</th>
-                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Importe Total</th>
-                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Anticipos</th>
-                            <th style="padding:12px 10px; text-align:right; font-weight:700; text-transform:uppercase; font-size:11px;">Saldo Neto</th>
+                            <th style="padding:6px 8px; text-align:left; font-weight:700; text-transform:uppercase; font-size:10px;">Origen / Producto / Variante</th>
+                            <th style="padding:6px 8px; text-align:right; font-weight:700; text-transform:uppercase; font-size:10px;">Costo base</th>
+                            <th style="padding:6px 8px; text-align:center; font-weight:700; text-transform:uppercase; font-size:10px;">Stock</th>
+                            <th style="padding:6px 8px; text-align:right; font-weight:700; text-transform:uppercase; font-size:10px;">Importe</th>
+                            <th style="padding:6px 8px; text-align:right; font-weight:700; text-transform:uppercase; font-size:10px;">Anticipos</th>
+                            <th style="padding:6px 8px; text-align:right; font-weight:700; text-transform:uppercase; font-size:10px;">Saldo</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -5595,6 +5684,7 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
 
     const base = folio || grupo || {
         compraOriginal: resumen.grupos.reduce((s, g) => s + g.compraOriginal, 0),
+        vendidoReportado: resumen.grupos.reduce((s, g) => s + g.vendidoReportado, 0),
         pagadoPorVentas: resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0),
         anticiposTotal: resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0),
         anticiposAplicados: 0,
@@ -5639,37 +5729,42 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
                 }
             }
 
-            const estadoStockHtml = cantVendida > 0 
+            let estadoStockHtml = cantVendida > 0 
                 ? `<b style="color: #b45309; font-size: 12px;">✔️ ${cantVendida} Vendida(s)</b>${infoVentaHtml}<br><span style="color: #64748b; font-size: 11px;">${cantPendiente} en piso</span>`
-                : `<b style="color: #0f766e; font-size: 12px;">${cantPendiente} Disponible(s)</b>`;
+                : `<b style="color:#0f766e;font-size:10px;">${cantPendiente} disponible(s)</b>`;
+            estadoStockHtml = estadoStockHtml
+                .replace(/font-size:\s*12px/g, 'font-size:10px')
+                .replace(/font-size:\s*11px/g, 'font-size:9px')
+                .replace(/Vendida\(s\)/g, 'vendida(s)')
+                .replace(/LiquidaciÃ³n pactada/g, 'Liq. pactada');
 
             return `
-            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px;">
-                <td style="padding: 10px; text-align: left; color: #334155;">
+            <tr style="border-bottom:1px solid #e2e8f0;font-size:10px;line-height:1.15;">
+                <td style="padding:4px 5px; text-align: left; color: #334155;">
                     <b>${_comprasEscHTML(c.producto)}</b>
-                    ${c.color ? `<br><span style="color:#64748b; font-size:11px;">Variante: ${_comprasEscHTML(c.color)}</span>` : ''}
+                    ${c.color ? `<br><span style="color:#64748b; font-size:9px;">Variante: ${_comprasEscHTML(c.color)}</span>` : ''}
                 </td>
-                <td style="padding: 10px; text-align: right; color: #334155;">${dinero(c.costoUnitario)}</td>
-                <td style="padding: 10px; text-align: center; line-height: 1.3;">
+                <td style="padding:4px 5px; text-align: right; color: #334155;">${dinero(c.costoUnitario)}</td>
+                <td style="padding:4px 5px; text-align: center; line-height: 1.15;">
                     ${estadoStockHtml}
                 </td>
-                <td style="padding: 10px; text-align: right; color: #334155; font-weight: bold;">${dinero(_consigImporte(c))}</td>
-                <td style="padding: 10px; text-align: right; color: #0f172a; font-weight: bold;">${dinero(_consigImporte(c))}</td>
+                <td style="padding:4px 5px; text-align: right; color: #334155; font-weight: bold;">${dinero(_consigImporte(c))}</td>
+                <td style="padding:4px 5px; text-align: right; color: #0f172a; font-weight: bold;">${dinero(_consigImporte(c))}</td>
             </tr>`;
         }).join('');
 
         const anticiposHtml = f.anticipos.map(a => `
-            <tr style="background-color: #f0fdf4; color: #15803d; font-size: 12px; font-weight: bold;">
-                <td colspan="3" style="padding: 10px; text-align: right;">
+            <tr style="background-color:#f0fdf4;color:#15803d;font-size:10px;font-weight:bold;line-height:1.15;">
+                <td colspan="3" style="padding:4px 5px; text-align: right;">
                     Anticipo registrado (${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))})
                 </td>
-                <td style="padding: 10px; text-align: right;">-${dinero(a.monto || 0)}</td>
-                <td style="padding: 10px; text-align: right; color: #16a34a;">Abonado</td>
+                <td style="padding:4px 5px; text-align: right;">-${dinero(a.monto || 0)}</td>
+                <td style="padding:4px 5px; text-align: right; color: #16a34a;">Abonado</td>
             </tr>
         `).join('');
 
         return `
-            <tr style="background: #f8fafc; font-weight: bold; border-top: 2px solid #cbd5e1;">
+            <tr style="background:#f8fafc;font-weight:bold;border-top:1px solid #cbd5e1;">
                 <td colspan="5" style="padding: 10px; color: #1e293b; font-size: 12px;">📄 Identificador de Relación: ${_comprasEscHTML(f.folioOrigen)}</td>
             </tr>
             ${itemsHtml}
@@ -5684,6 +5779,93 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
     const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
     const empresaNombre = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
 
+    const productosConsignacionHtml = foliosEstado.map(f => {
+        const productoCards = _comprasAsegurarArray(f.consignaciones).map(c => {
+            const cantTotal = Number(c.cantidadTotal || 0);
+            const cantPendiente = Number(c.cantidadPendiente || 0);
+            const cantVendida = Math.max(0, cantTotal - cantPendiente);
+            const variante = _consigValorPublico(c.color);
+            return `
+                <div class="prod-card">
+                    <div class="prod-title">${_comprasEscHTML(c.producto || 'Producto')}</div>
+                    <div class="prod-meta">${_comprasEscHTML(variante)}</div>
+                    <div class="prod-data">Costo <b>${dinero(c.costoUnitario)}</b></div>
+                    <div class="prod-data">Stock <b>${cantPendiente}/${cantTotal} u</b></div>
+                    <div class="prod-data">Vend. <b>${cantVendida} u</b></div>
+                    <div class="prod-total">${dinero(_consigImporte(c))}</div>
+                </div>`;
+        }).join('');
+        const subtotalProductos = _comprasAsegurarArray(f.consignaciones).reduce((s, c) => s + Number(_consigImporte(c) || 0), 0);
+        const tituloBloque = scope === 'folio'
+            ? ''
+            : `<div class="folio-head"><div><strong>Folio ${_comprasEscHTML(f.folioOrigen || '-')}</strong><span>${_comprasEscHTML(f.proveedor || proveedorNombre)}</span></div></div>`;
+
+        return `
+            <section class="folio-card">
+                ${tituloBloque}
+                <div class="prod-grid">${productoCards || '<div class="empty-block">Sin productos en consignacion.</div>'}</div>
+                <div class="block-subtotal product-subtotal">Subtotal productos: ${dinero(subtotalProductos)}</div>
+            </section>`;
+    }).join('');
+
+    const movimientosConsignacionHtml = foliosEstado.map(f => {
+        const anticiposMov = _comprasAsegurarArray(f.anticipos)
+            .slice()
+            .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaStr) - _consigFechaOrdenDoc(b.fecha || b.fechaStr))
+            .map(a => `
+            <div class="mov-row mov-anticipo">
+                <span>Anticipo</span>
+                <b>${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))}</b>
+                <em>Bolsa general</em>
+                <strong>${dinero(a.monto || 0)}</strong>
+            </div>`).join('');
+
+        const ventasMov = _comprasAsegurarArray(f.cuentasCxp)
+            .slice()
+            .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaISO || a.fechaIso) - _consigFechaOrdenDoc(b.fecha || b.fechaISO || b.fechaIso))
+            .map(cxp => {
+            const abonosCxp = _comprasAsegurarArray(cxp.abonos || []);
+            const pagosEfectivosVenta = abonosCxp
+                .filter(a => !_consigEsAnticipoAplicado(a))
+                .reduce((s, a) => s + Number(a.monto || 0), 0);
+            const anticiposAplicadosVenta = abonosCxp
+                .filter(a => _consigEsAnticipoAplicado(a))
+                .reduce((s, a) => s + Number(a.monto || 0), 0);
+            const saldo = Math.max(0, Number(cxp.saldoPendiente ?? (Number(cxp.total || 0) - pagosEfectivosVenta - anticiposAplicadosVenta)));
+            return `
+                <div class="mov-row mov-venta">
+                    <span>Venta</span>
+                    <b>${_comprasEscHTML(_comprasFechaVista(cxp.fecha || cxp.fechaISO || cxp.fechaIso, '-'))}</b>
+                    <em>${_comprasEscHTML(cxp.producto || '-')}</em>
+                    <strong>${dinero(cxp.total || 0)}</strong>
+                    <small>Pagado ${dinero(pagosEfectivosVenta)}${anticiposAplicadosVenta > 0.01 ? ` | Anticipo ${dinero(anticiposAplicadosVenta)}` : ''} | Saldo ${dinero(saldo)}</small>
+                </div>`;
+        }).join('');
+        const subtotalAnticipos = _comprasAsegurarArray(f.anticipos).reduce((s, a) => s + Number(a.monto || 0), 0);
+        const subtotalVentas = _comprasAsegurarArray(f.cuentasCxp).reduce((s, cxp) => s + Number(cxp.total || 0), 0);
+
+        if (!anticiposMov && !ventasMov) return '';
+        const tituloMovimientos = scope === 'folio'
+            ? 'Movimientos'
+            : `Movimientos de ${_comprasEscHTML(f.folioOrigen || '-')}`;
+        return `
+            <section class="mov-card">
+                <div class="section-title">${tituloMovimientos}</div>
+                <div class="mov-columns">
+                    <div class="mov-box mov-box-anticipo">
+                        <div class="mov-box-title">Anticipos</div>
+                        ${anticiposMov || '<div class="empty-line">Sin anticipos.</div>'}
+                        <div class="block-subtotal anticipos-subtotal">Subtotal anticipos: ${dinero(subtotalAnticipos)}</div>
+                    </div>
+                    <div class="mov-box mov-box-venta">
+                        <div class="mov-box-title">Ventas</div>
+                        ${ventasMov || '<div class="empty-line">Sin ventas.</div>'}
+                        <div class="block-subtotal ventas-subtotal">Subtotal ventas: ${dinero(subtotalVentas)}</div>
+                    </div>
+                </div>
+            </section>`;
+    }).filter(Boolean).join('');
+
     const htmlDocumento = `
     <!DOCTYPE html>
     <html lang="es">
@@ -5691,15 +5873,53 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
         <meta charset="UTF-8">
         <title>Estado de Cuenta Comercial</title>
         <style>
-            @page { size: letter portrait; margin: 15mm; }
-            body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            .tabla-estructura { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+            @page { size: letter portrait; margin: 8mm; }
+            body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 12px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .tabla-estructura { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
             .tabla-estructura td { vertical-align: top; border: none; }
-            .kpi-box { padding: 12px; border-radius: 6px; text-align: center; border: 1px solid #e2e8f0; }
-            .tabla-datos { width: 100%; border-collapse: collapse; margin-bottom: 30px; margin-top: 10px; }
-            .tabla-datos th { background: #f1f5f9; padding: 10px; border-bottom: 2px solid #cbd5e1; text-transform: uppercase; font-size: 11px; color: #475569; font-weight: bold; }
-            .tabla-datos td { padding: 10px; }
-            .linea-firma { border-top: 1px solid #94a3b8; margin-top: 60px; padding-top: 6px; font-weight: bold; color: #334155; font-size: 13px; }
+            .kpi-box { padding: 6px; border-radius: 5px; text-align: center; border: 1px solid #e2e8f0; line-height: 1.15; }
+            .tabla-datos { width: 100%; border-collapse: collapse; margin-bottom: 12px; margin-top: 6px; table-layout: fixed; }
+            .tabla-datos th { background: #f1f5f9; padding: 5px; border-bottom: 1px solid #cbd5e1; text-transform: uppercase; font-size: 9px; color: #475569; font-weight: bold; }
+            .tabla-datos td { padding: 4px 5px; line-height: 1.15; }
+            .linea-firma { border-top: 1px solid #94a3b8; margin-top: 22px; padding-top: 4px; font-weight: bold; color: #334155; font-size: 10.5px; }
+            .folio-card { border: 1px solid #dbe4ee; border-radius: 6px; margin: 7px 0; page-break-inside: avoid; overflow: hidden; }
+            .folio-head { display: grid; grid-template-columns: 1.2fr 2fr; gap: 6px; background: #f8fafc; padding: 6px 8px; border-bottom: 1px solid #dbe4ee; }
+            .folio-head strong { display: block; font-size: 12.5px; color: #0f172a; }
+            .folio-head span { display: block; color: #64748b; font-size: 11px; }
+            .folio-totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+            .folio-totals span { background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; text-align: center; font-size: 10.5px; color: #64748b; }
+            .folio-totals b { display: block; color: #0f172a; font-size: 12px; }
+            .prod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px; }
+            .prod-card { border: 1px solid #e2e8f0; border-radius: 7px; padding: 8px; background: #ffffff; break-inside: avoid; display:grid; grid-template-columns:minmax(0,1.6fr) minmax(48px,.45fr) minmax(86px,.7fr) minmax(78px,.65fr) minmax(68px,.55fr) minmax(88px,.75fr); gap:7px; align-items:center; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+            .prod-title { font-weight: 900; color: #0f172a; font-size: 12.5px; line-height: 1.18; overflow-wrap:anywhere; }
+            .prod-meta { color: #64748b; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .prod-data { color: #475569; font-size: 11px; white-space: nowrap; }
+            .prod-data b { color:#0f172a; }
+            .prod-total { text-align: right; color: #0f766e; font-weight: 900; font-size: 12.5px; white-space: nowrap; }
+            .mov-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 7px; margin-top: 8px; page-break-inside: avoid; }
+            .section-title { font-size: 12.5px; font-weight: 900; color: #334155; margin-bottom: 5px; text-transform: uppercase; }
+            .mov-columns { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+            .mov-box { border:1px solid #e2e8f0; border-radius:6px; padding:6px; }
+            .mov-box-anticipo { background:#f0fdf4; border-color:#bbf7d0; }
+            .mov-box-venta { background:#fff7ed; border-color:#fed7aa; }
+            .mov-box-title { font-size:13px; font-weight:900; margin-bottom:4px; }
+            .mov-box-anticipo .mov-box-title { color:#15803d; }
+            .mov-box-venta .mov-box-title { color:#b45309; }
+            .mov-row { display: grid; grid-template-columns: 66px 92px 1fr 96px; gap: 6px; align-items: center; border-top: 1px solid rgba(148,163,184,.35); padding: 5px 0; font-size: 11.5px; }
+            .mov-row:first-of-type { border-top: 0; }
+            .mov-row span { font-weight: 800; }
+            .mov-row em { color: #475569; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .mov-row strong { text-align: right; }
+            .mov-row small { grid-column: 3 / 5; color: #64748b; margin-top: -2px; }
+            .mov-anticipo span, .mov-anticipo strong { color: #15803d; }
+            .mov-venta span, .mov-venta strong { color: #b45309; }
+            .empty-block { grid-column: 1 / -1; color: #94a3b8; text-align: center; padding: 8px; }
+            .empty-line { color:#94a3b8; font-size:10.5px; padding:4px 0; }
+            .block-subtotal { margin-top: 6px; padding-top: 6px; border-top: 2px solid #cbd5e1; text-align: right; font-weight: 900; font-size: 12px; }
+            .product-subtotal { margin: 0 7px 7px; padding: 7px 8px; border-top-color: #0f766e; background: #ecfdf5; color: #0f766e; border-radius: 5px; }
+            .anticipos-subtotal { border-top-color: #86efac; color: #15803d; }
+            .ventas-subtotal { border-top-color: #fdba74; color: #b45309; }
+            tr { page-break-inside: avoid; }
         </style>
     </head>
     <body>
@@ -5710,15 +5930,15 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
                     <img src="img/Logo.svg" alt="Logo" style="width: 60px; height: auto;">
                 </td>
                 <td>
-                    <div style="font-size: 19px; font-weight: bold; color: #0f766e; letter-spacing: -0.5px;">${empresaNombre.toUpperCase()}</div>
-                    <div style="font-size: 11px; color: #475569; margin-top: 2px; line-height: 1.3;">
+                    <div style="font-size: 15px; font-weight: bold; color: #0f766e; letter-spacing: -0.5px;">${empresaNombre.toUpperCase()}</div>
+                    <div style="font-size: 9.5px; color: #475569; margin-top: 1px; line-height: 1.15;">
                         Tlaxcala, México<br>
                         Contactos directos: 241 108 1657 | 749 106 0035
                     </div>
                 </td>
                 <td style="text-align: right; width: 45%;">
-                    <div style="font-size: 14px; font-weight: bold; color: #1e293b; text-transform: uppercase; letter-spacing: 0.5px;">Estado de Cuenta Comercial</div>
-                    <div style="font-size: 11px; color: #475569; margin-top: 4px; line-height: 1.4;">
+                    <div style="font-size: 12px; font-weight: bold; color: #1e293b; text-transform: uppercase; letter-spacing: 0.3px;">Estado de Cuenta Comercial</div>
+                    <div style="font-size: 9.5px; color: #475569; margin-top: 2px; line-height: 1.2;">
                         <b>Proveedor:</b> ${_comprasEscHTML(proveedorNombre)}<br>
                         <b>Fecha Emisión:</b> ${_comprasFechaVista(new Date())}<br>
                         <b>Hora:</b> ${new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'})}
@@ -5727,24 +5947,24 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
             </tr>
         </table>
 
-        <table class="tabla-estructura" style="margin-bottom: 20px;">
+        <table class="tabla-estructura" style="display:none;margin-bottom: 8px;">
             <tr>
                 <td style="width: 25%; padding-right: 5px;">
                     <div class="kpi-box" style="background: #eff6ff; color: #1d4ed8;">
                         <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Valor Recibido</span><br>
-                        <strong style="font-size: 15px;">${dinero(baseKpi.compraOriginal)}</strong>
+                        <strong style="font-size: 12px;">${dinero(baseKpi.compraOriginal)}</strong>
                     </div>
                 </td>
                 <td style="width: 25%; padding-left: 5px; padding-right: 5px;">
                     <div class="kpi-box" style="background: #fef3c7; color: #b45309;">
                         <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Baja por Venta</span><br>
-                        <strong style="font-size: 15px;">${dinero(baseKpi.vendidoReportado || 0)}</strong>
+                        <strong style="font-size: 12px;">${dinero(baseKpi.vendidoReportado || 0)}</strong>
                     </div>
                 </td>
                 <td style="width: 25%; padding-left: 5px; padding-right: 5px;">
                     <div class="kpi-box" style="background: #f5f3ff; color: #6d28d9;">
                         <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Anticipos Entregados</span><br>
-                        <strong style="font-size: 15px;">${dinero(baseAnticipoEntregado)}</strong><br>
+                        <strong style="font-size: 12px;">${dinero(baseAnticipoEntregado)}</strong><br>
                         <span style="font-size: 9px;">Aplicado: ${dinero(baseAnticipoAplicado)}</span><br>
                         <span style="font-size: 9px;">Disponible: ${dinero(baseAnticipoDisponible)}</span>
                     </div>
@@ -5752,13 +5972,18 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
                 <td style="width: 25%; padding-left: 5px;">
                     <div class="kpi-box" style="background: #fff1f2; color: #be123c;">
                         <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase;">Balance Pendiente</span><br>
-                        <strong style="font-size: 15px;">${dinero(baseKpi.saldoNeto)}</strong>
+                        <strong style="font-size: 12px;">${dinero(baseKpi.saldoNeto)}</strong>
                     </div>
                 </td>
             </tr>
         </table>
 
-        <table class="tabla-datos">
+        <div class="section-title">Productos en consignacion</div>
+        ${productosConsignacionHtml || '<div class="empty-block">Sin productos en consignacion.</div>'}
+
+        ${movimientosConsignacionHtml ? `<div class="section-title" style="margin-top:8px;">Movimientos</div>${movimientosConsignacionHtml}` : ''}
+
+        <table class="tabla-datos" style="display:none;">
             <thead>
                 <tr>
                     <th style="text-align: left; width: 40%;">Descripción del Artículo</th>
@@ -5773,16 +5998,16 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
             </tbody>
         </table>
 
-        <table class="tabla-estructura" style="margin-top: 60px;">
+        <table class="tabla-estructura" style="margin-top: 20px;">
             <tr>
                 <td style="width: 45%; text-align: center;">
                     <div class="linea-firma">${empresaNombre}</div>
-                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Representante Comercial</div>
+                    <div style="font-size: 9.5px; color: #64748b; margin-top: 1px;">Representante Comercial</div>
                 </td>
                 <td style="width: 10%;"></td>
                 <td style="width: 45%; text-align: center;">
                     <div class="linea-firma">Firma de Conformidad</div>
-                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Acreedor / Proveedor</div>
+                    <div style="font-size: 9.5px; color: #64748b; margin-top: 1px;">Acreedor / Proveedor</div>
                 </td>
             </tr>
         </table>
