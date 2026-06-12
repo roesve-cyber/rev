@@ -38,6 +38,12 @@ if (
 
         firebase.initializeApp(firebaseConfig);
         window._auth = firebase.auth();
+        try {
+            await window._auth.setPersistence(firebase.auth.Auth.Persistence.NONE);
+            console.log('✅ Sesion Firebase sin persistencia del navegador.');
+        } catch (err) {
+            console.warn('No se pudo limitar persistencia de sesion Firebase:', err);
+        }
         window._db   = firebase.firestore();
         window.db    = window._db;
 
