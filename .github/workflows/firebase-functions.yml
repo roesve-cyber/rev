@@ -62,4 +62,4 @@ jobs:
           echo "=== Contenido firebase.json ==="
           cat firebase.json
           echo "=== Deploy ==="
-          firebase deploy --only functions,firestore:rules --project mmpueblito-8fb29 --non-interactive
+          firebase deploy --only functions,firestore:rules --project mmpueblito-8fb29 --non-interactive --force
