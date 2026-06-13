@@ -3931,7 +3931,17 @@ function renderCuentasPorPagar() {
         const saldoCorrecto = Math.max(0, subtotalReal - totalAbonado - anticipoExtra);
         if (Math.abs((parseFloat(c.saldoPendiente) || 0) - saldoCorrecto) > 0.01) {
             c.saldoPendiente = saldoCorrecto;
+            c.saldo = saldoCorrecto;
             c.abonos = abonos;
+            huboCambios = true;
+        }
+        if (saldoCorrecto <= 0.01 && !_consigCxpLiquidada(c)) {
+            c.saldoPendiente = 0;
+            c.saldo = 0;
+            c.estatus = "Liquidado";
+            c.estado = "Liquidado";
+            c.liquidado = true;
+            c.pagado = true;
             huboCambios = true;
         }
     });
@@ -4611,6 +4621,9 @@ window.marcarConsignacionVendida = function(idConsig) {
 
     const montoCxp = Math.max(0, montoDeuda - montoCubiertoConAnticipos);
     const folioVentaOrigen = (prompt("Si corresponde a una venta del POS, captura el folio (opcional):", sugerida?.folioVenta || "") || "").trim();
+    if (folioVentaOrigen && _consigReporteVentaExiste({ consignacionId: c.id, folioVenta: folioVentaOrigen })) {
+        return alert("Esta venta de consignacion ya fue reportada. No se generara otra cuenta por pagar.");
+    }
     const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("RCON") : `RCON-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     const fechaActual = new Date();
@@ -4631,7 +4644,7 @@ window.marcarConsignacionVendida = function(idConsig) {
         origenConsignacion: true,
         proveedor: c.proveedor,
         proveedorId: realProveedorId, // Forzar ID maestro para romper el bloqueo de la vista CXP
-        producto: `[Vendido de Consignacion] - ${c.producto} (${cantidadAVender} pzas)`,
+        producto: c.producto,
         articulos: [{
             productoId: c.productoId || null,
             nombre: c.producto,
@@ -4831,6 +4844,87 @@ function _consigFoliosYaReportados(consignaciones = []) {
     return set;
 }
 
+function _consigCxpLiquidada(cxp = {}) {
+    const saldo = Number(cxp.saldoPendiente ?? cxp.saldo ?? 0) || 0;
+    const estado = _consigNormTexto(`${cxp.estado || ''} ${cxp.estatus || ''}`);
+    return saldo <= 0.01 || cxp.pagado === true || cxp.liquidado === true || estado.includes('liquidad') || estado.includes('pagad');
+}
+
+function _consigCxpsPendientesPorConsignacion(consignacionId) {
+    const consId = String(consignacionId || '').trim();
+    if (!consId) return [];
+    return _comprasAsegurarArray(StorageService.get("cuentasPorPagar", []))
+        .filter(cx => cx?.origenConsignacion && String(cx.consignacionId || '') === consId && !_consigCxpLiquidada(cx));
+}
+
+function _consigSaldoCxps(cxps = []) {
+    return _comprasAsegurarArray(cxps).reduce((s, cxp) => s + (Number(cxp.saldoPendiente ?? cxp.saldo ?? 0) || 0), 0);
+}
+
+function _consigPiezasCxp(cxp = {}) {
+    const articulos = _comprasAsegurarArray(cxp.articulos || []);
+    const piezas = articulos.reduce((s, a) => s + (Number(a.cantidad || a.piezas || a.qty || 0) || 0), 0);
+    return piezas || 1;
+}
+
+function _consigPiezasCxps(cxps = []) {
+    return _comprasAsegurarArray(cxps).reduce((s, cxp) => s + _consigPiezasCxp(cxp), 0);
+}
+
+function _consigPagosRealesCxp(cxp = {}) {
+    return _comprasAsegurarArray(cxp.abonos || []).filter(a => !_consigEsAnticipoAplicado(a));
+}
+
+function _consigTotalPagosRealesCxp(cxp = {}) {
+    return _consigPagosRealesCxp(cxp).reduce((s, a) => s + (Number(a.monto || 0) || 0), 0);
+}
+
+function _consigTotalAnticiposCxp(cxp = {}) {
+    return _comprasAsegurarArray(cxp.abonos || [])
+        .filter(a => _consigEsAnticipoAplicado(a))
+        .reduce((s, a) => s + (Number(a.monto || 0) || 0), 0);
+}
+
+function _consigProductoCxp(cxp = {}) {
+    const articulo = _comprasAsegurarArray(cxp.articulos || [])[0] || {};
+    return String(articulo.nombre || cxp.producto || '-')
+        .replace(/^\s*\[Vendido de Consignacion\]\s*-\s*/i, '')
+        .replace(/\s*\(\s*\d+(?:\.\d+)?\s*pzas?\s*\)\s*$/i, '')
+        .trim() || '-';
+}
+
+function _consigReporteVentaExiste({ consignacionId, folioVenta } = {}) {
+    const folioNorm = String(folioVenta || '').trim().toUpperCase();
+    const consId = String(consignacionId || '').trim();
+    if (!folioNorm && !consId) return false;
+
+    const cxpExiste = _comprasAsegurarArray(StorageService.get("cuentasPorPagar", [])).some(cxp => {
+        if (!cxp?.origenConsignacion) return false;
+        const mismaConsig = consId && String(cxp.consignacionId || '') === consId;
+        const mismoFolio = folioNorm && [
+            cxp.folioVentaAsociada,
+            cxp.folioVentaOrigen,
+            cxp.folioVenta,
+            cxp.folio
+        ].some(v => String(v || '').trim().toUpperCase() === folioNorm);
+        return mismoFolio && (!consId || mismaConsig);
+    });
+    if (cxpExiste) return true;
+
+    return _getConsignacionesActivas().some(c => {
+        if (consId && String(c.id || c.consignacionId || '') !== consId) return false;
+        return _comprasAsegurarArray(c.ventasReportadas).some(vr =>
+            [
+                vr.folioVentaPOS,
+                vr.folioVentaOrigen,
+                vr.folioVentaAsociada,
+                vr.folioVenta,
+                vr.folio
+            ].some(v => String(v || '').trim().toUpperCase() === folioNorm)
+        );
+    });
+}
+
 function _consigScoreCoincidencia(consignacion = {}, item = {}) {
     const consId = String(consignacion.productoId || consignacion.idProducto || '').trim();
     const itemId = _consigItemProductoId(item);
@@ -4959,7 +5053,10 @@ function _consigProductoRows(folio) {
     const todasCxp = StorageService.get("cuentasPorPagar", []); 
 
     return folio.consignaciones.map(c => {
-        const cxpVinculada = todasCxp.find(cx => String(cx.consignacionId) === String(c.id) && Number(cx.saldoPendiente) > 0.01);
+        const cxpsPendientes = _consigCxpsPendientesPorConsignacion(c.id);
+        const saldoPendienteVentas = _consigSaldoCxps(cxpsPendientes);
+        const piezasPendientesPago = _consigPiezasCxps(cxpsPendientes);
+        const piezasVendidas = Number(c.cantidadVendida || 0) || _comprasAsegurarArray(c.ventasReportadas).reduce((s, v) => s + (Number(v.cantidad || 0) || 0), 0);
         
         let btnPago = '';
         if (cxpVinculada) {
@@ -4979,6 +5076,32 @@ function _consigProductoRows(folio) {
             </td>
         </tr>
         `;
+    }).join('');
+}
+
+function _consigProductoRows(folio) {
+    return folio.consignaciones.map(c => {
+        const cxpsPendientes = _consigCxpsPendientesPorConsignacion(c.id);
+        const saldoPendienteVentas = _consigSaldoCxps(cxpsPendientes);
+        const piezasPendientesPago = _consigPiezasCxps(cxpsPendientes);
+        const piezasVendidas = Number(c.cantidadVendida || 0) || _comprasAsegurarArray(c.ventasReportadas).reduce((s, v) => s + (Number(v.cantidad || 0) || 0), 0);
+
+        const btnPago = cxpsPendientes.length
+            ? `<button onclick="abrirModalPagoConsignacionGrupo('${String(c.id).replace(/'/g, "\\'")}')" style="margin-top:6px; width:100%; padding:8px 12px;background:#be123c;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Pagar ${dinero(saldoPendienteVentas)}</button>`
+            : '';
+
+        return `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px;">${_comprasEscHTML(c.fecha || '-')}</td>
+            <td style="padding:10px;"><strong>${_comprasEscHTML(c.producto || '-')}</strong><br><small style="color:#64748b;">${_comprasEscHTML(c.color || 'General')} | ${_comprasEscHTML(c.ubicacion || 'General')}</small></td>
+            <td style="padding:10px;text-align:center;">${Number(c.cantidadPendiente || 0)} / ${Number(c.cantidadTotal || 0)}<br><small style="color:#64748b;">Vendidas: ${piezasVendidas}</small>${piezasPendientesPago ? `<br><small style="color:#be123c;font-weight:bold;">Pend. pago: ${piezasPendientesPago}</small>` : ''}</td>
+            <td style="padding:10px;text-align:right;">${dinero(c.costoUnitario)}</td>
+            <td style="padding:10px;text-align:right;"><strong>${dinero(_consigImporte(c))}</strong><br><small style="color:#64748b;">Pendiente inventario: ${dinero(Number(c.cantidadPendiente || 0) * Number(c.costoUnitario || 0))}</small>${saldoPendienteVentas ? `<br><small style="color:#be123c;font-weight:bold;">Por pagar ventas: ${dinero(saldoPendienteVentas)}</small>` : ''}</td>
+            <td style="padding:10px;text-align:center;vertical-align:middle;">
+                ${Number(c.cantidadPendiente) > 0 ? `<button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="width:100%; padding:8px 12px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Reportar venta</button>` : ''}
+                ${btnPago}
+            </td>
+        </tr>`;
     }).join('');
 }
 
@@ -5258,6 +5381,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         pagadoPorVentas: resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0),
         anticiposTotal: resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0),
         anticiposAplicados: 0,
+        creditoAnticipos: resumen.grupos.reduce((s, g) => s + Number(g.creditoAnticipos ?? Math.max(Number(g.anticiposTotal || 0), Number(g.anticiposAplicados || 0))), 0),
         saldoNeto: resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0),
         folios: resumen.folios,
         proveedor: 'Todos los Proveedores',
@@ -5285,6 +5409,8 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
     const kpiAnticiposEntregados = Number(base.anticiposTotal || 0);
     const kpiAnticiposAplicados = Number(base.anticiposAplicados || 0);
     const kpiAnticiposDisponibles = Math.max(0, kpiAnticiposEntregados - kpiAnticiposAplicados);
+    const kpiAnticiposResumen = Number(base.creditoAnticipos ?? Math.max(kpiAnticiposEntregados, kpiAnticiposAplicados));
+    const kpiSaldoActualResumen = Math.max(0, kpiOriginal - kpiAnticiposResumen - kpiPagadoVentas);
     const kpiSaldoNeto = base.saldoNeto || 0;
 
     const filas = foliosEstado.map(f => {
@@ -5315,16 +5441,24 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         `).join('');
 
         const cxpHtml = f.cuentasCxp.map(cxp => {
-            const abonosCxp = _comprasAsegurarArray(cxp.abonos || []);
-            const pagosEfectivosVenta = abonosCxp
-                .filter(a => !_consigEsAnticipoAplicado(a))
-                .reduce((s, a) => s + Number(a.monto || 0), 0);
-            const anticiposAplicadosVenta = abonosCxp
-                .filter(a => _consigEsAnticipoAplicado(a))
-                .reduce((s, a) => s + Number(a.monto || 0), 0);
+            const pagosRealesVenta = _consigPagosRealesCxp(cxp);
+            const pagosEfectivosVenta = _consigTotalPagosRealesCxp(cxp);
+            const anticiposAplicadosVenta = _consigTotalAnticiposCxp(cxp);
                 
             const saldoFijoRenglon = Math.max(0, Number(cxp.saldoPendiente ?? (Number(cxp.total || 0) - pagosEfectivosVenta - anticiposAplicadosVenta)));
+            const productoLimpio = _consigProductoCxp(cxp);
+            const piezasCxp = _consigPiezasCxp(cxp);
+            const pagosDetalleHtml = pagosRealesVenta.map(p => `
+            <tr style="background:#f0fdf4;border-bottom:1px solid #dcfce7;font-size:11px;line-height:1.2;">
+                <td style="padding:4px 8px 4px 34px; color:#15803d; font-weight:600;">
+                    ${_comprasEscHTML(productoLimpio)}
+                </td>
+                <td style="padding:4px 8px;text-align:center;color:#334155;">${piezasCxp} pza(s)</td>
+                <td colspan="2" style="padding:4px 8px;text-align:right;color:#15803d;font-weight:bold;">${dinero(p.monto || 0)}</td>
+                <td colspan="2" style="padding:4px 8px;text-align:right;color:#334155;">${_comprasEscHTML(_comprasFechaVista(p.fecha || p.fechaIso || p.fechaAbonoIso, '-'))}</td>
+            </tr>`).join('');
             
+            return pagosDetalleHtml;
             const controlPagoHtml = saldoFijoRenglon > 0.01 
                 ? `<br><span style="color:#b91c1c; font-weight:bold; font-size:11px;">⚠️ Pendiente de Pago</span>`
                 : '<br><span style="color:#166534; font-weight:bold; font-size:11px;">✔️ Liquidada al 100%</span>';
@@ -5332,7 +5466,7 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             <tr style="background:#fff5f5;border-bottom:1px solid #fecdd3;font-size:11px;line-height:1.2;">
                 <td style="padding:4px 8px 4px 18px; color:#b91c1c;">
                     <span style="color:#ef4444;">📑</span> <b>Reporte de Venta</b> (${_comprasEscHTML(_comprasFechaVista(cxp.fecha || cxp.fechaISO || cxp.fechaIso, '-'))})
-                    <br><small style="color:#475569;">${_comprasEscHTML(cxp.producto)}</small>
+                    <br><small style="color:#475569;">${_comprasEscHTML(productoLimpio)}</small>
                 </td>
                 <td style="padding:4px 8px; text-align:right; color:#475569;">${dinero(cxp.articulos?.[0]?.costo || 0)}</td>
                 <td style="padding:4px 8px; text-align:center; color:#334155;">${cxp.articulos?.[0]?.cantidad || 1} u</td>
@@ -5342,7 +5476,8 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                     ${dinero(saldoFijoRenglon)}
                     ${controlPagoHtml}
                 </td>
-            </tr>`;
+            </tr>
+            ${pagosDetalleHtml}`;
         }).join('');
 
         const anticipo = _consigAnticipoLectura(f);
@@ -5389,14 +5524,14 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             const cantVendida = Math.max(0, cantTotal - cantPendiente);
             const variante = _consigValorPublico(c.color);
             return `
-                <div style="border:1px solid #e2e8f0;border-radius:9px;padding:9px;background:#fff;break-inside:avoid;box-shadow:0 1px 2px rgba(15,23,42,.04);">
-                    <div style="font-size:13px;font-weight:900;color:#0f172a;line-height:1.2;overflow-wrap:anywhere;">${_comprasEscHTML(c.producto || 'Producto')}</div>
+                <div style="border:1px solid #dbeafe;border-radius:9px;padding:9px;background:#eff6ff;break-inside:avoid;box-shadow:0 1px 2px rgba(15,23,42,.04);">
+                    <div style="font-size:13px;font-weight:900;color:#1d4ed8;line-height:1.2;overflow-wrap:anywhere;">${_comprasEscHTML(c.producto || 'Producto')}</div>
                     <div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:10px;align-items:center;margin-top:6px;font-size:12px;">
                     <span style="color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_comprasEscHTML(variante)}</span>
                     <span style="color:#475569;">Costo <b style="color:#0f172a;">${dinero(c.costoUnitario)}</b></span>
                     <span style="color:#475569;">Stock <b style="color:#0f172a;">${cantPendiente}/${cantTotal} u</b></span>
                     <span style="color:#475569;">Vend. <b style="color:#b45309;">${cantVendida} u</b></span>
-                    <strong style="text-align:right;color:#0f766e;font-size:13px;white-space:nowrap;">${dinero(_consigImporte(c))}</strong>
+                    <strong style="text-align:right;color:#1d4ed8;font-size:13px;white-space:nowrap;">${dinero(_consigImporte(c))}</strong>
                     </div>
                 </div>`;
         }).join('');
@@ -5405,17 +5540,20 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             .slice()
             .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaStr) - _consigFechaOrdenDoc(b.fecha || b.fechaStr))
             .map(a =>
-            `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;font-size:12px;border-top:1px solid #e2e8f0;padding:6px 0;color:#15803d;"><span>${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))}</span><strong>${dinero(a.monto || 0)}</strong></div>`
+            `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;font-size:12px;border-top:1px solid #ddd6fe;padding:6px 0;color:#6d28d9;"><span>${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))}</span><strong>${dinero(a.monto || 0)}</strong></div>`
         ).join('');
         const ventasBloque = _comprasAsegurarArray(f.cuentasCxp)
             .slice()
             .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaISO || a.fechaIso) - _consigFechaOrdenDoc(b.fecha || b.fechaISO || b.fechaIso))
-            .map(cxp =>
-            `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;font-size:12px;border-top:1px solid #e2e8f0;padding:6px 0;color:#b45309;"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_comprasEscHTML(cxp.producto || '-')}</span><strong>${dinero(cxp.total || 0)}</strong></div>`
-        ).join('');
+            .map(cxp => {
+                const pagos = _consigPagosRealesCxp(cxp);
+                const productoLimpio = _consigProductoCxp(cxp);
+                const piezasCxp = _consigPiezasCxp(cxp);
+                return pagos.map(p => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 56px auto 92px;gap:10px;font-size:12px;border-top:1px dashed #bbf7d0;padding:5px 0;color:#15803d;align-items:center;"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_comprasEscHTML(productoLimpio)}</span><span style="text-align:center;color:#334155;">${piezasCxp}</span><strong>${dinero(p.monto || 0)}</strong><span style="text-align:right;color:#334155;">${_comprasEscHTML(_comprasFechaVista(p.fecha || p.fechaIso || p.fechaAbonoIso, '-'))}</span></div>`).join('');
+            }).join('');
         const subtotalProductos = _comprasAsegurarArray(f.consignaciones).reduce((s, c) => s + Number(_consigImporte(c) || 0), 0);
         const subtotalAnticipos = _comprasAsegurarArray(f.anticipos).reduce((s, a) => s + Number(a.monto || 0), 0);
-        const subtotalVentas = _comprasAsegurarArray(f.cuentasCxp).reduce((s, cxp) => s + Number(cxp.total || 0), 0);
+        const subtotalVentas = _comprasAsegurarArray(f.cuentasCxp).reduce((s, cxp) => s + _consigTotalPagosRealesCxp(cxp), 0);
         const tituloBloque = scope === 'folio'
             ? ''
             : `<div style="background:#f8fafc;border-bottom:1px solid #dbe4ee;padding:8px 10px;"><strong style="font-size:14px;color:#0f172a;">Folio ${_comprasEscHTML(f.folioOrigen || '-')}</strong><span style="font-size:12px;color:#64748b;margin-left:8px;">${_comprasEscHTML(f.proveedor || '')}</span></div>`;
@@ -5424,10 +5562,10 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             <section style="border:1px solid #dbe4ee;border-radius:9px;margin:10px 0;overflow:hidden;background:#fff;">
                 ${tituloBloque}
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:10px;">${productos || '<div style="color:#94a3b8;">Sin productos.</div>'}</div>
-                <div style="margin:0 10px 10px;padding:8px 10px;border-top:2px solid #0f766e;background:#ecfdf5;border-radius:7px;text-align:right;font-size:13px;color:#0f766e;font-weight:900;">Subtotal productos: ${dinero(subtotalProductos)}</div>
+                <div style="margin:0 10px 10px;padding:8px 10px;border-top:2px solid #1d4ed8;background:#eff6ff;border-radius:7px;text-align:right;font-size:13px;color:#1d4ed8;font-weight:900;">Subtotal productos: ${dinero(subtotalProductos)}</div>
                 ${(anticiposBloque || ventasBloque) ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 10px 10px;">
-                    <div style="border:1px solid #dcfce7;border-radius:9px;padding:9px;background:#f0fdf4;"><div style="font-size:14px;font-weight:900;color:#15803d;margin-bottom:4px;">Anticipos</div>${anticiposBloque || '<div style="font-size:12px;color:#94a3b8;">Sin anticipos.</div>'}<div style="border-top:2px solid #86efac;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#15803d;">Subtotal anticipos: ${dinero(subtotalAnticipos)}</div></div>
-                    <div style="border:1px solid #fed7aa;border-radius:9px;padding:9px;background:#fff7ed;"><div style="font-size:14px;font-weight:900;color:#b45309;margin-bottom:4px;">Ventas reportadas</div>${ventasBloque || '<div style="font-size:12px;color:#94a3b8;">Sin ventas.</div>'}<div style="border-top:2px solid #fdba74;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#b45309;">Subtotal ventas: ${dinero(subtotalVentas)}</div></div>
+                    <div style="border:1px solid #ddd6fe;border-radius:9px;padding:9px;background:#f5f3ff;"><div style="font-size:14px;font-weight:900;color:#6d28d9;margin-bottom:4px;">Anticipos</div>${anticiposBloque || '<div style="font-size:12px;color:#94a3b8;">Sin anticipos.</div>'}<div style="border-top:2px solid #c4b5fd;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#6d28d9;">Subtotal anticipos: ${dinero(subtotalAnticipos)}</div></div>
+                    <div style="border:1px solid #bbf7d0;border-radius:9px;padding:9px;background:#f0fdf4;"><div style="font-size:14px;font-weight:900;color:#15803d;margin-bottom:4px;">Pagado por ventas</div>${ventasBloque || '<div style="font-size:12px;color:#94a3b8;">Sin ventas.</div>'}<div style="border-top:2px solid #86efac;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#15803d;">Subtotal pagado: ${dinero(subtotalVentas)}</div></div>
                 </div>` : ''}
             </section>`;
     }).join('');
@@ -5438,9 +5576,9 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         <div id="${safeDomId}" style="background:#ffffff; padding:16px; color:#0f172a; font-family:Arial, sans-serif; box-sizing:border-box;">
             <div style="border-bottom:2px solid #0f766e; padding-bottom:9px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                 <div style="flex:1;">
-                    <div style="display:flex; align-items:center; gap:9px; margin-bottom:4px;">
-                        <span style="font-size:28px;">🏛️</span>
-                        <div>
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+                        <img src="img/Logo.svg" alt="Logo" style="width:44px;height:44px;object-fit:contain;flex:0 0 44px;" onerror="this.style.display='none'">
+                        <div style="display:flex;flex-direction:column;justify-content:center;min-height:44px;">
                             <div style="font-size:15px; font-weight:900; color:#0f766e; letter-spacing:-0.5px;">${empresaNombre.toUpperCase()}</div>
                             ${empresaDir ? `<div style="font-size:11px; color:#64748b; margin-top:1px;">${empresaDir}</div>` : ''}
                             ${empresaTel ? `<div style="font-size:11px; color:#64748b;">Tel/Cel: ${empresaTel}</div>` : ''}
@@ -5489,6 +5627,31 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
             </div>
 
             ${bloquesConsignacion || '<div style="padding:16px;text-align:center;color:#94a3b8;">No hay registros.</div>'}
+
+            <div style="margin-top:12px;border:1px solid #cbd5e1;border-radius:9px;overflow:hidden;background:#ffffff;break-inside:avoid;">
+                <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:9px 12px;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Resumen</div>
+                <div style="display:grid;grid-template-columns:minmax(112px,1fr) 18px minmax(112px,1fr) 18px minmax(112px,1fr) 18px minmax(120px,1fr);gap:8px;align-items:stretch;padding:12px;">
+                    <div style="border:1px solid #dbeafe;background:#eff6ff;border-radius:7px;padding:8px 10px;">
+                        <small style="display:block;color:#1e40af;font-size:10px;font-weight:900;text-transform:uppercase;">Productos</small>
+                        <strong style="display:block;color:#1d4ed8;font-size:15px;text-align:right;">${dinero(kpiOriginal)}</strong>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:center;font-weight:900;color:#64748b;font-size:18px;">-</div>
+                    <div style="border:1px solid #ddd6fe;background:#f5f3ff;border-radius:7px;padding:8px 10px;">
+                        <small style="display:block;color:#5b21b6;font-size:10px;font-weight:900;text-transform:uppercase;">Anticipos</small>
+                        <strong style="display:block;color:#6d28d9;font-size:15px;text-align:right;">${dinero(kpiAnticiposResumen)}</strong>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:center;font-weight:900;color:#64748b;font-size:18px;">-</div>
+                    <div style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:7px;padding:8px 10px;">
+                        <small style="display:block;color:#166534;font-size:10px;font-weight:900;text-transform:uppercase;">Pagado</small>
+                        <strong style="display:block;color:#15803d;font-size:15px;text-align:right;">${dinero(kpiPagadoVentas)}</strong>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:center;font-weight:900;color:#64748b;font-size:18px;">=</div>
+                    <div style="border:1px solid #fecdd3;background:#fff1f2;border-radius:7px;padding:8px 10px;">
+                        <small style="display:block;color:#991b1b;font-size:10px;font-weight:900;text-transform:uppercase;">Saldo actual</small>
+                        <strong style="display:block;color:#be123c;font-size:16px;text-align:right;">${dinero(kpiSaldoActualResumen)}</strong>
+                    </div>
+                </div>
+            </div>
 
             <div style="display:none;width:100%; overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:14px; box-sizing:border-box;">
                 <table style="width:100%; border-collapse:collapse; font-size:11px; min-width:760px; table-layout:fixed;">
@@ -5688,6 +5851,7 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
         pagadoPorVentas: resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0),
         anticiposTotal: resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0),
         anticiposAplicados: 0,
+        creditoAnticipos: resumen.grupos.reduce((s, g) => s + Number(g.creditoAnticipos ?? Math.max(Number(g.anticiposTotal || 0), Number(g.anticiposAplicados || 0))), 0),
         saldoNeto: resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0),
         folios: resumen.folios,
         anticipos: resumen.anticipos,
@@ -5776,6 +5940,10 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
     const baseAnticipoEntregado = Number(baseKpi.anticiposTotal || 0);
     const baseAnticipoAplicado = Number(baseKpi.anticiposAplicados || 0);
     const baseAnticipoDisponible = Math.max(0, baseAnticipoEntregado - baseAnticipoAplicado);
+    const docProductosResumen = Number(baseKpi.compraOriginal || 0);
+    const docPagadoResumen = Number(baseKpi.pagadoPorVentas || 0);
+    const docAnticiposResumen = Number(baseKpi.creditoAnticipos ?? Math.max(baseAnticipoEntregado, baseAnticipoAplicado));
+    const docSaldoActualResumen = Math.max(0, docProductosResumen - docAnticiposResumen - docPagadoResumen);
     const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
     const empresaNombre = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
 
@@ -5824,25 +5992,20 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
             .slice()
             .sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaISO || a.fechaIso) - _consigFechaOrdenDoc(b.fecha || b.fechaISO || b.fechaIso))
             .map(cxp => {
-            const abonosCxp = _comprasAsegurarArray(cxp.abonos || []);
-            const pagosEfectivosVenta = abonosCxp
-                .filter(a => !_consigEsAnticipoAplicado(a))
-                .reduce((s, a) => s + Number(a.monto || 0), 0);
-            const anticiposAplicadosVenta = abonosCxp
-                .filter(a => _consigEsAnticipoAplicado(a))
-                .reduce((s, a) => s + Number(a.monto || 0), 0);
-            const saldo = Math.max(0, Number(cxp.saldoPendiente ?? (Number(cxp.total || 0) - pagosEfectivosVenta - anticiposAplicadosVenta)));
-            return `
-                <div class="mov-row mov-venta">
-                    <span>Venta</span>
-                    <b>${_comprasEscHTML(_comprasFechaVista(cxp.fecha || cxp.fechaISO || cxp.fechaIso, '-'))}</b>
-                    <em>${_comprasEscHTML(cxp.producto || '-')}</em>
-                    <strong>${dinero(cxp.total || 0)}</strong>
-                    <small>Pagado ${dinero(pagosEfectivosVenta)}${anticiposAplicadosVenta > 0.01 ? ` | Anticipo ${dinero(anticiposAplicadosVenta)}` : ''} | Saldo ${dinero(saldo)}</small>
-                </div>`;
+            const pagosRealesVenta = _consigPagosRealesCxp(cxp);
+            const productoLimpio = _consigProductoCxp(cxp);
+            const piezasCxp = _consigPiezasCxp(cxp);
+            const pagosHtml = pagosRealesVenta.map(p => `
+                <div class="mov-row mov-pago">
+                    <span>${_comprasEscHTML(productoLimpio)}</span>
+                    <b>${piezasCxp} pza(s)</b>
+                    <em>${_comprasEscHTML(_comprasFechaVista(p.fecha || p.fechaIso || p.fechaAbonoIso, '-'))}</em>
+                    <strong>${dinero(p.monto || 0)}</strong>
+                </div>`).join('');
+            return pagosHtml;
         }).join('');
         const subtotalAnticipos = _comprasAsegurarArray(f.anticipos).reduce((s, a) => s + Number(a.monto || 0), 0);
-        const subtotalVentas = _comprasAsegurarArray(f.cuentasCxp).reduce((s, cxp) => s + Number(cxp.total || 0), 0);
+        const subtotalVentas = _comprasAsegurarArray(f.cuentasCxp).reduce((s, cxp) => s + _consigTotalPagosRealesCxp(cxp), 0);
 
         if (!anticiposMov && !ventasMov) return '';
         const tituloMovimientos = scope === 'folio'
@@ -5858,9 +6021,9 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
                         <div class="block-subtotal anticipos-subtotal">Subtotal anticipos: ${dinero(subtotalAnticipos)}</div>
                     </div>
                     <div class="mov-box mov-box-venta">
-                        <div class="mov-box-title">Ventas</div>
+                        <div class="mov-box-title">Pagado por ventas</div>
                         ${ventasMov || '<div class="empty-line">Sin ventas.</div>'}
-                        <div class="block-subtotal ventas-subtotal">Subtotal ventas: ${dinero(subtotalVentas)}</div>
+                        <div class="block-subtotal ventas-subtotal">Subtotal pagado: ${dinero(subtotalVentas)}</div>
                     </div>
                 </div>
             </section>`;
@@ -5890,35 +6053,50 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
             .folio-totals span { background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; text-align: center; font-size: 10.5px; color: #64748b; }
             .folio-totals b { display: block; color: #0f172a; font-size: 12px; }
             .prod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px; }
-            .prod-card { border: 1px solid #e2e8f0; border-radius: 7px; padding: 8px; background: #ffffff; break-inside: avoid; display:grid; grid-template-columns:minmax(0,1.6fr) minmax(48px,.45fr) minmax(86px,.7fr) minmax(78px,.65fr) minmax(68px,.55fr) minmax(88px,.75fr); gap:7px; align-items:center; box-shadow:0 1px 2px rgba(15,23,42,.04); }
-            .prod-title { font-weight: 900; color: #0f172a; font-size: 12.5px; line-height: 1.18; overflow-wrap:anywhere; }
+            .prod-card { border: 1px solid #dbeafe; border-radius: 7px; padding: 8px; background: #eff6ff; break-inside: avoid; display:grid; grid-template-columns:minmax(0,1.6fr) minmax(48px,.45fr) minmax(86px,.7fr) minmax(78px,.65fr) minmax(68px,.55fr) minmax(88px,.75fr); gap:7px; align-items:center; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+            .prod-title { font-weight: 900; color: #1d4ed8; font-size: 12.5px; line-height: 1.18; overflow-wrap:anywhere; }
             .prod-meta { color: #64748b; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             .prod-data { color: #475569; font-size: 11px; white-space: nowrap; }
             .prod-data b { color:#0f172a; }
-            .prod-total { text-align: right; color: #0f766e; font-weight: 900; font-size: 12.5px; white-space: nowrap; }
+            .prod-total { text-align: right; color: #1d4ed8; font-weight: 900; font-size: 12.5px; white-space: nowrap; }
             .mov-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 7px; margin-top: 8px; page-break-inside: avoid; }
             .section-title { font-size: 12.5px; font-weight: 900; color: #334155; margin-bottom: 5px; text-transform: uppercase; }
             .mov-columns { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
             .mov-box { border:1px solid #e2e8f0; border-radius:6px; padding:6px; }
-            .mov-box-anticipo { background:#f0fdf4; border-color:#bbf7d0; }
-            .mov-box-venta { background:#fff7ed; border-color:#fed7aa; }
+            .mov-box-anticipo { background:#f5f3ff; border-color:#ddd6fe; }
+            .mov-box-venta { background:#f0fdf4; border-color:#bbf7d0; }
             .mov-box-title { font-size:13px; font-weight:900; margin-bottom:4px; }
-            .mov-box-anticipo .mov-box-title { color:#15803d; }
-            .mov-box-venta .mov-box-title { color:#b45309; }
+            .mov-box-anticipo .mov-box-title { color:#6d28d9; }
+            .mov-box-venta .mov-box-title { color:#15803d; }
             .mov-row { display: grid; grid-template-columns: 66px 92px 1fr 96px; gap: 6px; align-items: center; border-top: 1px solid rgba(148,163,184,.35); padding: 5px 0; font-size: 11.5px; }
             .mov-row:first-of-type { border-top: 0; }
             .mov-row span { font-weight: 800; }
             .mov-row em { color: #475569; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             .mov-row strong { text-align: right; }
             .mov-row small { grid-column: 3 / 5; color: #64748b; margin-top: -2px; }
-            .mov-anticipo span, .mov-anticipo strong { color: #15803d; }
-            .mov-venta span, .mov-venta strong { color: #b45309; }
+            .mov-anticipo span, .mov-anticipo strong { color: #6d28d9; }
+            .mov-venta span, .mov-venta strong { color: #15803d; }
+            .mov-pago span, .mov-pago strong { color: #15803d; }
+            .mov-pago-pendiente span, .mov-pago-pendiente strong { color: #b91c1c; }
             .empty-block { grid-column: 1 / -1; color: #94a3b8; text-align: center; padding: 8px; }
             .empty-line { color:#94a3b8; font-size:10.5px; padding:4px 0; }
             .block-subtotal { margin-top: 6px; padding-top: 6px; border-top: 2px solid #cbd5e1; text-align: right; font-weight: 900; font-size: 12px; }
-            .product-subtotal { margin: 0 7px 7px; padding: 7px 8px; border-top-color: #0f766e; background: #ecfdf5; color: #0f766e; border-radius: 5px; }
-            .anticipos-subtotal { border-top-color: #86efac; color: #15803d; }
-            .ventas-subtotal { border-top-color: #fdba74; color: #b45309; }
+            .product-subtotal { margin: 0 7px 7px; padding: 7px 8px; border-top-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; border-radius: 5px; }
+            .anticipos-subtotal { border-top-color: #c4b5fd; color: #6d28d9; }
+            .ventas-subtotal { border-top-color: #86efac; color: #15803d; }
+            .resumen-final { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; margin-top: 10px; background: #ffffff; page-break-inside: avoid; }
+            .resumen-formula { display: grid; grid-template-columns: 1fr 18px 1fr 18px 1fr 18px 1fr; gap: 6px; align-items: stretch; }
+            .resumen-formula div { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 6px; }
+            .resumen-formula small { display: block; font-size: 9px; color: #64748b; font-weight: 900; text-transform: uppercase; }
+            .resumen-formula strong { display: block; font-size: 12px; text-align: right; color: #0f172a; }
+            .resumen-formula span { display: flex; align-items: center; justify-content: center; font-weight: 900; color: #475569; }
+            .resumen-formula .productos { background:#eff6ff; border-color:#dbeafe; }
+            .resumen-formula .productos small, .resumen-formula .productos strong { color:#1d4ed8; }
+            .resumen-formula .anticipos { background:#f5f3ff; border-color:#ddd6fe; }
+            .resumen-formula .anticipos small, .resumen-formula .anticipos strong { color:#6d28d9; }
+            .resumen-formula .pagado { background:#f0fdf4; border-color:#bbf7d0; }
+            .resumen-formula .pagado small, .resumen-formula .pagado strong { color:#15803d; }
+            .resumen-formula .saldo strong { color: #be123c; font-size: 12.5px; }
             tr { page-break-inside: avoid; }
         </style>
     </head>
@@ -5926,14 +6104,16 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
 
         <table class="tabla-estructura">
             <tr>
-                <td style="width: 70px;">
-                    <img src="img/Logo.svg" alt="Logo" style="width: 60px; height: auto;">
-                </td>
-                <td>
+                <td style="width: 55%;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <img src="img/Logo.svg" alt="Logo" style="width: 58px; height: 58px; object-fit: contain;">
+                        <div style="display:flex;flex-direction:column;justify-content:center;min-height:58px;">
                     <div style="font-size: 15px; font-weight: bold; color: #0f766e; letter-spacing: -0.5px;">${empresaNombre.toUpperCase()}</div>
                     <div style="font-size: 9.5px; color: #475569; margin-top: 1px; line-height: 1.15;">
                         Tlaxcala, México<br>
                         Contactos directos: 241 108 1657 | 749 106 0035
+                        </div>
+                    </div>
                     </div>
                 </td>
                 <td style="text-align: right; width: 45%;">
@@ -5982,6 +6162,19 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
         ${productosConsignacionHtml || '<div class="empty-block">Sin productos en consignacion.</div>'}
 
         ${movimientosConsignacionHtml ? `<div class="section-title" style="margin-top:8px;">Movimientos</div>${movimientosConsignacionHtml}` : ''}
+
+        <div class="resumen-final">
+            <div class="section-title">Resumen</div>
+            <div class="resumen-formula">
+                <div class="productos"><small>Productos</small><strong>${dinero(docProductosResumen)}</strong></div>
+                <span>-</span>
+                <div class="anticipos"><small>Anticipos</small><strong>${dinero(docAnticiposResumen)}</strong></div>
+                <span>-</span>
+                <div class="pagado"><small>Pagado</small><strong>${dinero(docPagadoResumen)}</strong></div>
+                <span>=</span>
+                <div class="saldo"><small>Saldo actual</small><strong>${dinero(docSaldoActualResumen)}</strong></div>
+            </div>
+        </div>
 
         <table class="tabla-datos" style="display:none;">
             <thead>
@@ -6042,13 +6235,158 @@ window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo =
     ventanaNueva.document.close();
 };
 
+window.abrirModalPagoConsignacionGrupo = function(consignacionId) {
+    const consignacion = _getConsignacionesActivas().find(c => String(c.id || c.consignacionId || '') === String(consignacionId));
+    const cxpsPendientes = _consigCxpsPendientesPorConsignacion(consignacionId);
+    const saldo = _consigSaldoCxps(cxpsPendientes);
+    if (!cxpsPendientes.length || saldo <= 0.01) return alert("No hay ventas pendientes de pago para este producto.");
+
+    const piezas = _consigPiezasCxps(cxpsPendientes);
+    const selectorCuentasHtml = window._buildSelectorCuentas('cuentaPagoConsig', false);
+    const filasCxP = cxpsPendientes.map(cxp => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:8px;">${_comprasEscHTML(cxp.folioVentaAsociada || cxp.folioOrigen || cxp.id || '-')}</td>
+            <td style="padding:8px;text-align:center;">${_consigPiezasCxp(cxp)}</td>
+            <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(Number(cxp.saldoPendiente ?? cxp.saldo ?? 0) || 0)}</td>
+        </tr>`).join('');
+
+    const modalHtml = `
+    <div id="modalPagoConsig" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); backdrop-filter:blur(3px); display:flex; justify-content:center; align-items:center; z-index:100000;">
+        <div style="background:white; padding:30px; border-radius:15px; width:90%; max-width:620px; max-height:90vh; overflow-y:auto; font-family:Arial,sans-serif; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+            <h2 style="margin-top:0; color:#0f766e;">Pagar ventas de consignacion</h2>
+            <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:16px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div><small style="color:#718096;">Producto</small><br><strong>${_comprasEscHTML(consignacion?.producto || _consigProductoCxp(cxpsPendientes[0]) || '-')}</strong><br><small style="color:#64748b;">${cxpsPendientes.length} venta(s), ${piezas} pieza(s)</small></div>
+                    <div><small style="color:#718096;">Total a pagar</small><br><strong style="color:#e74c3c; font-size:20px;">${dinero(saldo)}</strong></div>
+                </div>
+            </div>
+            <div style="overflow:auto; margin-bottom:16px; border:1px solid #e2e8f0; border-radius:8px;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:8px;text-align:left;">Venta / reporte</th><th style="padding:8px;text-align:center;">Pzas</th><th style="padding:8px;text-align:right;">Saldo</th></tr></thead>
+                    <tbody>${filasCxP}</tbody>
+                </table>
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold; display:block; margin-bottom:8px;">Monto del pago ($):</label>
+                <input type="number" id="montoPagoConsig" value="${saldo}" max="${saldo}" step="0.01" style="width:100%; padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:24px;">
+                <label style="font-weight:bold; display:block; margin-bottom:8px;">De donde sale el dinero</label>
+                ${selectorCuentasHtml}
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button onclick="this.disabled=true; this.textContent='Registrando...'; window.ejecutarPagoConsigGrupo('${String(consignacionId).replace(/'/g, "\\'")}', this)" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Registrar pago total</button>
+                <button onclick="document.getElementById('modalPagoConsig').remove()" style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.ejecutarPagoConsigGrupo = function(consignacionId, btn = null) {
+    const reactivarBoton = () => {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.textContent = 'Registrar pago total';
+    };
+    const monto = parseFloat(document.getElementById('montoPagoConsig')?.value);
+    const selector = document.getElementById('cuentaPagoConsig');
+    if (!selector || !selector.value) {
+        reactivarBoton();
+        return alert("Selecciona la cuenta de pago.");
+    }
+
+    let cxps = StorageService.get("cuentasPorPagar", []) || [];
+    const pendientes = cxps
+        .filter(cx => cx?.origenConsignacion && String(cx.consignacionId || '') === String(consignacionId) && !_consigCxpLiquidada(cx))
+        .sort((a, b) => String(a.fechaIso || a.fecha || '').localeCompare(String(b.fechaIso || b.fecha || '')));
+    const saldoTotal = _consigSaldoCxps(pendientes);
+    if (!pendientes.length || saldoTotal <= 0.01) {
+        document.getElementById('modalPagoConsig')?.remove();
+        if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+        return alert("Estas ventas ya fueron pagadas. No se duplico el egreso.");
+    }
+    if (isNaN(monto) || monto <= 0 || monto > saldoTotal + 0.01) {
+        reactivarBoton();
+        return alert("Monto invalido o excede el total pendiente.");
+    }
+
+    const cuentaId = selector.value;
+    const cuentaNombreCompleto = selector.options[selector.selectedIndex]?.text || cuentaId;
+    const cuentaNombreLimpio = cuentaNombreCompleto.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').trim();
+    const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    const referenciaPago = `PCON-GRUPO-${consignacionId}`;
+    const idOperacionPago = `PAGO-CONSIG-GRUPO-${consignacionId}-${Date.now()}`;
+
+    const productoNombre = _consigProductoCxp(pendientes[0]) || 'Consignacion';
+    const egresoOk = window._egresarCuenta({
+        monto,
+        cuentaId,
+        etiqueta: cuentaNombreLimpio,
+        concepto: `[Pago Consig] - ${productoNombre} (${pendientes.length} venta(s))`,
+        referencia: referenciaPago,
+        idOperacion: idOperacionPago,
+        fecha: fechaIso
+    });
+
+    if (egresoOk === false) {
+        reactivarBoton();
+        return;
+    }
+
+    let restante = monto;
+    let aplicadoTotal = 0;
+    cxps = cxps.map(cxp => {
+        if (restante <= 0.01 || !cxp?.origenConsignacion || String(cxp.consignacionId || '') !== String(consignacionId) || _consigCxpLiquidada(cxp)) return cxp;
+        const saldoCxp = Number(cxp.saldoPendiente ?? cxp.saldo ?? 0) || 0;
+        const aplicado = Math.min(restante, saldoCxp);
+        if (aplicado <= 0.01) return cxp;
+        restante -= aplicado;
+        aplicadoTotal += aplicado;
+        cxp.abonos = _comprasAsegurarArray(cxp.abonos || []);
+        cxp.abonos.push({
+            id: Date.now() + Math.random(),
+            idOperacion: idOperacionPago,
+            referencia: referenciaPago,
+            fecha: fechaIso,
+            monto: aplicado,
+            cuenta: cuentaNombreLimpio,
+            cuentaId,
+            nota: "Liquidacion agrupada de consignacion"
+        });
+        cxp.saldoPendiente = Math.max(0, saldoCxp - aplicado);
+        cxp.saldo = cxp.saldoPendiente;
+        if (cxp.saldoPendiente <= 0.01) {
+            cxp.estatus = "Liquidado";
+            cxp.estado = "Liquidado";
+            cxp.liquidado = true;
+            cxp.pagado = true;
+        }
+        return cxp;
+    });
+    StorageService.set("cuentasPorPagar", cxps);
+
+    let consigArr = StorageService.get("consignacionesActivas", []) || [];
+    const cIdx = consigArr.findIndex(x => String(x.id || x.consignacionId || '') === String(consignacionId));
+    if (cIdx !== -1) {
+        consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - aplicadoTotal);
+        StorageService.set("consignacionesActivas", consigArr);
+    }
+
+    document.getElementById('modalPagoConsig')?.remove();
+    alert(`Pago aplicado por ${dinero(aplicadoTotal)} desde ${cuentaNombreLimpio}.`);
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+    if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+};
+
 window.abrirModalPagoConsignacion = function(cxpId) {
     let cxps = StorageService.get("cuentasPorPagar", []) || [];
     const cxpItem = cxps.find(c => String(c.id) === String(cxpId));
     if (!cxpItem) return alert("No se localizó la liquidación.");
 
     const saldo = Number(cxpItem.saldoPendiente ?? cxpItem.saldo ?? 0);
-    if (saldo <= 0) return alert("Esta liquidación ya fue completada.");
+    if (_consigCxpLiquidada(cxpItem)) return alert("Esta liquidación ya fue completada.");
 
     // Usamos el selector universal ya reparado
     const selectorCuentasHtml = window._buildSelectorCuentas('cuentaPagoConsig', false);
@@ -6060,7 +6398,7 @@ window.abrirModalPagoConsignacion = function(cxpId) {
             
             <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                    <div><small style="color:#718096;">Producto / Referencia</small><br><strong>${cxpItem.producto || '-'}</strong></div>
+                    <div><small style="color:#718096;">Producto / Referencia</small><br><strong>${_comprasEscHTML(_consigProductoCxp(cxpItem))}</strong></div>
                     <div><small style="color:#718096;">Saldo Exigible</small><br><strong style="color:#e74c3c; font-size:20px;">${dinero(saldo)}</strong></div>
                 </div>
             </div>
@@ -6076,7 +6414,7 @@ window.abrirModalPagoConsignacion = function(cxpId) {
             </div>
             
             <div style="display:flex; gap:10px;">
-                <button onclick="window.ejecutarPagoConsig('${cxpId}')" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">✅ Registrar Pago</button>
+                <button onclick="this.disabled=true; this.textContent='Registrando...'; window.ejecutarPagoConsig('${cxpId}', this)" style="flex:1; padding:12px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">✅ Registrar Pago</button>
                 <button onclick="document.getElementById('modalPagoConsig').remove()" style="flex:1; padding:12px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">✕ Cancelar</button>
             </div>
         </div>
@@ -6084,20 +6422,48 @@ window.abrirModalPagoConsignacion = function(cxpId) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-window.ejecutarPagoConsig = function(cxpId) {
-    const monto = parseFloat(document.getElementById('montoPagoConsig').value);
+window.ejecutarPagoConsig = function(cxpId, btn = null) {
+    const reactivarBoton = () => {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.textContent = 'Registrar Pago';
+    };
+    const monto = parseFloat(document.getElementById('montoPagoConsig')?.value);
     const selector = document.getElementById('cuentaPagoConsig');
+    if (!selector || !selector.value) {
+        reactivarBoton();
+        return alert("Selecciona la cuenta de pago.");
+    }
     const cuentaId = selector.value;
-    const cuentaNombreCompleto = selector.options[selector.selectedIndex].text;
+    const cuentaNombreCompleto = selector.options[selector.selectedIndex]?.text || cuentaId;
     
     // Limpiar emojis para guardar texto limpio
     const cuentaNombreLimpio = cuentaNombreCompleto.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').trim();
 
     let cxps = StorageService.get("cuentasPorPagar", []) || [];
     const idx = cxps.findIndex(c => String(c.id) === String(cxpId));
-    if (idx === -1) return;
+    if (idx === -1) {
+        document.getElementById('modalPagoConsig')?.remove();
+        return alert("Esta liquidacion ya no existe.");
+    }
     const cxpItem = cxps[idx];
     const saldoPendiente = Number(cxpItem.saldoPendiente ?? cxpItem.saldo ?? 0);
+
+    if (_consigCxpLiquidada(cxpItem)) {
+        document.getElementById('modalPagoConsig')?.remove();
+        if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+        if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+        return alert("Esta liquidacion ya fue pagada. No se duplico el egreso.");
+    }
+
+    if (isNaN(monto) || monto <= 0 || monto > saldoPendiente + 0.01) {
+        reactivarBoton();
+        return alert("Monto invalido o excede la deuda.");
+    }
+
+    const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    const referenciaPago = cxpItem.folioOrigen || `PCON-${cxpId}`;
+    const idOperacionPago = `PAGO-CONSIG-${cxpId}-${Date.now()}`;
 
     if (isNaN(monto) || monto <= 0 || monto > saldoPendiente + 0.01) return alert("❌ Monto inválido o excede la deuda.");
 
@@ -6106,19 +6472,23 @@ window.ejecutarPagoConsig = function(cxpId) {
         monto: monto,
         cuentaId: cuentaId, 
         etiqueta: cuentaNombreLimpio,
-        concepto: `[Pago Consig] - ${cxpItem.producto}`,
-        referencia: cxpItem.folioOrigen || `PCON-${Date.now()}`,
-        idOperacion: `PAGO-CONSIG-${Date.now()}`,
-        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+        concepto: `[Pago Consig] - ${_consigProductoCxp(cxpItem)}`,
+        referencia: referenciaPago,
+        idOperacion: idOperacionPago,
+        fecha: fechaIso
     });
 
-    if (egresoOk === false) return; 
+    if (egresoOk === false) {
+        reactivarBoton();
+        return;
+    }
 
     // APLICAR ABONO EN LA CUENTA POR PAGAR
-    const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     if (!cxpItem.abonos) cxpItem.abonos = [];
     cxpItem.abonos.push({
         id: Date.now(),
+        idOperacion: idOperacionPago,
+        referencia: referenciaPago,
         fecha: fechaIso,
         monto: monto,
         cuenta: cuentaNombreLimpio,
