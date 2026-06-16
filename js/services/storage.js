@@ -1,4 +1,13 @@
 // ===== STORAGE SERVICE (BLINDADO IDB + FIREBASE SYNC) =====
+window.productoEstaActivo = function(producto) {
+    if (!producto) return false;
+    return producto.activo !== false && producto.Activo !== 0 && producto.Activo !== false;
+};
+
+window.filtrarProductosActivos = function(lista) {
+    return (Array.isArray(lista) ? lista : []).filter(window.productoEstaActivo);
+};
+
 const StorageService = {
         _cache: {}, 
     _isReady: false,
