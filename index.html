@@ -61,7 +61,7 @@
                 <div class="menu-item">
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-prod')">📦 PRODUCTOS <span>▾</span></button>
             <div id="sub-prod" class="submenu oculto-submenu">
-                <button onclick="navA('inventario')">📋 Inventario</button>
+                <button onclick="navA('inventario')">📋 Gestion de Productos</button>
                 <button onclick="navA('configcategorias')">🏷️ Categorías</button>
                 <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
                 <button onclick="navA('kardex-inventario'); if(typeof renderKardexInventario === 'function') renderKardexInventario();">&#128202; Kardex de Inventario</button>
@@ -97,6 +97,7 @@
                 <button onclick="navA('estadoCuentaCliente')">📊 Estado de Cuenta Cliente</button>
                 <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
                 <div class="submenu-grupo">Postventa</div>
+                <button onclick="navA('reimprimir-venta'); if(typeof renderReimprimirVenta === 'function') renderReimprimirVenta();">🖨️ Reimpresiones</button>
                 <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
                 <button onclick="navA('garantias')">🛡️ Garantías</button>
             </div>
@@ -507,7 +508,7 @@
     <!-- INVENTARIO -->
     <div id="inventario" class="vista oculto">
  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
- <h2>Control de Inventario</h2>
+ <h2>Gestion de Productos</h2>
  <div style="display:flex; gap:8px;">
  <button onclick="abrirModalTransferenciaInv()" style="background:#3b82f6; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Transferir</button>
  <button onclick="abrirModalAjusteInv()" style="background:#f59e0b; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Ajuste</button>
@@ -515,9 +516,10 @@
  <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  </div>
- <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:grid; grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) auto auto; gap:10px; align-items:end;">
+ <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:grid; grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) minmax(130px,auto) auto auto; gap:10px; align-items:end;">
  <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar producto, categoria..." style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;box-sizing:border-box;"></div>
  <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Proveedor:</label><select id="filtroProveedorInventario" onchange="aplicarFiltros()" style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select></div>
+ <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Estado:</label><select id="filtroEstadoProducto" onchange="aplicarFiltros()" style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">Todos</option><option value="activos">Activos</option><option value="inactivos">Inactivos</option></select></div>
  <button onclick="aplicarFiltros()" style="padding:9px 15px; background:#2d3748; color:white; border:none; border-radius:5px; cursor:pointer;font-weight:bold;">Filtrar</button>
  <button onclick="limpiarFiltros()" style="padding:9px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Limpiar</button>
  <details style="grid-column:1/-1;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
@@ -710,10 +712,12 @@
  <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">DOCUMENTO</label>
  <select id="rvTipoDoc" onchange="renderReimprimirVenta()"
  style="width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:14px;">
- <option value="todos">Todos excepto abonos</option>
+ <option value="todos">Todos</option>
  <option value="contado">Contado</option>
  <option value="credito">Credito</option>
  <option value="apartado">Apartado</option>
+ <option value="abono_credito">Abono credito</option>
+ <option value="abono_apartado">Abono apartado</option>
  <option value="entrega_mcia">Entrega mcia</option>
  <option value="devolucion_cancelacion">Devolucion</option>
  </select>
@@ -953,6 +957,13 @@
                 <label>Nombre del Producto</label>
                 <input type="text" id="pNombre" placeholder="Ej: Sala Esquinera Gris">
             </div>
+            <div style="background:#ecfdf5; border:1px solid #bbf7d0; border-radius:8px; padding:14px;">
+                <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin:0;">
+                    <input type="checkbox" id="pActivo" checked style="width:20px; height:20px; accent-color:#16a34a;">
+                    <span style="font-size:14px; font-weight:bold; color:#166534;">Producto activo</span>
+                </label>
+                <small style="display:block; margin:6px 0 0 30px; color:#047857;">Si lo desactivas, no aparecera en ventas, compras, catalogo ni selectores operativos.</small>
+            </div>
             <div class="campo">
                 <label>Categoría / Subcategoría</label>
                 <select id="pSubcategoria"></select>
@@ -1125,7 +1136,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
-<script src="js/services/storage.js?v=17"></script>
+<script src="js/services/storage.js?v=18"></script>
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=3"></script>
 <script src="js/services/calculator.js"></script>
@@ -1137,19 +1148,19 @@
 <script src="js/core/data.js"></script>
 
 <script src="js/modules/auth.js?v=2.8"></script>
-<script src="js/modules/inventario.js?v=21"></script>
-<script src="js/modules/tienda.js?v=4"></script>
-<script src="js/modules/ventas.js?v=2.2"></script>
+<script src="js/modules/inventario.js?v=23"></script>
+<script src="js/modules/tienda.js?v=5"></script>
+<script src="js/modules/ventas.js?v=2.5"></script>
 <script src="js/modules/clientes.js?v=3"></script>
-<script src="js/modules/cxc.js?v=25"></script>
+<script src="js/modules/cxc.js?v=28"></script>
 <script src="js/modules/apartados.js?v=8"></script>
-<script src="js/modules/compras.js?v=47"></script>
+<script src="js/modules/compras.js?v=48"></script>
 <script src="js/modules/bancos.js?v=10"></script>
 <script src="js/modules/reportes.js?v=20"></script>
 <script src="js/modules/reportes-plus.js?v=8"></script>
 <script src="js/modules/reportes-credito.js?v=4"></script>
 <script src="js/modules/dashboard.js?v=6"></script>
-<script src="js/modules/cotizaciones.js?v=4"></script>
+<script src="js/modules/cotizaciones.js?v=5"></script>
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
@@ -1158,9 +1169,9 @@
 <script src="js/modules/proyeccion.js?v=2"></script>
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/agenda.js"></script>
-<script src="js/modules/producto-picker.js?v=2"></script>
+<script src="js/modules/producto-picker.js?v=3"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
-<script src="js/modules/notificaciones.js?v=3"></script>
+<script src="js/modules/notificaciones.js?v=4"></script>
 <script src="js/modules/push-autorizaciones.js?v=5"></script>
 <script src="js/modules/estadoCuentaCliente.js?v=2"></script>
 <script src="js/modules/configuracion.js"></script>

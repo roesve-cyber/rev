@@ -1205,7 +1205,7 @@ async function cargarDatos() {
   ]);
 
   productos = Array.isArray(prods)
-    ? prods.filter(p => p && p.Activo !== 0 && p.activo !== false)
+    ? prods.filter(p => p && p.Activo !== 0 && p.Activo !== false && p.activo !== false)
     : [];
   categoriasData = Array.isArray(cats) ? cats : [];
 
