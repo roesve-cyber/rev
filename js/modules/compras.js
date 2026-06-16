@@ -410,7 +410,7 @@ function renderHistorialCostosAuditoria() {
         <span id="selectProductoHistorialCostos-display"
               style="flex:1;padding:7px 12px;font-size:15px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;">Sin seleccionar</span>
         <button type="button"
-                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',incluirInactivos:true,onSeleccion:function(p){
                     document.getElementById('selectProductoHistorialCostos').value=p.id;
                     var d=document.getElementById('selectProductoHistorialCostos-display');
                     d.textContent=p.nombre; d.style.color='#111827';
@@ -1824,6 +1824,11 @@ function _foliosOC() {
     return 'OC-' + ymd + '-' + seq;
 }
 
+function _comprasProductoActivo(p) {
+    if (typeof window.productoEstaActivo === 'function') return window.productoEstaActivo(p);
+    return !!p && p.activo !== false && p.Activo !== 0 && p.Activo !== false;
+}
+
 function abrirNuevaOrdenCompra() {
     const provs = StorageService.get('proveedores', []);
     const prods = StorageService.get('productos', []);
@@ -1943,8 +1948,8 @@ function agregarArticuloOC() {
     const caracInput = document.getElementById('ocCaracteristicas');
     if (!sel.value) return;
     const prods = StorageService.get('productos', []);
-    const prod = prods.find(p => String(p.id) === String(sel.value));
-    if (!prod) return;
+    const prod = prods.find(p => String(p.id) === String(sel.value) && _comprasProductoActivo(p));
+    if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la orden.');
     const cant = parseInt(cantInput.value) || 1;
     const costo = parseFloat(prod.costo) || 0;
     const caracteristicas = caracInput ? caracInput.value.trim() : '';
@@ -3103,8 +3108,8 @@ function agregarArticuloEditOC() {
     const cant = parseInt(document.getElementById('editOcCantidad').value) || 1;
     if (!sel.value) return;
     const prods = StorageService.get('productos', []);
-    const prod  = prods.find(p => String(p.id) === String(sel.value));
-    if (!prod) return;
+    const prod  = prods.find(p => String(p.id) === String(sel.value) && _comprasProductoActivo(p));
+    if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la orden.');
     if (!window._editArticulosOC) window._editArticulosOC = [];
     const idx = window._editArticulosOC.findIndex(a => String(a.productoId) === String(prod.id));
     if (idx !== -1) {
@@ -3294,7 +3299,8 @@ function iniciarOrdenDesdeRequisiciones() {
     seleccionados.forEach(idReq => {
         const req = reqsTotales.find(r => String(r.id) === String(idReq));
         if (req) {
-            const prod = prods.find(p => String(p.id) === String(req.productoId));
+            const prod = prods.find(p => String(p.id) === String(req.productoId) && _comprasProductoActivo(p));
+            if (!prod) return;
             window._articulosOC.push({
                 productoId: req.productoId,
                 nombre: req.producto,
@@ -3326,7 +3332,8 @@ function iniciarCompraDirectaDesdeRequisiciones() {
     seleccionados.forEach(idReq => {
         const req = reqsTotales.find(r => String(r.id) === String(idReq));
         if (req) {
-            const prod = prods.find(p => String(p.id) === String(req.productoId));
+            const prod = prods.find(p => String(p.id) === String(req.productoId) && _comprasProductoActivo(p));
+            if (!prod) return;
             window._articulosCompraDirecta.push({
                 productoId: req.productoId,
                 nombre: req.producto,
@@ -3464,8 +3471,8 @@ function agregarArticuloCompraDirecta() {
     const sel = document.getElementById('cdProductoSel');
     if (!sel.value) return;
     const prods = StorageService.get('productos', []);
-    const prod = prods.find(p => String(p.id) === String(sel.value));
-    if (!prod) return;
+    const prod = prods.find(p => String(p.id) === String(sel.value) && _comprasProductoActivo(p));
+    if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la compra.');
     
     window._articulosCompraDirecta.push({ 
         productoId: prod.id, nombre: prod.nombre, costo: prod.costo || 0, cantidad: 1, 
@@ -4272,7 +4279,8 @@ window.confirmarAgregarA_OC_Existente = function() {
     reqIds.forEach(idReq => {
         let req = reqsTotales.find(r => String(r.id) === String(idReq));
         if (req && req.estatus === "Pendiente") {
-            const prod = prods.find(p => String(p.id) === String(req.productoId));
+            const prod = prods.find(p => String(p.id) === String(req.productoId) && _comprasProductoActivo(p));
+            if (!prod) return;
             const costoUnitario = prod ? parseFloat(prod.costo) : 0;
             const cant = parseInt(req.cantidad) || 1;
             const caracteristicas = req.folioVenta ? `Req. Venta: ${req.folioVenta}` : "Req. Venta: S/F";

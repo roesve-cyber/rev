@@ -206,6 +206,11 @@ function _invArray(value) {
  return Array.isArray(value) ? value : [];
 }
 
+function _invProductoActivo(p) {
+ if (typeof window.productoEstaActivo === 'function') return window.productoEstaActivo(p);
+ return !!p && p.activo !== false && p.Activo !== 0 && p.Activo !== false;
+}
+
 function _invStorageArray(key) {
  try {
  if (typeof StorageService === 'undefined') return [];
@@ -1129,7 +1134,7 @@ window.renderConsultaInventario = function() {
  const provFiltro = document.getElementById('filtroProvInv')?.value || 'todos';
 
  // 2. Preparacion de Datos (Kardex y Ordenes de Compra)
- const productosConsulta = window.productos || [];
+ const productosConsulta = (window.productos || []).filter(_invProductoActivo);
  const productosMapConsulta = new Map(productosConsulta.map(p => [String(p.id), p]));
  const kardex = (window.movimientosInventario || [])
  .map(m => _normalizarMovimientoKardex(m, productosMapConsulta))
@@ -1418,7 +1423,8 @@ window.initConsultaInventario = function() {
  provSel.onchange = renderConsultaInventario;
  }
 
- let cats = [...new Set((window.productos||[]).map(p=>p.categoria).filter(Boolean))];
+ const productosActivos = (window.productos || []).filter(_invProductoActivo);
+ let cats = [...new Set(productosActivos.map(p=>p.categoria).filter(Boolean))];
  // Ordenar categorias por posicion
  const categoriasOrdenadas = (window.categoriasData || [])
  .filter(c => cats.includes(c.nombre))
@@ -1430,7 +1436,7 @@ window.initConsultaInventario = function() {
  
  catSel.onchange = function() {
  const cat = catSel.value;
- let subs = (window.productos||[]).filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
+ let subs = productosActivos.filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
  subs = [...new Set(subs)];
  
  // Ordenar subcategorias por posicion
@@ -1510,9 +1516,12 @@ function aplicarFiltros() {
  const catFiltro = document.getElementById("filtroCategoria").value;
  const subFiltro = document.getElementById("filtroSubcategoria").value;
  const provFiltro = document.getElementById("filtroProveedorInventario")?.value || "todos";
+ const estadoFiltro = document.getElementById("filtroEstadoProducto")?.value || "todos";
  const busqueda = document.getElementById("busquedaProducto").value.toLowerCase();
 
  let filtrados = window.productos.filter(p => {
+ const activo = _invProductoActivo(p);
+ const coincideEstado = estadoFiltro === "todos" || (estadoFiltro === "activos" ? activo : !activo);
  const proveedorProducto = _invProveedorProducto(p);
  const coincideCat = (catFiltro === "todos" || p.categoria === catFiltro);
  const coincideSub = (subFiltro === "todos" || p.subcategoria === subFiltro);
@@ -1521,7 +1530,7 @@ function aplicarFiltros() {
  : (provFiltro === "sin_proveedor" ? !_invTextoNormalizado(proveedorProducto) : _invTextoNormalizado(proveedorProducto) === _invTextoNormalizado(provFiltro));
  const texto = `${p.nombre || ''} ${p.categoria || ''} ${p.subcategoria || ''} ${p.marca || ''} ${p.modelo || ''} ${proveedorProducto}`.toLowerCase();
  const coincideNombre = !busqueda || texto.includes(busqueda);
- return coincideCat && coincideSub && coincideProveedor && coincideNombre;
+ return coincideEstado && coincideCat && coincideSub && coincideProveedor && coincideNombre;
  });
 
  // PASAR POR EL MOTOR ANTES DE RENDERIZAR
@@ -1553,18 +1562,22 @@ function limpiarFiltros() {
  document.getElementById("busquedaProducto").value = "";
  const filtroProveedor = document.getElementById("filtroProveedorInventario");
  if (filtroProveedor) filtroProveedor.value = "todos";
- renderInventario(window.productos);
+ const filtroEstado = document.getElementById("filtroEstadoProducto");
+ if (filtroEstado) filtroEstado.value = "todos";
+ renderInventario(window.productos || []);
 }
 
 function actualizarCombosFiltros() {
  const filtroCat = document.getElementById("filtroCategoria");
  const filtroSub = document.getElementById("filtroSubcategoria");
  const filtroProveedor = document.getElementById("filtroProveedorInventario");
+ const filtroEstado = document.getElementById("filtroEstadoProducto");
  if (!filtroCat) return;
 
  const catPrevia = filtroCat.value;
  const subPrevia = filtroSub ? filtroSub.value : "todos";
  const provPrevio = filtroProveedor ? filtroProveedor.value : "todos";
+ const estadoPrevio = filtroEstado ? filtroEstado.value : "todos";
 
  let htmlCat = '<option value="todos">-- Todas las Categorias --</option>';
  // Ordenar categorias por posicion
@@ -1600,10 +1613,15 @@ function actualizarCombosFiltros() {
  filtroProveedor.value = provPrevio || "todos";
  if (!filtroProveedor.value) filtroProveedor.value = "todos";
  }
+
+ if (filtroEstado) {
+ filtroEstado.value = estadoPrevio || "todos";
+ if (!filtroEstado.value) filtroEstado.value = "todos";
+ }
 }
 
 // ===== INVENTARIO =====
-function renderInventario(listaAMostrar = window.productos) {
+function renderInventario(listaAMostrar = (window.productos || [])) {
  const cont = document.getElementById("listaInventario");
  if (!cont) return;
 
@@ -1611,12 +1629,14 @@ function renderInventario(listaAMostrar = window.productos) {
  const filtrosControl = {
  q: String(document.getElementById("busquedaProducto")?.value || ''),
  proveedor: document.getElementById("filtroProveedorInventario")?.value || "todos",
+ estado: document.getElementById("filtroEstadoProducto")?.value || "todos",
  categoria: document.getElementById("filtroCategoria")?.value || "todos",
  subcategoria: document.getElementById("filtroSubcategoria")?.value || "todos"
  };
  const chipsControl = _invActiveFilterChips(filtrosControl, [
  { key: 'q', id: 'busquedaProducto', label: 'Buscar', defaultValue: '' },
  { key: 'proveedor', id: 'filtroProveedorInventario', label: 'Proveedor', defaultValue: 'todos', options: { sin_proveedor: 'Sin proveedor' } },
+ { key: 'estado', id: 'filtroEstadoProducto', label: 'Estado', defaultValue: 'todos', options: { activos: 'Activos', inactivos: 'Inactivos' } },
  { key: 'categoria', id: 'filtroCategoria', label: 'Categoria', defaultValue: 'todos' },
  { key: 'subcategoria', id: 'filtroSubcategoria', label: 'Subcategoria', defaultValue: 'todos' }
  ], 'aplicarFiltros');
@@ -1640,10 +1660,12 @@ function renderInventario(listaAMostrar = window.productos) {
  listaAMostrar.forEach(p => {
  const stock = p.stock || 0;
  const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
+ const activo = _invProductoActivo(p);
  html += `
  <tr>
  <td>
  <b>${p.nombre}</b><br>
+ ${activo ? '' : '<span style="display:inline-block;margin:3px 0;padding:2px 7px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:10px;font-weight:900;text-transform:uppercase;">Inactivo</span><br>'}
  <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
  </td>
  <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
@@ -1762,6 +1784,7 @@ function abrirProductoForm(id = null) {
  const inputCaracteristicas = document.getElementById("pCaracteristicas");
  const inputDestacadoCatalogo = document.getElementById("pDestacadoCatalogo");
  const inputOrdenDestacadoCatalogo = document.getElementById("pOrdenDestacadoCatalogo");
+ const inputActivo = document.getElementById("pActivo");
 
  let p = null; // <--- CORRECCIAN: Declaramos 'p' aqui para que exista en toda la funcion
 
@@ -1781,6 +1804,7 @@ function abrirProductoForm(id = null) {
  if (inputCaracteristicas) inputCaracteristicas.value = p.caracteristicas || '';
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = !!p.destacadoCatalogo;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = p.ordenDestacadoCatalogo || '';
+ if (inputActivo) inputActivo.checked = _invProductoActivo(p);
  } else {
  productoEditando = null;
  document.getElementById("tituloModalProducto").innerText = "Nuevo Producto";
@@ -1794,6 +1818,7 @@ function abrirProductoForm(id = null) {
  if (inputCaracteristicas) inputCaracteristicas.value = "";
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = false;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = "";
+ if (inputActivo) inputActivo.checked = true;
  }
  
  // --- LAGICA FINANCIERA DEL PRODUCTO ---
@@ -1829,6 +1854,7 @@ function guardarProductoDB() {
  const caracteristicas = document.getElementById("pCaracteristicas")?.value.trim() || "";
  const destacadoCatalogo = document.getElementById("pDestacadoCatalogo")?.checked || false;
  const ordenDestacadoCatalogoRaw = parseInt(document.getElementById("pOrdenDestacadoCatalogo")?.value, 10);
+ const activo = document.getElementById("pActivo")?.checked !== false;
  const ordenDestacadoCatalogo = Number.isFinite(ordenDestacadoCatalogoRaw) && ordenDestacadoCatalogoRaw > 0
  ? ordenDestacadoCatalogoRaw
  : 999;
@@ -1858,6 +1884,8 @@ function guardarProductoDB() {
  categoria: categoriaPadre,
  subcategoria: subcatNombre,
  caracteristicas,
+ activo,
+ Activo: activo ? 1 : 0,
  destacadoCatalogo,
  ordenDestacadoCatalogo,
  configCredito, // <----- ESTA ES LA LINEA MAGICA
@@ -1878,7 +1906,7 @@ function guardarProductoDB() {
  if (!StorageService.set("productos", window.productos)) return alert("Error guardando producto");
 
  cerrarProductoForm();
- renderInventario();
+ aplicarFiltros();
 }
 
 // ===== VISOR MAESTRO CON GESTIAN DE UBICACIONES Y COLORES =====

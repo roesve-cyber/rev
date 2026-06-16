@@ -448,8 +448,8 @@ function agregarArticuloCotizacion() {
         }
     } else {
         const productosLista = StorageService.get('productos', []);
-        const prod = productosLista.find(p => String(p.id) === String(sel.value));
-        if (!prod) return;
+        const prod = productosLista.find(p => String(p.id) === String(sel.value) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
+        if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la cotizacion.');
         const precio = parseFloat(prod.precio) || 0;
         const idx = window._articulosCot.findIndex(a => String(a.productoId) === String(prod.id));
         if (idx !== -1) {
@@ -803,6 +803,13 @@ function convertirCotizacionAVenta(id) {
     
     let carritoActual = StorageService.get('carrito', []);
     const productosLista = StorageService.get('productos', []);
+    const articulosNoDisponibles = cot.articulos.filter(art => {
+        if (art.esLibre) return false;
+        return !productosLista.some(p => String(p.id) === String(art.productoId) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
+    });
+    if (articulosNoDisponibles.length) {
+        return alert('No se puede convertir la cotizacion porque contiene producto(s) inactivos o eliminados.');
+    }
 
     cot.articulos.forEach(art => {
         if (art.esLibre) {
@@ -819,7 +826,7 @@ function convertirCotizacionAVenta(id) {
                 esLibre: true
             });
         } else {
-            const prod = productosLista.find(p => String(p.id) === String(art.productoId));
+            const prod = productosLista.find(p => String(p.id) === String(art.productoId) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
             if (!prod) return;
             const existe = carritoActual.findIndex(ci => String(ci.id) === String(prod.id));
             if (existe !== -1) {

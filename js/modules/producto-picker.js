@@ -5,11 +5,15 @@
 window.abrirSelectorProducto = function(opciones) {
     const {
         titulo = "🔍 Seleccionar Producto",
-        onSeleccion = () => {}
+        onSeleccion = () => {},
+        incluirInactivos = false
     } = opciones || {};
 
     // Obtener catálogo fresco
-    const prods = StorageService.get("productos", []);
+    const productosBase = StorageService.get("productos", []);
+    const prods = incluirInactivos || typeof window.filtrarProductosActivos !== 'function'
+        ? productosBase
+        : window.filtrarProductosActivos(productosBase);
     const cats = StorageService.get("categoriasData", []);
 
     // Guardar estado global para navegación interna

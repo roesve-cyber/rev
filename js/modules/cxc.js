@@ -99,6 +99,110 @@ function _cxcFechaVentaDate(cuenta) {
     return d && !isNaN(d.getTime()) ? d : new Date();
 }
 
+function _cxcFechaFinalCredito(cuenta, estadoCta = null) {
+    const raw = cuenta?.fechaFinalPago || cuenta?.fechaFinalCredito || cuenta?.fechaFinCredito || cuenta?.fechaLiquidacionLimite || '';
+    let d = null;
+    if (raw && window.parseFechaMXOrNull) d = window.parseFechaMXOrNull(raw);
+    if (!d && raw && window.parseFechaMX) d = window.parseFechaMX(raw);
+    if ((!d || isNaN(d.getTime())) && raw) d = new Date(raw);
+    if (d && !isNaN(d.getTime())) return d;
+
+    const mesesPlan = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    if (mesesPlan > 0) {
+        const base = _cxcFechaVentaDate(cuenta);
+        const fin = new Date(base.getFullYear(), base.getMonth() + mesesPlan, base.getDate(), 23, 59, 59);
+        if (!isNaN(fin.getTime())) return fin;
+    }
+
+    const pagares = estadoCta?.pagares || StorageService.get("pagaresSistema", []).filter(p => p.folio === cuenta?.folio);
+    const fechas = pagares
+        .map(p => new Date(p.fechaVencimiento))
+        .filter(f => !isNaN(f.getTime()))
+        .sort((a, b) => b - a);
+    return fechas[0] || null;
+}
+
+function _cxcRedondearMoratorio(monto) {
+    const n = Number(monto || 0);
+    if (n <= 0) return 0;
+    return Math.ceil(n / 10) * 10;
+}
+
+function _cxcMoratoriosVigentes(cuenta) {
+    return (cuenta?.cargosMoratorios || []).filter(m => !m.cancelado && !m.anulado);
+}
+
+function _cxcMoratoriosPendientes(cuenta) {
+    return _cxcMoratoriosVigentes(cuenta)
+        .filter(m => String(m.tipo || 'cargo') !== 'exencion')
+        .map(m => {
+            const monto = Number(m.monto || 0);
+            const abonado = Number(m.montoAbonado || 0);
+            return { ...m, pendiente: Math.max(0, monto - abonado) };
+        })
+        .filter(m => m.pendiente > 0.01);
+}
+
+function _cxcTotalMoratoriosPendientes(cuenta) {
+    return _cxcMoratoriosPendientes(cuenta).reduce((s, m) => s + Number(m.pendiente || 0), 0);
+}
+
+function _cxcMesesMoratorioRegistrados(cuenta) {
+    return _cxcMoratoriosVigentes(cuenta).reduce((s, m) => s + Math.max(1, Number(m.mesesCubiertos || 1)), 0);
+}
+
+function _cxcEvaluarMoratorio(cuenta, estadoCta = null) {
+    if (!cuenta || _cxcCuentaCancelada(cuenta) || _cxcEsIncobrable(cuenta)) return null;
+    const estado = estadoCta || (cuenta.folio ? window._calcularEstadoCuenta?.(cuenta.folio) : null);
+    const saldo = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0);
+    const fechaFinal = _cxcFechaFinalCredito(cuenta, estado);
+    if (!fechaFinal || isNaN(fechaFinal.getTime()) || saldo <= 0.01) {
+        return { aplica: false, saldo, fechaFinal, diasVencidos: 0, mesesVencidos: 0, mesesPendientes: 0, montoSugerido: 0 };
+    }
+
+    const hoy = new Date();
+    const diasVencidos = Math.floor((hoy - fechaFinal) / 86400000);
+    if (diasVencidos <= 0) {
+        return { aplica: false, saldo, fechaFinal, diasVencidos: 0, mesesVencidos: 0, mesesPendientes: 0, montoSugerido: 0 };
+    }
+
+    const mesesVencidos = Math.max(1, Math.ceil(diasVencidos / 30.44));
+    const mesesRegistrados = _cxcMesesMoratorioRegistrados(cuenta);
+    const mesesPendientes = Math.max(0, mesesVencidos - mesesRegistrados);
+    const montoSugerido = _cxcRedondearMoratorio(saldo * 0.02 * mesesPendientes);
+    return {
+        aplica: mesesPendientes > 0 && montoSugerido > 0,
+        saldo,
+        fechaFinal,
+        diasVencidos,
+        mesesVencidos,
+        mesesRegistrados,
+        mesesPendientes,
+        montoSugerido,
+        tasaMensual: 2
+    };
+}
+
+function _cxcAplicarPagoAMoratorios(cuenta, montoDisponible) {
+    let restante = Number(montoDisponible || 0);
+    if (!cuenta || restante <= 0.01) return restante;
+    cuenta.cargosMoratorios = cuenta.cargosMoratorios || [];
+    cuenta.cargosMoratorios = cuenta.cargosMoratorios.map(m => {
+        if (restante <= 0.01 || m.cancelado || m.anulado || String(m.tipo || 'cargo') === 'exencion') return m;
+        const pendiente = Math.max(0, Number(m.monto || 0) - Number(m.montoAbonado || 0));
+        if (pendiente <= 0.01) return m;
+        const aplicado = Math.min(restante, pendiente);
+        restante -= aplicado;
+        const nuevoAbonado = Number(m.montoAbonado || 0) + aplicado;
+        return {
+            ...m,
+            montoAbonado: nuevoAbonado,
+            estado: nuevoAbonado >= Number(m.monto || 0) - 0.01 ? "Pagado" : "Parcial"
+        };
+    });
+    return restante;
+}
+
 function _cxcImporteContadoCuenta(cuenta) {
     const articulos = Array.isArray(cuenta?.articulos) ? cuenta.articulos : [];
     const desdeArticulos = articulos.reduce((s, a) => {
@@ -214,6 +318,46 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     };
 }
 
+function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
+    if (!politica) {
+        return {
+            titulo: "Politica de pago anticipado",
+            detalle: "No se pudo evaluar la politica para esta cuenta.",
+            nota: ""
+        };
+    }
+
+    const modoTxt = esDirecto
+        ? "Aplica tambien en Abono Directo: si el monto captura una liquidacion por politica, se ingresara a caja el monto correcto de politica."
+        : "Aplica tambien al enviar a Boveda: Auditoria autorizara el monto correcto de politica, no solo el saldo visible.";
+    const beneficioTxt = politica.beneficio > 0.01
+        ? ` Beneficio para el cliente: ${_cxcDinero(politica.beneficio)}.`
+        : "";
+
+    if (politica.tipo === "contado_30") {
+        return {
+            titulo: "Politica de pago anticipado: precio de contado",
+            detalle: `Esta cuenta esta dentro de los primeros 30 dias. Puede liquidarse descontando intereses y cobrando solo el pendiente a precio de contado: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}`,
+            nota: modoTxt
+        };
+    }
+
+    if (politica.tipo === "plan_anticipado") {
+        const meses = politica.plan?.meses || politica.mesActualVenta || "-";
+        return {
+            titulo: `Politica de pago anticipado: plan ${meses} meses`,
+            detalle: `Ya vencio el periodo de contado. Si el cliente liquida anticipadamente, el sistema cobra el plan aplicable a la antiguedad de la venta: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}`,
+            nota: modoTxt
+        };
+    }
+
+    return {
+        titulo: "Politica de pago anticipado: saldo vigente",
+        detalle: `No hay descuento anticipado disponible para esta cuenta. Para liquidar debe cubrir el saldo vigente: ${_cxcDinero(politica.saldoActual)}.`,
+        nota: modoTxt
+    };
+}
+
 // ==========================================
 // 1. MOTOR CENTRAL DE SALDOS
 // ==========================================
@@ -266,6 +410,9 @@ window._calcularEstadoCuenta = function(folio) {
 
     const abonos = (cuenta.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
     const totalAbonado = abonos.reduce((sum, a) => sum + (a.monto || 0), 0);
+    const moratoriosPendientes = _cxcMoratoriosPendientes(cuenta);
+    const saldoMoratorios = moratoriosPendientes.reduce((sum, m) => sum + Number(m.pendiente || 0), 0);
+    if (saldoMoratorios > 0.01) saldoTotal += saldoMoratorios;
 
     let estadoGeneral = "Activo";
     let promesaVigente = false;
@@ -285,7 +432,7 @@ window._calcularEstadoCuenta = function(folio) {
         else estadoGeneral = "Crítico";
     }
 
-    return { cuenta, pagares: pagaresDelFolio, pagaresPendientes, pagaresVencidos, saldoTotal, montoVencido, diasMaxAtraso, estadoGeneral, promesaVigente, totalAbonado };
+    return { cuenta, pagares: pagaresDelFolio, pagaresPendientes, pagaresVencidos, saldoTotal, montoVencido, diasMaxAtraso, estadoGeneral, promesaVigente, totalAbonado, moratoriosPendientes, saldoMoratorios };
 };
 
 // ==========================================
@@ -346,17 +493,25 @@ function renderCuentasXCobrar(filtroCliente = "") {
 
         cuentasMostradas++;
         const textoPromesa = estadoCta.promesaVigente ? `<br><span style="color:#d97706; font-size:11px; font-weight:bold;">📝 Promesa: ${_cxcFechaVista(c.promesaPago.fecha)}</span>` : '';
+        const moratorio = _cxcEvaluarMoratorio(c, estadoCta);
+        const textoMoratorio = estadoCta.saldoMoratorios > 0.01
+            ? `<br><small style="color:#7f1d1d; font-weight:800;">Moratorios pendientes: ${_cxcDinero(estadoCta.saldoMoratorios)}</small>`
+            : (moratorio?.aplica ? `<br><small style="color:#b45309; font-weight:800;">Moratorio sugerido: ${_cxcDinero(moratorio.montoSugerido)}</small>` : '');
+        const accionesMoratorio = moratorio?.aplica ? `
+                    <button onclick="abrirModalMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#7f1d1d; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Aplicar moratorio manual">Moratorio</button>
+                    <button onclick="exentarMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Exentar moratorio sugerido">Exentar</button>` : '';
 
         htmlTabla += `<tr>
             <td><strong>${nombreCliente}</strong><br><small style="color:#718096;">${c.folio}</small></td>
             <td>${c.fechaVenta ? _cxcFechaVista(c.fechaVenta) : '-'}</td>
             <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
-            <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}</td>
+            <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}${textoMoratorio}</td>
             <td>${estadoCta.pagaresPendientes.length} pendiente(s)${textoPromesa}</td>
             <td>${c.metodo === "apartado" ? "📦 Apartado" : "💳 Crédito"}</td>
             <td>
                 <div style="display:flex; gap:5px; flex-wrap:wrap;">
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
+                    ${accionesMoratorio}
                     <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
                 </div>
@@ -396,20 +551,30 @@ function renderAbonosDirectos(filtroCliente = "") {
                     </tr>
                 </thead>
                 <tbody>
-                    ${filas.map(({ cuenta, estado }) => `
+                    ${filas.map(({ cuenta, estado }) => {
+                        const moratorio = _cxcEvaluarMoratorio(cuenta, estado);
+                        const avisoMoratorio = estado.saldoMoratorios > 0.01
+                            ? `<br><small style="display:inline-block; margin-top:4px; color:#7f1d1d; font-weight:800;">Moratorios pendientes: ${_cxcDinero(estado.saldoMoratorios)}</small>`
+                            : (moratorio?.aplica ? `<br><small style="display:inline-block; margin-top:4px; color:#b45309; font-weight:800;">Moratorio sugerido: ${_cxcDinero(moratorio.montoSugerido)}</small>` : '');
+                        const accionesMoratorio = moratorio?.aplica ? `
+                                    <button onclick="abrirModalMoratorio('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#7f1d1d; color:white; font-weight:bold; cursor:pointer;">Moratorio</button>
+                                    <button onclick="exentarMoratorio('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#64748b; color:white; font-weight:bold; cursor:pointer;">Exentar</button>` : '';
+                        return `
                         <tr>
                             <td><strong>${_cxcEscHTML(cuenta.nombre || cuenta.clienteNombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
-                            <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}</td>
+                            <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}${avisoMoratorio}</td>
                             <td>${estado.pagaresPendientes.length} pendiente(s)</td>
                             <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2'}; color:${estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b'}; font-weight:bold; font-size:12px;">${_cxcEscHTML(estado.estadoGeneral)}</span></td>
                             <td style="text-align:right;">
                                 <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
+                                    ${accionesMoratorio}
                                     <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: 'directo' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">Aplicar</button>
                                     <button onclick="marcarIncobrable('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#475569; color:white; font-weight:bold; cursor:pointer;">Incobrable</button>
                                 </div>
                             </td>
                         </tr>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </tbody>
             </table>
         </div>`}
@@ -421,6 +586,130 @@ function renderAbonosDirectos(filtroCliente = "") {
             <div id="tablaIncobrables"></div>
         </div>`;
     renderCuentasIncobrables();
+}
+
+function abrirModalMoratorio(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return alert("Cuenta no encontrada.");
+    const estado = window._calcularEstadoCuenta(folio);
+    const moratorio = _cxcEvaluarMoratorio(cuenta, estado);
+    if (!moratorio?.aplica) return alert("Esta cuenta no tiene moratorio pendiente de aplicar.");
+
+    document.querySelector('[data-modal="moratorio-manual"]')?.remove();
+    const html = `
+        <div data-modal="moratorio-manual" style="position:fixed; inset:0; background:rgba(15,23,42,0.72); z-index:7000; display:flex; align-items:center; justify-content:center; padding:18px;">
+            <div style="background:white; width:100%; max-width:460px; border-radius:12px; overflow:hidden; box-shadow:0 24px 60px rgba(15,23,42,0.35);">
+                <div style="padding:18px 22px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center;">
+                    <h3 style="margin:0; color:#7f1d1d;">Aplicar moratorio</h3>
+                    <button onclick="document.querySelector('[data-modal=&quot;moratorio-manual&quot;]')?.remove()" style="border:none; background:white; color:#64748b; font-size:22px; cursor:pointer;">x</button>
+                </div>
+                <div style="padding:22px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+                        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px;">
+                            <small style="color:#64748b; font-weight:800;">Saldo base</small>
+                            <div style="font-size:20px; font-weight:900; color:#0f172a;">${_cxcDinero(moratorio.saldo)}</div>
+                        </div>
+                        <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:10px;">
+                            <small style="color:#991b1b; font-weight:800;">Sugerido</small>
+                            <div style="font-size:20px; font-weight:900; color:#7f1d1d;">${_cxcDinero(moratorio.montoSugerido)}</div>
+                        </div>
+                    </div>
+                    <div style="font-size:13px; color:#334155; line-height:1.45; margin-bottom:16px;">
+                        Fecha final: <b>${_cxcFechaVista(moratorio.fechaFinal)}</b><br>
+                        Vencimiento: <b>${moratorio.diasVencidos}</b> dia(s), <b>${moratorio.mesesPendientes}</b> mes(es) pendiente(s).<br>
+                        Regla: <b>2% mensual sobre saldo</b>, redondeado a multiplos de 10.
+                    </div>
+                    <label style="display:block; font-size:12px; color:#475569; font-weight:800; margin-bottom:5px;">Monto a cargar</label>
+                    <input id="moratorioMontoInput" type="number" min="0" step="10" value="${moratorio.montoSugerido}" style="width:100%; box-sizing:border-box; padding:12px; border:2px solid #dc2626; border-radius:8px; font-size:18px; font-weight:800; margin-bottom:12px;">
+                    <label style="display:block; font-size:12px; color:#475569; font-weight:800; margin-bottom:5px;">Nota obligatoria</label>
+                    <textarea id="moratorioNotaInput" rows="3" placeholder="Ej. Se aplica moratorio por vencimiento final del credito." style="width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1; border-radius:8px; resize:vertical; margin-bottom:18px;"></textarea>
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="aplicarMoratorioManual('${_cxcEscHTML(folio)}')" style="flex:2; padding:12px; border:none; border-radius:8px; background:#7f1d1d; color:white; font-weight:900; cursor:pointer;">Aplicar cargo</button>
+                        <button onclick="document.querySelector('[data-modal=&quot;moratorio-manual&quot;]')?.remove()" style="flex:1; padding:12px; border:none; border-radius:8px; background:#e2e8f0; color:#334155; font-weight:800; cursor:pointer;">Cancelar</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function aplicarMoratorioManual(folio) {
+    const monto = Number(document.getElementById("moratorioMontoInput")?.value || 0);
+    const nota = String(document.getElementById("moratorioNotaInput")?.value || '').trim();
+    if (monto <= 0) return alert("Ingresa un monto de moratorio mayor a cero.");
+    if (!nota) return alert("La nota es obligatoria para aplicar un moratorio.");
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const idx = cuentas.findIndex(c => c.folio === folio);
+    if (idx === -1) return alert("Cuenta no encontrada.");
+    const estado = window._calcularEstadoCuenta(folio);
+    const moratorio = _cxcEvaluarMoratorio(cuentas[idx], estado);
+    if (!moratorio?.aplica) return alert("Esta cuenta ya no tiene moratorio pendiente de aplicar.");
+
+    cuentas[idx].cargosMoratorios = cuentas[idx].cargosMoratorios || [];
+    cuentas[idx].cargosMoratorios.push({
+        id: `MOR-${Date.now()}`,
+        tipo: "cargo",
+        estado: "Pendiente",
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        monto,
+        montoAbonado: 0,
+        tasaMensual: 2,
+        saldoBase: moratorio.saldo,
+        fechaFinalCredito: window.localISO ? window.localISO(moratorio.fechaFinal) : moratorio.fechaFinal.toISOString(),
+        diasVencidos: moratorio.diasVencidos,
+        mesesCubiertos: moratorio.mesesPendientes,
+        nota
+    });
+    StorageService.set("cuentasPorCobrar", cuentas);
+
+    const actualizadas = StorageService.get("cuentasPorCobrar", []);
+    const idxAct = actualizadas.findIndex(c => c.folio === folio);
+    if (idxAct !== -1) {
+        const estadoAct = window._calcularEstadoCuenta(folio);
+        actualizadas[idxAct].saldoActual = Number(estadoAct?.saldoTotal || actualizadas[idxAct].saldoActual || 0);
+        StorageService.set("cuentasPorCobrar", actualizadas);
+    }
+
+    document.querySelector('[data-modal="moratorio-manual"]')?.remove();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    alert("Moratorio aplicado al saldo de la cuenta.");
+}
+
+function exentarMoratorio(folio) {
+    const nota = prompt("Motivo de exencion del moratorio:");
+    if (nota === null) return;
+    if (!String(nota).trim()) return alert("La nota es obligatoria para exentar un moratorio.");
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const idx = cuentas.findIndex(c => c.folio === folio);
+    if (idx === -1) return alert("Cuenta no encontrada.");
+    const estado = window._calcularEstadoCuenta(folio);
+    const moratorio = _cxcEvaluarMoratorio(cuentas[idx], estado);
+    if (!moratorio?.aplica) return alert("Esta cuenta no tiene moratorio pendiente de exentar.");
+
+    cuentas[idx].cargosMoratorios = cuentas[idx].cargosMoratorios || [];
+    cuentas[idx].cargosMoratorios.push({
+        id: `MOR-EX-${Date.now()}`,
+        tipo: "exencion",
+        estado: "Exentado",
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        monto: 0,
+        montoAbonado: 0,
+        tasaMensual: 2,
+        saldoBase: moratorio.saldo,
+        fechaFinalCredito: window.localISO ? window.localISO(moratorio.fechaFinal) : moratorio.fechaFinal.toISOString(),
+        diasVencidos: moratorio.diasVencidos,
+        mesesCubiertos: moratorio.mesesPendientes,
+        nota: String(nota).trim()
+    });
+    StorageService.set("cuentasPorCobrar", cuentas);
+
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    alert("Moratorio exentado para el periodo pendiente.");
 }
 
 function renderVisorCreditosCobranza() {
@@ -740,6 +1029,7 @@ let mejorPlan = planesOrdenados.length > 0
         selectorCuentasHTML = `<select id="cuentaOrigen_abono" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">💵 Efectivo Principal</option></select>`;
     }
     const politicaInicial = _cxcEvaluarPoliticaPagoAnticipado(folio, 0);
+    const resumenPoliticaInicial = _cxcResumenPoliticaPagoAnticipado(politicaInicial, esDirecto);
 
     const modalHTML = `
         <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
@@ -790,13 +1080,12 @@ let mejorPlan = planesOrdenados.length > 0
                 </div>
 
                 <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
-                    <strong style="color:#92400e;">Politica de pago anticipado</strong>
-                    <p style="margin:8px 0 0 0; font-size:14px; color:#78350f;">
-                        ${politicaInicial?.tipo === 'contado_30'
-                            ? `Esta dentro de los 30 dias. Liquida al precio de contado con: <strong>${_cxcDinero(politicaInicial.montoLiquidacion)}</strong>${politicaInicial.beneficio > 0 ? ` y obtiene un beneficio de <strong>${_cxcDinero(politicaInicial.beneficio)}</strong>` : ''}.`
-                            : (politicaInicial?.tipo === 'plan_anticipado'
-                                ? `Periodo de contado vencido. Puede liquidar al plan de ${politicaInicial.plan?.meses || '-'} meses con: <strong>${_cxcDinero(politicaInicial.montoLiquidacion)}</strong>${politicaInicial.beneficio > 0 ? ` y obtiene un beneficio de <strong>${_cxcDinero(politicaInicial.beneficio)}</strong>` : ''}.`
-                                : `Debe liquidar el saldo total vigente: <strong>${_cxcDinero(politicaInicial?.saldoActual ?? saldo)}</strong>.`)}
+                    <strong style="color:#92400e;">${resumenPoliticaInicial.titulo}</strong>
+                    <p style="margin:8px 0 0 0; font-size:14px; color:#78350f; line-height:1.45;">
+                        ${resumenPoliticaInicial.detalle}
+                    </p>
+                    <p style="margin:8px 0 0 0; font-size:12px; color:#92400e; line-height:1.45; font-weight:700;">
+                        ${resumenPoliticaInicial.nota}
                     </p>
                 </div>
 
@@ -837,6 +1126,7 @@ function actualizarAvisoPoliticaAbono(folio) {
         ? `<br>Beneficio para el cliente: <b>${_cxcDinero(politica.beneficio)}</b>.`
         : "";
     const montoPoliticaHTML = `Monto correcto por politica: <b>${_cxcDinero(politica.montoLiquidacion)}</b>.`;
+    const reglaHTML = `<br><span style="font-weight:700;">Esta regla se aplicara igual si el abono es directo o si se envia a Boveda.</span>`;
 
     if (politica.aplica && politica.liquidaria) {
         const titulo = politica.tipo === "contado_30"
@@ -845,7 +1135,7 @@ function actualizarAvisoPoliticaAbono(folio) {
         const excesoHTML = montoAbono > politica.montoLiquidacion + 0.01
             ? `<br>Capturaste <b>${_cxcDinero(montoAbono)}</b>; se aplicara el monto de politica.`
             : "";
-        avisoDiv.innerHTML = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #15803d;"><b>${titulo}</b><br>${montoPoliticaHTML}${beneficioHTML}${excesoHTML}</div>`;
+        avisoDiv.innerHTML = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #15803d;"><b>${titulo}</b><br>${montoPoliticaHTML}${beneficioHTML}${excesoHTML}${reglaHTML}</div>`;
         return;
     }
 
@@ -853,7 +1143,7 @@ function actualizarAvisoPoliticaAbono(folio) {
         const titulo = politica.tipo === "contado_30"
             ? "Politica 30 dias"
             : `Liquidacion anticipada${politica.plan?.meses ? ` al plan de ${politica.plan.meses} meses` : ""}`;
-        avisoDiv.innerHTML = `<div style="background:#fef3c7; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #d97706;"><b>${titulo}:</b> agrega <b>${_cxcDinero(politica.faltante)}</b> para liquidar con esta politica.<br>${montoPoliticaHTML}${beneficioHTML}</div>`;
+        avisoDiv.innerHTML = `<div style="background:#fef3c7; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #d97706;"><b>${titulo}:</b> agrega <b>${_cxcDinero(politica.faltante)}</b> para liquidar con esta politica.<br>${montoPoliticaHTML}${beneficioHTML}${reglaHTML}</div>`;
         return;
     }
 
@@ -892,7 +1182,14 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     const medioPago = isCaja ? 'efectivo' : 'transferencia';
 
     if (isNaN(montoAbonoInput) || montoAbonoInput <= 0) return alert("Ingresa un monto válido.");
-    if (montoAbonoInput > (saldoActual + 0.01)) return alert("El abono no puede ser mayor al saldo.");
+    const politicaValidacion = _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbonoInput);
+    const maximoPermitido = Math.max(
+        Number(saldoActual || 0),
+        Number(politicaValidacion?.montoLiquidacion || 0)
+    );
+    if (montoAbonoInput > (maximoPermitido + 0.01)) {
+        return alert(`El abono no puede ser mayor al saldo o al monto correcto por politica.\n\nSaldo visible: ${_cxcDinero(saldoActual)}\nMonto por politica: ${_cxcDinero(politicaValidacion?.montoLiquidacion || saldoActual)}`);
+    }
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const cuenta = cuentas.find(c => c.folio === folio) || {};
@@ -917,7 +1214,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     const pagares = StorageService.get("pagaresSistema", []);
     const precioContadoReal = _cxcImporteContadoCuenta(cuenta) || Number(montoOriginal);
-    const politicaAbono = _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbonoInput);
+    const politicaAbono = politicaValidacion || _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbonoInput);
 
     if (politicaAbono?.aplica && politicaAbono.liquidaria) {
         const tipoPolitica = politicaAbono.tipo === "contado_30"
@@ -986,7 +1283,10 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         if (_montoRestante >= _n - 0.01) { _pagaresCubiertos.push({ ...pag }); _montoRestante -= _n; } 
         else { if (_montoRestante > 0.01) { _pagareParcial = { ...pag, montoAplicado: _montoRestante }; } break; }
     }
-    let nuevoSaldoReal = pagares.filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado||0)) : p.monto), 0) - montoFinal;
+    const saldoPagaresAntes = pagares.filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado||0)) : p.monto), 0);
+    const saldoMoratoriosAntes = _cxcTotalMoratoriosPendientes(cuenta);
+    const excedenteParaMoratorios = Math.max(0, montoFinal - saldoPagaresAntes);
+    let nuevoSaldoReal = Math.max(0, saldoPagaresAntes - montoFinal) + Math.max(0, saldoMoratoriosAntes - excedenteParaMoratorios);
     if (liquidacionPorPolitica) nuevoSaldoReal = 0;
 
     const _pagaresRestantes = pagares.filter(p => p.folio === folio && (p.estado === "Pendiente" || p.estado === "Parcial")).map(p => {
@@ -1107,8 +1407,15 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
     }
     const estadoCuentaGuard = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(_folioGuard) : null;
     const saldoVigenteGuard = Number(estadoCuentaGuard?.saldoTotal ?? cuentaGuard.saldoActual ?? 0);
-    if (_montoGuard > saldoVigenteGuard + 0.01) {
-        alert(`No se puede aplicar el abono porque excede el saldo vigente.\n\nAbono: ${_cxcDinero(_montoGuard)}\nSaldo vigente: ${_cxcDinero(saldoVigenteGuard)}`);
+    const politicaGuard = a.liquidacionPorPolitica && typeof _cxcEvaluarPoliticaPagoAnticipado === 'function'
+        ? _cxcEvaluarPoliticaPagoAnticipado(_folioGuard, _montoGuard)
+        : null;
+    const maximoPermitidoGuard = Math.max(
+        saldoVigenteGuard,
+        Number(politicaGuard?.montoLiquidacion || 0)
+    );
+    if (_montoGuard > maximoPermitidoGuard + 0.01) {
+        alert(`No se puede aplicar el abono porque excede el saldo vigente o el monto correcto por politica.\n\nAbono: ${_cxcDinero(_montoGuard)}\nSaldo vigente: ${_cxcDinero(saldoVigenteGuard)}\nPolitica: ${_cxcDinero(politicaGuard?.montoLiquidacion || saldoVigenteGuard)}`);
         return false;
     }
     const _idGuardCredito = String(a.idCuarentena || a.id || a.idOperacion || '');
@@ -1154,9 +1461,11 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         const cuentaAct = cuentasXCobrar[idxCuenta];
         cuentaAct.abonos = cuentaAct.abonos || [];
         cuentaAct.abonos.push({ idOperacion: a.idCuarentena || a.id || a.idOperacion || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, vendedorId: a.vendedorId || null });
+        _cxcAplicarPagoAMoratorios(cuentaAct, _montoRestante);
 
         const _pagaresAct = StorageService.get("pagaresSistema", []);
         let nuevoSaldoReal = _pagaresAct.filter(p => p.folio === a.folioCXC && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
+        nuevoSaldoReal += _cxcTotalMoratoriosPendientes(cuentaAct);
 
         cuentaAct.saldoActual = nuevoSaldoReal;
         if (nuevoSaldoReal <= 0.01) { cuentaAct.estado = "Saldado"; cuentaAct.saldoActual = 0; }
@@ -1583,7 +1892,8 @@ function reimprimirTicketAbono(folio, indexAbono) {
     const abono = abonos[indexAbono];
     const pagaresDelFolio = pagaresSistema.filter(p => p.folio === folio);
     const pagaresPendientes = pagaresDelFolio.filter(p => p.estado !== "Pagado" && p.estado !== "Cancelado");
-    const saldoActual = pagaresPendientes.reduce((s, p) => s + (p.monto - (p.montoAbonado || 0)), 0);
+    const estadoCta = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(folio) : null;
+    const saldoActual = Number(estadoCta?.saldoTotal ?? pagaresPendientes.reduce((s, p) => s + (p.monto - (p.montoAbonado || 0)), 0));
 
     generarTicketAbonoTermico({
         folio: folio,
@@ -3086,7 +3396,12 @@ window.renderVisorCreditosCobranza = renderVisorCreditosCobranza;
 window.renderAbonosDirectos = renderAbonosDirectos;
 window.actualizarPlanesConvertir = actualizarPlanesConvertir;
 window.abrirModalAbonoAvanzado = abrirModalAbonoAvanzado;
+window.abrirModalMoratorio = abrirModalMoratorio;
+window.aplicarMoratorioManual = aplicarMoratorioManual;
+window.exentarMoratorio = exentarMoratorio;
 window.actualizarAvisoPoliticaAbono = actualizarAvisoPoliticaAbono;
+window.evaluarPoliticaLiquidacion = evaluarPoliticaLiquidacion;
+window._cxcEvaluarPoliticaPagoAnticipado = _cxcEvaluarPoliticaPagoAnticipado;
 window.procesarAbonoAvanzado = procesarAbonoAvanzado;
 window.generarTicketAbonoTermico = generarTicketAbonoTermico;
 window.renderCobranzaEsperada = renderCobranzaEsperada;

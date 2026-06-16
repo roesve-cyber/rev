@@ -79,7 +79,8 @@ function recopilarNotificaciones() {
     });
 
     // Stock bajo
-    const productos = StorageService.get('productos', []);
+    const productosBase = StorageService.get('productos', []);
+    const productos = typeof window.filtrarProductosActivos === 'function' ? window.filtrarProductosActivos(productosBase) : productosBase;
     productos.forEach(p => {
         const stock = p.stock || p.cantidad || 0;
         const minimo = p.stockMinimo || 3;

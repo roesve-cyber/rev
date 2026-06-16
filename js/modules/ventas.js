@@ -60,6 +60,11 @@ function _escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function _ventaProductoActivo(p) {
+    if (typeof window.productoEstaActivo === 'function') return window.productoEstaActivo(p);
+    return !!p && p.activo !== false && p.Activo !== 0 && p.Activo !== false;
+}
+
 function _fechaInputDesdeHoy(dias = 30) {
     const d = new Date();
     d.setDate(d.getDate() + dias);
@@ -291,9 +296,9 @@ function _ventaResolverVendedorSeleccionado() {
 
 function agregarAlCarritoDesdeModal() {
     if (!productoActualId) return;
-    const p = productos.find(prod => String(prod.id) === String(productoActualId));
+    const p = productos.find(prod => String(prod.id) === String(productoActualId) && _ventaProductoActivo(prod));
     if (!p) {
-        alert("Error: Producto no encontrado.");
+        alert("Error: Producto no encontrado o inactivo.");
         return;
     }
 
@@ -339,7 +344,7 @@ function agregarAlCarritoDesdeModal() {
 }
 
 function agregarAlCarrito(id) {
-    const p = productos.find(x => String(x.id) === String(id));
+    const p = productos.find(x => String(x.id) === String(id) && _ventaProductoActivo(x));
     if (!p) return;
     productoActualId = id;
     agregarAlCarritoDesdeModal();
@@ -373,9 +378,9 @@ function renderCarrito() {
     }
 
     carrito = carrito.filter(item => {
-        const prod = productos.find(p => String(p.id) === String(item.id));
+        const prod = productos.find(p => String(p.id) === String(item.id) && _ventaProductoActivo(p));
         if (!prod) {
-            console.warn("Producto fantasma eliminado del carrito:", item.id);
+            console.warn("Producto no disponible eliminado del carrito:", item.id);
             return false;
         }
         return true;
@@ -3740,13 +3745,42 @@ window.renderReimprimirVenta = function() {
     const montoMin = parseFloat(document.getElementById('rvMontoMin').value) || 0;
     const montoMax = parseFloat(document.getElementById('rvMontoMax').value) || Infinity;
     const tipoDoc = document.getElementById('rvTipoDoc')?.value || 'todos';
+    const escJs = v => String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
-    // 1. Extraer documentos reimprimibles. Se excluyen abonos por regla operativa.
+    // 1. Extraer documentos reimprimibles.
     const ventas = StorageService.get("ventasRegistradas", [])
         .filter(v => !['credito', 'apartado'].includes(String(v.metodoPago || '').toLowerCase()))
         .map(v => ({...v, _origen: 'contado'}));
-    const cxc = StorageService.get("cuentasPorCobrar", []).map(c => ({...c, _origen: 'credito'}));
-    const apartados = StorageService.get("apartados", []).map(a => ({...a, _origen: 'apartado'}));
+    const cuentasCxc = StorageService.get("cuentasPorCobrar", []);
+    const apartadosBase = StorageService.get("apartados", []);
+    const cxc = cuentasCxc.map(c => ({...c, _origen: 'credito'}));
+    const apartados = apartadosBase.map(a => ({...a, _origen: 'apartado'}));
+    const abonosCredito = cuentasCxc.flatMap(c => (c.abonos || [])
+        .map((ab, index) => ({ ab, index }))
+        .filter(({ ab }) => !ab.cancelado && !ab.canceladoPorVenta && !ab.canceladoPorApartado)
+        .map(({ ab, index }, consecutivo) => ({
+            ...ab,
+            _origen: 'abono_credito',
+            _reimpresionFolio: `${c.folio}||${index}`,
+            folio: `ABONO-${c.folio}-${consecutivo + 1}`,
+            folioVenta: c.folio,
+            clienteNombre: c.nombre || c.clienteNombre || '',
+            fecha: ab.fechaAbonoIso || ab.fechaAbono || ab.fecha || ab.fechaIso || '',
+            total: Number(ab.monto || ab.montoAbonado || 0)
+        })));
+    const abonosApartado = apartadosBase.flatMap(a => (a.abonos || [])
+        .map((ab, index) => ({ ab, index }))
+        .filter(({ ab }) => !ab.cancelado && !ab.anulado)
+        .map(({ ab, index }, consecutivo) => ({
+            ...ab,
+            _origen: 'abono_apartado',
+            _reimpresionFolio: `${a.folio}||${index}`,
+            folio: `ABONO-${a.folio}-${consecutivo + 1}`,
+            folioVenta: a.folio,
+            clienteNombre: a.clienteNombre || '',
+            fecha: ab.fechaAbono || ab.fecha || ab.fechaAbonoIso || '',
+            total: Number(ab.monto || ab.montoAbonado || 0)
+        })));
     const entregas = StorageService.get("documentosEntrega", []).map(d => ({
         ...d,
         _origen: 'entrega_mcia',
@@ -3765,7 +3799,7 @@ window.renderReimprimirVenta = function() {
     }));
 
     // 2. Unificar todo en una sola lista maestra
-    let todo = [...ventas, ...cxc, ...apartados, ...entregas, ...devoluciones];
+    let todo = [...ventas, ...cxc, ...apartados, ...abonosCredito, ...abonosApartado, ...entregas, ...devoluciones];
 
     // 3. Aplicar Filtros de Búsqueda
     let filtrados = todo.filter(item => {
@@ -3810,23 +3844,25 @@ window.renderReimprimirVenta = function() {
         
         const cliente = item.cliente?.nombre || item.clienteNombre || item.nombre || 'Desconocido';
         const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
-        const etiquetas = { contado: 'CONTADO', credito: 'CR0DITO', apartado: 'APARTADO', entrega_mcia: 'ENTREGA MCIA' };
+        const etiquetas = { contado: 'CONTADO', credito: 'CR0DITO', apartado: 'APARTADO', abono_credito: 'ABONO CREDITO', abono_apartado: 'ABONO APARTADO', entrega_mcia: 'ENTREGA MCIA', devolucion_cancelacion: 'DEVOLUCION' };
         const tipo = etiquetas[item._origen] || item._origen.toUpperCase();
         
         let colorTipo = '#6b7280';
         if (item._origen === 'contado') colorTipo = '#16a34a'; // Verde
         if (item._origen === 'credito') colorTipo = '#2563eb'; // Azul
         if (item._origen === 'apartado') colorTipo = '#7c3aed'; // Morado
+        if (item._origen === 'abono_credito' || item._origen === 'abono_apartado') colorTipo = '#0f766e'; // Teal
         if (item._origen === 'entrega_mcia') colorTipo = '#0f766e'; // Teal
 
         const tieneEnganche = (item._origen === 'credito' || item._origen === 'apartado');
+        const folioReimpresion = item._reimpresionFolio || folio;
         const botonesAccion = `
-            <button onclick="reimprimirConAutorizacion('${folio}', '${item._origen}')"
+            <button onclick="reimprimirConAutorizacion('${escJs(folioReimpresion)}', '${escJs(item._origen)}')"
                     style="background:#475569; color:white; border:none; padding:7px 11px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1); font-size:12px;">
                 🖨️ Ticket
             </button>
             ${tieneEnganche ? `
-            <button onclick="reimprimirConAutorizacion('${folio}', 'enganche')"
+            <button onclick="reimprimirConAutorizacion('${escJs(folio)}', 'enganche')"
                     style="background:#0f766e; color:white; border:none; padding:7px 11px; border-radius:6px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1); font-size:12px; margin-left:4px;">
                 🖨️ Enganche
             </button>` : ''}`;
@@ -3858,6 +3894,39 @@ window.limpiarFiltrosReimpresion = function() {
 };
 
 window.reimprimirFolioUnificado = function(folio, origen) {
+    const parseAbonoKey = () => {
+        const partes = String(folio || '').split('||');
+        return { folioBase: partes[0] || '', index: Number(partes[1] || 0) };
+    };
+
+    if (origen === 'abono_credito') {
+        const { folioBase, index } = parseAbonoKey();
+        if (typeof window.reimprimirTicketAbono !== 'function') {
+            return alert("No esta disponible la reimpresion de abonos de credito.");
+        }
+        window.reimprimirTicketAbono(folioBase, index);
+        return;
+    }
+
+    if (origen === 'abono_apartado') {
+        const { folioBase, index } = parseAbonoKey();
+        const apartados = StorageService.get("apartados", []);
+        const ap = apartados.find(a => a.folio === folioBase);
+        if (!ap) return alert("No se encontro el apartado del abono.");
+        const abono = (ap.abonos || [])[index];
+        if (!abono) return alert("No se encontro el abono del apartado.");
+        if (typeof window.imprimirTicketAbonoApartado !== 'function') {
+            return alert("No esta disponible la reimpresion de abonos de apartado.");
+        }
+        window.imprimirTicketAbonoApartado(
+            ap,
+            Number(abono.monto || abono.montoAbonado || 0),
+            abono.etiquetaCuenta || abono.cuentaId || 'Caja',
+            abono.fechaAbono || abono.fecha || abono.fechaAbonoIso
+        );
+        return;
+    }
+
     if (origen === 'devolucion_cancelacion') {
         const docs = StorageService.get("documentosCancelacion", []);
         const doc = docs.find(d => d.folioDocumento === folio);
@@ -5376,8 +5445,12 @@ function _authAbonoBloqueadoPorEstado(a) {
         : (typeof window._calcularEstadoCuenta === 'function'
             ? Number(window._calcularEstadoCuenta(folio)?.saldoTotal || 0)
             : Number(cuenta.saldoActual || 0));
-    if (monto > saldoActual + 0.01) {
-        return { bloqueado: true, motivo: `El abono (${_cancelDinero(monto)}) excede el saldo vigente de ${folio} (${_cancelDinero(saldoActual)}).` };
+    const politicaAbono = !esApartado && a.liquidacionPorPolitica && typeof window._cxcEvaluarPoliticaPagoAnticipado === 'function'
+        ? window._cxcEvaluarPoliticaPagoAnticipado(folio, monto)
+        : null;
+    const maximoPermitido = Math.max(saldoActual, Number(politicaAbono?.montoLiquidacion || 0));
+    if (monto > maximoPermitido + 0.01) {
+        return { bloqueado: true, motivo: `El abono (${_cancelDinero(monto)}) excede el saldo vigente o el monto correcto por politica de ${folio}. Saldo: ${_cancelDinero(saldoActual)}. Politica: ${_cancelDinero(politicaAbono?.montoLiquidacion || saldoActual)}.` };
     }
     const yaAplicado = idOperacion && (cuenta.abonos || []).some(ab =>
         String(ab.idOperacion || ab.idCuarentena || ab.id || '') === idOperacion

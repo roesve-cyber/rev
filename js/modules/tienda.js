@@ -2,6 +2,11 @@
 // 🖼️ TIENDA / CATÁLOGO: 5 COLUMNAS FIJAS Y MODAL BLINDADO
 // ============================================================
 
+function _tiendaProductosActivos() {
+    const base = StorageService.get("productos", []) || window.productos || [];
+    return typeof window.filtrarProductosActivos === 'function' ? window.filtrarProductosActivos(base) : base;
+}
+
 window.mostrarProductos = function() {
     const vistaTienda = document.getElementById("tienda");
     if (!vistaTienda) return;
@@ -19,7 +24,7 @@ window.mostrarProductos = function() {
     contenedorGrid.style.gap = "15px";
     contenedorGrid.style.padding = "10px";
 
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
     const searchSelect = window._filtroTiendaBuscador || '';
     const filtroCat = window._filtroTiendaCategoria || '';
     const filtroSub = window._filtroTiendaSubcategoria || '';
@@ -71,7 +76,7 @@ window.filtrarCatalogo = function() {
     const category = window._filtroTiendaCategoria || '';
     const subcategory = window._filtroTiendaSubcategoria || '';
     const busqueda = (window._filtroTiendaBuscador || '').toLowerCase().trim();
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
 
     const filtrados = prods.filter(p => {
         const matchCat = !category || p.categoria === category;
@@ -144,7 +149,7 @@ window.verProductoAgrupado = function(idPrincipal) {
 
     contenido.innerHTML = ''; // Limpia cualquier vista fantasma anterior
 
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
     const base = prods.find(p => String(p.id) === String(idPrincipal));
     if (!base) return;
 
@@ -362,7 +367,7 @@ function agruparParaCatalogo(lista) {
 
 function agruparProductosPorCategoria() {
     const agrupados = {};
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
     prods.forEach(prod => {
         const categoria = prod.categoria || "Sin Categoría";
         const subcategoria = prod.subcategoria || "Sin Subcategoría";
@@ -382,7 +387,7 @@ window.verDetalle = function(id) { window.verProductoAgrupado(id); };
 
 // Función para obtener categorías ordenadas por posición
 window._obtenerCategoriasOrdenadas = function() {
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
     const categoriasEnProductos = [...new Set(prods.map(p => p.categoria).filter(Boolean))];
     const categoriasData = window.categoriasData || [];
     
@@ -396,7 +401,7 @@ window._obtenerCategoriasOrdenadas = function() {
 
 // Función para obtener subcategorías ordenadas por posición
 window._obtenerSubcategoriasOrdenadas = function(categoriaSeleccionada) {
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
     const subcategoriesEnProductos = [...new Set(prods.filter(p => p.categoria === categoriaSeleccionada).map(p => p.subcategoria).filter(Boolean))];
     const categoriasData = window.categoriasData || [];
     const catData = categoriasData.find(c => c.nombre === categoriaSeleccionada);
@@ -419,7 +424,7 @@ window.renderListaPrecios = function() {
     const contenedor = document.getElementById("listaPrecios");
     if (!contenedor) return;
 
-    const prods = StorageService.get("productos", []) || window.productos || [];
+    const prods = _tiendaProductosActivos();
     if (prods.length === 0) {
         contenedor.innerHTML = `<div style="text-align: center; padding: 40px; color: #718096;"><h3>📊 No hay productos para mostrar</h3></div>`;
         return;
