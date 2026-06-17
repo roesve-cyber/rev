@@ -502,17 +502,73 @@ const StorageService = {
         }
     },
 
-    _refrescarVistaActualPostSync() {
+    _registrarInteraccionUsuarioSync() {
+        if (this._syncInteraccionesRegistradas) return;
+        this._syncInteraccionesRegistradas = true;
+        this._ultimaInteraccionUsuario = Date.now();
+
+        const marcar = () => { this._ultimaInteraccionUsuario = Date.now(); };
+        ['pointerdown', 'keydown', 'wheel', 'touchstart', 'input', 'change', 'scroll'].forEach(evt => {
+            window.addEventListener(evt, marcar, { passive: true, capture: true });
+        });
+    },
+
+    _hayInteraccionActiva() {
+        const activo = document.activeElement;
+        const tag = String(activo?.tagName || '').toLowerCase();
+        const editando = !!activo && (
+            ['input', 'textarea', 'select', 'button'].includes(tag) ||
+            activo.isContentEditable
+        );
+        const modalAbierto = !!document.querySelector('[data-modal], .modal, #modalCorreccionAbono, #modalAbonoApartado, #modalHistorialAbonos');
+        const interaccionReciente = (Date.now() - Number(this._ultimaInteraccionUsuario || 0)) < 4000;
+        return editando || modalAbierto || interaccionReciente;
+    },
+
+    _renderVistaActualSuave(actual) {
+        const renderers = {
+            dashboard: () => typeof renderDashboard === 'function' && renderDashboard(),
+            tienda: () => typeof mostrarProductos === 'function' && mostrarProductos(),
+            cuentasxcobrar: () => typeof renderCuentasXCobrar === 'function' && renderCuentasXCobrar(),
+            clientes: () => typeof renderClientes === 'function' && renderClientes(),
+            compras: () => typeof renderCompras === 'function' && renderCompras(),
+            abonosdirectos: () => typeof renderAbonosDirectos === 'function' && renderAbonosDirectos(),
+            corte: () => typeof renderCorteCaja === 'function' && renderCorteCaja(),
+            'corte-caja': () => typeof renderCorteCaja === 'function' && renderCorteCaja()
+        };
+        const fn = renderers[actual];
+        if (!fn) return false;
+
+        const x = window.scrollX || 0;
+        const y = window.scrollY || 0;
+        fn();
+        requestAnimationFrame(() => window.scrollTo(x, y));
+        return true;
+    },
+
+    _refrescarVistaActualPostSync(opciones = {}) {
         try {
             if (typeof window._recargarVariablesGlobales === 'function') window._recargarVariablesGlobales();
             const actual = window._vistaActualSistema || (window.location.hash ? window.location.hash.replace('#', '') : '');
-            if (typeof navA === 'function' && actual) navA(actual, true);
-            if (actual === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
-            if (actual === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
-            if (actual === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
-            if (actual === 'clientes' && typeof renderClientes === 'function') renderClientes();
-            if (actual === 'compras' && typeof renderCompras === 'function') renderCompras();
             if (typeof renderBadgeNotificaciones === 'function') renderBadgeNotificaciones();
+
+            const forzar = opciones?.forzar === true;
+            if (!forzar && this._hayInteraccionActiva()) {
+                this._refrescoSuavePendiente = { actual, ts: Date.now() };
+                if (!this._refrescoSuaveTimer) {
+                    this._refrescoSuaveTimer = setTimeout(() => {
+                        this._refrescoSuaveTimer = null;
+                        const pendiente = this._refrescoSuavePendiente;
+                        if (!pendiente) return;
+                        if (this._hayInteraccionActiva()) return;
+                        this._renderVistaActualSuave(pendiente.actual);
+                        this._refrescoSuavePendiente = null;
+                    }, 12000);
+                }
+                return;
+            }
+
+            this._renderVistaActualSuave(actual);
         } catch (e) {
             console.warn('No se pudo refrescar vista post-sync:', e);
         }
@@ -970,6 +1026,7 @@ const StorageService = {
     startRealtimeSync() {
         if (!window._firebaseActivo || !window._db) return;
         if (this._syncStatusUnsubscribe) return;
+        this._registrarInteraccionUsuarioSync();
 
         console.log("Modulo de Firebase enlazado correctamente. Escuchando cambios remotos.");
         const vistoInicial = Number(this._cache._syncStatusVisto || localStorage.getItem('_syncStatusVisto') || 0);
