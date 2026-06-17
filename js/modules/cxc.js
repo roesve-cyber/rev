@@ -1079,6 +1079,18 @@ let mejorPlan = planesOrdenados.length > 0
                     ${selectorCuentasHTML}
                 </div>
 
+                ${esDirecto ? `
+                <div style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
+                    <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">Referencia de transferencia / lote</label>
+                    <input type="text" id="referenciaTransferenciaAbono" placeholder="Ej. SPEI 123456, deposito 29-may, transferencia cliente X"
+                        value="${_cxcEscHTML(window._ultimaReferenciaTransferenciaAbono || '')}"
+                        style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; box-sizing:border-box;">
+                    <small style="display:block; color:#64748b; margin-top:6px; line-height:1.35;">
+                        Si una sola transferencia cubre varios folios, usa exactamente la misma referencia en cada abono. En Flujo Real se vera agrupada como un solo deposito.
+                    </small>
+                </div>
+                ` : ''}
+
                 <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
                     <strong style="color:#92400e;">${resumenPoliticaInicial.titulo}</strong>
                     <p style="margin:8px 0 0 0; font-size:14px; color:#78350f; line-height:1.45;">
@@ -1169,6 +1181,7 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
+    const esDirecto = modoAplicacion === 'directo';
     const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
     const fechaAbonoRaw = document.getElementById("fechaAbonoInput")?.value;
     const fechaObj = fechaAbonoRaw ? new Date(fechaAbonoRaw + "T12:00:00") : new Date();
@@ -1180,6 +1193,13 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     const etiqueta = selCaja ? selCaja.options[selCaja.selectedIndex].text : 'Efectivo';
     const isCaja = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
     const medioPago = isCaja ? 'efectivo' : 'transferencia';
+    const referenciaTransferencia = esDirecto
+        ? String(document.getElementById("referenciaTransferenciaAbono")?.value || '').trim()
+        : '';
+    const grupoConciliacion = referenciaTransferencia
+        ? `TRANSF-${referenciaTransferencia.toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9_-]/g, '')}`
+        : '';
+    if (esDirecto) window._ultimaReferenciaTransferenciaAbono = referenciaTransferencia;
 
     if (isNaN(montoAbonoInput) || montoAbonoInput <= 0) return alert("Ingresa un monto válido.");
     const politicaValidacion = _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbonoInput);
@@ -1250,13 +1270,14 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         cuentaId: cuentaId,
         etiquetaCuenta: etiqueta,
         medioPago: medioPago,
+        referenciaBancaria: referenciaTransferencia,
+        grupoConciliacion,
         liquidacionPorPolitica: liquidacionPorPolitica,
         fechaAbonoIso: fechaAbonoIso,
         fechaAbonoStr: fechaAbonoStr,
         vendedorId: cuenta.vendedorId || null
     };
 
-    const esDirecto = modoAplicacion === 'directo';
     if (!esDirecto) {
         StorageService.pushAtomo("abonosPendientes", cuarentena);
         if (typeof window.notificarBovedaAutorizacion === 'function') {
@@ -1460,7 +1481,7 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
     if (idxCuenta !== -1) {
         const cuentaAct = cuentasXCobrar[idxCuenta];
         cuentaAct.abonos = cuentaAct.abonos || [];
-        cuentaAct.abonos.push({ idOperacion: a.idCuarentena || a.id || a.idOperacion || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, vendedorId: a.vendedorId || null });
+        cuentaAct.abonos.push({ idOperacion: a.idCuarentena || a.id || a.idOperacion || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null });
         _cxcAplicarPagoAMoratorios(cuentaAct, _montoRestante);
 
         const _pagaresAct = StorageService.get("pagaresSistema", []);
@@ -1473,7 +1494,7 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         StorageService.set("cuentasPorCobrar", cuentasXCobrar);
 
         if (typeof window._ingresarCuenta === 'function') {
-            window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null });
+            window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null, grupoConciliacion: a.grupoConciliacion || '', referenciaBancaria: a.referenciaBancaria || '', foliosGrupo: a.grupoConciliacion ? [a.folioCXC] : [] });
         }
     } else {
         alert("No se encontro la cuenta por cobrar para aplicar el abono.");
@@ -2200,7 +2221,10 @@ function _cxcRecrearMovimientosAbonos(cuenta) {
             cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
             medioPago: ab.medioPago || 'efectivo',
             etiquetaCuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo',
-            idOperacion: ab.idOperacion || ab.idCuarentena || ab.id || null
+            idOperacion: ab.idOperacion || ab.idCuarentena || ab.id || null,
+            grupoConciliacion: ab.grupoConciliacion || '',
+            referenciaBancaria: ab.referenciaBancaria || '',
+            foliosGrupo: ab.grupoConciliacion ? [cuenta.folio] : []
         });
     });
     StorageService.set("movimientosCaja", movimientosCaja);

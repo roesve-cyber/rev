@@ -713,7 +713,7 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
     }
     return true;
 };
-window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha, idOperacion }) {
+window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referencia, fecha, idOperacion, grupoConciliacion, referenciaBancaria, foliosGrupo }) {
     const montoNum = _validarMontoMovimientoCuenta(monto, concepto);
     if (montoNum === null) return false;
 
@@ -743,7 +743,10 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         etiquetaCuenta: etiqueta || cuenta.cuentaRealId,
         medioPago: cuenta.medioPago,
         referencia,
-        idOperacion: idOperacion || null
+        idOperacion: idOperacion || null,
+        grupoConciliacion: grupoConciliacion || '',
+        referenciaBancaria: referenciaBancaria || '',
+        foliosGrupo: Array.isArray(foliosGrupo) ? foliosGrupo : []
     });
     StorageService.set('movimientosCaja', movs);
     if (window.AuditService?.log) {

@@ -1022,7 +1022,10 @@ window.renderReporteFlujo = function() {
         cuenta,
         monto,
         origen,
-        referencia
+        referencia,
+        grupoConciliacion,
+        referenciaBancaria,
+        foliosGrupo
     }) => {
         const montoNum = parseFloat(monto || 0);
 
@@ -1039,7 +1042,10 @@ window.renderReporteFlujo = function() {
             cuentaNombre: nombreCuenta(cuentaId),
             monto: montoNum,
             origen: origen || 'sin_origen',
-            referencia: referencia || ''
+            referencia: referencia || '',
+            grupoConciliacion: grupoConciliacion || '',
+            referenciaBancaria: referenciaBancaria || '',
+            foliosGrupo: Array.isArray(foliosGrupo) ? foliosGrupo : []
         };
     };
 
@@ -1086,6 +1092,45 @@ window.renderReporteFlujo = function() {
         movimientos.push({ ...mov, origen: `${mov.origen}_reconstruido` });
     };
 
+    const agruparTransferenciasConciliacion = (lista) => {
+        const gruposTransferencia = {};
+        const sueltos = [];
+
+        lista.forEach(m => {
+            const grupo = String(m.grupoConciliacion || '').trim();
+            if (!grupo || m.tipo !== 'ingreso') {
+                sueltos.push(m);
+                return;
+            }
+            const clave = `${m.tipo}|${m.cuenta}|${fechaKeyMovimiento(m.fecha)}|${grupo}`;
+            if (!gruposTransferencia[clave]) {
+                gruposTransferencia[clave] = {
+                    ...m,
+                    id: `grupo-${clave}`,
+                    concepto: `Transferencia agrupada: ${m.referenciaBancaria || grupo}`,
+                    referencia: m.referenciaBancaria || grupo,
+                    monto: 0,
+                    itemsGrupo: [],
+                    foliosGrupo: []
+                };
+            }
+            gruposTransferencia[clave].monto += Number(m.monto || 0);
+            gruposTransferencia[clave].itemsGrupo.push(m);
+            gruposTransferencia[clave].foliosGrupo.push(m.referencia || m.id || '');
+        });
+
+        const agrupados = Object.values(gruposTransferencia).flatMap(g => {
+            if (g.itemsGrupo.length < 2) return g.itemsGrupo;
+            return [{
+                ...g,
+                monto: Number(g.monto.toFixed(2)),
+                foliosGrupo: [...new Set(g.foliosGrupo.filter(Boolean))]
+            }];
+        });
+
+        return [...sueltos, ...agrupados];
+    };
+
     // ======================================================
     // FUENTES DE DATOS
     // ======================================================
@@ -1116,7 +1161,10 @@ window.renderReporteFlujo = function() {
             cuenta: m.cuenta || m.cuentaId || m.metodoPago || m.medioPago || m.origen || 'efectivo',
             monto: m.monto,
             origen: 'movimientosCaja',
-            referencia: m.folio || m.referencia || m.id
+            referencia: m.folio || m.referencia || m.id,
+            grupoConciliacion: m.grupoConciliacion || '',
+            referenciaBancaria: m.referenciaBancaria || '',
+            foliosGrupo: m.foliosGrupo || []
         });
 
         if (mov) movimientos.push(mov);
@@ -1530,12 +1578,14 @@ window.renderReporteFlujo = function() {
         return coincideCuenta && coincideRango;
     });
 
+    const movsParaFlujo = agruparTransferenciasConciliacion(movsFiltrados);
+
     // ======================================================
     // 7. AGRUPACIÓN
     // ======================================================
     const grupos = {};
 
-    movsFiltrados.forEach(m => {
+    movsParaFlujo.forEach(m => {
         const d = _repParseDate(m.fecha);
         let clave = "";
         let sortKey = d.getTime();
@@ -1591,7 +1641,11 @@ window.renderReporteFlujo = function() {
 
         const balance = g.ing - g.egr;
         const itemsOrdenados = ordenarItemsFlujo(g.items);
-        const renderItem = (i) => `
+        const renderItem = (i) => {
+            const detalleGrupo = Array.isArray(i.itemsGrupo) && i.itemsGrupo.length > 1
+                ? `<br><small style="color:#0f766e; font-weight:700;">${i.itemsGrupo.length} abonos: ${escFlujo(i.itemsGrupo.map(x => `${x.referencia || '-'} ${dineroFlujo(x.monto)}`).join(' | '))}</small>`
+                : '';
+            return `
                         <label style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:11px; cursor:pointer;">
                             <div style="display:flex; align-items:center; gap:8px; min-width:0;">
                                 <input type="checkbox" class="flujo-check" data-tipo="${i.tipo}" data-monto="${Number(i.monto || 0)}" onchange="window.actualizarResumenSeleccionFlujo()" style="width:16px; height:16px; cursor:pointer; accent-color:#1e40af; flex-shrink:0;">
@@ -1599,12 +1653,14 @@ window.renderReporteFlujo = function() {
                                     <b style="display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escFlujo(i.concepto)}">${escFlujo(i.concepto)}</b>
                                     <small style="color:#64748b;">${escFlujo(i.cuentaNombre)}</small><br>
                                     <small style="color:#94a3b8;">${escFlujo(fechaLargaFlujo(i.fecha))}</small>
+                                    ${detalleGrupo}
                                 </div>
                             </div>
                             <span style="font-weight:bold; color:${i.tipo === 'ingreso' ? '#16a34a' : '#dc2626'}; white-space:nowrap;">
                                 ${i.tipo === 'ingreso' ? '+' : '-'}${dineroFlujo(i.monto)}
                             </span>
                         </label>`;
+        };
 
         const itemsHTML = vistaMovimientos === 'tipo'
             ? `
@@ -1637,7 +1693,7 @@ window.renderReporteFlujo = function() {
     window._flujoResumenBase = {
         ingresos: totalIng,
         egresos: totalEgr,
-        movimientos: movsFiltrados.length
+        movimientos: movsParaFlujo.length
     };
 
     cont.innerHTML = `
@@ -1723,7 +1779,7 @@ window.renderReporteFlujo = function() {
 
             <div style="background:#f8fafc; border-left:5px solid #64748b; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <small style="color:#475569; font-weight:bold;">MOVIMIENTOS MOSTRADOS</small><br>
-                <strong id="flujoKpiMovs" style="font-size:22px; color:#334155;">${movsFiltrados.length}</strong>
+                <strong id="flujoKpiMovs" style="font-size:22px; color:#334155;">${movsParaFlujo.length}</strong>
                 <div id="flujoKpiModo" style="font-size:11px; color:#64748b; font-weight:bold; margin-top:4px;">Filtro completo</div>
             </div>
         </div>

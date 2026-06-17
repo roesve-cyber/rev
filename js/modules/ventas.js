@@ -60,6 +60,13 @@ function _escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function _authGrupoConciliacionDesdeReferencia(referencia) {
+    const limpia = String(referencia || '').trim();
+    return limpia
+        ? `TRANSF-${limpia.toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9_-]/g, '')}`
+        : '';
+}
+
 function _ventaProductoActivo(p) {
     if (typeof window.productoEstaActivo === 'function') return window.productoEstaActivo(p);
     return !!p && p.activo !== false && p.Activo !== 0 && p.Activo !== false;
@@ -5483,7 +5490,7 @@ window.revisarAbonoPendiente = function(index) {
 
     const html = `
     <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
-        <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
+        <div style="background:white; padding:25px; border-radius:12px; width:100%; max-width:460px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
             <h3 style="color:#059669; margin-top:0;">Autorizar Abono Provisional ${esApartado ? 'de Apartado' : 'de Crédito'}</h3>
             <p style="font-size:14px; margin: 6px 0;"><strong>Folio ${esApartado ? 'Apartado' : 'Crédito'}:</strong> ${folioRef}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Cliente:</strong> ${clienteNombre}</p>
@@ -5492,6 +5499,14 @@ window.revisarAbonoPendiente = function(index) {
             
             <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px; color:#475569;">Fecha de Ingreso Oficial (Auditoría):</label>
             <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
+
+            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px; color:#475569;">Agrupar transferencia para conciliacion:</label>
+            <input type="text" id="authReferenciaTransferenciaAbono" placeholder="Ej. SPEI 123456, deposito 29-may"
+                value="${_escapeHtml(a.referenciaBancaria || window._ultimaReferenciaTransferenciaAbono || '')}"
+                style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
+            <small style="display:block; color:#64748b; margin-top:6px; line-height:1.35;">
+                Usa la misma referencia al autorizar varios abonos de una sola transferencia. Si no aplica, dejalo vacio.
+            </small>
 
             <div style="display:flex; gap:10px; margin-top:20px;">
                 <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Ingresar a Caja</button>
@@ -5524,6 +5539,10 @@ window.aprobarAbonoCuarentena = function(index) {
     
     a.fechaAbonoIso = nuevaFechaIso;
     a.fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta;
+    const referenciaTransferencia = String(document.getElementById('authReferenciaTransferenciaAbono')?.value || '').trim();
+    a.referenciaBancaria = referenciaTransferencia;
+    a.grupoConciliacion = _authGrupoConciliacionDesdeReferencia(referenciaTransferencia);
+    window._ultimaReferenciaTransferenciaAbono = referenciaTransferencia;
 
     const aplicado = window.ejecutarAbonoAutorizadoReal(a);
     if (aplicado === false) return;
