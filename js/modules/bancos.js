@@ -896,6 +896,55 @@ function recalcularSaldosGuardadosDesdeMovimientos() {
     renderCuentasBancarias();
 }
 
+function _bancosFechaKeyMovimiento(fecha) {
+    if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
+    if (!fecha) return '';
+    const d = new Date(fecha);
+    if (isNaN(d.getTime())) return String(fecha).slice(0, 10);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function _bancosAgruparTransferenciasConciliacion(lista) {
+    const grupos = {};
+    const sueltos = [];
+
+    lista.forEach(m => {
+        const grupo = String(m.grupoConciliacion || '').trim();
+        const tipo = String(m.tipo || '').toLowerCase();
+        if (!grupo || tipo !== 'ingreso') {
+            sueltos.push(m);
+            return;
+        }
+
+        const cuenta = String(m.cuenta || m.cuentaId || 'efectivo');
+        const fechaKey = _bancosFechaKeyMovimiento(m.fecha || m.fechaISO || m.createdAt);
+        const clave = `${cuenta}|${fechaKey}|${grupo}`;
+        if (!grupos[clave]) {
+            grupos[clave] = {
+                ...m,
+                id: `grupo-${clave}`,
+                concepto: `Transferencia agrupada: ${m.referenciaBancaria || grupo}`,
+                referencia: m.referenciaBancaria || grupo,
+                monto: 0,
+                itemsGrupo: []
+            };
+        }
+        grupos[clave].monto += Number(m.monto || 0);
+        grupos[clave].itemsGrupo.push(m);
+    });
+
+    const agrupados = Object.values(grupos).flatMap(g => {
+        if (g.itemsGrupo.length < 2) return g.itemsGrupo;
+        return [{ ...g, monto: Number(g.monto.toFixed(2)) }];
+    });
+
+    return [...sueltos, ...agrupados].sort((a, b) => {
+        const dateA = new Date(a.fecha || 0);
+        const dateB = new Date(b.fecha || 0);
+        return dateA - dateB;
+    });
+}
+
 function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (cuentaSeleccionada !== null) { window._filtroCuentaLiquidez = cuentaSeleccionada; }
     
@@ -991,6 +1040,8 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
         movimientosFiltrados = movimientosFiltrados.filter(m => m.fecha <= window._filtroLiquidezHasta + "T23:59:59");
     }
 
+    const movimientosParaVista = _bancosAgruparTransferenciasConciliacion(movimientosFiltrados);
+
     let rightPanelHTML = `
         <div style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
@@ -1012,14 +1063,17 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
                     </tr></thead>
                     <tbody>`;
 
-    if (movimientosFiltrados.length === 0) {
+    if (movimientosParaVista.length === 0) {
         rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No hay movimientos en este periodo o cuenta.</td></tr>`;
     } else {
-        movimientosFiltrados.forEach(m => {
+        movimientosParaVista.forEach(m => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
             const color = esIngreso ? "#16a34a" : "#dc2626";
             const icon = esIngreso ? "⬆️" : "⬇️";
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
+            const detalleGrupo = Array.isArray(m.itemsGrupo) && m.itemsGrupo.length > 1
+                ? `<br><small style="display:block; color:#0f766e; font-weight:700; margin-top:4px;">${m.itemsGrupo.length} abonos: ${m.itemsGrupo.map(x => `${x.referencia || '-'} ${dinero(x.monto)}`).join(' | ')}</small>`
+                : '';
             
             let conceptoLimpio = m.concepto || "";
             if (conceptoLimpio.startsWith("Pago a proveedor")) {
@@ -1033,7 +1087,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             rightPanelHTML += `
                 <tr style="border-bottom:1px solid #f1f5f9;">
                     <td style="padding:10px; white-space:nowrap;">${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
-                    <td style="padding:10px;" title="${m.concepto}">${conceptoLimpio}</td>
+                    <td style="padding:10px;" title="${m.concepto}">${conceptoLimpio}${detalleGrupo}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
                     <td style="padding:10px; text-align:right; font-weight:bold; color:${color}; white-space:nowrap;">${icon} ${dinero(m.monto)}</td>
                 </tr>`;
