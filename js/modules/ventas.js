@@ -3253,7 +3253,9 @@ function dibujarFormularioAuditoria() {
             <td style="padding:8px; font-size:12px; color:#475569;">${_escapeHtml(ab.etiquetaCuenta || ab.medioPago || ab.cuentaId || 'Efectivo')}</td>
             <td style="padding:8px; text-align:right;">
                 <button onclick="if (typeof abrirEditorAbono === 'function') abrirEditorAbono('${cuenta.folio}', ${originalIndex}); else alert('Editor de abonos no disponible.');"
-                    style="background:#1e40af; color:white; border:none; padding:7px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Corregir abono</button>
+                    style="background:#1e40af; color:white; border:none; padding:7px 10px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Corregir</button>
+                <button onclick="if (typeof eliminarAbonoAuditoriaCxC === 'function') eliminarAbonoAuditoriaCxC('${cuenta.folio}', ${originalIndex}); else alert('Eliminador de abonos no disponible.');"
+                    style="background:#b91c1c; color:white; border:none; padding:7px 10px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-left:5px;">Eliminar</button>
             </td>
         </tr>
     `).join('');

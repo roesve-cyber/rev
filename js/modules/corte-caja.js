@@ -16,6 +16,11 @@
         "'": '&#039;'
     }[ch]));
 
+    const escJs = (value) => String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, ' ');
+
     const hoyInput = () => {
         if (typeof window.obtenerHoyInputMX === 'function') return window.obtenerHoyInputMX();
         const d = new Date();
@@ -771,6 +776,102 @@
         imprimirCorteGuardado(corte.folio);
     };
 
+    function recalcularCorteGuardado(corte) {
+        const movimientos = Array.isArray(corte.movimientos) ? corte.movimientos : [];
+        const ingresos = movimientos
+            .filter(m => String(m.tipo || '').toLowerCase() === 'ingreso')
+            .reduce((s, m) => s + Number(m.monto || 0), 0);
+        const egresos = movimientos
+            .filter(m => String(m.tipo || '').toLowerCase() !== 'ingreso')
+            .reduce((s, m) => s + Number(m.monto || 0), 0);
+        const porCategoria = {};
+
+        movimientos.forEach(m => {
+            const categoria = categoriaMovimiento(m);
+            if (!porCategoria[categoria]) {
+                porCategoria[categoria] = { categoria, ingresos: 0, egresos: 0, movimientos: 0 };
+            }
+            porCategoria[categoria].movimientos += 1;
+            if (String(m.tipo || '').toLowerCase() === 'ingreso') porCategoria[categoria].ingresos += Number(m.monto || 0);
+            else porCategoria[categoria].egresos += Number(m.monto || 0);
+        });
+
+        corte.ingresos = Number(ingresos.toFixed(2));
+        corte.egresos = Number(egresos.toFixed(2));
+        corte.saldoFinalSistema = Number((ingresos - egresos).toFixed(2));
+        corte.movimientosMarcados = movimientos.length;
+        corte.movimientosExcluidos = Math.max(0, Number(corte.movimientosDisponibles || movimientos.length) - movimientos.length);
+        corte.resumenCategorias = Object.values(porCategoria)
+            .sort((a, b) => (b.ingresos + b.egresos) - (a.ingresos + a.egresos));
+        corte.diferencia = Number((Number(corte.totalReal || 0) - Number(corte.saldoFinalSistema || 0)).toFixed(2));
+        return corte;
+    }
+
+    window.sacarMovimientoDeCorteCaja = function(folio, indexMovimiento) {
+        if (window.AuditService?.requireAdmin) {
+            if (!window.AuditService.requireAdmin('sacar movimiento de corte de caja')) return;
+        } else {
+            const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+            if (!sesion || sesion.rol !== 'admin') return alert('Operacion restringida. Solo un administrador puede modificar cortes guardados.');
+        }
+
+        const cortesRaw = StorageService.get('cortesCaja', []);
+        const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
+        const idxCorte = cortes.findIndex(c => String(c.folio) === String(folio));
+        if (idxCorte === -1) return alert('No se encontro el corte solicitado.');
+
+        const corte = cortes[idxCorte];
+        const movimientos = Array.isArray(corte.movimientos) ? corte.movimientos : [];
+        const idx = Number(indexMovimiento);
+        if (idx < 0 || idx >= movimientos.length) return alert('No se encontro el movimiento dentro del corte.');
+
+        const mov = movimientos[idx];
+        const resumen = `${mov.fecha || '-'}\n${mov.concepto || '-'}\n${mov.referencia || ''}\n${dinero(mov.monto)}`;
+        if (!confirm(`Sacar este movimiento del corte ${folio}?\n\n${resumen}\n\nEl movimiento real de caja NO se elimina; solo quedara disponible para otro corte.`)) return;
+
+        const retirado = movimientos.splice(idx, 1)[0];
+        corte.movimientos = movimientos;
+        cortes[idxCorte] = recalcularCorteGuardado(corte);
+        StorageService.set('cortesCaja', cortes);
+
+        window.AuditService?.log?.({
+            accion: 'MOVIMIENTO_RETIRADO_DE_CORTE',
+            modulo: 'Corte Caja',
+            entidad: 'Corte',
+            entidadId: folio,
+            detalle: `Movimiento retirado del corte ${folio}: ${retirado.referencia || retirado.concepto || '-'}`,
+            monto: Number(retirado.monto || 0),
+            severidad: 'alerta',
+            datos: { movimiento: retirado }
+        });
+
+        alert('Movimiento retirado del corte. Ya puede entrar en otro corte.');
+        abrirDetalleCorteCaja(folio);
+        renderCorteCaja();
+    };
+
+    window.sacarMovimientosDeCortePorReferencia = function(folio, referencias = []) {
+        const refs = Array.isArray(referencias) ? referencias.map(String) : [String(referencias)];
+        const cortesRaw = StorageService.get('cortesCaja', []);
+        const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
+        const idxCorte = cortes.findIndex(c => String(c.folio) === String(folio));
+        if (idxCorte === -1) return alert('No se encontro el corte solicitado.');
+        const corte = cortes[idxCorte];
+        const antes = Array.isArray(corte.movimientos) ? corte.movimientos : [];
+        const retirados = [];
+        corte.movimientos = antes.filter(m => {
+            const coincide = refs.includes(String(m.referencia || ''));
+            if (coincide) retirados.push(m);
+            return !coincide;
+        });
+        if (!retirados.length) return alert('No se encontraron esas referencias en el corte.');
+        cortes[idxCorte] = recalcularCorteGuardado(corte);
+        StorageService.set('cortesCaja', cortes);
+        alert(`Se retiraron ${retirados.length} movimiento(s) del corte ${folio}.`);
+        abrirDetalleCorteCaja(folio);
+        renderCorteCaja();
+    };
+
     window.abrirDetalleCorteCaja = function(folio) {
         const cortes = StorageService.get('cortesCaja', []);
         const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
@@ -784,7 +885,7 @@
         const totalIngresos = ingresos.reduce((s, m) => s + Number(m.monto || 0), 0);
         const totalEgresos = egresos.reduce((s, m) => s + Number(m.monto || 0), 0);
 
-        const row = (m, color) => `
+        const row = (m, color, index) => `
             <tr>
                 <td style="padding:8px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">${esc(window.formatearFechaMX ? window.formatearFechaMX(m.fecha) : (m.fecha || '-'))}</td>
                 <td style="padding:8px;border-bottom:1px solid #e5e7eb;">
@@ -793,6 +894,9 @@
                 </td>
                 <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${esc(m.cuenta || '-')}</td>
                 <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:900;color:${color};">${dinero(m.monto)}</td>
+                <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">
+                    <button onclick="sacarMovimientoDeCorteCaja('${escJs(corte.folio)}', ${index})" style="padding:6px 9px;background:#b91c1c;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:800;font-size:11px;">Sacar</button>
+                </td>
             </tr>`;
 
         const tabla = (titulo, items, total, color, vacio) => `
@@ -809,9 +913,10 @@
                                 <th style="padding:8px;text-align:left;">Movimiento</th>
                                 <th style="padding:8px;text-align:left;">Cuenta</th>
                                 <th style="padding:8px;text-align:right;">Monto</th>
+                                <th style="padding:8px;text-align:right;">Accion</th>
                             </tr>
                         </thead>
-                        <tbody>${items.map(m => row(m, color)).join('') || `<tr><td colspan="4" style="padding:20px;text-align:center;color:#94a3b8;">${esc(vacio)}</td></tr>`}</tbody>
+                        <tbody>${items.map(m => row(m, color, movimientos.indexOf(m))).join('') || `<tr><td colspan="5" style="padding:20px;text-align:center;color:#94a3b8;">${esc(vacio)}</td></tr>`}</tbody>
                     </table>
                 </div>
             </div>`;

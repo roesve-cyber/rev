@@ -1965,7 +1965,8 @@ window.renderAuditoriaAbonos = function() {
                     <td style="padding:10px; font-weight:bold; color:#16a34a;">${_cxcDinero(ab.monto)}</td>
                     <td style="padding:10px; font-size:11px; color:#64748b;">${ab.etiquetaCuenta || ab.medioPago || 'Efectivo'}</td>
                     <td style="padding:10px; text-align:right;">
-                        <button onclick="abrirEditorAbono('${c.folio}', ${idx})" style="padding:6px 12px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">✏️ Editar</button>
+                        <button onclick="abrirEditorAbono('${c.folio}', ${idx})" style="padding:6px 10px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">Corregir</button>
+                        <button onclick="eliminarAbonoAuditoriaCxC('${c.folio}', ${idx})" style="padding:6px 10px; background:#b91c1c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px; margin-left:5px;">Eliminar</button>
                     </td>
                 </tr>
             `).join('');
@@ -2009,7 +2010,8 @@ window.renderAuditoriaAbonos = function() {
                 <td style="padding:12px; font-weight:bold; color:#16a34a;">${_cxcDinero(a.monto)}</td>
                 <td style="padding:12px; font-size:11px;">${a.cuenta}</td>
                 <td style="padding:12px; text-align:right;">
-                    <button onclick="abrirEditorAbono('${a.folio}', ${a.abonoIdx})" style="padding:6px 12px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">✏️ Corregir</button>
+                    <button onclick="abrirEditorAbono('${a.folio}', ${a.abonoIdx})" style="padding:6px 10px; background:#1e3a8a; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px;">Corregir</button>
+                    <button onclick="eliminarAbonoAuditoriaCxC('${a.folio}', ${a.abonoIdx})" style="padding:6px 10px; background:#b91c1c; color:white; border:none; border-radius:6px; cursor:pointer; font-size:11px; margin-left:5px;">Eliminar</button>
                 </td>
             </tr>`).join('');
         htmlCuerpo = `<div style="background:white; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); overflow:hidden;"><table style="width:100%; border-collapse:collapse;"><thead style="background:#0f172a; color:white; font-size:11px;"><tr><th style="padding:15px; text-align:left;">Fecha Abono</th><th style="padding:15px; text-align:left;">Cliente</th><th style="padding:15px; text-align:left;">Importe</th><th style="padding:15px; text-align:left;">Cuenta</th><th style="padding:15px; text-align:right;">Acción</th></tr></thead><tbody>${filasPlanos}</tbody></table></div>`;
@@ -2159,6 +2161,185 @@ function _cxcOpcionesCuentasReceptoras(seleccionId = '', seleccionEtiqueta = '')
     return [...optsCajas, ...optsDebito].join('') || '<option value="efectivo" data-nombre="Efectivo Principal">Efectivo Principal</option>';
 }
 
+function _cxcAbonoVigente(a) {
+    return a && !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado && !a.eliminadoAuditoria;
+}
+
+function _cxcMovimientosAbonoFolio(folio) {
+    return StorageService.get("movimientosCaja", []).filter(m => String(m.referencia || '') === `ABONO-${folio}`);
+}
+
+function _cxcSnapshotSaldosAbonos(cuenta, movimientosPrevios = null) {
+    const movs = Array.isArray(movimientosPrevios) ? movimientosPrevios : _cxcMovimientosAbonoFolio(cuenta.folio);
+    if (movs.length) {
+        return movs.map(m => ({
+            cuentaId: m.cuenta || m.cuentaId || m.medioPago || 'efectivo',
+            monto: Number(m.monto || 0)
+        }));
+    }
+    return (cuenta.abonos || [])
+        .filter(_cxcAbonoVigente)
+        .map(a => ({
+            cuentaId: a.cuentaId || a.medioPago || 'efectivo',
+            monto: Number(a.monto || 0)
+        }));
+}
+
+function _cxcRecrearMovimientosAbonos(cuenta) {
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    movimientosCaja = movimientosCaja.filter(m => String(m.referencia || '') !== `ABONO-${cuenta.folio}`);
+    (cuenta.abonos || []).filter(_cxcAbonoVigente).forEach((ab) => {
+        movimientosCaja.push({
+            id: Date.now() + Math.random(),
+            folio: cuenta.folio,
+            fecha: _cxcFechaAbonoBase(ab) || ab.fecha,
+            monto: Number(ab.monto || 0),
+            tipo: "ingreso",
+            concepto: `Abono a ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'} - ${cuenta.folio}`,
+            referencia: `ABONO-${cuenta.folio}`,
+            cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
+            medioPago: ab.medioPago || 'efectivo',
+            etiquetaCuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo',
+            idOperacion: ab.idOperacion || ab.idCuarentena || ab.id || null
+        });
+    });
+    StorageService.set("movimientosCaja", movimientosCaja);
+}
+
+function _cxcRecalcularCuentaPorAbonos(cuenta, pagares) {
+    cuenta.abonos = Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
+    const abonosVigentes = cuenta.abonos.filter(_cxcAbonoVigente);
+    let bolsa = abonosVigentes.reduce((sum, a) => sum + Number(a.monto || 0), 0);
+    const fechaUltimoAbono = _cxcFechaAbonoBase(abonosVigentes[abonosVigentes.length - 1]) || null;
+
+    let pagaresFolio = pagares
+        .filter(p => p.folio === cuenta.folio && (String(p.estado || '').toLowerCase() !== 'cancelado' || String(p.nota || '').toLowerCase().includes('liquidado por')))
+        .sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    pagaresFolio.forEach(p => {
+        p.montoAbonado = 0;
+        p.fechaAbono = null;
+        p.estado = "Pendiente";
+        if (String(p.nota || '').toLowerCase().includes('liquidado por')) p.nota = '';
+
+        const montoPagare = Number(p.monto || 0);
+        if (bolsa >= montoPagare - 0.01) {
+            p.estado = "Pagado";
+            p.montoAbonado = montoPagare;
+            p.fechaAbono = fechaUltimoAbono;
+            bolsa -= montoPagare;
+        } else if (bolsa > 0.01) {
+            p.estado = "Parcial";
+            p.montoAbonado = bolsa;
+            p.fechaAbono = fechaUltimoAbono;
+            bolsa = 0;
+        }
+    });
+
+    cuenta.cargosMoratorios = (cuenta.cargosMoratorios || []).map(m => {
+        if (m.cancelado || m.anulado || String(m.tipo || 'cargo') === 'exencion') return m;
+        return { ...m, montoAbonado: 0, estado: Number(m.monto || 0) > 0.01 ? "Pendiente" : (m.estado || "Pendiente") };
+    });
+    _cxcAplicarPagoAMoratorios(cuenta, bolsa);
+
+    const pagaresActualizados = pagares.map(p => {
+        const mod = pagaresFolio.find(pf => pf.id === p.id);
+        return mod ? mod : p;
+    });
+
+    const saldoPagares = pagaresActualizados
+        .filter(p => p.folio === cuenta.folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
+        .reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)) : Number(p.monto || 0)), 0);
+    const saldoMoratorios = _cxcTotalMoratoriosPendientes(cuenta);
+    cuenta.saldoActual = Math.max(0, saldoPagares + saldoMoratorios);
+    if (cuenta.saldoActual <= 0.01) {
+        cuenta.estado = "Saldado";
+        cuenta.saldoActual = 0;
+    } else if (cuenta.estado === "Saldado") {
+        cuenta.estado = "Pendiente";
+    }
+
+    return pagaresActualizados;
+}
+
+window.eliminarAbonoAuditoriaCxC = function(folio, abonoIndex) {
+    if (window.AuditService?.requireAdmin) {
+        if (!window.AuditService.requireAdmin('eliminar abono CxC')) return;
+    } else {
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        if (!sesion || (sesion.rol !== 'admin' && sesion.rol !== 'Administrador')) return alert("Acceso denegado: solo administradores.");
+    }
+
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    let pagares = StorageService.get("pagaresSistema", []);
+    const idxCuenta = cuentas.findIndex(c => c.folio === folio);
+    if (idxCuenta === -1) return alert("Cuenta no encontrada.");
+
+    const cuenta = cuentas[idxCuenta];
+    cuenta.abonos = Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
+    const abono = cuenta.abonos[abonoIndex];
+    if (!abono || !_cxcAbonoVigente(abono)) return alert("El abono no existe o ya fue eliminado.");
+
+    const monto = Number(abono.monto || 0);
+    const msg = `ELIMINAR ABONO\n\nFolio: ${folio}\nCliente: ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'}\nMonto: ${_cxcDinero(monto)}\n\nEsto quitara el abono del estado de cuenta, recalculara saldos/pagares y retirara el ingreso de caja/banco.\n\nDeseas continuar?`;
+    if (!confirm(msg)) return;
+
+    const motivo = prompt("Motivo de eliminacion del abono:");
+    if (motivo === null) return;
+    if (!String(motivo).trim()) return alert("El motivo es obligatorio para eliminar un abono.");
+
+    const movimientosPrevios = _cxcMovimientosAbonoFolio(folio);
+    const saldosPrevios = _cxcSnapshotSaldosAbonos(cuenta, movimientosPrevios);
+    const abonoEliminado = cuenta.abonos.splice(abonoIndex, 1)[0];
+    cuenta.abonosEliminados = cuenta.abonosEliminados || [];
+    cuenta.abonosEliminados.push({
+        ...abonoEliminado,
+        eliminadoAuditoria: true,
+        fechaEliminacion: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        motivoEliminacion: String(motivo).trim()
+    });
+
+    pagares = _cxcRecalcularCuentaPorAbonos(cuenta, pagares);
+    cuentas[idxCuenta] = cuenta;
+    StorageService.set("cuentasPorCobrar", cuentas);
+    StorageService.set("pagaresSistema", pagares);
+
+    _cxcRecrearMovimientosAbonos(cuenta);
+
+    let saldosActualizados = true;
+    saldosPrevios.forEach(m => {
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(m.cuentaId, -Number(m.monto || 0))) saldosActualizados = false;
+    });
+    cuenta.abonos.filter(_cxcAbonoVigente).forEach(a => {
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(a.cuentaId || a.medioPago || 'efectivo', Number(a.monto || 0))) saldosActualizados = false;
+    });
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ELIMINACION_ABONO_CXC',
+            modulo: 'CxC',
+            entidad: 'Abono',
+            entidadId: `${folio}#${abonoIndex + 1}`,
+            detalle: `Eliminacion de abono por ${_cxcDinero(monto)}. Motivo: ${String(motivo).trim()}`,
+            monto,
+            severidad: 'critica',
+            datos: { abono: abonoEliminado, motivo: String(motivo).trim() }
+        });
+    }
+
+    alert(saldosActualizados
+        ? "Abono eliminado. Se reversaron saldo, estado de cuenta, pagares y flujo de caja."
+        : "Abono eliminado, pero alguna cuenta de caja/banco no se encontro para ajustar saldo. Revisa Mis Cuentas.");
+    if (typeof renderAuditoriaAbonos === 'function') renderAuditoriaAbonos();
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (document.querySelector('[data-modal="auditoria-cxc"]') && window._auditCuentaActual?.folio === folio && typeof buscarVentaAuditoria === 'function') {
+        const inputAudit = document.getElementById('auditFolioInput');
+        if (inputAudit) inputAudit.value = folio;
+        buscarVentaAuditoria();
+    }
+};
+
 window.procesarCorreccionAbono = function(folio, abonoIndex) {
     if (window.AuditService?.requireAdmin) {
         if (!window.AuditService.requireAdmin('corregir abono CxC')) return;
@@ -2195,12 +2376,8 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
     const nuevaFechaIso = window.localISO ? window.localISO(fechaObj) : fechaObj.toISOString();
     const nuevaFechaVisible = _cxcFechaCorta(fechaObj);
 
-    const movimientosAbonoPrevios = movimientosCaja.filter(m => m.folio === folio && m.referencia === `ABONO-${folio}`);
-    const saldosPrevios = movimientosAbonoPrevios.length
-        ? movimientosAbonoPrevios.map(m => ({ cuentaId: m.cuenta || m.cuentaId || m.medioPago || 'efectivo', monto: Number(m.monto || 0) }))
-        : cuenta.abonos
-            .filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado)
-            .map(a => ({ cuentaId: a.cuentaId || a.medioPago || 'efectivo', monto: Number(a.monto || 0) }));
+    const movimientosAbonoPrevios = _cxcMovimientosAbonoFolio(folio);
+    const saldosPrevios = _cxcSnapshotSaldosAbonos(cuenta, movimientosAbonoPrevios);
 
     cuenta.abonos[abonoIndex].fecha = nuevaFechaVisible;
     cuenta.abonos[abonoIndex].fechaAbonoIso = nuevaFechaIso;
@@ -2210,72 +2387,17 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
     cuenta.abonos[abonoIndex].medioPago = medioPago;
     cuenta.abonos[abonoIndex].etiquetaCuenta = etiqueta;
 
-    const abonosVigentes = cuenta.abonos.filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
-    const totalAbonado = abonosVigentes.reduce((sum, a) => sum + Number(a.monto || 0), 0);
-    const enganche = Number(cuenta.engancheRecibido || 0);
-    let deudaTotal = cuenta.totalContadoOriginal - enganche;
-    if (cuenta.plan && cuenta.plan.total) deudaTotal = cuenta.plan.total;
-    else if (cuenta.saldoOriginal) deudaTotal = cuenta.saldoOriginal;
-
-    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado);
-    if (cuenta.saldoActual <= 0.01) {
-        cuenta.estado = "Saldado";
-        cuenta.saldoActual = 0;
-    } else if (cuenta.estado === "Saldado") {
-        cuenta.estado = "Pendiente";
-    }
-
-    let pagaresFolio = pagares.filter(p => p.folio === folio).sort((a,b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
-    let bolsa = totalAbonado;
-
-    pagaresFolio.forEach(p => {
-        p.montoAbonado = 0;
-        p.fechaAbono = null;
-        p.estado = "Pendiente";
-
-        if (bolsa >= p.monto - 0.01) {
-            p.estado = "Pagado";
-            p.montoAbonado = p.monto;
-            p.fechaAbono = _cxcFechaAbonoBase(abonosVigentes[abonosVigentes.length - 1]) || null;
-            bolsa -= p.monto;
-        } else if (bolsa > 0.01) {
-            p.estado = "Parcial";
-            p.montoAbonado = bolsa;
-            p.fechaAbono = _cxcFechaAbonoBase(abonosVigentes[abonosVigentes.length - 1]) || null;
-            bolsa = 0;
-        }
-    });
-
-    pagares = pagares.map(p => {
-        const pMod = pagaresFolio.find(pf => pf.id === p.id);
-        return pMod ? pMod : p;
-    });
-
-    movimientosCaja = movimientosCaja.filter(m => !(m.folio === folio && m.referencia === `ABONO-${folio}`));
-    abonosVigentes.forEach((ab) => {
-        movimientosCaja.push({
-            id: Date.now() + Math.random(),
-            folio: folio,
-            fecha: _cxcFechaAbonoBase(ab) || ab.fecha,
-            monto: ab.monto,
-            tipo: "ingreso",
-            concepto: `Abono a ${cuenta.nombre} - ${folio}`,
-            referencia: `ABONO-${folio}`,
-            cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
-            medioPago: ab.medioPago || 'efectivo',
-            etiquetaCuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo'
-        });
-    });
+    pagares = _cxcRecalcularCuentaPorAbonos(cuenta, pagares);
 
     StorageService.set("cuentasPorCobrar", cuentas);
     StorageService.set("pagaresSistema", pagares);
-    StorageService.set("movimientosCaja", movimientosCaja);
+    _cxcRecrearMovimientosAbonos(cuenta);
 
     let saldosActualizados = true;
     saldosPrevios.forEach(m => {
         if (!_cxcAjustarSaldoCuentaPorCorreccion(m.cuentaId, -Number(m.monto || 0))) saldosActualizados = false;
     });
-    abonosVigentes.forEach(ab => {
+    cuenta.abonos.filter(_cxcAbonoVigente).forEach(ab => {
         if (!_cxcAjustarSaldoCuentaPorCorreccion(ab.cuentaId || ab.medioPago || 'efectivo', Number(ab.monto || 0))) saldosActualizados = false;
     });
 
