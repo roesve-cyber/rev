@@ -31,6 +31,17 @@ function _navLimpiarFiltrosOperacion() {
 }
 
 window.navA = function(vistaId, isPopState = false) {
+    const rutasRetiradas = {
+        cobranzaesperada: { vista: 'reportes', render: 'compromisos' },
+        agendacobros: { vista: 'reportes', render: 'cartera' },
+        clientesmorosos: { vista: 'reportes', render: 'cartera' },
+        flujocaja: { vista: 'reporte-flujo', render: 'flujo' },
+        proyeccion: { vista: 'reportes', render: 'compromisos' },
+        'reporte-rentabilidad': { vista: 'reporte-ventas', render: 'ventas' }
+    };
+    const redireccionRetirada = rutasRetiradas[vistaId] || null;
+    if (redireccionRetirada) vistaId = redireccionRetirada.vista;
+
     const vistaAnterior = window._vistaActualSistema || '';
     const grupoAnterior = _navGrupoVista(vistaAnterior);
     const grupoDestino = _navGrupoVista(vistaId);
@@ -65,7 +76,6 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'estadoCuentaCliente' && typeof window.renderEstadoCuentaClienteConsolidado === 'function') window.renderEstadoCuentaClienteConsolidado();
         if (vistaId === 'abonosdirectos' && typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
         if (vistaId === 'visor-creditos' && typeof renderVisorCreditosCobranza === 'function') renderVisorCreditosCobranza();
-        if (vistaId === 'cobranzaesperada' && typeof renderCobranzaEsperada === 'function') renderCobranzaEsperada();
         if (vistaId === 'listaprecios' && typeof renderListaPrecios === 'function') renderListaPrecios();
         if (vistaId === 'seleccionarcliente' && typeof renderSeleccionClienteVenta === 'function') {
             renderSeleccionClienteVenta();
@@ -95,13 +105,15 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'reporte-flujo' && typeof renderReporteFlujo === 'function') renderReporteFlujo();
         if (vistaId === 'reimprimir-venta' && typeof renderReimprimirVenta === 'function') renderReimprimirVenta();
         if (vistaId === 'gastos' && typeof renderGestionGastos === 'function') renderGestionGastos();
-        if (vistaId === 'proyeccion' && typeof renderProyeccionFlujo === 'function') renderProyeccionFlujo();
         if (vistaId === 'vendedores' && typeof renderGestionVendedores === 'function') renderGestionVendedores();
         if (vistaId === 'descuentos' && typeof renderGestionDescuentos === 'function') renderGestionDescuentos();
         if (vistaId === 'ubicaciones' && typeof renderUbicaciones === 'function') renderUbicaciones();
         if (vistaId === 'usuarios' && typeof renderGestionUsuarios === 'function') renderGestionUsuarios();
         if (vistaId === 'puntos' && typeof renderPanelPuntos === 'function') renderPanelPuntos();
-        if (vistaId === 'clientesmorosos' && typeof renderClientesMorosos === 'function') renderClientesMorosos();
+        if (redireccionRetirada?.render === 'compromisos' && typeof renderReporteCompromisos === 'function') renderReporteCompromisos();
+        if (redireccionRetirada?.render === 'cartera' && typeof renderARC_v3 === 'function') renderARC_v3();
+        if (redireccionRetirada?.render === 'flujo' && typeof renderReporteFlujo === 'function') renderReporteFlujo();
+        if (redireccionRetirada?.render === 'ventas' && typeof renderReporteVentas === 'function') renderReporteVentas();
         if (vistaId === 'autorizaciones' && typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         
         // REPARACION: liga que faltaba para las categorias
