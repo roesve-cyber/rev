@@ -163,11 +163,49 @@
         return String(mov.tipo || '').toLowerCase() === 'ingreso' ? 'ingreso' : 'egreso';
     }
 
+    function cuentaEsDebito(idONombre) {
+        const clave = normalizarId(idONombre);
+        if (!clave) return false;
+        const debito = (StorageService.get('tarjetasConfig', []) || [])
+            .filter(t => String(t.tipo || '').toLowerCase() === 'debito');
+        const bancarias = StorageService.get('cuentas-bancarias', []) || [];
+        return [...debito, ...bancarias].some(c =>
+            [c.id, c.banco, c.nombre, c.etiqueta]
+                .filter(Boolean)
+                .some(valor => {
+                    const candidato = normalizarId(valor);
+                    return candidato === clave || clave.includes(candidato) || candidato.includes(clave);
+                })
+        );
+    }
+
+    function esTransferenciaInterna(mov, txt) {
+        const referencia = String(mov.referencia || '').trim().toUpperCase();
+        const medio = String(mov.medioPago || '').trim().toLowerCase();
+        return referencia.startsWith('TR-') ||
+            String(mov.tipoMovimiento || '').toLowerCase() === 'transferencia_interna' ||
+            !!(mov.cuentaOrigen && mov.cuentaDestino) ||
+            txt.includes('transferencia a:') ||
+            txt.includes('transferencia de:') ||
+            (medio === 'transferencia' && txt.includes('transferencia interna'));
+    }
+
+    function destinoMovimiento(mov, txt) {
+        const directo = mov.cuentaDestino || mov.destinoCuenta || mov.destino || '';
+        if (directo) return directo;
+        const match = txt.match(/transferencia\s+a:\s*([^(]+)/i);
+        return match ? match[1].trim() : '';
+    }
+
     function categoriaMovimiento(mov) {
         const txt = `${mov.concepto || ''} ${mov.referencia || ''}`.toLowerCase();
         const tipo = tipoNormalizado(mov);
+        const destino = destinoMovimiento(mov, txt);
+        const destinoDebito = cuentaEsDebito(destino);
+        const transferencia = esTransferenciaInterna(mov, txt);
 
         if (tipo === 'ingreso') {
+            if (transferencia || destinoDebito) return 'Transferencias';
             if (txt.includes('abono a apartado') || txt.includes('abn-apt') || txt.includes('apartado')) return 'Apartados';
             if (txt.includes('abono')) return 'Abonos credito';
             if (txt.includes('enganche')) return 'Enganches';
@@ -176,12 +214,19 @@
             return 'Otros ingresos';
         }
 
+        if (transferencia || destinoDebito) return 'Transferencias';
         if (txt.includes('gasto')) return 'Gastos operativos';
         if (txt.includes('proveedor') || txt.includes('compra') || txt.includes('oc')) return 'Compras/proveedores';
-        if (txt.includes('tarjeta') || txt.includes('tc') || txt.includes('msi')) return 'Tarjetas/MSI';
+        if (
+            String(mov.medioPago || '').toLowerCase() === 'tarjeta_msi' ||
+            String(mov.referencia || '').toUpperCase().startsWith('PAGO-TC-') ||
+            String(mov.referencia || '').toUpperCase().startsWith('MSI-') ||
+            txt.includes('pago a corte mensual tarjeta') ||
+            txt.includes('pago msi')
+        ) return 'Pago de tarjeta / MSI';
         if (txt.includes('cancel') || txt.includes('devolucion') || txt.includes('reembolso')) return 'Cancelaciones/devoluciones';
         if (txt.includes('consign')) return 'Consignacion';
-        return 'Otros egresos';
+        return 'Egresos por identificar';
     }
 
     function leerFiltros() {
@@ -479,6 +524,7 @@
     }
 
     window.renderCorteCaja = function() {
+        reclasificarCortesGuardados();
         const cont = document.getElementById('contenidoCorteCaja');
         if (!cont) return;
 
@@ -724,7 +770,13 @@
                 concepto: m.concepto || '',
                 cuenta: m.cuenta || m.cuentaId || '',
                 monto: m._monto,
-                referencia: m.referencia || ''
+                referencia: m.referencia || '',
+                medioPago: m.medioPago || '',
+                tipoMovimiento: m.tipoMovimiento || '',
+                cuentaOrigen: m.cuentaOrigen || '',
+                cuentaDestino: m.cuentaDestino || '',
+                cuentaOrigenNombre: m.cuentaOrigenNombre || '',
+                cuentaDestinoNombre: m.cuentaDestinoNombre || ''
             }))
         };
     }
@@ -808,6 +860,21 @@
         return corte;
     }
 
+    function reclasificarCortesGuardados() {
+        const cortesRaw = StorageService.get('cortesCaja', []);
+        const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
+        let cambio = false;
+        cortes.forEach(corte => {
+            const antes = JSON.stringify(corte.resumenCategorias || []);
+            recalcularCorteGuardado(corte);
+            if (antes !== JSON.stringify(corte.resumenCategorias || [])) cambio = true;
+        });
+        if (cambio) StorageService.set('cortesCaja', cortes);
+        return cortes;
+    }
+
+    window.reclasificarCortesCaja = reclasificarCortesGuardados;
+
     function movimientosDisponiblesParaCorte(corte) {
         const cuentas = obtenerCuentasCorte();
         const cuenta = String(corte.cuentaId || '') === 'todas'
@@ -854,7 +921,13 @@
             concepto: m.concepto || '',
             cuenta: m.cuenta || m.cuentaId || '',
             monto: m._monto,
-            referencia: m.referencia || ''
+            referencia: m.referencia || '',
+            medioPago: m.medioPago || '',
+            tipoMovimiento: m.tipoMovimiento || '',
+            cuentaOrigen: m.cuentaOrigen || '',
+            cuentaDestino: m.cuentaDestino || '',
+            cuentaOrigenNombre: m.cuentaOrigenNombre || '',
+            cuentaDestinoNombre: m.cuentaDestinoNombre || ''
         };
     }
 
@@ -1050,7 +1123,7 @@
     };
 
     window.abrirDetalleCorteCaja = function(folio) {
-        const cortes = StorageService.get('cortesCaja', []);
+        const cortes = reclasificarCortesGuardados();
         const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
         if (!corte) return alert('No se encontro el corte solicitado.');
 
@@ -1195,7 +1268,7 @@
     };
 
     window.imprimirCorteGuardado = function(folio) {
-        const cortes = StorageService.get('cortesCaja', []);
+        const cortes = reclasificarCortesGuardados();
         const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
         if (!corte) return alert('No se encontro el corte solicitado.');
         window.AuditService?.log?.({

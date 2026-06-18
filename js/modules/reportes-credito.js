@@ -808,6 +808,49 @@ window.renderARCTablaExcel = function() {
 // ================================================================
 // 3. SCORECARD DE COMPORTAMIENTO DE PAGO
 // ================================================================
+window.ordenarComportamientoPor = function(columna) {
+    const misma = window._cbOrden === columna;
+    const direccionInicial = columna === 'nombre' ? 'asc' : 'desc';
+    window._cbDireccion = misma
+        ? (window._cbDireccion === 'asc' ? 'desc' : 'asc')
+        : direccionInicial;
+    window._cbOrden = columna;
+    renderComportamiento();
+};
+
+window.abrirDetalleScorecardCliente = function(claveCodificada) {
+    const clave = decodeURIComponent(String(claveCodificada || ''));
+    const grupo = window._cbGruposCliente?.[clave];
+    if (!grupo) return alert('No se encontro el detalle del cliente.');
+    document.querySelector('[data-modal="scorecard-cliente"]')?.remove();
+    const filas = grupo.cuentas.map(c => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:10px;"><b>${c.folio || '-'}</b></td>
+            <td style="padding:10px;text-align:right;font-weight:900;color:#dc2626;">${_rc.fmt(c.sne.saldoActual)}</td>
+            <td style="padding:10px;text-align:right;">${_rc.fmt(c.sne.excedente)}</td>
+            <td style="padding:10px;">${_rc.badge(c.sne.emojiRiesgo + ' ' + c.sne.nivelRiesgo, c.sne.colorRiesgo + '18', c.sne.colorRiesgo)}</td>
+            <td style="padding:10px;text-align:right;white-space:nowrap;">
+                <button onclick="abrirModalAbonoAvanzado('${String(c.folio || '').replace(/'/g, "\\'")}')" style="padding:6px 9px;background:#16a34a;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer;">Abonar</button>
+                <button onclick="enviarRecordatorioWhatsApp('${String(c.folio || '').replace(/'/g, "\\'")}')" style="padding:6px 9px;background:#25D366;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer;margin-left:4px;">WhatsApp</button>
+            </td>
+        </tr>`).join('');
+    document.body.insertAdjacentHTML('beforeend', `
+        <div data-modal="scorecard-cliente" style="position:fixed;inset:0;background:rgba(15,23,42,.78);z-index:10000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+            <div style="width:100%;max-width:900px;background:white;border-radius:10px;padding:22px;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px;">
+                    <div><h3 style="margin:0;color:#0f172a;">${grupo.nombre}</h3><p style="margin:5px 0 0;color:#64748b;">${grupo.cuentas.length} cuentas activas</p></div>
+                    <button onclick="document.querySelector('[data-modal=&quot;scorecard-cliente&quot;]')?.remove()" style="padding:8px 12px;border:0;border-radius:6px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
+                </div>
+                <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
+                    <table style="width:100%;border-collapse:collapse;min-width:680px;font-size:12px;">
+                        <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:10px;text-align:left;">Folio</th><th style="padding:10px;text-align:right;">Saldo</th><th style="padding:10px;text-align:right;">SNE</th><th style="padding:10px;text-align:left;">Riesgo</th><th style="padding:10px;"></th></tr></thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`);
+};
+
 window.renderComportamiento = function() {
     const cont = document.getElementById('reportes') ||
                  document.getElementById('reportes-contenido') ||
@@ -819,7 +862,9 @@ window.renderComportamiento = function() {
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
     const ordenar = window._cbOrden || 'excedente';
+    const direccion = window._cbDireccion || (ordenar === 'nombre' || ordenar === 'excedente' ? 'asc' : 'desc');
     const filtro  = window._cbFiltro || 'todos';
+    const agruparCliente = window._cbAgruparCliente === true;
 
     const cuentasSNE = cxc
         .filter(c => c.estado !== 'Saldado' && !_rcCuentaCancelada(c))
@@ -864,15 +909,134 @@ window.renderComportamiento = function() {
         });
 
     let lista = cuentasSNE;
+    if (agruparCliente) {
+        const grupos = {};
+        const normalizar = value => String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        cuentasSNE.forEach(c => {
+            const clave = c.clienteId
+                ? `id:${c.clienteId}`
+                : `nombre:${normalizar(c.nombre || c.clienteNombre)}|tel:${normalizar(c.telefono)}`;
+            if (!grupos[clave]) grupos[clave] = { clave, nombre: c.nombre || c.clienteNombre || 'Cliente', clienteId: c.clienteId || null, cuentas: [] };
+            grupos[clave].cuentas.push(c);
+        });
+
+        const severidad = {
+            'INCOBRABLE': 7, 'Alerta total': 7,
+            'CRITICO': 6, 'CRÍTICO': 6, 'Alto riesgo': 6,
+            'EN MORA': 5, 'Riesgo': 5,
+            'MODERADO': 4, 'Precaucion': 4, 'Precaución': 4,
+            'LEVE': 3, 'Estable': 2, 'AL CORRIENTE': 1, 'Al corriente': 1
+        };
+        lista = Object.values(grupos).map(g => {
+            const abonos = g.cuentas.flatMap(c => (c.abonos || []).map(a => ({
+                monto: Number(a.monto || 0),
+                fecha: _rc.parseFecha(a.fecha || a.fechaAbono),
+                cancelado: a.cancelado || a.canceladoPorVenta || a.canceladoPorApartado
+            }))).filter(a => a.fecha && !a.cancelado);
+            abonos.sort((a, b) => a.fecha - b.fecha);
+
+            let diasEntreAbonos = null;
+            if (abonos.length >= 2) {
+                let sumaDias = 0;
+                for (let i = 1; i < abonos.length; i++) sumaDias += Math.floor((abonos[i].fecha - abonos[i - 1].fecha) / 86400000);
+                diasEntreAbonos = Math.round(sumaDias / (abonos.length - 1));
+            }
+
+            const hace60 = new Date(hoy); hace60.setDate(hoy.getDate() - 60);
+            const hace90 = new Date(hoy); hace90.setDate(hoy.getDate() - 90);
+            const hace120 = new Date(hoy); hace120.setDate(hoy.getDate() - 120);
+            const recientes = abonos.filter(a => a.fecha >= hace60).reduce((s, a) => s + a.monto, 0);
+            const anteriores = abonos.filter(a => a.fecha >= hace120 && a.fecha < hace60).reduce((s, a) => s + a.monto, 0);
+            const abonos90 = abonos.filter(a => a.fecha >= hace90);
+            let tendencia = 'estable';
+            if (anteriores > 0) {
+                const delta = (recientes - anteriores) / anteriores * 100;
+                if (delta > 15) tendencia = 'subiendo';
+                else if (delta < -15) tendencia = 'bajando';
+            } else if (recientes > 0) tendencia = 'nuevo';
+
+            const peor = g.cuentas.slice().sort((a, b) => (severidad[b.sne.nivelRiesgo] || 0) - (severidad[a.sne.nivelRiesgo] || 0))[0];
+            const totalPlazo = g.cuentas.reduce((s, c) => s + Number(c.sne.totalPlazo || c.sne.totalVenta || 0), 0);
+            const totalPagado = g.cuentas.reduce((s, c) => s + Number(c.sne.totalPagado || 0), 0);
+            const montoEsperado = g.cuentas.reduce((s, c) => s + Number(c.sne.montoEsperado || 0), 0);
+            const excedente = totalPagado - montoEsperado;
+            const sne = {
+                saldoActual: g.cuentas.reduce((s, c) => s + Number(c.sne.saldoActual || 0), 0),
+                totalPagado,
+                montoEsperado,
+                excedente,
+                totalVenta: g.cuentas.reduce((s, c) => s + Number(c.sne.totalVenta || 0), 0),
+                totalPlazo,
+                deficitPct: totalPlazo > 0 ? Math.abs(Math.min(0, excedente)) / totalPlazo * 100 : 0,
+                numAbonos: abonos.length,
+                diasSinPagar: abonos.length ? Math.max(0, Math.floor((hoy - abonos[abonos.length - 1].fecha) / 86400000)) : 9999,
+                promedioAbono90: abonos90.length ? abonos90.reduce((s, a) => s + a.monto, 0) / abonos90.length : 0,
+                nivelRiesgo: peor?.sne.nivelRiesgo || 'AL CORRIENTE',
+                colorRiesgo: peor?.sne.colorRiesgo || '#16a34a',
+                emojiRiesgo: peor?.sne.emojiRiesgo || 'OK'
+            };
+            return {
+                ...g.cuentas[0],
+                nombre: g.nombre,
+                folio: `${g.cuentas.length} cuentas`,
+                folios: g.cuentas.map(c => c.folio),
+                sne,
+                tendencia,
+                diasEntreAbonos,
+                recientes,
+                anteriores,
+                agrupado: true,
+                grupoClave: g.clave,
+                cuentasGrupo: g.cuentas
+            };
+        });
+        window._cbGruposCliente = Object.fromEntries(lista.map(g => [g.grupoClave, { clave: g.grupoClave, nombre: g.nombre, cuentas: g.cuentasGrupo }]));
+    } else {
+        window._cbGruposCliente = {};
+    }
     if (filtro === 'alCorriente') lista = lista.filter(c => c.sne.excedente >= 0);
-    if (filtro === 'enMora')      lista = lista.filter(c => ['Riesgo', 'Alto riesgo', 'Alerta total', 'EN MORA', 'CRÍTICO'].includes(c.sne.nivelRiesgo));
+    if (filtro === 'enMora')      lista = lista.filter(c => ['riesgo', 'alto riesgo', 'alerta total', 'en mora', 'critico', 'crítico'].includes(String(c.sne.nivelRiesgo || '').toLowerCase()));
     if (filtro === 'sinAbono60')  lista = lista.filter(c => c.sne.diasSinPagar > 60);
     if (filtro === 'subiendo')    lista = lista.filter(c => c.tendencia === 'subiendo');
 
-    if (ordenar === 'excedente') lista.sort((a, b) => a.sne.excedente - b.sne.excedente);
-    if (ordenar === 'saldo')     lista.sort((a, b) => b.sne.saldoActual - a.sne.saldoActual);
-    if (ordenar === 'diasSin')   lista.sort((a, b) => b.sne.diasSinPagar - a.sne.diasSinPagar);
-    if (ordenar === 'nombre')    lista.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+    const riesgoOrden = {
+        'Alerta total': 6, 'EN MORA': 6, 'CRITICO': 6, 'CRÍTICO': 6,
+        'Alto riesgo': 5, 'Riesgo': 4, 'Precaucion': 3, 'Precaución': 3,
+        'Estable': 2, 'Al corriente': 1
+    };
+    const tendenciaOrden = { bajando: 1, estable: 2, nuevo: 3, subiendo: 4 };
+    const valorOrden = (c) => {
+        const s = c.sne;
+        if (ordenar === 'nombre') return String(c.nombre || '');
+        if (ordenar === 'saldo') return Number(s.saldoActual || 0);
+        if (ordenar === 'pagado') return Number(s.totalPagado || 0);
+        if (ordenar === 'esperado') return Number(s.montoEsperado || 0);
+        if (ordenar === 'excedente') return Number(s.excedente || 0);
+        if (ordenar === 'cubierto') return s.totalVenta > 0 ? Number(s.totalPagado || 0) / Number(s.totalVenta) : 0;
+        if (ordenar === 'riesgo') return riesgoOrden[s.nivelRiesgo] || 0;
+        if (ordenar === 'diasSin') return Number(s.diasSinPagar || 0);
+        if (ordenar === 'frecuencia') return c.diasEntreAbonos === null ? Number.MAX_SAFE_INTEGER : Number(c.diasEntreAbonos);
+        if (ordenar === 'promedio90') return Number(s.promedioAbono90 || 0);
+        if (ordenar === 'tendencia') return tendenciaOrden[c.tendencia] || 0;
+        return 0;
+    };
+    lista.sort((a, b) => {
+        const va = valorOrden(a);
+        const vb = valorOrden(b);
+        let comparacion = typeof va === 'string'
+            ? va.localeCompare(vb, 'es', { sensitivity: 'base' })
+            : va - vb;
+        if (comparacion === 0) {
+            comparacion = String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' });
+        }
+        return direccion === 'asc' ? comparacion : -comparacion;
+    });
+
+    const thOrdenable = (clave, texto, alineacion = 'left') => {
+        const activo = ordenar === clave;
+        const flecha = activo ? (direccion === 'asc' ? '▲' : '▼') : '↕';
+        return `<th onclick="ordenarComportamientoPor('${clave}')" title="Ordenar por ${texto}" style="position:sticky;top:0;z-index:3;padding:11px 12px;font-size:11px;color:${activo ? '#4c1d95' : '#475569'};background:${activo ? '#ede9fe' : '#f8fafc'};text-align:${alineacion};cursor:pointer;white-space:nowrap;border-bottom:2px solid ${activo ? '#7c3aed' : '#e2e8f0'};user-select:none;">${texto} <span style="font-size:10px;">${flecha}</span></th>`;
+    };
 
     const filas = lista.map(c => {
         const s = c.sne;
@@ -900,7 +1064,7 @@ window.renderComportamiento = function() {
         return `<tr style="border-bottom:1px solid #f1f5f9;">
             <td style="padding:10px 12px;min-width:160px;">
                 <b style="font-size:13px;">${c.nombre || '—'}</b><br>
-                <small style="color:#64748b;">${c.folio}</small>
+                <small style="color:#64748b;">${c.agrupado ? `${c.cuentasGrupo.length} cuentas: ${c.folios.join(', ')}` : c.folio}</small>
             </td>
             <td style="padding:10px 12px;text-align:right;font-weight:bold;color:#dc2626;">${_rc.fmt(s.saldoActual)}</td>
             <td style="padding:10px 12px;text-align:right;">${_rc.fmt(s.totalPagado)}<br><small style="color:#64748b;">${s.numAbonos} abonos</small></td>
@@ -916,8 +1080,10 @@ window.renderComportamiento = function() {
             <td style="padding:10px 12px;text-align:right;">${_rc.fmt(s.promedioAbono90)}</td>
             <td style="padding:10px 12px;font-size:18px;text-align:center;" title="${c.tendencia}">${iconoTendencia}</td>
             <td style="padding:10px 12px;">
-                <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:5px 9px;background:#16a34a;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;" title="Abonar">💰</button>
-                <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:5px 9px;background:#25D366;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;margin-left:3px;" title="WhatsApp">💬</button>
+                ${c.agrupado
+                    ? `<button onclick="abrirDetalleScorecardCliente('${encodeURIComponent(c.grupoClave).replace(/'/g, '%27')}')" style="padding:6px 10px;background:#4c1d95;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;white-space:nowrap;">Ver cuentas</button>`
+                    : `<button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:5px 9px;background:#16a34a;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;" title="Abonar">💰</button>
+                       <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:5px 9px;background:#25D366;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;margin-left:3px;" title="WhatsApp">💬</button>`}
             </td>
         </tr>`;
     }).join('');
@@ -939,6 +1105,10 @@ window.renderComportamiento = function() {
         </div>
 
         <div style="background:white;padding:14px;border-radius:10px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+            <label style="width:100%;display:flex;align-items:center;gap:9px;padding-bottom:12px;border-bottom:1px solid #e2e8f0;color:#4c1d95;font-size:13px;font-weight:900;cursor:pointer;">
+                <input type="checkbox" ${agruparCliente ? 'checked' : ''} onchange="window._cbAgruparCliente=this.checked;renderComportamiento();" style="width:18px;height:18px;accent-color:#7c3aed;cursor:pointer;">
+                Agrupar cuentas por cliente
+            </label>
             <div>
                 <label style="font-size:11px;font-weight:bold;color:#64748b;">FILTRAR:</label>
                 <select onchange="window._cbFiltro=this.value;renderComportamiento();" style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
@@ -951,33 +1121,33 @@ window.renderComportamiento = function() {
             </div>
             <div>
                 <label style="font-size:11px;font-weight:bold;color:#64748b;">ORDENAR:</label>
-                <select onchange="window._cbOrden=this.value;renderComportamiento();" style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                <select onchange="window._cbOrden=this.value;window._cbDireccion=this.value==='nombre'||this.value==='excedente'?'asc':'desc';renderComportamiento();" style="margin-left:8px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
                     <option value="excedente" ${ordenar==='excedente'?'selected':''}>SNE (menor a mayor)</option>
                     <option value="saldo" ${ordenar==='saldo'?'selected':''}>Saldo (mayor a menor)</option>
                     <option value="diasSin" ${ordenar==='diasSin'?'selected':''}>Días sin pagar</option>
                     <option value="nombre" ${ordenar==='nombre'?'selected':''}>Nombre A-Z</option>
                 </select>
             </div>
-            <div style="margin-left:auto;font-size:12px;color:#64748b;">${lista.length} clientes mostrados</div>
+            <div style="margin-left:auto;font-size:12px;color:#64748b;">${lista.length} ${agruparCliente ? 'clientes consolidados' : 'cuentas mostradas'}</div>
         </div>
 
         <div style="background:white;border-radius:10px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
-            <div style="overflow-x:auto;">
+            <div style="overflow:auto;max-height:calc(100vh - 245px);min-height:280px;">
                 <table style="width:100%;border-collapse:collapse;min-width:1200px;">
-                    <thead style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+                    <thead>
                         <tr>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:left;">Cliente</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:right;">Saldo</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:right;">Total Pagado</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:right;">Esperado Hoy</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:right;">SNE ↕</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;">% Cubierto</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;">Riesgo Real</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;">Último Abono</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;">Frecuencia</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:right;">Prom. 90d</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;text-align:center;">Tend.</th>
-                            <th style="padding:11px 12px;font-size:11px;color:#475569;">Acción</th>
+                            ${thOrdenable('nombre', 'Cliente')}
+                            ${thOrdenable('saldo', 'Saldo', 'right')}
+                            ${thOrdenable('pagado', 'Total Pagado', 'right')}
+                            ${thOrdenable('esperado', 'Esperado Hoy', 'right')}
+                            ${thOrdenable('excedente', 'SNE', 'right')}
+                            ${thOrdenable('cubierto', '% Cubierto')}
+                            ${thOrdenable('riesgo', 'Riesgo Real')}
+                            ${thOrdenable('diasSin', 'Último Abono')}
+                            ${thOrdenable('frecuencia', 'Frecuencia')}
+                            ${thOrdenable('promedio90', 'Prom. 90d', 'right')}
+                            ${thOrdenable('tendencia', 'Tend.', 'center')}
+                            <th style="position:sticky;top:0;z-index:3;padding:11px 12px;font-size:11px;color:#475569;background:#f8fafc;text-align:left;border-bottom:2px solid #e2e8f0;">Acción</th>
                         </tr>
                     </thead>
                     <tbody>

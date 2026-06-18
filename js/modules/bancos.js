@@ -1803,6 +1803,11 @@ window.ejecutarTransferenciaCuentas = function() {
         concepto: `Transferencia a: ${nombreDestino} (${motivo})`,
         referencia: `TR-${idTransf}`,
         cuenta: origen,
+        cuentaOrigen: origen,
+        cuentaDestino: destino,
+        cuentaOrigenNombre: nombreOrigenFull,
+        cuentaDestinoNombre: nombreDestinoFull,
+        tipoMovimiento: "transferencia_interna",
         medioPago: "transferencia",
         etiquetaCuenta: nombreOrigenFull
     });
@@ -1816,6 +1821,11 @@ window.ejecutarTransferenciaCuentas = function() {
         concepto: `Transferencia de: ${nombreOrigen} (${motivo})`,
         referencia: `TR-${idTransf}`,
         cuenta: destino,
+        cuentaOrigen: origen,
+        cuentaDestino: destino,
+        cuentaOrigenNombre: nombreOrigenFull,
+        cuentaDestinoNombre: nombreDestinoFull,
+        tipoMovimiento: "transferencia_interna",
         medioPago: "transferencia",
         etiquetaCuenta: nombreDestinoFull
     });
