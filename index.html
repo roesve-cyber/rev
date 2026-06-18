@@ -64,6 +64,7 @@
                 <button onclick="navA('inventario')">📋 Gestion de Productos</button>
                 <button onclick="navA('configcategorias')">🏷️ Categorías</button>
                 <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
+                <button onclick="navA('toma-inventario')">✅ Toma de Inventario</button>
                 <button onclick="navA('kardex-inventario'); if(typeof renderKardexInventario === 'function') renderKardexInventario();">&#128202; Kardex de Inventario</button>
             </div>
 
@@ -247,6 +248,9 @@
 </div>
 <div id="kardex-inventario" class="vista oculto" style="display:none;">
  <div id="contenidoKardexInventario"></div>
+</div>
+<div id="toma-inventario" class="vista oculto" style="display:none;">
+ <div id="contenidoTomaInventario"></div>
 </div>
 <div id="auditoria-productos" class="vista oculto" style="display:none;">
  <div style="padding:30px;max-width:900px;margin:0 auto;">
@@ -1140,7 +1144,7 @@
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=4"></script>
 <script src="js/services/calculator.js"></script>
-<script src="js/services/ticket-service.js?v=7"></script>
+<script src="js/services/ticket-service.js?v=8"></script>
 <script src="js/services/audit-service.js?v=1"></script>
 <script src="js/services/folio-service.js?v=1"></script>
 <script src="js/services/cobranza-risk-service.js?v=1"></script>
@@ -1149,22 +1153,23 @@
 
 <script src="js/modules/auth.js?v=2.8"></script>
 <script src="js/modules/inventario.js?v=23"></script>
-<script src="js/modules/tienda.js?v=5"></script>
+<script src="js/modules/toma-inventario.js?v=1"></script>
+<script src="js/modules/tienda.js?v=6"></script>
 <script src="js/modules/ventas.js?v=2.7"></script>
 <script src="js/modules/clientes.js?v=3"></script>
 <script src="js/modules/cxc.js?v=32"></script>
 <script src="js/modules/apartados.js?v=8"></script>
-<script src="js/modules/compras.js?v=49"></script>
+<script src="js/modules/compras.js?v=50"></script>
 <script src="js/modules/bancos.js?v=11"></script>
 <script src="js/modules/reportes.js?v=21"></script>
 <script src="js/modules/reportes-plus.js?v=8"></script>
 <script src="js/modules/reportes-credito.js?v=4"></script>
 <script src="js/modules/dashboard.js?v=6"></script>
-<script src="js/modules/cotizaciones.js?v=5"></script>
+<script src="js/modules/cotizaciones.js?v=6"></script>
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
-<script src="js/modules/corte-caja.js?v=3"></script>
+<script src="js/modules/corte-caja.js?v=5"></script>
 <script src="js/modules/gastos.js"></script>
 <script src="js/modules/proyeccion.js?v=2"></script>
 <script src="js/modules/devoluciones.js"></script>
