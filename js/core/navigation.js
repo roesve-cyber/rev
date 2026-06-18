@@ -54,6 +54,7 @@ window.navA = function(vistaId, isPopState = false) {
     // 3. AUTO-RENDERIZAR
     try {
         if (vistaId === 'inventario' && typeof renderInventario === 'function') renderInventario();
+        if (vistaId === 'toma-inventario' && typeof renderTomaInventario === 'function') renderTomaInventario();
         if (vistaId === 'kardex-inventario' && typeof renderKardexInventario === 'function') renderKardexInventario();
         if (vistaId === 'productos-visor' && window._visorProductoIdActual && typeof mostrarDetalleProductoMaestro === 'function') mostrarDetalleProductoMaestro(window._visorProductoIdActual);
         if (vistaId === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
