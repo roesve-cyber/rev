@@ -107,13 +107,10 @@
         <div class="menu-item">
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
-        <button onclick="navA('cobranzaesperada')">📊 Cobranza Esperada</button>
         <button onclick="navA('visor-creditos');renderVisorCreditosCobranza();">📋 Visor de Créditos</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
-        <button onclick="navA('agendacobros');renderAgendaCobros();">📅 Agenda de Cobros</button>
-        <button onclick="navA('clientesmorosos')">&#128308; Clientes Morosos</button>
     </div>
 </div>
 
@@ -131,9 +128,7 @@
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-finanzas')">💰 FINANZAS <span>▾</span></button>
             <div id="sub-finanzas" class="submenu oculto-submenu">
                 <button onclick="navA('corte-caja');renderCorteCaja();">Corte de Caja</button>
-                <button onclick="navA('flujocaja')">&#128200; Flujo de Caja</button>
                 <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
-                <button onclick="navA('proyeccion');renderProyeccionFlujo();">📈 Proyección de Flujo</button>
             </div>
         </div>
 
@@ -144,9 +139,7 @@
                 <button onclick="navA('dashboard'); if(typeof renderDashboard === 'function') renderDashboard();">&#128200; Dashboard Principal</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
                 <button onclick="navA('reporte-flujo'); renderReporteFlujo();">💵 Flujo Real</button>
-                <button onclick="navA('reporte-rentabilidad'); if(typeof renderReporteRentabilidad === 'function') renderReporteRentabilidad();">&#128201; Rentabilidad Real</button>
-                <button onclick="navA('reportes'); renderReporteCompromisos();" style="color:#965cfa; font-weight:bold;">🔮 Flujo Proyectado</button>
-                <button onclick="navA('reportes'); renderARC_v3();" style="color:#8ff5aede; font-weight:bold; border-top:1px solid #e2e8f0; margin-top:5px; padding-top:10px;">💳 Cartera / Cobranza</button>
+                <button onclick="navA('reportes'); renderReporteCompromisos();" style="color:#965cfa; font-weight:bold;">🔮 Proyección de Compromisos</button>
             </div>
         </div>
 
@@ -1144,7 +1137,7 @@
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=4"></script>
 <script src="js/services/calculator.js"></script>
-<script src="js/services/ticket-service.js?v=8"></script>
+<script src="js/services/ticket-service.js?v=9"></script>
 <script src="js/services/audit-service.js?v=1"></script>
 <script src="js/services/folio-service.js?v=1"></script>
 <script src="js/services/cobranza-risk-service.js?v=1"></script>
@@ -1160,20 +1153,18 @@
 <script src="js/modules/cxc.js?v=32"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=50"></script>
-<script src="js/modules/bancos.js?v=11"></script>
+<script src="js/modules/bancos.js?v=12"></script>
 <script src="js/modules/reportes.js?v=21"></script>
 <script src="js/modules/reportes-plus.js?v=8"></script>
-<script src="js/modules/reportes-credito.js?v=4"></script>
+<script src="js/modules/reportes-credito.js?v=6"></script>
 <script src="js/modules/dashboard.js?v=6"></script>
 <script src="js/modules/cotizaciones.js?v=6"></script>
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
-<script src="js/modules/corte-caja.js?v=5"></script>
+<script src="js/modules/corte-caja.js?v=6"></script>
 <script src="js/modules/gastos.js"></script>
-<script src="js/modules/proyeccion.js?v=2"></script>
 <script src="js/modules/devoluciones.js"></script>
-<script src="js/modules/agenda.js"></script>
 <script src="js/modules/producto-picker.js?v=3"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=4"></script>
@@ -1181,7 +1172,7 @@
 <script src="js/modules/estadoCuentaCliente.js?v=2"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
-<script src="js/core/navigation.js?v=8"></script>
+<script src="js/core/navigation.js?v=9"></script>
 <script src="js/init.js?v=8"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
