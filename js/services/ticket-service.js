@@ -191,9 +191,9 @@ function mmpAbrirComprobanteProfesional(){
     function toolbar() {
         return `
 <div class="mmp-print-toolbar no-print">
-    <button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button>
+    <button class="mmp-btn-print" onclick="window.print()">Ticket / PDF</button>
     <button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button>
-    <button class="mmp-btn-print" onclick="mmpAbrirComprobanteProfesional()">Comprobante profesional</button>
+    <button class="mmp-btn-print" onclick="mmpAbrirComprobanteProfesional()">PDF profesional</button>
     <button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button>
 </div>`;
     }
@@ -325,10 +325,57 @@ function documentToolbar(options = {}) {
         const thermalButton = options.thermal === false ? '' : `<button class="mmp-btn-print" onclick="mmpAbrirDocumentoTermico()">Ticket termico</button>`;
         return `
 <div class="mmp-document-toolbar no-print">
-    <button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button>
+    <button class="mmp-btn-print" onclick="window.print()">PDF / Imprimir</button>
     ${imageButton}
     ${thermalButton}
 </div>`;
+    }
+
+    function elegirFormato({ html = '', title = 'Documento', filename = '', source = 'document', pageSize = 'letter' } = {}) {
+        const modalId = `mmp-formato-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const config = { html: String(html || ''), title, filename: filename || title, source, pageSize };
+        window._mmpDocumentosPendientes = window._mmpDocumentosPendientes || {};
+        window._mmpDocumentosPendientes[modalId] = config;
+        document.querySelector('[data-modal="mmp-formato-documento"]')?.remove();
+        document.body.insertAdjacentHTML('beforeend', `
+            <div data-modal="mmp-formato-documento" data-id="${esc(modalId)}" style="position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:120000;display:flex;align-items:center;justify-content:center;padding:18px;">
+                <div style="width:100%;max-width:520px;background:white;border-radius:8px;padding:24px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
+                    <h3 style="margin:0;color:#0f172a;">Emitir documento</h3>
+                    <p style="margin:6px 0 20px;color:#64748b;font-size:13px;">${esc(title)}</p>
+                    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
+                        <button onclick="TicketService.abrirFormato('${esc(modalId)}','pdf')" style="padding:16px 8px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:900;cursor:pointer;">PDF</button>
+                        <button onclick="TicketService.abrirFormato('${esc(modalId)}','ticket')" style="padding:16px 8px;border:0;border-radius:7px;background:#7c3aed;color:white;font-weight:900;cursor:pointer;">Ticket</button>
+                        <button onclick="TicketService.abrirFormato('${esc(modalId)}','imagen')" style="padding:16px 8px;border:0;border-radius:7px;background:#047857;color:white;font-weight:900;cursor:pointer;">Imagen</button>
+                    </div>
+                    <button onclick="TicketService.cerrarSelectorFormato('${esc(modalId)}')" style="width:100%;margin-top:12px;padding:10px;border:0;border-radius:7px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cancelar</button>
+                </div>
+            </div>`);
+        return true;
+    }
+
+    function cerrarSelectorFormato(id) {
+        document.querySelector('[data-modal="mmp-formato-documento"]')?.remove();
+        if (window._mmpDocumentosPendientes) delete window._mmpDocumentosPendientes[id];
+    }
+
+    function abrirFormato(id, formato) {
+        const cfg = window._mmpDocumentosPendientes?.[id];
+        if (!cfg) return false;
+        document.querySelector('[data-modal="mmp-formato-documento"]')?.remove();
+        let ok = false;
+        if (formato === 'ticket') {
+            ok = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
+        } else {
+            ok = openDocument(cfg.html, {
+                title: cfg.title,
+                filename: cfg.filename,
+                pageSize: cfg.pageSize,
+                autoPrint: formato === 'pdf',
+                autoImage: formato === 'imagen'
+            });
+        }
+        delete window._mmpDocumentosPendientes[id];
+        return ok;
     }
 
     function normalizeHtml(html, options = {}) {
@@ -424,6 +471,9 @@ function documentToolbar(options = {}) {
         openHtml,
         openDocument,
         openThermal,
+        elegirFormato,
+        abrirFormato,
+        cerrarSelectorFormato,
         normalizeHtml,
         normalizeDocumentHtml,
         thermalCss

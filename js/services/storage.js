@@ -65,6 +65,7 @@ const StorageService = {
         'salidasPendientesVenta',
         'solicitudesClientesPendientes',
         'tarjetasConfig',
+        'tomasInventario',
         'ubicacionesConfig',
         'usuariosConfig',
         'vendedores',
