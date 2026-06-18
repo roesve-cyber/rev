@@ -452,7 +452,7 @@
                     <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:center;">
                         <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
                             <button onclick="abrirDetalleCorteCaja('${esc(c.folio)}')" style="padding:6px 10px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-weight:800;">Detalle</button>
-                            <button onclick="imprimirCorteGuardado('${esc(c.folio)}')" style="padding:6px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">Ver</button>
+                            <button onclick="imprimirCorteGuardado('${esc(c.folio)}')" style="padding:6px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;">Emitir</button>
                         </div>
                     </td>
                 </tr>`;
@@ -500,7 +500,7 @@
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button onclick="guardarCorteCaja()" style="padding:10px 16px;background:#1e40af;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">Guardar corte</button>
-                    <button onclick="imprimirCorteActual()" style="padding:10px 16px;background:#475569;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">Imprimir</button>
+                    <button onclick="imprimirCorteActual()" style="padding:10px 16px;background:#475569;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">PDF / Ticket / Imagen</button>
                 </div>
             </div>
 
@@ -800,12 +800,189 @@
         corte.egresos = Number(egresos.toFixed(2));
         corte.saldoFinalSistema = Number((ingresos - egresos).toFixed(2));
         corte.movimientosMarcados = movimientos.length;
-        corte.movimientosExcluidos = Math.max(0, Number(corte.movimientosDisponibles || movimientos.length) - movimientos.length);
+        corte.movimientosDisponibles = Math.max(Number(corte.movimientosDisponibles || 0), movimientos.length);
+        corte.movimientosExcluidos = Math.max(0, Number(corte.movimientosDisponibles) - movimientos.length);
         corte.resumenCategorias = Object.values(porCategoria)
             .sort((a, b) => (b.ingresos + b.egresos) - (a.ingresos + a.egresos));
         corte.diferencia = Number((Number(corte.totalReal || 0) - Number(corte.saldoFinalSistema || 0)).toFixed(2));
         return corte;
     }
+
+    function movimientosDisponiblesParaCorte(corte) {
+        const cuentas = obtenerCuentasCorte();
+        const cuenta = String(corte.cuentaId || '') === 'todas'
+            ? { id: 'todas', aliases: [] }
+            : cuentas.find(c => String(c.id) === String(corte.cuentaId)) || {
+                id: corte.cuentaId || '',
+                aliases: [corte.cuentaId, corte.cuentaNombre].filter(Boolean)
+            };
+        const inicio = parseFechaLocal(corte.fechaInicio, false);
+        const fin = parseFechaLocal(corte.fechaFin, true);
+        const cortados = idsMovimientosYaCortados();
+        const raw = StorageService.get('movimientosCaja', []);
+
+        return (Array.isArray(raw) ? raw : [])
+            .map((m, index) => {
+                const fecha = parseFechaLocal(m.fecha || m.fechaISO || m.createdAt);
+                return {
+                    ...m,
+                    _idx: index,
+                    _corteId: idMovimientoCorte(m, index),
+                    _fechaObj: fecha,
+                    _tipo: tipoNormalizado(m),
+                    _categoria: categoriaMovimiento(m),
+                    _monto: Number(m.monto || 0),
+                    _dentroPeriodo: fecha >= inicio && fecha <= fin,
+                    _mismaCuenta: coincideCuenta(m, cuenta)
+                };
+            })
+            .filter(m => m._monto > 0)
+            .filter(m => !cortados.has(String(m._corteId)) && !cortados.has(String(m.id || '')))
+            .sort((a, b) =>
+                Number(b._mismaCuenta) - Number(a._mismaCuenta) ||
+                Number(b._dentroPeriodo) - Number(a._dentroPeriodo) ||
+                b._fechaObj - a._fechaObj
+            );
+    }
+
+    function movimientoParaCorte(m) {
+        return {
+            corteId: m._corteId,
+            id: m.id || m._idx,
+            fecha: m.fecha || m.fechaISO || m.createdAt,
+            tipo: m._tipo,
+            concepto: m.concepto || '',
+            cuenta: m.cuenta || m.cuentaId || '',
+            monto: m._monto,
+            referencia: m.referencia || ''
+        };
+    }
+
+    window.abrirAgregarMovimientoACorte = function(folio) {
+        const cortes = StorageService.get('cortesCaja', []);
+        const corte = (Array.isArray(cortes) ? cortes : []).find(c => String(c.folio) === String(folio));
+        if (!corte) return alert('No se encontro el corte solicitado.');
+
+        const disponibles = movimientosDisponiblesParaCorte(corte);
+        window._corteMovimientosDisponibles = { folio: String(folio), movimientos: disponibles };
+        window._corteMovimientosAgregar = new Set();
+        document.querySelector('[data-modal="agregar-movimiento-corte"]')?.remove();
+
+        const filas = disponibles.map(m => {
+            const alerta = !m._mismaCuenta
+                ? '<span style="color:#b91c1c;font-weight:900;">Otra cuenta</span>'
+                : (!m._dentroPeriodo ? '<span style="color:#b45309;font-weight:900;">Fuera del periodo</span>' : '<span style="color:#047857;font-weight:900;">Coincide</span>');
+            return `<tr data-agregar-corte-row="${esc(m._corteId)}" data-busqueda="${esc(`${m.concepto || ''} ${m.referencia || ''} ${m.cuenta || m.cuentaId || ''} ${m.monto || ''}`.toLowerCase())}" style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:9px;text-align:center;"><input type="checkbox" data-id="${esc(m._corteId)}" onchange="toggleAgregarMovimientoACorte(this)" style="width:18px;height:18px;accent-color:#1e40af;"></td>
+                <td style="padding:9px;white-space:nowrap;">${esc(window.formatearFechaMX ? window.formatearFechaMX(m.fecha || m.fechaISO || m.createdAt) : (m.fecha || '-'))}</td>
+                <td style="padding:9px;"><b>${esc(m.concepto || '-')}</b>${m.referencia ? `<br><small style="color:#64748b;">${esc(m.referencia)}</small>` : ''}</td>
+                <td style="padding:9px;">${esc(m.etiquetaCuenta || m.cuenta || m.cuentaId || '-')}<br><small>${alerta}</small></td>
+                <td style="padding:9px;text-align:center;text-transform:uppercase;font-weight:900;color:${m._tipo === 'ingreso' ? '#15803d' : '#b91c1c'};">${esc(m._tipo)}</td>
+                <td style="padding:9px;text-align:right;font-weight:900;">${dinero(m._monto)}</td>
+            </tr>`;
+        }).join('');
+
+        document.body.insertAdjacentHTML('beforeend', `
+            <div data-modal="agregar-movimiento-corte" style="position:fixed;inset:0;background:rgba(15,23,42,.78);z-index:11000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+                <div style="width:100%;max-width:1050px;background:white;border-radius:10px;padding:22px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
+                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;">
+                        <div><h3 style="margin:0;color:#0f172a;">Agregar movimiento a ${esc(corte.folio)}</h3>
+                        <p style="margin:5px 0 0;color:#64748b;font-size:13px;">Sólo aparecen movimientos que no pertenecen a ningún otro corte.</p></div>
+                        <button onclick="document.querySelector('[data-modal=&quot;agregar-movimiento-corte&quot;]')?.remove()" style="padding:9px 13px;border:0;border-radius:6px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
+                    </div>
+                    <input id="buscarMovimientoAgregarCorte" oninput="filtrarMovimientosAgregarCorte()" placeholder="Buscar concepto, referencia, cuenta o importe..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
+                    <div style="overflow:auto;max-height:520px;border:1px solid #e2e8f0;border-radius:8px;">
+                        <table style="width:100%;border-collapse:collapse;min-width:850px;font-size:12px;">
+                            <thead style="position:sticky;top:0;background:#f8fafc;color:#475569;z-index:1;"><tr>
+                                <th style="padding:9px;"></th><th style="padding:9px;text-align:left;">Fecha</th><th style="padding:9px;text-align:left;">Movimiento</th>
+                                <th style="padding:9px;text-align:left;">Cuenta / compatibilidad</th><th style="padding:9px;text-align:center;">Tipo</th><th style="padding:9px;text-align:right;">Importe</th>
+                            </tr></thead>
+                            <tbody>${filas || '<tr><td colspan="6" style="padding:30px;text-align:center;color:#64748b;">No hay movimientos libres para agregar.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+                        <div id="estadoAgregarMovimientoCorte" style="color:#64748b;font-size:13px;">0 movimientos seleccionados.</div>
+                        <button onclick="confirmarAgregarMovimientosACorte('${escJs(corte.folio)}')" ${disponibles.length ? '' : 'disabled'} style="padding:11px 16px;border:0;border-radius:7px;background:${disponibles.length ? '#1e40af' : '#cbd5e1'};color:white;font-weight:900;cursor:${disponibles.length ? 'pointer' : 'not-allowed'};">Agregar al corte</button>
+                    </div>
+                </div>
+            </div>`);
+    };
+
+    window.toggleAgregarMovimientoACorte = function(input) {
+        const id = input?.dataset?.id;
+        if (!id) return;
+        if (!window._corteMovimientosAgregar) window._corteMovimientosAgregar = new Set();
+        if (input.checked) window._corteMovimientosAgregar.add(id);
+        else window._corteMovimientosAgregar.delete(id);
+        const seleccionados = window._corteMovimientosAgregar.size;
+        const estado = document.getElementById('estadoAgregarMovimientoCorte');
+        if (estado) estado.textContent = `${seleccionados} movimiento(s) seleccionado(s).`;
+    };
+
+    window.filtrarMovimientosAgregarCorte = function() {
+        const q = String(document.getElementById('buscarMovimientoAgregarCorte')?.value || '').trim().toLowerCase();
+        document.querySelectorAll('[data-agregar-corte-row]').forEach(row => {
+            row.style.display = !q || String(row.dataset.busqueda || '').includes(q) ? '' : 'none';
+        });
+    };
+
+    window.confirmarAgregarMovimientosACorte = function(folio) {
+        const ejecutar = () => {
+            const ids = new Set(window._corteMovimientosAgregar || []);
+            if (!ids.size) return alert('Selecciona al menos un movimiento.');
+            const cortesRaw = StorageService.get('cortesCaja', []);
+            const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
+            const idxCorte = cortes.findIndex(c => String(c.folio) === String(folio));
+            if (idxCorte < 0) return alert('No se encontro el corte solicitado.');
+            const corte = cortes[idxCorte];
+            const disponibles = movimientosDisponiblesParaCorte(corte);
+            const elegidos = disponibles.filter(m => ids.has(String(m._corteId)));
+            if (elegidos.length !== ids.size) return alert('Uno o más movimientos ya fueron utilizados en otro corte. Actualiza e intenta de nuevo.');
+
+            const incompatibles = elegidos.filter(m => !m._mismaCuenta || !m._dentroPeriodo);
+            if (incompatibles.length && !confirm(`${incompatibles.length} movimiento(s) no coincide(n) con la cuenta o periodo original del corte.\n\nSe conservarán su fecha y cuenta reales. ¿Deseas agregarlos de todos modos?`)) return;
+
+            const totalIngresos = elegidos.filter(m => m._tipo === 'ingreso').reduce((s, m) => s + m._monto, 0);
+            const totalEgresos = elegidos.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
+            if (!confirm(`Agregar ${elegidos.length} movimiento(s) al corte ${folio}?\n\nIngresos: ${dinero(totalIngresos)}\nEgresos: ${dinero(totalEgresos)}\n\nSe recalculará el saldo esperado y la diferencia del corte.`)) return;
+
+            corte.movimientos = Array.isArray(corte.movimientos) ? corte.movimientos : [];
+            corte.movimientos.push(...elegidos.map(movimientoParaCorte));
+            corte.movimientosDisponibles = Math.max(Number(corte.movimientosDisponibles || 0), corte.movimientos.length);
+            corte.modificaciones = Array.isArray(corte.modificaciones) ? corte.modificaciones : [];
+            corte.modificaciones.push({
+                fecha: localIso(new Date()),
+                accion: 'AGREGAR_MOVIMIENTOS',
+                usuario: document.getElementById('nombreUsuarioActivo')?.textContent?.trim() || 'Usuario',
+                movimientos: elegidos.map(m => ({ corteId: m._corteId, referencia: m.referencia || '', monto: m._monto, tipo: m._tipo }))
+            });
+            cortes[idxCorte] = recalcularCorteGuardado(corte);
+            StorageService.set('cortesCaja', cortes);
+            window.AuditService?.log?.({
+                accion: 'MOVIMIENTOS_AGREGADOS_A_CORTE',
+                modulo: 'Corte Caja',
+                entidad: 'Corte',
+                entidadId: folio,
+                detalle: `${elegidos.length} movimiento(s) agregados al corte ${folio}`,
+                monto: totalIngresos - totalEgresos,
+                severidad: 'alerta',
+                datos: { movimientos: elegidos.map(movimientoParaCorte), ingresos: totalIngresos, egresos: totalEgresos }
+            });
+            document.querySelector('[data-modal="agregar-movimiento-corte"]')?.remove();
+            alert(`${elegidos.length} movimiento(s) agregados. El corte fue recalculado.`);
+            abrirDetalleCorteCaja(folio);
+            renderCorteCaja();
+        };
+
+        if (window.AuditService?.requireAdmin) {
+            if (!window.AuditService.requireAdmin('agregar movimiento a corte de caja')) return;
+            ejecutar();
+            return;
+        }
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        if (!sesion || sesion.rol !== 'admin') return alert('Operacion restringida. Solo un administrador puede modificar cortes guardados.');
+        ejecutar();
+    };
 
     window.sacarMovimientoDeCorteCaja = function(folio, indexMovimiento) {
         if (window.AuditService?.requireAdmin) {
@@ -929,7 +1106,10 @@
                             <h3 style="margin:0;color:#0f172a;">Detalle del corte ${esc(corte.folio)}</h3>
                             <p style="margin:4px 0 0;color:#64748b;font-size:13px;">${esc(corte.cuentaNombre || '-')} | ${esc(corte.fechaInicio || '-')} a ${esc(corte.fechaFin || '-')}</p>
                         </div>
-                        <button onclick="document.querySelector('[data-modal=&quot;detalle-corte-caja&quot;]')?.remove()" style="padding:9px 14px;background:#e2e8f0;color:#334155;border:0;border-radius:6px;cursor:pointer;font-weight:800;">Cerrar</button>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button onclick="abrirAgregarMovimientoACorte('${escJs(corte.folio)}')" style="padding:9px 14px;background:#1e40af;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">+ Agregar movimiento</button>
+                            <button onclick="document.querySelector('[data-modal=&quot;detalle-corte-caja&quot;]')?.remove()" style="padding:9px 14px;background:#e2e8f0;color:#334155;border:0;border-radius:6px;cursor:pointer;font-weight:800;">Cerrar</button>
+                        </div>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;">
                         ${renderKpi('Ingresos', totalIngresos, '#15803d', `${ingresos.length} movimientos`)}
@@ -989,8 +1169,18 @@
 
     function abrirHtmlCorte(corte) {
         const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(corte.folio)}</title></head><body>${htmlCorte(corte)}</body></html>`;
-        if (window.TicketService?.openHtml) {
-            window.TicketService.openHtml(html, { title: corte.folio, filename: corte.folio });
+        if (window.TicketService?.elegirFormato) {
+            window.TicketService.elegirFormato({
+                html,
+                title: `Corte de Caja ${corte.folio}`,
+                filename: `corte_${corte.folio}`,
+                source: 'document',
+                pageSize: 'letter'
+            });
+            return;
+        }
+        if (window.TicketService?.openDocument) {
+            window.TicketService.openDocument(html, { title: corte.folio, filename: `corte_${corte.folio}`, pageSize: 'letter' });
             return;
         }
         const w = window.open('', '_blank');

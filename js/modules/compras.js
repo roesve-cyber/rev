@@ -1542,8 +1542,7 @@ window.verDetalleCompra = function(idCuenta) {
 
                 <div style="padding:16px 32px;background:#f8fafc;text-align:right;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
                     <button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove();" style="padding:10px 22px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Cerrar</button>
-                    <button onclick="imprimirEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Imprimir / PDF</button>
-                    <button id="btn-img-estado-proveedor-${String(c.id).replace(/[^a-zA-Z0-9_-]/g, '-')}" onclick="descargarImagenEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">Guardar imagen</button>
+                    <button onclick="imprimirEstadoCuentaProveedor('${c.id}')" style="padding:10px 22px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">PDF / Ticket / Imagen</button>
                     ${saldoPendiente > 0 ? (
                         c.origenConsignacion || String(c.folioOrigen).startsWith('RCON-')
                         ? `<button onclick="document.querySelector('[data-modal=&quot;detalle-compra&quot;]')?.remove(); abrirModalPagoConsignacion('${c.id}');" style="padding:10px 22px;background:#be123c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💸 Pagar Venta Consignación</button>`
@@ -1574,6 +1573,15 @@ function _clonarEstadoCuentaProveedor(idCuenta) {
 window.imprimirEstadoCuentaProveedor = function(idCuenta) {
     const clone = _clonarEstadoCuentaProveedor(idCuenta);
     if (!clone) return alert('Abre primero el estado de cuenta para imprimirlo.');
+    if (window.TicketService?.elegirFormato) {
+        window.TicketService.elegirFormato({
+            html: clone.outerHTML,
+            title: 'Estado de cuenta proveedor',
+            filename: `estado_proveedor_${idCuenta}`,
+            pageSize: 'letter'
+        });
+        return;
+    }
     if (window.TicketService?.openDocument) {
         window.TicketService.openDocument(clone.outerHTML, { title: 'Estado de cuenta proveedor', filename: `estado_proveedor_${idCuenta}`, pageSize: 'letter', autoPrint: true });
         return;
@@ -2178,6 +2186,16 @@ function imprimirOrdenCompra(id) {
       <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-size:15px;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
+    if (window.TicketService?.elegirFormato) {
+        const pageSize = (oc.articulos || []).length <= 4 && !oc.notas ? 'half-letter' : 'letter';
+        window.TicketService.elegirFormato({
+            html: ocHTML,
+            title: `Orden de Compra ${oc.folio}`,
+            filename: `oc_${oc.folio}`,
+            pageSize
+        });
+        return;
+    }
     if (window.TicketService?.openDocument) {
         const pageSize = (oc.articulos || []).length <= 4 && !oc.notas ? 'half-letter' : 'letter';
         window.TicketService.openDocument(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}`, pageSize });
@@ -2946,6 +2964,16 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
         <button onclick="window.print()" style="padding:11px 28px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:bold;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
+    if (window.TicketService?.elegirFormato) {
+        const pageSize = ((compra.articulos || []).length + (backorder || []).length) <= 4 && !notas ? 'half-letter' : 'letter';
+        window.TicketService.elegirFormato({
+            html: recepcionHTML,
+            title: `Recepcion ${compra.folio}`,
+            filename: `recepcion_${compra.folio}`,
+            pageSize
+        });
+        return;
+    }
     if (window.TicketService?.openDocument) {
         const pageSize = ((compra.articulos || []).length + (backorder || []).length) <= 4 && !notas ? 'half-letter' : 'letter';
         window.TicketService.openDocument(recepcionHTML, { title: `Recepcion ${compra.folio}`, filename: `recepcion_${compra.folio}`, pageSize });

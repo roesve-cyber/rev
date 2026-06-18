@@ -500,7 +500,7 @@ window.renderListaPrecios = function() {
     });
 
     html += `<div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center; padding-bottom: 40px; flex-wrap: wrap;">
-            <button onclick="window.imprimirListaPrecios()" style="padding: 12px 24px; background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimir</button>
+            <button onclick="window.imprimirListaPrecios()" style="padding: 12px 24px; background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">PDF / Ticket / Imagen</button>
             <button onclick="window.exportarListaPreciosCSV()" style="padding: 12px 24px; background: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">📥 Descargar Excel</button>
         </div></div>`;
 
@@ -519,6 +519,15 @@ window.imprimirListaPrecios = function() {
         th,td{padding:5px;border:1px solid #ddd;text-align:right;} td:first-child{text-align:left;}
         th{background:#f4f4f4;text-align:center;} h2,h3{margin:10px 0;} @media print { body{padding:0;} }
     </style></head><body>${contenidoLimpio}</body></html>`;
+    if (window.TicketService?.elegirFormato) {
+        window.TicketService.elegirFormato({
+            html: htmlCompleto,
+            title: 'Lista de Precios',
+            filename: 'lista_precios',
+            pageSize: 'letter'
+        });
+        return;
+    }
     if (window.TicketService?.openDocument) {
         window.TicketService.openDocument(htmlCompleto, { title: 'Lista de Precios', filename: 'lista_precios', pageSize: 'letter' });
         return;

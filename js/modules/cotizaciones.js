@@ -783,6 +783,15 @@ if (c.customPlanes && c.customPlanes.length > 0) {
       </script>
     </body>
     </html>`;
+    if (window.TicketService?.elegirFormato) {
+      window.TicketService.elegirFormato({
+        html: cotizacionHTML,
+        title: `Cotizacion ${c.folio}`,
+        filename: `cotizacion_${c.folio}`,
+        pageSize: 'letter'
+      });
+      return;
+    }
     if (window.TicketService?.openHtml) {
       window.TicketService.openHtml(cotizacionHTML, { title: `Cotizacion ${c.folio}`, filename: `cotizacion_${c.folio}` });
       return;
