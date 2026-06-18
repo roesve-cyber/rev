@@ -123,6 +123,33 @@ function mmpGuardarTicketImagen(){
         });
     });
 }
+function mmpCargarJsPdf(cb){
+    if (window.jspdf && window.jspdf.jsPDF) return cb();
+    var existente = document.getElementById('mmp-jspdf-loader');
+    if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
+    var s = document.createElement('script');
+    s.id = 'mmp-jspdf-loader';
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+    s.onload = cb;
+    s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
+    document.head.appendChild(s);
+}
+function mmpGuardarTicketPdf(){
+    mmpCargarHtml2Canvas(function(){
+        mmpCargarJsPdf(function(){
+            var node = document.getElementById('ticket-contenido') || document.querySelector('.ticket-contenido') || document.querySelector('.mmp-ticket-body') || document.body;
+            html2canvas(node, { scale: 3, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+                var width = 226.77;
+                var margin = 8;
+                var imgWidth = width - margin * 2;
+                var imgHeight = canvas.height * imgWidth / canvas.width;
+                var pdf = new window.jspdf.jsPDF({ unit:'pt', format:[width, Math.max(300, imgHeight + margin * 2)], orientation:'portrait' });
+                pdf.addImage(canvas.toDataURL('image/jpeg', .94), 'JPEG', margin, margin, imgWidth, imgHeight, undefined, 'FAST');
+                pdf.save('${file}.pdf');
+            }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
+        });
+    });
+}
 function mmpBase64Url(text){
     var utf8 = unescape(encodeURIComponent(text || ''));
     return btoa(utf8).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
@@ -139,61 +166,15 @@ function mmpImprimirBluetooth(){
     if (text.length > 7000 && !confirm('El ticket es largo y Android puede rechazar el envio por enlace. ¿Intentar de todos modos?')) return;
     window.location.href = 'mmpprinter://print?b64=' + mmpBase64Url(text);
 }
-function mmpGuardarDocumentoProfesionalImagen(){
-    mmpCargarHtml2Canvas(function(){
-        var node = document.querySelector('.mmp-professional-page') || document.body;
-        var btn = document.getElementById('mmp-prof-btn-imagen');
-        var old = btn ? btn.textContent : '';
-        if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
-        html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
-            var a = document.createElement('a');
-            a.download = '${file}_profesional.png';
-            a.href = canvas.toDataURL('image/png');
-            a.click();
-        }).catch(function(err){
-            console.error(err);
-            alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
-        }).finally(function(){
-            if (btn) { btn.disabled = false; btn.textContent = old || 'Guardar imagen'; }
-        });
-    });
-}
-function mmpAbrirComprobanteProfesional(){
-    var source = document.getElementById('ticket-contenido') || document.querySelector('.ticket-contenido') || document.querySelector('.mmp-ticket-body') || document.body;
-    var clone = source.cloneNode(true);
-    clone.querySelectorAll('script,style,button,.no-print,.mmp-print-toolbar').forEach(function(el){ el.remove(); });
-    var titulo = document.title || 'Comprobante profesional';
-    var css = '<style>' +
-        '@page{size:letter portrait;margin:12mm}' +
-        'html,body{margin:0;padding:0;background:#e2e8f0;color:#0f172a;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-        '*{box-sizing:border-box}' +
-        '.mmp-prof-toolbar{position:sticky;top:0;z-index:10;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;background:#e2e8f0;border-bottom:1px solid #cbd5e1;padding:12px}' +
-        '.mmp-prof-toolbar button{border:0;border-radius:7px;padding:10px 15px;font-weight:800;cursor:pointer}' +
-        '.mmp-professional-page{max-width:8in;margin:18px auto;background:white;padding:26px 32px;border-radius:10px;box-shadow:0 14px 28px rgba(15,23,42,.12)}' +
-        '.mmp-prof-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;border-bottom:3px solid #1e40af;padding-bottom:14px;margin-bottom:18px}' +
-        '.mmp-prof-brand{font-size:20px;font-weight:900;color:#0f172a;letter-spacing:.02em}.mmp-prof-sub{font-size:12px;color:#64748b;margin-top:4px}.mmp-prof-badge{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:900;text-align:right}' +
-        '.mmp-prof-content{font-size:12px;line-height:1.45;color:#0f172a}.mmp-prof-content *{font-family:Arial,Helvetica,sans-serif!important;color:#0f172a!important;font-size:12px!important;line-height:1.42!important}.mmp-prof-content .centro{text-align:center!important}.mmp-prof-content .negrita,.mmp-prof-content b,.mmp-prof-content strong{font-weight:900!important}.mmp-prof-content table{width:100%!important;border-collapse:collapse!important;margin:10px 0!important}.mmp-prof-content th{background:#f8fafc!important;color:#475569!important;border-bottom:1px solid #cbd5e1!important;padding:7px!important}.mmp-prof-content td{border-bottom:1px solid #e2e8f0!important;padding:7px!important}.mmp-prof-content img{max-width:80px!important;max-height:70px!important;object-fit:contain!important}.mmp-prof-content .separador,.mmp-prof-content .sep{border-top:1px solid #cbd5e1!important;margin:14px 0!important}.mmp-prof-content .total-box{border:2px solid #0f172a!important;border-radius:8px!important;padding:12px!important;margin:14px 0!important;background:#f8fafc!important;text-align:center!important}' +
-        '.mmp-prof-footer{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:18px;font-size:11px;color:#64748b}.mmp-sign{border-top:1px solid #0f172a;text-align:center;padding-top:8px;color:#0f172a;font-weight:800}' +
-        '@media print{html,body{background:white}.mmp-prof-toolbar{display:none!important}.mmp-professional-page{box-shadow:none;border-radius:0;margin:0;max-width:none;padding:0}}' +
-        '</style>';
-    var script = '<script>' + mmpCargarHtml2Canvas.toString() + mmpGuardarDocumentoProfesionalImagen.toString() + '<\\/script>';
-    var win = window.open('', '_blank');
-    if (!win) { alert('Habilita las ventanas emergentes para abrir el comprobante profesional.'); return; }
-    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' profesional</title>' + css + '</head><body>' +
-        '<div class="mmp-prof-toolbar no-print"><button style="background:#1e40af;color:white" onclick="window.print()">Imprimir / PDF</button><button id="mmp-prof-btn-imagen" style="background:#047857;color:white" onclick="mmpGuardarDocumentoProfesionalImagen()">Guardar imagen</button></div>' +
-        '<main class="mmp-professional-page"><header class="mmp-prof-header"><div><div class="mmp-prof-brand">Muebleria Mi Pueblito</div><div class="mmp-prof-sub">Comprobante documental generado desde el sistema</div></div><div class="mmp-prof-badge">Formato profesional</div></header><section class="mmp-prof-content">' + clone.innerHTML + '</section><footer class="mmp-prof-footer"><div>El contenido corresponde al mismo comprobante emitido en formato ticket.</div><div class="mmp-sign">Firma / Recibe</div></footer></main>' + script + '</body></html>');
-    win.document.close();
-    win.focus();
-}
 <\/script>`;
     }
 
     function toolbar() {
         return `
 <div class="mmp-print-toolbar no-print">
-    <button class="mmp-btn-print" onclick="window.print()">Ticket / PDF</button>
+    <button class="mmp-btn-print" onclick="window.print()">Imprimir ticket</button>
     <button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button>
-    <button class="mmp-btn-print" onclick="mmpAbrirComprobanteProfesional()">PDF profesional</button>
+    <button class="mmp-btn-print" onclick="mmpGuardarTicketPdf()">Descargar PDF</button>
     <button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button>
 </div>`;
     }
@@ -293,6 +274,38 @@ function mmpGuardarDocumentoImagen(){
         });
     });
 }
+function mmpCargarJsPdfDocumento(cb){
+    if (window.jspdf && window.jspdf.jsPDF) return cb();
+    var existente = document.getElementById('mmp-jspdf-loader');
+    if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
+    var s = document.createElement('script');
+    s.id = 'mmp-jspdf-loader';
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+    s.onload = cb;
+    s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
+    document.head.appendChild(s);
+}
+function mmpGuardarDocumentoPdf(){
+    mmpCargarHtml2CanvasDocumento(function(){
+        mmpCargarJsPdfDocumento(function(){
+            var node = document.querySelector('.mmp-document-body') || document.body;
+            html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+                var pageWidth = 612, pageHeight = 792, margin = 24;
+                var imgWidth = pageWidth - margin * 2;
+                var imgHeight = canvas.height * imgWidth / canvas.width;
+                var data = canvas.toDataURL('image/jpeg', .94);
+                var pdf = new window.jspdf.jsPDF({ unit:'pt', format:'letter', orientation:'portrait', compress:true });
+                var offset = 0;
+                do {
+                    if (offset > 0) pdf.addPage('letter', 'portrait');
+                    pdf.addImage(data, 'JPEG', margin, margin - offset, imgWidth, imgHeight, undefined, 'FAST');
+                    offset += pageHeight - margin * 2;
+                } while (offset < imgHeight);
+                pdf.save('${file}.pdf');
+            }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
+        });
+    });
+}
 function mmpDocBase64Url(text){
     var utf8 = unescape(encodeURIComponent(text || ''));
     return btoa(utf8).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
@@ -307,13 +320,15 @@ function mmpAbrirDocumentoTermico(){
     var script = '<script>' +
         'function mmpCargarHtml2Canvas(cb){if(typeof html2canvas!==\"undefined\")return cb();var s=document.createElement(\"script\");s.src=\"https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.\");};document.head.appendChild(s);}' +
         'function mmpGuardarTicketImagen(){mmpCargarHtml2Canvas(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var a=document.createElement(\"a\");a.download=\"' + file + '.png\";a.href=canvas.toDataURL(\"image/png\");a.click();}).catch(function(){alert(\"No se pudo generar la imagen. Intenta imprimirlo a PDF.\");});});}' +
+        'function mmpCargarJsPdf(cb){if(window.jspdf&&window.jspdf.jsPDF)return cb();var s=document.createElement(\"script\");s.src=\"https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor PDF.\");};document.head.appendChild(s);}' +
+        'function mmpGuardarTicketPdf(){mmpCargarHtml2Canvas(function(){mmpCargarJsPdf(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var w=226.77,m=8,iw=w-m*2,ih=canvas.height*iw/canvas.width;var pdf=new window.jspdf.jsPDF({unit:\"pt\",format:[w,Math.max(300,ih+m*2)],orientation:\"portrait\"});pdf.addImage(canvas.toDataURL(\"image/jpeg\",.94),\"JPEG\",m,m,iw,ih,undefined,\"FAST\");pdf.save(\"' + file + '.pdf\");}).catch(function(){alert(\"No se pudo generar el PDF.\");});});});}' +
         'function mmpBase64Url(text){var utf8=unescape(encodeURIComponent(text||\"\"));return btoa(utf8).replace(/\\\\+/g,\"-\").replace(/\\\\//g,\"_\").replace(/=+$/g,\"\");}' +
         'function mmpTextoTicket(){var node=document.getElementById(\"ticket-contenido\")||document.body;var c=node.cloneNode(true);c.querySelectorAll(\"script,style,button,.no-print,.mmp-print-toolbar\").forEach(function(el){el.remove();});return (c.innerText||c.textContent||\"\").replace(/\\\\n{3,}/g,\"\\\\n\\\\n\").trim();}' +
         'function mmpImprimirBluetooth(){var text=mmpTextoTicket();if(!text){alert(\"No se encontro texto imprimible.\");return;}if(text.length>7000&&!confirm(\"El ticket es largo y Android puede rechazar el envio por enlace. Intentar de todos modos?\"))return;window.location.href=\"mmpprinter://print?b64=\"+mmpBase64Url(text);}' +
         '<\\/script>';
     var win = window.open('', '_blank');
     if (!win) { alert('Habilita las ventanas emergentes para abrir el ticket termico.'); return; }
-    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' termico</title>' + css + script + '</head><body><div class="mmp-print-toolbar no-print"><button class="mmp-btn-print" onclick="window.print()">Imprimir / PDF</button><button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button><button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button></div><div id="ticket-contenido" class="mmp-ticket-body">' + clone.innerHTML + '</div></body></html>');
+    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' termico</title>' + css + script + '</head><body><div class="mmp-print-toolbar no-print"><button class="mmp-btn-print" onclick="window.print()">Imprimir ticket</button><button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button><button class="mmp-btn-print" onclick="mmpGuardarTicketPdf()">Descargar PDF</button><button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button></div><div id="ticket-contenido" class="mmp-ticket-body">' + clone.innerHTML + '</div></body></html>');
     win.document.close();
     win.focus();
 }
@@ -325,10 +340,147 @@ function documentToolbar(options = {}) {
         const thermalButton = options.thermal === false ? '' : `<button class="mmp-btn-print" onclick="mmpAbrirDocumentoTermico()">Ticket termico</button>`;
         return `
 <div class="mmp-document-toolbar no-print">
-    <button class="mmp-btn-print" onclick="window.print()">PDF / Imprimir</button>
+    <button id="mmp-doc-btn-pdf" class="mmp-btn-print" onclick="mmpGuardarDocumentoPdf()">Descargar PDF</button>
     ${imageButton}
     ${thermalButton}
 </div>`;
+    }
+
+    function cargarScriptGlobal(id, src, disponible) {
+        if (disponible()) return Promise.resolve();
+        const previo = document.getElementById(id);
+        if (previo) {
+            return new Promise((resolve, reject) => {
+                previo.addEventListener('load', resolve, { once: true });
+                previo.addEventListener('error', reject, { once: true });
+            });
+        }
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.id = id;
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+
+    async function prepararCanvasDocumento(html, options = {}) {
+        await cargarScriptGlobal(
+            'mmp-html2canvas-global',
+            'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+            () => typeof window.html2canvas === 'function'
+        );
+
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('aria-hidden', 'true');
+        iframe.style.cssText = 'position:fixed;left:-100000px;top:0;width:900px;height:1200px;border:0;opacity:0;pointer-events:none;';
+        document.body.appendChild(iframe);
+
+        const doc = iframe.contentDocument;
+        const contenido = normalizeDocumentHtml(html, {
+            ...options,
+            autoPrint: false,
+            autoImage: false,
+            thermal: false,
+            image: false
+        });
+        doc.open();
+        doc.write(contenido);
+        doc.close();
+
+        await new Promise(resolve => {
+            if (doc.readyState === 'complete') resolve();
+            else iframe.addEventListener('load', resolve, { once: true });
+        });
+        doc.querySelectorAll('.mmp-document-toolbar,.mmp-print-toolbar,.no-print,script').forEach(el => el.remove());
+        await Promise.all(Array.from(doc.images || []).map(img => img.complete
+            ? Promise.resolve()
+            : new Promise(resolve => {
+                img.addEventListener('load', resolve, { once: true });
+                img.addEventListener('error', resolve, { once: true });
+            })));
+        if (doc.fonts?.ready) {
+            try { await doc.fonts.ready; } catch {}
+        }
+
+        const node = doc.querySelector('.mmp-document-body') ||
+            doc.getElementById('ticket-contenido') ||
+            doc.querySelector('.ticket-contenido,.mmp-ticket-body') ||
+            doc.body;
+        const canvas = await window.html2canvas(node, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false,
+            windowWidth: Math.max(node.scrollWidth, 800),
+            windowHeight: Math.max(node.scrollHeight, 1000)
+        });
+        iframe.remove();
+        return canvas;
+    }
+
+    function mostrarGenerando(texto) {
+        document.querySelector('[data-mmp-generando-documento]')?.remove();
+        document.body.insertAdjacentHTML('beforeend', `<div data-mmp-generando-documento style="position:fixed;inset:0;background:rgba(15,23,42,.48);z-index:130000;display:flex;align-items:center;justify-content:center;"><div style="background:white;border-radius:8px;padding:18px 24px;color:#0f172a;font-weight:900;box-shadow:0 18px 45px rgba(15,23,42,.25);">${esc(texto)}</div></div>`);
+    }
+
+    function ocultarGenerando() {
+        document.querySelector('[data-mmp-generando-documento]')?.remove();
+    }
+
+    async function descargarImagen(html, options = {}) {
+        mostrarGenerando('Generando imagen...');
+        try {
+            const canvas = await prepararCanvasDocumento(html, options);
+            const a = document.createElement('a');
+            a.download = `${safeName(options.filename || options.title || 'documento')}.png`;
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+            return true;
+        } catch (err) {
+            console.error('No se pudo generar la imagen:', err);
+            alert('No se pudo generar la imagen. Revisa tu conexion e intenta de nuevo.');
+            return false;
+        } finally {
+            ocultarGenerando();
+        }
+    }
+
+    async function descargarPdf(html, options = {}) {
+        mostrarGenerando('Generando PDF...');
+        try {
+            await cargarScriptGlobal(
+                'mmp-jspdf-global',
+                'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js',
+                () => !!window.jspdf?.jsPDF
+            );
+            const canvas = await prepararCanvasDocumento(html, options);
+            const jsPDF = window.jspdf.jsPDF;
+            const half = options.pageSize === 'half-letter';
+            const pageWidth = half ? 396 : 612;
+            const pageHeight = half ? 612 : 792;
+            const margin = 24;
+            const usableWidth = pageWidth - margin * 2;
+            const imageHeight = canvas.height * usableWidth / canvas.width;
+            const pdf = new jsPDF({ unit: 'pt', format: half ? [pageWidth, pageHeight] : 'letter', orientation: 'portrait', compress: true });
+            const data = canvas.toDataURL('image/jpeg', 0.94);
+            let offset = 0;
+            do {
+                if (offset > 0) pdf.addPage(half ? [pageWidth, pageHeight] : 'letter', 'portrait');
+                pdf.addImage(data, 'JPEG', margin, margin - offset, usableWidth, imageHeight, undefined, 'FAST');
+                offset += pageHeight - margin * 2;
+            } while (offset < imageHeight);
+            pdf.save(`${safeName(options.filename || options.title || 'documento')}.pdf`);
+            return true;
+        } catch (err) {
+            console.error('No se pudo generar el PDF:', err);
+            alert('No se pudo generar el PDF. Revisa tu conexion e intenta de nuevo.');
+            return false;
+        } finally {
+            ocultarGenerando();
+        }
     }
 
     function elegirFormato({ html = '', title = 'Documento', filename = '', source = 'document', pageSize = 'letter' } = {}) {
@@ -362,20 +514,16 @@ function documentToolbar(options = {}) {
         const cfg = window._mmpDocumentosPendientes?.[id];
         if (!cfg) return false;
         document.querySelector('[data-modal="mmp-formato-documento"]')?.remove();
-        let ok = false;
+        let resultado = false;
         if (formato === 'ticket') {
-            ok = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
-        } else {
-            ok = openDocument(cfg.html, {
-                title: cfg.title,
-                filename: cfg.filename,
-                pageSize: cfg.pageSize,
-                autoPrint: formato === 'pdf',
-                autoImage: formato === 'imagen'
-            });
+            resultado = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
+        } else if (formato === 'pdf') {
+            resultado = descargarPdf(cfg.html, cfg);
+        } else if (formato === 'imagen') {
+            resultado = descargarImagen(cfg.html, cfg);
         }
         delete window._mmpDocumentosPendientes[id];
-        return ok;
+        return resultado;
     }
 
     function normalizeHtml(html, options = {}) {
@@ -440,7 +588,7 @@ function documentToolbar(options = {}) {
             out = out.replace(/<body[^>]*>/i, match => `${match}\n${documentToolbar(options)}`);
         }
         if (options.autoPrint && !/mmp-auto-print/.test(out)) {
-            out = out.replace(/<\/body>/i, `<script id="mmp-auto-print">window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},450);});<\/script></body>`);
+            out = out.replace(/<\/body>/i, `<script id="mmp-auto-print">window.addEventListener('load',function(){setTimeout(function(){if(typeof mmpGuardarDocumentoPdf==='function')mmpGuardarDocumentoPdf();},650);});<\/script></body>`);
         }
         if (options.autoImage && !/mmp-auto-image/.test(out)) {
             out = out.replace(/<\/body>/i, `<script id="mmp-auto-image">window.addEventListener('load',function(){setTimeout(function(){if(typeof mmpGuardarDocumentoImagen==='function')mmpGuardarDocumentoImagen();},650);});<\/script></body>`);
@@ -449,6 +597,12 @@ function documentToolbar(options = {}) {
     }
 
     function openDocument(html, options = {}) {
+        if (options.autoPrint) {
+            return descargarPdf(html, options);
+        }
+        if (options.autoImage) {
+            return descargarImagen(html, options);
+        }
         const w = window.open('', '_blank');
         if (!w) {
             alert('Habilita las ventanas emergentes para imprimir el documento.');
@@ -471,6 +625,8 @@ function documentToolbar(options = {}) {
         openHtml,
         openDocument,
         openThermal,
+        descargarPdf,
+        descargarImagen,
         elegirFormato,
         abrirFormato,
         cerrarSelectorFormato,
