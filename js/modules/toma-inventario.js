@@ -177,12 +177,13 @@
         const cerradas = lista.filter(t => t.estado === 'cerrada').length;
         const filas = lista.map(t => {
             const r = resumen(t);
+            const ciegaEnConteo = t.modalidad === 'ciega' && t.estado === 'conteo';
             return `<tr style="border-bottom:1px solid #e2e8f0;">
                 <td style="padding:11px;"><b>${esc(t.folio)}</b><br><small style="color:#64748b;">${esc(fechaVisible(t.creadaEn))}</small></td>
-                <td style="padding:11px;"><b>${esc(t.ubicacion)}</b><br><small style="color:#64748b;">${esc(t.responsable || '-')}</small></td>
+                <td style="padding:11px;"><b>${esc(t.ubicacion)}</b><br><small style="color:#64748b;">${esc(t.responsable || '-')} | ${t.modalidad === 'ciega' ? 'A ciegas' : 'Con datos'}</small></td>
                 <td style="padding:11px;">${badgeEstado(t.estado)}</td>
                 <td style="padding:11px;text-align:center;"><b>${r.contadas}/${r.total}</b><br><small style="color:#64748b;">${r.avance}%</small></td>
-                <td style="padding:11px;text-align:center;color:${r.diferencias ? '#b45309' : '#047857'};font-weight:900;">${r.diferencias}</td>
+                <td style="padding:11px;text-align:center;color:${ciegaEnConteo ? '#64748b' : (r.diferencias ? '#b45309' : '#047857')};font-weight:900;">${ciegaEnConteo ? 'Ocultas' : r.diferencias}</td>
                 <td style="padding:11px;text-align:right;"><button onclick="abrirTomaInventario('${jsArg(t.id)}')" style="padding:8px 12px;border:0;border-radius:6px;background:#0f172a;color:white;font-weight:bold;cursor:pointer;">Abrir</button></td>
             </tr>`;
         }).join('');
@@ -223,6 +224,17 @@
                     <select id="tomaNuevaUbicacion" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;margin-bottom:13px;">${opciones}</select>
                     <label style="display:block;font-size:11px;font-weight:900;color:#475569;margin-bottom:5px;">RESPONSABLE DEL CONTEO</label>
                     <input id="tomaNuevoResponsable" value="${esc(usuarioNombre())}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;margin-bottom:13px;">
+                    <label style="display:block;font-size:11px;font-weight:900;color:#475569;margin-bottom:6px;">MODALIDAD DE CONTEO</label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:13px;">
+                        <label style="display:flex;align-items:flex-start;gap:8px;padding:11px;border:1px solid #cbd5e1;border-radius:7px;cursor:pointer;background:#f8fafc;">
+                            <input type="radio" name="tomaModalidad" value="datos" checked style="margin-top:2px;accent-color:#047857;">
+                            <span><b style="color:#0f172a;">Con datos</b><br><small style="color:#64748b;">Muestra existencia y diferencias durante el conteo.</small></span>
+                        </label>
+                        <label style="display:flex;align-items:flex-start;gap:8px;padding:11px;border:1px solid #cbd5e1;border-radius:7px;cursor:pointer;background:#f8fafc;">
+                            <input type="radio" name="tomaModalidad" value="ciega" style="margin-top:2px;accent-color:#7c3aed;">
+                            <span><b style="color:#0f172a;">A ciegas</b><br><small style="color:#64748b;">Oculta sistema y diferencias hasta revisión.</small></span>
+                        </label>
+                    </div>
                     <label style="display:block;font-size:11px;font-weight:900;color:#475569;margin-bottom:5px;">OBSERVACIONES / ALCANCE</label>
                     <textarea id="tomaNuevaNota" rows="3" placeholder="Ej. Conteo general de cierre, zona de exhibicion..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;resize:vertical;"></textarea>
                     <div style="display:flex;gap:10px;margin-top:18px;">
@@ -237,6 +249,7 @@
         const ubicacion = document.getElementById('tomaNuevaUbicacion')?.value || '';
         const responsable = document.getElementById('tomaNuevoResponsable')?.value.trim() || '';
         const nota = document.getElementById('tomaNuevaNota')?.value.trim() || '';
+        const modalidad = document.querySelector('input[name="tomaModalidad"]:checked')?.value === 'ciega' ? 'ciega' : 'datos';
         if (!ubicacion || !responsable) return alert('Selecciona la ubicacion e indica al responsable.');
         const abierta = leer().find(t => t.ubicacion === ubicacion && ['conteo', 'revision'].includes(t.estado));
         if (abierta) return alert(`Ya existe una toma abierta para ${ubicacion}: ${abierta.folio}. Debes concluirla o cancelarla.`);
@@ -248,21 +261,22 @@
             ubicacion,
             responsable,
             nota,
+            modalidad,
             estado: 'conteo',
             creadaEn,
             creadaPor: usuarioNombre(),
             actualizadaEn: creadaEn,
             actualizadaPor: usuarioNombre(),
             lineas: lineasIniciales(ubicacion),
-            historial: [{ fecha: creadaEn, accion: 'TOMA_INICIADA', usuario: usuarioNombre(), detalle: `Ubicacion: ${ubicacion}` }]
+            historial: [{ fecha: creadaEn, accion: 'TOMA_INICIADA', usuario: usuarioNombre(), detalle: `Ubicacion: ${ubicacion}; modalidad: ${modalidad}` }]
         };
         const lista = leer();
         lista.push(toma);
         guardar(lista);
         window.AuditService?.log?.({
             accion: 'TOMA_INVENTARIO_INICIADA', modulo: 'Inventario', entidad: toma.folio,
-            entidadId: toma.id, detalle: `${ubicacion}; responsable: ${responsable}`,
-            datos: { ubicacion, lineas: toma.lineas.length }
+            entidadId: toma.id, detalle: `${ubicacion}; responsable: ${responsable}; modalidad: ${modalidad}`,
+            datos: { ubicacion, modalidad, lineas: toma.lineas.length }
         });
         document.querySelector('[data-modal="nueva-toma-inventario"]')?.remove();
         abrirTomaInventario(toma.id);
@@ -300,6 +314,8 @@
         if (!cont || !toma) return renderListado();
         const r = resumen(toma);
         const editable = toma.estado === 'conteo' || toma.estado === 'revision';
+        const ciegaEnConteo = toma.modalidad === 'ciega' && toma.estado === 'conteo';
+        const mostrarComparacion = !ciegaEnConteo;
         const posteriores = movimientosPosteriores(toma);
         const lista = toma.lineas.filter(l => {
             const texto = `${l.productoNombre} ${l.categoria} ${l.subcategoria} ${l.color} ${l.nota}`.toLowerCase();
@@ -310,20 +326,20 @@
             const final = valorFinal(l);
             const diferencia = final === null ? null : final - num(l.teorico);
             const colorDif = diferencia === null ? '#94a3b8' : diferencia === 0 ? '#047857' : '#b45309';
-            return `<tr style="border-bottom:1px solid #e2e8f0;background:${diferencia !== null && diferencia !== 0 ? '#fffbeb' : 'white'};">
+            return `<tr style="border-bottom:1px solid #e2e8f0;background:${mostrarComparacion && diferencia !== null && diferencia !== 0 ? '#fffbeb' : 'white'};">
                 <td style="padding:9px;min-width:240px;"><b>${esc(l.productoNombre)}</b>${l.inactivo ? ' <span style="color:#991b1b;font-size:10px;font-weight:900;">INACTIVO</span>' : ''}<br><small style="color:#64748b;">${esc([l.categoria, l.subcategoria].filter(Boolean).join(' / ') || '-')}</small></td>
                 <td style="padding:9px;min-width:110px;"><b>${esc(l.color || 'General')}</b></td>
-                <td style="padding:9px;text-align:center;font-size:16px;font-weight:900;color:#334155;">${num(l.teorico)}</td>
+                <td style="padding:9px;text-align:center;font-size:${mostrarComparacion ? '16px' : '12px'};font-weight:900;color:${mostrarComparacion ? '#334155' : '#64748b'};">${mostrarComparacion ? num(l.teorico) : 'OCULTO'}</td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="1" value="${l.conteo ?? ''}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','conteo',this.value)" style="width:82px;padding:8px;border:2px solid ${l.conteo === null || l.conteo === '' ? '#cbd5e1' : '#60a5fa'};border-radius:6px;text-align:center;font-weight:900;"></td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="1" value="${l.reconteo ?? ''}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','reconteo',this.value)" placeholder="-" style="width:82px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;font-weight:900;"></td>
-                <td style="padding:9px;text-align:center;color:${colorDif};font-size:16px;font-weight:900;">${diferencia === null ? '-' : (diferencia > 0 ? `+${diferencia}` : diferencia)}</td>
+                <td style="padding:9px;text-align:center;color:${mostrarComparacion ? colorDif : '#64748b'};font-size:${mostrarComparacion ? '16px' : '12px'};font-weight:900;">${mostrarComparacion ? (diferencia === null ? '-' : (diferencia > 0 ? `+${diferencia}` : diferencia)) : 'OCULTA'}</td>
                 <td style="padding:7px;"><input value="${esc(l.nota || '')}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','nota',this.value)" placeholder="Observacion" style="width:170px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;"></td>
             </tr>`;
         }).join('');
 
         const acciones = editable ? `
             <button onclick="agregarProductoToma()" style="padding:9px 12px;border:1px solid #0f766e;border-radius:6px;background:white;color:#0f766e;font-weight:bold;cursor:pointer;">+ Producto no listado</button>
-            <button onclick="marcarTeoricoComoConteo()" style="padding:9px 12px;border:1px solid #64748b;border-radius:6px;background:white;color:#475569;font-weight:bold;cursor:pointer;">Copiar teorico en pendientes</button>
+            ${ciegaEnConteo ? '' : '<button onclick="marcarTeoricoComoConteo()" style="padding:9px 12px;border:1px solid #64748b;border-radius:6px;background:white;color:#475569;font-weight:bold;cursor:pointer;">Copiar teorico en pendientes</button>'}
             ${toma.estado === 'conteo'
                 ? '<button onclick="enviarTomaRevision()" style="padding:9px 13px;border:0;border-radius:6px;background:#b45309;color:white;font-weight:900;cursor:pointer;">Enviar a revision</button>'
                 : '<button onclick="regresarTomaConteo()" style="padding:9px 13px;border:0;border-radius:6px;background:#475569;color:white;font-weight:900;cursor:pointer;">Regresar a conteo</button><button onclick="solicitarCerrarTomaInventario()" style="padding:9px 13px;border:0;border-radius:6px;background:#047857;color:white;font-weight:900;cursor:pointer;">Cerrar y ajustar</button>'}
@@ -335,7 +351,7 @@
                 <div style="display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;">
                     <div><button onclick="volverListadoTomas()" style="border:0;background:none;color:#1d4ed8;font-weight:bold;cursor:pointer;padding:0 0 8px;">← Todas las tomas</button>
                     <h2 style="margin:0;color:#0f172a;">${esc(toma.folio)} ${badgeEstado(toma.estado)}</h2>
-                    <p style="margin:5px 0 0;color:#64748b;"><b>${esc(toma.ubicacion)}</b> | Responsable: ${esc(toma.responsable)} | Inicio: ${esc(fechaVisible(toma.creadaEn))}</p></div>
+                    <p style="margin:5px 0 0;color:#64748b;"><b>${esc(toma.ubicacion)}</b> | ${toma.modalidad === 'ciega' ? 'Toma a ciegas' : 'Toma con datos'} | Responsable: ${esc(toma.responsable)} | Inicio: ${esc(fechaVisible(toma.creadaEn))}</p></div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">${acciones}</div>
                 </div>
                 ${toma.nota ? `<div style="padding:10px 12px;border-left:4px solid #64748b;background:#f8fafc;margin-bottom:12px;color:#334155;">${esc(toma.nota)}</div>` : ''}
@@ -343,18 +359,20 @@
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px;">
                     <div style="padding:12px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:8px;"><small style="color:#64748b;font-weight:900;">AVANCE</small><br><b style="font-size:22px;color:#1d4ed8;">${r.avance}%</b><br><small>${r.contadas} de ${r.total}</small></div>
                     <div style="padding:12px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;"><small style="color:#64748b;font-weight:900;">PENDIENTES</small><br><b style="font-size:22px;color:#334155;">${r.pendientes}</b></div>
-                    <div style="padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;"><small style="color:#64748b;font-weight:900;">RENGLONES CON DIFERENCIA</small><br><b style="font-size:22px;color:#b45309;">${r.diferencias}</b></div>
-                    <div style="padding:12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;"><small style="color:#64748b;font-weight:900;">DIFERENCIA NETA</small><br><b style="font-size:22px;color:${r.unidadesDiferencia === 0 ? '#047857' : '#b45309'};">${r.unidadesDiferencia > 0 ? '+' : ''}${r.unidadesDiferencia}</b></div>
+                    ${mostrarComparacion
+                        ? `<div style="padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;"><small style="color:#64748b;font-weight:900;">RENGLONES CON DIFERENCIA</small><br><b style="font-size:22px;color:#b45309;">${r.diferencias}</b></div>
+                           <div style="padding:12px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;"><small style="color:#64748b;font-weight:900;">DIFERENCIA NETA</small><br><b style="font-size:22px;color:${r.unidadesDiferencia === 0 ? '#047857' : '#b45309'};">${r.unidadesDiferencia > 0 ? '+' : ''}${r.unidadesDiferencia}</b></div>`
+                        : `<div style="grid-column:span 2;padding:12px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:8px;"><small style="color:#6d28d9;font-weight:900;">CONTEO A CIEGAS</small><br><b style="font-size:15px;color:#4c1d95;">Existencia y diferencias ocultas hasta enviar a revisión.</b></div>`}
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
                     <input id="tomaFiltro" value="${esc(filtroToma)}" oninput="filtrarLineasToma()" placeholder="Buscar producto, categoria o color..." style="width:min(100%,430px);padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
-                    <small style="color:#64748b;">La existencia teorica es la fotografia tomada al iniciar.</small>
+                    <small style="color:#64748b;">${ciegaEnConteo ? 'La comparación se revelará al enviar a revisión.' : 'La existencia teórica es la fotografía tomada al iniciar.'}</small>
                 </div>
                 <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px;background:white;">
                     <table style="width:100%;border-collapse:collapse;min-width:1050px;">
                         <thead style="position:sticky;top:0;background:#0f172a;color:white;z-index:1;"><tr>
                             <th style="padding:10px;text-align:left;">Producto</th><th style="padding:10px;text-align:left;">Color</th>
-                            <th style="padding:10px;text-align:center;">Sistema</th><th style="padding:10px;text-align:center;">Conteo</th>
+                            <th style="padding:10px;text-align:center;">${ciegaEnConteo ? 'Sistema oculto' : 'Sistema'}</th><th style="padding:10px;text-align:center;">Conteo</th>
                             <th style="padding:10px;text-align:center;">Reconteo</th><th style="padding:10px;text-align:center;">Diferencia</th>
                             <th style="padding:10px;text-align:left;">Nota</th>
                         </tr></thead>
@@ -389,6 +407,9 @@
     window.marcarTeoricoComoConteo = function() {
         const toma = buscarToma(tomaActivaId);
         if (!toma || !['conteo', 'revision'].includes(toma.estado)) return;
+        if (toma.modalidad === 'ciega' && toma.estado === 'conteo') {
+            return alert('Esta opcion no esta disponible durante una toma a ciegas.');
+        }
         const pendientes = toma.lineas.filter(l => l.conteo === null || l.conteo === '').length;
         if (!pendientes) return alert('No hay renglones pendientes.');
         if (!confirm(`Se copiaran las existencias del sistema en ${pendientes} renglones pendientes. Utiliza esta opcion solo si esos productos ya fueron verificados fisicamente.`)) return;
@@ -429,7 +450,10 @@
         if (!toma || toma.estado !== 'conteo') return;
         const r = resumen(toma);
         if (r.pendientes) return alert(`Faltan ${r.pendientes} renglones por contar. Los ceros tambien deben capturarse expresamente.`);
-        if (r.diferencias && !confirm(`La toma tiene ${r.diferencias} renglones con diferencia. Se enviara a revision para validar reconteos y notas. Continuar?`)) return;
+        const mensajeRevision = toma.modalidad === 'ciega'
+            ? 'Al enviar la toma a revision se revelaran las existencias del sistema y las diferencias para validar reconteos. Continuar?'
+            : `La toma tiene ${r.diferencias} renglones con diferencia. Se enviara a revision para validar reconteos y notas. Continuar?`;
+        if ((toma.modalidad === 'ciega' || r.diferencias) && !confirm(mensajeRevision)) return;
         actualizarToma(toma.id, t => {
             t.estado = 'revision';
             t.enviadaRevisionEn = ahora();
