@@ -16,6 +16,15 @@ function _cxcNormalizarTexto(s) {
     return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+// 🔐 Nombre de cliente VIGENTE para mostrar (tabla "clientes"), nunca
+// la copia congelada que quedó guardada en la cuenta al crearla.
+function _cxcNombreClienteVigente(cuenta = {}) {
+    const snapshot = cuenta.nombre || cuenta.clienteNombre || 'Cliente';
+    if (typeof window.obtenerClienteCanonico !== 'function') return snapshot;
+    const canonico = window.obtenerClienteCanonico(cuenta.clienteId, snapshot, cuenta.telefono);
+    return canonico?.nombre || snapshot;
+}
+
 function _cxcFechaClave(fecha) {
     if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
     if (!fecha) return '';
@@ -236,7 +245,15 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     if (!cuenta) return null;
 
     const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(folio) : null;
-    const saldoActual = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0);
+    // 🛡️ estado.saldoTotal INCLUYE moratorios pendientes (ver _calcularEstadoCuenta).
+    // El "Saldo Crédito" que se muestra en pantalla en Registrar Abono es SOLO
+    // pagares (sin moratorios). Si aqui se usara saldoTotal tal cual, la politica
+    // podria mostrar un monto mayor al saldo visible aunque el calculo de plan
+    // este perfecto -- solo porque trae moratorios escondidos adentro sin avisar.
+    // Por eso se resta el moratorio para dejar el mismo saldo nominal de pantalla,
+    // y el moratorio se reporta aparte (campo moratoriosPendientes en el resultado).
+    const moratoriosPendientesMonto = Number(estado?.saldoMoratorios || 0);
+    const saldoActual = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0) - moratoriosPendientesMonto;
     const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
     const totalContado = _cxcImporteContadoCuenta(cuenta);
     const capitalContado = Math.max(0, totalContado - enganche);
@@ -244,11 +261,17 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     const fechaVentaDate = _cxcFechaVentaDate(cuenta);
     const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVentaDate) / 86400000));
     const mesActualVenta = Math.max(1, Math.floor(diasDesdeVenta / 30.44) + 1);
+    // Meses transcurridos DESPUES de que vencio el periodo de contado (30 dias).
+    // El plan aplicable se busca contra esto, no contra mesActualVenta: si apenas
+    // se vencieron los 30 dias de contado, el plan aplicable es el de 1 mes, no
+    // el de 2 (antes se brincaba un escalon de mas y se cobraba de mas).
+    const mesPostContado = Math.max(1, Math.floor(Math.max(0, diasDesdeVenta - 30) / 30.44) + 1);
     const periodicidad = cuenta.periodicidad || "semanal";
 
     const base = {
         cuenta,
         saldoActual,
+        moratoriosPendientesMonto,
         enganche,
         totalContado,
         capitalContado,
@@ -284,11 +307,44 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
         };
     }
 
-    const planes = (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
-        ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad)
-        : [];
+    // Plazo (en meses) que el cliente realmente pacto al comprar. La politica
+    // de pago anticipado NUNCA debe recotizar por ENCIMA de esto: si el cliente
+    // ya esta al nivel de su propio plazo o lo paso, no hay "plan mas caro" que
+    // cobrarle por antiguedad -- eso ya no es un pago anticipado de nada, es
+    // simplemente su saldo nominal (los moratorios, si aplican, se calculan
+    // aparte con base en el plazo total, no aqui).
+    const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+
+    if (mesesPlanOriginal > 0 && mesPostContado >= mesesPlanOriginal) {
+        const liquidaria = base.montoAbono >= saldoActual - 0.01;
+        return {
+            ...base,
+            liquidaria,
+            faltante: Math.max(0, saldoActual - base.montoAbono),
+            mensaje: 'Ya alcanzo o paso su plazo pactado; se liquida con el saldo nominal vigente (sin recotizar a un plan mayor).'
+        };
+    }
+
+    // 🛡️ Las tasas (configCreditoGlobal) son un valor GLOBAL y EDITABLE: si se
+    // ajustaron despues de esta venta, recalcular "que costaria un plan mas
+    // corto" con la calculadora EN VIVO usa las tasas de HOY, no las que
+    // estaban vigentes cuando se vendio -- y puede salir un absurdo (un plan
+    // mas corto mas caro que el plan original completo). Por eso se prefiere
+    // la tabla que quedo CONGELADA en la propia venta (cuenta.saldosPorMes),
+    // y solo se recalcula en vivo si esa tabla no existe o no es coherente.
+    const tablaCongelada = Array.isArray(cuenta?.saldosPorMes) ? cuenta.saldosPorMes.slice() : [];
+    const tablaCongeladaEsSana = tablaCongelada.length > 0 && tablaCongelada
+        .slice().sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))
+        .every((p, i, arr) => i === 0 || Number(p.total || 0) >= Number(arr[i - 1].total || 0) - 0.01);
+
+    const planes = tablaCongeladaEsSana
+        ? tablaCongelada
+        : ((typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad)
+            : []);
     const planAplicable = [...planes]
-        .filter(p => Number(p.meses || 0) >= mesActualVenta)
+        .filter(p => Number(p.meses || 0) >= mesPostContado)
+        .filter(p => mesesPlanOriginal <= 0 || Number(p.meses || 0) <= mesesPlanOriginal)
         .filter(p => Number(p.total || 0) > totalPagado)
         .sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))[0] || null;
 
@@ -302,7 +358,14 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
         };
     }
 
-    const montoLiquidacion = Math.max(0, Number(planAplicable.total || 0) - totalPagado);
+    // 🛡️ Limite de seguridad: pagar anticipado (dentro de su propio plazo)
+    // jamas debe salir MAS CARO que simplemente deber el saldo nominal vigente.
+    // Si por inconsistencia de tasas/datos el calculo da un numero mayor, se
+    // usa el saldo nominal en su lugar (nunca un recargo por encima de el).
+    const montoLiquidacion = Math.min(
+        Math.max(0, Number(planAplicable.total || 0) - totalPagado),
+        saldoActual
+    );
     const beneficio = Math.max(0, saldoActual - montoLiquidacion);
     const liquidaria = base.montoAbono >= montoLiquidacion - 0.01;
     return {
@@ -333,11 +396,18 @@ function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     const beneficioTxt = politica.beneficio > 0.01
         ? ` Beneficio para el cliente: ${_cxcDinero(politica.beneficio)}.`
         : "";
+    // Los moratorios son un mecanismo APARTE (plazo total pactado vs hoy, ya
+    // correcto). El monto de politica de aqui es solo pagares/financiamiento;
+    // si hay moratorios pendientes se avisan por separado para que no parezca
+    // que la politica "invento" un cargo extra sin explicacion.
+    const moratorioTxt = politica.moratoriosPendientesMonto > 0.01
+        ? ` Ademas tiene ${_cxcDinero(politica.moratoriosPendientesMonto)} de moratorios pendientes (se cobran aparte, no estan incluidos en este monto). Total real a liquidar: ${_cxcDinero(politica.montoLiquidacion + politica.moratoriosPendientesMonto)}.`
+        : "";
 
     if (politica.tipo === "contado_30") {
         return {
             titulo: "Politica de pago anticipado: precio de contado",
-            detalle: `Esta cuenta esta dentro de los primeros 30 dias. Puede liquidarse descontando intereses y cobrando solo el pendiente a precio de contado: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}`,
+            detalle: `Esta cuenta esta dentro de los primeros 30 dias. Puede liquidarse descontando intereses y cobrando solo el pendiente a precio de contado: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${moratorioTxt}`,
             nota: modoTxt
         };
     }
@@ -346,14 +416,14 @@ function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
         const meses = politica.plan?.meses || politica.mesActualVenta || "-";
         return {
             titulo: `Politica de pago anticipado: plan ${meses} meses`,
-            detalle: `Ya vencio el periodo de contado. Si el cliente liquida anticipadamente, el sistema cobra el plan aplicable a la antiguedad de la venta: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}`,
+            detalle: `Ya vencio el periodo de contado. Si el cliente liquida anticipadamente, el sistema cobra el plan aplicable a la antiguedad de la venta: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${moratorioTxt}`,
             nota: modoTxt
         };
     }
 
     return {
         titulo: "Politica de pago anticipado: saldo vigente",
-        detalle: `No hay descuento anticipado disponible para esta cuenta. Para liquidar debe cubrir el saldo vigente: ${_cxcDinero(politica.saldoActual)}.`,
+        detalle: `No hay descuento anticipado disponible para esta cuenta. Para liquidar debe cubrir el saldo vigente: ${_cxcDinero(politica.saldoActual)}.${moratorioTxt}`,
         nota: modoTxt
     };
 }
@@ -487,7 +557,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
         if (!mostrar) return;
         const filtroEstado = document.getElementById("filtroEstadoCobranza")?.value || "";
         if (filtroEstado && estadoCta.estadoGeneral !== filtroEstado) return;
-        const nombreCliente = c.nombre || c.clienteNombre || 'Cliente';
+        const nombreCliente = _cxcNombreClienteVigente(c);
         const stringBusqueda = `${nombreCliente} ${c.folio || ''}`.toLowerCase();
         if (filtroCliente && !stringBusqueda.includes(filtroCliente)) return;
 
@@ -532,10 +602,10 @@ function renderAbonosDirectos(filtroCliente = "") {
         .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
         .filter(x => x.estado && x.estado.saldoTotal > 0.01)
         .filter(x => {
-            const texto = `${x.cuenta.nombre || x.cuenta.clienteNombre || ''} ${x.cuenta.folio || ''}`.toLowerCase();
+            const texto = `${_cxcNombreClienteVigente(x.cuenta)} ${x.cuenta.folio || ''}`.toLowerCase();
             return !filtroCliente || texto.includes(filtroCliente);
         })
-        .sort((a, b) => String(a.cuenta.nombre || a.cuenta.clienteNombre || '').localeCompare(String(b.cuenta.nombre || b.cuenta.clienteNombre || ''), 'es'));
+        .sort((a, b) => _cxcNombreClienteVigente(a.cuenta).localeCompare(_cxcNombreClienteVigente(b.cuenta), 'es'));
 
     contenedor.innerHTML = `
         ${filas.length === 0 ? `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b; margin-bottom:16px;">Sin cuentas con saldo para abono directo.</div>` : `
@@ -561,7 +631,7 @@ function renderAbonosDirectos(filtroCliente = "") {
                                     <button onclick="exentarMoratorio('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#64748b; color:white; font-weight:bold; cursor:pointer;">Exentar</button>` : '';
                         return `
                         <tr>
-                            <td><strong>${_cxcEscHTML(cuenta.nombre || cuenta.clienteNombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
+                            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
                             <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}${avisoMoratorio}</td>
                             <td>${estado.pagaresPendientes.length} pendiente(s)</td>
                             <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2'}; color:${estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b'}; font-weight:bold; font-size:12px;">${_cxcEscHTML(estado.estadoGeneral)}</span></td>
@@ -723,14 +793,14 @@ function renderVisorCreditosCobranza() {
         .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
         .filter(x => x.estado)
         .filter(x => {
-            const texto = `${x.cuenta.nombre || x.cuenta.clienteNombre || ''} ${x.cuenta.folio || ''}`.toLowerCase();
+            const texto = `${_cxcNombreClienteVigente(x.cuenta)} ${x.cuenta.folio || ''}`.toLowerCase();
             return !filtroTexto || texto.includes(filtroTexto);
         })
         .filter(x => !filtroEstado || x.estado.estadoGeneral === filtroEstado)
         .sort((a, b) => {
             const saldoDiff = Number(b.estado.saldoTotal || 0) - Number(a.estado.saldoTotal || 0);
             if (Math.abs(saldoDiff) > 0.01) return saldoDiff;
-            return String(a.cuenta.nombre || a.cuenta.clienteNombre || '').localeCompare(String(b.cuenta.nombre || b.cuenta.clienteNombre || ''), 'es');
+            return _cxcNombreClienteVigente(a.cuenta).localeCompare(_cxcNombreClienteVigente(b.cuenta), 'es');
         });
 
     const totalSaldo = cuentas.reduce((s, x) => s + Number(x.estado.saldoTotal || 0), 0);
@@ -776,7 +846,7 @@ function renderVisorCreditosCobranza() {
                         const totalCredito = _cxcTotalCreditoCuenta(cuenta, estado);
                         return `
                             <tr>
-                                <td><strong>${_cxcEscHTML(cuenta.nombre || cuenta.clienteNombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio || '-')}</small></td>
+                                <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio || '-')}</small></td>
                                 <td>${cuenta.fechaVenta ? _cxcFechaVista(cuenta.fechaVenta) : '-'}</td>
                                 <td style="font-weight:800;">${_cxcDinero(totalCredito)}</td>
                                 <td style="font-weight:800;color:#15803d;">${_cxcDinero(estado.totalAbonado)}</td>
@@ -877,7 +947,6 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     }
     let original = precioContadoReal > 0 ? precioContadoReal : (Number(cuenta.totalContadoOriginal || cuenta.totalMercancia || 0));
     const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
-    const montoAFinanciarContado = Math.max(0, original - enganche);
 
     const totalAbonosRegistrados = todosPagares.reduce((s, p) => {
         if (p.estado === 'Parcial') return s + (p.montoAbonado || 0);
@@ -885,9 +954,6 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
         return s;
     }, 0);
 
-    const restanteContado = Math.max(0, montoAFinanciarContado - totalAbonosRegistrados);
-    const periodicidadCuenta = cuenta.periodicidad || "semanal";
-    
     // --- NUEVO: LECTURA SEGURA DE FECHAS PARA EL MENSAJE AMARILLO ---
    // --- LECTURA SEGURA DE FECHAS ---
     const fStr = cuenta.fechaVenta || cuenta.fecha; // SE AGREGÓ ESTA LÍNEA
@@ -906,32 +972,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
 
     const diasDesdeVenta = Math.floor((hoy - fechaVentaDate) / (1000 * 60 * 60 * 24));
     const aplicaPoliticaContado = diasDesdeVenta <= 30; 
-    const mesActualVenta = Math.floor(diasDesdeVenta / 30.44) + 1;
-
-    let montoProximoMes = null;
-    let mesesPlanMasCercano = null;
-    
-    if (!aplicaPoliticaContado) {
-        // IGNORAR cuenta.saldosPorMes (porque tiene los datos corruptos de la venta original)
-        // Recalcular los planes con el saldo base limpio y buscar respetando el mes actual
-        const planes = (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
-            ? CalculatorService.calcularCreditoConPeriodicidad(montoAFinanciarContado, periodicidadCuenta)
-            : [];
-
-        const planesOrdenados = [...planes]
-    .filter(p => Number(p.meses || 0) >= mesActualVenta)
-    .filter(p => (Number(p.total || 0) - totalAbonosRegistrados) > 0)
-    .sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0));
-
-let mejorPlan = planesOrdenados.length > 0
-    ? planesOrdenados[0]
-    : null;
-
-        if (mejorPlan) {
-            montoProximoMes = Math.max(0, mejorPlan.total - totalAbonosRegistrados);
-            mesesPlanMasCercano = mejorPlan.meses;
-        }
-    }
+    const plazoMesesPactado = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
 
     const articulosHTML = (cuenta.articulos || []).length > 0 ? `
         <div style="margin-bottom:20px;">
@@ -1035,14 +1076,18 @@ let mejorPlan = planesOrdenados.length > 0
         <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
             <div style="background:white; border-radius:15px; width:100%; max-width:600px; overflow:hidden;">
                 <div style="display:flex; justify-content:space-between; align-items:center; padding:18px 24px; border-bottom:1px solid #e5e7eb; position:sticky; top:0; background:white; z-index:2;">
-                    <h2 style="margin:0;">${esDirecto ? 'Abono Directo' : 'Registrar Abono'} - ${cuenta.nombre}</h2>
+                    <h2 style="margin:0;">${esDirecto ? 'Abono Directo' : 'Registrar Abono'} - ${_cxcNombreClienteVigente(cuenta)}</h2>
                     <button onclick="document.querySelector('[data-modal=abono-avanzado]')?.remove()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#9ca3af;">✕</button>
                 </div>
                 <div style="padding:24px;">
                 
-                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
-                    <div><small style="color:#4b5563;">Saldo Crédito</small><br><strong style="font-size:20px; color:#16a34a;">${_cxcDinero(saldo)}</strong></div>
-                    <div style="text-align:right;"><small style="color:#4b5563;">Días Venta</small><br><strong style="font-size:20px; color:#2563eb;">${diasDesdeVenta}</strong></div>
+                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; text-align:center;">
+                        <div><small style="color:#4b5563;">Saldo Crédito</small><br><strong style="font-size:17px; color:#16a34a;">${_cxcDinero(saldo)}</strong></div>
+                        <div><small style="color:#4b5563;">Días Venta</small><br><strong style="font-size:17px; color:#2563eb;">${diasDesdeVenta}</strong></div>
+                        <div><small style="color:#4b5563;">Plazo Pactado</small><br><strong style="font-size:17px; color:#7c3aed;">${plazoMesesPactado > 0 ? plazoMesesPactado + ' mes' + (plazoMesesPactado === 1 ? '' : 'es') : '-'}</strong></div>
+                        <div><small style="color:#4b5563;">Fecha Venta</small><br><strong style="font-size:15px; color:#0f172a;">${_cxcFechaVista(fechaVentaDate)}</strong></div>
+                    </div>
                 </div>
 
                 ${resumenCobranzaHTML}
@@ -1236,6 +1281,23 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     const precioContadoReal = _cxcImporteContadoCuenta(cuenta) || Number(montoOriginal);
     const politicaAbono = politicaValidacion || _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbonoInput);
 
+    // 🛡️ CANDADO DE POLITICA: si este abono alcanza para cubrir el saldo NOMINAL
+    // visible (y por lo tanto cerraria la cuenta), pero existe una politica de
+    // pago anticipado vigente que exige un monto mayor (porque ya vencio el
+    // periodo de contado y aplica el plan correspondiente a la antiguedad de la
+    // venta), no se permite cerrar la cuenta por el monto nominal. El operador
+    // debe capturar el monto de politica para liquidar, o un monto menor que
+    // deje la cuenta como abono parcial (sin liquidar).
+    if (
+        politicaAbono?.aplica &&
+        !politicaAbono.liquidaria &&
+        montoAbonoInput >= Number(saldoActual || 0) - 0.01 &&
+        montoAbonoInput < Number(politicaAbono.montoLiquidacion || 0) - 0.01
+    ) {
+        alert(`POLITICA DE PAGO ANTICIPADO\n\nEste abono cerraria el saldo visible de la cuenta (${_cxcDinero(saldoActual)}), pero ya vencio el periodo de contado: la politica exige ${_cxcDinero(politicaAbono.montoLiquidacion)} para liquidar anticipadamente.\n\nCaptura ${_cxcDinero(politicaAbono.montoLiquidacion)} para liquidar la cuenta, o un monto menor que NO la liquide (quedara como abono parcial).`);
+        return;
+    }
+
     if (politicaAbono?.aplica && politicaAbono.liquidaria) {
         const tipoPolitica = politicaAbono.tipo === "contado_30"
             ? "PRECIO DE CONTADO (30 DIAS)"
@@ -1253,9 +1315,9 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     }
 
     if (!liquidacionPorPolitica && politicaAbono?.liquidaria && montoAbonoInput >= Number(politicaAbono.saldoActual || saldoActual) - 0.01) {
-        if (!confirm(`LIQUIDACION DE SALDO\n\nEste abono liquida el saldo vigente de la cuenta.\nCliente: ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'}\nFolio: ${folio}\nMonto: ${_cxcDinero(montoFinal)}\nDestino: ${etiqueta}\n\nConfirmas el abono?`)) return;
+        if (!confirm(`LIQUIDACION DE SALDO\n\nEste abono liquida el saldo vigente de la cuenta.\nCliente: ${_cxcNombreClienteVigente(cuenta)}\nFolio: ${folio}\nMonto: ${_cxcDinero(montoFinal)}\nDestino: ${etiqueta}\n\nConfirmas el abono?`)) return;
     } else if (!liquidacionPorPolitica) {
-        if (!confirm(`RESUMEN DE ABONO\n\nCliente: ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'}\nFolio: ${folio}\nMonto: ${_cxcDinero(montoFinal)}\nDestino: ${etiqueta}\n\nConfirmas el abono?`)) return;
+        if (!confirm(`RESUMEN DE ABONO\n\nCliente: ${_cxcNombreClienteVigente(cuenta)}\nFolio: ${folio}\nMonto: ${_cxcDinero(montoFinal)}\nDestino: ${etiqueta}\n\nConfirmas el abono?`)) return;
     }
     // 🚀 BÓVEDA DE CUARENTENA PARA ABONO
     const cuarentena = {
@@ -1263,7 +1325,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         folioCXC: folio,
         fechaCaptura: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
         fechaCapturaIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
-        clienteNombre: cuenta.nombre || cuenta.clienteNombre || 'Cliente',
+        clienteNombre: _cxcNombreClienteVigente(cuenta),
         montoAbonado: montoFinal,
         montoAbonoInput: montoAbonoInput,
         fechaAbonoRaw: fechaAbonoRaw,
@@ -1285,9 +1347,9 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
                 tipo: 'abono',
                 id: `abono-${cuarentena.id}`,
                 titulo: 'Abono pendiente en Boveda',
-                cuerpo: `${cuenta.nombre || cuenta.clienteNombre || 'Cliente'} - ${_cxcDinero(montoFinal)}`,
+                cuerpo: `${_cxcNombreClienteVigente(cuenta)} - ${_cxcDinero(montoFinal)}`,
                 folio,
-                cliente: cuenta.nombre || cuenta.clienteNombre || 'Cliente',
+                cliente: _cxcNombreClienteVigente(cuenta),
                 monto: montoFinal
             });
         }
@@ -1329,7 +1391,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
         ticketEmitido = generarTicketAbonoTermico({
         folio,
-        cliente: { nombre: cuenta.nombre || cuenta.clienteNombre || folio, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
+        cliente: { nombre: _cxcNombreClienteVigente(cuenta), telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: montoFinal,
         nuevoSaldo: Math.max(0, nuevoSaldoReal),
         fecha: fechaAbonoStr, 
@@ -1428,9 +1490,26 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
     }
     const estadoCuentaGuard = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(_folioGuard) : null;
     const saldoVigenteGuard = Number(estadoCuentaGuard?.saldoTotal ?? cuentaGuard.saldoActual ?? 0);
-    const politicaGuard = a.liquidacionPorPolitica && typeof _cxcEvaluarPoliticaPagoAnticipado === 'function'
+    const politicaGuardSiempre = typeof _cxcEvaluarPoliticaPagoAnticipado === 'function'
         ? _cxcEvaluarPoliticaPagoAnticipado(_folioGuard, _montoGuard)
         : null;
+    const politicaGuard = a.liquidacionPorPolitica ? politicaGuardSiempre : null;
+
+    // 🛡️ CANDADO DE POLITICA (Boveda): aunque el abono en cuarentena no haya
+    // sido marcado como "liquidacion por politica" al capturarse, si al
+    // autorizarlo cierra el saldo vigente y existe una politica de pago
+    // anticipado vigente que exige un monto mayor, Auditoria no debe
+    // aprobarlo por el monto nominal.
+    if (
+        !a.liquidacionPorPolitica &&
+        politicaGuardSiempre?.aplica &&
+        !politicaGuardSiempre.liquidaria &&
+        _montoGuard >= saldoVigenteGuard - 0.01 &&
+        _montoGuard < Number(politicaGuardSiempre.montoLiquidacion || 0) - 0.01
+    ) {
+        alert(`No se puede autorizar este abono por el monto nominal.\n\nEste abono (${_cxcDinero(_montoGuard)}) cerraria el saldo visible (${_cxcDinero(saldoVigenteGuard)}), pero la politica de pago anticipado exige ${_cxcDinero(politicaGuardSiempre.montoLiquidacion)} para liquidar esta cuenta.\n\nRechaza este abono y solicita que se capture de nuevo por el monto correcto de politica.`);
+        return false;
+    }
     const maximoPermitidoGuard = Math.max(
         saldoVigenteGuard,
         Number(politicaGuard?.montoLiquidacion || 0)
@@ -1827,7 +1906,7 @@ function abrirDetalleCobranza(mesKeyEncoded) {
         else atrasoHtml = `<span style="color:#92400e; font-weight:bold; font-size:12px;">⏳ Pendiente</span>`;
 
         const cuenta = cuentas.find(c => c.folio === p.folio);
-        const clienteNombre = cuenta ? (cuenta.nombre || cuenta.clienteNombre) : (p.clienteNombre || p.folio || '-');
+        const clienteNombre = cuenta ? _cxcNombreClienteVigente(cuenta) : (p.clienteNombre || p.folio || '-');
         const articulos = cuenta ? (cuenta.articulos || []) : [];
         const articulosHtml = articulos.length > 0
             ? articulos.map(a => `<small>${a.nombre || a.productoNombre || '-'} ×${a.cantidad || 1}</small>`).join(', ')
@@ -1918,7 +1997,7 @@ function reimprimirTicketAbono(folio, indexAbono) {
 
     generarTicketAbonoTermico({
         folio: folio,
-        cliente: { nombre: cuenta.nombre, telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
+        cliente: { nombre: _cxcNombreClienteVigente(cuenta), telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: abono.monto || 0,
         nuevoSaldo: saldoActual,
         fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fecha) : new Date(abono.fecha).toLocaleDateString(),
@@ -2062,7 +2141,7 @@ window.abrirEditorAbono = function(folio, abonoIndex) {
     <div id="modalCorreccionAbono" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
         <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
             <h3 style="margin:0 0 5px 0; color:#1e40af;">✏️ Corrección de Abono</h3>
-            <p style="font-size:13px; color:#64748b; margin-top:0;">Venta: <b>${folio}</b> | Cliente: <b>${cuenta.nombre}</b></p>
+            <p style="font-size:13px; color:#64748b; margin-top:0;">Venta: <b>${folio}</b> | Cliente: <b>${_cxcNombreClienteVigente(cuenta)}</b></p>
             
             <div style="margin-top:20px;">
                 <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">FECHA DEL MOVIMIENTO:</label>
@@ -2216,7 +2295,7 @@ function _cxcRecrearMovimientosAbonos(cuenta) {
             fecha: _cxcFechaAbonoBase(ab) || ab.fecha,
             monto: Number(ab.monto || 0),
             tipo: "ingreso",
-            concepto: `Abono a ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'} - ${cuenta.folio}`,
+            concepto: `Abono a ${_cxcNombreClienteVigente(cuenta)} - ${cuenta.folio}`,
             referencia: `ABONO-${cuenta.folio}`,
             cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
             medioPago: ab.medioPago || 'efectivo',
@@ -2305,7 +2384,7 @@ window.eliminarAbonoAuditoriaCxC = function(folio, abonoIndex) {
     if (!abono || !_cxcAbonoVigente(abono)) return alert("El abono no existe o ya fue eliminado.");
 
     const monto = Number(abono.monto || 0);
-    const msg = `ELIMINAR ABONO\n\nFolio: ${folio}\nCliente: ${cuenta.nombre || cuenta.clienteNombre || 'Cliente'}\nMonto: ${_cxcDinero(monto)}\n\nEsto quitara el abono del estado de cuenta, recalculara saldos/pagares y retirara el ingreso de caja/banco.\n\nDeseas continuar?`;
+    const msg = `ELIMINAR ABONO\n\nFolio: ${folio}\nCliente: ${_cxcNombreClienteVigente(cuenta)}\nMonto: ${_cxcDinero(monto)}\n\nEsto quitara el abono del estado de cuenta, recalculara saldos/pagares y retirara el ingreso de caja/banco.\n\nDeseas continuar?`;
     if (!confirm(msg)) return;
 
     const motivo = prompt("Motivo de eliminacion del abono:");
@@ -2497,6 +2576,15 @@ function _cxcEstadoCuentaModelo(folio) {
     const saldoActual = Number(estadoCta.saldoTotal || 0);
     const estatus = estadoCta.estadoGeneral || cuenta.estado || 'Activo';
 
+    // 🔐 Nombre/teléfono/dirección a MOSTRAR siempre vigentes desde la
+    // tabla "clientes" (no la copia congelada guardada en la cuenta).
+    const clienteCanonico = (typeof window.obtenerClienteCanonico === 'function')
+        ? window.obtenerClienteCanonico(cuenta.clienteId, cuenta.nombre || cuenta.clienteNombre, cuenta.telefono)
+        : null;
+    const clienteNombreVigente = clienteCanonico?.nombre || cuenta.nombre || cuenta.clienteNombre || 'Cliente';
+    const clienteTelefonoVigente = clienteCanonico?.telefono || cuenta.telefono || '';
+    const clienteDireccionVigente = clienteCanonico?.direccion || cuenta.direccion || '';
+
     return {
         folio,
         cuenta,
@@ -2515,7 +2603,10 @@ function _cxcEstadoCuentaModelo(folio) {
         pagosPlan,
         abonoPeriodo,
         montoVencido: Number(estadoCta.montoVencido || 0),
-        diasMaxAtraso: Number(estadoCta.diasMaxAtraso || 0)
+        diasMaxAtraso: Number(estadoCta.diasMaxAtraso || 0),
+        clienteNombreVigente,
+        clienteTelefonoVigente,
+        clienteDireccionVigente
     };
 }
 
@@ -2619,7 +2710,7 @@ function _cxcEstadoCuentaHtml(m, opts = {}) {
         </header>
         <section class="mmp-edo-band">
             <div class="mmp-edo-row">
-                <div class="mmp-edo-box"><div class="mmp-edo-label">Cliente</div><div class="mmp-edo-value">${_cxcEscHTML(m.cuenta.nombre || m.cuenta.clienteNombre || 'Cliente')}</div><div class="mmp-edo-muted">${_cxcEscHTML(m.cuenta.telefono || '')}${m.cuenta.direccion ? ` | ${_cxcEscHTML(m.cuenta.direccion)}` : ''}</div></div>
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Cliente</div><div class="mmp-edo-value">${_cxcEscHTML(m.clienteNombreVigente)}</div><div class="mmp-edo-muted">${_cxcEscHTML(m.clienteTelefonoVigente)}${m.clienteDireccionVigente ? ` | ${_cxcEscHTML(m.clienteDireccionVigente)}` : ''}</div></div>
                 <div class="mmp-edo-box"><div class="mmp-edo-label">Estatus de cuenta</div><span class="mmp-edo-status ${statusClass}">${_cxcEscHTML(m.estatus)}</span><div class="mmp-edo-muted" style="margin-top:8px;">Fecha de venta: <strong>${_cxcEstadoCuentaFecha(m.fechaVenta)}</strong></div></div>
             </div>
 
@@ -2659,7 +2750,7 @@ function _cxcEstadoCuentaTicketBody(m) {
         <div style="text-align:center;">ESTADO DE CUENTA</div>
         <div>${linea}</div>
         <div>Folio: ${_cxcEscHTML(m.folio)}</div>
-        <div>Cliente: ${_cxcEscHTML(m.cuenta.nombre || m.cuenta.clienteNombre || 'Cliente')}</div>
+        <div>Cliente: ${_cxcEscHTML(m.clienteNombreVigente)}</div>
         <div>Fecha venta: ${_cxcEstadoCuentaFecha(m.fechaVenta)}</div>
         <div>Estatus: ${_cxcEscHTML(m.estatus)}</div>
         <div>${linea}</div>
@@ -2681,19 +2772,141 @@ function _cxcEstadoCuentaTicketBody(m) {
     </div>`;
 }
 
+// ================================================================
+// ESTADO DE CUENTA POR ANTIGÜEDAD DE ABONOS
+// Misma informacion de venta/abonos que el estado de cuenta por
+// pagares, pero la clasificacion de riesgo viene del mismo motor
+// que ya usan los reportes y alertas (CobranzaRiskService), es
+// decir: dias desde el ultimo abono, no fechas de pagare.
+// ================================================================
+function _cxcEstadoCuentaModeloAntiguedad(folio) {
+    const base = _cxcEstadoCuentaModelo(folio);
+    if (!base) return null;
+    if (typeof window.CobranzaRiskService?.analizarCuenta !== 'function') {
+        return { ...base, antiguedad: null };
+    }
+    const analisis = window.CobranzaRiskService.analizarCuenta(base.cuenta, {
+        estadoCuenta: base.estadoCta,
+        pagaresSistema: StorageService.get('pagaresSistema', [])
+    });
+    return { ...base, antiguedad: analisis };
+}
+
+function _cxcEstadoCuentaStatusClassAntiguedad(key) {
+    if (key === 'saldado') return 'ok';
+    if (key === 'bajo') return 'info';
+    if (key === 'riesgo') return 'warn';
+    return 'bad'; // alto, alerta
+}
+
+function _cxcEstadoCuentaHtmlAntiguedad(m, opts = {}) {
+    const a = m.antiguedad || {};
+    const condiciones = _cxcEstadoCuentaCondiciones(m).map(x => `<li>${_cxcEscHTML(x)}</li>`).join('');
+    const statusClass = _cxcEstadoCuentaStatusClassAntiguedad(a.key);
+    const promesaTxt = a.promesa?.vigente
+        ? `<div class="mmp-edo-muted" style="margin-top:8px;">Promesa de pago vigente: <strong>${_cxcEstadoCuentaFecha(a.promesa.fecha)}</strong></div>`
+        : '';
+    const alerta = (Number(a.diasSinPago || 0) > 30)
+        ? `<div class="mmp-edo-box" style="background:${a.bg || '#fef2f2'};border-color:${a.borde || '#fecaca'};color:${a.color || '#991b1b'};margin-top:12px;">
+               <strong>Atencion:</strong> sin abonos desde hace <strong>${a.diasSinPago} dia(s)</strong> (ultimo abono: ${a.fechaUltimoPago ? _cxcEstadoCuentaFecha(a.fechaUltimoPago) : 'sin registro'}).
+               ${a.accion ? ` Accion sugerida: ${_cxcEscHTML(a.accion)}.` : ''}
+           </div>`
+        : '';
+    return `${_cxcEstadoCuentaCss()}
+    <div class="mmp-edo-wrap">
+        <header class="mmp-edo-head">
+            <div class="mmp-edo-brandbox">
+                <img class="mmp-edo-logo" src="img/Logo.svg" alt="Mi Pueblito" onerror="this.style.display='none'">
+                <div><div class="mmp-edo-brand">Muebleria Mi Pueblito</div><div class="mmp-edo-sub">Estado de cuenta - antiguedad de abonos</div></div>
+            </div>
+            <div class="mmp-edo-folio">Folio de venta<b>${_cxcEscHTML(m.folio)}</b><div>Emision: ${_cxcEstadoCuentaFecha(new Date())}</div></div>
+        </header>
+        <section class="mmp-edo-band">
+            <div class="mmp-edo-row">
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Cliente</div><div class="mmp-edo-value">${_cxcEscHTML(m.clienteNombreVigente)}</div><div class="mmp-edo-muted">${_cxcEscHTML(m.clienteTelefonoVigente)}${m.clienteDireccionVigente ? ` | ${_cxcEscHTML(m.clienteDireccionVigente)}` : ''}</div></div>
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Clasificacion por antiguedad</div><span class="mmp-edo-status ${statusClass}">${_cxcEscHTML(a.estadoGeneral || a.nivelRiesgo || '-')}</span><div class="mmp-edo-muted" style="margin-top:8px;">Ultimo abono: <strong>${a.fechaUltimoPago ? _cxcEstadoCuentaFecha(a.fechaUltimoPago) : 'Sin registro'}</strong> (${a.diasSinPago ?? 0} dia(s))</div>${promesaTxt}</div>
+            </div>
+
+            <div class="mmp-edo-metrics">
+                <div class="mmp-edo-metric"><div class="mmp-edo-label">Precio contado</div><strong>${_cxcDinero(m.precioContado)}</strong></div>
+                <div class="mmp-edo-metric primary"><div class="mmp-edo-label">Total credito</div><strong>${_cxcDinero(m.totalCredito)}</strong></div>
+                <div class="mmp-edo-metric"><div class="mmp-edo-label">Enganche</div><strong>${_cxcDinero(m.enganche)}</strong></div>
+                <div class="mmp-edo-metric green"><div class="mmp-edo-label">Abonos recibidos</div><strong>${_cxcDinero(m.totalAbonos)}</strong></div>
+                <div class="mmp-edo-metric ${m.saldoActual > 0 ? 'red' : 'green'}"><div class="mmp-edo-label">Saldo actual</div><strong>${_cxcDinero(m.saldoActual)}</strong></div>
+            </div>
+
+            <div class="mmp-edo-row">
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Condiciones de credito</div><div class="mmp-edo-value">${m.pagosPlan || '-'} pago(s) ${_cxcEscHTML(m.periodicidad)}</div><div class="mmp-edo-muted">Abono por periodo: ${m.abonoPeriodo ? _cxcDinero(m.abonoPeriodo) : '-'}</div></div>
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Total pagado por cliente</div><div class="mmp-edo-value">${_cxcDinero(m.totalPagadoCliente)}</div><div class="mmp-edo-muted">Enganche + abonos autorizados</div></div>
+            </div>
+            ${alerta}
+
+            <div class="mmp-edo-section"><div class="mmp-edo-title">Productos de la venta</div><table class="mmp-edo-table"><thead><tr><th>Producto</th><th class="mmp-edo-center">Cant.</th><th class="mmp-edo-right">Precio contado</th><th class="mmp-edo-right">Importe venta</th></tr></thead><tbody>${_cxcEstadoCuentaProductosRows(m)}</tbody></table></div>
+            <div class="mmp-edo-section"><div class="mmp-edo-title">Historial de abonos</div><table class="mmp-edo-table"><thead><tr><th>#</th><th>Fecha</th><th>Medio / cuenta</th><th class="mmp-edo-right">Importe</th><th class="mmp-edo-right">Saldo despues</th></tr></thead><tbody>${_cxcEstadoCuentaAbonosRows(m)}</tbody></table></div>
+            <div class="mmp-edo-section"><div class="mmp-edo-title">Condiciones generales</div><div class="mmp-edo-conditions"><ol>${condiciones}</ol></div></div>
+            <div class="mmp-edo-footer"><div>Documento informativo basado en antiguedad de abonos (no en fechas de pagare). No sustituye recibos individuales de abono.</div><div class="mmp-edo-sign">Cliente / Recibe</div></div>
+        </section>
+    </div>`;
+}
+
+function _cxcEstadoCuentaTicketBodyAntiguedad(m) {
+    const a = m.antiguedad || {};
+    const linea = '--------------------------------';
+    const productos = m.articulos.length
+        ? m.articulos.map(art => `${art.nombre || art.productoNombre || 'Producto'} x${art.cantidad || 1}\n  ${_cxcDinero(Number(art.precioContado || art.precio || 0))}`).join('\n')
+        : 'Sin detalle de productos';
+    const abonos = m.abonos.length
+        ? m.abonos.map((ab, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(ab))}  ${_cxcDinero(ab.monto || ab.montoAbonado || 0)}`).join('\n')
+        : 'Sin abonos registrados';
+    return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.25;color:#000;">
+        <div style="text-align:center;"><img src="img/Logo.svg" alt="Mi Pueblito" style="width:48px;height:48px;object-fit:contain;" onerror="this.style.display='none'"></div>
+        <div style="text-align:center;font-weight:bold;">MUEBLERIA MI PUEBLITO</div>
+        <div style="text-align:center;">ESTADO DE CUENTA (ANTIGUEDAD)</div>
+        <div>${linea}</div>
+        <div>Folio: ${_cxcEscHTML(m.folio)}</div>
+        <div>Cliente: ${_cxcEscHTML(m.clienteNombreVigente)}</div>
+        <div>Fecha venta: ${_cxcEstadoCuentaFecha(m.fechaVenta)}</div>
+        <div>Clasificacion: ${_cxcEscHTML(a.estadoGeneral || a.nivelRiesgo || '-')}</div>
+        <div>Ultimo abono: ${a.fechaUltimoPago ? _cxcEstadoCuentaFecha(a.fechaUltimoPago) : 'Sin registro'} (${a.diasSinPago ?? 0} dia(s))</div>
+        <div>${linea}</div>
+        <div>Precio contado: ${_cxcDinero(m.precioContado)}</div>
+        <div>Total credito : ${_cxcDinero(m.totalCredito)}</div>
+        <div>Enganche      : ${_cxcDinero(m.enganche)}</div>
+        <div>Abonos        : ${_cxcDinero(m.totalAbonos)}</div>
+        <div>Saldo actual  : ${_cxcDinero(m.saldoActual)}</div>
+        <div>Plazo         : ${m.pagosPlan || '-'} pago(s) ${_cxcEscHTML(m.periodicidad)}</div>
+        <div>Abono periodo : ${m.abonoPeriodo ? _cxcDinero(m.abonoPeriodo) : '-'}</div>
+        <div>${linea}</div>
+        <div><b>PRODUCTOS</b></div>
+        <pre style="font-family:'Courier New',monospace;white-space:pre-wrap;margin:3px 0;">${_cxcEscHTML(productos)}</pre>
+        <div>${linea}</div>
+        <div><b>ABONOS</b></div>
+        <pre style="font-family:'Courier New',monospace;white-space:pre-wrap;margin:3px 0;">${_cxcEscHTML(abonos)}</pre>
+        <div>${linea}</div>
+        <div style="font-size:10px;">Clasificacion basada en antiguedad de abonos. Documento informativo; conserve sus recibos de abono.</div>
+    </div>`;
+}
+
 function abrirEstadoCuentaFolio(folio) {
     const modelo = _cxcEstadoCuentaModelo(folio);
     if (!modelo) return alert("No se encontro informacion de este folio.");
+    window._cxcEstadoCuentaVistaActiva = 'pagares';
     const htmlDoc = _cxcEstadoCuentaHtml(modelo);
     const safeFolioId = String(folio).replace(/[^a-zA-Z0-9_-]/g, '-');
     const modalHTML = `
         <div data-modal="estado-cuenta-folio" style="position:fixed; inset:0; background:rgba(15,23,42,0.86); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:18px;">
             <div style="width:100%; max-width:930px; margin:auto;">
-                <div class="mmp-edo-actions no-print">
-                    <button class="mmp-edo-blue" onclick="emitirEstadoCuentaFolioTicket('${_cxcEscHTML(folio)}')">Imprimir ticket</button>
-                    <button class="mmp-edo-blue" onclick="emitirEstadoCuentaFolioPdf('${_cxcEscHTML(folio)}')">PDF / A4</button>
-                    <button id="btn-img-estado-folio-${safeFolioId}" class="mmp-edo-green" onclick="descargarImagenEstadoCuentaFolio('${_cxcEscHTML(folio)}')">Guardar imagen</button>
-                    <button class="mmp-edo-gray" onclick="document.querySelector('[data-modal=estado-cuenta-folio]')?.remove()">Cerrar</button>
+                <div class="mmp-edo-actions no-print" style="flex-direction:column;">
+                    <div style="display:flex; gap:8px; justify-content:center; margin-bottom:8px;">
+                        <button id="tabEdoPagares-${safeFolioId}" class="mmp-edo-blue" onclick="cambiarVistaEstadoCuentaFolio('${_cxcEscHTML(folio)}','pagares')">📄 Por Pagarés</button>
+                        <button id="tabEdoAntiguedad-${safeFolioId}" class="mmp-edo-gray" onclick="cambiarVistaEstadoCuentaFolio('${_cxcEscHTML(folio)}','antiguedad')">📊 Por Antigüedad de Abonos</button>
+                    </div>
+                    <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+                        <button class="mmp-edo-blue" onclick="emitirEstadoCuentaFolioTicket('${_cxcEscHTML(folio)}')">Imprimir ticket</button>
+                        <button class="mmp-edo-blue" onclick="emitirEstadoCuentaFolioPdf('${_cxcEscHTML(folio)}')">PDF / A4</button>
+                        <button id="btn-img-estado-folio-${safeFolioId}" class="mmp-edo-green" onclick="descargarImagenEstadoCuentaFolio('${_cxcEscHTML(folio)}')">Guardar imagen</button>
+                        <button class="mmp-edo-gray" onclick="document.querySelector('[data-modal=estado-cuenta-folio]')?.remove()">Cerrar</button>
+                    </div>
                 </div>
                 <div id="estadoCuentaFolioDoc">${htmlDoc}</div>
             </div>
@@ -2701,10 +2914,35 @@ function abrirEstadoCuentaFolio(folio) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
+function cambiarVistaEstadoCuentaFolio(folio, vista) {
+    const doc = document.getElementById('estadoCuentaFolioDoc');
+    if (!doc) return;
+    window._cxcEstadoCuentaVistaActiva = vista;
+
+    if (vista === 'antiguedad') {
+        const modeloA = _cxcEstadoCuentaModeloAntiguedad(folio);
+        if (!modeloA) return alert("No se encontro informacion de este folio.");
+        doc.innerHTML = _cxcEstadoCuentaHtmlAntiguedad(modeloA);
+    } else {
+        const modelo = _cxcEstadoCuentaModelo(folio);
+        if (!modelo) return alert("No se encontro informacion de este folio.");
+        doc.innerHTML = _cxcEstadoCuentaHtml(modelo);
+    }
+
+    const safeFolioId = String(folio).replace(/[^a-zA-Z0-9_-]/g, '-');
+    const tabPagares = document.getElementById(`tabEdoPagares-${safeFolioId}`);
+    const tabAntiguedad = document.getElementById(`tabEdoAntiguedad-${safeFolioId}`);
+    if (tabPagares && tabAntiguedad) {
+        tabPagares.className = vista === 'antiguedad' ? 'mmp-edo-gray' : 'mmp-edo-blue';
+        tabAntiguedad.className = vista === 'antiguedad' ? 'mmp-edo-blue' : 'mmp-edo-gray';
+    }
+}
+
 function emitirEstadoCuentaFolioTicket(folio) {
-    const modelo = _cxcEstadoCuentaModelo(folio);
+    const vista = window._cxcEstadoCuentaVistaActiva || 'pagares';
+    const modelo = vista === 'antiguedad' ? _cxcEstadoCuentaModeloAntiguedad(folio) : _cxcEstadoCuentaModelo(folio);
     if (!modelo) return alert("No se encontro informacion de este folio.");
-    const body = _cxcEstadoCuentaTicketBody(modelo);
+    const body = vista === 'antiguedad' ? _cxcEstadoCuentaTicketBodyAntiguedad(modelo) : _cxcEstadoCuentaTicketBody(modelo);
     if (window.TicketService?.openThermal) {
         return window.TicketService.openThermal({ title: `Estado de Cuenta ${folio}`, filename: `estado_cuenta_${folio}`, body });
     }
@@ -2726,10 +2964,11 @@ function _cxcClonarDocEstadoCuentaFolio(folio) {
         clone.style.boxSizing = 'border-box';
         return clone;
     }
-    const modelo = _cxcEstadoCuentaModelo(folio);
+    const vista = window._cxcEstadoCuentaVistaActiva || 'pagares';
+    const modelo = vista === 'antiguedad' ? _cxcEstadoCuentaModeloAntiguedad(folio) : _cxcEstadoCuentaModelo(folio);
     if (!modelo) return null;
     const wrap = document.createElement('div');
-    wrap.innerHTML = _cxcEstadoCuentaHtml(modelo);
+    wrap.innerHTML = vista === 'antiguedad' ? _cxcEstadoCuentaHtmlAntiguedad(modelo) : _cxcEstadoCuentaHtml(modelo);
     wrap.style.width = '860px';
     wrap.style.maxWidth = '860px';
     wrap.style.background = '#ffffff';
@@ -2753,9 +2992,10 @@ function _cxcCargarHtml2CanvasEstadoFolio(cb) {
 }
 
 function emitirEstadoCuentaFolioPdf(folio) {
-    const modelo = _cxcEstadoCuentaModelo(folio);
+    const vista = window._cxcEstadoCuentaVistaActiva || 'pagares';
+    const modelo = vista === 'antiguedad' ? _cxcEstadoCuentaModeloAntiguedad(folio) : _cxcEstadoCuentaModelo(folio);
     if (!modelo) return alert("No se encontro informacion de este folio.");
-    const htmlDoc = _cxcEstadoCuentaHtml(modelo);
+    const htmlDoc = vista === 'antiguedad' ? _cxcEstadoCuentaHtmlAntiguedad(modelo) : _cxcEstadoCuentaHtml(modelo);
     const opts = {
         title: `Estado de Cuenta ${folio}`,
         filename: `estado_cuenta_${folio}`,
@@ -2845,9 +3085,9 @@ window.enviarRecordatorioWhatsApp = function(folio) {
     const est = window._calcularEstadoCuenta(folio);
     if (!est || !est.cuenta) return alert("No se encontro informacion de este folio.");
 
-    const clientes = StorageService.get("clientes", []);
-    const cli = clientes.find(x => String(x.id) === String(est.cuenta.clienteId)) ||
-        clientes.find(x => _cxcNormalizarTexto(x.nombre) === _cxcNormalizarTexto(est.cuenta.nombre || est.cuenta.clienteNombre));
+    const cli = (typeof window.obtenerClienteCanonico === 'function')
+        ? window.obtenerClienteCanonico(est.cuenta.clienteId, est.cuenta.nombre || est.cuenta.clienteNombre, est.cuenta.telefono)
+        : null;
     const nombre = cli?.nombre || est.cuenta.nombre || est.cuenta.clienteNombre || 'cliente';
     const telefonoRaw = cli?.telefono || est.cuenta.telefono || '';
     const telefono = String(telefonoRaw).replace(/\D/g, '');
@@ -3295,7 +3535,7 @@ window.buscarPagosAuditoria = function() {
     }
 
     document.getElementById("auditContenedorFechas").innerHTML = `
-        <h3 style="margin-top:0; color:#334155; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">Cliente: <span style="color:#2563eb;">${cuenta.nombre || cuenta.clienteNombre}</span></h3>
+        <h3 style="margin-top:0; color:#334155; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">Cliente: <span style="color:#2563eb;">${_cxcNombreClienteVigente(cuenta)}</span></h3>
         ${registrosHtml}
     `;
 };
@@ -3599,7 +3839,7 @@ window.marcarIncobrable = function(folio) {
 
     if (cuenta.incobrable) {
         // Revertir
-        if (!confirm(`¿Reactivar la cuenta ${folio} de ${cuenta.nombre || cuenta.clienteNombre}?\nVolverá a aparecer en proyecciones y cobranza.`)) return;
+        if (!confirm(`¿Reactivar la cuenta ${folio} de ${_cxcNombreClienteVigente(cuenta)}?\nVolverá a aparecer en proyecciones y cobranza.`)) return;
         delete cuentas[idx].incobrable;
         delete cuentas[idx].incobrableFecha;
         delete cuentas[idx].incobrableMotivo;
@@ -3678,7 +3918,7 @@ window.renderCuentasIncobrables = function() {
         const saldo = _cxcDinero(est?.saldoTotal || c.saldoActual || 0);
         const fecha = c.incobrableFecha ? new Date(c.incobrableFecha).toLocaleDateString('es-MX') : '-';
         html += `<tr>
-            <td><strong>${_cxcEscHTML(c.nombre || c.clienteNombre || 'Cliente')}</strong><br>
+            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(c))}</strong><br>
                 <small style="color:#64748b;">${_cxcEscHTML(c.folio)}</small></td>
             <td style="font-weight:800; color:#dc2626;">${saldo}</td>
             <td style="max-width:200px; font-size:12px; color:#6b7280;">${_cxcEscHTML(c.incobrableMotivo || '-')}</td>

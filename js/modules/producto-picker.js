@@ -6,7 +6,11 @@ window.abrirSelectorProducto = function(opciones) {
     const {
         titulo = "🔍 Seleccionar Producto",
         onSeleccion = () => {},
-        incluirInactivos = false
+        incluirInactivos = false,
+        // 'precio' = precio cobrado al cliente (ventas/cotizaciones).
+        // 'costo'  = costo de compra al proveedor (ordenes de compra).
+        // No es lo mismo: cada modulo debe pedir el campo que le corresponde.
+        campoPrecio = 'precio'
     } = opciones || {};
 
     // Obtener catálogo fresco
@@ -160,7 +164,10 @@ window.abrirSelectorProducto = function(opciones) {
                     <div style="font-size:11px;color:#64748b;margin-bottom:4px;">${prod.codigo ? `Cód: ${prod.codigo}` : 'Sin código'}</div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-size:11px;color:#64748b;">Stock: <strong style="color:${prod.stock > 0 ? '#16a34a' : '#dc2626'}">${prod.stock || 0}</strong></span>
-                        <strong style="color:#1e40af;font-size:14px;">${formatDinero(prod.precio || prod.costo || 0)}</strong>
+                        <span style="text-align:right;">
+                            ${campoPrecio === 'costo' ? '<small style="display:block;font-size:9px;color:#92400e;font-weight:bold;">COSTO</small>' : ''}
+                            <strong style="color:#1e40af;font-size:14px;">${formatDinero(Number(prod[campoPrecio] || 0))}</strong>
+                        </span>
                     </div>
                 </div>
             `;

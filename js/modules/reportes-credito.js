@@ -154,7 +154,7 @@ const _rc = {
 
         // 6. Nivel de riesgo REAL (basado en SNE, no en conteo de pagarés)
         let nivelRiesgo, colorRiesgo, emojiRiesgo;
-        if (cuenta.esIncobrable) {
+        if (cuenta.incobrable) {
             nivelRiesgo = 'INCOBRABLE'; colorRiesgo = '#475569'; emojiRiesgo = '⚫';
         } else if (excedente >= 0) {
             nivelRiesgo = 'AL CORRIENTE'; colorRiesgo = '#16a34a'; emojiRiesgo = '🟢';
@@ -212,7 +212,7 @@ window.renderARC_v3 = function() {
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
-    const cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
+    const cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && !c.incobrable && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
     if (!cuentasActivas.length) {
         cont.innerHTML = `<div style="padding:50px;text-align:center;background:white;border-radius:16px;margin:20px 0;">
             <div style="font-size:48px;">✅</div>
@@ -422,6 +422,7 @@ window.renderARCTablaExcel = function() {
     window._arcExDateSort = window._arcExDateSort || 'asc';
     window._arcExGroup = window._arcExGroup || 'semana'; 
     window._arcExClienteFilter = window._arcExClienteFilter || '';
+    window._arcExAgruparCliente = window._arcExAgruparCliente === true;
 
     // --- Helpers para Agrupación de Tiempo ---
     const getMonday = (fecha) => {
@@ -476,7 +477,7 @@ window.renderARCTablaExcel = function() {
     };
 
     // 1. Procesar cuentas activas y aplicar filtro de cliente
-    let cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
+    let cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && !c.incobrable && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
     
     if (window._arcExClienteFilter) {
         const q = window._arcExClienteFilter.toLowerCase();
@@ -488,6 +489,58 @@ window.renderARCTablaExcel = function() {
         const sne = _rc.calcularSNE(c, pCta, hoy);
         return { ...c, sne, pagares: pCta };
     });
+
+    // 1.5 Agrupar por cliente (opcional) — combina todas las cuentas de un mismo
+    // cliente en una sola fila, sumando importes/saldos y fusionando sus abonos
+    // para que las columnas de fechas sigan mostrando el total cobrado por periodo.
+    if (window._arcExAgruparCliente) {
+        const normalizar = value => String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const severidadRiesgo = {
+            'INCOBRABLE': 7, 'Alerta total': 7, 'CRÍTICO': 6, 'Alto riesgo': 6,
+            'EN MORA': 5, 'Riesgo': 5, 'MODERADO': 4, 'LEVE': 3, 'AL CORRIENTE': 1
+        };
+        const grupos = {};
+        cuentasActivas.forEach(c => {
+            const clave = c.clienteId
+                ? `id:${c.clienteId}`
+                : `nombre:${normalizar(c.nombre || c.clienteNombre)}|tel:${normalizar(c.telefono)}`;
+            if (!grupos[clave]) grupos[clave] = { clave, nombre: c.nombre || c.clienteNombre || 'Cliente', cuentas: [] };
+            grupos[clave].cuentas.push(c);
+        });
+
+        cuentasActivas = Object.values(grupos).map(g => {
+            // Base = la cuenta con la venta mas reciente (conserva su fecha cruda intacta
+            // para que el parseo/ordenamiento por fecha siga funcionando igual que hoy).
+            const masReciente = g.cuentas.slice().sort((a, b) => {
+                const fa = _rc.parseFecha(a.fechaVenta || a.fechaIso || a.fecha)?.getTime() || 0;
+                const fb = _rc.parseFecha(b.fechaVenta || b.fechaIso || b.fecha)?.getTime() || 0;
+                return fb - fa;
+            })[0];
+            const peor = g.cuentas.slice().sort((a, b) => (severidadRiesgo[b.sne.nivelRiesgo] || 0) - (severidadRiesgo[a.sne.nivelRiesgo] || 0))[0];
+
+            const abonosCombinados = g.cuentas.flatMap(c => c.abonos || []);
+            const articulosCombinados = g.cuentas.flatMap(c => c.articulos || []);
+            const fechasUltimoPago = g.cuentas.map(c => c.sne.ultimaFechaAbono).filter(Boolean);
+            const totalMercanciaGrupo = g.cuentas.reduce((s, c) => s + Number(c.totalMercancia || c.totalContadoOriginal || c.total || 0), 0);
+
+            return {
+                ...masReciente,
+                nombre: g.nombre,
+                folio: g.cuentas.length > 1 ? `${g.cuentas.length} cuentas` : g.cuentas[0].folio,
+                folios: g.cuentas.map(c => c.folio),
+                abonos: abonosCombinados,
+                articulos: articulosCombinados,
+                totalMercancia: totalMercanciaGrupo,
+                sne: {
+                    ...peor.sne,
+                    saldoActual: g.cuentas.reduce((s, c) => s + Number(c.sne.saldoActual || 0), 0),
+                    ultimaFechaAbono: fechasUltimoPago.length ? new Date(Math.max(...fechasUltimoPago.map(f => f.getTime()))) : null
+                },
+                agrupadoPorCliente: true,
+                cuentasGrupo: g.cuentas
+            };
+        });
+    }
 
     // 2. Ordenamiento Vertical Dinámico
     const sortDir = window._arcExSortDir === 'desc' ? -1 : 1;
@@ -581,7 +634,13 @@ window.renderARCTablaExcel = function() {
             bgStatus = '#b91c1c'; colorText = '#ffffff'; 
         }
 
-        const desc = (c.articulos || []).map(a => a.nombre).join(', ') || 'Venta General';
+        const desc = c.agrupadoPorCliente
+            ? `📦 ${c.cuentasGrupo.length} cuenta${c.cuentasGrupo.length > 1 ? 's' : ''}`
+            : ((c.articulos || []).map(a => a.nombre).join(', ') || 'Venta General');
+        const descTooltip = c.agrupadoPorCliente
+            ? (c.articulos || []).map(a => a.nombre).join(', ') || 'Sin artículos registrados'
+            : desc;
+        const nombreCliente = c.agrupadoPorCliente ? `${c.nombre} (${c.cuentasGrupo.length})` : c.nombre;
         const fVenta = _rc.parseFecha(c.fechaVenta || c.fechaIso || c.fecha);
         const fechaVentaStr = fVenta ? `${String(fVenta.getDate()).padStart(2,'0')}/${String(fVenta.getMonth()+1).padStart(2,'0')}/${String(fVenta.getFullYear()).slice(-2)}` : '-';
         const fechaUltPagoStr = s.ultimaFechaAbono
@@ -600,8 +659,8 @@ window.renderARCTablaExcel = function() {
         let row = `<tr style="font-size:11px; background:#ffffff; border-bottom:1px solid #e2e8f0;">
             <td class="ex-stky ex-col-1" style="background:${bgStatus}; color:${colorText};" title="${s.nivelRiesgo}">${s.emojiRiesgo}</td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
-            <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${desc}">${desc}</td>
-            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${c.nombre}">${c.nombre}</td>
+            <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${descTooltip}">${desc}</td>
+            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${c.nombre}">${nombreCliente}</td>
             <td class="ex-stky ex-col-5" style="background:#fef3c7; color:#92400e; text-align:center; font-weight:bold;">${fechaUltPagoStr}</td>
             <td class="ex-stky ex-col-6" style="background:#f8fafc; color:#0f172a; text-align:right;">$${importeReal.toLocaleString('en-US')}</td>
             <td class="ex-stky ex-col-7" style="background:#dcfce7; color:#166534; text-align:center; font-weight:bold;">${pctCubierto}%</td>
@@ -751,6 +810,13 @@ window.renderARCTablaExcel = function() {
                     <option value="desc" ${window._arcExSort==='ultimoPago'&&window._arcExSortDir==='desc'?'selected':''}>Mas reciente arriba</option>
                 </select>
             </div>
+            <div style="width:1px;height:24px;background:#e2e8f0;"></div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#64748b;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="arcExAgruparCliente" ${window._arcExAgruparCliente ? 'checked' : ''} onchange="window._arcExAgruparCliente=this.checked;renderARCTablaExcel();" style="width:15px;height:15px;cursor:pointer;">
+                    👥 AGRUPAR POR CLIENTE
+                </label>
+            </div>
         </div>
 
         <!-- Contenedor con Scrollbars (Horizontal y Vertical) -->
@@ -867,7 +933,7 @@ window.renderComportamiento = function() {
     const agruparCliente = window._cbAgruparCliente === true;
 
     const cuentasSNE = cxc
-        .filter(c => c.estado !== 'Saldado' && !_rcCuentaCancelada(c))
+        .filter(c => c.estado !== 'Saldado' && !_rcCuentaCancelada(c) && !c.incobrable)
         .map(c => {
             const pagaresCuenta = pagaresSistema.filter(p => p.folio === c.folio);
             const sne = _rc.calcularSNE(c, pagaresCuenta, hoy);
@@ -1361,7 +1427,7 @@ window.renderConcentracion = function() {
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
-    const activas = cxc.filter(c => !_rcCuentaCancelada(c) && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado')
+    const activas = cxc.filter(c => !_rcCuentaCancelada(c) && !c.incobrable && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado')
         .map(c => {
             const sne = _rc.calcularSNE(c, pagaresSistema.filter(p => p.folio === c.folio), hoy);
             return { ...c, sne };

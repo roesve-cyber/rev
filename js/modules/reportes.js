@@ -593,8 +593,13 @@ window.renderReporteCompromisos = function() {
     }
 
     // 📥 INGRESOS: Pagarés Activos (Módulo nativo parseFechaMX)
+    // Excluimos pagarés de cuentas marcadas como incobrables: ese dinero no se va a cobrar.
+    const _foliosIncobrablesCompromisos = new Set(
+        StorageService.get("cuentasPorCobrar", []).filter(c => c.incobrable === true).map(c => c.folio)
+    );
     StorageService.get("pagaresSistema", []).forEach(p => {
         if (p.estado === "Pagado" || p.estado === "Cancelado") return;
+        if (_foliosIncobrablesCompromisos.has(p.folio)) return;
         const restante = Math.max(0, (parseFloat(p.monto)||0) - (parseFloat(p.montoAbonado)||0));
         if (restante <= 0) return;
 

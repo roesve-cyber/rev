@@ -366,6 +366,24 @@ function actualizarContadorCarrito() {
     }
 }
 
+// Permite agregar productos al carrito sin depender del catalogo: reutiliza
+// el mismo selector universal con buscador/categorias que ya usan Compras y
+// Cotizaciones, y al elegir un producto lo agrega con la misma logica que
+// usa el catalogo (agregarAlCarrito), luego refresca la tabla del carrito.
+function agregarProductoDesdeCarrito() {
+    if (typeof window.abrirSelectorProducto !== 'function') {
+        alert('El selector de productos no esta disponible.');
+        return;
+    }
+    window.abrirSelectorProducto({
+        titulo: '🔍 Agregar producto al carrito',
+        onSeleccion: function (p) {
+            agregarAlCarrito(p.id);
+            renderCarrito();
+        }
+    });
+}
+
 // ===== CARRITO =====
 function renderCarrito() {
     const vistaCarrito = document.getElementById("carrito");
@@ -377,9 +395,10 @@ function renderCarrito() {
     if (carrito.length === 0) {
         vistaCarrito.innerHTML = `
             <div class="header-seccion"><h2>Carrito de Ventas</h2></div>
-            <p style="text-align:center; padding:40px; color:#718096; background:white; border-radius:8px;">
-                El carrito está vacío. Agrega productos desde el inventario.
-            </p>`;
+            <div style="text-align:center; padding:40px; color:#718096; background:white; border-radius:8px;">
+                <p style="margin:0 0 16px;">El carrito está vacío.</p>
+                <button onclick="agregarProductoDesdeCarrito()" style="padding:11px 18px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">🔍 Agregar producto</button>
+            </div>`;
         actualizarContadorCarrito();
         return;
     }
@@ -424,7 +443,10 @@ function renderCarrito() {
         <div style="display:grid; grid-template-columns: 1.8fr 1.2fr; gap: 20px; align-items: start;">
             
             <div style="background:white; padding:20px; border-radius:10px;">
-                <h3 style="margin:0 0 15px 0;">Productos seleccionados</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                    <h3 style="margin:0;">Productos seleccionados</h3>
+                    <button onclick="agregarProductoDesdeCarrito()" style="padding:9px 14px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">🔍 Agregar producto</button>
+                </div>
                 <table class="tabla-admin">
                     <thead>
                         <tr>
@@ -912,16 +934,16 @@ function _renderOpcionesOrigenVenta(prod, item) {
     }
     return `
         <div style="margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;">
-            <div style="font-size:12px;color:#1e40af;font-weight:900;margin-bottom:8px;">Elige la ubicacion fisica de salida:</div>
+            <div style="font-size:12px;color:#1e40af;font-weight:900;margin-bottom:8px;">Elige la ubicacion fisica de salida: <span style="background:#dcfce7;color:#166534;border-radius:999px;padding:2px 8px;font-size:11px;">⭐ Se sugiere tomar de inventario</span></div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
-                ${opciones.map(op => `
+                ${opciones.map((op, idx) => `
                     <button type="button"
                         id="btn-origen-${idDom}-${_ventaDomId(op.ubicacion)}"
                         data-origen-producto="${_escapeHtml(idDom)}"
                         onclick="seleccionarOrigenInventario('${idProdArg}', '${_ventaJsArg(op.ubicacion)}')"
                         style="text-align:left;padding:12px;border:2px solid #93c5fd;background:white;color:#0f172a;border-radius:8px;cursor:pointer;transition:all .15s ease;box-shadow:0 1px 2px rgba(15,23,42,.08);">
                         <span style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
-                            <strong style="font-size:14px;">${_escapeHtml(op.ubicacion)}</strong>
+                            <strong style="font-size:14px;">${_escapeHtml(op.ubicacion)}${idx === 0 ? ' <small style="color:#16a34a;font-weight:900;">(sugerida)</small>' : ''}</strong>
                             <span style="background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:900;">${Number(op.stock || 0)} pza.</span>
                         </span>
                         ${op.nota ? `<br><small style="color:#64748b;">${_escapeHtml(op.nota)}</small>` : ''}
@@ -1655,6 +1677,22 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
     _actualizarBotonProcesarInventario();
+
+    // Sugerencia automatica: si hay existencia se preselecciona tomarla de la
+    // ubicacion de mayor prioridad (o la que el usuario ya tenia elegida si
+    // reabrio este dialogo). "Mandar sobre pedido" sigue disponible para
+    // que el usuario decida vender sobre pedido en su lugar.
+    productosConStock.forEach(x => {
+        const idProd = x.prod.id;
+        const colorElegido = x.item.colorElegido || '';
+        const opciones = _ubicacionesSalidaVentaDetalle(x.prod, colorElegido);
+        if (!opciones.length) return;
+        const ubicacionSugerida = x.item.ubicacionElegida || opciones[0].ubicacion;
+        const idDom = _ventaDomId(idProd);
+        if (document.getElementById(`btn-origen-${idDom}-${_ventaDomId(ubicacionSugerida)}`)) {
+            seleccionarOrigenInventario(idProd, ubicacionSugerida);
+        }
+    });
 }
 
 function seleccionarOrigenInventario(productoId, ubicacion) {

@@ -65,7 +65,12 @@ function recopilarNotificaciones() {
 
     // Pagarés vencidos o por vencer en ≤3 días
     const pagares = StorageService.get('pagaresSistema', []);
-    pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').forEach(p => {
+    const foliosIncobrables = new Set(
+        StorageService.get('cuentasPorCobrar', [])
+            .filter(c => c.incobrable === true)
+            .map(c => c.folio)
+    );
+    pagares.filter(p => (p.estado === 'Pendiente' || p.estado === 'Parcial') && !foliosIncobrables.has(p.folio)).forEach(p => {
         const fv = new Date(p.fechaVencimiento);
         if (fv <= hoy) {
             const dias = Math.floor((hoy - fv) / (1000 * 60 * 60 * 24));

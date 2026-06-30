@@ -58,7 +58,10 @@ function renderProyeccionFlujo() {
     }
 
     // INGRESOS: Pagarés vencidos (se suman al mes actual) y por vencer
-    pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').forEach(p => {
+    // Excluimos pagarés de cuentas marcadas como incobrables: ese dinero no se va a cobrar.
+    const cxcParaFlujo = StorageService.get("cuentasPorCobrar", []);
+    const foliosIncobrablesFlujo = new Set(cxcParaFlujo.filter(c => c.incobrable === true).map(c => c.folio));
+    pagares.filter(p => (p.estado === 'Pendiente' || p.estado === 'Parcial') && !foliosIncobrablesFlujo.has(p.folio)).forEach(p => {
         const fv = new Date(p.fechaVencimiento);
         // Extraemos "YYYY-MM" directo del formato estandarizado para máxima seguridad
         const mesKey = p.fechaVencimiento.substring(0, 7);

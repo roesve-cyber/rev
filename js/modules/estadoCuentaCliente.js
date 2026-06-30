@@ -222,12 +222,21 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
     const estadoConsolidado = _calcularEstadoCliente(totalSaldoConsolidado, diasAntiguoConsolidado);
     const frecuenciaPago = _analizarFrecuencia(abonosConsolidados);
     
+    // 🔐 Los datos a MOSTRAR siempre vienen de la tabla "clientes" vigente,
+    // nunca de la copia congelada que quedó guardada en la cuenta al
+    // momento de la venta. Esto evita que ediciones de nombre/teléfono
+    // queden "atrapadas" en reportes antiguos.
+    const snapshot = cuentasCliente[0];
+    const canonico = (typeof window.obtenerClienteCanonico === 'function')
+        ? window.obtenerClienteCanonico(clienteId, clienteNombre, _clienteTelefonoCuenta(snapshot))
+        : null;
+
     return {
         existe: true,
-        clienteId,
-        clienteNombre: _clienteNombreCuenta(cuentasCliente[0]) || clienteNombre,
-        clienteTelefono: _clienteTelefonoCuenta(cuentasCliente[0]),
-        clienteDireccion: _clienteDireccionCuenta(cuentasCliente[0]),
+        clienteId: canonico?.id ?? clienteId,
+        clienteNombre: canonico?.nombre || _clienteNombreCuenta(snapshot) || clienteNombre,
+        clienteTelefono: canonico?.telefono || _clienteTelefonoCuenta(snapshot),
+        clienteDireccion: canonico?.direccion || _clienteDireccionCuenta(snapshot),
         
         // CONSOLIDADOS
         totalVendido,
@@ -281,42 +290,29 @@ function _estimarProximaCobro(abonos) {
     return _fechaCortaCuenta(proxima);
 }
 
-// 🎯 RENDERIZAR LISTA DE CLIENTES PARA SELECCIONAR
+// 🎯 RENDERIZAR SELECTOR DE CLIENTE (picker universal, basado en tabla "clientes")
 window.renderEstadoCuentaClienteSelector = function() {
     const contenedor = document.getElementById('contenidoEstadoCuentaCliente');
     if (!contenedor) return;
-    
-    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
-    const clientesUnicos = [];
-    const clientesMap = new Map();
-    
-    cuentasCxC.forEach(c => {
-        const id = _clienteIdCuenta(c);
-        const nombre = _clienteNombreCuenta(c);
-        const key = id ? `id:${String(id)}` : `nombre:${_normalizarCuentaTexto(nombre)}`;
-        
-        if (nombre && !clientesMap.has(key)) {
-            clientesMap.set(key, { id, nombre, key });
-            clientesUnicos.push({ id, nombre, key });
-        }
-    });
-    
-    clientesUnicos.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
-    
+
+    window._eccClienteSeleccionado = null;
+
     const html = `
-    <div style="display:flex; gap:20px; margin-bottom:20px; flex-wrap:wrap;">
+    <div style="display:flex; gap:20px; margin-bottom:20px; flex-wrap:wrap; align-items:flex-end;">
         <div style="flex:1; min-width:250px;">
-            <label style="display:block; font-weight:bold; margin-bottom:8px; color:#1e293b;">🔍 Buscar Cliente:</label>
-            <input type="text" id="filtroClienteECC" placeholder="Nombre del cliente..." 
-                   style="width:100%; padding:12px; border:2px solid #cbd5e1; border-radius:8px; font-size:14px;"
-                   oninput="filtrarClientesECC()">
-        </div>
-        <div style="flex:1; min-width:250px;">
-            <label style="display:block; font-weight:bold; margin-bottom:8px; color:#1e293b;">👥 Seleccionar:</label>
-            <select id="selectClienteECC" style="width:100%; padding:12px; border:2px solid #cbd5e1; border-radius:8px; font-size:14px;">
-                <option value="">-- Elige un cliente --</option>
-                ${clientesUnicos.map(c => `<option value="${_escCuenta(c.key)}" data-id="${_escCuenta(c.id || '')}" data-nombre="${_escCuenta(c.nombre || '')}">${_escCuenta(c.nombre)}</option>`).join('')}
-            </select>
+            <label style="display:block; font-weight:bold; margin-bottom:8px; color:#1e293b;">👤 Cliente:</label>
+            <input type="hidden" id="eccClienteId" value="">
+            <input type="hidden" id="eccClienteNombre" value="">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span id="eccClienteDisplay"
+                      style="flex:1; padding:12px; border:2px solid #cbd5e1; border-radius:8px; font-size:14px; background:#f8fafc; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    Sin seleccionar
+                </span>
+                <button type="button" onclick="window._eccAbrirSelectorCliente()"
+                        style="padding:12px 16px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px; white-space:nowrap;">
+                    🔍 Buscar
+                </button>
+            </div>
         </div>
         <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
             <button onclick="generarEstadoCuentaClienteConsolidado()" 
@@ -337,26 +333,34 @@ window.renderEstadoCuentaClienteSelector = function() {
     contenedor.innerHTML = html;
 };
 
-window.filtrarClientesECC = function() {
-    const filtro = document.getElementById('filtroClienteECC')?.value.toLowerCase() || '';
-    const select = document.getElementById('selectClienteECC');
-    
-    if (!select) return;
-    
-    Array.from(select.options).forEach((option, idx) => {
-        if (idx === 0) return;
-        const text = option.text.toLowerCase();
-        option.style.display = text.includes(filtro) ? 'block' : 'none';
+// 🔍 Abre el selector universal de clientes (basado estrictamente en la tabla "clientes")
+window._eccAbrirSelectorCliente = function() {
+    if (typeof window.abrirSelectorCliente !== 'function') {
+        alert('El selector de clientes aún no está disponible.');
+        return;
+    }
+    window.abrirSelectorCliente({
+        titulo: '👤 Seleccionar Cliente',
+        onSeleccion: function(c) {
+            window._eccClienteSeleccionado = c;
+            document.getElementById('eccClienteId').value = c.id ?? '';
+            document.getElementById('eccClienteNombre').value = c.nombre || '';
+            const disp = document.getElementById('eccClienteDisplay');
+            if (disp) {
+                disp.textContent = c.nombre || 'Cliente sin nombre';
+                disp.style.color = '#111827';
+            }
+            // Generar el reporte automáticamente al seleccionar
+            window.generarEstadoCuentaClienteConsolidado();
+        }
     });
 };
 
 window.generarEstadoCuentaClienteConsolidado = function() {
-    const selectCliente = document.getElementById('selectClienteECC');
-    const selectedOption = selectCliente?.selectedOptions?.[0];
-    const clienteId = selectedOption?.dataset?.id || '';
-    const clienteNombre = selectedOption?.dataset?.nombre || '';
+    const clienteId = document.getElementById('eccClienteId')?.value || '';
+    const clienteNombre = document.getElementById('eccClienteNombre')?.value || '';
     
-    if (!selectCliente?.value) {
+    if (!clienteId && !clienteNombre) {
         alert('⚠️ Selecciona un cliente primero.');
         return;
     }

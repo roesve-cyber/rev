@@ -213,10 +213,7 @@ function renderDashboard() {
 }
 
 // ===== ALERTAS DE PAGARÉS VENCIDOS =====
-function verificarAlertasPagares() {
-    // No repetir en la misma sesión
-    if (sessionStorage.getItem("alertaPagaresVistaSesion")) return;
-
+function verificarAlertasPagaresVencidos() {
     const pagaresSistema = StorageService.get("pagaresSistema", []);
     const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
     const hoy = new Date();
@@ -225,22 +222,13 @@ function verificarAlertasPagares() {
     const vencidos = pagaresSistema.filter(p => {
         if (p.estado === "Pagado" || p.estado === "Cancelado") return false;
         const cuenta = cuentasPorCobrar.find(c => c.folio === p.folio);
-        if (cuenta && _dashboardCuentaCancelada(cuenta)) return false;
+        if (cuenta && (_dashboardCuentaCancelada(cuenta) || cuenta.incobrable)) return false;
         return new Date(p.fechaVencimiento) < hoy;
     });
 
-    // Actualizar badge en menú
-    const badge = document.getElementById("badgeCobranzaVencidos");
-    if (badge) {
-        if (vencidos.length > 0) {
-            badge.textContent = vencidos.length;
-            badge.style.display = 'inline-block';
-        } else {
-            badge.style.display = 'none';
-        }
-    }
-
-    if (vencidos.length === 0) return;
+    // El conteo para el badge se devuelve siempre (lo combina verificarAlertasPagares).
+    // El modal de aviso si respeta "una vez por sesion" para no ser repetitivo.
+    if (vencidos.length === 0 || sessionStorage.getItem("alertaPagaresVistaSesion")) return vencidos.length;
 
     sessionStorage.setItem("alertaPagaresVistaSesion", "1");
 
@@ -262,25 +250,28 @@ function verificarAlertasPagares() {
     const modalHTML = `
         <div data-modal="alerta-pagares-vencidos" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9000; display:flex; justify-content:center; align-items:center; padding:20px;">
             <div style="background:white; border-radius:15px; width:95%; max-width:750px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-                <div style="background:#dc2626; padding:20px 24px; border-radius:15px 15px 0 0; display:flex; justify-content:space-between; align-items:center;">
-                    <h2 style="margin:0; color:white; font-size:20px;">⚠️ Pagarés Vencidos</h2>
+                <div style="background:#b45309; padding:20px 24px; border-radius:15px 15px 0 0; display:flex; justify-content:space-between; align-items:center;">
+                    <h2 style="margin:0; color:white; font-size:20px;">🗂️ Pagarés sin aplicar (documental)</h2>
                     <button onclick="document.querySelector('[data-modal=&quot;alerta-pagares-vencidos&quot;]')?.remove();"
                             style="background:rgba(255,255,255,0.2); border:none; color:white; font-size:22px; cursor:pointer; border-radius:6px; padding:4px 10px; line-height:1;">✕</button>
                 </div>
                 <div style="padding:24px;">
-                    <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
-                        <span style="color:#991b1b; font-weight:bold;">Total vencido: ${dinero(totalVencido)}</span>
-                        <span style="background:#dc2626; color:white; padding:4px 12px; border-radius:9999px; font-size:14px; font-weight:bold;">${vencidos.length} pagaré(s)</span>
+                    <p style="margin:0 0 14px; color:#78350f; font-size:13px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 14px;">
+                        💡 Esto es un pendiente <b>documental</b>: el pagaré pasó su fecha sin marcarse como pagado, pero el cliente puede ya estar al corriente por antigüedad de abonos. Para saber si realmente debes cobrarle, revisa la alerta de "Cuentas sin pago reciente".
+                    </p>
+                    <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:#92400e; font-weight:bold;">Monto en pagarés sin aplicar: ${dinero(totalVencido)}</span>
+                        <span style="background:#b45309; color:white; padding:4px 12px; border-radius:9999px; font-size:14px; font-weight:bold;">${vencidos.length} pagaré(s)</span>
                     </div>
                     <div style="overflow-x:auto; margin-bottom:20px;">
                         <table style="width:100%; border-collapse:collapse; font-size:14px;">
                             <thead>
-                                <tr style="background:#fef2f2;">
-                                    <th style="padding:10px; text-align:left; color:#991b1b;">Cliente</th>
-                                    <th style="padding:10px; text-align:left; color:#991b1b;">Folio</th>
-                                    <th style="padding:10px; text-align:left; color:#991b1b;">Vencimiento</th>
-                                    <th style="padding:10px; text-align:right; color:#991b1b;">Monto</th>
-                                    <th style="padding:10px; text-align:center; color:#991b1b;">Días Atraso</th>
+                                <tr style="background:#fffbeb;">
+                                    <th style="padding:10px; text-align:left; color:#92400e;">Cliente</th>
+                                    <th style="padding:10px; text-align:left; color:#92400e;">Folio</th>
+                                    <th style="padding:10px; text-align:left; color:#92400e;">Vencimiento</th>
+                                    <th style="padding:10px; text-align:right; color:#92400e;">Monto</th>
+                                    <th style="padding:10px; text-align:center; color:#92400e;">Días sin marcar</th>
                                 </tr>
                             </thead>
                             <tbody>${filas}</tbody>
@@ -288,7 +279,7 @@ function verificarAlertasPagares() {
                     </div>
                     <div style="display:flex; gap:12px; justify-content:flex-end;">
                         <button onclick="navA('cobranzaesperada'); document.querySelector('[data-modal=&quot;alerta-pagares-vencidos&quot;]')?.remove();"
-                                style="padding:10px 20px; background:#dc2626; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">
+                                style="padding:10px 20px; background:#b45309; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">
                             📊 Ver Cobranza
                         </button>
                         <button onclick="document.querySelector('[data-modal=&quot;alerta-pagares-vencidos&quot;]')?.remove();"
@@ -301,6 +292,7 @@ function verificarAlertasPagares() {
         </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+    return vencidos.length;
 }
 
 // Version vigente: alerta de cuentas activas sin pago reciente.
@@ -353,15 +345,13 @@ function _dashboardSaldoCuenta(cuenta, pagaresSistema) {
         .reduce((s, p) => s + Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)), 0);
 }
 
-function verificarAlertasPagares() {
-    if (sessionStorage.getItem("alertaCuentasSinPagoVistaSesion")) return;
-
+function verificarAlertasCuentasSinPago() {
     const pagaresSistema = StorageService.get("pagaresSistema", []);
     const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
     const hoy = _dashboardInicioDia(new Date());
 
     const cuentasSinPago = cuentasPorCobrar
-        .filter(c => c && !_dashboardCuentaCancelada(c) && String(c.estado || c.estatus || '').toLowerCase() !== 'saldado')
+        .filter(c => c && !_dashboardCuentaCancelada(c) && !c.incobrable && String(c.estado || c.estatus || '').toLowerCase() !== 'saldado')
         .map(cuenta => {
             const saldo = _dashboardSaldoCuenta(cuenta, pagaresSistema);
             const ultimoPago = _dashboardUltimoPagoCuenta(cuenta);
@@ -378,17 +368,9 @@ function verificarAlertasPagares() {
         .filter(r => r && r.diasAtraso > 30)
         .sort((a, b) => b.diasAtraso - a.diasAtraso);
 
-    const badge = document.getElementById("badgeCobranzaVencidos");
-    if (badge) {
-        if (cuentasSinPago.length > 0) {
-            badge.textContent = cuentasSinPago.length;
-            badge.style.display = 'inline-block';
-        } else {
-            badge.style.display = 'none';
-        }
-    }
-
-    if (cuentasSinPago.length === 0) return;
+    // El conteo para el badge se devuelve siempre (lo combina verificarAlertasPagares).
+    // El modal de aviso si respeta "una vez por sesion" para no ser repetitivo.
+    if (cuentasSinPago.length === 0 || sessionStorage.getItem("alertaCuentasSinPagoVistaSesion")) return cuentasSinPago.length;
 
     sessionStorage.setItem("alertaCuentasSinPagoVistaSesion", "1");
 
@@ -444,7 +426,41 @@ function verificarAlertasPagares() {
         </div>`;
 
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+    return cuentasSinPago.length;
+}
+
+// Orquestador: corre ambas verificaciones (cuentas sin pago por antigüedad +
+// pagares vencidos por fecha) pero ya NO las mezcla en un solo numero.
+// La logica de negocio real es antigüedad de abonos, asi que esa es la que
+// manda en el badge principal (rojo). "Pagares vencidos" es un tema documental
+// (el pagare no se ha marcado aunque el cliente ya haya pagado), asi que se
+// re-prioriza a un badge secundario, mas discreto, junto al principal.
+function verificarAlertasPagares() {
+    const totalVencidos = verificarAlertasPagaresVencidos();
+    const totalSinPago = verificarAlertasCuentasSinPago();
+
+    const badgePrincipal = document.getElementById("badgeCobranzaVencidos");
+    if (badgePrincipal) {
+        if (totalSinPago > 0) {
+            badgePrincipal.textContent = totalSinPago > 99 ? '99+' : totalSinPago;
+            badgePrincipal.style.display = 'inline-block';
+        } else {
+            badgePrincipal.style.display = 'none';
+        }
+    }
+
+    const badgeDocumental = document.getElementById("badgeCobranzaDocumental");
+    if (badgeDocumental) {
+        if (totalVencidos > 0) {
+            badgeDocumental.textContent = totalVencidos > 99 ? '99+' : totalVencidos;
+            badgeDocumental.style.display = 'inline-block';
+        } else {
+            badgeDocumental.style.display = 'none';
+        }
+    }
 }
 
 window.renderDashboard = renderDashboard;
 window.verificarAlertasPagares = verificarAlertasPagares;
+window.verificarAlertasPagaresVencidos = verificarAlertasPagaresVencidos;
+window.verificarAlertasCuentasSinPago = verificarAlertasCuentasSinPago;

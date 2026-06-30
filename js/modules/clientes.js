@@ -2,6 +2,134 @@
 
 window.clientes = StorageService.get("clientes", []);
 
+// ================================================================
+// 🔐 BLINDAJE DE IDENTIDAD: la tabla "clientes" es la ÚNICA fuente
+// de verdad para nombre/teléfono/dirección. Clientes migrados de
+// otros sistemas pueden no tener "id"; aquí se les asigna uno de
+// forma permanente para que el picker y los reportes siempre
+// puedan referenciarlos de forma estable.
+// ================================================================
+function _clientesAsegurarIds() {
+    const lista = StorageService.get("clientes", []);
+    if (!Array.isArray(lista) || lista.length === 0) return lista;
+
+    const idsUsados = new Set(lista.map(c => c.id).filter(id => id !== undefined && id !== null && id !== ''));
+    let asignados = 0;
+
+    lista.forEach((c, idx) => {
+        if (c.id === undefined || c.id === null || c.id === '') {
+            let nuevoId = Date.now() + idx;
+            while (idsUsados.has(nuevoId)) nuevoId++;
+            c.id = nuevoId;
+            idsUsados.add(nuevoId);
+            asignados++;
+        }
+    });
+
+    if (asignados > 0) {
+        StorageService.set("clientes", lista);
+        console.log(`🔧 Se asignó ID permanente a ${asignados} cliente(s) migrado(s) sin identificador.`);
+    }
+    window.clientes = lista;
+    return lista;
+}
+window._clientesAsegurarIds = _clientesAsegurarIds;
+
+// ================================================================
+// 🎯 RESOLVEDOR CANÓNICO: dado un id y/o nombre (típicamente venidos
+// de una venta, cuenta por cobrar o apartado), regresa el registro
+// VIGENTE en la tabla "clientes" (con su nombre/teléfono/dirección
+// actuales). Esto es lo que debe usarse para MOSTRAR datos del
+// cliente en reportes; nunca la copia congelada que quedó guardada
+// dentro de la venta/cuenta al momento de crearla.
+// ================================================================
+window.obtenerClienteCanonico = function(id, nombre, telefono) {
+    const lista = (Array.isArray(window.clientes) && window.clientes.length)
+        ? window.clientes
+        : StorageService.get("clientes", []);
+
+    const idBuscado = (id !== undefined && id !== null && id !== '') ? String(id) : '';
+    if (idBuscado) {
+        const porId = lista.find(c => String(c.id) === idBuscado);
+        if (porId) return porId;
+    }
+
+    const nombreBuscado = _clienteNormalizarBusqueda(nombre);
+    const telBuscado = String(telefono || '').replace(/\D/g, '');
+
+    let candidato = null;
+    if (nombreBuscado) {
+        candidato = lista.find(c => _clienteNormalizarBusqueda(c.nombre) === nombreBuscado) || null;
+    }
+    if (!candidato && telBuscado) {
+        candidato = lista.find(c => String(c.telefono || '').replace(/\D/g, '') === telBuscado) || null;
+    }
+    return candidato;
+};
+
+// ================================================================
+// 🔗 MIGRACIÓN DE ENLACE: las cuentas por cobrar / apartados creados
+// antes de tener "id" en clientes (o antes de este blindaje) quedaron
+// con el nombre "congelado" y sin clienteId. Aquí se enlazan una sola
+// vez de forma permanente contra la tabla "clientes" (por nombre y,
+// si no hay coincidencia, por teléfono), para que de ahí en adelante
+// CUALQUIER reporte pueda resolver al cliente vigente por ID.
+// ================================================================
+function _clientesVincularRegistrosHistoricos() {
+    const lista = (Array.isArray(window.clientes) && window.clientes.length)
+        ? window.clientes
+        : StorageService.get("clientes", []);
+    if (!Array.isArray(lista) || lista.length === 0) return;
+
+    let totalEnlazados = 0;
+
+    const enlazarColeccion = (clave, leerId, leerNombre, leerTelefono, escribirId) => {
+        const coleccion = StorageService.get(clave, []);
+        if (!Array.isArray(coleccion) || coleccion.length === 0) return;
+        let cambios = false;
+        coleccion.forEach(item => {
+            const idActual = leerId(item);
+            if (idActual !== undefined && idActual !== null && idActual !== '') return; // ya enlazado
+            const nombreItem = leerNombre(item);
+            const telItem = leerTelefono ? leerTelefono(item) : '';
+            const match = window.obtenerClienteCanonico(null, nombreItem, telItem);
+            if (match) {
+                escribirId(item, match.id);
+                cambios = true;
+                totalEnlazados++;
+            }
+        });
+        if (cambios) StorageService.set(clave, coleccion);
+    };
+
+    enlazarColeccion(
+        "cuentasPorCobrar",
+        c => c.clienteId,
+        c => c.nombre || c.clienteNombre,
+        c => c.telefono,
+        (c, id) => { c.clienteId = id; }
+    );
+
+    enlazarColeccion(
+        "apartados",
+        a => a.clienteId,
+        a => a.clienteNombre,
+        null,
+        (a, id) => { a.clienteId = id; }
+    );
+
+    if (totalEnlazados > 0) {
+        console.log(`🔗 Se enlazaron ${totalEnlazados} registro(s) histórico(s) con su cliente vigente en la tabla "clientes".`);
+    }
+}
+window._clientesVincularRegistrosHistoricos = _clientesVincularRegistrosHistoricos;
+
+// ⚠️ IMPORTANTE: estas funciones NO se ejecutan aquí arriba porque este
+// archivo corre ANTES de que StorageService.init() termine de cargar los
+// datos reales (IndexedDB es asíncrono). Ejecutarlas aquí operaría sobre
+// listas vacías. Es StorageService.init() (en storage.js) quien las invoca
+// en el momento correcto, una vez que los datos ya están en memoria.
+
 function _escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -275,11 +403,8 @@ function eliminarCliente(id) {
 function prepararEdicionCliente(id) {
     const c = window.clientes.find(cli => cli.id === id);
     if (!c) return;
-    document.getElementById("clienteNombre").value   = c.nombre;
-    document.getElementById("clienteDireccion").value = c.direccion || '';
-    document.getElementById("clienteTelefono").value = c.telefono || '';
-    document.getElementById("clienteReferencia").value = c.referencia || '';
-    window.clienteEditandoId = id;
+    window._clienteGestionCobranzaSeleccionado = c;
+    renderGestionClientesCobranza();
     window.scrollTo(0, 0);
 }
 
@@ -773,6 +898,121 @@ function enviarSolicitudCambioCliente() {
     renderGestionDatosCliente();
 }
 
+// ================================================================
+// GESTIONAR CLIENTES (COBRANZA) — Misma experiencia que "Datos de
+// Cliente" en Operación, pero los cambios se aplican directo a la
+// base de clientes (sin pasar por la Boveda de Autorizaciones).
+// ================================================================
+function seleccionarClienteParaGestionCobranza() {
+    if (typeof window.abrirSelectorCliente !== 'function') {
+        alert('El selector de clientes aun no esta disponible.');
+        return;
+    }
+    window.abrirSelectorCliente({
+        titulo: 'Seleccionar cliente para actualizar datos',
+        onSeleccion: (cliente) => {
+            window._clienteGestionCobranzaSeleccionado = cliente;
+            renderGestionClientesCobranza();
+        }
+    });
+}
+
+function renderGestionClientesCobranza() {
+    const cont = document.getElementById('contenidoGestionClientesCobranza');
+    if (!cont) return;
+    const cliente = window._clienteGestionCobranzaSeleccionado || null;
+    const totalClientes = StorageService.get('clientes', []).length;
+
+    const actual = cliente ? _clienteCamposBase(cliente) : { nombre: '', direccion: '', telefono: '', referencia: '' };
+    cont.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px;">
+        <div>
+            <h2 style="margin:0;color:#0f172a;">Gestionar Clientes</h2>
+            <p style="margin:5px 0 0;color:#64748b;">Los cambios aqui se aplican directo a la base de clientes (sin pasar por la Boveda).</p>
+        </div>
+        <button onclick="seleccionarClienteParaGestionCobranza()" style="padding:11px 16px;background:#2563eb;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Seleccionar cliente</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:16px;align-items:start;margin-bottom:18px;">
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:18px;box-shadow:0 2px 8px rgba(15,23,42,0.06);">
+            ${cliente ? `
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;">
+                    <strong style="color:#0f172a;">Cliente seleccionado: ${_escapeHtml(cliente.nombre || '-')}</strong><br>
+                    <small style="color:#64748b;">Tel: ${_escapeHtml(cliente.telefono || '-')} · Dir: ${_escapeHtml(cliente.direccion || '-')}</small><br>
+                    <small style="color:#64748b;">Referencia actual: ${_escapeHtml(cliente.referencia || '-')}</small>
+                </div>
+                <input type="hidden" id="gestCobClienteId" value="${_escapeHtml(cliente.id)}">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div><label style="font-size:12px;font-weight:900;color:#475569;">NOMBRE</label><input id="gestCobClienteNombre" value="${_escapeHtml(actual.nombre)}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"></div>
+                    <div><label style="font-size:12px;font-weight:900;color:#475569;">TELEFONO</label><input id="gestCobClienteTelefono" value="${_escapeHtml(actual.telefono)}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"></div>
+                </div>
+                <div style="margin-bottom:12px;"><label style="font-size:12px;font-weight:900;color:#475569;">DIRECCION</label><input id="gestCobClienteDireccion" value="${_escapeHtml(actual.direccion)}" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;"></div>
+                <div style="margin-bottom:14px;">
+                    <label style="font-size:12px;font-weight:900;color:#475569;">REFERENCIA BUSCABLE</label>
+                    <textarea id="gestCobClienteReferencia" style="width:100%;min-height:82px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;">${_escapeHtml(actual.referencia)}</textarea>
+                    <small style="color:#64748b;">Usala como alias y ayuda de busqueda: colonia, punto cercano, nombre alterno, negocio, familiar autorizado o nota corta para reconocerlo rapido.</small>
+                </div>
+                <button onclick="aplicarCambioClienteDirecto()" style="width:100%;padding:13px;background:#16a34a;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">💾 Guardar Cambios (se aplican de inmediato)</button>
+            ` : `
+                <div style="text-align:center;padding:42px 20px;color:#64748b;">
+                    <h3 style="margin-top:0;color:#0f172a;">Selecciona un cliente</h3>
+                    <p>Usaremos el selector universal para encontrarlo por nombre, telefono, direccion o referencia.</p>
+                    <button onclick="seleccionarClienteParaGestionCobranza()" style="padding:11px 16px;background:#2563eb;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Abrir selector</button>
+                </div>
+            `}
+        </div>
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:18px;box-shadow:0 2px 8px rgba(15,23,42,0.06);">
+            <h3 style="margin:0 0 10px;color:#0f172a;">Base de clientes</h3>
+            <div style="font-size:32px;font-weight:900;color:#16a34a;line-height:1;">${totalClientes}</div>
+            <p style="color:#64748b;margin:6px 0 12px;font-size:13px;">Clientes registrados.</p>
+            <p style="color:#94a3b8;font-size:13px;">Aqui los cambios no requieren autorizacion de auditoria; se guardan al instante en la base de clientes y se sincronizan con cuentas, pagares y ventas relacionadas.</p>
+        </div>
+    </div>`;
+}
+
+function aplicarCambioClienteDirecto() {
+    const clienteId = document.getElementById('gestCobClienteId')?.value;
+    const clientesBD = StorageService.get('clientes', []);
+    const index = clientesBD.findIndex(c => String(c.id) === String(clienteId));
+    if (index === -1) return alert('Cliente no encontrado.');
+
+    const despues = _clienteCamposBase({
+        nombre: document.getElementById('gestCobClienteNombre')?.value,
+        direccion: document.getElementById('gestCobClienteDireccion')?.value,
+        telefono: document.getElementById('gestCobClienteTelefono')?.value,
+        referencia: document.getElementById('gestCobClienteReferencia')?.value
+    });
+    const validacion = ValidatorService.validarCliente({ nombre: despues.nombre, telefono: despues.telefono });
+    if (!validacion.valid) return alert('⚠️ ' + validacion.errores.join('\n'));
+
+    const antes = _clienteCamposBase(clientesBD[index]);
+    const cambios = _clienteCambios(antes, despues);
+    if (cambios.length === 0) return alert('No hay cambios que guardar.');
+
+    clientesBD[index] = _clienteConBusqueda({ ...clientesBD[index], ...despues });
+    if (!StorageService.set('clientes', clientesBD)) {
+        alert('❌ Error guardando los cambios del cliente.');
+        return;
+    }
+    _clientesSincronizarDatosRelacionados(clientesBD[index]);
+
+    const sesion = _clienteSesionActiva() || {};
+    window.AuditService?.log?.({
+        accion: 'CLIENTE_DATOS_ACTUALIZADOS',
+        modulo: 'Clientes',
+        entidad: clientesBD[index].nombre,
+        entidadId: clientesBD[index].id,
+        detalle: `Cambio aplicado directo desde Gestionar Clientes (Cobranza): ${cambios.join(', ')}`,
+        severidad: 'info',
+        datos: { antes, despues, aplicadoPor: sesion.nombre || sesion.usuario || 'Usuario' }
+    });
+
+    window._clienteGestionCobranzaSeleccionado = clientesBD[index];
+    alert('✅ Cambios guardados.');
+    renderGestionClientesCobranza();
+    if (typeof window.renderClientes === 'function') window.renderClientes();
+}
+
 function _clientesSincronizarDatosRelacionados(cliente) {
     if (!cliente?.id) return 0;
     const campos = { id: cliente.id, ..._clienteCamposBase(cliente) };
@@ -1000,6 +1240,9 @@ window.abrirModalNuevoCliente = abrirModalNuevoCliente;
 window.guardarClienteDesdeModal = guardarClienteDesdeModal;
 window.seleccionarClienteParaGestion = seleccionarClienteParaGestion;
 window.renderGestionDatosCliente = renderGestionDatosCliente;
+window.seleccionarClienteParaGestionCobranza = seleccionarClienteParaGestionCobranza;
+window.renderGestionClientesCobranza = renderGestionClientesCobranza;
+window.aplicarCambioClienteDirecto = aplicarCambioClienteDirecto;
 window.enviarSolicitudCambioCliente = enviarSolicitudCambioCliente;
 window.renderSolicitudesClienteAutorizacion = renderSolicitudesClienteAutorizacion;
 window.revisarSolicitudCliente = revisarSolicitudCliente;

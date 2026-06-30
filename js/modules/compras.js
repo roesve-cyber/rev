@@ -410,7 +410,7 @@ function renderHistorialCostosAuditoria() {
         <span id="selectProductoHistorialCostos-display"
               style="flex:1;padding:7px 12px;font-size:15px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;">Sin seleccionar</span>
         <button type="button"
-                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',incluirInactivos:true,onSeleccion:function(p){
+                onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',incluirInactivos:true,campoPrecio:'costo',onSeleccion:function(p){
                     document.getElementById('selectProductoHistorialCostos').value=p.id;
                     var d=document.getElementById('selectProductoHistorialCostos-display');
                     d.textContent=p.nombre; d.style.color='#111827';
@@ -1901,7 +1901,7 @@ function abrirNuevaOrdenCompra() {
                                 Sin seleccionar
                             </span>
                             <button type="button"
-        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){document.getElementById('ocProductoSel').value=p.id;var d=document.getElementById('ocProductoSel-display');d.textContent=p.nombre+'  (Costo: '+dinero(p.costo||0)+')';d.style.color='#111827';alert('💡 Referencia de costo:\\nEl último costo registrado para este producto es de: $' + (p.costo || 0));}})"
+        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',campoPrecio:'costo',onSeleccion:function(p){document.getElementById('ocProductoSel').value=p.id;var d=document.getElementById('ocProductoSel-display');d.textContent=p.nombre+'  (Costo: '+dinero(p.costo||0)+')';d.style.color='#111827';alert('💡 Referencia de costo:\\nEl último costo registrado para este producto es de: $' + (p.costo || 0));}})"
         style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
     🔍 Buscar
 </button>
@@ -3105,7 +3105,7 @@ function editarOrdenCompra(id) {
                     Sin seleccionar
                 </span>
                 <button type="button"
-        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){document.getElementById('editOcProductoSel').value=p.id;var d=document.getElementById('editOcProductoSel-display');d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';d.style.color='#111827';alert('💡 Referencia de costo:\\nEl último costo registrado para este producto es de: $' + (p.costo || 0));}})"
+        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',campoPrecio:'costo',onSeleccion:function(p){document.getElementById('editOcProductoSel').value=p.id;var d=document.getElementById('editOcProductoSel-display');d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';d.style.color='#111827';alert('💡 Referencia de costo:\\nEl último costo registrado para este producto es de: $' + (p.costo || 0));}})"
         style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
     🔍 Buscar
 </button>
@@ -3453,7 +3453,7 @@ function abrirModalCompraDirectaMulti() {
             <input type="hidden" id="cdProductoSel" value="">
             <div style="display:flex;align-items:center;gap:6px;">
                 <span id="cdProductoSel-display" style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;">Sin seleccionar</span>
-                <button type="button" onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){document.getElementById('cdProductoSel').value=p.id;var d=document.getElementById('cdProductoSel-display');d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';d.style.color='#111827';}})" style="padding:9px 12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;">🔍 Buscar</button>
+                <button type="button" onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',campoPrecio:'costo',onSeleccion:function(p){document.getElementById('cdProductoSel').value=p.id;var d=document.getElementById('cdProductoSel-display');d.textContent=p.nombre+' ('+dinero(p.costo||0)+')';d.style.color='#111827';}})" style="padding:9px 12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;">🔍 Buscar</button>
             </div>
           </div>
           <button onclick="agregarArticuloCompraDirecta()" style="padding:9px 16px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Añadir Artículo</button>
