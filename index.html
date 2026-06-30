@@ -105,11 +105,11 @@
         </div>
 
         <div class="menu-item">
-    <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
+    <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span><span id="badgeCobranzaDocumental" title="Pagares sin aplicar (documental)" style="display:none; background:#fde68a; color:#92400e; border-radius:9999px; padding:0px 6px; font-size:9px; margin-left:3px; font-weight:bold; vertical-align:2px;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
         <button onclick="navA('visor-creditos');renderVisorCreditosCobranza();">📋 Visor de Créditos</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
-        <button onclick="navA('clientes')">👥 Gestionar Clientes</button>
+        <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
     </div>
 </div>
@@ -472,18 +472,12 @@
  <div id="tablaProveedores"></div>
  </div>
 
-    <!-- CLIENTES (SIMPLIFICADO) -->
+    <!-- CLIENTES (GESTION DIRECTA - COBRANZA) -->
     <div id="clientes" class="vista oculto">
- <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
- <h2>Base de Datos de Clientes</h2>
+ <div id="contenidoGestionClientesCobranza"></div>
+ <div style="display: flex; justify-content: space-between; align-items: center; margin:24px 0 14px;">
+ <h2 style="margin:0;">Base de Datos de Clientes</h2>
  <button onclick="renderClientes()" style="padding:8px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Refrescar</button>
- </div>
- <div style="background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap;">
- <input type="text" id="clienteNombre" placeholder="Nombre Completo" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <input type="text" id="clienteDireccion" placeholder="Direccion" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <input type="text" id="clienteTelefono" placeholder="Telefono" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <input type="text" id="clienteReferencia" placeholder="Referencia" style="flex:1; min-width:160px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <button onclick="guardarCliente()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Anadir</button>
  </div>
  <div id="listaClientes" style="margin-top: 10px;"></div>
  </div>
@@ -1133,7 +1127,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
-<script src="js/services/storage.js?v=19"></script>
+<script src="js/services/storage.js?v=20"></script>
 <script src="js/services/recovery.js"></script>
 <script src="js/services/validator.js?v=4"></script>
 <script src="js/services/calculator.js"></script>
@@ -1149,8 +1143,8 @@
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=6"></script>
 <script src="js/modules/ventas.js?v=2.7"></script>
-<script src="js/modules/clientes.js?v=3"></script>
-<script src="js/modules/cxc.js?v=32"></script>
+<script src="js/modules/clientes.js?v=5"></script>
+<script src="js/modules/cxc.js?v=33"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=50"></script>
 <script src="js/modules/bancos.js?v=12"></script>
@@ -1169,7 +1163,7 @@
 <script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=4"></script>
 <script src="js/modules/push-autorizaciones.js?v=5"></script>
-<script src="js/modules/estadoCuentaCliente.js?v=2"></script>
+<script src="js/modules/estadoCuentaCliente.js?v=3"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/core/navigation.js?v=9"></script>
