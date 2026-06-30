@@ -54,6 +54,10 @@
         return String(cuenta?.estado || cuenta?.estatus || '').toLowerCase().includes('cancel');
     }
 
+    function cuentaIncobrable(cuenta) {
+        return cuenta?.incobrable === true;
+    }
+
     function abonoValido(abono) {
         if (!abono) return false;
         const estado = String(abono.estado || abono.estatus || '').toLowerCase();
@@ -197,7 +201,7 @@
 
     function analizarCartera(cuentas, pagaresSistema, opciones = {}) {
         const items = (Array.isArray(cuentas) ? cuentas : [])
-            .filter(c => c && !cuentaCancelada(c))
+            .filter(c => c && !cuentaCancelada(c) && !cuentaIncobrable(c))
             .map(cuenta => analizarCuenta(cuenta, { ...opciones, pagaresSistema }))
             .filter(r => r.key !== 'saldado')
             .sort((a, b) => {

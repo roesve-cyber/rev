@@ -685,7 +685,17 @@ const StorageService = {
         window.categoriasData = this.get("categoriasData", []);
         window.carrito = this.get("carrito", []);
         window.movimientosInventario = this.get("movimientosInventario", []);
-        
+
+        // 🔐 Integridad de clientes: ahora que los datos reales ya están en
+        // memoria (no antes), aseguramos IDs en clientes migrados y
+        // enlazamos cuentas/apartados históricos sin clienteId.
+        try {
+            if (typeof window._clientesAsegurarIds === 'function') window._clientesAsegurarIds();
+            if (typeof window._clientesVincularRegistrosHistoricos === 'function') window._clientesVincularRegistrosHistoricos();
+        } catch (e) {
+            console.warn('No se pudo ejecutar la integridad de clientes:', e);
+        }
+
         this._isReady = true;
         return true;
     },
