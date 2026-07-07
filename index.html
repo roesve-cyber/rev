@@ -66,6 +66,7 @@
                 <button onclick="navA('consulta-inventario'); setTimeout(()=>{window.initConsultaInventario && window.initConsultaInventario(); window.renderConsultaInventario && window.renderConsultaInventario();}, 100)">📊 Consulta de Inventario</button>
                 <button onclick="navA('toma-inventario')">✅ Toma de Inventario</button>
                 <button onclick="navA('kardex-inventario'); if(typeof renderKardexInventario === 'function') renderKardexInventario();">&#128202; Kardex de Inventario</button>
+                <button onclick="if(typeof detectarYCorregirIdsDuplicados === 'function') detectarYCorregirIdsDuplicados();" style="color:#f59e0b; font-weight:bold;">🔧 Reparar IDs duplicados</button>
             </div>
 
         </div>
