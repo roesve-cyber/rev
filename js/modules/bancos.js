@@ -844,6 +844,44 @@ function renderFlujoCaja() {
 window._filtroCuentaLiquidez = window._filtroCuentaLiquidez || 'Todos';
 window._filtroLiquidezDesde = window._filtroLiquidezDesde || '';
 window._filtroLiquidezHasta = window._filtroLiquidezHasta || '';
+window._filtroPeriodoLiquidez = window._filtroPeriodoLiquidez || 'total'; // Guarda el combo seleccionado
+
+window.aplicarFiltroPeriodoLiquidez = function(periodo) {
+    window._filtroPeriodoLiquidez = periodo;
+    if (periodo === 'manual') return;
+
+    const d = new Date();
+    const fmt = (dateObj) => {
+        return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+    };
+
+    if (periodo === 'dia') {
+        const hoyStr = fmt(d);
+        window._filtroLiquidezDesde = hoyStr;
+        window._filtroLiquidezHasta = hoyStr;
+    } else if (periodo === 'semana') {
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1); // El Lunes es 1, si es domingo (0) retrocede 6 días
+        const lunes = new Date(d.getFullYear(), d.getMonth(), diff);
+        const domingo = new Date(d.getFullYear(), d.getMonth(), diff + 6);
+        window._filtroLiquidezDesde = fmt(lunes);
+        window._filtroLiquidezHasta = fmt(domingo);
+    } else if (periodo === 'mes') {
+        const primerDia = new Date(d.getFullYear(), d.getMonth(), 1); // Día 1
+        const ultimoDia = new Date(d.getFullYear(), d.getMonth() + 1, 0); // Último día del mes
+        window._filtroLiquidezDesde = fmt(primerDia);
+        window._filtroLiquidezHasta = fmt(ultimoDia);
+    } else if (periodo === 'ano') {
+        const primerDia = new Date(d.getFullYear(), 0, 1);
+        const ultimoDia = new Date(d.getFullYear(), 11, 31);
+        window._filtroLiquidezDesde = fmt(primerDia);
+        window._filtroLiquidezHasta = fmt(ultimoDia);
+    } else { // 'total'
+        window._filtroLiquidezDesde = '';
+        window._filtroLiquidezHasta = '';
+    }
+    renderCuentasBancarias();
+};
 
 function _bancosCalcularSaldosDesdeMovimientos() {
     const tarjetas = StorageService.get("tarjetasConfig", []);
@@ -939,9 +977,17 @@ function _bancosAgruparTransferenciasConciliacion(lista) {
     });
 
     return [...sueltos, ...agrupados].sort((a, b) => {
-        const dateA = new Date(a.fecha || 0);
-        const dateB = new Date(b.fecha || 0);
-        return dateA - dateB;
+        const obtenerTimestamp = (m) => {
+            if (!m || !m.fecha) return 0;
+            if (typeof m.fecha === 'string' && m.fecha.includes('/')) {
+                const partes = m.fecha.split(' ')[0].split('/');
+                if (partes.length === 3) return new Date(`${partes[2]}-${partes[1].padStart(2,'0')}-${partes[0].padStart(2,'0')}`).getTime();
+            }
+            const d = new Date(m.fecha);
+            return isNaN(d.getTime()) ? 0 : d.getTime();
+        };
+        // AQUÍ ESTÁ LA MAGIA: dateB menos dateA para que sea del más reciente al más antiguo
+        return obtenerTimestamp(b) - obtenerTimestamp(a); 
     });
 }
 
@@ -1015,11 +1061,34 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     });
     leftPanelHTML += `</div>`;
 
-    // 🚀 ORDENAMIENTO ESTRICTO POR FECHA (MÁS RECIENTE A MÁS ANTIGUO)
+    // 🚀 ORDENAMIENTO ESTRICTO POR FECHA (MÁS RECIENTE A MÁS ANTIGUO - SEGURO)
     let movimientosFiltrados = movimientos.slice().sort((a, b) => {
-        const dateA = new Date(a.fecha || 0);
-        const dateB = new Date(b.fecha || 0);
-        return dateA - dateB;
+        const obtenerTimestamp = (m) => {
+            if (!m) return 0;
+            // Intentar obtener la fecha de cualquier propiedad disponible
+            const f = m.fechaISO || m.createdAt || m.fecha;
+            if (!f) return 0;
+            if (typeof f === 'number') return f;
+
+            // Si el formato viene con diagonales estilo DD/MM/YYYY
+            if (typeof f === 'string' && f.includes('/')) {
+                const partesEspacio = f.trim().split(' ');
+                const partesFecha = partesEspacio[0].split('/');
+                if (partesFecha.length === 3) {
+                    const [dia, mes, anio] = partesFecha;
+                    // Reestructurar a formato ISO estándar (YYYY-MM-DD)
+                    let isoSeguro = `${anio}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+                    if (partesEspacio[1]) isoSeguro += `T${partesEspacio[1]}`;
+                    const dObj = new Date(isoSeguro);
+                    if (!isNaN(dObj.getTime())) return dObj.getTime();
+                }
+            }
+
+            const dObj = new Date(f);
+            return isNaN(dObj.getTime()) ? 0 : dObj.getTime();
+        };
+
+        return obtenerTimestamp(b) - obtenerTimestamp(a);
     });
     
     // 1. Filtro por Cuenta
@@ -1045,12 +1114,23 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     let rightPanelHTML = `
         <div style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                
                 <h3 style="margin:0; color:#374151;">📋 MOVIMIENTOS</h3>
+                
+                <select onchange="aplicarFiltroPeriodoLiquidez(this.value)" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; font-weight:bold; color:#475569; background:#f8fafc; cursor:pointer;">
+                    <option value="dia" ${window._filtroPeriodoLiquidez === 'dia' ? 'selected' : ''}>Día de hoy</option>
+                    <option value="semana" ${window._filtroPeriodoLiquidez === 'semana' ? 'selected' : ''}>Esta Semana</option>
+                    <option value="mes" ${window._filtroPeriodoLiquidez === 'mes' ? 'selected' : ''}>Este Mes</option>
+                    <option value="ano" ${window._filtroPeriodoLiquidez === 'ano' ? 'selected' : ''}>Este Año</option>
+                    <option value="total" ${window._filtroPeriodoLiquidez === 'total' ? 'selected' : ''}>Total (Histórico)</option>
+                    <option value="manual" ${window._filtroPeriodoLiquidez === 'manual' ? 'selected' : ''} style="display:none;">Fechas Manuales</option>
+                </select>
+
                 <div style="display:flex; gap:10px; align-items:center;">
-                    <input type="date" value="${window._filtroLiquidezDesde}" onchange="window._filtroLiquidezDesde=this.value; renderCuentasBancarias();" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;" title="Fecha Desde">
+                    <input type="date" value="${window._filtroLiquidezDesde}" onchange="window._filtroPeriodoLiquidez='manual'; window._filtroLiquidezDesde=this.value; renderCuentasBancarias();" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;" title="Fecha Desde">
                     <span style="color:#64748b; font-size:12px; font-weight:bold;">al</span>
-                    <input type="date" value="${window._filtroLiquidezHasta}" onchange="window._filtroLiquidezHasta=this.value; renderCuentasBancarias();" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;" title="Fecha Hasta">
-                    <button onclick="window._filtroLiquidezDesde=''; window._filtroLiquidezHasta=''; renderCuentasBancarias();" style="padding:6px 10px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:12px;" title="Mostrar Todo">🔄 Reset</button>
+                    <input type="date" value="${window._filtroLiquidezHasta}" onchange="window._filtroPeriodoLiquidez='manual'; window._filtroLiquidezHasta=this.value; renderCuentasBancarias();" style="padding:6px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;" title="Fecha Hasta">
+                    <button onclick="aplicarFiltroPeriodoLiquidez('total');" style="padding:6px 10px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:12px;" title="Mostrar Todo">🔄 Reset</button>
                 </div>
             </div>
             <div style="overflow:auto; max-height:65vh; border:1px solid #f1f5f9; border-radius:8px;">

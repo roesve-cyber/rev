@@ -153,7 +153,10 @@
 
     function coincideCuenta(mov, cuenta) {
         if (!cuenta || cuenta.id === 'todas') return true;
-        const valorMov = normalizarId(mov.cuenta || mov.cuentaId || mov.metodoPago || mov.medioPago || mov.origen || 'efectivo');
+        
+        // CORRECCIÓN: 'origen' debe ir ANTES que 'metodoPago' y 'medioPago'.
+        const valorMov = normalizarId(mov.cuenta || mov.cuentaId || mov.origen || mov.metodoPago || mov.medioPago || 'efectivo');
+        
         return cuenta.aliases.some(alias => normalizarId(alias) === valorMov);
     }
 
