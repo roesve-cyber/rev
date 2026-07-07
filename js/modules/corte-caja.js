@@ -3,6 +3,17 @@
 (function() {
     const DENOMINACIONES = [1000, 500, 200, 100, 50, 20, 10, 5, 2, 1, 0.5];
 
+    // Cargar saldos iniciales manuales por cuenta desde localStorage
+    try {
+        const guardados = localStorage.getItem('saldosInicialesManualesCorte');
+        if (guardados) {
+            window._saldosInicialesManuales = JSON.parse(guardados);
+        }
+    } catch (e) {
+        console.warn('No se pudieron cargar saldos iniciales desde localStorage:', e);
+        window._saldosInicialesManuales = {};
+    }
+
     const dinero = (valor) => new Intl.NumberFormat('es-MX', {
         style: 'currency',
         currency: 'MXN'
@@ -295,6 +306,10 @@
         const saldoFinalSistema = saldoActual - netoPosterior;
         const saldoInicial = saldoFinalSistema - neto;
 
+        // Obtener saldo inicial manual específico para esta cuenta
+        const saldosInicialesManuales = window._saldosInicialesManuales || {};
+        const saldoInicialManualCuenta = saldosInicialesManuales[cuenta.id] || null;
+
         const porCategoria = {};
         movimientos.forEach(m => {
             if (!porCategoria[m._categoria]) {
@@ -312,6 +327,7 @@
             inicio,
             fin,
             saldoInicial,
+            saldoInicialManualCuenta,
             ingresos,
             egresos,
             neto,
@@ -348,7 +364,9 @@
         const egresos = seleccionados.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
         
         const saldoInicialManualInput = document.getElementById('corteSaldoInicialManual');
-        const saldoInicialManual = saldoInicialManualInput && saldoInicialManualInput.value !== '' ? Number(saldoInicialManualInput.value) : null;
+        const saldoInicialManualInputVal = saldoInicialManualInput && saldoInicialManualInput.value !== '' ? Number(saldoInicialManualInput.value) : null;
+        // Usar el valor del input si está presente, si no usar el guardado para esta cuenta específica
+        const saldoInicialManual = saldoInicialManualInputVal !== null ? saldoInicialManualInputVal : (resumen?.saldoInicialManualCuenta || null);
         const saldoInicial = saldoInicialManual !== null ? saldoInicialManual : (resumen?.saldoInicial || 0);
         
         const saldoFinalSistema = saldoInicial + ingresos - egresos;
@@ -545,6 +563,10 @@
         resetSeleccionCorte(resumen, true);
         const seleccion = resumenSeleccionado(resumen);
 
+        // Cargar saldo inicial manual guardado para esta cuenta específica
+        const saldosInicialesManuales = window._saldosInicialesManuales || {};
+        const saldoInicialGuardado = saldosInicialesManuales[filtros.cuentaId] || '';
+
         cont.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
                 <div>
@@ -572,7 +594,7 @@
                 </div>
                 <div>
                     <label style="font-size:11px;font-weight:800;color:#64748b;">SALDO INICIAL MANUAL (opcional)</label>
-                    <input id="corteSaldoInicialManual" type="number" step="0.01" placeholder="Dejar vacío para calcular automático" onchange="recalcularSeleccionCorte()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+                    <input id="corteSaldoInicialManual" type="number" step="0.01" value="${esc(saldoInicialGuardado)}" placeholder="Dejar vacío para calcular automático" onchange="guardarSaldoInicialManualCuenta(); recalcularSeleccionCorte()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
                 </div>
             </div>
 
@@ -679,6 +701,31 @@
         }
 
         recalcularSeleccionCorte();
+    };
+
+    window.guardarSaldoInicialManualCuenta = function() {
+        const input = document.getElementById('corteSaldoInicialManual');
+        const cuentaId = document.getElementById('corteCuenta')?.value || 'todas';
+        if (!input || !cuentaId) return;
+        
+        const valor = input.value !== '' ? Number(input.value) : null;
+        
+        if (!window._saldosInicialesManuales) {
+            window._saldosInicialesManuales = {};
+        }
+        
+        if (valor !== null) {
+            window._saldosInicialesManuales[cuentaId] = valor;
+        } else {
+            delete window._saldosInicialesManuales[cuentaId];
+        }
+        
+        // Guardar en localStorage para persistencia
+        try {
+            localStorage.setItem('saldosInicialesManualesCorte', JSON.stringify(window._saldosInicialesManuales));
+        } catch (e) {
+            console.warn('No se pudo guardar saldos iniciales en localStorage:', e);
+        }
     };
 
     window.recalcularSeleccionCorte = function() {
@@ -843,7 +890,24 @@
                 movimientosMarcados: corte.movimientosMarcados
             }
         });
-        alert(`Corte guardado: ${corte.folio}`);
+        
+        // Calcular saldo final del corte para establecerlo como nuevo saldo inicial manual
+        const saldoFinalCorte = corte.saldoInicial + corte.ingresos - corte.egresos;
+        
+        // Guardar el saldo final como nuevo saldo inicial manual para esta cuenta
+        if (!window._saldosInicialesManuales) {
+            window._saldosInicialesManuales = {};
+        }
+        window._saldosInicialesManuales[corte.cuentaId] = saldoFinalCorte;
+        
+        // Persistir en localStorage
+        try {
+            localStorage.setItem('saldosInicialesManualesCorte', JSON.stringify(window._saldosInicialesManuales));
+        } catch (e) {
+            console.warn('No se pudo guardar nuevo saldo inicial en localStorage:', e);
+        }
+        
+        alert(`Corte guardado: ${corte.folio}\n\nEl saldo final de ${dinero(saldoFinalCorte)} se ha establecido como nuevo saldo inicial manual para ${corte.cuentaNombre || 'esta cuenta'}.`);
         renderCorteCaja();
         imprimirCorteGuardado(corte.folio);
     };
