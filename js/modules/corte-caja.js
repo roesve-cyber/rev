@@ -346,7 +346,12 @@
         const seleccionados = movimientosSeleccionados(resumen);
         const ingresos = seleccionados.filter(m => m._tipo === 'ingreso').reduce((s, m) => s + m._monto, 0);
         const egresos = seleccionados.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
-        const saldoFinalSistema = ingresos - egresos;
+        
+        const saldoInicialManualInput = document.getElementById('corteSaldoInicialManual');
+        const saldoInicialManual = saldoInicialManualInput && saldoInicialManualInput.value !== '' ? Number(saldoInicialManualInput.value) : null;
+        const saldoInicial = saldoInicialManual !== null ? saldoInicialManual : (resumen?.saldoInicial || 0);
+        
+        const saldoFinalSistema = saldoInicial + ingresos - egresos;
         const porCategoria = {};
 
         seleccionados.forEach(m => {
@@ -362,6 +367,8 @@
             ingresos,
             egresos,
             neto: ingresos - egresos,
+            saldoInicial,
+            saldoInicialManual,
             saldoFinalSistema,
             movimientos: seleccionados,
             totalMovimientos: resumen?.movimientos?.length || 0,
@@ -563,9 +570,14 @@
                     <label style="font-size:11px;font-weight:800;color:#64748b;">CAJA / CUENTA</label>
                     ${renderSelectCuentas(filtros.cuentaId)}
                 </div>
+                <div>
+                    <label style="font-size:11px;font-weight:800;color:#64748b;">SALDO INICIAL MANUAL (opcional)</label>
+                    <input id="corteSaldoInicialManual" type="number" step="0.01" placeholder="Dejar vacío para calcular automático" onchange="recalcularSeleccionCorte()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+                </div>
             </div>
 
             <div id="corteKpiFranja" style="position:sticky;top:72px;z-index:30;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;background:rgba(248,250,252,0.94);backdrop-filter:blur(8px);padding:10px 0;">
+                ${renderKpi('Saldo inicial', seleccion.saldoInicial, '#64748b', seleccion.saldoInicialManual !== null ? 'Manual' : 'Calculado', 'corteKpiSaldoInicial', 'corteSubSaldoInicial')}
                 ${renderKpi('Ingresos marcados', seleccion.ingresos, '#15803d', `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`, 'corteKpiIngresos', 'corteSubIngresos')}
                 ${renderKpi('Egresos marcados', seleccion.egresos, '#b91c1c', `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`, 'corteKpiEgresos', 'corteSubEgresos')}
                 ${renderKpi('Saldo esperado marcado', seleccion.saldoFinalSistema, '#1e40af', `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`, 'corteKpiSaldoSistema', 'corteSubSaldoSistema')}
@@ -677,6 +689,11 @@
         const cats = document.getElementById('corteCategoriasSeleccion');
         const inputReal = document.getElementById('corteTotalReal');
 
+        const saldoInicialEl = document.getElementById('corteKpiSaldoInicial');
+        const subSaldoInicialEl = document.getElementById('corteSubSaldoInicial');
+        if (saldoInicialEl) saldoInicialEl.textContent = dinero(seleccion.saldoInicial);
+        if (subSaldoInicialEl) subSaldoInicialEl.textContent = seleccion.saldoInicialManual !== null ? 'Manual' : 'Calculado';
+
         pintarKpisCorte({
             ingresos: seleccion.ingresos,
             egresos: seleccion.egresos,
@@ -725,8 +742,10 @@
         document.querySelectorAll('[data-denom]').forEach(input => input.value = 0);
         const real = document.getElementById('corteTotalReal');
         const obs = document.getElementById('corteObservaciones');
+        const saldoInicialManual = document.getElementById('corteSaldoInicialManual');
         if (real) real.value = '';
         if (obs) obs.value = '';
+        if (saldoInicialManual) saldoInicialManual.value = '';
         recalcularConteoCorte();
     };
 
@@ -749,7 +768,8 @@
             cuentaNombre: resumen.cuenta.nombre,
             fechaInicio: resumen.filtros.fechaInicio,
             fechaFin: resumen.filtros.fechaFin,
-            saldoInicial: Number(resumen.saldoInicial.toFixed(2)),
+            saldoInicial: Number(seleccion.saldoInicial.toFixed(2)),
+            saldoInicialManual: seleccion.saldoInicialManual !== null ? Number(seleccion.saldoInicialManual.toFixed(2)) : null,
             ingresos: Number(seleccion.ingresos.toFixed(2)),
             egresos: Number(seleccion.egresos.toFixed(2)),
             saldoFinalSistema: Number(seleccion.saldoFinalSistema.toFixed(2)),

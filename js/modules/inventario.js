@@ -1485,25 +1485,44 @@ window.contarIdsDuplicados = function() {
 window.detectarYCorregirIdsDuplicados = function() {
  const idsExistentes = new Set();
  let correcciones = 0;
+ const productosCorregidos = [];
 
- window.productos.forEach(p => {
- // Si el ID ya existe o no tiene, generamos uno numerico nuevo
- if (!p.id || idsExistentes.has(Number(p.id))) {
+ window.productos.forEach((p, index) => {
+ const idStr = String(p.id || '');
+ // Si el ID ya existe o no tiene, generamos uno único nuevo
+ if (!p.id || idsExistentes.has(idStr)) {
  const antiguoId = p.id;
- // Generamos un ID numerico basado en el tiempo + aleatorio
- p.id = Math.round(Date.now() + Math.random() * 1000000);
+ // Generamos un ID único robusto (igual que para productos nuevos)
+ let nuevoId;
+ let intentos = 0;
+ do {
+ nuevoId = Date.now() + Math.random().toString(36).slice(2, 8);
+ intentos++;
+ } while (window.productos.some(prod => String(prod.id) === String(nuevoId)) && intentos < 100);
+ 
+ p.id = nuevoId;
  correcciones++;
- console.log(`Corregido: Antiguo ID ${antiguoId} -> Nuevo ID ${p.id}`);
+ productosCorregidos.push({
+ indice: index,
+ nombre: p.nombre || 'Sin nombre',
+ antiguoId: antiguoId || 'Sin ID',
+ nuevoId: nuevoId
+ });
+ console.log(`Corregido: Antiguo ID ${antiguoId} -> Nuevo ID ${nuevoId} (${p.nombre})`);
  }
- idsExistentes.add(Number(p.id));
+ idsExistentes.add(idStr);
  });
 
  if (correcciones > 0) {
  // Guardar cambios en el almacenamiento local
  if (StorageService.set("productos", window.productos)) {
- alert(`Se repararon ${correcciones} productos con IDs duplicados.\nAhora puedes ver sus detalles normalmente.`);
+ const detalle = productosCorregidos.map(c => 
+ `- ${c.nombre}: ID ${c.antiguoId} -> ${c.nuevoId}`
+ ).join('\n');
+ alert(`Se repararon ${correcciones} productos con IDs duplicados.\n\nDetalle:\n${detalle}\n\nAhora puedes ver sus detalles normalmente.`);
  // Recargar la tabla para aplicar cambios
- if (typeof renderizarTablaInventario === 'function') renderizarTablaInventario();
+ if (typeof renderInventario === 'function') renderInventario();
+ if (typeof aplicarFiltros === 'function') aplicarFiltros();
  } else {
  alert("Error al guardar los cambios en Storage.");
  }
@@ -1900,7 +1919,14 @@ function guardarProductoDB() {
  window.productos[index] = { ...window.productos[index], ...datosProducto, stock: totalStock };
  }
  } else {
- window.productos.push({ id: Date.now(), ...datosProducto, stock: 0 });
+ // Generar ID único que no colisione con productos existentes
+ let nuevoId;
+ let intentos = 0;
+ do {
+ nuevoId = Date.now() + Math.random().toString(36).slice(2, 8);
+ intentos++;
+ } while (window.productos.some(p => String(p.id) === String(nuevoId)) && intentos < 100);
+ window.productos.push({ id: nuevoId, ...datosProducto, stock: 0 });
  }
 
  if (!StorageService.set("productos", window.productos)) return alert("Error guardando producto");
