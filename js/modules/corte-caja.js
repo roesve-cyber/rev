@@ -154,8 +154,10 @@
     function coincideCuenta(mov, cuenta) {
         if (!cuenta || cuenta.id === 'todas') return true;
         
-        // CORRECCIÓN: 'origen' debe ir ANTES que 'metodoPago' y 'medioPago'.
-        const valorMov = normalizarId(mov.cuenta || mov.cuentaId || mov.origen || mov.metodoPago || mov.medioPago || 'efectivo');
+        // CORRECCIÓN: 'etiquetaCuenta' es el campo real de identidad de cuenta (se usa para mostrarla
+        // en las tablas); debe ir antes que 'origen' y muy por delante de 'metodoPago'/'medioPago',
+        // que describen la FORMA de pago, no a qué cuenta pertenece el movimiento.
+        const valorMov = normalizarId(mov.etiquetaCuenta || mov.cuenta || mov.cuentaId || mov.origen || mov.metodoPago || mov.medioPago || 'efectivo');
         
         return cuenta.aliases.some(alias => normalizarId(alias) === valorMov);
     }
