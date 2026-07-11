@@ -203,8 +203,8 @@ function _rcCuentaCancelada(cuenta) {
 // 1. ARC v3 — ANÁLISIS DE RIESGO CON LÓGICA SNE
 // ================================================================
 window.renderARC_v3 = function() {
-    const cont = document.getElementById('reportes') ||
-                 document.getElementById('reportes-contenido') ||
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
@@ -407,8 +407,8 @@ window.sortARCExcel = function(col) {
 };
 
 window.renderARCTablaExcel = function() {
-    const cont = document.getElementById('reportes') ||
-                 document.getElementById('reportes-contenido') ||
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
@@ -918,8 +918,8 @@ window.abrirDetalleScorecardCliente = function(claveCodificada) {
 };
 
 window.renderComportamiento = function() {
-    const cont = document.getElementById('reportes') ||
-                 document.getElementById('reportes-contenido') ||
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
@@ -1236,8 +1236,8 @@ window.renderComportamiento = function() {
 // 4. REPORTE DE COBRANZA MENSUAL
 // ================================================================
 window.renderCobranzaMensual = function() {
-    const cont = document.getElementById('reportes') ||
-                 document.getElementById('reportes-contenido') ||
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
@@ -1418,8 +1418,8 @@ window.renderCobranzaMensual = function() {
 // 5. REPORTE DE CONCENTRACIÓN DE CARTERA
 // ================================================================
 window.renderConcentracion = function() {
-    const cont = document.getElementById('reportes') ||
-                 document.getElementById('reportes-contenido') ||
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 

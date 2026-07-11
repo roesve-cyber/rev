@@ -573,145 +573,415 @@ window.exportarReporteCompras = function() {
     document.body.removeChild(link);
 };
 
-// ─── 3. PROYECCIÓN DE COMPROMISOS (CASH FLOW REAL) ────────
+// ============================================================================
+// 🔮 PROYECCIÓN DE COMPROMISOS (CASH FLOW) - SIMULADOR DE ESTRÉS Y YIELD
+// ============================================================================
+
+// Estado global para los interruptores del simulador
+window._escenariosCF = { puntuales: true, bajo: true, medio: false, alto: false };
+window._datosCF = null;
+
+// ─── MOTOR DE PROYECCIÓN POR CUENTA (usado por renderReporteCompromisos) ──
+// Reemplaza el reparto plano (mismo monto cada mes) por un cálculo que le
+// arma a cada cuenta su propio calendario de cobro, basado en su ritmo real
+// de abonos — sin tocar la clasificación de riesgo (puntuales/bajo/medio/alto)
+// que ya existía, que se sigue calculando exactamente igual que antes.
+
+const _CF_UMBRAL_MINIMO_ABONOS = 3; // menos de esto no alcanza para un patrón confiable
+
+function _cfIntervalosAbonos(abonosAsc) {
+    if (abonosAsc.length < 2) return [];
+    const dias = [];
+    for (let i = 1; i < abonosAsc.length; i++) {
+        dias.push(Math.max(1, Math.round((abonosAsc[i].fecha - abonosAsc[i - 1].fecha) / 86400000)));
+    }
+    return dias;
+}
+
+function _cfMediana(valores) {
+    if (!valores.length) return 0;
+    const s = [...valores].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function _cfDesviacion(valores, media) {
+    if (valores.length < 2) return 0;
+    const varianza = valores.reduce((s, v) => s + Math.pow(v - media, 2), 0) / valores.length;
+    return Math.sqrt(varianza);
+}
+
+// Calcula cuánto se espera cobrar por mes (capacidad) y qué tan confiable/regular
+// es el ritmo de pago de la cuenta. abonosAsc = abonos reales (sin cancelados),
+// ordenados ascendente por fecha.
+function _cfPerfilCuenta(abonosAsc, fechaVenta, hoy) {
+    const diasCuentaViva = Math.max(1, Math.floor((hoy - fechaVenta) / 86400000));
+
+    const hace90 = new Date(hoy); hace90.setDate(hoy.getDate() - 90);
+    const hace270 = new Date(hoy); hace270.setDate(hoy.getDate() - 270);
+
+    const abonos90 = abonosAsc.filter(a => a.fecha >= hace90);
+    const abonos270 = abonosAsc.filter(a => a.fecha >= hace270);
+
+    const divisor90 = Math.min(90, diasCuentaViva);
+    const divisor270 = Math.min(270, diasCuentaViva);
+
+    const rate90 = abonos90.length ? (abonos90.reduce((s, a) => s + a.monto, 0) / divisor90) * 30.44 : 0;
+    const rate270 = abonos270.length ? (abonos270.reduce((s, a) => s + a.monto, 0) / divisor270) * 30.44 : 0;
+
+    let flujoMensual;
+    if (abonos90.length > 0 && abonos270.length > 0) {
+        // Doble ventana 40/60: resuelve el caso de "se saltó un mes y luego cubrió
+        // dos" sin que el mes flojo lo haga ver moroso, y sin que un pico reciente
+        // aislado infle la proyección por sí solo.
+        flujoMensual = rate90 * 0.4 + rate270 * 0.6;
+    } else if (abonos270.length > 0) {
+        // No pagó en los últimos 90 días pero sí tiene ritmo sostenido en 270:
+        // va a destiempo, no está muerto — se usa su ritmo largo completo.
+        flujoMensual = rate270;
+    } else {
+        flujoMensual = 0; // sin historial suficiente; el llamador resuelve el respaldo
+    }
+
+    // Patrón de frecuencia + confiabilidad, solo con muestra mínima (>=3 abonos)
+    const muestra = abonos270.length >= _CF_UMBRAL_MINIMO_ABONOS ? abonos270 : abonosAsc;
+    let intervaloMediano = null, confiabilidad = 0.35, patron = 'Sin patrón suficiente';
+    const tieneMuestra = muestra.length >= _CF_UMBRAL_MINIMO_ABONOS;
+
+    if (tieneMuestra) {
+        const intervalos = _cfIntervalosAbonos(muestra);
+        intervaloMediano = _cfMediana(intervalos);
+        const desviacion = _cfDesviacion(intervalos, intervaloMediano);
+        const cv = intervaloMediano > 0 ? desviacion / intervaloMediano : 1.5;
+        // CV bajo (pagos regulares) -> confiabilidad alta -> calendario concentrado.
+        // CV alto (pagos erráticos) -> confiabilidad baja -> reparto casi plano.
+        confiabilidad = Math.max(0.2, Math.min(0.9, 1 - cv));
+        patron = cv > 1.1 ? 'Errático'
+               : intervaloMediano <= 10 ? 'Semanal'
+               : intervaloMediano <= 20 ? 'Quincenal'
+               : intervaloMediano <= 40 ? 'Mensual'
+               : 'Errático';
+    }
+
+    return { flujoMensual, intervaloMediano, confiabilidad, patron, tieneMuestra };
+}
+
+// Reparte el saldo de una cuenta en los próximos 6 meses según su perfil.
+// Nunca rebasa el saldo. Lo que no alcanza a proyectarse dentro de los 6 meses
+// se devuelve en `fueraDeHorizonte` — no se amontona en el mes 6.
+function _cfDistribuirCobro(saldo, perfil, diasSinPago) {
+    const meses6 = [0, 0, 0, 0, 0, 0];
+    if (saldo <= 0) return { meses: meses6, fueraDeHorizonte: 0 };
+
+    const flujo = Math.max(0, perfil.flujoMensual);
+    if (flujo <= 0) return { meses: meses6, fueraDeHorizonte: saldo };
+
+    if (!perfil.tieneMuestra || !perfil.intervaloMediano) {
+        // Sin patrón de frecuencia confiable: reparto plano de la capacidad mensual
+        // (mismo comportamiento que el modelo anterior), tope de 6 meses.
+        let restante = saldo;
+        for (let i = 0; i < 6 && restante > 0.01; i++) {
+            const cobro = Math.min(restante, flujo);
+            meses6[i] = cobro;
+            restante -= cobro;
+        }
+        return { meses: meses6, fueraDeHorizonte: Math.max(0, restante) };
+    }
+
+    // Con patrón confiable: se simulan los eventos de pago esperados cada
+    // "intervaloMediano" días. La mayor parte del evento cae en el mes exacto
+    // esperado (según confiabilidad); el resto se reparte entre los meses vecinos,
+    // para no ser tan rígido como un calendario fijo con clientes que varían un poco.
+    const montoPorEvento = flujo * (perfil.intervaloMediano / 30.44);
+    let restante = saldo;
+    let diaCursor = Math.max(0, perfil.intervaloMediano - diasSinPago);
+    let guard = 0;
+
+    while (diaCursor < 182 && restante > 0.01 && guard < 60) {
+        guard++;
+        const mesExacto = Math.min(5, Math.floor(diaCursor / 30.44));
+        const evento = Math.min(restante, montoPorEvento);
+
+        const montoExacto = evento * perfil.confiabilidad;
+        const montoVecino = evento - montoExacto;
+
+        meses6[mesExacto] += montoExacto;
+        restante -= montoExacto;
+
+        const vecinos = [mesExacto - 1, mesExacto + 1].filter(m => m >= 0 && m <= 5);
+        if (vecinos.length && restante > 0.01) {
+            const porVecino = Math.min(restante, montoVecino) / vecinos.length;
+            vecinos.forEach(v => { meses6[v] += porVecino; restante -= porVecino; });
+        } else if (restante > 0.01) {
+            const extra = Math.min(restante, montoVecino);
+            meses6[mesExacto] += extra;
+            restante -= extra;
+        }
+
+        diaCursor += perfil.intervaloMediano;
+    }
+
+    return { meses: meses6, fueraDeHorizonte: Math.max(0, restante) };
+}
+
 window.renderReporteCompromisos = function() {
-    const contenedor = document.getElementById("reportes") || document.getElementById("dashboardContenido");
+    const contenedor = document.getElementById('contenidoReporte');
     if (!contenedor) return;
 
     const hoy = new Date();
-    const mesesProyeccion = [];
-    
-    for(let i = 0; i < 6; i++) {
-        let d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
-        mesesProyeccion.push({
-            key: `${d.getFullYear()}-${d.getMonth()}`,
-            label: new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' }).format(d).toUpperCase(),
-            ingresos: { sano: 0, regular: 0, moroso: 0, total: 0 },
-            egresos: { tdc: 0, proveedores: 0 },
-            desglose: { tdc: {}, proveedores: {} }
-        });
+    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const cxp = StorageService.get("cuentasPorPagar", []);
+    const msi = StorageService.get("cuentasMSI", []);
+
+    // 1. INICIALIZAR ESTRUCTURA DE DATOS (6 Meses)
+    let meses = [];
+    let etiquetasMeses = [];
+    for (let i = 0; i < 6; i++) {
+        const d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
+        etiquetasMeses.push(new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(d).toUpperCase());
+        meses.push({ puntuales: 0, bajo: 0, medio: 0, alto: 0, cxp: 0, msi: 0 });
     }
 
-    // 📥 INGRESOS: Pagarés Activos (Módulo nativo parseFechaMX)
-    // Excluimos pagarés de cuentas marcadas como incobrables: ese dinero no se va a cobrar.
-    const _foliosIncobrablesCompromisos = new Set(
-        StorageService.get("cuentasPorCobrar", []).filter(c => c.incobrable === true).map(c => c.folio)
-    );
-    StorageService.get("pagaresSistema", []).forEach(p => {
-        if (p.estado === "Pagado" || p.estado === "Cancelado") return;
-        if (_foliosIncobrablesCompromisos.has(p.folio)) return;
-        const restante = Math.max(0, (parseFloat(p.monto)||0) - (parseFloat(p.montoAbonado)||0));
-        if (restante <= 0) return;
+    let stats = {
+        puntuales: { cuentas: 0, saldo: 0, diasPromedio: 0, label: '0 a 15 días sin pago' },
+        bajo:      { cuentas: 0, saldo: 0, diasPromedio: 0, label: '16 a 30 días sin pago' },
+        medio:     { cuentas: 0, saldo: 0, diasPromedio: 0, label: '31 a 60 días sin pago' },
+        alto:      { cuentas: 0, saldo: 0, diasPromedio: 0, label: '61 a 90 días sin pago' }
+    };
 
-        const fVenc = window.parseFechaMX(p.fechaVencimiento);
-        const keyMesVencimiento = `${fVenc.getFullYear()}-${fVenc.getMonth()}`;
-        
-        let dest = mesesProyeccion.find(m => m.key === keyMesVencimiento);
-        
-        if (!dest) {
-            dest = fVenc < hoy ? mesesProyeccion[0] : mesesProyeccion[5];
+    let carteraTotal = 0;
+    let carteraMuerta = 0;
+    let carteraFueraHorizonte = 0;
+    let compromisos = []; // detalle por cuenta, para el visor "Compromisos de Pago por Cliente"
+
+    // 2. MOTOR YIELD & CLASIFICACIÓN DE RIESGO
+    cxc.filter(c => c.estado !== 'Saldado' && !String(c.estado || '').toLowerCase().includes('cancel')).forEach(cuenta => {
+        const saldo = Number(cuenta.saldoActual || 0);
+        if (saldo <= 0) return;
+        carteraTotal += saldo;
+
+        if (cuenta.incobrable) {
+            carteraMuerta += saldo; return;
         }
 
-        dest.ingresos.sano += restante; // (Simplificado en sano por ahora)
-        dest.ingresos.total += restante;
-    });
+        const abonos = (cuenta.abonos || []).filter(a => !a.cancelado).map(a => ({
+            monto: Number(a.monto || a.montoAbonado || 0),
+            fecha: new Date(a.fechaIso || a.fechaAbonoIso || a.fecha)
+        })).filter(a => !isNaN(a.fecha.getTime())).sort((a, b) => b.fecha - a.fecha);
 
-    // 📤 EGRESOS TDC (MSI: usar directamente el mes de pago.fecha sin recalcular)
-    StorageService.get("cuentasMSI", []).forEach(msi => {
-        (msi.calendario || []).forEach(pago => {
-            if (pago.estado !== 'Pagado' && pago.estado !== 'Cancelado') {
-                // pago.fecha YA es vencimiento calculado (ej: "2025-02-15"), NO es fecha de compra
-                const partes = pago.fecha.split('-');
-                const keyMes = `${partes[0]}-${parseInt(partes[1]) - 1}`;
-                let dest = mesesProyeccion.find(m => m.key === keyMes);
-                if (!dest) {
-                    const fPago = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, 1);
-                    dest = fPago < hoy ? mesesProyeccion[0] : mesesProyeccion[5];
-                }
-                
-                let saldoReal = Math.max(0, (parseFloat(pago.monto)||0) - (parseFloat(pago.montoAbonado)||0));
-                if (saldoReal > 0) {
-                    dest.egresos.tdc += saldoReal;
-                    dest.desglose.tdc[msi.banco] = (dest.desglose.tdc[msi.banco] || 0) + saldoReal;
-                }
-            }
+        const fechaVenta = new Date(cuenta.fechaVenta || cuenta.fecha || hoy);
+        const ultimoMovimiento = abonos.length > 0 ? abonos[0].fecha : fechaVenta;
+        const diasSinPago = Math.max(0, Math.floor((hoy - ultimoMovimiento) / 86400000));
+
+        if (diasSinPago > 90) {
+            carteraMuerta += saldo; return;
+        }
+
+        // Determinar Nivel de Riesgo (clasificación sin cambios respecto al modelo anterior)
+        let tier = 'puntuales';
+        if (diasSinPago > 15 && diasSinPago <= 30) tier = 'bajo';
+        else if (diasSinPago > 30 && diasSinPago <= 60) tier = 'medio';
+        else if (diasSinPago > 60 && diasSinPago <= 90) tier = 'alto';
+
+        stats[tier].cuentas++;
+        stats[tier].saldo += saldo;
+        stats[tier].diasPromedio += diasSinPago;
+
+        // Perfil de ritmo de pago (doble ventana 90/270 + patrón de frecuencia)
+        const abonosAsc = [...abonos].sort((a, b) => a.fecha - b.fecha);
+        const perfil = _cfPerfilCuenta(abonosAsc, fechaVenta, hoy);
+
+        if (perfil.flujoMensual <= 0) {
+            // Sin historial de abonos (cuenta nueva): respaldo por plan de crédito,
+            // igual que el modelo anterior.
+            const abonoTeorico = Number(cuenta.plan?.abono || cuenta.planCredito?.abono || 0);
+            const mult = (cuenta.periodicidad === 'quincenal') ? 2.15 : (cuenta.periodicidad === 'mensual' ? 1 : 4.3);
+            perfil.flujoMensual = abonoTeorico > 0 ? (abonoTeorico * mult) : (saldo / 6);
+        }
+
+        // Reparto por calendario real de la cuenta (no plano, no todo en el mes 6)
+        const { meses: mesesCuenta, fueraDeHorizonte } = _cfDistribuirCobro(saldo, perfil, diasSinPago);
+        mesesCuenta.forEach((monto, i) => { meses[i][tier] += monto; });
+        carteraFueraHorizonte += fueraDeHorizonte;
+
+        compromisos.push({
+            nombre: cuenta.nombre || cuenta.clienteNombre || 'Cliente',
+            folio: cuenta.folio || '—',
+            saldo,
+            tier,
+            diasSinPago,
+            patron: perfil.patron,
+            flujoMensual: perfil.flujoMensual,
+            mesesParaLiquidar: perfil.flujoMensual > 0 ? Math.min(99, Math.ceil(saldo / perfil.flujoMensual)) : null
         });
     });
 
-    // 📤 EGRESOS CXP (Excluye consignaciones activas - solo CXP reales)
-    // PROTECCIÓN: Consignaciones activas NUNCA aparecen como egresos hasta transferirse a CXP
-    // Las consignaciones activas no se proyectan aqui; solo las CXP ya creadas al reportar venta.
-    
-    StorageService.get("cuentasPorPagar", []).forEach(cp => {
-        const saldo = parseFloat(cp.saldoPendiente || 0);
-        // Solo CXP reales: las consignaciones activas entran hasta reportarse vendidas.
-        if (saldo > 0 && !cp.esConsignacion) {
-            const fVenc = window.parseFechaMX(cp.vencimientoIso || cp.vencimiento || cp.fecha);
-            const keyMesCXP = `${fVenc.getFullYear()}-${fVenc.getMonth()}`;
-            
-            let dest = mesesProyeccion.find(m => m.key === keyMesCXP);
-            
-            if (!dest) {
-                dest = fVenc < hoy ? mesesProyeccion[0] : mesesProyeccion[5];
-            }
-            
-            dest.egresos.proveedores += saldo;
-            dest.desglose.proveedores[cp.proveedor] = (dest.desglose.proveedores[cp.proveedor] || 0) + saldo;
-        }
+    // 3. EGRESOS (CXP y MSI)
+    cxp.filter(p => !p.esConsignacion && Number(p.saldoPendiente || 0) > 0).forEach(p => {
+        const d = new Date(p.vencimientoIso || p.vencimiento || hoy);
+        const diffMeses = (d.getFullYear() - hoy.getFullYear()) * 12 + (d.getMonth() - hoy.getMonth());
+        const idx = Math.max(0, Math.min(diffMeses, 5));
+        meses[idx].cxp += Number(p.saldoPendiente || 0);
     });
 
-    const formatTltp = (obj) => Object.entries(obj).map(([k, v]) => `${k}: ${fmt(v)}`).join('\n') || 'Sin desglose';
+    msi.forEach(tarjeta => {
+        (tarjeta.calendario || []).filter(p => p.estado !== 'Pagado').forEach(pago => {
+            const monto = Number(pago.monto || 0) - Number(pago.montoAbonado || 0);
+            if (monto <= 0) return;
+            const d = new Date(pago.fecha);
+            const diffMeses = (d.getFullYear() - hoy.getFullYear()) * 12 + (d.getMonth() - hoy.getMonth());
+            if (diffMeses >= 0 && diffMeses < 6) meses[diffMeses].msi += monto;
+        });
+    });
+
+    // Promediar días de atraso en stats
+    ['puntuales', 'bajo', 'medio', 'alto'].forEach(t => {
+        if (stats[t].cuentas > 0) stats[t].diasPromedio = Math.round(stats[t].diasPromedio / stats[t].cuentas);
+    });
+
+    // Guardar en memoria y dibujar
+    window._datosCF = { meses, etiquetasMeses, stats, carteraTotal, carteraMuerta, carteraFueraHorizonte, compromisos };
+    
+    // Contenedor principal de la interfaz
+    contenedor.innerHTML = `
+        <div style="background:linear-gradient(135deg,#0f172a,#1e3a8a); color:white; padding:22px; border-radius:14px; margin-bottom:20px;">
+            <h2 style="margin:0; font-size:22px; font-weight:900;">🔮 Simulador de Cash Flow y Liquidez</h2>
+            <p style="margin:5px 0 0; color:#94a3b8; font-size:13px;">Activa o desactiva las llaves de cobro para medir cómo reacciona tu liquidez neta ante diferentes escenarios de riesgo.</p>
+        </div>
+        <div id="cf-tabla-dinamica"></div>
+    `;
+
+    window.dibujarTablaCashFlow();
+};
+
+window.toggleEscenarioCF = function(tier) {
+    window._escenariosCF[tier] = !window._escenariosCF[tier];
+    window.dibujarTablaCashFlow();
+};
+
+window.dibujarTablaCashFlow = function() {
+    const cont = document.getElementById('cf-tabla-dinamica');
+    if (!cont || !window._datosCF) return;
+
+    const { meses, etiquetasMeses, stats, carteraTotal, carteraMuerta, carteraFueraHorizonte, compromisos } = window._datosCF;
+    const esc = window._escenariosCF;
+    const fmt = v => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(v);
+
+    // Calcular totales horizontales
+    let totalFilas = { puntuales: 0, bajo: 0, medio: 0, alto: 0, cxp: 0, msi: 0, ingresosNetos: 0, flujoLibre: 0 };
+    meses.forEach(m => {
+        totalFilas.puntuales += m.puntuales; totalFilas.bajo += m.bajo; totalFilas.medio += m.medio; totalFilas.alto += m.alto;
+        totalFilas.cxp += m.cxp; totalFilas.msi += m.msi;
+    });
+
+    const tooltip = (tier) => {
+        const s = stats[tier];
+        const pct = carteraTotal > 0 ? ((s.saldo / carteraTotal) * 100).toFixed(1) : 0;
+        return `${s.cuentas} cuentas detectadas.\nSaldo en este bloque: ${fmt(s.saldo)} (${pct}% de la cartera activa).\nPromedio de atraso: ${s.diasPromedio} días.\nComportamiento: ${s.label}.`;
+    };
+
+    const generarFilaIngreso = (tier, nombre, color, bg, icon) => {
+        const activo = esc[tier];
+        let celdas = meses.map(m => `<td style="padding:10px; text-align:right; color:${activo ? color : '#cbd5e1'}; font-weight:${activo ? 'bold' : 'normal'};">${fmt(m[tier])}</td>`).join('');
+        return `
+        <tr style="border-bottom:1px solid #f1f5f9; background:${activo ? bg : '#f8fafc'}; transition:0.3s;" title="${tooltip(tier)}">
+            <td style="padding:10px;">
+                <label style="cursor:pointer; display:flex; align-items:center; gap:8px; color:${activo ? '#0f172a' : '#94a3b8'}; font-weight:bold;">
+                    <input type="checkbox" ${activo ? 'checked' : ''} onchange="toggleEscenarioCF('${tier}')" style="width:16px; height:16px; cursor:pointer;">
+                    ${icon} ${nombre}
+                </label>
+            </td>
+            ${celdas}
+            <td style="padding:10px; text-align:right; font-weight:900; color:${activo ? color : '#cbd5e1'}; border-left:2px solid #e2e8f0;">${fmt(totalFilas[tier])}</td>
+        </tr>`;
+    };
+
+    // Construcción de la tabla
+    let thead = `<th style="padding:12px; text-align:left; width:220px;">Flujo de Efectivo</th>`;
+    etiquetasMeses.forEach(m => { thead += `<th style="padding:12px; text-align:right;">${m}</th>`; });
+    thead += `<th style="padding:12px; text-align:right; border-left:2px solid #e2e8f0;">TOTAL</th>`;
 
     let html = `
-    <div style="background:white; padding:20px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); margin-top:15px; margin-bottom:30px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #e2e8f0; padding-bottom:15px; margin-bottom:20px;">
-            <div>
-                <h2 style="margin:0; color:#4c1d95; font-size:24px;">🔮 Proyección de Compromisos (Cash Flow)</h2>
-                <p style="margin:0; color:#64748b; font-size:14px;">Egresos reales (Fechas MX + Regla Bancaria) contra ingresos esperados.</p>
-            </div>
-            <div style="display:flex; gap:10px;">
-                <button onclick="renderReporteLiquidezCortoPlazo()" style="padding:10px 15px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">💧 Evaluar Liquidez (Runway)</button>
-                <button onclick="renderARC_v3()" style="padding:10px 15px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">⬅️ Volver a Cartera</button>
-            </div>
+    <div style="background:white; border-radius:12px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.05); border:1px solid #e2e8f0;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:800px;">
+            <thead style="background:#f8fafc; border-bottom:2px solid #cbd5e1; color:#475569;"><tr>${thead}</tr></thead>
+            <tbody>
+                <tr><td colspan="8" style="padding:8px 12px; background:#eff6ff; font-weight:900; color:#1e40af; font-size:11px;">(+) LLAVES DE COBRANZA (Activa para simular)</td></tr>
+                ${generarFilaIngreso('puntuales', 'Cobranza Puntual', '#16a34a', '#f0fdf4', '🟢')}
+                ${generarFilaIngreso('bajo', 'Bajo Riesgo', '#d97706', '#fffbeb', '🟡')}
+                ${generarFilaIngreso('medio', 'Mediano Riesgo', '#c2410c', '#fff7ed', '🟠')}
+                ${generarFilaIngreso('alto', 'Alto Riesgo', '#b91c1c', '#fef2f2', '🔴')}
+    `;
+
+    // Calcular Sumatorias Dinámicas
+    let sumatorias = meses.map((m, i) => {
+        let ingresos = 0;
+        if(esc.puntuales) ingresos += m.puntuales;
+        if(esc.bajo) ingresos += m.bajo;
+        if(esc.medio) ingresos += m.medio;
+        if(esc.alto) ingresos += m.alto;
+        let neto = ingresos - m.cxp - m.msi;
+        totalFilas.ingresosNetos += ingresos;
+        totalFilas.flujoLibre += neto;
+        return { ingresos, cxp: m.cxp, msi: m.msi, neto };
+    });
+
+    // Fila Ingresos Totales Escenario
+    html += `<tr style="border-bottom:2px solid #cbd5e1; background:#e0f2fe;">
+                <td style="padding:10px 12px; font-weight:900; color:#0369a1;">(=) TOTAL INGRESOS ESCENARIO</td>
+                ${sumatorias.map(s => `<td style="padding:10px; text-align:right; font-weight:900; color:#0369a1;">${fmt(s.ingresos)}</td>`).join('')}
+                <td style="padding:10px; text-align:right; font-weight:900; color:#0369a1; border-left:2px solid #bfdbfe;">${fmt(totalFilas.ingresosNetos)}</td>
+             </tr>`;
+
+    // Egresos
+    html += `<tr><td colspan="8" style="padding:8px 12px; background:#fef2f2; font-weight:900; color:#be123c; font-size:11px; border-top:2px solid white;">(-) OBLIGACIONES DE PAGO</td></tr>`;
+    html += `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Proveedores CXP</td>${sumatorias.map(s => `<td style="padding:10px; text-align:right; color:#dc2626;">${fmt(s.cxp)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.cxp)}</td></tr>`;
+    html += `<tr style="border-bottom:2px solid #cbd5e1;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Tarjetas MSI</td>${sumatorias.map(s => `<td style="padding:10px; text-align:right; color:#dc2626;">${fmt(s.msi)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.msi)}</td></tr>`;
+
+    // Flujo Libre Neto
+    html += `<tfoot><tr style="background:#0f172a; color:white;">
+                <td style="padding:14px 12px; font-weight:900; font-size:14px;">(=) FLUJO DE CAJA NETO</td>
+                ${sumatorias.map(s => `<td style="padding:14px; text-align:right; font-weight:900; font-size:14px; color:${s.neto >= 0 ? '#4ade80' : '#f87171'};">${fmt(s.neto)}</td>`).join('')}
+                <td style="padding:14px; text-align:right; font-weight:900; font-size:14px; color:${totalFilas.flujoLibre >= 0 ? '#4ade80' : '#f87171'}; border-left:2px solid #334155;">${fmt(totalFilas.flujoLibre)}</td>
+             </tr></tfoot>`;
+
+    html += `</tbody></table></div>`;
+
+    // Resumen de Cartera Congelada (Informativo)
+    html += `
+    <div style="margin-top:20px; display:flex; gap:10px; justify-content:space-between; align-items:center; flex-wrap:wrap; background:#f8fafc; padding:15px; border-radius:8px; border:1px dashed #cbd5e1;">
+        <span style="font-size:12px; color:#64748b; flex:1; min-width:220px;">
+            <b>Nota Analítica:</b> Pasa el cursor sobre las filas de cobranza para ver el número de cuentas y pesos comprometidos en cada estrato de riesgo.
+        </span>
+        <div style="text-align:right;">
+            <span style="font-size:11px; color:#64748b; font-weight:bold; display:block;">CARTERA INCOBRABLE (>90 DÍAS) EXCLUIDA DEL SIMULADOR:</span>
+            <span style="font-size:18px; font-weight:900; color:#475569;">${fmt(carteraMuerta)}</span>
         </div>
-
-        <div style="overflow-x:auto;">
-            <table style="width:100%; min-width:850px; border-collapse:collapse; font-size:13px;">
-                <thead>
-                    <tr style="background:#f8fafc; border-bottom:2px solid #cbd5e1;">
-                        <th style="padding:15px; text-align:left; font-size:14px; width:220px;">Concepto Flujo de Caja</th>
-                        ${mesesProyeccion.map(m => `<th style="padding:15px; text-align:center; font-size:13px; color:#1e1b4b;">${m.label}</th>`).join('')}
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr><td colspan="7" style="background:#f0fdf4; color:#16a34a; font-weight:bold; padding:8px 15px;">(+) Ingresos Esperados por Cobranza</td></tr>
-                    <tr style="border-bottom:1px solid #f1f5f9;">
-                        <td style="padding:10px 15px; padding-left:25px; color:#475569;">Cobranza Total Activa</td>
-                        ${mesesProyeccion.map(m => `<td style="padding:10px; text-align:center; color:#16a34a; font-weight:bold;">${fmt(m.ingresos.total)}</td>`).join('')}
-                    </tr>
-
-                    <tr><td colspan="7" style="background:#fff1f2; color:#be123c; font-weight:bold; padding:8px 15px;">(-) Egresos Ineludibles Comprometidos</td></tr>
-                    <tr style="border-bottom:1px solid #f1f5f9;">
-                        <td style="padding:10px 15px; padding-left:25px; color:#475569;">Tarjetas de Crédito (MSI Real)</td>
-                        ${mesesProyeccion.map(m => `<td title="${formatTltp(m.desglose.tdc)}" style="padding:10px; text-align:center; color:#dc2626; cursor:help;">${fmt(m.egresos.tdc)}</td>`).join('')}
-                    </tr>
-                    <tr style="border-bottom:2px solid #cbd5e1;">
-                        <td style="padding:10px 15px; padding-left:25px; color:#475569;">Cuentas por Pagar Comerciales</td>
-                        ${mesesProyeccion.map(m => `<td title="${formatTltp(m.desglose.proveedores)}" style="padding:10px; text-align:center; color:#dc2626; cursor:help;">${fmt(m.egresos.proveedores)}</td>`).join('')}
-                    </tr>
-
-                    <tr style="background:#f8fafc; border-bottom:2px solid #cbd5e1; font-weight:bold;">
-                        <td style="padding:15px; font-size:14px; color:#0f172a;">📊 BALANCE NETO DEL MES (Flujo)</td>
-                        ${mesesProyeccion.map(m => {
-                            let dif = m.ingresos.total - (m.egresos.tdc + m.egresos.proveedores);
-                            return `<td style="padding:15px; text-align:center; font-weight:900; color:${dif >= 0 ? '#16a34a' : '#dc2626'}; font-size:14px;">${fmt(dif)}</td>`;
-                        }).join('')}
-                    </tr>
-                </tbody>
-            </table>
+        <div style="text-align:right;">
+            <span style="font-size:11px; color:#64748b; font-weight:bold; display:block;">SALDO ACTIVO FUERA DEL HORIZONTE DE 6 MESES:</span>
+            <span style="font-size:18px; font-weight:900; color:#475569;">${fmt(carteraFueraHorizonte)}</span>
         </div>
     </div>`;
-    contenedor.innerHTML = html;
+
+    // Visor de bullets: Compromisos de Pago por Cliente (mismo componente que
+    // "Top clientes/productos/vendedores" en Reporte de Ventas: _repBarraLista)
+    const compromisosOrdenados = [...(compromisos || [])].sort((a, b) => b.saldo - a.saldo);
+    const totalCompromisos = compromisosOrdenados.reduce((s, c) => s + c.saldo, 0);
+    const iconoTier = { puntuales: '🟢', bajo: '🟡', medio: '🟠', alto: '🔴' };
+    const itemsCompromisos = compromisosOrdenados.slice(0, 10).map(c => ({
+        nombre: c.nombre,
+        valor: c.saldo,
+        extra: `${iconoTier[c.tier] || ''} ${c.patron} · ${fmt(c.flujoMensual)}/mes · ${c.mesesParaLiquidar ? c.mesesParaLiquidar + ' mes(es)' : '—'}`
+    }));
+
+    html += `
+    <div style="margin-top:20px; background:white; border:1px solid #e2e8f0; border-radius:10px; padding:18px;">
+        <h3 style="margin:0 0 4px; font-size:16px; color:#0f172a;">📋 Compromisos de Pago por Cliente</h3>
+        <p style="margin:0 0 12px; font-size:12px; color:#64748b;">Top 10 por saldo activo. Patrón detectado, cobro mensual estimado (doble ventana 90/270 días) y meses para liquidar a su ritmo actual.</p>
+        ${_repBarraLista(itemsCompromisos, totalCompromisos, "#0369a1")}
+    </div>`;
+
+    cont.innerHTML = html;
 };
 
 // ─── 4. REPORTE DE LIQUIDEZ A CORTO PLAZO (RUNWAY FINANCIERO) ────────

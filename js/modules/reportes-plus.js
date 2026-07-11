@@ -690,7 +690,7 @@
     };
 
     window.renderReporteLiquidezCortoPlazo = function() {
-        const container = document.getElementById('reportes') || document.getElementById('dashboardContenido');
+        const container = document.getElementById('runway-liquidez-contenido') || document.getElementById('reportes') || document.getElementById('dashboardContenido');
         if (!container) return;
 
         const today = new Date();
@@ -813,7 +813,6 @@
                         <h2 style="margin:0;color:#065f46;font-size:24px;">Valuacion de Liquidez (Runway Financiero)</h2>
                         <p style="margin:0;color:#64748b;font-size:14px;">Meses sin compromisos se ocultan; la liquidez se arrastra al siguiente mes con obligaciones.</p>
                     </div>
-                    <button onclick="renderReporteCompromisos()" style="padding:10px 15px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Volver a Cash Flow</button>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-bottom:20px;">
                     ${kpi('Efectivo + debito disponible', money(initialLiquidity), '#059669')}

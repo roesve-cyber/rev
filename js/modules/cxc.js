@@ -491,15 +491,33 @@ window._calcularEstadoCuenta = function(folio) {
         estadoGeneral = "Saldado";
         saldoTotal = 0;
     } else {
-        if (cuenta.promesaPago && cuenta.promesaPago.fecha) {
-            const fechaPromObj = new Date(cuenta.promesaPago.fecha + "T23:59:59");
-            if (fechaPromObj >= hoy) promesaVigente = true;
-        }
+        // Clasificación delegada a CobranzaRiskService (días desde el último abono +
+        // promesa vigente) — el mismo motor que ya usan Cash Flow y ARC v3. Reemplaza
+        // el conteo de pagarés vencidos por fecha, que sobre-clasificaba como "Crítico"
+        // a clientes de ritmo irregular (se atrasan en pagarés puntuales concretos
+        // aunque su cobranza real, medida por último abono, esté al corriente).
+        const analisis = typeof window.CobranzaRiskService?.analizarCuenta === 'function'
+            ? window.CobranzaRiskService.analizarCuenta(cuenta, { hoy, pagaresSistema: pagares, saldoPreferente: saldoTotal })
+            : null;
 
-        if (promesaVigente) estadoGeneral = "Promesa";
-        else if (pagaresVencidos.length === 0) estadoGeneral = "Al corriente";
-        else if (pagaresVencidos.length <= 2) estadoGeneral = "Atrasado";
-        else estadoGeneral = "Crítico";
+        if (analisis) {
+            promesaVigente = !!analisis.promesa?.vigente;
+            if (promesaVigente) estadoGeneral = "Promesa";
+            else if (analisis.key === 'bajo') estadoGeneral = "Al corriente";
+            else if (analisis.key === 'riesgo') estadoGeneral = "Atrasado";
+            else estadoGeneral = "Crítico"; // agrupa 'alto' (61-120d) y 'alerta' (121+d)
+        } else {
+            // Respaldo si el servicio no está cargado en la página: conserva la lógica
+            // anterior (conteo de pagarés vencidos) para que el reporte no truene.
+            if (cuenta.promesaPago && cuenta.promesaPago.fecha) {
+                const fechaPromObj = new Date(cuenta.promesaPago.fecha + "T23:59:59");
+                if (fechaPromObj >= hoy) promesaVigente = true;
+            }
+            if (promesaVigente) estadoGeneral = "Promesa";
+            else if (pagaresVencidos.length === 0) estadoGeneral = "Al corriente";
+            else if (pagaresVencidos.length <= 2) estadoGeneral = "Atrasado";
+            else estadoGeneral = "Crítico";
+        }
     }
 
     return { cuenta, pagares: pagaresDelFolio, pagaresPendientes, pagaresVencidos, saldoTotal, montoVencido, diasMaxAtraso, estadoGeneral, promesaVigente, totalAbonado, moratoriosPendientes, saldoMoratorios };
