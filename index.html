@@ -108,7 +108,7 @@
         <div class="menu-item">
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span><span id="badgeCobranzaDocumental" title="Pagares sin aplicar (documental)" style="display:none; background:#fde68a; color:#92400e; border-radius:9999px; padding:0px 6px; font-size:9px; margin-left:3px; font-weight:bold; vertical-align:2px;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
-        <button onclick="navA('visor-creditos');renderVisorCreditosCobranza();">📋 Visor de Créditos</button>
+        <button onclick="navA('arc-v3'); renderARC_v3();">📊 ARC v3 (Análisis de Riesgo)</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
@@ -140,7 +140,8 @@
                 <button onclick="navA('dashboard'); if(typeof renderDashboard === 'function') renderDashboard();">&#128200; Dashboard Principal</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
                 <button onclick="navA('reporte-flujo'); renderReporteFlujo();">💵 Flujo Real</button>
-                <button onclick="navA('reportes'); renderReporteCompromisos();" style="color:#965cfa; font-weight:bold;">🔮 Proyección de Compromisos</button>
+                <button onclick="navA('reportes'); if(typeof renderReporteCompromisos === 'function') renderReporteCompromisos();" style="color:#965cfa; font-weight:bold;">🔮 Proyección de Compromisos</button>
+<button onclick="navA('runway-liquidez'); if(typeof renderReporteLiquidezCortoPlazo === 'function') renderReporteLiquidezCortoPlazo();" style="color:#059669; font-weight:bold;">⏳ Valuación de Liquidez (Runway)</button>
             </div>
         </div>
 
@@ -339,26 +340,9 @@
  <div id="tablaAbonosDirectos"></div>
  </div>
 
-    <div id="visor-creditos" class="vista oculto">
- <div class="vista-header">
- <h2>Visor de Creditos</h2>
- <p>Consulta ventas a credito y su estado, sin captura de abonos.</p>
- </div>
- <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
- <input type="text" id="filtroVisorCreditos" placeholder="Buscar cliente o folio..."
- onkeyup="renderVisorCreditosCobranza()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <select id="filtroEstadoVisorCreditos" onchange="renderVisorCreditosCobranza()" style="padding:10px; border:1px solid #ddd; border-radius:5px;">
- <option value="">Todos los estados</option>
- <option value="Al corriente">Al corriente</option>
- <option value="Atrasado">Atrasado</option>
- <option value="Critico">Critico</option>
- <option value="Promesa">Promesa</option>
- <option value="Saldado">Saldado</option>
- </select>
- <button onclick="renderVisorCreditosCobranza()" style="padding:10px 20px; background:#1e40af; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
- </div>
- <div id="tablaVisorCreditos"></div>
- </div>
+ <div id="arc-v3" class="vista oculto" style="padding-top: 20px;">
+    <div id="arc-v3-contenido"></div> 
+</div>
 
     <!-- LISTA DE PRECIOS -->
     <div id="listaprecios" class="vista oculto">
@@ -410,8 +394,12 @@
 
     <!-- CONTENEDOR DE REPORTES EJECUTIVOS -->
     <div id="reportes" class="vista oculto">
- <div id="contenidoReporte"></div>
- </div>
+    <div id="contenidoReporte"></div>
+</div>
+
+<div id="runway-liquidez" class="vista oculto">
+    <div id="runway-liquidez-contenido"></div>
+</div>
 
     <!-- CATEGORÍAS -->
     <div id="configcategorias" class="vista oculto">
