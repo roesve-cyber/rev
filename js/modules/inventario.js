@@ -1219,6 +1219,7 @@ window.renderConsultaInventario = function() {
 
  let totalGlobalUnidades = 0;
  let totalGlobalPesos = 0;
+ const filasReporte = [];
 
  productosFiltrados.forEach(p => {
  const proveedorProducto = _invProveedorProducto(p);
@@ -1283,6 +1284,18 @@ window.renderConsultaInventario = function() {
  estadoPedido === 'baja' ? '<span style="color:#e11d48;">Pendiente Baja</span>' : '';
  const antiguedad = typeof calcularAntiguedadProducto === 'function' ? calcularAntiguedadProducto(p) : '-';
 
+ filasReporte.push({
+  nombre: p.nombre || 'Producto sin nombre',
+  categoria: [p.categoria, p.subcategoria].filter(Boolean).join(' / ') || 'Sin categoria',
+  proveedor: proveedorProducto || 'Sin proveedor',
+  stock: stockGeneral,
+  desglose: (p.variantes || []).filter(v => v.stock > 0).map(v => `${v.ubicacion}: ${v.color} (${v.stock})`).join(', ') || (stockSinAsignar > 0 ? `Sin asignar: ${stockSinAsignar}` : (stockGeneral <= 0 ? 'Sin stock' : '')),
+  costoPromedio,
+  valorTotal,
+  estadoPedido,
+  antiguedad
+ });
+
  html += `
  <tr style="border-bottom:1px solid #f1f5f9;">
  <td style="padding:12px;">
@@ -1320,8 +1333,103 @@ window.renderConsultaInventario = function() {
  </table>
  </div>`;
 
+ window._invReporteConsultaInventario = {
+  generadoEn: new Date().toISOString(),
+  ubiFiltro,
+  provFiltro,
+  q,
+  filas: filasReporte,
+  totalUnidades: totalGlobalUnidades,
+  totalPesos: totalGlobalPesos
+ };
+
  cont.innerHTML = html;
 }
+
+// ===== REPORTE IMPRIMIBLE DE CONSULTA DE INVENTARIO (PDF / TICKET / IMAGEN) =====
+window.generarReporteConsultaInventario = function() {
+ const datos = window._invReporteConsultaInventario;
+ if (!datos || !datos.filas || datos.filas.length === 0) {
+  alert('No hay datos para generar el reporte. Aplica un filtro o espera a que cargue la consulta de inventario.');
+  return;
+ }
+
+ const fecha = new Date(datos.generadoEn);
+ const fechaTxt = fecha.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+ const horaTxt = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
+ const ubicacionesConfig = typeof StorageService !== 'undefined' ? StorageService.get('ubicacionesConfig', []) : [];
+ let ubiTxt = 'Todas las ubicaciones';
+ if (datos.ubiFiltro === 'sin_asignar') ubiTxt = 'Stock sin asignar';
+ else if (datos.ubiFiltro && datos.ubiFiltro !== 'todos') ubiTxt = datos.ubiFiltro;
+
+ let filtrosTxt = [];
+ if (datos.q) filtrosTxt.push(`Busqueda: "${datos.q}"`);
+ if (datos.provFiltro && datos.provFiltro !== 'todos') filtrosTxt.push(`Proveedor: ${datos.provFiltro === 'sin_proveedor' ? 'Sin proveedor' : datos.provFiltro}`);
+
+ // Filas compactas: una sola linea por producto, sin imagenes, para mantener el archivo ligero.
+ const filas = datos.filas.map((f, idx) => `
+  <tr style="background:${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};border-bottom:1px solid #e2e8f0;">
+   <td style="padding:6px 8px;">
+    <b>${_kardexEsc(f.nombre)}</b><br>
+    <span style="font-size:10px;color:#64748b;">${_kardexEsc(f.categoria)}${f.proveedor ? ' &middot; ' + _kardexEsc(f.proveedor) : ''}</span>
+   </td>
+   <td style="padding:6px 8px;text-align:center;font-weight:bold;">${f.stock}</td>
+   <td style="padding:6px 8px;font-size:10.5px;color:#334155;">${_kardexEsc(f.desglose || '-')}</td>
+   <td style="padding:6px 8px;text-align:right;">${typeof dinero === 'function' ? dinero(f.valorTotal) : f.valorTotal}</td>
+   <td style="padding:6px 8px;text-align:center;font-size:10px;">${f.estadoPedido === 'pendiente' ? 'Pedido pend.' : (f.estadoPedido === 'baja' ? 'Pend. baja' : '-')}</td>
+  </tr>`).join('');
+
+ const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Consulta de Inventario</title>
+ <style>
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#0f172a;}
+  table{width:100%;border-collapse:collapse;}
+  th{background:#0f172a;color:white;padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em;}
+  th.num,td.num{text-align:right;}
+ </style></head><body>
+ <div style="display:flex;align-items:center;gap:12px;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:12px;">
+  <img src="img/Logo.svg" alt="Logo" style="width:46px;height:46px;object-fit:contain;" onerror="this.style.display='none'">
+  <div style="flex:1;">
+   <div style="font-size:16px;font-weight:900;">Reporte de Inventario por Ubicacion</div>
+   <div style="font-size:11px;color:#64748b;">Generado el ${fechaTxt} a las ${horaTxt}</div>
+  </div>
+ </div>
+ <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+  <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:6px 12px;font-size:11px;"><b>Ubicacion:</b> ${_kardexEsc(ubiTxt)}</div>
+  ${filtrosTxt.map(t => `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 12px;font-size:11px;">${_kardexEsc(t)}</div>`).join('')}
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 12px;font-size:11px;"><b>Productos:</b> ${datos.filas.length}</div>
+ </div>
+ <table>
+  <thead><tr><th>Producto</th><th class="num">Stock</th><th>Desglose ubicacion / color</th><th class="num">Valor</th><th>Estado</th></tr></thead>
+  <tbody>${filas}</tbody>
+  <tfoot><tr style="background:#f1f5f9;font-weight:900;border-top:2px solid #cbd5e1;">
+   <td style="padding:8px;text-align:right;">TOTALES:</td>
+   <td style="padding:8px;text-align:center;">${datos.totalUnidades}</td>
+   <td></td>
+   <td style="padding:8px;text-align:right;">${typeof dinero === 'function' ? dinero(datos.totalPesos) : datos.totalPesos}</td>
+   <td></td>
+  </tr></tfoot>
+ </table>
+ </body></html>`;
+
+ if (window.TicketService?.elegirFormato) {
+  window.TicketService.elegirFormato({
+   html,
+   title: 'Reporte de Inventario por Ubicacion',
+   filename: `inventario_${(datos.ubiFiltro && datos.ubiFiltro !== 'todos') ? datos.ubiFiltro : 'general'}_${new Date().toISOString().slice(0,10)}`,
+   pageSize: 'letter'
+  });
+  return;
+ }
+ if (window.TicketService?.openDocument) {
+  window.TicketService.openDocument(html, { title: 'Reporte de Inventario por Ubicacion', pageSize: 'letter' });
+  return;
+ }
+ const w = window.open('', '_blank');
+ w.document.write(html);
+ w.document.close();
+ w.focus();
+};
 
 // LAGICA DE ASIGNACIAN RAPIDA DE STOCK HUARFANO
 window.asignarUbicacionRapida = function(id, cantidadAAsignar) {
