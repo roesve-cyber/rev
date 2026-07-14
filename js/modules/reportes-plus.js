@@ -94,6 +94,41 @@
         return (id && maps.byId.get(id)) || (name && maps.byName.get(name)) || null;
     }
 
+    // Costo de un articulo de venta, en cascada:
+    // 1) costo registrado directamente en el articulo de la venta
+    // 2) costo del producto en catalogo
+    // 3) el mas alto del historial de costos del producto
+    // 4) el de la compra/recepcion mas reciente (via _invCostoHistoricoProducto en inventario.js)
+    function resolverCostoItem(item = {}, maps = productProviderMaps()) {
+        const directo = Number(item.costoUnitario || item.costo || item.precioCompra || 0) || 0;
+        if (directo > 0) return { costo: directo, estimado: false, fuente: 'registrado' };
+
+        const producto = itemProduct(item, maps) || {};
+        const costoProducto = Number(producto.costo || producto.precioCompra || producto.costoPromedio || 0) || 0;
+        if (costoProducto > 0) return { costo: costoProducto, estimado: true, fuente: 'catalogo' };
+
+        const productoId = String(item.productoId || item.idProducto || item.id || producto.id || '').trim();
+        if (productoId) {
+            const historicos = arr('historialCostos')
+                .filter(h => String(h.productoId || h.idProducto || '') === productoId)
+                .map(h => Number(h.precioCompra || h.costoNuevo || h.costo || h.nuevo || 0))
+                .filter(c => Number.isFinite(c) && c > 0);
+            if (historicos.length) return { costo: Math.max(...historicos), estimado: true, fuente: 'historial' };
+
+            if (typeof window._invCostoHistoricoProducto === 'function') {
+                const reciente = Number(window._invCostoHistoricoProducto(productoId)) || 0;
+                if (reciente > 0) return { costo: reciente, estimado: true, fuente: 'compra_reciente' };
+            }
+        }
+        return { costo: 0, estimado: false, fuente: null };
+    }
+
+    const FUENTE_COSTO_LABEL = {
+        catalogo: 'Costo de catalogo',
+        historial: 'Maximo del historial',
+        compra_reciente: 'Ultima compra'
+    };
+
     function itemCategoryLabel(item = {}, maps = productProviderMaps()) {
         const product = itemProduct(item, maps);
         return String(item.categoria || item.category || product?.categoria || product?.category || '').trim();
@@ -203,11 +238,14 @@
         return `<span style="display:inline-flex;padding:4px 9px;border-radius:999px;background:${bg};color:${color};font-size:11px;font-weight:900;">${esc(text)}</span>`;
     }
 
-    function bars(items, total, color) {
+    function bars(items, total, color, onClick = null) {
         if (!items.length) return `<div style="padding:16px;text-align:center;color:#94a3b8;">Sin datos suficientes.</div>`;
         return items.map((it, idx) => {
             const pct = total > 0 ? Math.max(4, (it.value / total) * 100) : 0;
-            return `<div style="display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;">
+            const events = onClick
+                ? ` onclick="${onClick}('${esc(it.name).replace(/'/g, "\\'")}')" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'"`
+                : '';
+            return `<div style="display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid #f1f5f9;${onClick ? 'cursor:pointer;border-radius:6px;transition:background .12s;' : ''}"${events} title="${onClick ? 'Clic para filtrar por ' + esc(it.name) : ''}">
                 <div style="font-weight:900;color:#94a3b8;">${idx + 1}</div>
                 <div>
                     <div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:800;color:#0f172a;">
@@ -235,6 +273,27 @@
         return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-6px 0 16px;">${chips.join('')}</div>`;
     }
 
+    window._rvFiltrarPorMes = function(key) {
+        const [y, m] = String(key).split('-').map(Number);
+        if (!y || !m) return;
+        const desde = `${y}-${String(m).padStart(2, '0')}-01`;
+        const ultimoDia = new Date(y, m, 0).getDate();
+        const hasta = `${y}-${String(m).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+        if (document.getElementById('rvFechaDesde')) document.getElementById('rvFechaDesde').value = desde;
+        if (document.getElementById('rvFechaHasta')) document.getElementById('rvFechaHasta').value = hasta;
+        window.renderReporteVentas();
+    };
+
+    window._rvFiltrarPorTexto = function(texto) {
+        if (document.getElementById('rvBusqueda')) document.getElementById('rvBusqueda').value = texto;
+        window.renderReporteVentas();
+    };
+
+    window._rvFiltrarPorMetodo = function(metodo) {
+        if (document.getElementById('rvMetodo')) document.getElementById('rvMetodo').value = metodo;
+        window.renderReporteVentas();
+    };
+
     window._rplusClearFilter = function(id, rendererName) {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -254,20 +313,27 @@
         return [...map.values()].sort((a, b) => b.value - a.value).slice(0, 5);
     }
 
-    function chartByMonth(rows, valueFn, colorA, colorB) {
+    function chartByMonth(rows, valueFn, colorA, colorB, options = {}) {
+        const { onClick = null, extraFn = null, extraLabel = '' } = options;
         const byMonth = new Map();
         rows.forEach(row => {
             if (!(row.date instanceof Date) || isNaN(row.date.getTime()) || row.date.getFullYear() < 2000) return;
             const key = `${row.date.getFullYear()}-${String(row.date.getMonth() + 1).padStart(2, '0')}`;
-            const current = byMonth.get(key) || { total: 0, label: new Intl.DateTimeFormat('es-MX', { month: 'short' }).format(row.date) };
+            const current = byMonth.get(key) || { total: 0, extra: 0, label: new Intl.DateTimeFormat('es-MX', { month: 'short' }).format(row.date) };
             current.total += Number(valueFn(row) || 0);
+            if (extraFn) current.extra += Number(extraFn(row) || 0);
             byMonth.set(key, current);
         });
         const months = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-8);
         const max = Math.max(1, ...months.map(([, m]) => m.total));
-        const barsHtml = months.length ? months.map(([key, m]) => `
-            <div title="${key}: ${money(m.total)}" style="flex:1;min-width:36px;height:${Math.max(10, (m.total / max) * 160)}px;background:linear-gradient(180deg,${colorA},${colorB});border-radius:6px 6px 2px 2px;color:white;font-size:10px;font-weight:900;display:flex;align-items:flex-start;justify-content:center;padding-top:5px;">${money(m.total).replace('.00','')}</div>
-        `).join('') : `<div style="width:100%;align-self:center;text-align:center;color:#94a3b8;">Sin datos en el rango seleccionado.</div>`;
+        const barsHtml = months.length ? months.map(([key, m]) => {
+            const tooltip = extraFn ? `${key}: ${money(m.total)} | ${extraLabel}: ${money(m.extra)}` : `${key}: ${money(m.total)}`;
+            const clickable = onClick ? `cursor:pointer;` : '';
+            const events = onClick
+                ? ` onclick="${onClick}('${key}')" onmouseover="this.style.filter='brightness(1.15)'" onmouseout="this.style.filter='none'"`
+                : '';
+            return `<div title="${esc(tooltip)}" style="flex:1;min-width:36px;height:${Math.max(10, (m.total / max) * 160)}px;background:linear-gradient(180deg,${colorA},${colorB});border-radius:6px 6px 2px 2px;color:white;font-size:10px;font-weight:900;display:flex;align-items:flex-start;justify-content:center;padding-top:5px;transition:filter .12s;${clickable}"${events}>${money(m.total).replace('.00','')}</div>`;
+        }).join('') : `<div style="width:100%;align-self:center;text-align:center;color:#94a3b8;">Sin datos en el rango seleccionado.</div>`;
         const labels = months.map(([, m]) => `<div style="flex:1;min-width:36px;text-align:center;font-size:11px;color:#64748b;text-transform:uppercase;">${m.label}</div>`).join('');
         return `<div style="display:flex;align-items:flex-end;gap:6px;height:180px;padding:0 10px;">${barsHtml}</div><div style="display:flex;gap:6px;padding:4px 10px;margin-top:4px;">${labels}</div>`;
     }
@@ -305,7 +371,10 @@
         const date = parseDate(dateRaw);
         const itemTotal = items.reduce((s, a) => s + ((Number(a.precioContado || a.precio || 0) || 0) * (Number(a.cantidad || 1) || 1)), 0);
         const totalMerch = Number(v.totalMercancia || v.totalContadoOriginal || v.importeApartado || itemTotal || v.totalVenta || v.total || v.args?.[1] || 0) || 0;
-        const cost = items.reduce((s, a) => s + ((Number(a.costoUnitario || a.costo || a.precioCompra || 0) || 0) * (Number(a.cantidad || 1) || 1)), 0);
+        const costoResuelto = items.map(a => resolverCostoItem(a, providerMaps));
+        const cost = items.reduce((s, a, i) => s + costoResuelto[i].costo * (Number(a.cantidad || 1) || 1), 0);
+        const costEstimated = costoResuelto.some(r => r.estimado);
+        const costSources = [...new Set(costoResuelto.filter(r => r.estimado && r.fuente).map(r => r.fuente))];
         const method = String(v.metodoPago || v.metodo || v.datosVenta?.metodo || v.args?.[0] || 'contado').toLowerCase();
         const folio = v.folio || v.datosVenta?.folio || v.args?.[5] || '-';
         const suppliers = saleSuppliers(items, providerMaps);
@@ -313,6 +382,11 @@
             .sort((a, b) => a.localeCompare(b, 'es'));
         const subcategories = [...new Set(items.map(item => itemSubcategoryLabel(item, providerMaps)).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b, 'es'));
+        const totalDoc = Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || totalMerch || 0) || 0;
+        const profit = cost > 0 ? Math.max(0, totalMerch - cost) : 0;
+        // Interes/recargo por credito: diferencia entre el total documentado (con intereses) y la mercancia vendida.
+        const financialInterest = Math.max(0, totalDoc - totalMerch);
+        const financialProfit = profit + financialInterest;
         return {
             raw: v,
             index,
@@ -325,7 +399,7 @@
                 : (v.clienteNombre || v.cliente?.nombre || v.datosVenta?.cliente?.nombre || 'Publico general'),
             method,
             totalMerch,
-            totalDoc: Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || totalMerch || 0) || 0,
+            totalDoc,
             downPayment: Number(v.enganche || v.engancheRecibido || v.datosVenta?.enganche || v.args?.[2] || 0) || 0,
             initialCollected: Number(v.montoIngresoInicial ?? 0) || 0,
             account: v.cuentaReceptora || v.cuentaId || v.etiquetaCuenta || v.datosVenta?.cuentaReceptora || '',
@@ -333,7 +407,11 @@
             items,
             units: items.reduce((s, a) => s + (Number(a.cantidad || 1) || 1), 0),
             cost,
-            profit: cost > 0 ? Math.max(0, totalMerch - cost) : 0,
+            costEstimated,
+            costSources,
+            profit,
+            financialInterest,
+            financialProfit,
             seller: v.vendedor || v.vendedorNombre || v.vendedorSeleccionado?.nombre || '',
             suppliers,
             categories,
@@ -389,6 +467,93 @@
             });
     }
 
+    function detalleItemRow(item, maps) {
+        const cantidad = Number(item.cantidad || item.cant || 1) || 1;
+        const precioUnit = Number(item.precioContado || item.precio || 0) || 0;
+        const subtotal = precioUnit * cantidad;
+        const { costo: costoUnit, estimado, fuente } = resolverCostoItem(item, maps);
+        const costoTotal = costoUnit * cantidad;
+        const utilidad = costoUnit > 0 ? Math.max(0, subtotal - costoTotal) : null;
+        const nombre = item.nombre || item.productoNombre || 'Producto';
+        const proveedor = itemSupplierLabel(item, maps);
+        const categoria = itemCategoryLabel(item, maps);
+        return `<tr style="border-bottom:1px solid #f1f5f9;">
+            <td style="padding:9px;">${esc(nombre)}${(proveedor && proveedor !== 'Sin proveedor') || categoria ? `<br><small style="color:#64748b;">${[proveedor !== 'Sin proveedor' ? proveedor : '', categoria].filter(Boolean).map(esc).join(' · ')}</small>` : ''}</td>
+            <td style="padding:9px;text-align:center;">${cantidad}</td>
+            <td style="padding:9px;text-align:right;">${money(precioUnit)}</td>
+            <td style="padding:9px;text-align:right;font-weight:800;">${money(subtotal)}</td>
+            <td style="padding:9px;text-align:right;color:#64748b;">${costoUnit > 0 ? `${money(costoTotal)}${estimado ? `<br><small style="color:#b45309;">${esc(FUENTE_COSTO_LABEL[fuente] || 'Estimado')}</small>` : ''}` : '-'}</td>
+            <td style="padding:9px;text-align:right;color:#0f766e;font-weight:800;">${utilidad !== null ? money(utilidad) : '-'}</td>
+        </tr>`;
+    }
+
+    window._rvAbrirDetalle = function(source, folio, index) {
+        const providerMaps = productProviderMaps();
+        let raw = null;
+        let v = null;
+        if (source === 'cuarentena') {
+            const pendientes = arr('ventasPendientes');
+            raw = index !== null && index !== undefined && index >= 0 ? pendientes[index] : null;
+            v = raw ? normalizeSale(raw, 'cuarentena', index, providerMaps) : null;
+        } else {
+            raw = arr('ventasRegistradas').find(x => String(x.folio || '') === String(folio));
+            v = raw ? normalizeSale(raw, 'registrada', null, providerMaps) : null;
+        }
+        if (!v) return;
+
+        document.querySelector('[data-modal="detalle-venta"]')?.remove();
+        const estadoBadge = String(v.status).toLowerCase().includes('cancel') ? badge(v.status, '#fee2e2', '#991b1b') : badge(v.status, '#e0f2fe', '#075985');
+        const origenBadge = v.source === 'cuarentena' ? badge('Boveda', '#fff7ed', '#c2410c') : badge('Registrada', '#ecfdf5', '#047857');
+        const itemsHtml = v.items.length
+            ? v.items.map(a => detalleItemRow(a, providerMaps)).join('')
+            : `<tr><td colspan="6" style="padding:14px;text-align:center;color:#94a3b8;">Sin articulos registrados.</td></tr>`;
+        const margenTxt = v.cost > 0 && v.totalMerch > 0 ? `${money(v.profit)} (${((v.profit / v.totalMerch) * 100).toFixed(1)}%)` : 'Sin costo registrado';
+        const fuentesTxt = v.costSources.map(f => FUENTE_COSTO_LABEL[f] || f).join(', ');
+        const margenFoot = v.cost > 0 && v.costEstimated ? `Costo estimado: ${fuentesTxt}` : '';
+        const financieraFoot = v.financialInterest > 0 ? `Mercancia ${money(v.profit)} + interes ${money(v.financialInterest)}` : 'Sin interes de credito en esta venta';
+        const cobradoLabel = v.method === 'credito' || v.method === 'apartado' ? 'Enganche/anticipo' : 'Cobrado';
+        const cobradoValor = v.initialCollected || (['contado', 'transferencia'].includes(v.method) ? v.totalMerch : v.downPayment);
+
+        const html = `
+        <div data-modal="detalle-venta" style="position:fixed;inset:0;background:rgba(15,23,42,0.82);z-index:10000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+            <div style="background:white;border-radius:14px;width:100%;max-width:760px;padding:24px;box-shadow:0 25px 60px rgba(0,0,0,0.35);">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;">
+                    <div>
+                        <h2 style="margin:0;color:#0f172a;">Venta ${esc(v.folio)}</h2>
+                        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">${origenBadge}${estadoBadge}${badge(v.method, '#f1f5f9', '#334155')}</div>
+                    </div>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-venta&quot;]')?.remove()" style="border:none;background:#f1f5f9;color:#334155;border-radius:8px;padding:8px 12px;font-weight:900;cursor:pointer;">Cerrar</button>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px;color:#334155;">
+                    <div><strong style="display:block;color:#64748b;font-size:11px;text-transform:uppercase;">Cliente</strong>${esc(v.customer)}</div>
+                    <div><strong style="display:block;color:#64748b;font-size:11px;text-transform:uppercase;">Fecha</strong>${esc(v.dateText)}</div>
+                    <div><strong style="display:block;color:#64748b;font-size:11px;text-transform:uppercase;">Vendedor</strong>${esc(v.seller || '-')}</div>
+                    <div><strong style="display:block;color:#64748b;font-size:11px;text-transform:uppercase;">Cuenta</strong>${esc(v.account || '-')}</div>
+                </div>
+                <h3 style="margin:0 0 8px;font-size:14px;color:#0f172a;">Articulos</h3>
+                <div style="overflow-x:auto;margin-bottom:16px;">
+                    <table style="width:100%;border-collapse:collapse;min-width:520px;font-size:13px;">
+                        <thead><tr style="background:#f8fafc;text-align:left;color:#334155;">
+                            <th style="padding:9px;">Producto</th><th style="padding:9px;text-align:center;">Cant.</th><th style="padding:9px;text-align:right;">Precio</th><th style="padding:9px;text-align:right;">Subtotal</th><th style="padding:9px;text-align:right;">Costo</th><th style="padding:9px;text-align:right;">Utilidad</th>
+                        </tr></thead>
+                        <tbody>${itemsHtml}</tbody>
+                    </table>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+                    ${kpi('Total mercancia', money(v.totalMerch), '#2563eb')}
+                    ${kpi('Total documento', money(v.totalDoc), '#0f172a')}
+                    ${kpi('Costo', v.cost > 0 ? money(v.cost) : 'Sin costo', '#64748b')}
+                    ${kpi('Utilidad bruta', margenTxt, '#0f766e', margenFoot)}
+                    ${kpi('Interes de credito', v.financialInterest > 0 ? money(v.financialInterest) : '$0.00', '#f59e0b')}
+                    ${kpi('Utilidad financiera', money(v.financialProfit), '#7c3aed', financieraFoot)}
+                    ${kpi(cobradoLabel, money(cobradoValor), '#16a34a')}
+                    ${kpi('Saldo', v.balance > 0 ? money(v.balance) : 'Liquidada', v.balance > 0 ? '#dc2626' : '#94a3b8')}
+                </div>
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+    };
+
     window.renderReporteVentas = function() {
         const app = reportTarget('reporteVentasApp', 'reporte-ventas');
         if (!app) return;
@@ -400,9 +565,12 @@
         const credit = active.filter(v => v.method === 'credito').reduce((s, v) => s + v.balance, 0);
         const cost = active.reduce((s, v) => s + v.cost, 0);
         const profit = active.reduce((s, v) => s + v.profit, 0);
+        const financialInterest = active.reduce((s, v) => s + v.financialInterest, 0);
+        const financialProfit = active.reduce((s, v) => s + v.financialProfit, 0);
         const units = active.reduce((s, v) => s + v.units, 0);
         const avg = active.length ? total / active.length : 0;
         const margin = cost > 0 && total > 0 ? (profit / total) * 100 : 0;
+        const financialMargin = docTotal > 0 ? (financialProfit / docTotal) * 100 : 0;
         const inVault = arr('ventasPendientes')
             .filter(v => !String(v.estado || v.estatus || '').toLowerCase().includes('cancel')).length;
         const canceled = arr('ventasRegistradas')
@@ -442,7 +610,7 @@
         const methodBars = ['contado', 'transferencia', 'credito', 'apartado'].map(m => {
             const value = active.filter(v => v.method === m).reduce((s, v) => s + v.totalMerch, 0);
             const pct = total > 0 ? Math.round(value / total * 100) : 0;
-            return `<div style="padding:9px 0;border-bottom:1px solid #f1f5f9;">
+            return `<div style="padding:9px 6px;border-bottom:1px solid #f1f5f9;cursor:pointer;border-radius:6px;transition:background .12s;" onclick="window._rvFiltrarPorMetodo('${m}')" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'" title="Clic para filtrar por ${esc(m)}">
                 <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:800;color:#334155;"><span>${badge(m, '#f1f5f9', '#334155')}</span><span>${money(value)} (${pct}%)</span></div>
                 <div style="height:8px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-top:7px;"><div style="width:${pct}%;height:100%;background:#0f766e;"></div></div>
             </div>`;
@@ -455,7 +623,9 @@
                 const itemText = v.items.length ? v.items.slice(0, 3).map(a => `${a.cantidad || 1}x ${esc(a.nombre || a.productoNombre || '-')}`).join('<br>') : '<span style="color:#94a3b8;">Sin detalle</span>';
                 const source = v.source === 'cuarentena' ? badge('Boveda', '#fff7ed', '#c2410c') : badge('Registrada', '#ecfdf5', '#047857');
                 const status = String(v.status).toLowerCase().includes('cancel') ? badge(v.status, '#fee2e2', '#991b1b') : badge(v.status, '#e0f2fe', '#075985');
-                return `<tr style="border-bottom:1px solid #e2e8f0;">
+                const detalleArg = v.source === 'cuarentena' ? String(v.index) : 'null';
+                const folioArg = esc(v.folio).replace(/'/g, "\\'");
+                return `<tr style="border-bottom:1px solid #e2e8f0;cursor:pointer;transition:background .12s;" onclick="window._rvAbrirDetalle('${v.source}','${folioArg}',${detalleArg})" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'" title="Clic para ver el detalle de la venta">
                     <td style="padding:12px;vertical-align:top;"><strong>${esc(v.folio)}</strong><br>${source}<br>${status}</td>
                     <td style="padding:12px;vertical-align:top;white-space:nowrap;">${esc(v.dateText)}</td>
                     <td style="padding:12px;vertical-align:top;"><strong>${esc(v.customer)}</strong>${v.seller ? `<br><small style="color:#64748b;">Vendedor: ${esc(v.seller)}</small>` : ''}</td>
@@ -464,7 +634,7 @@
                     <td style="padding:12px;vertical-align:top;font-size:12px;">${itemText}${v.items.length > 3 ? `<br><small style="color:#64748b;">+${v.items.length - 3} mas</small>` : ''}</td>
                     <td style="padding:12px;vertical-align:top;text-align:center;font-weight:900;">${v.units}</td>
                     <td style="padding:12px;vertical-align:top;text-align:right;"><strong style="color:#1d4ed8;">${money(v.totalMerch)}</strong><br><small style="color:#64748b;">Doc: ${money(v.totalDoc)}</small></td>
-                    <td style="padding:12px;vertical-align:top;text-align:right;">${v.cost > 0 ? `<strong style="color:#0f766e;">${money(v.profit)}</strong><br><small style="color:#64748b;">Costo: ${money(v.cost)}</small>` : '<span style="color:#94a3b8;">Sin costo</span>'}</td>
+                    <td style="padding:12px;vertical-align:top;text-align:right;">${v.cost > 0 ? `<strong style="color:#0f766e;">${money(v.profit)}</strong><br><small style="color:#64748b;">Costo: ${money(v.cost)}</small>${v.costEstimated ? `<br><small style="color:#b45309;">Estimado: ${esc(v.costSources.map(f => FUENTE_COSTO_LABEL[f] || f).join(', '))}</small>` : ''}` : '<span style="color:#94a3b8;">Sin costo</span>'}${v.financialInterest > 0 ? `<br><small style="color:#7c3aed;">+ interes ${money(v.financialInterest)}</small>` : ''}</td>
                     <td style="padding:12px;vertical-align:top;text-align:right;color:#16a34a;font-weight:900;">${money(v.initialCollected || v.downPayment)}</td>
                     <td style="padding:12px;vertical-align:top;text-align:right;color:${v.balance > 0 ? '#dc2626' : '#94a3b8'};font-weight:900;">${v.balance > 0 ? money(v.balance) : '-'}</td>
                 </tr>`;
@@ -493,11 +663,12 @@
                 </details>
             </div>
             ${ventaChips}
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Ventas registradas', active.length, '#0f172a')}${kpi('Mercancia vendida', money(total), '#2563eb')}${kpi('Cobro inicial', money(collected), '#16a34a')}${kpi('Cartera originada', money(credit), '#7c3aed')}${kpi('Ticket promedio', money(avg), '#0f766e')}${kpi('Utilidad estimada', cost > 0 ? `${money(profit)} (${margin.toFixed(1)}%)` : 'Sin costo', '#dc2626')}</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Ventas registradas', active.length, '#0f172a')}${kpi('Mercancia vendida', money(total), '#2563eb')}${kpi('Cobro inicial', money(collected), '#16a34a')}${kpi('Cartera originada', money(credit), '#7c3aed')}${kpi('Ticket promedio', money(avg), '#0f766e')}${kpi('Utilidad estimada', cost > 0 ? `${money(profit)} (${margin.toFixed(1)}%)` : 'Sin costo', '#dc2626', active.some(v => v.costEstimated) ? 'Incluye costos estimados (historial/compras)' : '')}${kpi('Interes de credito', money(financialInterest), '#f59e0b')}${kpi('Utilidad financiera', `${money(financialProfit)} (${financialMargin.toFixed(1)}%)`, '#7c3aed', 'Utilidad de mercancia + interes de credito, sobre el total documentado')}</div>
+            ${active.some(v => v.costEstimated) ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin:-8px 0 18px;font-size:12px;color:#92400e;">Algunas ventas no tenian costo registrado: se estimo usando el costo mas alto del historial del producto, o el de su compra mas reciente cuando no hay historial.</div>' : ''}
             <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Lectura rapida</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;color:#334155;font-size:13px;"><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Piezas vendidas</strong>${units}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Venta documental</strong>${money(docTotal)}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">En boveda</strong>${inVault}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Canceladas visibles</strong>${canceled}</div></div></div><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Mix de venta</h3>${methodBars}</div></div>
-            <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;margin-bottom:20px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Ventas registradas por mes</h3>${chartByMonth(active, v => v.totalMerch, '#2563eb', '#0f766e')}</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top clientes</h3>${bars(topCustomers, total, '#2563eb')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top productos</h3>${bars(topProducts, total, '#0f766e')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top vendedores</h3>${bars(topSellers, total, '#7c3aed')}</div></div>
-            <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Detalle de Ventas</h3><div style="overflow-x:auto;">${table}</div></div>`;
+            <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;margin-bottom:20px;"><h3 style="margin:0 0 6px;color:#0f172a;font-size:16px;">Ventas registradas por mes</h3><p style="margin:0 0 12px;color:#94a3b8;font-size:12px;">Clic en una barra para filtrar ese mes.</p>${chartByMonth(active, v => v.totalMerch, '#2563eb', '#0f766e', { onClick: '_rvFiltrarPorMes', extraFn: v => (v.cost > 0 ? v.profit : 0), extraLabel: 'Utilidad' })}</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top clientes</h3>${bars(topCustomers, total, '#2563eb', '_rvFiltrarPorTexto')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top productos</h3>${bars(topProducts, total, '#0f766e', '_rvFiltrarPorTexto')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top vendedores</h3>${bars(topSellers, total, '#7c3aed', '_rvFiltrarPorTexto')}</div></div>
+            <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 6px;color:#0f172a;font-size:16px;">Detalle de Ventas</h3><p style="margin:0 0 12px;color:#94a3b8;font-size:12px;">Clic en una fila para ver el detalle completo de la venta.</p><div style="overflow-x:auto;">${table}</div></div>`;
         const sf = window._rplusVentaFiltros || {};
         if (document.getElementById('rvMetodo')) document.getElementById('rvMetodo').value = sf.method || '';
         if (document.getElementById('rvProveedor')) document.getElementById('rvProveedor').value = sf.supplier || '';
@@ -509,10 +680,11 @@
 
     window.exportarReporteVentas = function() {
         const rows = filteredSales();
-        let csv = 'Origen,Folio,Fecha,Cliente,Proveedor,Categoria,Subcategoria,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,CostoEstimado,UtilidadEstimada,EngancheCobrado,Saldo,Vendedor,Estado\n';
+        let csv = 'Origen,Folio,Fecha,Cliente,Proveedor,Categoria,Subcategoria,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,Costo,CostoFuente,UtilidadMercancia,InteresCredito,UtilidadFinanciera,EngancheCobrado,Saldo,Vendedor,Estado\n';
         rows.forEach(v => {
             const items = v.items.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || ''}`).join(' | ');
-            csv += `"${v.source}","${v.folio}","${v.dateText}","${v.customer}","${(v.suppliers || []).join(' | ')}","${(v.categories || []).join(' | ')}","${(v.subcategories || []).join(' | ')}","${v.method}","${items}",${v.units},${v.totalMerch},${v.totalDoc},${v.cost},${v.profit},${v.initialCollected || v.downPayment},${v.balance},"${v.seller}","${v.status}"\n`;
+            const fuente = v.costEstimated ? v.costSources.map(f => FUENTE_COSTO_LABEL[f] || f).join(' / ') : 'Registrado';
+            csv += `"${v.source}","${v.folio}","${v.dateText}","${v.customer}","${(v.suppliers || []).join(' | ')}","${(v.categories || []).join(' | ')}","${(v.subcategories || []).join(' | ')}","${v.method}","${items}",${v.units},${v.totalMerch},${v.totalDoc},${v.cost},"${fuente}",${v.profit},${v.financialInterest},${v.financialProfit},${v.initialCollected || v.downPayment},${v.balance},"${v.seller}","${v.status}"\n`;
         });
         downloadCsv('reporte_ventas', csv);
     };

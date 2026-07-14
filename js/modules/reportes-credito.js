@@ -235,6 +235,7 @@ window.renderARC_v3 = function() {
         .reduce((s, c) => s + Math.abs(c.sne.excedente), 0);
     const cuentasAlCorriente = cuentasSNE.filter(c => c.sne.excedente >= 0).length;
     const cuentasEnMora = cuentasSNE.filter(c => c.sne.deficitPct >= 18).length;
+    window._filasParaCobranza = []; // Para el listado de cobranza
 
     // ── Agrupar por nivel ──────────────────────────────────────────
     const grupos = {
@@ -279,6 +280,8 @@ window.renderARC_v3 = function() {
         `;
 
         lista.forEach(c => {
+            const indexFila = window._filasParaCobranza.length;
+            window._filasParaCobranza.push(c);
             const s = c.sne;
             const pctPagado = s.totalVenta > 0 ? (s.totalPagado / s.totalVenta * 100) : 0;
             const exStr = s.excedente >= 0
@@ -291,9 +294,12 @@ window.renderARC_v3 = function() {
             tarjetasHTML += `
             <div style="background:white;border-radius:10px;padding:15px;border-left:4px solid ${s.colorRiesgo};box-shadow:0 2px 8px rgba(0,0,0,0.06);">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-                    <div>
-                        <div style="font-weight:900;color:#0f172a;font-size:14px;">${c.nombre || 'Sin nombre'}</div>
-                        <div style="font-size:11px;color:#64748b;">${c.folio}</div>
+                    <div style="display:flex; gap:8px; align-items:flex-start;">
+                        <input type="checkbox" class="chk-cobrador" value="${indexFila}" style="width:16px; height:16px; cursor:pointer; margin-top:2px;">
+                        <div>
+                            <div style="font-weight:900;color:#0f172a;font-size:14px;">${c.nombre || 'Sin nombre'}</div>
+                            <div style="font-size:11px;color:#64748b;">${c.folio}</div>
+                        </div>
                     </div>
                     ${_rc.badge(s.emojiRiesgo + ' ' + s.nivelRiesgo, s.colorRiesgo + '20', s.colorRiesgo)}
                 </div>
@@ -352,6 +358,7 @@ window.renderARC_v3 = function() {
                     </p>
                 </div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
                     <button onclick="renderARCTablaExcel()" style="padding:10px 16px;background:#059669;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📊 Vista Matriz Excel</button>
                     <button onclick="renderComportamiento()" style="padding:10px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🧬 Comportamiento de Pago</button>
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
@@ -622,7 +629,8 @@ window.renderARCTablaExcel = function() {
     uniqueGroups.forEach(key => sumAbonosFechas[key] = 0);
 
     // 5. Construir Filas
-    const filasHtml = cuentasActivas.map(c => {
+    window._filasParaCobranza = cuentasActivas;
+    const filasHtml = cuentasActivas.map((c, i) => {
         const s = c.sne;
         
         let bgStatus, colorText;
@@ -657,7 +665,12 @@ window.renderARCTablaExcel = function() {
         sumRestante += saldoRestante;
 
         let row = `<tr style="font-size:11px; background:#ffffff; border-bottom:1px solid #e2e8f0;">
-            <td class="ex-stky ex-col-1" style="background:${bgStatus}; color:${colorText};" title="${s.nivelRiesgo}">${s.emojiRiesgo}</td>
+            <td class="ex-stky ex-col-1" style="background:${bgStatus}; color:${colorText};" title="${s.nivelRiesgo}">
+                <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                    <input type="checkbox" class="chk-cobrador" value="${i}" style="width:13px; height:13px; margin:0; cursor:pointer;">
+                    ${s.emojiRiesgo}
+                </div>
+            </td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
             <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${descTooltip}">${desc}</td>
             <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${c.nombre}">${nombreCliente}</td>
@@ -772,6 +785,7 @@ window.renderARCTablaExcel = function() {
                     <p style="margin:5px 0 0;color:#a7f3d0;font-size:12px;">Desplázate hacia la derecha y hacia abajo libremente. Clic en las cabeceras para ordenar.</p>
                 </div>
                 <div style="display:flex;gap:10px;">
+                    <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
                     <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a Tarjetas</button>
                 </div>
             </div>
@@ -1097,6 +1111,8 @@ window.renderComportamiento = function() {
         }
         return direccion === 'asc' ? comparacion : -comparacion;
     });
+    
+    window._filasParaCobranza = lista;
 
     const thOrdenable = (clave, texto, alineacion = 'left') => {
         const activo = ordenar === clave;
@@ -1104,7 +1120,7 @@ window.renderComportamiento = function() {
         return `<th onclick="ordenarComportamientoPor('${clave}')" title="Ordenar por ${texto}" style="position:sticky;top:0;z-index:3;padding:11px 12px;font-size:11px;color:${activo ? '#4c1d95' : '#475569'};background:${activo ? '#ede9fe' : '#f8fafc'};text-align:${alineacion};cursor:pointer;white-space:nowrap;border-bottom:2px solid ${activo ? '#7c3aed' : '#e2e8f0'};user-select:none;">${texto} <span style="font-size:10px;">${flecha}</span></th>`;
     };
 
-    const filas = lista.map(c => {
+    const filas = lista.map((c, i) => {
         const s = c.sne;
         const pctPagado = s.totalVenta > 0 ? (s.totalPagado / s.totalVenta * 100) : 0;
 
@@ -1128,9 +1144,12 @@ window.renderComportamiento = function() {
             : `<span style="color:#dc2626;font-weight:bold;">${_rc.fmt(s.excedente)}</span>`;
 
         return `<tr style="border-bottom:1px solid #f1f5f9;">
-            <td style="padding:10px 12px;min-width:160px;">
-                <b style="font-size:13px;">${c.nombre || '—'}</b><br>
-                <small style="color:#64748b;">${c.agrupado ? `${c.cuentasGrupo.length} cuentas: ${c.folios.join(', ')}` : c.folio}</small>
+            <td style="padding:10px 12px;min-width:160px; display:flex; gap:8px; align-items:center;">
+                <input type="checkbox" class="chk-cobrador" value="${i}" style="width:16px; height:16px; cursor:pointer; accent-color:#7c3aed;">
+                <div>
+                    <b style="font-size:13px;">${c.nombre || '—'}</b><br>
+                    <small style="color:#64748b;">${c.agrupado ? `${c.cuentasGrupo.length} cuentas: ${c.folios.join(', ')}` : c.folio}</small>
+                </div>
             </td>
             <td style="padding:10px 12px;text-align:right;font-weight:bold;color:#dc2626;">${_rc.fmt(s.saldoActual)}</td>
             <td style="padding:10px 12px;text-align:right;">${_rc.fmt(s.totalPagado)}<br><small style="color:#64748b;">${s.numAbonos} abonos</small></td>
@@ -1166,7 +1185,10 @@ window.renderComportamiento = function() {
                         Un cliente con pagarés vencidos pero SNE positivo <b>está al corriente de facto</b>.
                     </p>
                 </div>
-                <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                </div>
             </div>
         </div>
 
@@ -1346,7 +1368,10 @@ window.renderCobranzaMensual = function() {
                         Compara cuánto <b>capital nuevo se colocó en crédito</b> contra cuánto <b>efectivo real regresó</b> ese mes vía abonos.
                     </p>
                 </div>
-                <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                </div>
             </div>
         </div>
 
@@ -1484,7 +1509,10 @@ window.renderConcentracion = function() {
                         ¿Cuánto de tu riesgo está en pocos clientes? Identifica dependencias críticas con el índice HHI.
                     </p>
                 </div>
-                <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                </div>
             </div>
         </div>
 
@@ -1536,6 +1564,125 @@ window.renderConcentracion = function() {
             </div>
         </div>
     </div>`;
+};
+
+window.generarListadoCobranza = function() {
+    // 1. Obtener los índices seleccionados en pantalla
+    const checkboxes = document.querySelectorAll('.chk-cobrador:checked');
+    if (checkboxes.length === 0) {
+        return alert("⚠️ Selecciona al menos un cliente marcando su casilla para generar el listado.");
+    }
+    
+    // 2. Extraer las filas exactas (agrupadas o individuales) desde la memoria de la vista actual
+    const cuentasCobrador = Array.from(checkboxes).map(chk => window._filasParaCobranza[parseInt(chk.value)]);
+    const hoy = new Date();
+
+    const formatearFecha = (fecha) => {
+        if (!fecha) return 'S/F';
+        const d = typeof fecha === 'string' || typeof fecha === 'number' ? new Date(fecha) : fecha;
+        return isNaN(d.getTime()) ? 'S/F' : d.toLocaleDateString('es-MX');
+    };
+
+    // 3. Construir la vista de impresión respetando agrupaciones
+    let htmlFilas = cuentasCobrador.map((c, i) => {
+        const s = c.sne || {};
+
+        // Identificar si la fila actual es un grupo de cuentas o una sola
+        const esAgrupado = c.agrupado || c.agrupadoPorCliente;
+        const folioVisible = esAgrupado && c.folios ? `Múltiples (${c.folios.join(', ')})` : (c.folio || '-');
+        
+        // Sumarizar artículos
+        let articulosText = '';
+        if (c.articulos && c.articulos.length > 0) {
+            articulosText = c.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || '-'}`).join(', ');
+        } else {
+            articulosText = 'Sin detalle de artículos';
+        }
+
+        const diasAtraso = s.diasSinPagar === 9999 ? 'Sin abonos' : `${s.diasSinPagar} días`;
+        const riesgo = s.nivelRiesgo || c.estado || 'N/D';
+        
+        // Fechas
+        const fechaVentaStr = formatearFecha(c.fechaVenta || c.fechaIso || c.fecha);
+        const fechaUltAbonoStr = s.ultimaFechaAbono ? formatearFecha(s.ultimaFechaAbono) : 'Sin abonos';
+
+        return `
+            <tr style="border-bottom: 2px solid #cbd5e1;">
+                <td style="padding: 10px; font-weight: bold; font-size: 14px;">${i + 1}</td>
+                <td style="padding: 10px;">
+                    <div style="font-weight: 900; font-size: 14px;">${c.nombre || c.clienteNombre || 'Sin nombre'}</div>
+                    <div style="font-size: 11px; color: #475569;">📞 Tel: ${c.telefono || 'N/D'}</div>
+                    <div style="font-size: 11px; color: #475569;">📍 Dir: ${c.direccion || 'N/D'}</div>
+                    <div style="font-size: 11px; color: #475569; margin-top: 4px;">🛒 ${articulosText}</div>
+                </td>
+                <td style="padding: 10px; font-size: 12px;">
+                    <div>Folio: <b>${folioVisible}</b></div>
+                    <div>F. Venta: <b>${fechaVentaStr}</b></div>
+                    <div style="margin-top: 4px;">Saldo: <b style="color: #dc2626; font-size: 14px;">$${(s.saldoActual || c.saldoActual || 0).toLocaleString('en-US')}</b></div>
+                    <div>Abonado: <b style="color: #16a34a;">$${(s.totalPagado || 0).toLocaleString('en-US')}</b></div>
+                </td>
+                <td style="padding: 10px; font-size: 12px;">
+                    <div>Riesgo: <b>${riesgo}</b></div>
+                    <div style="margin-top: 4px;">Últ. Abono: <b>${fechaUltAbonoStr}</b></div>
+                    <div>Días sin pago: <b>${diasAtraso}</b></div>
+                </td>
+                <td style="padding: 10px; width: 150px;">
+                    <div style="border-bottom: 1px solid #94a3b8; height: 25px; margin-bottom: 10px;"></div>
+                    <div style="border-bottom: 1px solid #94a3b8; height: 25px;"></div>
+                    <div style="font-size: 9px; text-align: center; color: #64748b; margin-top: 4px;">Firma / Notas</div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+
+    const ventana = window.open('', '_blank');
+    ventana.document.write(`
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <title>Ruta de Cobranza</title>
+            <base href="${baseUrl}">
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; color: #0f172a; }
+                table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+                .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 10px; }
+                .logo-container { display: flex; align-items: center; gap: 15px; }
+                @media print { button { display: none !important; } body { padding: 0; } }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="logo-container">
+                    <img src="img/Logo.svg" style="width: 60px; height: 60px; object-fit: contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
+                    <div>
+                        <h2 style="margin: 0; color: #0f172a;">Ruta de Cobranza en Campo</h2>
+                        <div style="font-size: 14px; color: #64748b; font-weight: bold;">Mueblería Mi Pueblito</div>
+                    </div>
+                </div>
+                <button onclick="window.print()" style="padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimir Ruta</button>
+            </div>
+            
+            <p style="margin-top: 0; font-size: 14px;">Fecha de emisión: <b>${hoy.toLocaleDateString('es-MX')}</b> | Clientes asignados: <b>${cuentasCobrador.length}</b></p>
+            
+            <table>
+                <thead>
+                    <tr style="background: #f8fafc; text-align: left; border-bottom: 2px solid #cbd5e1;">
+                        <th style="padding: 10px;">#</th>
+                        <th style="padding: 10px;">Datos del Cliente</th>
+                        <th style="padding: 10px;">Estado de Cuenta</th>
+                        <th style="padding: 10px;">Métricas de Riesgo</th>
+                        <th style="padding: 10px;">Gestión</th>
+                    </tr>
+                </thead>
+                <tbody>${htmlFilas}</tbody>
+            </table>
+        </body>
+        </html>
+    `);
+    ventana.document.close();
 };
 
 // ── Exponer al scope global ────────────────────────────────────
