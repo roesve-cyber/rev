@@ -225,7 +225,7 @@ window.renderReporteAbonEnganches = function() {
     // CONSTRUIR HTML
     let html = `
         <div style="background:linear-gradient(135deg,#059669,#047857); color:white; padding:22px; border-radius:14px; margin-bottom:20px; display:flex; align-items:center; gap:20px;">
-            <img src="img/Logo.png" style="height:60px; width:auto; object-fit:contain;" alt="Logo">
+            <img src="img/Logo.png" width="150" height="60" style="height:60px; width:150px; object-fit:contain;" alt="Logo">
             <div>
                 <h2 style="margin:0; font-size:22px; font-weight:900;">💵 Reporte de Abonos y Enganches</h2>
                 <p style="margin:5px 0 0; color:#d1fae5; font-size:13px;">Análisis de cobros en cobranza con saldos antes y después del movimiento.</p>
@@ -367,11 +367,19 @@ window.renderReporteAbonEnganches = function() {
     }
 
     cont.innerHTML = html;
-    window.scrollTo(0, 0);
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-    const appCont = document.getElementById('app-container');
-    if (appCont) appCont.scrollTop = 0;
+    const forzarScrollArriba = () => {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        const appCont = document.getElementById('app-container');
+        if (appCont) appCont.scrollTop = 0;
+    };
+    forzarScrollArriba();
+    requestAnimationFrame(forzarScrollArriba);
+    setTimeout(forzarScrollArriba, 50);
+    setTimeout(forzarScrollArriba, 300);
+    const logoImg = cont.querySelector('img[src*="Logo"]');
+    if (logoImg && !logoImg.complete) logoImg.addEventListener('load', forzarScrollArriba, { once: true });
 };
 
 window.exportarReporteAbonEnganches = function() {
