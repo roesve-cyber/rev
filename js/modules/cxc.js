@@ -1345,6 +1345,9 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         fechaCapturaIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
         clienteNombre: _cxcNombreClienteVigente(cuenta),
         montoAbonado: montoFinal,
+        estado: 'Pendiente',
+        status: 'Pendiente',
+        estatus: 'Pendiente',
         montoAbonoInput: montoAbonoInput,
         fechaAbonoRaw: fechaAbonoRaw,
         cuentaId: cuentaId,
@@ -1360,6 +1363,24 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 
     if (!esDirecto) {
         StorageService.pushAtomo("abonosPendientes", cuarentena);
+        if (window.AuditService?.log) {
+            window.AuditService.log({
+                accion: 'BOVEDA_ABONO_PENDIENTE',
+                modulo: 'CxC',
+                entidad: 'abono',
+                entidadId: folio,
+                detalle: `Abono enviado a la bóveda de autorizaciones`,
+                monto: montoFinal,
+                severidad: 'riesgo',
+                datos: {
+                    clienteNombre: _cxcNombreClienteVigente(cuenta),
+                    cuentaId: cuentaId,
+                    etiquetaCuenta: etiqueta,
+                    medioPago,
+                    estatus: 'Pendiente'
+                }
+            });
+        }
         if (typeof window.notificarBovedaAutorizacion === 'function') {
             window.notificarBovedaAutorizacion({
                 tipo: 'abono',

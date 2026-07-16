@@ -438,7 +438,7 @@
         const providerMaps = productProviderMaps();
         const rows = [
             ...arr('ventasRegistradas').map(v => normalizeSale(v, 'registrada', null, providerMaps)),
-            ...arr('ventasPendientes').map((v, i) => normalizeSale(v, 'cuarentena', i, providerMaps))
+            ...arr('ventasPendientes').filter(_esSolicitudBovedaPendiente).map((v, i) => normalizeSale(v, 'cuarentena', i, providerMaps))
         ];
         return rows
             .filter(v => !filters.method || v.method === filters.method)
@@ -572,6 +572,7 @@
         const margin = cost > 0 && total > 0 ? (profit / total) * 100 : 0;
         const financialMargin = docTotal > 0 ? (financialProfit / docTotal) * 100 : 0;
         const inVault = arr('ventasPendientes')
+            .filter(_esSolicitudBovedaPendiente)
             .filter(v => !String(v.estado || v.estatus || '').toLowerCase().includes('cancel')).length;
         const canceled = arr('ventasRegistradas')
             .filter(v => String(v.estado || v.estatus || '').toLowerCase().includes('cancel')).length;
@@ -581,7 +582,7 @@
         const saleProviderMaps = productProviderMaps();
         const allSaleRows = [
             ...arr('ventasRegistradas').map(v => normalizeSale(v, 'registrada', null, saleProviderMaps)),
-            ...arr('ventasPendientes').map((v, i) => normalizeSale(v, 'cuarentena', i, saleProviderMaps))
+            ...arr('ventasPendientes').filter(_esSolicitudBovedaPendiente).map((v, i) => normalizeSale(v, 'cuarentena', i, saleProviderMaps))
         ];
         const saleFilterState = window._rplusVentaFiltros || {};
         const supplierSelectVentas = supplierOptions(saleFilterState.supplier || '', allSaleRows.flatMap(v => v.suppliers || []));

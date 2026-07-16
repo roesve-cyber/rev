@@ -210,6 +210,7 @@ function _rvVentasFiltradas(filtros = {}) {
     const registradas = StorageService.get("ventasRegistradas", [])
         .map(v => _rvVentaNormalizada(v, "registrada"));
     const cuarentena = StorageService.get("ventasPendientes", [])
+        .filter(_esSolicitudBovedaPendiente)
         .map((v, index) => _rvVentaNormalizada(v, "cuarentena", index));
 
     return [...registradas, ...cuarentena]

@@ -56,6 +56,30 @@ function _normalizarFechasPendientesAutorizacion() {
     if (cambioAbonos) StorageService.set("abonosPendientes", abonosPend);
 }
 
+function _resolverEstadoBoveda(item, fallback = 'Pendiente') {
+    const raw = String(item?.estado ?? item?.status ?? item?.estatus ?? '').trim();
+    if (!raw) return fallback;
+    const normalizado = raw.toLowerCase();
+    if (['pendiente','pending','en boveda','en_boveda','en cuarentena','en_cuarentena','provisional','activo','activa','en espera','espera'].includes(normalizado)) return 'Pendiente';
+    if (['aprobado','autorizado','aprobada','autorizada','procesado','procesada','registrado','registrada','aplicado','aplicada','cerrado','cerrada'].includes(normalizado)) return 'Aprobado';
+    if (['rechazado','rechazada','cancelado','cancelada','anulado','anulada','descartado','descartada'].includes(normalizado)) return 'Rechazado';
+    return raw;
+}
+
+function _esSolicitudBovedaPendiente(item) {
+    return _resolverEstadoBoveda(item, 'Pendiente') === 'Pendiente';
+}
+
+function _marcarEstadoBoveda(item, estado, meta = {}) {
+    return {
+        ...(item || {}),
+        estado,
+        status: estado,
+        estatus: estado,
+        ...meta
+    };
+}
+
 function _escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -1983,6 +2007,9 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         fechaCapturaIso: _ventaFechaAhoraIso(),
         clienteNombre: clienteSeleccionado.nombre,
         totalVenta: totalContado,
+        estado: 'Pendiente',
+        status: 'Pendiente',
+        estatus: 'Pendiente',
         args: [
             metodoPago,
             totalContado,
@@ -2002,6 +2029,24 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     let pendientes = StorageService.get("ventasPendientes", []).map(_normalizarVentaPendienteFirestore);
     pendientes.push(cuarentena);
     StorageService.set("ventasPendientes", pendientes);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'BOVEDA_VENTA_PENDIENTE',
+            modulo: 'Ventas',
+            entidad: 'venta',
+            entidadId: folioVenta,
+            detalle: `Venta enviada a la bóveda de autorizaciones`,
+            monto: totalContado,
+            severidad: 'riesgo',
+            datos: {
+                clienteId: clienteSeleccionado?.id || null,
+                clienteNombre: clienteSeleccionado?.nombre || null,
+                metodoPago,
+                enganche,
+                estatus: 'Pendiente'
+            }
+        });
+    }
     if (typeof window.notificarBovedaAutorizacion === 'function') {
         window.notificarBovedaAutorizacion({
             tipo: 'venta',
@@ -4074,14 +4119,22 @@ window.renderPanelAutorizaciones = function() {
     if (!cont) return;
     _normalizarFechasPendientesAutorizacion();
     
-    const ventasP = StorageService.get("ventasPendientes", []).map(v => ({
-        ...v,
-        fechaCapturaIso: v.fechaCapturaIso || v.datosVenta?.fechaIso || v.args?.[7] || null
-    }));
-    const abonosP = StorageService.get("abonosPendientes", []).map(a => ({
-        ...a,
-        fechaCapturaIso: a.fechaCapturaIso || a.fechaAbonoIso || null
-    }));
+    const ventasPendientesGlobal = StorageService.get("ventasPendientes", []);
+    const ventasP = ventasPendientesGlobal
+        .map((v, index) => ({
+            ...v,
+            _indiceBoveda: index,
+            fechaCapturaIso: v.fechaCapturaIso || v.datosVenta?.fechaIso || v.args?.[7] || null
+        }))
+        .filter(_esSolicitudBovedaPendiente);
+    const abonosPendientesGlobal = StorageService.get("abonosPendientes", []);
+    const abonosP = abonosPendientesGlobal
+        .map((a, index) => ({
+            ...a,
+            _indiceBoveda: index,
+            fechaCapturaIso: a.fechaCapturaIso || a.fechaAbonoIso || null
+        }))
+        .filter(_esSolicitudBovedaPendiente);
     const solicitudesClientesP = StorageService.get("solicitudesClientesPendientes", []);
 
     let html = `
@@ -4106,7 +4159,7 @@ window.renderPanelAutorizaciones = function() {
                         <td style="padding: 8px;">${v.clienteNombre || 'Público General'}</td>
                         <td style="padding: 8px; font-weight: bold;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v.totalVenta || 0)}</td>
                         <td style="padding: 8px;">
-                            <button onclick="revisarVentaPendiente(${i})" style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar </button>
+                            <button onclick="revisarVentaPendiente(${v._indiceBoveda})" style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar </button>
                         </td>
                     </tr>
                     `).join('')}
@@ -4132,7 +4185,7 @@ window.renderPanelAutorizaciones = function() {
                         <td style="padding: 8px; color: #475569;"><strong>${folioRef}</strong><br><span style="font-size:11px; color:#64748b;">${esApartado ? 'Apartado' : 'Crédito'}</span></td>
                         <td style="padding: 8px; font-weight: bold; color: #059669;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado || 0)}</td>
                         <td style="padding: 8px;">
-                            <button onclick="revisarAbonoPendiente(${i})" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar </button>
+                            <button onclick="revisarAbonoPendiente(${a._indiceBoveda})" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">Revisar </button>
                         </td>
                     </tr>
                     `}).join('')}
@@ -4353,7 +4406,11 @@ window.aprobarVentaCuarentena = function(index) {
     const bloqueo = _authVentaBloqueadaPorEstado(v);
     if (bloqueo.bloqueada) {
         alert(`${bloqueo.motivo} Se retirara de la boveda para evitar duplicidad.`);
-        ventasP.splice(index, 1);
+        ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Rechazado', {
+            fechaResolucionIso: _ventaFechaAhoraIso(),
+            fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
+            motivoResolucion: 'Bloqueada por estado'
+        });
         StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
         document.querySelector('[data-modal=auth-venta]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
@@ -4452,9 +4509,29 @@ window.aprobarVentaCuarentena = function(index) {
     const autorizada = window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
     if (autorizada === false) return;
     
-    // 4. Limpiar de la cuarentena
-    ventasP.splice(index, 1);
+    // 4. Marcar como aprobada y conservar el registro en la bóveda
+    ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Aprobado', {
+        fechaResolucionIso: _ventaFechaAhoraIso(),
+        fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
+        motivoResolucion: 'Autorizado por auditoría'
+    });
     StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'BOVEDA_VENTA_APROBADA',
+            modulo: 'Ventas',
+            entidad: 'venta',
+            entidadId: _authFolioVentaPendiente(v) || v?.args?.[5] || '',
+            detalle: 'Venta aprobada desde la bóveda de autorizaciones',
+            monto: Number(v?.totalVenta || v?.datosVenta?.total || 0),
+            severidad: 'info',
+            datos: {
+                folio: _authFolioVentaPendiente(v) || v?.args?.[5] || '',
+                metodoPago: v?.args?.[0] || null,
+                estado: 'Aprobado'
+            }
+        });
+    }
     document.querySelector('[data-modal=auth-venta]').remove();
     
     alert("Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
@@ -4491,8 +4568,28 @@ window.rechazarVentaCuarentena = function(index) {
     if (tieneSalidaOperativa && folio) {
         _cancelReingresarInventarioPorVenta(folio, 'Rechazo de venta provisional en Boveda');
     }
-    ventasP.splice(index, 1);
+    ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Rechazado', {
+        fechaResolucionIso: _ventaFechaAhoraIso(),
+        fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
+        motivoResolucion: 'Rechazado por auditoría'
+    });
     StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'BOVEDA_VENTA_RECHAZADA',
+            modulo: 'Ventas',
+            entidad: 'venta',
+            entidadId: folio || '',
+            detalle: 'Venta rechazada desde la bóveda de autorizaciones',
+            monto: Number(v?.totalVenta || v?.datosVenta?.total || 0),
+            severidad: 'alerta',
+            datos: {
+                folio: folio || '',
+                motivo: 'Rechazado por auditoría',
+                estado: 'Rechazado'
+            }
+        });
+    }
     document.querySelector('[data-modal=auth-venta]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (typeof renderApartados === 'function') renderApartados();
@@ -5565,7 +5662,11 @@ window.aprobarAbonoCuarentena = function(index) {
     const bloqueo = _authAbonoBloqueadoPorEstado(a);
     if (bloqueo.bloqueado) {
         alert(`${bloqueo.motivo} Se retirara de la boveda para evitar duplicidad.`);
-        abonosP.splice(index, 1);
+        abonosP[index] = _marcarEstadoBoveda(abonosP[index], 'Rechazado', {
+            fechaResolucionIso: _ventaFechaAhoraIso(),
+            fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
+            motivoResolucion: 'Bloqueado por estado'
+        });
         StorageService.set("abonosPendientes", abonosP);
         document.querySelector('[data-modal=auth-abono]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
@@ -5585,8 +5686,27 @@ window.aprobarAbonoCuarentena = function(index) {
     const aplicado = window.ejecutarAbonoAutorizadoReal(a);
     if (aplicado === false) return;
     
-    abonosP.splice(index, 1);
+    abonosP[index] = _marcarEstadoBoveda(abonosP[index], 'Aprobado', {
+        fechaResolucionIso: _ventaFechaAhoraIso(),
+        fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
+        motivoResolucion: 'Autorizado por auditoría'
+    });
     StorageService.set("abonosPendientes", abonosP);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'BOVEDA_ABONO_APROBADO',
+            modulo: 'CxC',
+            entidad: 'abono',
+            entidadId: _authFolioAbonoPendiente(a) || a?.folioCXC || a?.folioApartado || '',
+            detalle: 'Abono aprobado desde la bóveda de autorizaciones',
+            monto: Number(a?.montoAbonado || a?.monto || 0),
+            severidad: 'info',
+            datos: {
+                folio: _authFolioAbonoPendiente(a) || a?.folioCXC || a?.folioApartado || '',
+                estado: 'Aprobado'
+            }
+        });
+    }
     document.querySelector('[data-modal=auth-abono]').remove();
     alert("Abono aprobado y registrado en flujo de caja.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
@@ -5598,8 +5718,27 @@ window.rechazarAbonoCuarentena = function(index) {
     const abonosP = resAbono.abonosP;
     index = resAbono.index;
     if (!resAbono.abono) return;
-    abonosP.splice(index, 1);
+    abonosP[index] = _marcarEstadoBoveda(abonosP[index], 'Rechazado', {
+        fechaResolucionIso: _ventaFechaAhoraIso(),
+        fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
+        motivoResolucion: 'Rechazado por auditoría'
+    });
     StorageService.set("abonosPendientes", abonosP);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'BOVEDA_ABONO_RECHAZADO',
+            modulo: 'CxC',
+            entidad: 'abono',
+            entidadId: _authFolioAbonoPendiente(resAbono.abono || a) || (resAbono.abono || a)?.folioCXC || (resAbono.abono || a)?.folioApartado || '',
+            detalle: 'Abono rechazado desde la bóveda de autorizaciones',
+            monto: Number((resAbono.abono || a)?.montoAbonado || (resAbono.abono || a)?.monto || 0),
+            severidad: 'alerta',
+            datos: {
+                folio: _authFolioAbonoPendiente(resAbono.abono || a) || (resAbono.abono || a)?.folioCXC || (resAbono.abono || a)?.folioApartado || '',
+                estado: 'Rechazado'
+            }
+        });
+    }
     document.querySelector('[data-modal=auth-abono]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 };
