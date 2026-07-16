@@ -198,6 +198,8 @@ window.renderReporteAbonEnganches = function() {
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
     }[ch]));
 
+    const esAdminActual = typeof window.esAdmin === 'function' ? window.esAdmin() : false;
+
     // FILTROS
     const filtroDesde = document.getElementById('abonDesde')?.value || '';
     const filtroHasta = document.getElementById('abonHasta')?.value || '';
@@ -282,6 +284,7 @@ window.renderReporteAbonEnganches = function() {
                 <div style="font-size:11px; font-weight:bold; color:#047857;">TOTAL MOVIMIENTOS</div>
                 <div style="font-size:28px; font-weight:900; color:#047857; margin-top:5px;">${listado.length}</div>
             </div>
+            ${esAdminActual ? `
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:18px; border-radius:10px;">
                 <div style="font-size:11px; font-weight:bold; color:#059669;">TOTAL COBRADO</div>
                 <div style="font-size:28px; font-weight:900; color:#059669; margin-top:5px;">${fmt(totalAbonos)}</div>
@@ -289,7 +292,7 @@ window.renderReporteAbonEnganches = function() {
             <div style="background:#f5f3ff; border:1px solid #d8b4fe; padding:18px; border-radius:10px; print-display:none;" class="no-print-kpi">
                 <div style="font-size:11px; font-weight:bold; color:#7c3aed;">SALDO TOTAL PENDIENTE</div>
                 <div style="font-size:28px; font-weight:900; color:#7c3aed; margin-top:5px;">${fmt(totalSaldoPosterior)}</div>
-            </div>
+            </div>` : ''}
         </div>
         <style>
             @media print {
@@ -304,7 +307,7 @@ window.renderReporteAbonEnganches = function() {
         </style>
 
         <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
-            <button onclick="exportarReporteAbonEnganches()" style="padding:12px 20px; background:#3b82f6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📥 Descargar CSV</button>
+            ${esAdminActual ? `<button onclick="exportarReporteAbonEnganches()" style="padding:12px 20px; background:#3b82f6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📥 Descargar CSV</button>` : ''}
             <button onclick="generarDocumentoReporteAbonEnganches()" style="padding:12px 20px; background:#8b5cf6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📄 Generar PDF/Imagen</button>
         </div>
     `;
