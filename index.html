@@ -98,6 +98,7 @@
                 <button onclick="navA('cuentasxcobrar')">💰 Aplicar abonos cliente</button>
                 <button onclick="navA('estadoCuentaCliente')">📊 Estado de Cuenta Cliente</button>
                 <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
+                <button onclick="navA('reporte-abonos-enganches'); renderReporteAbonEnganches();">💵 Reporte de Abonos y Enganches</button>
                 <div class="submenu-grupo">Postventa</div>
                 <button onclick="navA('reimprimir-venta'); if(typeof renderReimprimirVenta === 'function') renderReimprimirVenta();">🖨️ Reimpresiones</button>
                 <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
@@ -109,7 +110,6 @@
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span><span id="badgeCobranzaDocumental" title="Pagares sin aplicar (documental)" style="display:none; background:#fde68a; color:#92400e; border-radius:9999px; padding:0px 6px; font-size:9px; margin-left:3px; font-weight:bold; vertical-align:2px;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
         <button onclick="navA('arc-v3'); renderARC_v3();">📊 ARC v3 (Análisis de Riesgo)</button>
-        <button onclick="navA('reporte-abonos-enganches'); renderReporteAbonEnganches();">💵 Reporte de Abonos y Enganches</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
