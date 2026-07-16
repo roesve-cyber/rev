@@ -367,7 +367,11 @@ window.renderReporteAbonEnganches = function() {
     }
 
     cont.innerHTML = html;
-    cont.scrollTop = 0;
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const appCont = document.getElementById('app-container');
+    if (appCont) appCont.scrollTop = 0;
 };
 
 window.exportarReporteAbonEnganches = function() {
