@@ -92,6 +92,30 @@
         .toLowerCase()
         .replace(/\s+/g, '_');
 
+    // ===== PENDIENTES DE CORTE (omisiones detectadas al hacer el corte) =====
+    const PENDIENTES_CORTE_KEY = 'pendientesCorteCaja';
+
+    const ETIQUETAS_TIPO_PENDIENTE = {
+        abono: { label: 'Abono', color: '#0f766e' },
+        enganche: { label: 'Enganche', color: '#7c3aed' },
+        transferencia: { label: 'Transferencia', color: '#1e40af' },
+        gasto: { label: 'Gasto', color: '#b91c1c' },
+        otro: { label: 'Otro', color: '#64748b' }
+    };
+
+    function usuarioActivoCorte() {
+        return document.getElementById('nombreUsuarioActivo')?.textContent?.trim() || 'Usuario';
+    }
+
+    function obtenerPendientesCorte() {
+        const raw = StorageService.get(PENDIENTES_CORTE_KEY, []);
+        return Array.isArray(raw) ? raw : [];
+    }
+
+    function guardarPendientesCorte(lista) {
+        StorageService.set(PENDIENTES_CORTE_KEY, lista);
+    }
+
     function asegurarCuentasBancarias() {
         let bancarias = StorageService.get('cuentas-bancarias', []);
         const tarjetas = StorageService.get('tarjetasConfig', []);
@@ -272,6 +296,23 @@
         return ids;
     }
 
+    // Saldo inicial FIJO: se hereda del ultimo corte guardado de esta cuenta y no se recalcula
+    // con cada movimiento nuevo. Solo se calcula por respaldo la primera vez que se corta una cuenta
+    // (cuando aun no existe ningun corte previo guardado para ella).
+    function obtenerUltimoCorteGuardado(cuentaId) {
+        if (!cuentaId || cuentaId === 'todas') return null;
+        const cortesRaw = StorageService.get('cortesCaja', []);
+        const cortes = (Array.isArray(cortesRaw) ? cortesRaw : [])
+            .filter(c => String(c.cuentaId) === String(cuentaId) && typeof c.saldoFinalSistema === 'number');
+        if (!cortes.length) return null;
+        return cortes.sort((a, b) => {
+            const fa = parseFechaLocal(a.fechaFin || a.fechaCreacion, true);
+            const fb = parseFechaLocal(b.fechaFin || b.fechaCreacion, true);
+            if (fb - fa !== 0) return fb - fa;
+            return String(b.fechaCreacion || '').localeCompare(String(a.fechaCreacion || ''));
+        })[0];
+    }
+
     function calcularResumen(filtros = leerFiltros()) {
         const cuentas = obtenerCuentasCorte();
         const cuenta = filtros.cuentaId === 'todas'
@@ -309,7 +350,11 @@
             ? sumarNetoMovimientos(StorageService.get('movimientosCaja', []), aliases, fin, null)
             : sumarNetoMovimientos(StorageService.get('movimientosCaja', []), cuenta.aliases, fin, null);
         const saldoFinalSistema = saldoActual - netoPosterior;
-        const saldoInicial = saldoFinalSistema - neto;
+        const ultimoCorteCuenta = obtenerUltimoCorteGuardado(cuenta.id);
+        const saldoInicial = ultimoCorteCuenta
+            ? ultimoCorteCuenta.saldoFinalSistema
+            : (saldoFinalSistema - neto); // respaldo: solo aplica si esta cuenta nunca se ha cortado antes
+        const saldoInicialOrigen = ultimoCorteCuenta ? 'heredado' : 'calculado';
 
         // Obtener saldo inicial manual específico para esta cuenta
         const saldosInicialesManuales = window._saldosInicialesManuales || {};
@@ -332,6 +377,7 @@
             inicio,
             fin,
             saldoInicial,
+            saldoInicialOrigen,
             saldoInicialManualCuenta,
             ingresos,
             egresos,
@@ -392,6 +438,7 @@
             neto: ingresos - egresos,
             saldoInicial,
             saldoInicialManual,
+            saldoInicialOrigen: resumen?.saldoInicialOrigen || 'calculado',
             saldoFinalSistema,
             movimientos: seleccionados,
             totalMovimientos: resumen?.movimientos?.length || 0,
@@ -463,6 +510,102 @@
             <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:16px;">
                 <label style="font-size:11px;font-weight:800;color:#64748b;">OBSERVACIONES DEL CORTE</label>
                 <textarea id="corteObservaciones" placeholder="Ej. movimientos revisados, efectivo separado, pendiente por aclarar..." style="width:100%;min-height:72px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;box-sizing:border-box;margin-top:6px;"></textarea>
+            </div>`;
+    }
+
+    function renderPendientesCorte() {
+        const todos = obtenerPendientesCorte().slice().sort((a, b) => String(b.creado || '').localeCompare(String(a.creado || '')));
+        const mostrarResueltos = !!window._corteCajaMostrarResueltos;
+        const visibles = mostrarResueltos ? todos : todos.filter(p => !p.resuelto);
+        const activos = todos.filter(p => !p.resuelto).length;
+
+        const filas = visibles.map(p => {
+            const tag = ETIQUETAS_TIPO_PENDIENTE[p.tipo] || ETIQUETAS_TIPO_PENDIENTE.otro;
+            const fechaTexto = String(p.creado || '').slice(0, 16).replace('T', ' ');
+            return `
+                <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 8px;border-bottom:1px solid #f1f5f9;${p.resuelto ? 'opacity:0.55;' : ''}">
+                    <input type="checkbox" ${p.resuelto ? 'checked' : ''} onchange="togglePendienteCorte('${esc(p.id)}')" style="width:18px;height:18px;margin-top:2px;accent-color:#15803d;cursor:pointer;flex:none;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                            <span style="font-size:10px;font-weight:900;text-transform:uppercase;color:white;background:${tag.color};padding:2px 7px;border-radius:999px;">${esc(tag.label)}</span>
+                            ${p.cliente ? `<span style="font-size:12px;font-weight:800;color:#0f172a;">${esc(p.cliente)}</span>` : ''}
+                            ${p.montoEstimado ? `<span style="font-size:12px;font-weight:800;color:#334155;">${dinero(p.montoEstimado)}</span>` : ''}
+                        </div>
+                        <div style="font-size:13px;color:#334155;margin-top:3px;${p.resuelto ? 'text-decoration:line-through;' : ''}">${esc(p.texto)}</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${esc(p.creadoPor || '')} · ${esc(fechaTexto)}${p.resuelto ? ' · resuelto por ' + esc(p.resueltoPor || '') : ''}</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex:none;flex-wrap:wrap;justify-content:flex-end;">
+                        ${p.cliente ? `<button onclick="copiarClientePendienteCorte('${esc(p.id)}')" style="padding:6px 9px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;">Copiar cliente</button>` : ''}
+                        <button onclick="eliminarPendienteCorte('${esc(p.id)}')" style="padding:6px 9px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;cursor:pointer;font-size:11px;font-weight:800;">Eliminar</button>
+                    </div>
+                </div>`;
+        }).join('');
+
+        return `
+            <div id="panelPendientesCorte" style="background:white;border:1px solid ${activos ? '#fed7aa' : '#e2e8f0'};border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                    <div>
+                        <h3 style="margin:0;color:#0f172a;font-size:16px;">Pendientes por registrar${activos ? ` <span style="color:#c2410c;">(${activos})</span>` : ''}</h3>
+                        <p style="margin:3px 0 0;color:#64748b;font-size:12px;">Anota aqui lo que detectes al hacer el corte (abonos, enganches, transferencias, gastos) y regresa a marcarlo cuando ya lo hayas registrado en su modulo.</p>
+                    </div>
+                    <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" ${mostrarResueltos ? 'checked' : ''} onchange="toggleMostrarResueltosPendientes(this)" style="accent-color:#1e40af;">
+                        Ver resueltos
+                    </label>
+                </div>
+                <div style="max-height:280px;overflow-y:auto;border:1px solid #f1f5f9;border-radius:8px;">
+                    ${filas || `<div style="padding:18px;text-align:center;color:#94a3b8;font-size:13px;">Sin pendientes${mostrarResueltos ? '.' : ' activos.'}</div>`}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px;">
+                    <select id="pendienteTipo" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                        <option value="abono">Abono</option>
+                        <option value="enganche">Enganche</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="gasto">Gasto</option>
+                        <option value="otro">Otro</option>
+                    </select>
+                    <input id="pendienteCliente" placeholder="Cliente (opcional)" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                    <input id="pendienteMonto" type="number" step="0.01" placeholder="Monto aprox. (opcional)" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                    <input id="pendienteTexto" placeholder="Que falta registrar..." style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;grid-column:1 / -2;">
+                    <button onclick="agregarPendienteCorte()" style="padding:9px;background:#c2410c;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;font-size:12px;">+ Anotar pendiente</button>
+                </div>
+            </div>`;
+    }
+
+    function renderCapturaRapidaCorte(cuentaIdActual) {
+        const cuentas = obtenerCuentasCorte().filter(c => c.id !== 'todas');
+        const opciones = (seleccionarId) => cuentas.map(c =>
+            `<option value="${esc(c.id)}" ${String(c.id) === String(seleccionarId) ? 'selected' : ''}>${esc(c.nombre)}</option>`
+        ).join('');
+
+        return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-bottom:16px;">
+                <div style="margin-bottom:10px;">
+                    <h3 style="margin:0;color:#0f172a;font-size:16px;">Registrar movimiento rapido</h3>
+                    <p style="margin:3px 0 0;color:#64748b;font-size:12px;">Solo para gastos, ingresos varios o transferencias entre tus propias cuentas. Los abonos y enganches de clientes se registran en CXC / Ventas.</p>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
+                    <select id="movRapidoTipo" onchange="actualizarFormMovimientoRapido()" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                        <option value="egreso">Gasto (egreso)</option>
+                        <option value="ingreso">Ingreso vario</option>
+                        <option value="transferencia">Transferencia entre cuentas</option>
+                    </select>
+                    <input id="movRapidoFecha" type="date" value="${esc(hoyInput())}" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                    <input id="movRapidoMonto" type="number" step="0.01" placeholder="Monto" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                </div>
+                <div id="movRapidoCamposSimple" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px;">
+                    <select id="movRapidoCuenta" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">${opciones(cuentaIdActual)}</select>
+                    <input id="movRapidoConcepto" placeholder="Concepto" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                    <input id="movRapidoReferencia" placeholder="Referencia (opcional)" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                </div>
+                <div id="movRapidoCamposTransferencia" style="display:none;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px;">
+                    <select id="movRapidoCuentaOrigen" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">${opciones(cuentaIdActual)}</select>
+                    <select id="movRapidoCuentaDestino" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">${opciones(null)}</select>
+                    <input id="movRapidoConceptoTransferencia" placeholder="Nota (opcional)" style="padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                </div>
+                <div style="margin-top:10px;">
+                    <button onclick="guardarMovimientoRapidoCorte()" style="padding:9px 16px;background:#15803d;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;font-size:12px;">+ Registrar y agregar al corte</button>
+                </div>
             </div>`;
     }
 
@@ -584,6 +727,9 @@
                 </div>
             </div>
 
+            ${renderPendientesCorte()}
+            ${renderCapturaRapidaCorte(filtros.cuentaId)}
+
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;background:white;border:1px solid #e2e8f0;border-radius:10px;padding:15px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <div>
                     <label style="font-size:11px;font-weight:800;color:#64748b;">DESDE</label>
@@ -604,7 +750,7 @@
             </div>
 
             <div id="corteKpiFranja" style="position:sticky;top:72px;z-index:30;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;background:rgba(248,250,252,0.94);backdrop-filter:blur(8px);padding:10px 0;">
-                ${renderKpi('Saldo inicial', seleccion.saldoInicial, '#64748b', seleccion.saldoInicialManual !== null ? 'Manual' : 'Calculado', 'corteKpiSaldoInicial', 'corteSubSaldoInicial')}
+                ${renderKpi('Saldo inicial', seleccion.saldoInicial, '#64748b', seleccion.saldoInicialManual !== null ? 'Manual' : (seleccion.saldoInicialOrigen === 'heredado' ? 'Heredado del corte anterior' : 'Calculado (primer corte de esta cuenta)'), 'corteKpiSaldoInicial', 'corteSubSaldoInicial')}
                 ${renderKpi('Ingresos marcados', seleccion.ingresos, '#15803d', `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`, 'corteKpiIngresos', 'corteSubIngresos')}
                 ${renderKpi('Egresos marcados', seleccion.egresos, '#b91c1c', `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`, 'corteKpiEgresos', 'corteSubEgresos')}
                 ${renderKpi('Saldo esperado marcado', seleccion.saldoFinalSistema, '#1e40af', `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`, 'corteKpiSaldoSistema', 'corteSubSaldoSistema')}
@@ -630,6 +776,256 @@
                 subSaldo: 'Ingresos menos egresos seleccionados'
             });
         }
+    };
+
+    // ===== ACCIONES: PENDIENTES DE CORTE =====
+
+    window.toggleMostrarResueltosPendientes = function(input) {
+        window._corteCajaMostrarResueltos = !!input.checked;
+        const cont = document.getElementById('panelPendientesCorte');
+        if (cont) cont.outerHTML = renderPendientesCorte();
+    };
+
+    window.agregarPendienteCorte = function() {
+        const tipo = document.getElementById('pendienteTipo')?.value || 'otro';
+        const cliente = document.getElementById('pendienteCliente')?.value.trim() || '';
+        const montoInput = Number(document.getElementById('pendienteMonto')?.value || 0);
+        const montoEstimado = montoInput > 0 ? montoInput : null;
+        const texto = document.getElementById('pendienteTexto')?.value.trim() || '';
+
+        if (!texto) return alert('Describe brevemente que falta registrar.');
+
+        const lista = obtenerPendientesCorte();
+        const item = {
+            id: `pnd_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            tipo,
+            cliente,
+            montoEstimado,
+            texto,
+            resuelto: false,
+            creado: localIso(new Date()),
+            creadoPor: usuarioActivoCorte(),
+            resueltoEn: null,
+            resueltoPor: ''
+        };
+        lista.push(item);
+        guardarPendientesCorte(lista);
+
+        window.AuditService?.log?.({
+            accion: 'CORTE_CAJA_PENDIENTE_CREADO',
+            modulo: 'Corte Caja',
+            entidad: item.id,
+            entidadId: item.id,
+            detalle: `Pendiente anotado (${tipo}): ${texto}${cliente ? ' - ' + cliente : ''}`,
+            severidad: 'info'
+        });
+
+        ['pendienteCliente', 'pendienteMonto', 'pendienteTexto'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+
+        const cont = document.getElementById('panelPendientesCorte');
+        if (cont) cont.outerHTML = renderPendientesCorte();
+    };
+
+    window.togglePendienteCorte = function(id) {
+        const lista = obtenerPendientesCorte();
+        const item = lista.find(p => String(p.id) === String(id));
+        if (!item) return;
+        item.resuelto = !item.resuelto;
+        item.resueltoEn = item.resuelto ? localIso(new Date()) : null;
+        item.resueltoPor = item.resuelto ? usuarioActivoCorte() : '';
+        guardarPendientesCorte(lista);
+
+        window.AuditService?.log?.({
+            accion: item.resuelto ? 'CORTE_CAJA_PENDIENTE_RESUELTO' : 'CORTE_CAJA_PENDIENTE_REABIERTO',
+            modulo: 'Corte Caja',
+            entidad: item.id,
+            entidadId: item.id,
+            detalle: `${item.texto}${item.cliente ? ' - ' + item.cliente : ''}`,
+            severidad: 'info'
+        });
+
+        const cont = document.getElementById('panelPendientesCorte');
+        if (cont) cont.outerHTML = renderPendientesCorte();
+    };
+
+    window.eliminarPendienteCorte = function(id) {
+        if (!confirm('Eliminar este pendiente?')) return;
+        const lista = obtenerPendientesCorte().filter(p => String(p.id) !== String(id));
+        guardarPendientesCorte(lista);
+        const cont = document.getElementById('panelPendientesCorte');
+        if (cont) cont.outerHTML = renderPendientesCorte();
+    };
+
+    window.copiarClientePendienteCorte = function(id) {
+        const item = obtenerPendientesCorte().find(p => String(p.id) === String(id));
+        if (!item || !item.cliente) return;
+        const texto = item.cliente;
+        const avisar = () => alert(`Copiado: "${texto}"\n\nVe a la pestaña CXC o Ventas segun corresponda y pegalo en el buscador de clientes.`);
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(texto).then(avisar).catch(avisar);
+        } else {
+            avisar();
+        }
+        // Intento opcional de navegacion directa si el sistema expone algun helper global (no falla si no existe)
+        const modulo = item.tipo === 'enganche' ? 'ventas' : 'cxc';
+        const helper = window.mostrarModulo || window.cambiarModulo || window.mostrarSeccion;
+        if (typeof helper === 'function') {
+            try { helper(modulo); } catch (e) { /* helper no compatible, se ignora */ }
+        }
+    };
+
+    // ===== ACCIONES: CAPTURA RAPIDA DE MOVIMIENTOS DESDE EL CORTE =====
+
+    window.actualizarFormMovimientoRapido = function() {
+        const tipo = document.getElementById('movRapidoTipo')?.value;
+        const simple = document.getElementById('movRapidoCamposSimple');
+        const transferencia = document.getElementById('movRapidoCamposTransferencia');
+        if (!simple || !transferencia) return;
+        if (tipo === 'transferencia') {
+            simple.style.display = 'none';
+            transferencia.style.display = 'grid';
+        } else {
+            simple.style.display = 'grid';
+            transferencia.style.display = 'none';
+        }
+    };
+
+    function marcarNuevosMovimientosRapidos(referencia) {
+        if (!referencia) return;
+        const resumen = window._corteCajaResumen;
+        if (!resumen) return;
+        const nuevos = resumen.movimientos.filter(m => m.referencia === referencia).map(m => m._corteId);
+        if (!nuevos.length) return;
+        if (!window._corteCajaSeleccion) {
+            window._corteCajaSeleccion = {
+                key: `${resumen.filtros.fechaInicio}|${resumen.filtros.fechaFin}|${resumen.cuenta.id}`,
+                ids: new Set()
+            };
+        }
+        nuevos.forEach(id => window._corteCajaSeleccion.ids.add(id));
+        renderCorteCaja();
+    }
+
+    window.guardarMovimientoRapidoCorte = function() {
+        const tipo = document.getElementById('movRapidoTipo')?.value || 'egreso';
+        const fecha = document.getElementById('movRapidoFecha')?.value || hoyInput();
+        const monto = Number(document.getElementById('movRapidoMonto')?.value || 0);
+        const usuario = usuarioActivoCorte();
+
+        if (!(monto > 0)) return alert('Indica un monto valido.');
+
+        const cuentas = obtenerCuentasCorte().filter(c => c.id !== 'todas');
+        const raw = StorageService.get('movimientosCaja', []);
+        const movimientos = Array.isArray(raw) ? raw : [];
+        const fechaISO = localIso(parseFechaLocal(fecha));
+        let referencia;
+
+        if (tipo === 'transferencia') {
+            const origenId = document.getElementById('movRapidoCuentaOrigen')?.value;
+            const destinoId = document.getElementById('movRapidoCuentaDestino')?.value;
+            const notaExtra = document.getElementById('movRapidoConceptoTransferencia')?.value.trim();
+            const origen = cuentas.find(c => String(c.id) === String(origenId));
+            const destino = cuentas.find(c => String(c.id) === String(destinoId));
+            if (!origen || !destino) return alert('Selecciona cuentas validas.');
+            if (String(origen.id) === String(destino.id)) return alert('La cuenta origen y destino no pueden ser la misma.');
+
+            referencia = `TR-${Date.now()}`;
+            const base = {
+                fecha,
+                fechaISO,
+                referencia,
+                medioPago: 'transferencia',
+                tipoMovimiento: 'transferencia_interna',
+                registradoDesdeCorte: true,
+                registradoPor: usuario,
+                createdAt: localIso(new Date())
+            };
+
+            movimientos.push({
+                ...base,
+                id: `mr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_o`,
+                tipo: 'egreso',
+                monto,
+                cuenta: origen.nombre,
+                cuentaId: origen.id,
+                etiquetaCuenta: origen.nombre,
+                cuentaOrigen: origen.id,
+                cuentaDestino: destino.id,
+                cuentaOrigenNombre: origen.nombre,
+                cuentaDestinoNombre: destino.nombre,
+                concepto: `Transferencia a: ${destino.nombre}${notaExtra ? ' (' + notaExtra + ')' : ''}`
+            });
+            movimientos.push({
+                ...base,
+                id: `mr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}_d`,
+                tipo: 'ingreso',
+                monto,
+                cuenta: destino.nombre,
+                cuentaId: destino.id,
+                etiquetaCuenta: destino.nombre,
+                cuentaOrigen: origen.id,
+                cuentaDestino: destino.id,
+                cuentaOrigenNombre: origen.nombre,
+                cuentaDestinoNombre: destino.nombre,
+                concepto: `Transferencia de: ${origen.nombre}${notaExtra ? ' (' + notaExtra + ')' : ''}`
+            });
+
+            StorageService.set('movimientosCaja', movimientos);
+            window.AuditService?.log?.({
+                accion: 'CORTE_CAJA_MOVIMIENTO_RAPIDO',
+                modulo: 'Corte Caja',
+                entidad: referencia,
+                entidadId: referencia,
+                detalle: `Transferencia manual desde corte: ${origen.nombre} -> ${destino.nombre}`,
+                monto,
+                severidad: 'riesgo'
+            });
+        } else {
+            const cuentaId = document.getElementById('movRapidoCuenta')?.value;
+            const concepto = document.getElementById('movRapidoConcepto')?.value.trim();
+            const referenciaInput = document.getElementById('movRapidoReferencia')?.value.trim();
+            const cuenta = cuentas.find(c => String(c.id) === String(cuentaId));
+            if (!cuenta) return alert('Selecciona una cuenta valida.');
+            if (!concepto) return alert('Indica un concepto.');
+
+            referencia = referenciaInput || `MR-${Date.now()}`;
+
+            movimientos.push({
+                id: `mr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                fecha,
+                fechaISO,
+                tipo,
+                concepto,
+                monto,
+                cuenta: cuenta.nombre,
+                cuentaId: cuenta.id,
+                etiquetaCuenta: cuenta.nombre,
+                referencia,
+                medioPago: 'manual',
+                tipoMovimiento: 'manual_corte',
+                registradoDesdeCorte: true,
+                registradoPor: usuario,
+                createdAt: localIso(new Date())
+            });
+
+            StorageService.set('movimientosCaja', movimientos);
+            window.AuditService?.log?.({
+                accion: 'CORTE_CAJA_MOVIMIENTO_RAPIDO',
+                modulo: 'Corte Caja',
+                entidad: referencia,
+                entidadId: referencia,
+                detalle: `${tipo === 'ingreso' ? 'Ingreso' : 'Gasto'} manual desde corte: ${concepto}`,
+                monto,
+                severidad: 'riesgo'
+            });
+        }
+
+        renderCorteCaja();
+        marcarNuevosMovimientosRapidos(referencia);
+        alert('Movimiento registrado y agregado al corte.');
     };
 
     window.toggleMovimientoCorte = function(input) {
@@ -744,7 +1140,7 @@
         const saldoInicialEl = document.getElementById('corteKpiSaldoInicial');
         const subSaldoInicialEl = document.getElementById('corteSubSaldoInicial');
         if (saldoInicialEl) saldoInicialEl.textContent = dinero(seleccion.saldoInicial);
-        if (subSaldoInicialEl) subSaldoInicialEl.textContent = seleccion.saldoInicialManual !== null ? 'Manual' : 'Calculado';
+        if (subSaldoInicialEl) subSaldoInicialEl.textContent = seleccion.saldoInicialManual !== null ? 'Manual' : (seleccion.saldoInicialOrigen === 'heredado' ? 'Heredado del corte anterior' : 'Calculado (primer corte de esta cuenta)');
 
         pintarKpisCorte({
             ingresos: seleccion.ingresos,
