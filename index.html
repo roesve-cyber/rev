@@ -106,9 +106,10 @@
         </div>
 
         <div class="menu-item">
-    <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span> <span>▾</span></button>
+    <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span><span id="badgeCobranzaDocumental" title="Pagares sin aplicar (documental)" style="display:none; background:#fde68a; color:#92400e; border-radius:9999px; padding:0px 6px; font-size:9px; margin-left:3px; font-weight:bold; vertical-align:2px;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
         <button onclick="navA('arc-v3'); renderARC_v3();">📊 ARC v3 (Análisis de Riesgo)</button>
+        <button onclick="navA('reporte-abonos-enganches'); renderReporteAbonEnganches();">💵 Reporte de Abonos y Enganches</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
@@ -150,6 +151,9 @@
     <div id="sub-auditoria" class="submenu oculto-submenu">
         <button onclick="navA('autorizaciones'); if(typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();" style="color: #d97706; font-weight: bold;">
             🛡️ Bóveda de Autorizaciones
+        </button>
+        <button onclick="navA('auditoria-movimientos'); if(typeof renderBitacoraAuditoria === 'function') renderBitacoraAuditoria();" style="color: #0f766e; font-weight: bold;">
+            📜 Visor de Movimientos
         </button>
         <button onclick="navA('auditoria-productos')">📦 Productos</button>
         <button onclick="navA('reimprimir-venta')">🖨️ Reimprimir Ticket</button>
@@ -226,7 +230,7 @@
  <div id="filtrosConsultaInventario" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:grid;grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) auto;gap:10px;align-items:end;">
  <div><label style="font-size:11px;font-weight:900;color:#475569;">BUSCAR</label><input type="search" id="filtroBusquedaInv" oninput="renderConsultaInventario()" placeholder="Producto, categoria, proveedor..." style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div>
  <div><label style="font-size:11px;font-weight:900;color:#475569;">PROVEEDOR</label><select id="filtroProvInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select></div>
- <div style="display:flex;gap:8px;"><button onclick="renderConsultaInventario()" style="padding:10px 14px;background:#0f172a;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Filtrar</button><button onclick="window.generarReporteConsultaInventario && window.generarReporteConsultaInventario()" style="padding:10px 14px;background:#047857;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;white-space:nowrap;">Generar reporte</button></div>
+ <button onclick="renderConsultaInventario()" style="padding:10px 14px;background:#0f172a;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Filtrar</button>
  <details style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
  <summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary>
  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;align-items:end;margin-top:10px;">
@@ -247,6 +251,17 @@
 <div id="toma-inventario" class="vista oculto" style="display:none;">
  <div id="contenidoTomaInventario"></div>
 </div>
+<div id="reporte-abonos-enganches" class="vista oculto" style="display:none;">
+ <div style="padding:24px;max-width:1400px;margin:0 auto;">
+  <div id="contenidoReporteAbonEnganches"></div>
+ </div>
+</div>
+
+ <div style="padding:24px;max-width:1400px;margin:0 auto;">
+  <div id="contenidoBitacoraAuditoria"></div>
+ </div>
+</div>
+
 <div id="auditoria-productos" class="vista oculto" style="display:none;">
  <div style="padding:30px;max-width:900px;margin:0 auto;">
  <div style="background:white;padding:40px;border-radius:15px;box-shadow:0 10px 25px rgba(0,0,0,0.1);text-align:center;">
@@ -1155,6 +1170,7 @@
 <script src="js/modules/estadoCuentaCliente.js?v=3"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
+<script src="js/modules/reportes-abonos-enganches.js"></script>
 <script src="js/core/navigation.js?v=9"></script>
 <script src="js/init.js?v=8"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
