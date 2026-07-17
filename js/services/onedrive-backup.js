@@ -173,7 +173,6 @@ window.conectarOneDrive = async function () {
         if (typeof msal === "undefined") { alert("❌ MSAL no cargado."); return null; }
         const app   = new msal.PublicClientApplication(_msalConfig);
         const token = await app.loginPopup({ scopes: _GRAPH_SCOPES });
-        window._msalApp   = app;
         window._msalToken = token.accessToken;
         alert(`✅ Conectado como ${token.account.username}`);
         return token.accessToken;

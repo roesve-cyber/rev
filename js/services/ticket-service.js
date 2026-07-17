@@ -306,10 +306,7 @@ function mmpGuardarDocumentoPdf(){
         });
     });
 }
-function mmpDocBase64Url(text){
-    var utf8 = unescape(encodeURIComponent(text || ''));
-    return btoa(utf8).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
-}
+
 function mmpAbrirDocumentoTermico(){
     var source = document.querySelector('.mmp-document-body') || document.body;
     var clone = source.cloneNode(true);

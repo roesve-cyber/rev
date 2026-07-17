@@ -89,18 +89,6 @@ window.formatearFechaVistaMX = function(fecha, opciones = {}) {
     return `${dias[d.getDay()]} ${String(d.getDate()).padStart(2, '0')} de ${meses[d.getMonth()]} ${d.getFullYear()}`;
 };
 
-window.formatearFechaHoraVistaMX = function(fecha, opciones = {}) {
-    const d = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fecha) : (fecha instanceof Date ? fecha : new Date(fecha));
-    if (!d || isNaN(d.getTime())) return opciones.fallback ?? (fecha ? String(fecha) : '—');
-    const hora = new Intl.DateTimeFormat('es-MX', {
-        timeZone: 'America/Mexico_City',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-    }).format(d);
-    return `${window.formatearFechaVistaMX(d, opciones)}, ${hora}`;
-};
-
 window.obtenerFechaCDMX = function(fechaManual = null) {
     return window.getFechaLocalMX(fechaManual);
 };
