@@ -106,7 +106,11 @@
                     subcategoria: p.subcategoria || '',
                     color,
                     teorico,
-                    conteo: null,
+                    // Si el sistema ya marca 0 piezas, se da por contado automaticamente
+                    // (evita exigir que se teclee "0" manualmente en cada renglon sin existencia).
+                    // Si al contar fisicamente aparece mercancia, basta con capturar el numero real.
+                    conteo: teorico === 0 ? 0 : null,
+                    autoCero: teorico === 0,
                     reconteo: null,
                     nota: '',
                     inactivo: !activo(p)
@@ -282,9 +286,23 @@
         abrirTomaInventario(toma.id);
     };
 
+    function normalizarAutoCero(id) {
+        const toma = buscarToma(id);
+        if (!toma || toma.estado !== 'conteo') return;
+        const requiereAjuste = toma.lineas.some(l => num(l.teorico) === 0 && (l.conteo === null || l.conteo === ''));
+        if (!requiereAjuste) return;
+        actualizarToma(id, t => t.lineas.forEach(l => {
+            if (num(l.teorico) === 0 && (l.conteo === null || l.conteo === '')) {
+                l.conteo = 0;
+                l.autoCero = true;
+            }
+        }));
+    }
+
     window.abrirTomaInventario = function(id) {
         tomaActivaId = id;
         filtroToma = '';
+        normalizarAutoCero(id);
         renderDetalle();
     };
 
@@ -330,7 +348,10 @@
                 <td style="padding:9px;min-width:240px;"><b>${esc(l.productoNombre)}</b>${l.inactivo ? ' <span style="color:#991b1b;font-size:10px;font-weight:900;">INACTIVO</span>' : ''}<br><small style="color:#64748b;">${esc([l.categoria, l.subcategoria].filter(Boolean).join(' / ') || '-')}</small></td>
                 <td style="padding:9px;min-width:110px;"><b>${esc(l.color || 'General')}</b></td>
                 <td style="padding:9px;text-align:center;font-size:${mostrarComparacion ? '16px' : '12px'};font-weight:900;color:${mostrarComparacion ? '#334155' : '#64748b'};">${mostrarComparacion ? num(l.teorico) : 'OCULTO'}</td>
-                <td style="padding:7px;text-align:center;"><input type="number" min="0" step="1" value="${l.conteo ?? ''}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','conteo',this.value)" style="width:82px;padding:8px;border:2px solid ${l.conteo === null || l.conteo === '' ? '#cbd5e1' : '#60a5fa'};border-radius:6px;text-align:center;font-weight:900;"></td>
+                <td style="padding:7px;text-align:center;">
+                    <input type="number" min="0" step="1" value="${l.conteo ?? ''}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','conteo',this.value)" style="width:82px;padding:8px;border:2px ${l.autoCero ? 'dashed' : 'solid'} ${l.conteo === null || l.conteo === '' ? '#cbd5e1' : (l.autoCero ? '#cbd5e1' : '#60a5fa')};border-radius:6px;text-align:center;font-weight:900;background:${l.autoCero ? '#f8fafc' : 'white'};">
+                    ${l.autoCero ? '<br><small style="color:#94a3b8;">Auto: sin existencia</small>' : ''}
+                </td>
                 <td style="padding:7px;text-align:center;"><input type="number" min="0" step="1" value="${l.reconteo ?? ''}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','reconteo',this.value)" placeholder="-" style="width:82px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;font-weight:900;"></td>
                 <td style="padding:9px;text-align:center;color:${mostrarComparacion ? colorDif : '#64748b'};font-size:${mostrarComparacion ? '16px' : '12px'};font-weight:900;">${mostrarComparacion ? (diferencia === null ? '-' : (diferencia > 0 ? `+${diferencia}` : diferencia)) : 'OCULTA'}</td>
                 <td style="padding:7px;"><input value="${esc(l.nota || '')}" ${editable ? '' : 'disabled'} onchange="guardarConteoToma('${jsArg(l.id)}','nota',this.value)" placeholder="Observacion" style="width:170px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;"></td>
@@ -398,6 +419,7 @@
             const linea = t.lineas.find(l => String(l.id) === String(lineaId));
             if (!linea) return;
             linea[campo] = campo === 'nota' ? String(value || '').trim() : (value === '' ? null : num(value));
+            if (campo === 'conteo') delete linea.autoCero;
             linea.ultimaCapturaEn = ahora();
             linea.ultimaCapturaPor = usuarioNombre();
         });
@@ -449,7 +471,7 @@
         const toma = buscarToma(tomaActivaId);
         if (!toma || toma.estado !== 'conteo') return;
         const r = resumen(toma);
-        if (r.pendientes) return alert(`Faltan ${r.pendientes} renglones por contar. Los ceros tambien deben capturarse expresamente.`);
+        if (r.pendientes) return alert(`Faltan ${r.pendientes} renglones por contar (mercancia con existencia en sistema).`);
         const mensajeRevision = toma.modalidad === 'ciega'
             ? 'Al enviar la toma a revision se revelaran las existencias del sistema y las diferencias para validar reconteos. Continuar?'
             : `La toma tiene ${r.diferencias} renglones con diferencia. Se enviara a revision para validar reconteos y notas. Continuar?`;

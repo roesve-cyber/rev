@@ -856,20 +856,6 @@ function gestionarCamposPago() {
     actualizarSelectBancos();
 }
 
-// Función para cargar las ubicaciones en el select cuando el usuario le da clic
-function cargarUbicacionesCompra() {
-    const select = document.getElementById("compraUbicacion");
-    // Si ya tiene más de 1 opción, significa que ya cargó, no lo volvemos a cargar
-    if (!select || select.options.length > 1) return; 
-    
-    const ubicaciones = StorageService.get("ubicacionesConfig", []);
-    let html = '<option value="General">-- General --</option>';
-    ubicaciones.forEach(u => {
-        html += `<option value="${u.nombre}">${u.nombre}</option>`;
-    });
-    select.innerHTML = html;
-}
-
 // Función principal de registro de compras actualizada
 function registrarCompra() {
     const productoId  = parseInt(document.getElementById("compraProducto").value);
@@ -1635,48 +1621,6 @@ function _cargarHtml2CanvasEstadoProveedor(cb) {
     script.onerror = () => alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.');
     document.head.appendChild(script);
 }
-
-window.descargarImagenEstadoCuentaProveedor = function(idCuenta) {
-    const clone = _clonarEstadoCuentaProveedor(idCuenta);
-    if (!clone) return alert('Abre primero el estado de cuenta para guardarlo como imagen.');
-    const safeId = String(idCuenta).replace(/[^a-zA-Z0-9_-]/g, '-');
-    const btn = document.getElementById(`btn-img-estado-proveedor-${safeId}`);
-    const textoOriginal = btn ? btn.textContent : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Generando...';
-    }
-
-    _cargarHtml2CanvasEstadoProveedor(() => {
-        const wrap = document.createElement('div');
-        wrap.style.position = 'fixed';
-        wrap.style.left = '-10000px';
-        wrap.style.top = '0';
-        wrap.style.background = '#ffffff';
-        wrap.style.padding = '20px';
-        wrap.appendChild(clone);
-        document.body.appendChild(wrap);
-
-        html2canvas(clone, { scale: 2.5, backgroundColor: '#ffffff', useCORS: true })
-            .then(canvas => {
-                const link = document.createElement('a');
-                link.download = `estado_cuenta_proveedor_${safeId}.png`;
-                link.href = canvas.toDataURL('image/png');
-                link.click();
-            })
-            .catch(err => {
-                console.error('Error generando imagen de estado de cuenta:', err);
-                alert('No se pudo generar la imagen. Intenta con Imprimir / PDF.');
-            })
-            .finally(() => {
-                wrap.remove();
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = textoOriginal || 'Guardar imagen';
-                }
-            });
-    });
-};
 
 window.registrarAbonoProveedor = function(idCuenta) {
     const cuentas = StorageService.get("cuentasPorPagar", []);
@@ -3244,19 +3188,7 @@ function guardarEdicionOC(id) {
     
     if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
 }
-// Función auxiliar para listar tus cuentas de débito
-function _generarOpcionesCuentasDebito() {
-    const cuentas = StorageService.get("cuentas-bancarias", []);  // ← corregido: guión igual que el resto del sistema
-    let opciones = `<option value="efectivo">💵 Efectivo (Caja Chica)</option>`;
-    
-    cuentas.forEach(c => {
-        // Buscamos las que tengan la palabra "debito" en su tipo
-        if (c.tipo && c.tipo.toLowerCase().includes("debito")) {
-            opciones += `<option value="${c.nombre}">💳 Débito: ${c.nombre}</option>`;
-        }
-    });
-    return opciones;
-}
+
 // ============================================================
 // MÓDULO DE REQUISICIONES Y COMPRAS MULTI-ARTÍCULO
 // ============================================================
@@ -4966,10 +4898,6 @@ function _consigTotalPagosRealesCxp(cxp = {}) {
     return _consigPagosRealesCxp(cxp).reduce((s, a) => s + (Number(a.monto || 0) || 0), 0);
 }
 
-function _consigTotalAnticiposCxp(cxp = {}) {
-    return _comprasAsegurarArray(cxp.abonos || []).filter(a => _consigEsAnticipoAplicado(a)).reduce((s, a) => s + (Number(a.monto || 0) || 0), 0);
-}
-
 function _consigProductoCxp(cxp = {}) {
     const articulo = _comprasAsegurarArray(cxp.articulos || [])[0] || {};
     return String(articulo.nombre || cxp.producto || '-').replace(/^\s*\[Vendido de Consignacion\]\s*-\s*/i, '').replace(/\s*\(\s*\d+(?:\.\d+)?\s*pzas?\s*\)\s*$/i, '').trim() || '-';
@@ -5339,47 +5267,6 @@ function _cargarHtml2CanvasPreviaDevolucion(cb) {
     script.onerror = () => alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.');
     document.head.appendChild(script);
 }
-
-window.descargarImagenPreviaDevolucionConsignacion = function() {
-    const clone = _clonarPreviaDevolucionConsignacion();
-    if (!clone) return alert('Abre primero la vista previa de la devolución para guardarla como imagen.');
-    const btn = document.getElementById('btn-img-previa-devolucion');
-    const textoOriginal = btn ? btn.textContent : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Generando...';
-    }
-
-    _cargarHtml2CanvasPreviaDevolucion(() => {
-        const wrap = document.createElement('div');
-        wrap.style.position = 'absolute'; 
-        wrap.style.left = '-10000px';
-        wrap.style.top = '0';
-        wrap.style.background = '#ffffff';
-        wrap.style.padding = '20px';
-        wrap.appendChild(clone);
-        document.body.appendChild(wrap);
-
-        html2canvas(clone, { scale: 2.5, backgroundColor: '#ffffff', useCORS: true })
-            .then(canvas => {
-                const link = document.createElement('a');
-                link.download = `devolucion_consignacion_${Date.now()}.png`;
-                link.href = canvas.toDataURL('image/png');
-                link.click();
-            })
-            .catch(err => {
-                console.error('Error generando imagen de devolución de consignación:', err);
-                alert('No se pudo generar la imagen. Intenta con Imprimir / PDF.');
-            })
-            .finally(() => {
-                wrap.remove();
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = textoOriginal || '🖼️ Guardar imagen';
-                }
-            });
-    });
-};
 
 window.ejecutarDevolucionConsignacion = function(payload) {
     if (!_comprasRequireAdmin('Ejecutar devolución de consignación')) return;
@@ -6011,43 +5898,6 @@ window.descargarImagenEstadoCuentaConsignacion = function(scope = 'actual', key 
             if (btn) { btn.disabled = false; btn.textContent = textoOriginal || 'Imagen'; }
         });
     });
-};
-
-window.imprimirEstadoCuentaClean = function(divId) {
-    const contenedor = document.getElementById(divId);
-    if (!contenedor) return alert("No se encontró el documento a imprimir.");
-
-    const clon = contenedor.cloneNode(true);
-    const botones = clon.querySelectorAll('button');
-    botones.forEach(b => b.remove());
-
-    const htmlLimpio = clon.innerHTML;
-
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed'; iframe.style.right = '0'; iframe.style.bottom = '0'; iframe.style.width = '0'; iframe.style.height = '0'; iframe.style.border = '0';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Estado de Cuenta - Consignaciones</title>
-            <style>
-                @page { margin: 10mm 15mm; size: letter portrait; }
-                body { font-family: Arial, sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; margin: 0; padding: 0; background: #ffffff; }
-                * { box-sizing: border-box; }
-                table { width: 100% !important; table-layout: fixed; border-collapse: collapse; }
-                td, th { word-wrap: break-word; overflow-wrap: break-word; }
-            </style>
-        </head>
-        <body><div style="width: 100%; max-width: 800px; margin: 0 auto;">${htmlLimpio}</div><script>setTimeout(() => { window.print(); }, 500);</script></body>
-        </html>
-    `);
-    doc.close();
-
-    setTimeout(() => { document.body.removeChild(iframe); }, 5000);
 };
 
 window.emitirEstadoCuentaProveedor = function(scope = 'actual', key = '', modo = 'documento') {

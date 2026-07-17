@@ -712,27 +712,6 @@ function obtenerColoresDisponibles(productoId) {
     return Object.entries(mapaColores).map(([color, stock]) => ({ color, stock }));
 }
 
-// 2. Obtiene el stock total de un color específico
-function obtenerStockPorColor(productoId, color) {
-    const prod = productos.find(p => String(p.id) === String(productoId));
-    if (!prod || !prod.variantes) return 0;
-    
-    return prod.variantes
-        .filter(v => v.color && v.color.toUpperCase() === color.toUpperCase())
-        .reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-}
-
-// 3. Obtiene en qué ubicaciones está disponible un color específico
-function obtenerUbicacionesPorColor(productoId, color) {
-    const prod = productos.find(p => String(p.id) === String(productoId));
-    if (!prod || !prod.variantes) return [];
-    
-    // Filtramos solo las variantes que coincidan con el color y tengan stock > 0
-    return prod.variantes
-        .filter(v => v.color && v.color.toUpperCase() === color.toUpperCase() && (Number(v.stock) || 0) > 0)
-        .map(v => ({ ubicacion: v.ubicacion || 'General', stock: v.stock }));
-}
-
 function _normalizarClaveInventario(valor) {
     return String(valor || '')
         .normalize('NFD')
@@ -1070,20 +1049,6 @@ function actualizarUbicacionCarrito(index, ubicacion) {
     if (index >= 0 && index < carrito.length) {
         carrito[index].ubicacionElegida = ubicacion;
         StorageService.set("carrito", carrito);
-    }
-}
-
-function aplicarMetodoStockDefaults() {
-    const met = document.getElementById("selMetodoPago")?.value;
-    const chkD = document.getElementById("chkDescontarStock");
-    const chkR = document.getElementById("chkRequisicionSinStock");
-    if (!chkD || !chkR) return;
-    if (met === "apartado") {
-        chkD.checked = false;
-        chkR.checked = true;
-    } else {
-        chkD.checked = true;
-        chkR.checked = true;
     }
 }
 

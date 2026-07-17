@@ -703,39 +703,6 @@ async function cerrarSesion() {
     await _cerrarSesionInterno({ confirmar: true });
 }
 
-// ── menú de usuario en header ─────────────────────────────────────────────────
-function abrirMenuUsuarioLegacy() {
-    const existing = document.querySelector('[data-modal="menu-usuario"]');
-    if (existing) { existing.remove(); return; }
-    const sesion = getSesion();
-    const displayName = sesion?.nombre || sesion?.email || sesion?.usuario || '-';
-    const html = `
-    <div data-modal="menu-usuario" style="position:fixed;top:52px;right:16px;z-index:99998;background:white;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,0.2);min-width:200px;padding:8px 0;border:1px solid #e5e7eb;">
-      <div style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
-        <div style="font-weight:bold;color:#1e40af;">${_esc(displayName)}</div>
-        <div style="font-size:12px;color:#6b7280;text-transform:capitalize;">${_esc(sesion?.rol || '-')}</div>
-      </div>
-      <button onclick="document.querySelector('[data-modal=menu-usuario]')?.remove(); cambiarContrasenaUsuarioActual();"
-        style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#1e40af;display:flex;align-items:center;gap:8px;">
-        Cambiar contrasena
-      </button>
-      <button onclick="document.querySelector('[data-modal=menu-usuario]')?.remove(); cerrarSesion();"
-        style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;cursor:pointer;font-size:14px;color:#dc2626;display:flex;align-items:center;gap:8px;">
-        🚪 Cerrar sesión
-      </button>
-    </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-    // Cerrar al hacer click fuera
-    setTimeout(() => {
-        document.addEventListener('click', function _close(e) {
-            if (!e.target.closest('[data-modal="menu-usuario"]') && !e.target.closest('#infoUsuarioActivo')) {
-                document.querySelector('[data-modal="menu-usuario"]')?.remove();
-                document.removeEventListener('click', _close);
-            }
-        });
-    }, 10);
-}
-
 // ── gestión de usuarios ───────────────────────────────────────────────────────
 function abrirMenuUsuario() {
     const existing = document.querySelector('[data-modal="menu-usuario"]');
@@ -1041,7 +1008,6 @@ async function listarUsuariosFirebase() {
 // ── exportar al scope global ──────────────────────────────────────────────────
 window.getSesion = getSesion;
 window.esAdmin = esAdmin;
-window.validarUsuarioFirebaseActivo = _obtenerPerfilFirebaseActivo;
 window.obtenerVendedorDeUsuario = obtenerVendedorDeUsuario;
 window.requireAdmin = requireAdmin;
 window._verificarPinAdmin = _verificarPinAdmin;

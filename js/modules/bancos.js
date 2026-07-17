@@ -151,40 +151,6 @@ function eliminarCaja(index) {
     }
 }
 
-function guardarEdicionBancoModal() {
-    const tipo = document.getElementById("modalBancoTipo").value;
-    const indexStr = document.getElementById("modalBancoIndex").value;
-    const nombre = document.getElementById("modalBancoNombre").value.trim().toUpperCase();
-    
-    if (!nombre) return alert("⚠️ El nombre del banco es obligatorio.");
-
-    let nuevaCuenta = { banco: nombre, tipo: tipo };
-
-    if (tipo === 'debito') {
-        nuevaCuenta.ultimos4 = document.getElementById("modalBancoDigitos").value.trim();
-        nuevaCuenta.saldoInicial = parseFloat(document.getElementById("modalBancoSaldo").value) || 0;
-        nuevaCuenta.diaCorte = 0;
-        nuevaCuenta.diaLimite = 0;
-    } else {
-        const corte = parseInt(document.getElementById("modalBancoCorte").value);
-        const limite = parseInt(document.getElementById("modalBancoLimite").value);
-        if (isNaN(corte) || isNaN(limite) || corte < 1 || corte > 31 || limite < 1 || limite > 31) {
-            return alert("⚠️ Los días de corte y límite deben ser números entre 1 y 31.");
-        }
-        nuevaCuenta.diaCorte = corte;
-        nuevaCuenta.diaLimite = limite;
-    }
-
-    if (indexStr === "") {
-        tarjetasConfig.push(nuevaCuenta); // Nueva cuenta
-    } else {
-        tarjetasConfig[parseInt(indexStr)] = nuevaCuenta; // Editando existente
-    }
-
-    actualizarYRefrescarBancos();
-    document.querySelector('[data-modal="edicion-banco"]').remove();
-}
-
 function eliminarBanco(index) {
     if (confirm("⚠️ ¿Estás completamente seguro de eliminar esta cuenta? Esta acción no se puede deshacer.")) {
         tarjetasConfig.splice(index, 1);
@@ -656,6 +622,11 @@ function renderCuentasMSI() {
                         style="padding:4px 10px; background:#16a34a; color:white; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">
                         💰 Pago Individual
                     </button>`;
+                } else if (estaPagada && pIdx === pagosHechos - 1) {
+                    accionBtn = `<button onclick="deshacerPagoMSI(${c.id})"
+                        style="padding:4px 10px; background:#f1f5f9; color:#b91c1c; border:1px solid #fecaca; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">
+                        ↩ Deshacer
+                    </button>`;
                 }
 
                 html += `<tr style="background:${rowBg}; border-bottom:1px solid #f3f4f6;">
@@ -752,92 +723,6 @@ function _etiquetaCuenta(m) {
     return "💵 Efectivo";
 }
 
-function renderFlujoCaja() {
-    const contenedor = document.getElementById("tablasFlujoCaja");
-    if (!contenedor) return;
-
-    const movimientos = StorageService.get("movimientosCaja", []);
-
-    let totalIngresos = 0;
-    let totalEgresos = 0;
-
-    // Per-account balances
-    const saldosPorCuenta = {};
-    movimientos.forEach(m => {
-        const etq = _etiquetaCuenta(m);
-        if (!saldosPorCuenta[etq]) saldosPorCuenta[etq] = 0;
-        const monto = parseFloat(m.monto) || 0;
-        const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
-        saldosPorCuenta[etq] += esIngreso ? monto : -monto;
-        if (esIngreso) totalIngresos += monto;
-        else totalEgresos += monto;
-    });
-
-    // Mini-tarjetas por cuenta
-    let miniCards = '';
-    if (Object.keys(saldosPorCuenta).length > 0) {
-        miniCards = `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">`;
-        Object.entries(saldosPorCuenta).forEach(([etq, saldo]) => {
-            const color = saldo >= 0 ? '#059669' : '#dc2626';
-            const bg = saldo >= 0 ? '#f0fdf4' : '#fef2f2';
-            miniCards += `<div style="background:${bg}; padding:12px 18px; border-radius:8px; border-left:3px solid ${color}; min-width:160px;">
-                <div style="font-size:13px; color:#6b7280;">${etq}</div>
-                <div style="font-size:18px; font-weight:bold; color:${color};">${dinero(saldo)}</div>
-            </div>`;
-        });
-        miniCards += `</div>`;
-    }
-
-    let html = miniCards + `
-        <div style="overflow-x:auto;">
-        <table class="tabla-admin" style="width:100%;">
-            <thead><tr>
-                <th>Fecha</th>
-                <th>Folio</th>
-                <th>Concepto</th>
-                <th>Referencia</th>
-                <th>Cuenta</th>
-                <th>Tipo</th>
-                <th style="text-align:right;">Monto</th>
-            </tr></thead>
-            <tbody>`;
-
-    if (movimientos.length === 0) {
-        html += `<tr><td colspan="7" style="text-align:center; padding:20px; color:#999;">Sin movimientos registrados.</td></tr>`;
-    } else {
-        // 🚀 ORDENAMIENTO ESTRICTO POR FECHA REAL
-        const movsOrdenados = [...movimientos].sort((a, b) => {
-            const dateA = new Date(a.fecha || 0);
-            const dateB = new Date(b.fecha || 0);
-            return dateA - dateB;
-        });
-
-        movsOrdenados.forEach(m => {
-            const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
-            const colorTipo = esIngreso ? "#059669" : "#dc2626";
-            const labelTipo = esIngreso ? "⬆️ Ingreso" : "⬇️ Egreso";
-            const etq = _etiquetaCuenta(m);
-            html += `
-                <tr>
-                    <td>${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
-                    <td>${m.folio || "—"}</td>
-                    <td>${m.concepto || ""}</td>
-                    <td>${m.referencia || "—"}</td>
-                    <td><strong>${etq}</strong></td>
-                    <td style="color:${colorTipo}; font-weight:bold;">${labelTipo}</td>
-                    <td style="text-align:right; font-weight:bold; color:${colorTipo};">${dinero(m.monto)}</td>
-                </tr>`;
-        });
-    }
-
-    html += `</tbody></table></div>`;
-    contenedor.innerHTML = html;
-
-    const elIngresos = document.getElementById("totalIngresoContado");
-    if (elIngresos) elIngresos.textContent = dinero(totalIngresos);
-    const elEgresos = document.getElementById("totalEgresosProveedores");
-    if (elEgresos) elEgresos.textContent = dinero(totalEgresos);
-}
 // ===== CUENTAS BANCARIAS DASHBOARD (LIQUIDEZ) =====
 
 // Variables globales para los filtros de liquidez

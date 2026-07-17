@@ -12,10 +12,6 @@ function _cxcEscHTML(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function _cxcNormalizarTexto(s) {
-    return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
 // 🔐 Nombre de cliente VIGENTE para mostrar (tabla "clientes"), nunca
 // la copia congelada que quedó guardada en la cuenta al crearla.
 function _cxcNombreClienteVigente(cuenta = {}) {
@@ -887,25 +883,6 @@ window.cambiarPestanaCobranza = function(pestana) {
 // ==========================================
 // 3. LOGICA DE ABONOS Y POLÍTICAS
 // ==========================================
-function _buildCuentaOrigen(idSufijo) {
-    return `
-        <div class="campo" style="margin-bottom:10px;">
-            <label style="font-weight:bold; color:#374151;">💳 Medio de pago:</label>
-            <select id="medioPago_${idSufijo}" onchange="_actualizarCuentaEspecifica('${idSufijo}')"
-                    style="padding:10px; font-size:15px; border:2px solid #27ae60; border-radius:6px; width:100%; margin-top:4px;">
-                <option value="efectivo">💵 Efectivo</option>
-                <option value="transferencia">🏦 Transferencia bancaria</option>
-                <option value="tarjeta_credito">💳 Tarjeta de crédito</option>
-            </select>
-        </div>
-        <div id="divCuentaEspecifica_${idSufijo}" style="display:none; margin-bottom:10px;">
-            <label style="font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Cuenta específica:</label>
-            <select id="cuentaEspecifica_${idSufijo}"
-                    style="padding:10px; font-size:15px; border:2px solid #3498db; border-radius:6px; width:100%;">
-            </select>
-        </div>`;
-}
-
 window._actualizarCuentaEspecifica = function(idSufijo) {
     const medio = document.getElementById('medioPago_' + idSufijo)?.value;
     const divCuenta = document.getElementById('divCuentaEspecifica_' + idSufijo);

@@ -1186,17 +1186,6 @@
         window._corteCajaConteo = { totalDenoms, totalReal, diferencia };
     };
 
-    window.limpiarConteoCorte = function() {
-        document.querySelectorAll('[data-denom]').forEach(input => input.value = 0);
-        const real = document.getElementById('corteTotalReal');
-        const obs = document.getElementById('corteObservaciones');
-        const saldoInicialManual = document.getElementById('corteSaldoInicialManual');
-        if (real) real.value = '';
-        if (obs) obs.value = '';
-        if (saldoInicialManual) saldoInicialManual.value = '';
-        recalcularConteoCorte();
-    };
-
     function armarCorteDesdePantalla() {
         recalcularConteoCorte();
         const resumen = window._corteCajaResumen || calcularResumen();
@@ -1358,8 +1347,6 @@
         return cortes;
     }
 
-    window.reclasificarCortesCaja = reclasificarCortesGuardados;
-
     function movimientosDisponiblesParaCorte(corte) {
         const cuentas = obtenerCuentasCorte();
         const cuenta = String(corte.cuentaId || '') === 'todas'
@@ -1422,7 +1409,6 @@
         if (!corte) return alert('No se encontro el corte solicitado.');
 
         const disponibles = movimientosDisponiblesParaCorte(corte);
-        window._corteMovimientosDisponibles = { folio: String(folio), movimientos: disponibles };
         window._corteMovimientosAgregar = new Set();
         document.querySelector('[data-modal="agregar-movimiento-corte"]')?.remove();
 

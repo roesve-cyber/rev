@@ -207,7 +207,3 @@ window.abrirSelectorProducto = function(opciones) {
     setTimeout(() => buscador.focus(), 100);
 };
 
-// Aliases para asegurar compatibilidad con código anterior si existe
-window.renderCategoriasPicker = function() {};
-window.renderSubcategoriasPicker = function() {};
-window.renderProductosFinalesPicker = function() {};

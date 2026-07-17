@@ -356,12 +356,6 @@ function _invSubcategoriasInventario(categoria = 'todos') {
  return [...ordenadas, ...subs.filter(s => !ordenadas.includes(s)).sort((a, b) => a.localeCompare(b, 'es'))];
 }
 
-function _invOptions(values, selected, emptyValue = 'todos', emptyLabel = 'Todos') {
- return [`<option value="${_kardexEsc(emptyValue)}" ${selected === emptyValue ? 'selected' : ''}>${_kardexEsc(emptyLabel)}</option>`]
- .concat((values || []).map(v => `<option value="${_kardexEsc(v)}" ${String(selected) === String(v) ? 'selected' : ''}>${_kardexEsc(v)}</option>`))
- .join('');
-}
-
 function _invActiveFilterChips(filters, specs, rendererName) {
  const chips = specs
  .filter(spec => {
@@ -1267,7 +1261,13 @@ window.renderConsultaInventario = function() {
  if (p.variantes && p.variantes.length > 0) {
  p.variantes.forEach(v => totalStockVariantes += (Number(v.stock) || 0));
 
- desgloseHtml = p.variantes.filter(v => v.stock > 0).map(v => `
+ // Si se filtra por una ubicacion especifica, el desglose solo debe mostrar esa
+ // ubicacion (evita confundir con stock de otras ubicaciones que no se pidieron).
+ const variantesAMostrar = (ubiFiltro !== 'todos' && ubiFiltro !== 'sin_asignar')
+ ? p.variantes.filter(v => v.ubicacion === ubiFiltro)
+ : p.variantes;
+
+ desgloseHtml = variantesAMostrar.filter(v => v.stock > 0).map(v => `
  <div style="display:inline-block; background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1; padding:6px 10px; border-radius:8px; margin:3px; font-size:12px;">
  <span style="color:#0ea5e9;">${v.ubicacion}</span> | <b>${v.color}</b> 
  <span style="background:#0284c7;color:white;padding:2px 6px;border-radius:12px;margin-left:5px;font-weight:bold;">${v.stock} pzs</span>

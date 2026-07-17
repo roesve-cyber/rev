@@ -1248,9 +1248,9 @@ window.renderSolicitudesClienteAutorizacion = renderSolicitudesClienteAutorizaci
 window.revisarSolicitudCliente = revisarSolicitudCliente;
 window.aprobarSolicitudCliente = aprobarSolicitudCliente;
 window.rechazarSolicitudCliente = rechazarSolicitudCliente;
-window.obtenerClienteVigente = _clienteBuscarVigente;
+
 window.resolverNombreCliente = _clienteNombreVigente;
-window.sincronizarClientesConMovimientos = _clientesSincronizarTodosLosDatosRelacionados;
+
 
 try {
     _clientesSincronizarTodosLosDatosRelacionados();

@@ -59,12 +59,6 @@ function _repParseDate(valor) {
     return isNaN(d.getTime()) ? new Date(0) : d;
 }
 
-function _repInputDate(d) {
-    if (!(d instanceof Date) || isNaN(d.getTime())) return "";
-    if (window.fechaClaveMX) return window.fechaClaveMX(d, "");
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function _repFechaTexto(d, fallback = "") {
     if (!(d instanceof Date) || isNaN(d.getTime()) || d.getFullYear() < 2000) return fallback || "-";
     if (window.formatearFechaVistaMX) return window.formatearFechaVistaMX(d, { fallback: fallback || "-" });
@@ -99,15 +93,6 @@ function _rvFecha(v) {
 function _rvDate(v) {
     const f = _rvFecha(v);
     return _repParseDate(f);
-}
-
-function _rvInputDate(d) {
-    if (!(d instanceof Date) || isNaN(d.getTime())) return "";
-    if (window.fechaClaveMX) return window.fechaClaveMX(d, "");
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
 }
 
 function _rvCliente(v) {
@@ -2113,20 +2098,6 @@ window.actualizarResumenSeleccionFlujo = function() {
     }
     if (movsEl) movsEl.textContent = movimientos;
     if (modoEl) modoEl.textContent = modo;
-};
-
-window.actualizarFiltrosFlujo = function() {
-    const fPer = document.getElementById('fPer');
-    const fCta = document.getElementById('fCta');
-    const fIni = document.getElementById('fIni');
-    const fFin = document.getElementById('fFin');
-
-    if (fPer) window._filtroFlujoPeriodo = fPer.value;
-    if (fCta) window._filtroFlujoCuenta = fCta.value;
-    if (fIni) window._filtroFlujoFInicio = fIni.value;
-    if (fFin) window._filtroFlujoFFin = fFin.value;
-
-    window.renderReporteFlujo();
 };
 
 window.abrirModalGastoExtra = function() {
