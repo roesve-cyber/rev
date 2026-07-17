@@ -59,8 +59,6 @@ function dinero(valor) {
     }).format(valor || 0);
 }
 
-function mostrarVista(id) { navA(id); }
-
 function migrarStorageCuentasPorCobrar() {
     try {
         const legacyRaw = localStorage.getItem("cuentasPorCobrarCliente");
