@@ -5021,6 +5021,7 @@ window.aplicarSugerenciaVentaConsignacion = function(payload) {
 };
 
 function _consigProductoRows(folio) {
+    const borrador = _consigBorradorDevolucion(folio?.key);
     return folio.consignaciones.map(c => {
         const cxpsPendientes = _consigCxpsPendientesPorConsignacion(c.id);
         const saldoPendienteVentas = _consigSaldoCxps(cxpsPendientes);
@@ -5032,10 +5033,13 @@ function _consigProductoRows(folio) {
             : '';
 
         const pendiente = Number(c.cantidadPendiente || 0);
+        const borradorItem = borrador?.items?.find(it => String(it.consignacionId) === String(c.id));
+        const marcado = borradorItem ? 'checked' : '';
+        const cantidadValor = borradorItem ? Math.min(Number(borradorItem.cantidad) || pendiente, pendiente) : pendiente;
         const chkDevolucion = pendiente > 0
-            ? `<input type="checkbox" class="chkDevolucionConsig" value="${_comprasEscAttr(String(c.id))}" style="width:16px;height:16px;cursor:pointer;">
+            ? `<input type="checkbox" class="chkDevolucionConsig" value="${_comprasEscAttr(String(c.id))}" ${marcado} style="width:16px;height:16px;cursor:pointer;">
                <br>
-               <input type="number" class="inputCantidadDevolucion" data-consig="${_comprasEscAttr(String(c.id))}" value="${pendiente}" min="1" max="${pendiente}" style="width:56px;margin-top:4px;padding:4px;border:1px solid #cbd5e1;border-radius:5px;text-align:center;font-size:12px;">`
+               <input type="number" class="inputCantidadDevolucion" data-consig="${_comprasEscAttr(String(c.id))}" value="${cantidadValor}" min="1" max="${pendiente}" style="width:56px;margin-top:4px;padding:4px;border:1px solid #cbd5e1;border-radius:5px;text-align:center;font-size:12px;">`
             : '<span style="color:#94a3b8;font-size:11px;">—</span>';
 
         return `
@@ -5053,6 +5057,42 @@ function _consigProductoRows(folio) {
         </tr>`;
     }).join('');
 }
+
+// ===== BORRADOR DE DEVOLUCIÓN DE CONSIGNACIÓN =====
+function _consigBorradoresDevolucion() {
+    return StorageService.get('consignacionDevolucionBorradores', {}) || {};
+}
+
+function _consigGuardarBorradorDevolucion(folioKey, items) {
+    if (!folioKey || !Array.isArray(items) || !items.length) return;
+    const borradores = _consigBorradoresDevolucion();
+    borradores[folioKey] = {
+        guardadoEn: new Date().toISOString(),
+        items: items.map(it => ({ consignacionId: it.consignacionId, cantidad: it.cantidad }))
+    };
+    StorageService.set('consignacionDevolucionBorradores', borradores);
+}
+
+function _consigBorradorDevolucion(folioKey) {
+    if (!folioKey) return null;
+    return _consigBorradoresDevolucion()[folioKey] || null;
+}
+
+function _consigLimpiarBorradorDevolucion(folioKey) {
+    if (!folioKey) return;
+    const borradores = _consigBorradoresDevolucion();
+    if (borradores[folioKey]) {
+        delete borradores[folioKey];
+        StorageService.set('consignacionDevolucionBorradores', borradores);
+    }
+}
+
+window.descartarBorradorDevolucionConsignacion = function(folioKey) {
+    _consigLimpiarBorradorDevolucion(folioKey);
+    if (typeof window.seleccionarFolioConsignacion === 'function' && folioKey) {
+        window.seleccionarFolioConsignacion(folioKey);
+    }
+};
 
 function _consigDescontarInventario(productoId, cantidad, color, ubicacion) {
     if (!productoId || !(cantidad > 0)) return;
@@ -5103,6 +5143,8 @@ window.abrirPreviaDevolucionConsignacion = function(folioKey) {
 
     if (error) return alert('❌ ' + error);
     if (!items.length) return alert('No hay productos válidos para devolver.');
+
+    _consigGuardarBorradorDevolucion(folioKey, items);
 
     const folioResumen = _consigResumenGlobal().folios.find(f => f.key === folioKey) || null;
     const importeOriginalFolio = folioResumen ? Number(folioResumen.compraOriginal || 0) : 0;
@@ -5298,6 +5340,7 @@ window.ejecutarDevolucionConsignacion = function(payload) {
 
     // Mantenemos el registro histórico aunque la cantidad pendiente llegue a cero
     StorageService.set('consignacionesActivas', consigArr);
+    _consigLimpiarBorradorDevolucion(data.folioKey);
 
     if (window.AuditService?.log) {
         window.AuditService.log({
@@ -5437,6 +5480,15 @@ window.abrirGestorConsignaciones = function() {
                     </div>
                 </div>
                 <div style="margin-top:12px;">${_consigResumenKPIs({ ...folio, montoDevuelto: folio.montoDevuelto })}</div>
+                ${(() => {
+                    const b = _consigBorradorDevolucion(folio.key);
+                    if (!b) return '';
+                    const cuando = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(b.guardadoEn)) : new Date(b.guardadoEn).toLocaleString('es-MX');
+                    return `<div data-aviso="borrador-devolucion" style="margin-top:10px;padding:9px 12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;font-size:12px;color:#92400e;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <span>📝 Tienes un borrador de devolución guardado (${_comprasEscHTML(cuando)}). Ya está precargado abajo.</span>
+                        <button onclick="window.descartarBorradorDevolucionConsignacion('${_comprasEscAttr(folio.key)}')" style="padding:4px 10px;background:#92400e;color:white;border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:11px;">Descartar</button>
+                    </div>`;
+                })()}
             </div>
             <div style="overflow:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:760px;">
