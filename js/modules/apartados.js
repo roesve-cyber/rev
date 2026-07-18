@@ -23,6 +23,14 @@ function _apartadoCuentaDefault() {
     };
 }
 
+function _apartadoNombreCliente(ap) {
+    if (typeof window.obtenerClienteCanonico === 'function') {
+        const canonico = window.obtenerClienteCanonico(ap?.clienteId, ap?.clienteNombre);
+        if (canonico?.nombre) return canonico.nombre;
+    }
+    return ap?.clienteNombre || 'Cliente';
+}
+
 function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, importeApartado, fechaCompromiso, saldoPendiente, articulos, condiciones}) {
     const apartados = StorageService.get('apartados', []);
     apartados.push({
@@ -120,6 +128,8 @@ function obtenerApartados() {
 
 function renderApartados() {
     const apartados = obtenerApartados();
+    const sesionApt = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+    const esAdminApt = !!sesionApt && (sesionApt.rol === 'admin' || sesionApt.rol === 'Administrador');
     let html = `<h2>📦 Apartados</h2>`;
     
     if (apartados.length === 0) {
@@ -146,6 +156,7 @@ function renderApartados() {
                             <button onclick="abrirModalConvertirApartado('${a.folio}')" style="padding:6px 10px; background:#8b5cf6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">💳 Convertir</button>
                         ` : ''}
                         <button onclick="abrirHistorialAbonos('${a.folio}')" style="padding:6px 10px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📜 Historial</button>
+                        ${esAdminApt ? `<button onclick="abrirEditorEngancheApartado('${a.folio}')" style="padding:6px 10px; background:#1e40af; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">🛠️ Enganche</button>` : ''}
                         ${a.condiciones ? `<button onclick="verCondicionesApartado('${a.folio}')" style="padding:6px 10px; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📄 Cond.</button>` : ''}
                     </div>
                 </td>
@@ -471,3 +482,232 @@ window.registrarAbonoApartado = registrarAbonoApartado;
 window.obtenerApartados = obtenerApartados;
 window.renderApartados = renderApartados;
 window.imprimirTicketAbonoApartado = imprimirTicketAbonoApartado;
+
+// ==========================================
+// CORRECCION / ELIMINACION DE ANTICIPO (Auditoria Apartados)
+// ==========================================
+function _apartadoEsAdminSesion() {
+    const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+    return !!sesion && (sesion.rol === 'admin' || sesion.rol === 'Administrador');
+}
+
+window.abrirEditorEngancheApartado = function(folio) {
+    if (!_apartadoEsAdminSesion()) return alert("Acceso denegado: solo administradores.");
+
+    const apartados = StorageService.get("apartados", []);
+    const ap = apartados.find(a => a.folio === folio);
+    if (!ap) return alert("Apartado no encontrado.");
+
+    const engancheActual = Number(ap.enganche || 0);
+    const movimiento = (typeof _cxcMovimientoEngancheFolio === 'function') ? _cxcMovimientoEngancheFolio(folio) : null;
+    const cuentaActualId = movimiento?.cuenta || movimiento?.cuentaId || ap.cuentaIdEnganche || 'efectivo';
+    const etiquetaActual = movimiento?.etiquetaCuenta || ap.etiquetaCuentaEnganche || '';
+    const opcionesCuentas = (typeof _cxcOpcionesCuentasReceptoras === 'function')
+        ? _cxcOpcionesCuentasReceptoras(cuentaActualId, etiquetaActual)
+        : `<option value="efectivo">Efectivo Principal</option>`;
+
+    const html = `
+    <div id="modalCorreccionEngancheApartado" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 5px 0; color:#1e40af;">✏️ Corrección de Anticipo (Apartado)</h3>
+            <p style="font-size:13px; color:#64748b; margin-top:0;">Folio: <b>${folio}</b> | Cliente: <b>${_apartadoNombreCliente(ap)}</b></p>
+
+            <div style="margin-top:20px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">IMPORTE DEL ANTICIPO ($):</label>
+                <input type="number" id="editMontoEngApt" value="${engancheActual}" style="width:100%; padding:12px; border-radius:8px; border:2px solid #3b82f6; margin-top:5px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#1e40af;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">CUENTA RECEPTORA:</label>
+                <select id="editCuentaEngApt" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; font-size:14px;">
+                    ${opcionesCuentas}
+                </select>
+            </div>
+
+            <div style="background:#fffbeb; padding:12px; border-radius:8px; margin-top:20px; border:1px solid #fcd34d;">
+                <p style="margin:0; font-size:12px; color:#92400e;">⚠️ <b>Atención:</b> El saldo pendiente del apartado y el saldo de caja/banco se recalculan automáticamente al guardar. Si pones el importe en 0, se elimina el anticipo por completo (pide motivo).</p>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="procesarCorreccionEngancheApartado('${folio}')"
+                        style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">
+                    💾 Guardar Cambios
+                </button>
+                <button onclick="document.getElementById('modalCorreccionEngancheApartado').remove()"
+                        style="flex:1; padding:14px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
+                    Cancelar
+                </button>
+            </div>
+            <div style="margin-top:12px; text-align:center;">
+                <button onclick="eliminarEngancheApartadoAuditoria('${folio}')"
+                        style="background:none; border:none; color:#b91c1c; font-size:12px; font-weight:bold; cursor:pointer; text-decoration:underline;">
+                    🗑️ Eliminar anticipo por completo
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.procesarCorreccionEngancheApartado = function(folio) {
+    if (!_apartadoEsAdminSesion()) return alert("Acceso denegado: solo administradores.");
+
+    const nuevoMonto = parseFloat(document.getElementById('editMontoEngApt').value);
+    const selCuenta = document.getElementById('editCuentaEngApt');
+    if (isNaN(nuevoMonto) || nuevoMonto < 0) return alert("Importe inválido.");
+
+    if (nuevoMonto === 0) {
+        document.getElementById('modalCorreccionEngancheApartado')?.remove();
+        return window.eliminarEngancheApartadoAuditoria(folio);
+    }
+
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].getAttribute('data-nombre') || selCuenta.options[selCuenta.selectedIndex].text || cuentaId;
+    const isCajaDestino = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
+    const medioPago = isCajaDestino ? 'efectivo' : 'transferencia';
+
+    let apartados = StorageService.get("apartados", []);
+    const idx = apartados.findIndex(a => a.folio === folio);
+    if (idx === -1) return alert("Apartado no encontrado.");
+    const ap = apartados[idx];
+
+    const engancheAnterior = Number(ap.enganche || 0);
+    const movimientoAnterior = (typeof _cxcMovimientoEngancheFolio === 'function') ? _cxcMovimientoEngancheFolio(folio) : null;
+    const cuentaAnteriorId = movimientoAnterior?.cuenta || movimientoAnterior?.cuentaId || ap.cuentaIdEnganche || 'efectivo';
+
+    let saldosActualizados = true;
+    if (typeof _cxcAjustarSaldoCuentaPorCorreccion === 'function') {
+        if (engancheAnterior > 0) {
+            if (!_cxcAjustarSaldoCuentaPorCorreccion(cuentaAnteriorId, -engancheAnterior)) saldosActualizados = false;
+        }
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(cuentaId, nuevoMonto)) saldosActualizados = false;
+    }
+
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    const idxMov = movimientoAnterior ? movimientosCaja.findIndex(m => m.id === movimientoAnterior.id) : -1;
+    if (idxMov !== -1) {
+        movimientosCaja[idxMov].monto = nuevoMonto;
+        movimientosCaja[idxMov].cuenta = cuentaId;
+        movimientosCaja[idxMov].etiquetaCuenta = etiqueta;
+        movimientosCaja[idxMov].medioPago = medioPago;
+    } else {
+        movimientosCaja.push({
+            id: Date.now() + Math.random(),
+            folio,
+            fecha: ap.fechaApartado || (window.localISO ? window.localISO(new Date()) : new Date().toISOString()),
+            tipo: "ingreso",
+            monto: nuevoMonto,
+            concepto: `Enganche apartado - ${_apartadoNombreCliente(ap)} (Folio: ${folio})`,
+            referencia: `VENTA-${folio}`,
+            cuenta: cuentaId,
+            medioPago,
+            etiquetaCuenta: etiqueta
+        });
+    }
+    StorageService.set("movimientosCaja", movimientosCaja);
+
+    ap.enganche = nuevoMonto;
+    ap.cuentaIdEnganche = cuentaId;
+    ap.etiquetaCuentaEnganche = etiqueta;
+    ap.saldoPendiente = Math.max(0, _apartadoSaldoReal(ap));
+    const estadoActualAp = String(ap.estado || '').toLowerCase();
+    if (!estadoActualAp.includes('cancel') && !estadoActualAp.includes('migrado') && !estadoActualAp.includes('conversion')) {
+        ap.estado = ap.saldoPendiente <= 0.01 ? 'Liquidado' : 'Pendiente';
+    }
+
+    apartados[idx] = ap;
+    StorageService.set("apartados", apartados);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'CORRECCION_ENGANCHE_APARTADO',
+            modulo: 'Apartados',
+            entidad: 'Enganche',
+            entidadId: folio,
+            detalle: `Correccion de anticipo de apartado: monto ${dinero(engancheAnterior)} -> ${dinero(nuevoMonto)}; cuenta ${cuentaAnteriorId} -> ${etiqueta}`,
+            monto: nuevoMonto,
+            severidad: 'riesgo',
+            datos: { antes: { monto: engancheAnterior, cuenta: cuentaAnteriorId }, despues: { monto: nuevoMonto, cuenta: cuentaId } }
+        });
+    }
+
+    document.getElementById('modalCorreccionEngancheApartado')?.remove();
+    alert(saldosActualizados
+        ? "Anticipo corregido con exito. Saldo del apartado y caja/banco fueron actualizados."
+        : "Anticipo corregido, pero alguna cuenta destino no se encontro para ajustar su saldo. Revisa Mis Cuentas.");
+
+    if (typeof renderApartados === 'function') renderApartados();
+};
+
+window.eliminarEngancheApartadoAuditoria = function(folio) {
+    if (!_apartadoEsAdminSesion()) return alert("Acceso denegado: solo administradores.");
+
+    let apartados = StorageService.get("apartados", []);
+    const idx = apartados.findIndex(a => a.folio === folio);
+    if (idx === -1) return alert("Apartado no encontrado.");
+    const ap = apartados[idx];
+
+    const engancheAnterior = Number(ap.enganche || 0);
+    if (engancheAnterior <= 0) return alert("Este apartado no tiene anticipo registrado para eliminar.");
+
+    const msg = `ELIMINAR ANTICIPO\n\nFolio: ${folio}\nCliente: ${_apartadoNombreCliente(ap)}\nMonto: ${dinero(engancheAnterior)}\n\nEsto quitara el anticipo del apartado, sumara ese monto al saldo pendiente y retirara el ingreso de caja/banco.\n\nDeseas continuar?`;
+    if (!confirm(msg)) return;
+
+    const motivo = prompt("Motivo de eliminacion del anticipo:");
+    if (motivo === null) return;
+    if (!String(motivo).trim()) return alert("El motivo es obligatorio para eliminar el anticipo.");
+
+    const movimiento = (typeof _cxcMovimientoEngancheFolio === 'function') ? _cxcMovimientoEngancheFolio(folio) : null;
+    const cuentaAnteriorId = movimiento?.cuenta || movimiento?.cuentaId || ap.cuentaIdEnganche || 'efectivo';
+
+    let saldosActualizados = true;
+    if (typeof _cxcAjustarSaldoCuentaPorCorreccion === 'function') {
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(cuentaAnteriorId, -engancheAnterior)) saldosActualizados = false;
+    }
+
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    if (movimiento) {
+        movimientosCaja = movimientosCaja.filter(m => m.id !== movimiento.id);
+        StorageService.set("movimientosCaja", movimientosCaja);
+    }
+
+    ap.enganchesEliminados = ap.enganchesEliminados || [];
+    ap.enganchesEliminados.push({
+        monto: engancheAnterior,
+        cuenta: cuentaAnteriorId,
+        fechaEliminacion: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        motivoEliminacion: String(motivo).trim()
+    });
+
+    ap.enganche = 0;
+    ap.cuentaIdEnganche = null;
+    ap.etiquetaCuentaEnganche = null;
+    ap.saldoPendiente = Math.max(0, _apartadoSaldoReal(ap));
+    const estadoActualAp = String(ap.estado || '').toLowerCase();
+    if (!estadoActualAp.includes('cancel') && !estadoActualAp.includes('migrado') && !estadoActualAp.includes('conversion')) {
+        ap.estado = ap.saldoPendiente <= 0.01 ? 'Liquidado' : 'Pendiente';
+    }
+
+    apartados[idx] = ap;
+    StorageService.set("apartados", apartados);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ELIMINACION_ENGANCHE_APARTADO',
+            modulo: 'Apartados',
+            entidad: 'Enganche',
+            entidadId: folio,
+            detalle: `Eliminacion de anticipo de apartado por ${dinero(engancheAnterior)}. Motivo: ${String(motivo).trim()}`,
+            monto: engancheAnterior,
+            severidad: 'critica',
+            datos: { motivo: String(motivo).trim(), cuentaOrigen: cuentaAnteriorId }
+        });
+    }
+
+    document.getElementById('modalCorreccionEngancheApartado')?.remove();
+    alert(saldosActualizados
+        ? "Anticipo eliminado. Se reverso el ingreso de caja/banco y se sumo el monto al saldo pendiente del apartado."
+        : "Anticipo eliminado, pero alguna cuenta de caja/banco no se encontro para ajustar saldo. Revisa Mis Cuentas.");
+
+    if (typeof renderApartados === 'function') renderApartados();
+};
