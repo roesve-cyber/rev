@@ -3272,6 +3272,10 @@ function dibujarFormularioAuditoria() {
         try { fechaVentaDate = window.getFechaLocalMX ? window.getFechaLocalMX(cuenta.fechaVenta) : cuenta.fechaVenta.split('T')[0]; } catch(e) {}
     }
 
+    const engancheActual = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const movEngancheAudit = (typeof _cxcMovimientoEngancheFolio === 'function') ? _cxcMovimientoEngancheFolio(cuenta.folio) : null;
+    const etiquetaEngancheAudit = movEngancheAudit?.etiquetaCuenta || movEngancheAudit?.cuenta || 'Efectivo';
+
     let pagaresHTML = pagares.map((p, index) => {
         let fechaVencDate = "";
         if(p.fechaVencimiento) {
@@ -3328,6 +3332,24 @@ function dibujarFormularioAuditoria() {
                 <input type="date" id="auditFechaVenta" value="${fechaVentaDate}" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; background:#fffbdd; border-color:#fde047;">
                 <small style="color:#d97706;">* Modificar esta fecha afecta el cálculo de antiguedad.</small>
             </div>
+        </div>
+    </div>
+
+    <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #bbf7d0; margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:14px;">
+            <div>
+                <h3 style="margin:0; color:#166534; font-size:16px;">Enganche recibido</h3>
+                <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Corrige importe o cuenta receptora, o elimínalo por completo. Al guardar se recalculan saldo CxC y caja/banco.</p>
+            </div>
+            ${engancheActual > 0 ? `
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div style="text-align:right;">
+                    <div style="font-size:18px; font-weight:bold; color:#15803d;">${dinero(engancheActual)}</div>
+                    <div style="font-size:11px; color:#475569;">${_escapeHtml(etiquetaEngancheAudit)}</div>
+                </div>
+                <button onclick="if (typeof abrirEditorEnganche === 'function') abrirEditorEnganche('${cuenta.folio}'); else alert('Editor de enganche no disponible.');"
+                    style="background:#1e40af; color:white; border:none; padding:9px 14px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Corregir</button>
+            </div>` : `<div style="color:#94a3b8; font-size:13px;">Esta venta no registró enganche.</div>`}
         </div>
     </div>
 

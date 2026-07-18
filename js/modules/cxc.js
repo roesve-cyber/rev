@@ -2546,6 +2546,256 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
 };
 
 // ==========================================
+// CORRECCION / ELIMINACION DE ENGANCHE (Auditoria CxC)
+// ==========================================
+function _cxcMovimientoEngancheFolio(folio) {
+    const movs = StorageService.get("movimientosCaja", []);
+    const candidatos = movs.filter(m => String(m.referencia || '') === `VENTA-${folio}` && String(m.tipo || '').toLowerCase() === 'ingreso');
+    if (!candidatos.length) return null;
+    const conEtiqueta = candidatos.find(m => /enganche/i.test(String(m.concepto || '')));
+    return conEtiqueta || candidatos[0];
+}
+
+window.abrirEditorEnganche = function(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return alert("Cuenta no encontrada.");
+
+    const engancheActual = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const movimiento = _cxcMovimientoEngancheFolio(folio);
+    const cuentaActualId = movimiento?.cuenta || movimiento?.cuentaId || 'efectivo';
+    const etiquetaActual = movimiento?.etiquetaCuenta || '';
+    const opcionesCuentas = _cxcOpcionesCuentasReceptoras(cuentaActualId, etiquetaActual);
+
+    const html = `
+    <div id="modalCorreccionEnganche" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 5px 0; color:#1e40af;">✏️ Corrección de Enganche</h3>
+            <p style="font-size:13px; color:#64748b; margin-top:0;">Venta: <b>${folio}</b> | Cliente: <b>${_cxcNombreClienteVigente(cuenta)}</b></p>
+
+            <div style="margin-top:20px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">IMPORTE DEL ENGANCHE ($):</label>
+                <input type="number" id="editMontoEng" value="${engancheActual}" style="width:100%; padding:12px; border-radius:8px; border:2px solid #3b82f6; margin-top:5px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#1e40af;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">CUENTA RECEPTORA:</label>
+                <select id="editCuentaEng" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; font-size:14px;">
+                    ${opcionesCuentas}
+                </select>
+            </div>
+
+            <div style="background:#fffbeb; padding:12px; border-radius:8px; margin-top:20px; border:1px solid #fcd34d;">
+                <p style="margin:0; font-size:12px; color:#92400e;">⚠️ <b>Atención:</b> El saldo pendiente de la cuenta CxC y el saldo de caja/banco se recalculan automáticamente al guardar (si bajas el enganche, sube el saldo por cobrar; si lo subes, baja).</p>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="procesarCorreccionEnganche('${folio}')"
+                        style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">
+                    💾 Guardar Cambios
+                </button>
+                <button onclick="document.getElementById('modalCorreccionEnganche').remove()"
+                        style="flex:1; padding:14px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
+                    Cancelar
+                </button>
+            </div>
+            <div style="margin-top:12px; text-align:center;">
+                <button onclick="eliminarEngancheAuditoria('${folio}')"
+                        style="background:none; border:none; color:#b91c1c; font-size:12px; font-weight:bold; cursor:pointer; text-decoration:underline;">
+                    🗑️ Eliminar enganche por completo
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.procesarCorreccionEnganche = function(folio) {
+    if (window.AuditService?.requireAdmin) {
+        if (!window.AuditService.requireAdmin('corregir enganche CxC')) return;
+    } else {
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        if (!sesion || (sesion.rol !== 'admin' && sesion.rol !== 'Administrador')) return alert("Acceso denegado: solo administradores.");
+    }
+
+    const nuevoMonto = parseFloat(document.getElementById('editMontoEng').value);
+    const selCuenta = document.getElementById('editCuentaEng');
+    if (isNaN(nuevoMonto) || nuevoMonto < 0) return alert("Importe inválido.");
+
+    if (nuevoMonto === 0) {
+        document.getElementById('modalCorreccionEnganche')?.remove();
+        return window.eliminarEngancheAuditoria(folio);
+    }
+
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].getAttribute('data-nombre') || selCuenta.options[selCuenta.selectedIndex].text || cuentaId;
+    const isCajaDestino = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
+    const medioPago = isCajaDestino ? 'efectivo' : 'transferencia';
+
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    const idxCuenta = cuentas.findIndex(c => c.folio === folio);
+    if (idxCuenta === -1) return alert("Cuenta no encontrada.");
+    const cuenta = cuentas[idxCuenta];
+
+    const engancheAnterior = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const movimientoAnterior = _cxcMovimientoEngancheFolio(folio);
+    const cuentaAnteriorId = movimientoAnterior?.cuenta || movimientoAnterior?.cuentaId || 'efectivo';
+
+    let saldosActualizados = true;
+    if (engancheAnterior > 0) {
+        if (!_cxcAjustarSaldoCuentaPorCorreccion(cuentaAnteriorId, -engancheAnterior)) saldosActualizados = false;
+    }
+    if (!_cxcAjustarSaldoCuentaPorCorreccion(cuentaId, nuevoMonto)) saldosActualizados = false;
+
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    const idxMov = movimientoAnterior ? movimientosCaja.findIndex(m => m.id === movimientoAnterior.id) : -1;
+    if (idxMov !== -1) {
+        movimientosCaja[idxMov].monto = nuevoMonto;
+        movimientosCaja[idxMov].cuenta = cuentaId;
+        movimientosCaja[idxMov].etiquetaCuenta = etiqueta;
+        movimientosCaja[idxMov].medioPago = medioPago;
+    } else {
+        movimientosCaja.push({
+            id: Date.now() + Math.random(),
+            folio,
+            fecha: cuenta.fechaVenta || (window.localISO ? window.localISO(new Date()) : new Date().toISOString()),
+            tipo: "ingreso",
+            monto: nuevoMonto,
+            concepto: `Enganche credito - ${_cxcNombreClienteVigente(cuenta)} (Folio: ${folio})`,
+            referencia: `VENTA-${folio}`,
+            cuenta: cuentaId,
+            medioPago,
+            etiquetaCuenta: etiqueta
+        });
+    }
+    StorageService.set("movimientosCaja", movimientosCaja);
+
+    const delta = nuevoMonto - engancheAnterior; // positivo = mas enganche = menos saldo por cobrar
+    cuenta.engancheRecibido = nuevoMonto;
+    if (cuenta.enganche !== undefined) cuenta.enganche = nuevoMonto;
+    cuenta.saldoActual = Math.max(0, Number(cuenta.saldoActual || 0) - delta);
+    if (cuenta.saldoOriginal !== undefined) {
+        cuenta.saldoOriginal = Math.max(0, Number(cuenta.saldoOriginal || 0) - delta);
+    }
+    if (cuenta.saldoActual <= 0.01) {
+        cuenta.saldoActual = 0;
+        cuenta.estado = "Saldado";
+    } else if (cuenta.estado === "Saldado") {
+        cuenta.estado = "Pendiente";
+    }
+
+    cuentas[idxCuenta] = cuenta;
+    StorageService.set("cuentasPorCobrar", cuentas);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'CORRECCION_ENGANCHE_CXC',
+            modulo: 'CxC',
+            entidad: 'Enganche',
+            entidadId: folio,
+            detalle: `Correccion de enganche: monto ${_cxcDinero(engancheAnterior)} -> ${_cxcDinero(nuevoMonto)}; cuenta ${cuentaAnteriorId} -> ${etiqueta}`,
+            monto: nuevoMonto,
+            severidad: 'riesgo',
+            datos: { antes: { monto: engancheAnterior, cuenta: cuentaAnteriorId }, despues: { monto: nuevoMonto, cuenta: cuentaId } }
+        });
+    }
+
+    document.getElementById('modalCorreccionEnganche')?.remove();
+    alert(saldosActualizados
+        ? "Enganche corregido con exito. Saldo CxC, caja/banco y estado de cuenta fueron actualizados."
+        : "Enganche corregido, pero alguna cuenta destino no se encontro para ajustar su saldo. Revisa Mis Cuentas.");
+
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (document.querySelector('[data-modal="auditoria-cxc"]') && window._auditCuentaActual?.folio === folio && typeof buscarVentaAuditoria === 'function') {
+        const inputAudit = document.getElementById('auditFolioInput');
+        if (inputAudit) inputAudit.value = folio;
+        buscarVentaAuditoria();
+    }
+};
+
+window.eliminarEngancheAuditoria = function(folio) {
+    if (window.AuditService?.requireAdmin) {
+        if (!window.AuditService.requireAdmin('eliminar enganche CxC')) return;
+    } else {
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        if (!sesion || (sesion.rol !== 'admin' && sesion.rol !== 'Administrador')) return alert("Acceso denegado: solo administradores.");
+    }
+
+    let cuentas = StorageService.get("cuentasPorCobrar", []);
+    const idxCuenta = cuentas.findIndex(c => c.folio === folio);
+    if (idxCuenta === -1) return alert("Cuenta no encontrada.");
+    const cuenta = cuentas[idxCuenta];
+
+    const engancheAnterior = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    if (engancheAnterior <= 0) return alert("Esta cuenta no tiene enganche registrado para eliminar.");
+
+    const msg = `ELIMINAR ENGANCHE\n\nFolio: ${folio}\nCliente: ${_cxcNombreClienteVigente(cuenta)}\nMonto: ${_cxcDinero(engancheAnterior)}\n\nEsto quitara el enganche de la cuenta, sumara ese monto al saldo pendiente por cobrar y retirara el ingreso de caja/banco.\n\nDeseas continuar?`;
+    if (!confirm(msg)) return;
+
+    const motivo = prompt("Motivo de eliminacion del enganche:");
+    if (motivo === null) return;
+    if (!String(motivo).trim()) return alert("El motivo es obligatorio para eliminar el enganche.");
+
+    const movimiento = _cxcMovimientoEngancheFolio(folio);
+    const cuentaAnteriorId = movimiento?.cuenta || movimiento?.cuentaId || 'efectivo';
+
+    let saldosActualizados = true;
+    if (!_cxcAjustarSaldoCuentaPorCorreccion(cuentaAnteriorId, -engancheAnterior)) saldosActualizados = false;
+
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    if (movimiento) {
+        movimientosCaja = movimientosCaja.filter(m => m.id !== movimiento.id);
+        StorageService.set("movimientosCaja", movimientosCaja);
+    }
+
+    cuenta.enganchesEliminados = cuenta.enganchesEliminados || [];
+    cuenta.enganchesEliminados.push({
+        monto: engancheAnterior,
+        cuenta: cuentaAnteriorId,
+        fechaEliminacion: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        motivoEliminacion: String(motivo).trim()
+    });
+
+    cuenta.engancheRecibido = 0;
+    if (cuenta.enganche !== undefined) cuenta.enganche = 0;
+    cuenta.saldoActual = Number(cuenta.saldoActual || 0) + engancheAnterior;
+    if (cuenta.saldoOriginal !== undefined) {
+        cuenta.saldoOriginal = Number(cuenta.saldoOriginal || 0) + engancheAnterior;
+    }
+    if (cuenta.estado === "Saldado" && cuenta.saldoActual > 0.01) {
+        cuenta.estado = "Pendiente";
+    }
+
+    cuentas[idxCuenta] = cuenta;
+    StorageService.set("cuentasPorCobrar", cuentas);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ELIMINACION_ENGANCHE_CXC',
+            modulo: 'CxC',
+            entidad: 'Enganche',
+            entidadId: folio,
+            detalle: `Eliminacion de enganche por ${_cxcDinero(engancheAnterior)}. Motivo: ${String(motivo).trim()}`,
+            monto: engancheAnterior,
+            severidad: 'critica',
+            datos: { motivo: String(motivo).trim(), cuentaOrigen: cuentaAnteriorId }
+        });
+    }
+
+    document.getElementById('modalCorreccionEnganche')?.remove();
+    alert(saldosActualizados
+        ? "Enganche eliminado. Se reverso el ingreso de caja/banco y se sumo el monto al saldo pendiente de la cuenta."
+        : "Enganche eliminado, pero alguna cuenta de caja/banco no se encontro para ajustar saldo. Revisa Mis Cuentas.");
+
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (document.querySelector('[data-modal="auditoria-cxc"]') && window._auditCuentaActual?.folio === folio && typeof buscarVentaAuditoria === 'function') {
+        const inputAudit = document.getElementById('auditFolioInput');
+        if (inputAudit) inputAudit.value = folio;
+        buscarVentaAuditoria();
+    }
+};
+
+// ==========================================
 // ESTADO DE CUENTA PROFESIONAL / TICKET
 // ==========================================
 function _cxcEstadoCuentaFecha(valor) {
