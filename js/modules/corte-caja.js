@@ -274,6 +274,17 @@
         return ids;
     }
 
+    function persistirSaldoInicialManual(cuentaId, valor) {
+        if (!cuentaId) return;
+        if (!window._saldosInicialesManuales) window._saldosInicialesManuales = {};
+        window._saldosInicialesManuales[cuentaId] = valor;
+        try {
+            localStorage.setItem('saldosInicialesManualesCorte', JSON.stringify(window._saldosInicialesManuales));
+        } catch (e) {
+            console.warn('No se pudo persistir el saldo inicial fijo en localStorage:', e);
+        }
+    }
+
     // Saldo inicial FIJO: se hereda del ultimo corte guardado de esta cuenta y no se recalcula
     // con cada movimiento nuevo. Solo se calcula por respaldo la primera vez que se corta una cuenta
     // (cuando aun no existe ningun corte previo guardado para ella).
@@ -289,6 +300,31 @@
             if (fb - fa !== 0) return fb - fa;
             return String(b.fechaCreacion || '').localeCompare(String(a.fechaCreacion || ''));
         })[0];
+    }
+
+    function saldoInicialFijoCuenta(cuentaObj, movimientosRaw) {
+        // Resuelve el saldo inicial FIJO de una cuenta/ubicacion real (no 'todas'), en este orden:
+        // 1) valor manual guardado para esa cuenta -> nunca se toca solo, solo el usuario lo cambia.
+        // 2) saldo final del ultimo corte guardado de esa cuenta -> solo cambia al guardar un corte.
+        // 3) primera vez que se usa esa cuenta (nunca se corto ni se fijo a mano): se calcula UNA
+        //    SOLA VEZ a partir de todo el historial de movimientos y se fija de inmediato, para que
+        //    ningun movimiento futuro (venta, abono, correccion, etc.) lo vuelva a mover.
+        const saldosInicialesManuales = window._saldosInicialesManuales || {};
+        if (cuentaObj.id in saldosInicialesManuales) {
+            const valorManual = Number(saldosInicialesManuales[cuentaObj.id]);
+            if (!Number.isNaN(valorManual)) return { valor: valorManual, origen: 'manual' };
+        }
+
+        const ultimoCorte = obtenerUltimoCorteGuardado(cuentaObj.id);
+        if (ultimoCorte) {
+            return { valor: Number(ultimoCorte.saldoFinalSistema || 0), origen: 'heredado' };
+        }
+
+        const saldoActualCuenta = Number(cuentaObj.saldoActual || 0);
+        const netoHistoricoTotal = sumarNetoMovimientos(movimientosRaw, cuentaObj.aliases, null, null);
+        const valorBootstrap = saldoActualCuenta - netoHistoricoTotal;
+        persistirSaldoInicialManual(cuentaObj.id, valorBootstrap);
+        return { valor: valorBootstrap, origen: 'calculado' };
     }
 
     function calcularResumen(filtros = leerFiltros()) {
@@ -324,19 +360,35 @@
         const cuentasIncluidas = cuenta.id === 'todas' ? cuentas : [cuenta];
         const saldoActual = cuentasIncluidas.reduce((s, c) => s + Number(c.saldoActual || 0), 0);
         const aliases = cuentasIncluidas.flatMap(c => c.aliases);
+        const movimientosParaSaldos = StorageService.get('movimientosCaja', []);
         const netoPosterior = cuenta.id === 'todas'
-            ? sumarNetoMovimientos(StorageService.get('movimientosCaja', []), aliases, fin, null)
-            : sumarNetoMovimientos(StorageService.get('movimientosCaja', []), cuenta.aliases, fin, null);
+            ? sumarNetoMovimientos(movimientosParaSaldos, aliases, fin, null)
+            : sumarNetoMovimientos(movimientosParaSaldos, cuenta.aliases, fin, null);
         const saldoFinalSistema = saldoActual - netoPosterior;
-        const ultimoCorteCuenta = obtenerUltimoCorteGuardado(cuenta.id);
-        const saldoInicial = ultimoCorteCuenta
-            ? ultimoCorteCuenta.saldoFinalSistema
-            : (saldoFinalSistema - neto); // respaldo: solo aplica si esta cuenta nunca se ha cortado antes
-        const saldoInicialOrigen = ultimoCorteCuenta ? 'heredado' : 'calculado';
 
-        // Obtener saldo inicial manual específico para esta cuenta
+        // Saldo inicial FIJO por cuenta/ubicación: cada caja, banco, etc. tiene el suyo propio e
+        // independiente. Para 'todas' se suma el fijo de cada cuenta real (no se recalcula aparte).
+        let saldoInicial;
+        let saldoInicialOrigen;
+        if (cuenta.id === 'todas') {
+            let totalFijo = 0;
+            let huboCalculoNuevo = false;
+            cuentas.forEach(c => {
+                const r = saldoInicialFijoCuenta(c, movimientosParaSaldos);
+                totalFijo += r.valor;
+                if (r.origen === 'calculado') huboCalculoNuevo = true;
+            });
+            saldoInicial = totalFijo;
+            saldoInicialOrigen = huboCalculoNuevo ? 'calculado' : 'heredado';
+        } else {
+            const r = saldoInicialFijoCuenta(cuenta, movimientosParaSaldos);
+            saldoInicial = r.valor;
+            saldoInicialOrigen = r.origen;
+        }
+
+        // Obtener saldo inicial manual específico para esta cuenta (para mostrar "Manual" en la UI)
         const saldosInicialesManuales = window._saldosInicialesManuales || {};
-        const saldoInicialManualCuenta = saldosInicialesManuales[cuenta.id] || null;
+        const saldoInicialManualCuenta = (cuenta.id in saldosInicialesManuales) ? Number(saldosInicialesManuales[cuenta.id]) : null;
 
         const porCategoria = {};
         movimientos.forEach(m => {
@@ -911,23 +963,11 @@
             }
         });
         
-        // Calcular saldo final del corte para establecerlo como nuevo saldo inicial manual
-        const saldoFinalCorte = corte.saldoInicial + corte.ingresos - corte.egresos;
-        
-        // Guardar el saldo final como nuevo saldo inicial manual para esta cuenta
-        if (!window._saldosInicialesManuales) {
-            window._saldosInicialesManuales = {};
-        }
-        window._saldosInicialesManuales[corte.cuentaId] = saldoFinalCorte;
-        
-        // Persistir en localStorage
-        try {
-            localStorage.setItem('saldosInicialesManualesCorte', JSON.stringify(window._saldosInicialesManuales));
-        } catch (e) {
-            console.warn('No se pudo guardar nuevo saldo inicial en localStorage:', e);
-        }
-        
-        alert(`Corte guardado: ${corte.folio}\n\nEl saldo final de ${dinero(saldoFinalCorte)} se ha establecido como nuevo saldo inicial manual para ${corte.cuentaNombre || 'esta cuenta'}.`);
+        // El saldo final de este corte se fija de inmediato como el nuevo saldo inicial de esta
+        // cuenta/ubicación (unico disparador junto con la edición manual que puede moverlo).
+        persistirSaldoInicialManual(corte.cuentaId, corte.saldoFinalSistema);
+
+        alert(`Corte guardado: ${corte.folio}\n\nEl saldo final de ${dinero(corte.saldoFinalSistema)} se ha fijado como nuevo saldo inicial para ${corte.cuentaNombre || 'esta cuenta'}.`);
         renderCorteCaja();
         imprimirCorteGuardado(corte.folio);
     };
