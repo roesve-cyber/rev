@@ -247,11 +247,23 @@
         return 'Egresos por identificar';
     }
 
+    const UBICACION_FIJA_CORTE_KEY = 'corteCajaUbicacionFija';
+
+    function obtenerUbicacionFijaCorte() {
+        try { return localStorage.getItem(UBICACION_FIJA_CORTE_KEY) || 'todas'; } catch (e) { return 'todas'; }
+    }
+
+    function guardarUbicacionFijaCorte(cuentaId) {
+        try { localStorage.setItem(UBICACION_FIJA_CORTE_KEY, cuentaId || 'todas'); } catch (e) { /* noop */ }
+    }
+
     function leerFiltros() {
+        const cuentaId = document.getElementById('corteCuenta')?.value || obtenerUbicacionFijaCorte();
+        guardarUbicacionFijaCorte(cuentaId);
         return {
             fechaInicio: document.getElementById('corteFechaInicio')?.value || hoyInput(),
             fechaFin: document.getElementById('corteFechaFin')?.value || hoyInput(),
-            cuentaId: document.getElementById('corteCuenta')?.value || 'todas'
+            cuentaId
         };
     }
 
@@ -638,8 +650,9 @@
         const filtros = {
             fechaInicio: document.getElementById('corteFechaInicio')?.value || hoyInput(),
             fechaFin: document.getElementById('corteFechaFin')?.value || hoyInput(),
-            cuentaId: document.getElementById('corteCuenta')?.value || 'todas'
+            cuentaId: document.getElementById('corteCuenta')?.value || obtenerUbicacionFijaCorte()
         };
+        guardarUbicacionFijaCorte(filtros.cuentaId);
         const resumen = calcularResumen(filtros);
         window._corteCajaResumen = resumen;
         resetSeleccionCorte(resumen, true);
@@ -788,7 +801,7 @@
 
     window.guardarSaldoInicialManualCuenta = function() {
         const input = document.getElementById('corteSaldoInicialManual');
-        const cuentaId = document.getElementById('corteCuenta')?.value || 'todas';
+        const cuentaId = document.getElementById('corteCuenta')?.value || obtenerUbicacionFijaCorte();
         if (!input || !cuentaId) return;
         
         const valor = input.value !== '' ? Number(input.value) : null;
@@ -1047,8 +1060,8 @@
             })
             .filter(m => m._monto > 0)
             .filter(m => !cortados.has(String(m._corteId)) && !cortados.has(String(m.id || '')))
+            .filter(m => cuenta.id === 'todas' || m._mismaCuenta)
             .sort((a, b) =>
-                Number(b._mismaCuenta) - Number(a._mismaCuenta) ||
                 Number(b._dentroPeriodo) - Number(a._dentroPeriodo) ||
                 b._fechaObj - a._fechaObj
             );
@@ -1101,7 +1114,7 @@
                 <div style="width:100%;max-width:1050px;background:white;border-radius:10px;padding:22px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
                     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;">
                         <div><h3 style="margin:0;color:#0f172a;">Agregar movimiento a ${esc(corte.folio)}</h3>
-                        <p style="margin:5px 0 0;color:#64748b;font-size:13px;">Sólo aparecen movimientos que no pertenecen a ningún otro corte.</p></div>
+                        <p style="margin:5px 0 0;color:#64748b;font-size:13px;">Sólo aparecen movimientos de ${corte.cuentaId === 'todas' ? 'cualquier cuenta' : `<b>${esc(corte.cuentaNombre || corte.cuentaId)}</b>`} que no pertenecen a ningún otro corte.</p></div>
                         <button onclick="document.querySelector('[data-modal=&quot;agregar-movimiento-corte&quot;]')?.remove()" style="padding:9px 13px;border:0;border-radius:6px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
                     </div>
                     <input id="buscarMovimientoAgregarCorte" oninput="filtrarMovimientosAgregarCorte()" placeholder="Buscar concepto, referencia, cuenta o importe..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">

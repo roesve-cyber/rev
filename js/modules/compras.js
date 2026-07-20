@@ -5158,7 +5158,9 @@ window.abrirPreviaDevolucionConsignacion = function(folioKey) {
     const nombreEmpresa = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
     const proveedorNombre = items[0]?.proveedor || folioResumen?.proveedor || 'Proveedor';
     const folioOrigenTexto = folioResumen?.folioOrigen || '-';
-    const fechaHoyTexto = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX');
+    const ahoraActa = new Date();
+    const fechaHoyTexto = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ahoraActa) : ahoraActa.toLocaleDateString('es-MX');
+    const actaFolio = `ACTA-DEV-CONS-${ahoraActa.getFullYear()}${String(ahoraActa.getMonth() + 1).padStart(2, '0')}${String(ahoraActa.getDate()).padStart(2, '0')}-${String(ahoraActa.getHours()).padStart(2, '0')}${String(ahoraActa.getMinutes()).padStart(2, '0')}${String(ahoraActa.getSeconds()).padStart(2, '0')}`;
 
     const filas = items.map(it => `
         <tr style="border-bottom:1px solid #e2e8f0;">
@@ -5168,7 +5170,7 @@ window.abrirPreviaDevolucionConsignacion = function(folioKey) {
             <td style="padding:4px 8px;text-align:right;font-weight:bold;">${dinero(it.importe)}</td>
         </tr>`).join('');
 
-    const payload = encodeURIComponent(JSON.stringify({ folioKey, items }));
+    const payload = encodeURIComponent(JSON.stringify({ folioKey, items, actaFolio }));
 
     document.querySelector('[data-modal="previa-devolucion-consignacion"]')?.remove();
     const html = `
@@ -5179,14 +5181,20 @@ window.abrirPreviaDevolucionConsignacion = function(folioKey) {
                         <img src="img/Logo.svg" style="height:56px;" onerror="this.outerHTML='<span style=\\'font-size:28px;\\'>🏛️</span>'">
                         <h2 style="margin:6px 0 0;font-size:17px;color:#0f172a;">${_comprasEscHTML(nombreEmpresa)}</h2>
                     </div>
-                    <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 14px;">
+                    <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 10px;">
+                    <div style="text-align:center;margin-bottom:12px;">
+                        <div style="font-weight:900;font-size:15px;color:#0f172a;letter-spacing:0.3px;">ACTA DE DEVOLUCIÓN DE MERCANCÍA EN CONSIGNACIÓN</div>
+                        <div style="font-size:11px;color:#64748b;margin-top:2px;">Folio de acta: <strong>${_comprasEscHTML(actaFolio)}</strong></div>
+                    </div>
                     <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                         <div>
-                            <div style="font-weight:900;color:#0f172a;">↩️ Devolución de consignación</div>
                             <div style="font-size:12px;color:#64748b;margin-top:2px;">Proveedor: <strong>${_comprasEscHTML(proveedorNombre)}</strong></div>
-                            <div style="font-size:12px;color:#64748b;">Folio: <strong>${_comprasEscHTML(folioOrigenTexto)}</strong></div>
+                            <div style="font-size:12px;color:#64748b;">Folio de compra en consignación: <strong>${_comprasEscHTML(folioOrigenTexto)}</strong></div>
                         </div>
                         <div style="text-align:right;font-size:12px;color:#64748b;">Fecha: <strong>${_comprasEscHTML(fechaHoyTexto)}</strong></div>
+                    </div>
+                    <div style="font-size:12px;color:#334155;text-align:justify;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;line-height:1.5;">
+                        Por medio del presente documento, <strong>${_comprasEscHTML(nombreEmpresa)}</strong> hace constar la devolución al proveedor <strong>${_comprasEscHTML(proveedorNombre)}</strong> de la mercancía recibida originalmente en consignación bajo el folio <strong>${_comprasEscHTML(folioOrigenTexto)}</strong>, misma que se detalla a continuación. Ambas partes reconocen y hacen constar que, al momento de la presente entrega, la mercancía se encontró <strong>completa, en perfecto estado físico y de funcionamiento, sin daños, golpes, manchas, faltantes ni desperfectos visibles</strong>, salvo que se indique expresamente lo contrario en el apartado de observaciones de este documento. Este documento sirve como constancia formal de la devolución para efectos de aplicación de la misma ante el proveedor.
                     </div>
                     <div style="overflow:visible;">
                         <table style="width:100%;border-collapse:collapse;font-size:12px;">
@@ -5224,6 +5232,23 @@ window.abrirPreviaDevolucionConsignacion = function(folioKey) {
                             <strong>${dinero(valorQueSeMantiene)}</strong>
                         </div>
                     </div>
+                    <div id="docObservacionesSlot" style="font-size:12px;color:#334155;margin-top:10px;"></div>
+                    <div style="display:flex;justify-content:space-between;gap:24px;margin-top:38px;">
+                        <div style="flex:1;text-align:center;">
+                            <div style="border-top:1px solid #334155;margin:0 10px 6px;"></div>
+                            <div style="font-size:12px;font-weight:bold;color:#0f172a;">Entrega — ${_comprasEscHTML(nombreEmpresa)}</div>
+                            <div style="font-size:11px;color:#64748b;">Nombre y firma</div>
+                        </div>
+                        <div style="flex:1;text-align:center;">
+                            <div style="border-top:1px solid #334155;margin:0 10px 6px;"></div>
+                            <div style="font-size:12px;font-weight:bold;color:#0f172a;">Recibe — ${_comprasEscHTML(proveedorNombre)}</div>
+                            <div style="font-size:11px;color:#64748b;">Nombre y firma</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top:14px;">
+                    <label style="display:block;font-size:11px;font-weight:bold;color:#475569;margin-bottom:4px;">Observaciones (opcional — ej. detalles de empaque, faltantes, etc.):</label>
+                    <input id="inputObservacionesDevolucion" type="text" placeholder="Dejar en blanco si la mercancía se entregó sin ninguna observación." style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;font-size:13px;">
                 </div>
                 <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;">
                     <button onclick="imprimirPreviaDevolucionConsignacion()" style="flex:1;min-width:140px;padding:11px;background:#1e40af;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">🖨️ Emitir documento (PDF / Imagen / Ticket)</button>
@@ -5262,25 +5287,32 @@ function _clonarPreviaDevolucionConsignacion() {
 }
 
 window.imprimirPreviaDevolucionConsignacion = function() {
+    const obsVal = String(document.getElementById('inputObservacionesDevolucion')?.value || '').trim();
+    const slot = document.getElementById('docObservacionesSlot');
+    if (slot) {
+        slot.innerHTML = obsVal
+            ? `<strong>Observaciones:</strong> ${_comprasEscHTML(obsVal)}`
+            : `<strong>Observaciones:</strong> Ninguna. La mercancía se entregó sin observaciones.`;
+    }
     const clone = _clonarPreviaDevolucionConsignacion();
     if (!clone) return alert('Abre primero la vista previa de la devolución para imprimirla.');
     if (window.TicketService?.elegirFormato) {
         window.TicketService.elegirFormato({
             html: clone.outerHTML,
-            title: 'Devolución de consignación',
-            filename: `devolucion_consignacion_${Date.now()}`,
+            title: 'Acta de devolución de consignación',
+            filename: `acta_devolucion_consignacion_${Date.now()}`,
             pageSize: 'letter'
         });
         return;
     }
     if (window.TicketService?.openDocument) {
-        window.TicketService.openDocument(clone.outerHTML, { title: 'Devolución de consignación', filename: `devolucion_consignacion_${Date.now()}`, pageSize: 'letter', autoPrint: true });
+        window.TicketService.openDocument(clone.outerHTML, { title: 'Acta de devolución de consignación', filename: `acta_devolucion_consignacion_${Date.now()}`, pageSize: 'letter', autoPrint: true });
         return;
     }
     const w = window.open('', '_blank', 'width=900,height=1000');
     if (!w) return alert('Habilita las ventanas emergentes para imprimir la devolución.');
     w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-        <title>Devolución de consignación</title>
+        <title>Acta de devolución de consignación</title>
         <style>
             *{box-sizing:border-box}
             body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:22px;color:#0f172a}
@@ -5332,7 +5364,7 @@ window.ejecutarDevolucionConsignacion = function(payload) {
         c.cantidadPendiente = Math.max(0, Number(c.cantidadPendiente || 0) - cantidad);
         c.cantidadDevuelta = Number(c.cantidadDevuelta || 0) + cantidad;
         if (!Array.isArray(c.devoluciones)) c.devoluciones = [];
-        c.devoluciones.push({ fecha: new Date().toISOString(), cantidad, importe: cantidad * Number(c.costoUnitario || 0) });
+        c.devoluciones.push({ fecha: new Date().toISOString(), cantidad, importe: cantidad * Number(c.costoUnitario || 0), actaFolio: data.actaFolio || null });
 
         totalCantidad += cantidad;
         totalImporte += cantidad * Number(c.costoUnitario || 0);
@@ -5348,10 +5380,10 @@ window.ejecutarDevolucionConsignacion = function(payload) {
             modulo: 'Consignaciones',
             entidad: 'folio',
             entidadId: data.folioKey || null,
-            detalle: `Devolución de ${totalCantidad} pieza(s) a proveedor`,
+            detalle: `Devolución de ${totalCantidad} pieza(s) a proveedor (Acta: ${data.actaFolio || 'N/A'})`,
             monto: totalImporte,
             severidad: 'riesgo',
-            datos: { items }
+            datos: { items, actaFolio: data.actaFolio || null }
         });
     }
 
