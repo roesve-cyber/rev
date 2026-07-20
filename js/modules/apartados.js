@@ -128,8 +128,6 @@ function obtenerApartados() {
 
 function renderApartados() {
     const apartados = obtenerApartados();
-    const sesionApt = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
-    const esAdminApt = !!sesionApt && (sesionApt.rol === 'admin' || sesionApt.rol === 'Administrador');
     let html = `<h2>📦 Apartados</h2>`;
     
     if (apartados.length === 0) {
@@ -156,7 +154,6 @@ function renderApartados() {
                             <button onclick="abrirModalConvertirApartado('${a.folio}')" style="padding:6px 10px; background:#8b5cf6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">💳 Convertir</button>
                         ` : ''}
                         <button onclick="abrirHistorialAbonos('${a.folio}')" style="padding:6px 10px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📜 Historial</button>
-                        ${esAdminApt ? `<button onclick="abrirEditorEngancheApartado('${a.folio}')" style="padding:6px 10px; background:#1e40af; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">🛠️ Enganche</button>` : ''}
                         ${a.condiciones ? `<button onclick="verCondicionesApartado('${a.folio}')" style="padding:6px 10px; background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📄 Cond.</button>` : ''}
                     </div>
                 </td>
@@ -490,6 +487,264 @@ function _apartadoEsAdminSesion() {
     const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
     return !!sesion && (sesion.rol === 'admin' || sesion.rol === 'Administrador');
 }
+
+function _apartadoMovimientosAbonoFolio(folio) {
+    return StorageService.get("movimientosCaja", []).filter(m => String(m.referencia || '') === `ABN-APT-${folio}`);
+}
+
+function _apartadoSnapshotSaldosAbonos(ap, movimientosPrevios = null) {
+    const movs = Array.isArray(movimientosPrevios) ? movimientosPrevios : _apartadoMovimientosAbonoFolio(ap.folio);
+    if (movs.length) {
+        return movs.map(m => ({
+            cuentaId: m.cuenta || m.cuentaId || m.medioPago || 'efectivo',
+            monto: Number(m.monto || 0)
+        }));
+    }
+    return _apartadoAbonosVigentes(ap).map(a => ({
+        cuentaId: a.cuentaId || a.medioPago || 'efectivo',
+        monto: Number(a.monto || 0)
+    }));
+}
+
+function _apartadoRecrearMovimientosAbonos(ap) {
+    let movimientosCaja = StorageService.get("movimientosCaja", []);
+    movimientosCaja = movimientosCaja.filter(m => String(m.referencia || '') !== `ABN-APT-${ap.folio}`);
+    _apartadoAbonosVigentes(ap).forEach((ab) => {
+        movimientosCaja.push({
+            id: Date.now() + Math.random(),
+            folio: ap.folio,
+            fecha: ab.fechaAbono || ab.fecha,
+            monto: Number(ab.monto || 0),
+            tipo: "ingreso",
+            concepto: `Abono a Apartado - ${_apartadoNombreCliente(ap)} (Folio: ${ap.folio})`,
+            referencia: `ABN-APT-${ap.folio}`,
+            cuenta: ab.cuentaId || ab.medioPago || 'efectivo',
+            medioPago: ab.medioPago || 'efectivo',
+            etiquetaCuenta: ab.etiquetaCuenta || ab.medioPago || 'Efectivo',
+            idOperacion: ab.idOperacion || ab.idCuarentena || ab.id || null
+        });
+    });
+    StorageService.set("movimientosCaja", movimientosCaja);
+}
+
+window.abrirEditorAbonoApartado = function(folio, abonoIndex) {
+    const apartados = StorageService.get("apartados", []);
+    const ap = apartados.find(a => a.folio === folio);
+    if (!ap) return;
+
+    const abono = (ap.abonos || [])[abonoIndex];
+    if (!abono) return;
+
+    const cuentaActualId = abono.cuentaId || abono.medioPago || 'efectivo';
+    const opcionesCuentas = (typeof _cxcOpcionesCuentasReceptoras === 'function')
+        ? _cxcOpcionesCuentasReceptoras(cuentaActualId, abono.etiquetaCuenta || '')
+        : `<option value="efectivo">Efectivo Principal</option>`;
+
+    const fechaBase = abono.fechaAbono || abono.fecha || (window.localISO ? window.localISO(new Date()) : new Date().toISOString());
+    const fechaObj = window.parseFechaMX ? window.parseFechaMX(fechaBase) : new Date(fechaBase);
+    const valorFecha = window.fechaParaInput
+        ? window.fechaParaInput(fechaObj)
+        : (isNaN(fechaObj.getTime()) ? new Date() : fechaObj).toISOString().slice(0, 16);
+
+    const html = `
+    <div id="modalCorreccionAbonoApartado" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:30px; border-radius:16px; width:90%; max-width:450px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+            <h3 style="margin:0 0 5px 0; color:#1e40af;">✏️ Corrección de Abono (Apartado)</h3>
+            <p style="font-size:13px; color:#64748b; margin-top:0;">Folio: <b>${folio}</b> | Cliente: <b>${_apartadoNombreCliente(ap)}</b></p>
+
+            <div style="margin-top:20px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">FECHA DEL MOVIMIENTO:</label>
+                <input type="datetime-local" id="editFechaAbnApt" value="${valorFecha}" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">IMPORTE DEL ABONO ($):</label>
+                <input type="number" id="editMontoAbnApt" value="${abono.monto}" style="width:100%; padding:12px; border-radius:8px; border:2px solid #3b82f6; margin-top:5px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#1e40af;">
+            </div>
+
+            <div style="margin-top:15px;">
+                <label style="display:block; font-size:11px; font-weight:bold; color:#475569;">CUENTA RECEPTORA:</label>
+                <select id="editCuentaAbnApt" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-top:5px; font-size:14px;">
+                    ${opcionesCuentas}
+                </select>
+            </div>
+
+            <div style="background:#fffbeb; padding:12px; border-radius:8px; margin-top:20px; border:1px solid #fcd34d;">
+                <p style="margin:0; font-size:12px; color:#92400e;">⚠️ <b>Atención:</b> El saldo pendiente del apartado se recalcula y el movimiento en caja/banco se corrige automáticamente.</p>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-top:25px;">
+                <button onclick="procesarCorreccionAbonoApartado('${folio}', ${abonoIndex})"
+                        style="flex:2; padding:14px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:15px;">
+                    💾 Guardar Cambios
+                </button>
+                <button onclick="document.getElementById('modalCorreccionAbonoApartado').remove()"
+                        style="flex:1; padding:14px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.procesarCorreccionAbonoApartado = function(folio, abonoIndex) {
+    if (!_apartadoEsAdminSesion()) return alert("Acceso denegado: solo administradores.");
+
+    const nuevaFecha = document.getElementById('editFechaAbnApt').value;
+    const nuevoMonto = parseFloat(document.getElementById('editMontoAbnApt').value);
+    const selCuenta = document.getElementById('editCuentaAbnApt');
+    if (isNaN(nuevoMonto) || nuevoMonto <= 0) return alert("Importe inválido.");
+
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].getAttribute('data-nombre') || selCuenta.options[selCuenta.selectedIndex].text || cuentaId;
+    const isCajaDestino = String(cuentaId).startsWith('caja_') || cuentaId === 'efectivo';
+    const medioPago = isCajaDestino ? 'efectivo' : 'transferencia';
+
+    let apartados = StorageService.get("apartados", []);
+    const idx = apartados.findIndex(a => a.folio === folio);
+    if (idx === -1) return alert("Apartado no encontrado.");
+    const ap = apartados[idx];
+    ap.abonos = Array.isArray(ap.abonos) ? ap.abonos : [];
+    if (!ap.abonos[abonoIndex]) return alert("No se encontro el abono a corregir.");
+    const abonoAnterior = { ...ap.abonos[abonoIndex] };
+
+    const fechaObj = nuevaFecha
+        ? new Date(nuevaFecha.includes('T') ? nuevaFecha : `${nuevaFecha}T12:00:00`)
+        : new Date();
+    if (isNaN(fechaObj.getTime())) return alert("Fecha invalida.");
+    const nuevaFechaIso = window.localISO ? window.localISO(fechaObj) : fechaObj.toISOString();
+
+    const movimientosPrevios = _apartadoMovimientosAbonoFolio(folio);
+    const saldosPrevios = _apartadoSnapshotSaldosAbonos(ap, movimientosPrevios);
+
+    ap.abonos[abonoIndex].fechaAbono = nuevaFechaIso;
+    ap.abonos[abonoIndex].monto = nuevoMonto;
+    ap.abonos[abonoIndex].cuentaId = cuentaId;
+    ap.abonos[abonoIndex].medioPago = medioPago;
+    ap.abonos[abonoIndex].etiquetaCuenta = etiqueta;
+
+    ap.saldoPendiente = Math.max(0, _apartadoSaldoReal(ap));
+    const estadoActualAp = String(ap.estado || '').toLowerCase();
+    if (!estadoActualAp.includes('cancel') && !estadoActualAp.includes('migrado') && !estadoActualAp.includes('conversion')) {
+        ap.estado = ap.saldoPendiente <= 0.01 ? 'Liquidado' : 'Pendiente';
+    }
+
+    apartados[idx] = ap;
+    StorageService.set("apartados", apartados);
+    _apartadoRecrearMovimientosAbonos(ap);
+
+    let saldosActualizados = true;
+    if (typeof _cxcAjustarSaldoCuentaPorCorreccion === 'function') {
+        saldosPrevios.forEach(m => {
+            if (!_cxcAjustarSaldoCuentaPorCorreccion(m.cuentaId, -Number(m.monto || 0))) saldosActualizados = false;
+        });
+        _apartadoAbonosVigentes(ap).forEach(ab => {
+            if (!_cxcAjustarSaldoCuentaPorCorreccion(ab.cuentaId || ab.medioPago || 'efectivo', Number(ab.monto || 0))) saldosActualizados = false;
+        });
+    }
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'CORRECCION_ABONO_APARTADO',
+            modulo: 'Apartados',
+            entidad: 'Abono',
+            entidadId: `${folio}#${abonoIndex + 1}`,
+            detalle: `Correccion de abono de apartado: monto ${dinero(abonoAnterior.monto || 0)} -> ${dinero(nuevoMonto)}; cuenta ${abonoAnterior.etiquetaCuenta || abonoAnterior.cuentaId || '-'} -> ${etiqueta}`,
+            monto: nuevoMonto,
+            severidad: 'riesgo',
+            datos: { antes: abonoAnterior, despues: ap.abonos[abonoIndex] }
+        });
+    }
+
+    document.getElementById('modalCorreccionAbonoApartado')?.remove();
+    alert(saldosActualizados
+        ? "Abono corregido con exito. Saldo del apartado y caja/banco fueron recalculados."
+        : "Abono corregido, pero alguna cuenta destino no se encontro para ajustar su saldo. Revisa Mis Cuentas.");
+
+    if (typeof renderApartados === 'function') renderApartados();
+    if (document.querySelector('[data-modal="auditoria-cxc"]') && window._auditCuentaActual?.folio === folio && typeof buscarVentaAuditoria === 'function') {
+        const inputAudit = document.getElementById('auditFolioInput');
+        if (inputAudit) inputAudit.value = folio;
+        buscarVentaAuditoria();
+    }
+};
+
+window.eliminarAbonoApartadoAuditoria = function(folio, abonoIndex) {
+    if (!_apartadoEsAdminSesion()) return alert("Acceso denegado: solo administradores.");
+
+    let apartados = StorageService.get("apartados", []);
+    const idx = apartados.findIndex(a => a.folio === folio);
+    if (idx === -1) return alert("Apartado no encontrado.");
+    const ap = apartados[idx];
+    ap.abonos = Array.isArray(ap.abonos) ? ap.abonos : [];
+    const abono = ap.abonos[abonoIndex];
+    if (!abono) return alert("El abono no existe o ya fue eliminado.");
+
+    const monto = Number(abono.monto || 0);
+    const msg = `ELIMINAR ABONO\n\nFolio: ${folio}\nCliente: ${_apartadoNombreCliente(ap)}\nMonto: ${dinero(monto)}\n\nEsto quitara el abono del apartado, recalculara el saldo pendiente y retirara el ingreso de caja/banco.\n\nDeseas continuar?`;
+    if (!confirm(msg)) return;
+
+    const motivo = prompt("Motivo de eliminacion del abono:");
+    if (motivo === null) return;
+    if (!String(motivo).trim()) return alert("El motivo es obligatorio para eliminar un abono.");
+
+    const movimientosPrevios = _apartadoMovimientosAbonoFolio(folio);
+    const saldosPrevios = _apartadoSnapshotSaldosAbonos(ap, movimientosPrevios);
+    const abonoEliminado = ap.abonos.splice(abonoIndex, 1)[0];
+    ap.abonosEliminados = ap.abonosEliminados || [];
+    ap.abonosEliminados.push({
+        ...abonoEliminado,
+        eliminadoAuditoria: true,
+        fechaEliminacion: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        motivoEliminacion: String(motivo).trim()
+    });
+
+    ap.saldoPendiente = Math.max(0, _apartadoSaldoReal(ap));
+    const estadoActualAp = String(ap.estado || '').toLowerCase();
+    if (!estadoActualAp.includes('cancel') && !estadoActualAp.includes('migrado') && !estadoActualAp.includes('conversion')) {
+        ap.estado = ap.saldoPendiente <= 0.01 ? 'Liquidado' : 'Pendiente';
+    }
+
+    apartados[idx] = ap;
+    StorageService.set("apartados", apartados);
+    _apartadoRecrearMovimientosAbonos(ap);
+
+    let saldosActualizados = true;
+    if (typeof _cxcAjustarSaldoCuentaPorCorreccion === 'function') {
+        saldosPrevios.forEach(m => {
+            if (!_cxcAjustarSaldoCuentaPorCorreccion(m.cuentaId, -Number(m.monto || 0))) saldosActualizados = false;
+        });
+        _apartadoAbonosVigentes(ap).forEach(ab => {
+            if (!_cxcAjustarSaldoCuentaPorCorreccion(ab.cuentaId || ab.medioPago || 'efectivo', Number(ab.monto || 0))) saldosActualizados = false;
+        });
+    }
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ELIMINACION_ABONO_APARTADO',
+            modulo: 'Apartados',
+            entidad: 'Abono',
+            entidadId: `${folio}#${abonoIndex + 1}`,
+            detalle: `Eliminacion de abono de apartado por ${dinero(monto)}. Motivo: ${String(motivo).trim()}`,
+            monto,
+            severidad: 'critica',
+            datos: { motivo: String(motivo).trim(), abono: abonoEliminado }
+        });
+    }
+
+    document.getElementById('modalCorreccionAbonoApartado')?.remove();
+    alert(saldosActualizados
+        ? "Abono eliminado. Saldo del apartado y caja/banco fueron recalculados."
+        : "Abono eliminado, pero alguna cuenta de caja/banco no se encontro para ajustar saldo. Revisa Mis Cuentas.");
+
+    if (typeof renderApartados === 'function') renderApartados();
+    if (document.querySelector('[data-modal="auditoria-cxc"]') && window._auditCuentaActual?.folio === folio && typeof buscarVentaAuditoria === 'function') {
+        const inputAudit = document.getElementById('auditFolioInput');
+        if (inputAudit) inputAudit.value = folio;
+        buscarVentaAuditoria();
+    }
+};
 
 window.abrirEditorEngancheApartado = function(folio) {
     if (!_apartadoEsAdminSesion()) return alert("Acceso denegado: solo administradores.");

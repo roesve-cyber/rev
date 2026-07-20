@@ -3201,8 +3201,8 @@ function abrirAuditoriaCxC() {
             
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #ef4444; padding-bottom:15px; margin-bottom:20px;">
                 <div>
-                    <h2 style="margin:0; color:#b91c1c; font-size:24px;">Auditoría CxC: Edición de Ventas</h2>
-                    <p style="margin:0; color:#64748b; font-size:14px;">Modificación profunda de fechas y pagarés con impacto en Caja</p>
+                    <h2 style="margin:0; color:#b91c1c; font-size:24px;">Auditoría: Ventas CxC y Apartados</h2>
+                    <p style="margin:0; color:#64748b; font-size:14px;">Modificación profunda de fechas, pagarés, enganches y abonos con impacto en Caja</p>
                 </div>
                 <button onclick="document.querySelector('[data-modal=\\'auditoria-cxc\\']').remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">S" Cerrar</button>
             </div>
@@ -3231,22 +3231,34 @@ function buscarVentaAuditoria() {
     const pagares = StorageService.get("pagaresSistema", []);
 
     const cuenta = cuentas.find(c => String(c.folio).toUpperCase() === folio);
-    if (!cuenta) {
-        document.getElementById("auditContenedorDatos").innerHTML = `<div style="padding:20px; background:#fef2f2; color:#b91c1c; border-radius:8px; border:1px solid #fecaca;">No se encontró ninguna cuenta con el folio: ${folio}</div>`;
+    if (cuenta) {
+        // Buscar pagarés asociados al folio o al clienteId si no tienen folio explícito
+        let pagaresVenta = pagares.filter(p => String(p.folio).toUpperCase() === folio);
+
+        // Ordenar pagarés por fecha
+        pagaresVenta.sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+        // Guardar temporalmente en memoria para poder agregar/quitar antes de guardar definitivamente
+        window._auditEsApartado = false;
+        window._auditCuentaActual = JSON.parse(JSON.stringify(cuenta));
+        window._auditPagaresActuales = JSON.parse(JSON.stringify(pagaresVenta));
+
+        dibujarFormularioAuditoria();
         return;
     }
 
-    // Buscar pagarés asociados al folio o al clienteId si no tienen folio explícito
-    let pagaresVenta = pagares.filter(p => String(p.folio).toUpperCase() === folio);
-    
-    // Ordenar pagarés por fecha
-    pagaresVenta.sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+    const apartados = StorageService.get("apartados", []);
+    const apartado = apartados.find(a => String(a.folio).toUpperCase() === folio);
+    if (apartado) {
+        window._auditEsApartado = true;
+        window._auditCuentaActual = JSON.parse(JSON.stringify(apartado));
+        window._auditPagaresActuales = [];
 
-    // Guardar temporalmente en memoria para poder agregar/quitar antes de guardar definitivamente
-    window._auditCuentaActual = JSON.parse(JSON.stringify(cuenta));
-    window._auditPagaresActuales = JSON.parse(JSON.stringify(pagaresVenta));
+        dibujarFormularioAuditoria();
+        return;
+    }
 
-    dibujarFormularioAuditoria();
+    document.getElementById("auditContenedorDatos").innerHTML = `<div style="padding:20px; background:#fef2f2; color:#b91c1c; border-radius:8px; border:1px solid #fecaca;">No se encontró ninguna cuenta ni apartado con el folio: ${folio}</div>`;
 }
 
 function _auditFechaAbonoBase(abono) {
@@ -3266,17 +3278,24 @@ function _auditFechaCorta(valor) {
 function dibujarFormularioAuditoria() {
     const cuenta = window._auditCuentaActual;
     const pagares = window._auditPagaresActuales;
+    const esApartado = !!window._auditEsApartado;
+
+    const nombreClienteAudit = esApartado
+        ? ((typeof _apartadoNombreCliente === 'function') ? _apartadoNombreCliente(cuenta) : (cuenta.clienteNombre || 'Cliente'))
+        : (cuenta.nombre || cuenta.cliente || 'Cliente');
 
     let fechaVentaDate = "";
-    if(cuenta.fechaVenta) {
-        try { fechaVentaDate = window.getFechaLocalMX ? window.getFechaLocalMX(cuenta.fechaVenta) : cuenta.fechaVenta.split('T')[0]; } catch(e) {}
+    const fechaBaseCuenta = esApartado ? cuenta.fechaApartado : cuenta.fechaVenta;
+    if(fechaBaseCuenta) {
+        try { fechaVentaDate = window.getFechaLocalMX ? window.getFechaLocalMX(fechaBaseCuenta) : fechaBaseCuenta.split('T')[0]; } catch(e) {}
     }
 
     const engancheActual = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
     const movEngancheAudit = (typeof _cxcMovimientoEngancheFolio === 'function') ? _cxcMovimientoEngancheFolio(cuenta.folio) : null;
     const etiquetaEngancheAudit = movEngancheAudit?.etiquetaCuenta || movEngancheAudit?.cuenta || 'Efectivo';
+    const abrirEditorEngancheFn = esApartado ? 'abrirEditorEngancheApartado' : 'abrirEditorEnganche';
 
-    let pagaresHTML = pagares.map((p, index) => {
+    let pagaresHTML = esApartado ? '' : pagares.map((p, index) => {
         let fechaVencDate = "";
         if(p.fechaVencimiento) {
             try { fechaVencDate = window.getFechaLocalMX ? window.getFechaLocalMX(p.fechaVencimiento) : new Date(p.fechaVencimiento).toISOString().split('T')[0]; } catch(e) {}
@@ -3311,9 +3330,9 @@ function dibujarFormularioAuditoria() {
             <td style="padding:8px; font-weight:bold; color:#15803d;">${dinero(Number(ab.monto || ab.montoAbonado || 0))}</td>
             <td style="padding:8px; font-size:12px; color:#475569;">${_escapeHtml(ab.etiquetaCuenta || ab.medioPago || ab.cuentaId || 'Efectivo')}</td>
             <td style="padding:8px; text-align:right;">
-                <button onclick="if (typeof abrirEditorAbono === 'function') abrirEditorAbono('${cuenta.folio}', ${originalIndex}); else alert('Editor de abonos no disponible.');"
+                <button onclick="if (typeof ${esApartado ? 'abrirEditorAbonoApartado' : 'abrirEditorAbono'} === 'function') ${esApartado ? 'abrirEditorAbonoApartado' : 'abrirEditorAbono'}('${cuenta.folio}', ${originalIndex}); else alert('Editor de abonos no disponible.');"
                     style="background:#1e40af; color:white; border:none; padding:7px 10px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Corregir</button>
-                <button onclick="if (typeof eliminarAbonoAuditoriaCxC === 'function') eliminarAbonoAuditoriaCxC('${cuenta.folio}', ${originalIndex}); else alert('Eliminador de abonos no disponible.');"
+                <button onclick="if (typeof ${esApartado ? 'eliminarAbonoApartadoAuditoria' : 'eliminarAbonoAuditoriaCxC'} === 'function') ${esApartado ? 'eliminarAbonoApartadoAuditoria' : 'eliminarAbonoAuditoriaCxC'}('${cuenta.folio}', ${originalIndex}); else alert('Eliminador de abonos no disponible.');"
                     style="background:#b91c1c; color:white; border:none; padding:7px 10px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px; margin-left:5px;">Eliminar</button>
             </td>
         </tr>
@@ -3321,16 +3340,16 @@ function dibujarFormularioAuditoria() {
 
     const html = `
     <div style="background:#f8fafc; padding:20px; border-radius:8px; margin-bottom:20px; border:1px solid #e2e8f0;">
-        <h3 style="margin-top:0; color:#334155; font-size:16px;">Datos Generales de la Cuenta</h3>
+        <h3 style="margin-top:0; color:#334155; font-size:16px;">Datos Generales de la ${esApartado ? 'Apartado' : 'Cuenta'}</h3>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
             <div>
                 <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Cliente</label>
-                <input type="text" value="${cuenta.nombre || cuenta.cliente || ''}" disabled style="width:100%; padding:8px; background:#e2e8f0; border:1px solid #cbd5e1; border-radius:4px;">
+                <input type="text" value="${nombreClienteAudit}" disabled style="width:100%; padding:8px; background:#e2e8f0; border:1px solid #cbd5e1; border-radius:4px;">
             </div>
             <div>
-                <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Fecha de Venta</label>
-                <input type="date" id="auditFechaVenta" value="${fechaVentaDate}" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; background:#fffbdd; border-color:#fde047;">
-                <small style="color:#d97706;">* Modificar esta fecha afecta el cálculo de antiguedad.</small>
+                <label style="display:block; font-size:12px; color:#64748b; font-weight:bold; margin-bottom:4px;">Fecha de ${esApartado ? 'Apartado' : 'Venta'}</label>
+                <input type="date" id="auditFechaVenta" value="${fechaVentaDate}" ${esApartado ? 'disabled' : ''} style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:4px; ${esApartado ? 'background:#e2e8f0;' : 'background:#fffbdd; border-color:#fde047;'}">
+                ${esApartado ? '' : '<small style="color:#d97706;">* Modificar esta fecha afecta el cálculo de antiguedad.</small>'}
             </div>
         </div>
     </div>
@@ -3339,7 +3358,7 @@ function dibujarFormularioAuditoria() {
         <div style="display:flex; justify-content:space-between; align-items:center; gap:14px;">
             <div>
                 <h3 style="margin:0; color:#166534; font-size:16px;">Enganche recibido</h3>
-                <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Corrige importe o cuenta receptora, o elimínalo por completo. Al guardar se recalculan saldo CxC y caja/banco.</p>
+                <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Corrige importe o cuenta receptora, o elimínalo por completo. Al guardar se recalcula el saldo pendiente y caja/banco.</p>
             </div>
             ${engancheActual > 0 ? `
             <div style="display:flex; align-items:center; gap:12px;">
@@ -3347,7 +3366,7 @@ function dibujarFormularioAuditoria() {
                     <div style="font-size:18px; font-weight:bold; color:#15803d;">${dinero(engancheActual)}</div>
                     <div style="font-size:11px; color:#475569;">${_escapeHtml(etiquetaEngancheAudit)}</div>
                 </div>
-                <button onclick="if (typeof abrirEditorEnganche === 'function') abrirEditorEnganche('${cuenta.folio}'); else alert('Editor de enganche no disponible.');"
+                <button onclick="if (typeof ${abrirEditorEngancheFn} === 'function') ${abrirEditorEngancheFn}('${cuenta.folio}'); else alert('Editor de enganche no disponible.');"
                     style="background:#1e40af; color:white; border:none; padding:9px 14px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:12px;">Corregir</button>
             </div>` : `<div style="color:#94a3b8; font-size:13px;">Esta venta no registró enganche.</div>`}
         </div>
@@ -3357,7 +3376,7 @@ function dibujarFormularioAuditoria() {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:15px;">
             <div>
                 <h3 style="margin:0; color:#075985; font-size:16px;">Abonos registrados</h3>
-                <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Corrige fecha, importe o cuenta receptora. Al guardar se recalculan caja/banco, saldo CxC, pagarés y flujo de caja.</p>
+                <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Corrige fecha, importe o cuenta receptora. Al guardar se recalculan caja/banco, el saldo pendiente${esApartado ? '' : ' y los pagarés'}.</p>
             </div>
             <div style="background:#ecfdf5; border:1px solid #bbf7d0; color:#166534; padding:9px 12px; border-radius:8px; text-align:right;">
                 <div style="font-size:10px; font-weight:bold;">TOTAL ABONADO</div>
@@ -3380,6 +3399,7 @@ function dibujarFormularioAuditoria() {
         </table>
     </div>
 
+    ${esApartado ? '' : `
     <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #e2e8f0;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <h3 style="margin:0; color:#334155; font-size:16px;">Tabla de Amortización (Pagarés)</h3>
@@ -3407,6 +3427,12 @@ function dibujarFormularioAuditoria() {
             Guardar Cambios en Base de Datos
         </button>
     </div>
+    `}
+    ${esApartado ? `
+    <div style="margin-top:15px; padding:12px 16px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; color:#075985; font-size:12px;">
+        ℹ️ Los apartados no tienen tabla de pagarés. Las correcciones de enganche y abonos de arriba se guardan de inmediato al confirmarlas, no requieren un botón adicional.
+    </div>
+    ` : ''}
     `;
 
     document.getElementById("auditContenedorDatos").innerHTML = html;
@@ -3647,7 +3673,8 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
 
 window.abrirBuscadorVentasCxC = function(inputIdDestino) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
-    
+    const apartados = StorageService.get("apartados", []);
+
     const filas = cuentas.map(c => {
         // Formateamos la fecha
         const fechaFmt = c.fechaVenta ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(c.fechaVenta) : c.fechaVenta) : '-';
@@ -3673,6 +3700,33 @@ window.abrirBuscadorVentasCxC = function(inputIdDestino) {
         </tr>`;
     }).join('');
 
+    const filasApartados = apartados.map(a => {
+        const fechaFmt = a.fechaApartado ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fechaApartado) : a.fechaApartado) : '-';
+        const nombreCliente = (typeof _apartadoNombreCliente === 'function') ? _apartadoNombreCliente(a) : (a.clienteNombre || 'Cliente');
+        const resumenArticulos = (a.articulos || []).map(x => x.nombre).join(', ');
+
+        return `
+        <tr style="border-bottom:1px solid #e5e7eb; cursor:pointer;" onclick="seleccionarFolioAuditoria('${a.folio}', '${inputIdDestino}')" class="fila-busqueda-audit">
+            <td style="padding:12px; font-weight:bold; color:#1e40af;">${a.folio}
+                <span style="display:inline-block; margin-left:6px; padding:1px 6px; background:#fef3c7; color:#92400e; border-radius:4px; font-size:10px; font-weight:bold; vertical-align:middle;">APARTADO</span>
+            </td>
+            <td style="padding:12px;">
+                <div style="font-weight:bold;">${nombreCliente}</div>
+                <div style="font-size:11px; color:#64748b;">${fechaFmt}</div>
+            </td>
+            <td style="padding:12px; max-width:250px;">
+                <div style="font-size:12px; color:#4b5563; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${resumenArticulos}">
+                    ${resumenArticulos || '<span style="color:#9ca3af; font-style:italic;">Sin detalle</span>'}
+                </div>
+            </td>
+            <td style="padding:12px; text-align:right; font-weight:bold; color:#16a34a;">
+                ${dinero(a.importeApartado || a.total || 0)}
+            </td>
+        </tr>`;
+    }).join('');
+
+    const filasCombinadas = filas + filasApartados;
+
     const html = `
     <div data-modal="buscador-folios" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:flex-start; padding-top:50px; backdrop-filter:blur(4px);">
         <div style="background:white; padding:25px; border-radius:12px; width:100%; max-width:850px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.4);">
@@ -3694,7 +3748,7 @@ window.abrirBuscadorVentasCxC = function(inputIdDestino) {
                         </tr>
                     </thead>
                     <tbody id="tablaBuscadorAudit">
-                        ${filas || '<tr><td colspan="4" style="text-align:center; padding:30px; color:#94a3b8;">No se encontraron cuentas registradas.</td></tr>'}
+                        ${filasCombinadas || '<tr><td colspan="4" style="text-align:center; padding:30px; color:#94a3b8;">No se encontraron cuentas ni apartados registrados.</td></tr>'}
                     </tbody>
                 </table>
             </div>
