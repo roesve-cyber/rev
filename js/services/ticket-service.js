@@ -469,6 +469,17 @@ function documentToolbar(options = {}) {
                 pdf.addImage(data, 'JPEG', margin, margin - offset, usableWidth, imageHeight, undefined, 'FAST');
                 offset += pageHeight - margin * 2;
             } while (offset < imageHeight);
+
+            const totalPaginas = pdf.internal.getNumberOfPages();
+            if (totalPaginas > 1) {
+                for (let i = 1; i <= totalPaginas; i++) {
+                    pdf.setPage(i);
+                    pdf.setFontSize(8);
+                    pdf.setTextColor(120);
+                    pdf.text(`Página ${i} de ${totalPaginas}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+                }
+            }
+
             pdf.save(`${safeName(options.filename || options.title || 'documento')}.pdf`);
             return true;
         } catch (err) {
