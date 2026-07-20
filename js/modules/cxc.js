@@ -2610,6 +2610,61 @@ window.abrirEditorEnganche = function(folio) {
     document.body.insertAdjacentHTML('beforeend', html);
 };
 
+function _cxcAjustarPagaresPorEnganche(folio, cuenta, delta) {
+    // El "Saldo actual" que se muestra en Mis Cuentas y en el Estado de Cuenta NO sale de
+    // cuenta.saldoActual: sale de _calcularEstadoCuenta(folio), que sólo suma los pagarés
+    // Pendiente/Parcial de pagaresSistema. Por eso una corrección de enganche que solo toque
+    // cuenta.saldoActual es invisible para el usuario. Aquí sí tocamos los pagarés:
+    // delta > 0 (subió el enganche)   -> el cliente debe MENOS: se recorta el total de pagarés
+    //                                    desde el último hacia atrás (cancela/reduce), sin tocar
+    //                                    los ya marcados como Pagado.
+    // delta < 0 (bajó/se eliminó el enganche) -> el cliente debe MÁS: se agrega un pagaré de
+    //                                    ajuste al final del plan, con nota explícita.
+    if (!delta || Math.abs(delta) < 0.01) return;
+
+    let pagares = StorageService.get("pagaresSistema", []);
+    const pagaresFolio = pagares
+        .filter(p => p.folio === folio && String(p.estado || '').toLowerCase() !== 'cancelado')
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    if (delta > 0) {
+        let restante = delta;
+        for (let i = pagaresFolio.length - 1; i >= 0 && restante > 0.01; i--) {
+            const p = pagaresFolio[i];
+            if (String(p.estado || '').toLowerCase() === 'pagado') continue;
+            const montoPagare = Number(p.monto || 0);
+            if (montoPagare <= restante + 0.01) {
+                restante = Number((restante - montoPagare).toFixed(2));
+                p.estado = 'Cancelado';
+                p.montoAbonado = 0;
+                p.nota = `${p.nota ? p.nota + ' | ' : ''}Cancelado por corrección de enganche`;
+            } else {
+                p.monto = Number((montoPagare - restante).toFixed(2));
+                p.nota = `${p.nota ? p.nota + ' | ' : ''}Monto ajustado por corrección de enganche`;
+                restante = 0;
+            }
+        }
+    } else {
+        const extra = Number(Math.abs(delta).toFixed(2));
+        const ultimo = pagaresFolio[pagaresFolio.length - 1];
+        const fechaBase = ultimo ? new Date(ultimo.fechaVencimiento) : new Date();
+        const per = String(cuenta.periodicidad || cuenta.plan?.periodicidad || 'semanal').toLowerCase();
+        const diasPeriodo = per.includes('quincen') ? 15 : (per.includes('mensual') ? 30 : 7);
+        const fechaNueva = new Date(fechaBase.getTime() + diasPeriodo * 24 * 60 * 60 * 1000);
+        pagares.push({
+            id: `pg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            folio,
+            monto: extra,
+            montoAbonado: 0,
+            fechaVencimiento: window.localISO ? window.localISO(fechaNueva) : fechaNueva.toISOString(),
+            estado: 'Pendiente',
+            nota: 'Ajuste por corrección de enganche'
+        });
+    }
+
+    StorageService.set("pagaresSistema", pagares);
+}
+
 window.procesarCorreccionEnganche = function(folio) {
     if (window.AuditService?.requireAdmin) {
         if (!window.AuditService.requireAdmin('corregir enganche CxC')) return;
@@ -2673,19 +2728,22 @@ window.procesarCorreccionEnganche = function(folio) {
     const delta = nuevoMonto - engancheAnterior; // positivo = mas enganche = menos saldo por cobrar
     cuenta.engancheRecibido = nuevoMonto;
     if (cuenta.enganche !== undefined) cuenta.enganche = nuevoMonto;
-    cuenta.saldoActual = Math.max(0, Number(cuenta.saldoActual || 0) - delta);
-    if (cuenta.saldoOriginal !== undefined) {
-        cuenta.saldoOriginal = Math.max(0, Number(cuenta.saldoOriginal || 0) - delta);
-    }
-    if (cuenta.saldoActual <= 0.01) {
-        cuenta.saldoActual = 0;
-        cuenta.estado = "Saldado";
-    } else if (cuenta.estado === "Saldado") {
-        cuenta.estado = "Pendiente";
-    }
+
+    _cxcAjustarPagaresPorEnganche(folio, cuenta, delta);
 
     cuentas[idxCuenta] = cuenta;
     StorageService.set("cuentasPorCobrar", cuentas);
+
+    // El saldo real que se muestra en todo el sistema sale de _calcularEstadoCuenta (pagarés),
+    // no de cuenta.saldoActual. Recalculamos aqui para mantener ese campo (usado como respaldo
+    // en algunos lugares) sincronizado con la realidad ya reflejada en los pagarés.
+    const estadoCtaTrasAjuste = window._calcularEstadoCuenta(folio);
+    if (estadoCtaTrasAjuste) {
+        cuenta.saldoActual = Number(estadoCtaTrasAjuste.saldoTotal || 0);
+        cuenta.estado = estadoCtaTrasAjuste.estadoGeneral === 'Saldado' ? 'Saldado' : (cuenta.estado === 'Saldado' ? 'Pendiente' : cuenta.estado);
+        cuentas[idxCuenta] = cuenta;
+        StorageService.set("cuentasPorCobrar", cuentas);
+    }
 
     if (window.AuditService?.log) {
         window.AuditService.log({
@@ -2758,16 +2816,19 @@ window.eliminarEngancheAuditoria = function(folio) {
 
     cuenta.engancheRecibido = 0;
     if (cuenta.enganche !== undefined) cuenta.enganche = 0;
-    cuenta.saldoActual = Number(cuenta.saldoActual || 0) + engancheAnterior;
-    if (cuenta.saldoOriginal !== undefined) {
-        cuenta.saldoOriginal = Number(cuenta.saldoOriginal || 0) + engancheAnterior;
-    }
-    if (cuenta.estado === "Saldado" && cuenta.saldoActual > 0.01) {
-        cuenta.estado = "Pendiente";
-    }
+
+    _cxcAjustarPagaresPorEnganche(folio, cuenta, -engancheAnterior);
 
     cuentas[idxCuenta] = cuenta;
     StorageService.set("cuentasPorCobrar", cuentas);
+
+    const estadoCtaTrasAjuste = window._calcularEstadoCuenta(folio);
+    if (estadoCtaTrasAjuste) {
+        cuenta.saldoActual = Number(estadoCtaTrasAjuste.saldoTotal || 0);
+        cuenta.estado = estadoCtaTrasAjuste.estadoGeneral === 'Saldado' ? 'Saldado' : (cuenta.estado === 'Saldado' ? 'Pendiente' : cuenta.estado);
+        cuentas[idxCuenta] = cuenta;
+        StorageService.set("cuentasPorCobrar", cuentas);
+    }
 
     if (window.AuditService?.log) {
         window.AuditService.log({
