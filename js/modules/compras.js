@@ -5173,14 +5173,16 @@ window.abrirPreviaDevolucionConsignacion = function(folioKey) {
         <div data-modal="previa-devolucion-consignacion" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:10000;display:flex;align-items:center;justify-content:center;padding:18px;">
             <div style="background:white;border-radius:12px;max-width:640px;width:100%;padding:22px;max-height:90vh;overflow:auto;">
                 <div id="doc-devolucion-consignacion">
-                    <div style="text-align:center;margin-bottom:14px;">
-                        <img src="img/Logo.svg" style="height:56px;" onerror="this.outerHTML='<span style=\\'font-size:28px;\\'>🏛️</span>'">
-                        <h2 style="margin:6px 0 0;font-size:17px;color:#0f172a;">${_comprasEscHTML(nombreEmpresa)}</h2>
-                    </div>
-                    <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 10px;">
-                    <div style="text-align:center;margin-bottom:12px;">
-                        <div style="font-weight:900;font-size:15px;color:#0f172a;letter-spacing:0.3px;">ACTA DE DEVOLUCIÓN DE MERCANCÍA EN CONSIGNACIÓN</div>
-                        <div style="font-size:11px;color:#64748b;margin-top:2px;">Folio de acta: <strong>${_comprasEscHTML(actaFolio)}</strong></div>
+                    <div data-pdf-header>
+                        <div style="text-align:center;margin-bottom:14px;">
+                            <img src="img/Logo.svg" style="height:56px;" onerror="this.outerHTML='<span style=\\'font-size:28px;\\'>🏛️</span>'">
+                            <h2 style="margin:6px 0 0;font-size:17px;color:#0f172a;">${_comprasEscHTML(nombreEmpresa)}</h2>
+                        </div>
+                        <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 10px;">
+                        <div style="text-align:center;margin-bottom:12px;">
+                            <div style="font-weight:900;font-size:15px;color:#0f172a;letter-spacing:0.3px;">ACTA DE DEVOLUCIÓN DE MERCANCÍA EN CONSIGNACIÓN</div>
+                            <div style="font-size:11px;color:#64748b;margin-top:2px;">Folio de acta: <strong>${_comprasEscHTML(actaFolio)}</strong></div>
+                        </div>
                     </div>
                     <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                         <div>
