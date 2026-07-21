@@ -1609,16 +1609,12 @@ window.imprimirEstadoCuentaProveedor = function(idCuenta) {
 
 function _cargarHtml2CanvasEstadoProveedor(cb) {
     if (typeof html2canvas !== 'undefined') return cb();
-    const existente = document.getElementById('html2canvas-estado-proveedor');
-    if (existente) {
-        existente.addEventListener('load', cb, { once: true });
-        return;
-    }
+    document.getElementById('html2canvas-estado-proveedor')?.remove();
     const script = document.createElement('script');
     script.id = 'html2canvas-estado-proveedor';
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     script.onload = cb;
-    script.onerror = () => alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.');
+    script.onerror = () => { script.remove(); alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.'); };
     document.head.appendChild(script);
 }
 
