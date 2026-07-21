@@ -117,7 +117,10 @@ function sincronizarConNube(clave, datos) {
             ultimaActualizacion: window.localISO(new Date())
         })
         .then(() => console.log(`☁️ Sincronizado en vivo: ${clave}`))
-        .catch(e => console.error(`❌ Error al sincronizar ${clave}:`, e));
+        .catch(e => {
+            console.error(`❌ Error al sincronizar ${clave}:`, e);
+            if (window.StorageService?._notificarFalloSync) window.StorageService._notificarFalloSync(clave, e);
+        });
     }
 }
 
