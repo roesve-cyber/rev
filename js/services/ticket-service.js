@@ -345,19 +345,22 @@ function documentToolbar(options = {}) {
 
     function cargarScriptGlobal(id, src, disponible) {
         if (disponible()) return Promise.resolve();
-        const previo = document.getElementById(id);
-        if (previo) {
-            return new Promise((resolve, reject) => {
-                previo.addEventListener('load', resolve, { once: true });
-                previo.addEventListener('error', reject, { once: true });
-            });
-        }
+        // Si ya existe una etiqueta <script> con este id, es de un intento anterior. Los eventos
+        // load/error de un <script> sólo se disparan UNA vez: si ese intento ya falló (por
+        // ejemplo, sin conexión), volver a escuchar esos mismos eventos aquí nunca se cumple y
+        // la promesa se queda colgada para siempre ("Generando PDF..." pasmado). Por eso siempre
+        // partimos de una etiqueta nueva en cada intento.
+        document.getElementById(id)?.remove();
         return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                script.remove();
+                reject(new Error(`Tiempo de espera agotado al cargar ${src}`));
+            }, 15000);
             const script = document.createElement('script');
             script.id = id;
             script.src = src;
-            script.onload = resolve;
-            script.onerror = reject;
+            script.onload = () => { clearTimeout(timeout); resolve(); };
+            script.onerror = () => { clearTimeout(timeout); script.remove(); reject(new Error(`No se pudo cargar ${src}`)); };
             document.head.appendChild(script);
         });
     }
