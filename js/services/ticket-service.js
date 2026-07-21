@@ -292,24 +292,114 @@ function mmpCargarJsPdfDocumento(cb){
     s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
     document.head.appendChild(s);
 }
+function mmpBloquesDePagina(root){
+    var rectRoot = root.getBoundingClientRect();
+    var bloques = [];
+    function agregar(el){
+        var r = el.getBoundingClientRect();
+        if (r.height <= 0) return;
+        bloques.push({ top: r.top - rectRoot.top, bottom: r.bottom - rectRoot.top });
+    }
+    Array.prototype.forEach.call(root.children, function(hijo){
+        if (hijo.tagName === 'TABLE') {
+            Array.prototype.forEach.call(hijo.querySelectorAll('tr'), agregar);
+            return;
+        }
+        var tablas = hijo.querySelectorAll ? hijo.querySelectorAll('table') : [];
+        if (tablas.length) {
+            Array.prototype.forEach.call(tablas, function(t){
+                Array.prototype.forEach.call(t.querySelectorAll('tr'), agregar);
+            });
+        } else {
+            agregar(hijo);
+        }
+    });
+    bloques.sort(function(a, b){ return a.bottom - b.bottom; });
+    return bloques;
+}
+function mmpPuntosDeCorte(bloques, alturaTotal, capacidad){
+    if (capacidad <= 0) return [0, alturaTotal];
+    if (!bloques.length) {
+        var cortes0 = [0], y0 = 0;
+        while (y0 + capacidad < alturaTotal) { y0 += capacidad; cortes0.push(y0); }
+        cortes0.push(alturaTotal);
+        return cortes0;
+    }
+    var cortes = [0], inicio = 0, finValido = 0;
+    for (var i = 0; i < bloques.length; i++) {
+        var b = bloques[i];
+        if (b.bottom - inicio > capacidad) {
+            if (finValido > inicio) {
+                cortes.push(finValido);
+                inicio = finValido;
+            }
+            while (b.bottom - inicio > capacidad) {
+                inicio += capacidad;
+                cortes.push(inicio);
+            }
+        }
+        finValido = b.bottom;
+    }
+    if (cortes[cortes.length - 1] < alturaTotal) cortes.push(alturaTotal);
+    return cortes;
+}
 function mmpGuardarDocumentoPdf(){
     mmpCargarHtml2CanvasDocumento(function(){
         mmpCargarJsPdfDocumento(function(){
             var node = document.querySelector('.mmp-document-body') || document.body;
-            html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
-                var pageWidth = 612, pageHeight = 792, margin = 24;
-                var imgWidth = pageWidth - margin * 2;
-                var imgHeight = canvas.height * imgWidth / canvas.width;
-                var data = canvas.toDataURL('image/jpeg', .94);
-                var pdf = new window.jspdf.jsPDF({ unit:'pt', format:'letter', orientation:'portrait', compress:true });
-                var offset = 0;
-                do {
-                    if (offset > 0) pdf.addPage('letter', 'portrait');
-                    pdf.addImage(data, 'JPEG', margin, margin - offset, imgWidth, imgHeight, undefined, 'FAST');
-                    offset += pageHeight - margin * 2;
-                } while (offset < imgHeight);
-                pdf.save('${file}.pdf');
-            }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
+            var headerNode = node.querySelector('[data-pdf-header]');
+            var pageWidth = 612, pageHeight = 792, margin = 24, gapEncabezado = 10;
+            var usableWidth = pageWidth - margin * 2;
+
+            function continuar(headerCanvas, headerAlturaPt){
+                html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(bodyCanvas){
+                    var alturaTotalCss = node.scrollHeight;
+                    var escalaCanvasPorCss = bodyCanvas.height / alturaTotalCss;
+                    var ptPorCanvasPx = usableWidth / bodyCanvas.width;
+                    var capacidadPt = pageHeight - margin * 2 - (headerCanvas ? headerAlturaPt + gapEncabezado : 0);
+                    var capacidadCss = capacidadPt * (node.scrollWidth / usableWidth);
+                    var bloques = mmpBloquesDePagina(node);
+                    var cortes = mmpPuntosDeCorte(bloques, alturaTotalCss, Math.max(capacidadCss, 40));
+
+                    var pdf = new window.jspdf.jsPDF({ unit:'pt', format:'letter', orientation:'portrait', compress:true });
+                    for (var i = 0; i < cortes.length - 1; i++) {
+                        if (i > 0) pdf.addPage('letter', 'portrait');
+                        var cursorY = margin;
+                        if (headerCanvas) {
+                            pdf.addImage(headerCanvas.toDataURL('image/jpeg', .94), 'JPEG', margin, margin, usableWidth, headerAlturaPt, undefined, 'FAST');
+                            cursorY = margin + headerAlturaPt + gapEncabezado;
+                        }
+                        var syCss = cortes[i], eyCss = cortes[i + 1];
+                        var sy = Math.max(0, Math.round(syCss * escalaCanvasPorCss));
+                        var sh = Math.max(1, Math.min(bodyCanvas.height - sy, Math.round((eyCss - syCss) * escalaCanvasPorCss)));
+                        var recorte = document.createElement('canvas');
+                        recorte.width = bodyCanvas.width; recorte.height = sh;
+                        recorte.getContext('2d').drawImage(bodyCanvas, 0, sy, bodyCanvas.width, sh, 0, 0, bodyCanvas.width, sh);
+                        var segAlturaPt = sh * ptPorCanvasPx;
+                        pdf.addImage(recorte.toDataURL('image/jpeg', .94), 'JPEG', margin, cursorY, usableWidth, segAlturaPt, undefined, 'FAST');
+                    }
+                    var totalPaginas = pdf.internal.getNumberOfPages();
+                    if (totalPaginas > 1) {
+                        for (var p = 1; p <= totalPaginas; p++) {
+                            pdf.setPage(p);
+                            pdf.setFontSize(8);
+                            pdf.setTextColor(120);
+                            pdf.text('Pagina ' + p + ' de ' + totalPaginas, pageWidth - margin, pageHeight - 10, { align: 'right' });
+                        }
+                    }
+                    pdf.save('${file}.pdf');
+                }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
+            }
+
+            if (headerNode) {
+                html2canvas(headerNode, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(headerCanvas){
+                    var headerAlturaPt = headerCanvas.height * usableWidth / headerCanvas.width;
+                    headerNode.style.display = 'none';
+                    continuar(headerCanvas, headerAlturaPt);
+                }).catch(function(err){ console.error(err); continuar(null, 0); });
+            } else {
+                continuar(null, 0);
+            }
         });
     });
 }
@@ -370,6 +460,127 @@ function documentToolbar(options = {}) {
             script.onerror = () => { clearTimeout(timeout); script.remove(); reject(new Error(`No se pudo cargar ${src}`)); };
             document.head.appendChild(script);
         });
+    }
+
+    // ===== PAGINACIÓN CORRECTA PARA PDF MULTI-HOJA =====
+    // En vez de rebanar la captura completa cada X puntos fijos (lo cual puede partir una
+    // fila de tabla o un párrafo justo a la mitad), buscamos los límites reales de los
+    // bloques del documento (hijos directos, y filas de tabla a detalle) y solo cortamos
+    // de hoja en los límites entre bloques, nunca dentro de uno.
+    function _bloquesDePagina(root) {
+        const rectRoot = root.getBoundingClientRect();
+        const bloques = [];
+        function agregar(el) {
+            const r = el.getBoundingClientRect();
+            if (r.height <= 0) return;
+            bloques.push({ top: r.top - rectRoot.top, bottom: r.bottom - rectRoot.top });
+        }
+        Array.from(root.children).forEach(hijo => {
+            if (hijo.tagName === 'TABLE') {
+                Array.from(hijo.querySelectorAll('tr')).forEach(agregar);
+                return;
+            }
+            const tablas = hijo.querySelectorAll ? Array.from(hijo.querySelectorAll('table')) : [];
+            if (tablas.length) {
+                tablas.forEach(t => Array.from(t.querySelectorAll('tr')).forEach(agregar));
+            } else {
+                agregar(hijo);
+            }
+        });
+        bloques.sort((a, b) => a.bottom - b.bottom);
+        return bloques;
+    }
+
+    function _puntosDeCorte(bloques, alturaTotal, capacidad) {
+        if (capacidad <= 0) return [0, alturaTotal];
+        if (!bloques.length) {
+            // Sin bloques identificables: corte uniforme clásico (nunca perdemos contenido)
+            const cortes = [0];
+            let y = 0;
+            while (y + capacidad < alturaTotal) { y += capacidad; cortes.push(y); }
+            cortes.push(alturaTotal);
+            return cortes;
+        }
+        const cortes = [0];
+        let inicio = 0;
+        let finValido = 0;
+        for (let i = 0; i < bloques.length; i++) {
+            const b = bloques[i];
+            if (b.bottom - inicio > capacidad) {
+                if (finValido > inicio) {
+                    cortes.push(finValido);
+                    inicio = finValido;
+                }
+                // Si el bloque sigue sin caber solo (es más alto que una hoja completa),
+                // lo partimos a la fuerza cada "capacidad" para nunca perder contenido.
+                while (b.bottom - inicio > capacidad) {
+                    inicio += capacidad;
+                    cortes.push(inicio);
+                }
+            }
+            finValido = b.bottom;
+        }
+        if (cortes[cortes.length - 1] < alturaTotal) cortes.push(alturaTotal);
+        return cortes;
+    }
+
+    async function _renderCanvas(node) {
+        return await window.html2canvas(node, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff',
+            logging: false,
+            windowWidth: Math.max(node.scrollWidth, 800),
+            windowHeight: Math.max(node.scrollHeight, 1000)
+        });
+    }
+
+    async function _prepararDomParaPdf(html, options = {}) {
+        await cargarScriptGlobal(
+            'mmp-html2canvas-global',
+            VENDOR_HTML2CANVAS,
+            () => typeof window.html2canvas === 'function'
+        );
+
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('aria-hidden', 'true');
+        iframe.style.cssText = 'position:fixed;left:-100000px;top:0;width:900px;height:1200px;border:0;opacity:0;pointer-events:none;';
+        document.body.appendChild(iframe);
+
+        const doc = iframe.contentDocument;
+        const contenido = normalizeDocumentHtml(html, {
+            ...options,
+            autoPrint: false,
+            autoImage: false,
+            thermal: false,
+            image: false
+        });
+        doc.open();
+        doc.write(contenido);
+        doc.close();
+
+        await new Promise(resolve => {
+            if (doc.readyState === 'complete') resolve();
+            else iframe.addEventListener('load', resolve, { once: true });
+        });
+        doc.querySelectorAll('.mmp-document-toolbar,.mmp-print-toolbar,.no-print,script').forEach(el => el.remove());
+        await Promise.all(Array.from(doc.images || []).map(img => img.complete
+            ? Promise.resolve()
+            : new Promise(resolve => {
+                img.addEventListener('load', resolve, { once: true });
+                img.addEventListener('error', resolve, { once: true });
+            })));
+        if (doc.fonts?.ready) {
+            try { await doc.fonts.ready; } catch {}
+        }
+
+        const node = doc.querySelector('.mmp-document-body') ||
+            doc.getElementById('ticket-contenido') ||
+            doc.querySelector('.ticket-contenido,.mmp-ticket-body') ||
+            doc.body;
+        const headerNode = node.querySelector('[data-pdf-header]');
+        return { iframe, doc, node, headerNode };
     }
 
     async function prepararCanvasDocumento(html, options = {}) {
@@ -457,28 +668,64 @@ function documentToolbar(options = {}) {
 
     async function descargarPdf(html, options = {}) {
         mostrarGenerando('Generando PDF...');
+        let iframe = null;
         try {
             await cargarScriptGlobal(
                 'mmp-jspdf-global',
                 VENDOR_JSPDF,
                 () => !!window.jspdf?.jsPDF
             );
-            const canvas = await prepararCanvasDocumento(html, options);
+            const prep = await _prepararDomParaPdf(html, options);
+            iframe = prep.iframe;
             const jsPDF = window.jspdf.jsPDF;
             const half = options.pageSize === 'half-letter';
             const pageWidth = half ? 396 : 612;
             const pageHeight = half ? 612 : 792;
             const margin = 24;
+            const gapEncabezado = 10;
             const usableWidth = pageWidth - margin * 2;
-            const imageHeight = canvas.height * usableWidth / canvas.width;
+
+            // Si el documento marca un bloque con [data-pdf-header], lo capturamos aparte
+            // y lo repetimos arriba de cada hoja; el cuerpo se captura sin él.
+            let headerCanvas = null, headerImgHeightPt = 0;
+            if (prep.headerNode) {
+                headerCanvas = await _renderCanvas(prep.headerNode);
+                headerImgHeightPt = headerCanvas.height * usableWidth / headerCanvas.width;
+                prep.headerNode.style.display = 'none';
+            }
+
+            const bodyCanvas = await _renderCanvas(prep.node);
+            const alturaTotalCss = prep.node.scrollHeight;
+            const escalaCanvasPorCss = bodyCanvas.height / alturaTotalCss;
+            const ptPorCanvasPx = usableWidth / bodyCanvas.width;
+
+            const capacidadPt = pageHeight - margin * 2 - (headerCanvas ? headerImgHeightPt + gapEncabezado : 0);
+            const capacidadCss = capacidadPt * (prep.node.scrollWidth / usableWidth);
+
+            const bloques = _bloquesDePagina(prep.node);
+            const cortesCss = _puntosDeCorte(bloques, alturaTotalCss, Math.max(capacidadCss, 40));
+
             const pdf = new jsPDF({ unit: 'pt', format: half ? [pageWidth, pageHeight] : 'letter', orientation: 'portrait', compress: true });
-            const data = canvas.toDataURL('image/jpeg', 0.94);
-            let offset = 0;
-            do {
-                if (offset > 0) pdf.addPage(half ? [pageWidth, pageHeight] : 'letter', 'portrait');
-                pdf.addImage(data, 'JPEG', margin, margin - offset, usableWidth, imageHeight, undefined, 'FAST');
-                offset += pageHeight - margin * 2;
-            } while (offset < imageHeight);
+
+            for (let i = 0; i < cortesCss.length - 1; i++) {
+                if (i > 0) pdf.addPage(half ? [pageWidth, pageHeight] : 'letter', 'portrait');
+                let cursorY = margin;
+                if (headerCanvas) {
+                    const headerData = headerCanvas.toDataURL('image/jpeg', 0.94);
+                    pdf.addImage(headerData, 'JPEG', margin, margin, usableWidth, headerImgHeightPt, undefined, 'FAST');
+                    cursorY = margin + headerImgHeightPt + gapEncabezado;
+                }
+                const syCss = cortesCss[i], eyCss = cortesCss[i + 1];
+                const sy = Math.max(0, Math.round(syCss * escalaCanvasPorCss));
+                const sh = Math.max(1, Math.min(bodyCanvas.height - sy, Math.round((eyCss - syCss) * escalaCanvasPorCss)));
+                const recorte = document.createElement('canvas');
+                recorte.width = bodyCanvas.width;
+                recorte.height = sh;
+                recorte.getContext('2d').drawImage(bodyCanvas, 0, sy, bodyCanvas.width, sh, 0, 0, bodyCanvas.width, sh);
+                const segData = recorte.toDataURL('image/jpeg', 0.94);
+                const segAlturaPt = sh * ptPorCanvasPx;
+                pdf.addImage(segData, 'JPEG', margin, cursorY, usableWidth, segAlturaPt, undefined, 'FAST');
+            }
 
             const totalPaginas = pdf.internal.getNumberOfPages();
             if (totalPaginas > 1) {
@@ -497,6 +744,7 @@ function documentToolbar(options = {}) {
             alert('No se pudo generar el PDF. Revisa tu conexion e intenta de nuevo.');
             return false;
         } finally {
+            iframe?.remove();
             ocultarGenerando();
         }
     }
