@@ -914,22 +914,7 @@
             observaciones: document.getElementById('corteObservaciones')?.value.trim() || '',
             denominaciones,
             resumenCategorias: seleccion.porCategoria,
-            movimientos: seleccion.movimientos.map(m => ({
-                corteId: m._corteId,
-                id: m.id || m._idx,
-                fecha: m.fecha || m.fechaISO || m.createdAt,
-                tipo: m._tipo,
-                concepto: m.concepto || '',
-                cuenta: m.cuenta || m.cuentaId || '',
-                monto: m._monto,
-                referencia: m.referencia || '',
-                medioPago: m.medioPago || '',
-                tipoMovimiento: m.tipoMovimiento || '',
-                cuentaOrigen: m.cuentaOrigen || '',
-                cuentaDestino: m.cuentaDestino || '',
-                cuentaOrigenNombre: m.cuentaOrigenNombre || '',
-                cuentaDestinoNombre: m.cuentaDestinoNombre || ''
-            }))
+            movimientos: seleccion.movimientos.map(movimientoParaCorte)
         };
     }
 
@@ -1068,22 +1053,27 @@
     }
 
     function movimientoParaCorte(m) {
-        return {
+        const base = {
             corteId: m._corteId,
             id: m.id || m._idx,
             fecha: m.fecha || m.fechaISO || m.createdAt,
             tipo: m._tipo,
             concepto: m.concepto || '',
             cuenta: m.cuenta || m.cuentaId || '',
-            monto: m._monto,
-            referencia: m.referencia || '',
-            medioPago: m.medioPago || '',
-            tipoMovimiento: m.tipoMovimiento || '',
-            cuentaOrigen: m.cuentaOrigen || '',
-            cuentaDestino: m.cuentaDestino || '',
-            cuentaOrigenNombre: m.cuentaOrigenNombre || '',
-            cuentaDestinoNombre: m.cuentaDestinoNombre || ''
+            monto: m._monto
         };
+        // Los campos de referencia/medio de pago/transferencia solo se guardan si traen algo:
+        // en la mayoría de los movimientos van vacíos, y repetir 4-7 campos vacíos en cada uno
+        // de los cientos de movimientos de un corte es puro peso muerto contra el límite de
+        // tamaño por documento de Firestore.
+        if (m.referencia) base.referencia = m.referencia;
+        if (m.medioPago) base.medioPago = m.medioPago;
+        if (m.tipoMovimiento) base.tipoMovimiento = m.tipoMovimiento;
+        if (m.cuentaOrigen) base.cuentaOrigen = m.cuentaOrigen;
+        if (m.cuentaDestino) base.cuentaDestino = m.cuentaDestino;
+        if (m.cuentaOrigenNombre) base.cuentaOrigenNombre = m.cuentaOrigenNombre;
+        if (m.cuentaDestinoNombre) base.cuentaDestinoNombre = m.cuentaDestinoNombre;
+        return base;
     }
 
     window.abrirAgregarMovimientoACorte = function(folio) {
