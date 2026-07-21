@@ -170,12 +170,13 @@ function _renderCotizadorHTML(isAuditoria) {
                             d.textContent=p.nombre+' — '+dinero(p.precio||0);
                             d.style.color='#111827';
                             _onCotProductoChange();
+                            _cotSetImagenPreview(p.imagen || null);
                         }})"
                         style="padding:9px 12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
                   🔍 Buscar
                 </button>
                 <button type="button"
-                        onclick="document.getElementById('cotProductoSel').value='__libre__';var d=document.getElementById('cotProductoSel-display');d.textContent='✏️ Producto no registrado';d.style.color='#92400e';_onCotProductoChange();"
+                        onclick="document.getElementById('cotProductoSel').value='__libre__';var d=document.getElementById('cotProductoSel-display');d.textContent='✏️ Producto no registrado';d.style.color='#92400e';_onCotProductoChange();_cotSetImagenPreview(null);"
                         style="padding:9px 10px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;"
                         title="Producto no registrado en sistema">
                   ✏️
@@ -187,6 +188,24 @@ function _renderCotizadorHTML(isAuditoria) {
           </div>
           <div id="cotProductoLibreFields" style="display:none;background:#f9fafb;border-radius:6px;padding:12px;">
             ${camposLibre}
+          </div>
+          <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px;margin-top:10px;">
+            <label style="font-size:11px;font-weight:bold;color:#0369a1;">🖼️ IMAGEN DEL PRODUCTO (opcional, se agrega con el artículo)</label>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+              <div id="cotImagenPreviewWrap" style="width:60px;height:60px;border:1px dashed #94a3b8;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:white;flex-shrink:0;">
+                <span id="cotImagenPreviewVacio" style="font-size:9px;color:#94a3b8;text-align:center;line-height:1.2;">Sin<br>imagen</span>
+                <img id="cotImagenPreviewImg" style="display:none;width:100%;height:100%;object-fit:cover;">
+              </div>
+              <div style="flex:1;min-width:220px;display:flex;flex-direction:column;gap:6px;">
+                <input type="file" id="cotImagenArchivo" accept="image/*" onchange="_cotCargarImagenArchivo(this.files[0])" style="font-size:12px;">
+                <div id="cotImagenPasteZone" tabindex="0" contenteditable="true"
+                     style="font-size:11px;color:#64748b;border:1px dashed #94a3b8;border-radius:6px;padding:6px 8px;cursor:text;background:white;outline:none;"
+                     onpaste="_cotPegarImagen(event)">
+                  📋 Haz clic aquí y pega (Ctrl+V) una imagen copiada de otro lado
+                </div>
+              </div>
+              <button type="button" onclick="_cotQuitarImagen()" style="padding:8px 10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap;">✕ Quitar</button>
+            </div>
           </div>
         </div>
 
@@ -230,6 +249,7 @@ function _renderCotizadorHTML(isAuditoria) {
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
     window._articulosCot = [];
+    window._cotImagenTemp = null;
     _renderTablaArticulosCot();
 }
 
@@ -266,6 +286,97 @@ window._renderCustomPlanes = function() {
     `).join('');
 };
 
+
+// ── Imagen del producto (subir de disco o pegar del portapapeles) ──
+window._cotImagenTemp = null; // dataURL en preparación para el próximo artículo que se agregue
+
+function _cotSetImagenPreview(dataUrl) {
+    window._cotImagenTemp = dataUrl || null;
+    const img = document.getElementById('cotImagenPreviewImg');
+    const vacio = document.getElementById('cotImagenPreviewVacio');
+    if (!img || !vacio) return;
+    if (dataUrl) {
+        img.src = dataUrl;
+        img.style.display = 'block';
+        vacio.style.display = 'none';
+    } else {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        vacio.style.display = 'block';
+    }
+}
+
+function _cotRedimensionarImagen(dataUrl, maxDim, calidad) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            let width = img.naturalWidth || img.width;
+            let height = img.naturalHeight || img.height;
+            if (!width || !height) return resolve(dataUrl);
+            if (width > maxDim || height > maxDim) {
+                if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+                else { width = Math.round(width * maxDim / height); height = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            try {
+                resolve(canvas.toDataURL('image/jpeg', calidad || 0.82));
+            } catch (e) {
+                resolve(dataUrl); // p.ej. imagen con CORS bloqueado: se usa la original
+            }
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+}
+
+function _cotCargarImagenArchivo(file) {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+        return alert('⚠️ Selecciona un archivo de imagen válido.');
+    }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const optimizada = await _cotRedimensionarImagen(e.target.result, 700, 0.82);
+        _cotSetImagenPreview(optimizada);
+    };
+    reader.onerror = () => alert('⚠️ No se pudo leer el archivo de imagen.');
+    reader.readAsDataURL(file);
+}
+
+function _cotPegarImagen(event) {
+    event.preventDefault();
+    const zone = document.getElementById('cotImagenPasteZone');
+    const items = (event.clipboardData || window.clipboardData)?.items || [];
+    let encontrada = false;
+    for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+            encontrada = true;
+            const file = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const optimizada = await _cotRedimensionarImagen(e.target.result, 700, 0.82);
+                _cotSetImagenPreview(optimizada);
+                if (zone) zone.textContent = '✅ Imagen pegada. Pega otra para reemplazarla.';
+            };
+            reader.readAsDataURL(file);
+            break;
+        }
+    }
+    if (!encontrada && zone) {
+        zone.textContent = '⚠️ No se encontró una imagen en el portapapeles. Copia una imagen e intenta de nuevo.';
+    }
+}
+
+function _cotQuitarImagen() {
+    _cotSetImagenPreview(null);
+    const fileInput = document.getElementById('cotImagenArchivo');
+    if (fileInput) fileInput.value = '';
+    const zone = document.getElementById('cotImagenPasteZone');
+    if (zone) zone.textContent = '📋 Haz clic aquí y pega (Ctrl+V) una imagen copiada de otro lado';
+}
 
 function _onCotProductoChange() {
     const sel = document.getElementById('cotProductoSel');
@@ -437,7 +548,8 @@ function agregarArticuloCotizacion() {
             margen,
             esLibre: true,
             cantidad: cant,
-            subtotal: cant * precio
+            subtotal: cant * precio,
+            imagen: window._cotImagenTemp || null
         });
         
         document.getElementById('cotNombreLibre').value = '';
@@ -455,8 +567,9 @@ function agregarArticuloCotizacion() {
         if (idx !== -1) {
             window._articulosCot[idx].cantidad += cant;
             window._articulosCot[idx].subtotal = window._articulosCot[idx].cantidad * precio;
+            if (window._cotImagenTemp) window._articulosCot[idx].imagen = window._cotImagenTemp;
         } else {
-            window._articulosCot.push({ productoId: prod.id, nombre: prod.nombre, precio, cantidad: cant, subtotal: cant * precio });
+            window._articulosCot.push({ productoId: prod.id, nombre: prod.nombre, precio, cantidad: cant, subtotal: cant * precio, imagen: window._cotImagenTemp || prod.imagen || null });
         }
     }
 
@@ -465,6 +578,7 @@ function agregarArticuloCotizacion() {
     const displayCot = document.getElementById('cotProductoSel-display');
     if (displayCot) { displayCot.textContent = 'Sin seleccionar'; displayCot.style.color = '#6b7280'; }
     _onCotProductoChange();
+    _cotQuitarImagen();
     _renderTablaArticulosCot();
 }
 
@@ -483,6 +597,7 @@ function _renderTablaArticulosCot() {
     let rows = arts.map((a, i) => {
         total += a.subtotal;
         return `<tr>
+          <td style="padding:8px;text-align:center;">${a.imagen ? `<img src="${a.imagen}" style="width:34px;height:34px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;">` : '<span style="color:#cbd5e1;font-size:11px;">—</span>'}</td>
           <td style="padding:8px;">${a.nombre}${a.esLibre ? ' <span style="font-size:10px;color:#7c3aed;background:#f3e8ff;padding:2px 6px;border-radius:10px;">libre</span>' : ''}</td>
           <td style="padding:8px;text-align:center;">${dinero(a.precio)}</td>
           <td style="padding:8px;text-align:center;">${a.cantidad}</td>
@@ -492,6 +607,7 @@ function _renderTablaArticulosCot() {
     }).join('');
     cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
       <thead><tr style="background:#f3f4f6;">
+        <th style="padding:8px;"></th>
         <th style="padding:8px;text-align:left;">Artículo</th>
         <th style="padding:8px;text-align:center;">Precio Unit.</th>
         <th style="padding:8px;text-align:center;">Cant.</th>
@@ -528,6 +644,12 @@ function generarCotizacion() {
     // Capturar TODOS los planes custom creados
     const customPlanes = window._isCotizadorAuditoria ? [...(window._customPlanesAuditoria || [])] : [];
 
+    // Las imágenes son solo para la impresión inmediata: NUNCA se guardan en StorageService/Firebase.
+    const articulosParaGuardar = arts.map(a => {
+        const { imagen, ...resto } = a;
+        return resto;
+    });
+
     const cot = {
       id: Date.now(),
       folio: _foliosCot(),
@@ -535,7 +657,7 @@ function generarCotizacion() {
       fechaVencimiento: window.localISO(fechaVenc),
       clienteNombre,
       clienteId: selCliente?.value || null,
-      articulos: arts,
+      articulos: articulosParaGuardar,
       total,
       enganche,
       saldoFinanciar,
@@ -553,7 +675,9 @@ function generarCotizacion() {
     document.querySelector('[data-modal="cotizador"]')?.remove();
     alert(`✅ Cotización ${cot.folio} generada correctamente.`);
     if (document.getElementById('listaCotizaciones')) abrirListaCotizaciones();
-    imprimirCotizacion(cot.id);
+    // Se pasan los artículos originales (con imagen en memoria) solo para esta impresión;
+    // no quedan guardados en ningún lado una vez cerrada la ventana.
+    imprimirCotizacion(cot.id, arts);
 }
 
 function abrirListaCotizaciones() {
@@ -618,20 +742,33 @@ function _actualizarEstadosCotizaciones(lista) {
     if (cambios) StorageService.set('cotizaciones', lista);
 }
 
-function imprimirCotizacion(id) {
+function imprimirCotizacion(id, articulosConImagenTemporal) {
     const lista = StorageService.get('cotizaciones', []);
     const c = lista.find(x => x.id === id);
     if (!c) return alert('Cotización no encontrada.');
     
+    // articulosConImagenTemporal solo llega justo al generar la cotización (en memoria).
+    // Nunca se lee de StorageService/Firebase: las imágenes no se guardan ahí.
+    const articulos = articulosConImagenTemporal || c.articulos;
+    
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     
-    const rows = c.articulos.map(a => `
+    const rows = articulos.map(a => {
+        const filaTexto = `
         <tr>
             <td style="padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px;">${a.nombre}</td>
             <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:center; font-size:10px;">${a.cantidad}</td>
             <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
-        </tr>`).join('');
+        </tr>`;
+        const filaImagen = a.imagen ? `
+        <tr>
+            <td colspan="3" style="padding:4px 0; border-bottom:1px dashed #ccc; text-align:center;">
+                <img src="${a.imagen}" style="max-width:35mm; max-height:28mm; object-fit:contain; border-radius:3px;">
+            </td>
+        </tr>` : '';
+        return filaTexto + filaImagen;
+    }).join('');
 
     let planeRows = '';
     let hasCustom = false;
@@ -701,7 +838,6 @@ if (c.customPlanes && c.customPlanes.length > 0) {
     <head>
       <meta charset="UTF-8">
       <title>COT-${c.folio}</title>
-      <script src="${new URL('js/vendor/html2canvas.min.js', document.baseURI).href}"></script>
       <style>
         @page { size: 80mm auto; margin: 0; }
         body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
@@ -722,11 +858,6 @@ if (c.customPlanes && c.customPlanes.length > 0) {
       </style>
     </head>
     <body>
-      <div class="controles">
-        <button onclick="window.print()">Imprimir</button>
-        <button onclick="guardarComoImagen('${c.folio}')">Imagen</button>
-      </div>
-
       <div id="area-impresion">
         <h2>${empresa}</h2>
         <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
@@ -769,18 +900,6 @@ if (c.customPlanes && c.customPlanes.length > 0) {
           *** GRACIAS POR SU PREFERENCIA ***
         </div>
       </div>
-
-      <script>
-        function guardarComoImagen(folio) {
-          const node = document.getElementById('area-impresion');
-          html2canvas(node, { scale: 3 }).then(canvas => {
-            const link = document.createElement('a');
-            link.download = 'Cotizacion-' + folio + '.png';
-            link.href = canvas.toDataURL();
-            link.click();
-          });
-        }
-      </script>
     </body>
     </html>`;
     if (window.TicketService?.elegirFormato) {
@@ -869,6 +988,10 @@ function eliminarCotizacion(id) {
     abrirListaCotizaciones();
 }
 
+window._cotSetImagenPreview = _cotSetImagenPreview;
+window._cotCargarImagenArchivo = _cotCargarImagenArchivo;
+window._cotPegarImagen = _cotPegarImagen;
+window._cotQuitarImagen = _cotQuitarImagen;
 window.abrirCotizador = abrirCotizador;
 window.abrirCotizadorAuditoria = abrirCotizadorAuditoria;
 window.renderCotizaciones = renderCotizaciones;
