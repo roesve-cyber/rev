@@ -700,6 +700,32 @@ const StorageService = {
         return true;
     },
 
+    _avisosSyncMostrados: new Set(),
+
+    // Antes, un fallo al sincronizar con Firebase solo se registraba en la consola (console.warn/
+    // console.error) y el usuario nunca se enteraba: la tabla dejaba de respaldarse en la nube en
+    // silencio. Esta función centraliza el aviso: muestra una alerta clara (una sola vez por tabla
+    // por sesión, para no ser repetitiva) y distingue si el problema parece ser que el documento
+    // superó el límite de 1 MiB por documento de Firestore.
+    _notificarFalloSync(key, error) {
+        const msg = String((error && error.message) || error || '');
+        console.warn(`☁️ Fallo al sincronizar "${key}" con Firebase:`, error);
+        if (this._avisosSyncMostrados.has(key)) return;
+        this._avisosSyncMostrados.add(key);
+        const pareceLimiteTamano = /longer than|exceeds|maximum|1048576|too large|invalid-argument/i.test(msg);
+        if (pareceLimiteTamano) {
+            alert(
+                `⚠️ La tabla "${key}" no se pudo sincronizar con la nube: parece haber superado el límite de tamaño de Firestore (1 MB por documento).\n\n` +
+                `Tus datos siguen guardados en este dispositivo con seguridad, pero esta tabla dejó de respaldarse en la nube hasta resolver esto. Avisa a soporte/al desarrollador.`
+            );
+        } else {
+            alert(
+                `⚠️ No se pudo sincronizar "${key}" con la nube en este momento (sin conexión o error del servidor).\n\n` +
+                `Tus datos están guardados en este dispositivo y se reintentará la próxima vez que se guarde algo en esta tabla.`
+            );
+        }
+    },
+
     get(key, defaultValue = null) {
         if (this._cache[key] !== undefined && this._cache[key] !== null) {
             return this._cache[key];
@@ -770,7 +796,7 @@ const StorageService = {
                             _updatedAt: ts
                         }, { merge: true })
                             .then(() => this._marcarCambioRemoto(key, ts))
-                            .catch(e => console.warn("Error en merge:", e));
+                            .catch(e => this._notificarFalloSync(key, e));
                         
                     } else {
                         // Comportamiento normal para configuraciones o tablas de un solo autor
@@ -780,7 +806,7 @@ const StorageService = {
                         })
                             .then(() => this._marcarCambioRemoto(key, ts))
                             .catch(e => {
-                            console.warn("Firebase offline: El dato se sincronizará cuando vuelva la red.", e);
+                            this._notificarFalloSync(key, e);
                         });
                     }
                     // ──────────────────────────────────────────────────
@@ -838,6 +864,7 @@ const StorageService = {
                 console.log(`✅ pushAtomo: ${key} sincronizado INMEDIATAMENTE a Firebase`);
             } catch (e) { 
                 console.warn(`⚠️ pushAtomo fallo para ${key}, pero datos guardados localmente:`, e); 
+                this._notificarFalloSync(key, e);
             }
         }
     },
@@ -870,6 +897,7 @@ const StorageService = {
                 console.log(`✅ removeAtomo: ${key} item ${idValue} eliminado INMEDIATAMENTE en Firebase`);
             } catch (e) { 
                 console.warn(`⚠️ removeAtomo fallo para ${key}, pero datos limpiados localmente:`, e); 
+                this._notificarFalloSync(key, e);
             }
         }
     },
