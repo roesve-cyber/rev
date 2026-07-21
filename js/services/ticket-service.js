@@ -1,4 +1,11 @@
 (function() {
+    // html2canvas y jsPDF viven localmente en js/vendor (ya no dependen de un CDN externo).
+    // Se resuelven a una URL absoluta porque estos scripts también se inyectan dentro de
+    // ventanas emergentes (about:blank) para imprimir tickets/documentos, y ahí una ruta
+    // relativa podría no resolver contra el archivo correcto.
+    const VENDOR_HTML2CANVAS = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
+    const VENDOR_JSPDF = new URL('js/vendor/jspdf.umd.min.js', document.baseURI).href;
+
     function esc(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({
             '&': '&amp;',
@@ -99,7 +106,7 @@ function mmpCargarHtml2Canvas(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-html2canvas-loader';
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.src = VENDOR_HTML2CANVAS;
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.'); };
     document.head.appendChild(s);
@@ -129,7 +136,7 @@ function mmpCargarJsPdf(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-jspdf-loader';
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+    s.src = VENDOR_JSPDF;
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
     document.head.appendChild(s);
@@ -250,7 +257,7 @@ function mmpCargarHtml2CanvasDocumento(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-html2canvas-loader';
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.src = VENDOR_HTML2CANVAS;
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.'); };
     document.head.appendChild(s);
@@ -280,7 +287,7 @@ function mmpCargarJsPdfDocumento(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-jspdf-loader';
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
+    s.src = VENDOR_JSPDF;
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
     document.head.appendChild(s);
@@ -315,9 +322,9 @@ function mmpAbrirDocumentoTermico(){
     var css = ${JSON.stringify(thermalCss())};
     var file = '${file}_termico';
     var script = '<script>' +
-        'function mmpCargarHtml2Canvas(cb){if(typeof html2canvas!==\"undefined\")return cb();var s=document.createElement(\"script\");s.src=\"https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.\");};document.head.appendChild(s);}' +
+        'function mmpCargarHtml2Canvas(cb){if(typeof html2canvas!==\"undefined\")return cb();var s=document.createElement(\"script\");s.src=\"' + VENDOR_HTML2CANVAS + '\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.\");};document.head.appendChild(s);}' +
         'function mmpGuardarTicketImagen(){mmpCargarHtml2Canvas(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var a=document.createElement(\"a\");a.download=\"' + file + '.png\";a.href=canvas.toDataURL(\"image/png\");a.click();}).catch(function(){alert(\"No se pudo generar la imagen. Intenta imprimirlo a PDF.\");});});}' +
-        'function mmpCargarJsPdf(cb){if(window.jspdf&&window.jspdf.jsPDF)return cb();var s=document.createElement(\"script\");s.src=\"https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor PDF.\");};document.head.appendChild(s);}' +
+        'function mmpCargarJsPdf(cb){if(window.jspdf&&window.jspdf.jsPDF)return cb();var s=document.createElement(\"script\");s.src=\"' + VENDOR_JSPDF + '\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor PDF.\");};document.head.appendChild(s);}' +
         'function mmpGuardarTicketPdf(){mmpCargarHtml2Canvas(function(){mmpCargarJsPdf(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var w=226.77,m=8,iw=w-m*2,ih=canvas.height*iw/canvas.width;var pdf=new window.jspdf.jsPDF({unit:\"pt\",format:[w,Math.max(300,ih+m*2)],orientation:\"portrait\"});pdf.addImage(canvas.toDataURL(\"image/jpeg\",.94),\"JPEG\",m,m,iw,ih,undefined,\"FAST\");pdf.save(\"' + file + '.pdf\");}).catch(function(){alert(\"No se pudo generar el PDF.\");});});});}' +
         'function mmpBase64Url(text){var utf8=unescape(encodeURIComponent(text||\"\"));return btoa(utf8).replace(/\\\\+/g,\"-\").replace(/\\\\//g,\"_\").replace(/=+$/g,\"\");}' +
         'function mmpTextoTicket(){var node=document.getElementById(\"ticket-contenido\")||document.body;var c=node.cloneNode(true);c.querySelectorAll(\"script,style,button,.no-print,.mmp-print-toolbar\").forEach(function(el){el.remove();});return (c.innerText||c.textContent||\"\").replace(/\\\\n{3,}/g,\"\\\\n\\\\n\").trim();}' +
@@ -368,7 +375,7 @@ function documentToolbar(options = {}) {
     async function prepararCanvasDocumento(html, options = {}) {
         await cargarScriptGlobal(
             'mmp-html2canvas-global',
-            'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+            VENDOR_HTML2CANVAS,
             () => typeof window.html2canvas === 'function'
         );
 
@@ -453,7 +460,7 @@ function documentToolbar(options = {}) {
         try {
             await cargarScriptGlobal(
                 'mmp-jspdf-global',
-                'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js',
+                VENDOR_JSPDF,
                 () => !!window.jspdf?.jsPDF
             );
             const canvas = await prepararCanvasDocumento(html, options);
