@@ -691,7 +691,7 @@ window.descargarImagenEstadoCuentaCliente = function() {
     const loadScript = (cb) => {
         if (typeof html2canvas !== 'undefined') return cb();
         const s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        s.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
         s.onload = cb;
         s.onerror = () => { alert("Error al cargar motor de imágenes."); btn.innerHTML = txtOriginal; btn.disabled = false; };
         document.head.appendChild(s);

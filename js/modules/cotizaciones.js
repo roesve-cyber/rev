@@ -701,7 +701,7 @@ if (c.customPlanes && c.customPlanes.length > 0) {
     <head>
       <meta charset="UTF-8">
       <title>COT-${c.folio}</title>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+      <script src="${new URL('js/vendor/html2canvas.min.js', document.baseURI).href}"></script>
       <style>
         @page { size: 80mm auto; margin: 0; }
         body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }

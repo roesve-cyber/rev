@@ -1612,7 +1612,7 @@ function _cargarHtml2CanvasEstadoProveedor(cb) {
     document.getElementById('html2canvas-estado-proveedor')?.remove();
     const script = document.createElement('script');
     script.id = 'html2canvas-estado-proveedor';
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
     script.onload = cb;
     script.onerror = () => { script.remove(); alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.'); };
     document.head.appendChild(script);
@@ -5332,7 +5332,7 @@ function _cargarHtml2CanvasPreviaDevolucion(cb) {
     }
     const script = document.createElement('script');
     script.id = 'html2canvas-devolucion-consignacion';
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
     script.onload = cb;
     script.onerror = () => alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.');
     document.head.appendChild(script);

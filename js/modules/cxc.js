@@ -1693,7 +1693,7 @@ function generarTicketAbonoTermico(datosAbono) {
 
             var script = document.createElement('script');
             script.id = 'html2canvas-loader';
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+            script.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
             script.onload = callback;
             script.onerror = function() {
                 alert('No se pudo cargar el motor de imagen. Revisa tu conexión e intenta de nuevo, o usa Imprimir > Guardar como PDF.');
@@ -3312,7 +3312,7 @@ function _cxcCargarHtml2CanvasEstadoFolio(cb) {
     }
     const script = document.createElement('script');
     script.id = 'html2canvas-estado-folio-cxc';
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
     script.onload = cb;
     script.onerror = () => alert('No se pudo cargar el motor de imagen. Revisa tu conexion o usa PDF / A4.');
     document.head.appendChild(script);
