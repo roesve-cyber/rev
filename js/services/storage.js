@@ -967,7 +967,12 @@ const StorageService = {
         const docTabla = window._db.collection('posData').doc(tabla);
 
         if (!cambios.length && !eliminaciones.length) {
-            await docTabla.set({ _updatedAt: ts, _registroIndividual: true });
+            // merge:true a proposito: si esta rama se dispara con el arreglo local vacio
+            // (p.ej. por el bug de syncAll que pisaba el local con [] antes de migrar),
+            // NO queremos reemplazar el documento entero y borrar el campo "data" viejo
+            // que todavia trae los registros reales. Sin merge, .set() sustituye TODO
+            // el documento.
+            await docTabla.set({ _updatedAt: ts, _registroIndividual: true }, { merge: true });
             return;
         }
 
@@ -1107,10 +1112,18 @@ const StorageService = {
                 }
                 // ──────────────────────────────────────────────────────────
 
-                // Tablas configuradas como "registro individual": el documento padre no trae
+                // Tablas YA migradas a "registro individual": el documento padre no trae
                 // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
                 // aparte desde su subcolección en vez de pasar por la normalización genérica.
-                if (this._tablasRegistroIndividual[tabla] || payload?._registroIndividual) {
+                //
+                // OJO: nos guiamos por el marcador real payload._registroIndividual, NO por
+                // this._tablasRegistroIndividual[tabla] (que solo indica que la tabla ESTÁ
+                // CONFIGURADA para migrarse eventualmente). Si una tabla está en esa lista
+                // pero todavía no se migró con éxito, su subcolección "registros" está vacía
+                // y el documento padre AÚN conserva el arreglo viejo en payload.data; usar
+                // solo la config aquí borraba el local con [] antes de que la migración
+                // hubiera siquiera ocurrido.
+                if (payload?._registroIndividual) {
                     try {
                         const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
                         if (huboDescarga) descargadas++; else omitidas++;
