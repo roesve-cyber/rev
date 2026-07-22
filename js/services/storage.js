@@ -91,7 +91,10 @@ const StorageService = {
         cortesCaja: 'folio',
         movimientosCaja: 'id',
         ventasRegistradas: 'folio',
-        cuentasPorCobrar: 'folio'
+        cuentasPorCobrar: 'folio',
+        bitacoraAuditoria: 'id',
+        compras: 'id',
+        movimientosInventario: 'id'
     },
 
     _claveRegistro(tabla, item) {
