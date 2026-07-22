@@ -82,6 +82,22 @@ const StorageService = {
         'movimientosCaja'
     ]),
 
+    // Tablas que, por su tamaño y crecimiento continuo, se sincronizan como UN DOCUMENTO POR
+    // REGISTRO en Firestore (posData/{tabla}/registros/{clave}) en vez de un solo documento
+    // gigante con todo el arreglo. Esto elimina el límite de 1 MiB por documento como problema,
+    // porque cada registro individual (un pagaré, un corte) pesa un puñado de KB como mucho.
+    _tablasRegistroIndividual: {
+        pagaresSistema: 'id',
+        cortesCaja: 'folio'
+    },
+
+    _claveRegistro(tabla, item) {
+        const campo = this._tablasRegistroIndividual[tabla];
+        if (!campo || !item || typeof item !== 'object') return null;
+        const valor = item[campo];
+        return (valor === undefined || valor === null || valor === '') ? null : String(valor);
+    },
+
     // Decide si una clave puede tratarse como tabla real del sistema
     _esTablaValida(key, value) {
         if (!key || typeof key !== 'string') return false;
@@ -772,14 +788,25 @@ const StorageService = {
 
             // Programamos el nuevo envío con 1.5 segundos de espera
             this._syncTimers[key] = setTimeout(() => {
-                const valorFirestore = this._limpiarParaFirestore(value);
                 const ts = this._cache[`_ts_${key}`] || Date.now();
 
                 if (this._esTablaCriticaVacia(key, value)) {
                     console.warn(`Firebase protegido: no se sube ${key} vacia.`);
                     return;
                 }
-                 
+
+                // Tablas configuradas como "registro individual" (pagaresSistema, cortesCaja):
+                // en vez de reescribir un documento gigante con todo el arreglo, se sube SOLO
+                // lo que cambió, un documento por registro, en lotes.
+                if (this._tablasRegistroIndividual[key]) {
+                    this._sincronizarTablaPorRegistro(key, value, ts)
+                        .then(() => this._marcarCambioRemoto(key, ts))
+                        .catch(e => this._notificarFalloSync(key, e));
+                    return;
+                }
+
+                const valorFirestore = this._limpiarParaFirestore(value);
+
                 try {
                     const docRef = window._db.collection('posData').doc(key);
 
@@ -910,6 +937,129 @@ const StorageService = {
         return Number(this._cache[`_ts_${key}`] || 0);
     },
 
+    // Sube una tabla configurada como "registro individual" comparando contra el último estado
+    // sincronizado (en memoria) para escribir SOLO lo que cambió, en lotes de Firestore, en vez
+    // de reescribir un documento gigante con todo el arreglo en cada guardado.
+    async _sincronizarTablaPorRegistro(tabla, arreglo, ts = Date.now()) {
+        if (!Array.isArray(arreglo)) return;
+        const cacheKey = `_ultimoSyncPorRegistro_${tabla}`;
+        const anterior = this._cache[cacheKey] || {};
+        const actualPorClave = {};
+        const cambios = [];
+
+        arreglo.forEach(item => {
+            const clave = this._claveRegistro(tabla, item);
+            if (!clave) return; // sin clave utilizable: no se puede sincronizar individualmente
+            const limpio = this._limpiarParaFirestore(item);
+            const json = JSON.stringify(limpio);
+            actualPorClave[clave] = { json, data: limpio };
+            if (anterior[clave] !== json) cambios.push({ clave, data: limpio });
+        });
+
+        const eliminaciones = Object.keys(anterior).filter(clave => !(clave in actualPorClave));
+
+        const docTabla = window._db.collection('posData').doc(tabla);
+
+        if (!cambios.length && !eliminaciones.length) {
+            await docTabla.set({ _updatedAt: ts, _registroIndividual: true });
+            return;
+        }
+
+        const coleccion = docTabla.collection('registros');
+        const operaciones = [
+            ...cambios.map(c => ({ tipo: 'set', ref: coleccion.doc(c.clave), data: c.data })),
+            ...eliminaciones.map(clave => ({ tipo: 'delete', ref: coleccion.doc(clave) }))
+        ];
+
+        const TAMANO_LOTE = 400; // margen bajo el limite de 500 operaciones por batch de Firestore
+        for (let i = 0; i < operaciones.length; i += TAMANO_LOTE) {
+            const lote = window._db.batch();
+            operaciones.slice(i, i + TAMANO_LOTE).forEach(op => {
+                if (op.tipo === 'set') lote.set(op.ref, op.data);
+                else lote.delete(op.ref);
+            });
+            await lote.commit();
+        }
+
+        // Documento marcador SIN el campo "data": así un cliente viejo que aun espere el formato
+        // anterior no encuentra un arreglo gigante, y syncAll() sabe leer la subcoleccion.
+        await docTabla.set({ _updatedAt: ts, _registroIndividual: true });
+
+        const nuevoMapa = {};
+        Object.entries(actualPorClave).forEach(([clave, v]) => { nuevoMapa[clave] = v.json; });
+        this._cache[cacheKey] = nuevoMapa;
+
+        console.log(`☁️ ${tabla}: ${cambios.length} registro(s) actualizados, ${eliminaciones.length} eliminado(s) (documento individual).`);
+    },
+
+    // Descarga una tabla configurada como "registro individual" desde su subcolección.
+    async _descargarTablaPorRegistro(tabla, payload, forzarDescarga) {
+        const tsFirebase = Number(payload?._updatedAt || 0);
+        const tsLocal = this._tsLocal(tabla);
+        const datosLocalesAntes = this.get(tabla, null);
+        const localTieneDatos = Array.isArray(datosLocalesAntes) && datosLocalesAntes.length > 0;
+
+        if (!forzarDescarga && localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
+            console.log(`⏭️ ${tabla}: local más reciente (documento individual), se conserva.`);
+            return false;
+        }
+
+        const snap = await window._db.collection('posData').doc(tabla).collection('registros').get();
+        const registros = snap.docs.map(d => this._restaurarDesdeFirestore(d.data()));
+
+        if (!registros.length && this._tablasCriticasConDatos.has(tabla)) {
+            console.warn(`${tabla}: Firebase (documento individual) está vacío; no se sobreescribe local.`);
+            return false;
+        }
+
+        await this._guardarLocalDirecto(tabla, registros);
+        if (tsFirebase > 0) {
+            this._cache[`_ts_${tabla}`] = tsFirebase;
+            await localforage.setItem(`_ts_${tabla}`, tsFirebase).catch(() => {});
+        }
+
+        // Refrescamos el cache de diffing para que el próximo guardado local no vuelva a
+        // resubir todos los registros como si todos hubieran cambiado.
+        const mapa = {};
+        registros.forEach(r => {
+            const clave = this._claveRegistro(tabla, r);
+            if (clave) mapa[clave] = JSON.stringify(this._limpiarParaFirestore(r));
+        });
+        this._cache[`_ultimoSyncPorRegistro_${tabla}`] = mapa;
+
+        this._logTablaFirebase(tabla, registros);
+        return true;
+    },
+
+    // Migración manual, de una sola vez: convierte una tabla que hoy vive como documento
+    // gigante en Firestore al formato de un documento por registro. Llamar desde la consola:
+    // StorageService.migrarTablaARegistroIndividual('pagaresSistema')
+    async migrarTablaARegistroIndividual(tabla) {
+        if (!this._tablasRegistroIndividual[tabla]) {
+            alert(`"${tabla}" no está configurada para el modo de documento individual.`);
+            return;
+        }
+        if (!window._firebaseActivo || !window._db) {
+            alert('Firebase no está activo en este momento; no se puede migrar.');
+            return;
+        }
+        const datos = this.get(tabla, []);
+        if (!Array.isArray(datos) || !datos.length) {
+            alert(`No hay datos locales de "${tabla}" para migrar.`);
+            return;
+        }
+        if (!confirm(`Vas a migrar "${tabla}" (${datos.length} registros) al formato de un documento por registro en Firestore.\n\nEsto puede tardar unos segundos y no afecta tus datos locales. ¿Continuar?`)) {
+            return;
+        }
+        try {
+            await this._sincronizarTablaPorRegistro(tabla, datos, Date.now());
+            alert(`✅ "${tabla}" migrada con éxito: ${datos.length} registro(s) ahora viven en documentos individuales en Firestore. El límite de 1 MB por documento ya no aplica a esta tabla.`);
+        } catch (e) {
+            console.error(e);
+            alert(`❌ No se pudo migrar "${tabla}": ${e.message || e}`);
+        }
+    },
+
     async syncAll(opciones = {}) {
         if (!window._firebaseActivo || !window._db) {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
@@ -950,6 +1100,20 @@ const StorageService = {
                     continue;
                 }
                 // ──────────────────────────────────────────────────────────
+
+                // Tablas configuradas como "registro individual": el documento padre no trae
+                // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
+                // aparte desde su subcolección en vez de pasar por la normalización genérica.
+                if (this._tablasRegistroIndividual[tabla] || payload?._registroIndividual) {
+                    try {
+                        const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
+                        if (huboDescarga) descargadas++; else omitidas++;
+                    } catch (e) {
+                        console.warn(`⚠️ Fallo al descargar "${tabla}" (registro individual):`, e);
+                        omitidas++;
+                    }
+                    continue;
+                }
 
                 const datosRestaurados = this._asegurarTablaLista(
                     tabla,
