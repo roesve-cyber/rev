@@ -89,7 +89,9 @@ const StorageService = {
     _tablasRegistroIndividual: {
         pagaresSistema: 'id',
         cortesCaja: 'folio',
-        movimientosCaja: 'id'
+        movimientosCaja: 'id',
+        ventasRegistradas: 'folio',
+        cuentasPorCobrar: 'folio'
     },
 
     _claveRegistro(tabla, item) {
