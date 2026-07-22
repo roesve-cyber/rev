@@ -919,7 +919,7 @@ function registrarCompra() {
     const caracteristicas = document.getElementById("compraCaracteristicas")?.value || "";
 
     const nuevaCompra = {
-        id: Date.now(),
+        id: Date.now() + Math.random(),
         productoId,
         productoNombre: producto.nombre,   
         proveedor: prov.nombre,
@@ -1233,7 +1233,7 @@ window.ejecutarRecepcionFisica = function(idRecepcion) {
         
         // 3. Afectar KARDEX detallado
         movimientosInventario.push({
-            id: Date.now(),
+            id: Date.now() + Math.random(),
             productoId: String(prod.id),
             productoNombre: prod.nombre,
             tipo: 'entrada',
