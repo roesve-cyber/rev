@@ -88,7 +88,8 @@ const StorageService = {
     // porque cada registro individual (un pagaré, un corte) pesa un puñado de KB como mucho.
     _tablasRegistroIndividual: {
         pagaresSistema: 'id',
-        cortesCaja: 'folio'
+        cortesCaja: 'folio',
+        movimientosCaja: 'id'
     },
 
     _claveRegistro(tabla, item) {
