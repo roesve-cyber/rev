@@ -971,8 +971,26 @@ const StorageService = {
         const docTabla = window._db.collection('posData').doc(tabla);
 
         if (!cambios.length && !eliminaciones.length) {
-            await docTabla.set({ _updatedAt: ts, _registroIndividual: true });
+            // merge:true a proposito: nunca reemplazar todo el documento (evita borrar
+            // un eventual campo "data" viejo si esta rama se dispara antes de migrar).
+            await docTabla.set({ _updatedAt: ts, _registroIndividual: true }, { merge: true });
             return { errores: [] };
+        }
+
+        // Circuit-breaker: si el arreglo local llega incompleto (p.ej. por una recarga a
+        // medio sincronizar, o el bug que ya vivimos con movimientosCaja/cortesCaja), esta
+        // sincronizacion por diferencia interpretaria todo lo faltante como "borrado" y
+        // eliminaria cientos de registros reales en Firestore. Si se detecta que se
+        // borrarian demasiados registros de golpe respecto a lo que ya conocia, nos
+        // detenemos y avisamos en vez de ejecutar el borrado.
+        const totalAnterior = Object.keys(anterior).length;
+        const UMBRAL_ABSOLUTO = 20;
+        const UMBRAL_PROPORCION = 0.3; // 30%
+        if (totalAnterior >= UMBRAL_ABSOLUTO && eliminaciones.length > totalAnterior * UMBRAL_PROPORCION) {
+            const msg = `⚠️ Se detuvo la sincronización de "${tabla}": se iban a borrar ${eliminaciones.length} de ${totalAnterior} registros de golpe, lo que probablemente indica datos locales incompletos (no un borrado real). Revisa antes de continuar.`;
+            console.error(msg);
+            if (typeof alert === 'function') alert(msg);
+            throw new Error(msg);
         }
 
         const coleccion = docTabla.collection('registros');
@@ -1139,7 +1157,7 @@ const StorageService = {
                     // Tablas configuradas como "registro individual": el documento padre no trae
                     // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
                     // aparte desde su subcolección en vez de pasar por la normalización genérica.
-                    if (this._tablasRegistroIndividual[tabla] || payload?._registroIndividual) {
+                    if (payload?._registroIndividual) {
                         try {
                             const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
                             if (huboDescarga) descargadas++; else omitidas++;
