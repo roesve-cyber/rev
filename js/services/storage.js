@@ -947,15 +947,19 @@ const StorageService = {
     // sincronizado (en memoria) para escribir SOLO lo que cambió, en lotes de Firestore, en vez
     // de reescribir un documento gigante con todo el arreglo en cada guardado.
     async _sincronizarTablaPorRegistro(tabla, arreglo, ts = Date.now()) {
-        if (!Array.isArray(arreglo)) return;
+        if (!Array.isArray(arreglo)) return { errores: [] };
         const cacheKey = `_ultimoSyncPorRegistro_${tabla}`;
         const anterior = this._cache[cacheKey] || {};
         const actualPorClave = {};
         const cambios = [];
 
         arreglo.forEach(item => {
-            const clave = this._claveRegistro(tabla, item);
+            let clave = this._claveRegistro(tabla, item);
             if (!clave) return; // sin clave utilizable: no se puede sincronizar individualmente
+            // Firestore no permite "/" en un ID de documento (lo interpreta como una ruta), y
+            // limita el ID a 1500 bytes. Sanitizamos para que una clave "rara" (folio con fecha
+            // tipo "2024/07/01", etc.) nunca tumbe el guardado de todos los demás registros.
+            clave = String(clave).replace(/\//g, '-').slice(0, 400);
             const limpio = this._limpiarParaFirestore(item);
             const json = JSON.stringify(limpio);
             actualPorClave[clave] = { json, data: limpio };
@@ -967,13 +971,8 @@ const StorageService = {
         const docTabla = window._db.collection('posData').doc(tabla);
 
         if (!cambios.length && !eliminaciones.length) {
-            // merge:true a proposito: si esta rama se dispara con el arreglo local vacio
-            // (p.ej. por el bug de syncAll que pisaba el local con [] antes de migrar),
-            // NO queremos reemplazar el documento entero y borrar el campo "data" viejo
-            // que todavia trae los registros reales. Sin merge, .set() sustituye TODO
-            // el documento.
-            await docTabla.set({ _updatedAt: ts, _registroIndividual: true }, { merge: true });
-            return;
+            await docTabla.set({ _updatedAt: ts, _registroIndividual: true });
+            return { errores: [] };
         }
 
         const coleccion = docTabla.collection('registros');
@@ -982,14 +981,32 @@ const StorageService = {
             ...eliminaciones.map(clave => ({ tipo: 'delete', ref: coleccion.doc(clave) }))
         ];
 
+        const errores = [];
         const TAMANO_LOTE = 400; // margen bajo el limite de 500 operaciones por batch de Firestore
         for (let i = 0; i < operaciones.length; i += TAMANO_LOTE) {
-            const lote = window._db.batch();
-            operaciones.slice(i, i + TAMANO_LOTE).forEach(op => {
-                if (op.tipo === 'set') lote.set(op.ref, op.data);
-                else lote.delete(op.ref);
-            });
-            await lote.commit();
+            const grupo = operaciones.slice(i, i + TAMANO_LOTE);
+            try {
+                const lote = window._db.batch();
+                grupo.forEach(op => {
+                    if (op.tipo === 'set') lote.set(op.ref, op.data);
+                    else lote.delete(op.ref);
+                });
+                await lote.commit();
+            } catch (e) {
+                // Si el lote completo falla (por ejemplo, un solo registro demasiado pesado o con
+                // datos invalidos), no perdemos los demas: reintentamos registro por registro para
+                // aislar exactamente cual es el problematico y seguir con el resto de la tabla.
+                console.warn(`⚠️ Lote de "${tabla}" falló (${i}-${i + grupo.length}); reintentando registro por registro para aislar el problema:`, e);
+                for (const op of grupo) {
+                    try {
+                        if (op.tipo === 'set') await op.ref.set(op.data);
+                        else await op.ref.delete();
+                    } catch (e2) {
+                        errores.push({ clave: op.ref.id, error: e2?.message || String(e2) });
+                        console.error(`❌ "${tabla}" registro "${op.ref.id}" no se pudo sincronizar (se omite, el resto continúa):`, e2);
+                    }
+                }
+            }
         }
 
         // Documento marcador SIN el campo "data": así un cliente viejo que aun espere el formato
@@ -1000,7 +1017,8 @@ const StorageService = {
         Object.entries(actualPorClave).forEach(([clave, v]) => { nuevoMapa[clave] = v.json; });
         this._cache[cacheKey] = nuevoMapa;
 
-        console.log(`☁️ ${tabla}: ${cambios.length} registro(s) actualizados, ${eliminaciones.length} eliminado(s) (documento individual).`);
+        console.log(`☁️ ${tabla}: ${cambios.length} registro(s) actualizados, ${eliminaciones.length} eliminado(s) (documento individual).${errores.length ? ` ${errores.length} fallaron.` : ''}`);
+        return { errores };
     },
 
     // Descarga una tabla configurada como "registro individual" desde su subcolección.
@@ -1063,8 +1081,13 @@ const StorageService = {
             return;
         }
         try {
-            await this._sincronizarTablaPorRegistro(tabla, datos, Date.now());
-            alert(`✅ "${tabla}" migrada con éxito: ${datos.length} registro(s) ahora viven en documentos individuales en Firestore. El límite de 1 MB por documento ya no aplica a esta tabla.`);
+            const { errores } = await this._sincronizarTablaPorRegistro(tabla, datos, Date.now());
+            if (errores && errores.length) {
+                console.error(`"${tabla}": registros que fallaron:`, errores);
+                alert(`⚠️ "${tabla}" se migró parcialmente: ${datos.length - errores.length} de ${datos.length} registro(s) quedaron en documentos individuales.\n\n${errores.length} registro(s) NO se pudieron migrar (revisa la consola para ver el detalle de cada uno, clave y error):\n${errores.slice(0, 10).map(e => `• ${e.clave}: ${e.error}`).join('\n')}${errores.length > 10 ? `\n…y ${errores.length - 10} más.` : ''}`);
+            } else {
+                alert(`✅ "${tabla}" migrada con éxito: ${datos.length} registro(s) ahora viven en documentos individuales en Firestore. El límite de 1 MB por documento ya no aplica a esta tabla.`);
+            }
         } catch (e) {
             console.error(e);
             alert(`❌ No se pudo migrar "${tabla}": ${e.message || e}`);
@@ -1092,89 +1115,91 @@ const StorageService = {
                 // Ignorar claves de timestamps internos
                 if (tabla.startsWith('_ts_') || tabla === '_syncStatus') continue;
 
-                const payload = doc.data();
+                try {
+                    const payload = doc.data();
 
-                // ── BLINDAJE ANTI-SOBREESCRITURA ──────────────────────────────
-                // Solo bajamos si Firebase es MÁS RECIENTE que nuestro local.
-                // Esto evita que un syncAll() pise datos que ya teníamos
-                // correctos localmente pero que Firebase aún no recibió
-                // (por ejemplo, si la red falló justo después de aprobar la bóveda).
-                const tsFirebase = Number(payload?._updatedAt || 0);
-                const tsLocal    = this._tsLocal(tabla);
-                const datosLocalesAntes = this.get(tabla, null);
-                const localTieneDatos = Array.isArray(datosLocalesAntes)
-                    ? datosLocalesAntes.length > 0
-                    : !!(datosLocalesAntes && typeof datosLocalesAntes === 'object' && Object.keys(datosLocalesAntes).length > 0);
-                if (!forzarDescarga && localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
-                    console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
-                    omitidas++;
-                    continue;
-                }
-                // ──────────────────────────────────────────────────────────
-
-                // Tablas YA migradas a "registro individual": el documento padre no trae
-                // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
-                // aparte desde su subcolección en vez de pasar por la normalización genérica.
-                //
-                // OJO: nos guiamos por el marcador real payload._registroIndividual, NO por
-                // this._tablasRegistroIndividual[tabla] (que solo indica que la tabla ESTÁ
-                // CONFIGURADA para migrarse eventualmente). Si una tabla está en esa lista
-                // pero todavía no se migró con éxito, su subcolección "registros" está vacía
-                // y el documento padre AÚN conserva el arreglo viejo en payload.data; usar
-                // solo la config aquí borraba el local con [] antes de que la migración
-                // hubiera siquiera ocurrido.
-                if (payload?._registroIndividual) {
-                    try {
-                        const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
-                        if (huboDescarga) descargadas++; else omitidas++;
-                    } catch (e) {
-                        console.warn(`⚠️ Fallo al descargar "${tabla}" (registro individual):`, e);
-                        omitidas++;
-                    }
-                    continue;
-                }
-
-                const datosRestaurados = this._asegurarTablaLista(
-                    tabla,
-                    this._normalizarTablaDesdeFirestore(tabla, payload)
-                );
-                this._logTablaFirebase(tabla, datosRestaurados);
-                if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
-                    this._logPayloadVacio(tabla, payload);
-                    if (this._tablasCriticasConDatos.has(tabla)) {
-                        console.warn(`${tabla}: Firebase esta vacio; no se guarda local ni se marca como descargado.`);
+                    // ── BLINDAJE ANTI-SOBREESCRITURA ──────────────────────────────
+                    // Solo bajamos si Firebase es MÁS RECIENTE que nuestro local.
+                    // Esto evita que un syncAll() pise datos que ya teníamos
+                    // correctos localmente pero que Firebase aún no recibió
+                    // (por ejemplo, si la red falló justo después de aprobar la bóveda).
+                    const tsFirebase = Number(payload?._updatedAt || 0);
+                    const tsLocal    = this._tsLocal(tabla);
+                    const datosLocalesAntes = this.get(tabla, null);
+                    const localTieneDatos = Array.isArray(datosLocalesAntes)
+                        ? datosLocalesAntes.length > 0
+                        : !!(datosLocalesAntes && typeof datosLocalesAntes === 'object' && Object.keys(datosLocalesAntes).length > 0);
+                    if (!forzarDescarga && localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
+                        console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
                         omitidas++;
                         continue;
                     }
-                }
+                    // ──────────────────────────────────────────────────────────
 
-                if (!this._esTablaValida(tabla, datosRestaurados)) {
-                    if (!this._clavesIgnoradas.has(tabla)) {
-                        console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
+                    // Tablas configuradas como "registro individual": el documento padre no trae
+                    // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
+                    // aparte desde su subcolección en vez de pasar por la normalización genérica.
+                    if (this._tablasRegistroIndividual[tabla] || payload?._registroIndividual) {
+                        try {
+                            const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
+                            if (huboDescarga) descargadas++; else omitidas++;
+                        } catch (e) {
+                            console.warn(`⚠️ Fallo al descargar "${tabla}" (registro individual):`, e);
+                            omitidas++;
+                        }
+                        continue;
                     }
-                    continue;
-                }
 
-                const datosLocalesActuales = this.get(tabla, null);
-                if (
-                    !forzarDescarga &&
-                    Array.isArray(datosRestaurados) &&
-                    datosRestaurados.length === 0 &&
-                    Array.isArray(datosLocalesActuales) &&
-                    datosLocalesActuales.length > 0
-                ) {
-                    console.warn(`${tabla}: nube vacia y local con ${datosLocalesActuales.length} registros; se conserva local.`);
+                    const datosRestaurados = this._asegurarTablaLista(
+                        tabla,
+                        this._normalizarTablaDesdeFirestore(tabla, payload)
+                    );
+                    this._logTablaFirebase(tabla, datosRestaurados);
+                    if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
+                        this._logPayloadVacio(tabla, payload);
+                        if (this._tablasCriticasConDatos.has(tabla)) {
+                            console.warn(`${tabla}: Firebase esta vacio; no se guarda local ni se marca como descargado.`);
+                            omitidas++;
+                            continue;
+                        }
+                    }
+
+                    if (!this._esTablaValida(tabla, datosRestaurados)) {
+                        if (!this._clavesIgnoradas.has(tabla)) {
+                            console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
+                        }
+                        continue;
+                    }
+
+                    const datosLocalesActuales = this.get(tabla, null);
+                    if (
+                        !forzarDescarga &&
+                        Array.isArray(datosRestaurados) &&
+                        datosRestaurados.length === 0 &&
+                        Array.isArray(datosLocalesActuales) &&
+                        datosLocalesActuales.length > 0
+                    ) {
+                        console.warn(`${tabla}: nube vacia y local con ${datosLocalesActuales.length} registros; se conserva local.`);
+                        omitidas++;
+                        continue;
+                    }
+
+                    await this._guardarLocalDirecto(tabla, datosRestaurados);
+                    // Guardamos el timestamp de Firebase como referencia local
+                    if (tsFirebase > 0) {
+                        this._cache[`_ts_${tabla}`] = tsFirebase;
+                        await localforage.setItem(`_ts_${tabla}`, tsFirebase).catch(() => {});
+                    }
+                    descargadas++;
+                } catch (e) {
+                    // CRÍTICO: si una sola tabla viene corrupta o falla al procesarse, esto NO debe
+                    // tumbar la descarga de TODAS las demás tablas (antes sí pasaba: un solo error
+                    // aquí abortaba syncAll completo, dejando tablas como cuentasPorCobrar o
+                    // cuentasEfectivo sin descargar en otros dispositivos, aunque nada tuvieran
+                    // que ver con la tabla que realmente falló).
+                    console.warn(`⚠️ Fallo al procesar "${tabla}" durante la sincronización; se omite y se continúa con las demás:`, e);
                     omitidas++;
-                    continue;
                 }
-
-                await this._guardarLocalDirecto(tabla, datosRestaurados);
-                // Guardamos el timestamp de Firebase como referencia local
-                if (tsFirebase > 0) {
-                    this._cache[`_ts_${tabla}`] = tsFirebase;
-                    await localforage.setItem(`_ts_${tabla}`, tsFirebase).catch(() => {});
-                }
-                descargadas++;
             }
 
             console.log(`✅ Sync completada. Descargadas: ${descargadas}, conservadas por ser más recientes: ${omitidas}`);
@@ -1204,31 +1229,48 @@ const StorageService = {
             let omitidasVacias = 0;
 
             for (let tabla of tablas) {
-                const datosLocales = this.get(tabla, null);
+                try {
+                    const datosLocales = this.get(tabla, null);
 
-                if (!this._esTablaValida(tabla, datosLocales)) {
-                    if (!this._clavesIgnoradas.has(tabla)) {
-                        console.warn(`⏭️ Tabla ignorada al subir: ${tabla}`);
+                    if (!this._esTablaValida(tabla, datosLocales)) {
+                        if (!this._clavesIgnoradas.has(tabla)) {
+                            console.warn(`⏭️ Tabla ignorada al subir: ${tabla}`);
+                        }
+                        continue;
                     }
-                    continue;
+
+                    if (!permitirVacio && this._esTablaCriticaVacia(tabla, datosLocales)) {
+                        console.warn(`Firebase protegido: no se sube ${tabla} vacia.`);
+                        omitidasVacias++;
+                        continue;
+                    }
+
+                    // Tablas configuradas como "registro individual" se suben por su propio
+                    // camino (un documento por registro en una subcolección), nunca como un solo
+                    // documento gigante: hacerlo aquí volvería a chocar con el límite de 1 MiB
+                    // por documento que la migración a registro individual buscaba evitar.
+                    if (this._tablasRegistroIndividual[tabla] && Array.isArray(datosLocales)) {
+                        await this._sincronizarTablaPorRegistro(tabla, datosLocales, Date.now());
+                        subidas++;
+                        continue;
+                    }
+
+                    const datosFirestore = this._limpiarParaFirestore(datosLocales);
+
+                    const tsSubida = Date.now();
+                    await window._db.collection('posData').doc(tabla).set({
+                        data: datosFirestore,
+                        _updatedAt: tsSubida
+                    });
+                    await this._marcarCambioRemoto(tabla, tsSubida);
+
+                    subidas++;
+                } catch (e) {
+                    // CRÍTICO: igual que en syncAll, una tabla que falle al subir (por ejemplo,
+                    // por exceder el límite de 1 MiB de Firestore) NO debe impedir que las demás
+                    // tablas se suban. Antes, un solo fallo aquí abortaba uploadAll completo.
+                    console.warn(`⚠️ Fallo al subir "${tabla}"; se omite y se continúa con las demás:`, e);
                 }
-
-                if (!permitirVacio && this._esTablaCriticaVacia(tabla, datosLocales)) {
-                    console.warn(`Firebase protegido: no se sube ${tabla} vacia.`);
-                    omitidasVacias++;
-                    continue;
-                }
-
-                const datosFirestore = this._limpiarParaFirestore(datosLocales);
-
-                const tsSubida = Date.now();
-                await window._db.collection('posData').doc(tabla).set({
-                    data: datosFirestore,
-                    _updatedAt: tsSubida
-                });
-                await this._marcarCambioRemoto(tabla, tsSubida);
-
-                subidas++;
             }
 
             console.log(`✅ Subida dinámica completada. Tablas subidas: ${subidas}`);
