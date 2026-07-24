@@ -768,12 +768,29 @@ window.aplicarFiltroPeriodoLiquidez = function(periodo) {
     renderCuentasBancarias();
 };
 
+// 🔒 REGLA DE ORO: un movimiento SOLO puede pertenecer a UNA caja/cuenta, y esa
+// pertenencia se decide EXCLUSIVAMENTE con window.movimientoPerteneceACuenta
+// (misma función que usa Corte de Caja y Estado de Cuenta Bancario). Antes esta
+// función tenía su propia lógica de prioridad de campos, distinta a la de
+// corte-caja.js, y eso hacía que el mismo movimiento se contara aquí bajo una
+// caja y en Corte de Caja bajo otra (o en ninguna). Nunca vuelvas a comparar
+// mov.cuenta/mov.cuentaId a mano: usa la función compartida.
+function _bancosAliasesCaja(c, index) {
+    return [c.id, c.nombre, index === 0 ? 'efectivo' : '', index === 0 ? 'caja' : ''].filter(Boolean);
+}
+
+function _bancosAliasesDebito(t) {
+    return [t.banco, t.id, t.nombre].filter(Boolean);
+}
+
 function _bancosCalcularSaldosDesdeMovimientos() {
     const tarjetas = StorageService.get("tarjetasConfig", []);
     const movimientos = StorageService.get("movimientosCaja", []);
     const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "Efectivo Principal", saldo: 0 }]);
     const cuentasDebito = tarjetas.filter(t => t.tipo === "debito");
-    const cajaDefaultId = cajas[0]?.id || "efectivo";
+
+    const cajasConAliases = cajas.map((c, index) => ({ id: c.id, aliases: _bancosAliasesCaja(c, index) }));
+    const debitoConAliases = cuentasDebito.map(t => ({ id: t.banco, aliases: _bancosAliasesDebito(t) }));
 
     const saldosCajas = {};
     cajas.forEach(c => saldosCajas[c.id] = 0);
@@ -784,17 +801,24 @@ function _bancosCalcularSaldosDesdeMovimientos() {
     movimientos.forEach(m => {
         const esIngreso = String(m.tipo || '').toLowerCase() === "ingreso";
         const monto = parseFloat(m.monto) || 0;
-        const cuentaRaw = m.cuenta || m.cuentaId || m.metodoPago || m.medioPago || 'efectivo';
-        const cuentaMov = (cuentaRaw === "efectivo" || cuentaRaw === "caja") ? cajaDefaultId : cuentaRaw;
+        const signo = esIngreso ? monto : -monto;
 
-        if (saldosCajas[cuentaMov] !== undefined) {
-            const idCajaAfectada = cuentaMov;
-            if (saldosCajas[idCajaAfectada] !== undefined) {
-                saldosCajas[idCajaAfectada] += esIngreso ? monto : -monto;
-            }
-        } else if (saldosDebito[cuentaMov] !== undefined) {
-            saldosDebito[cuentaMov] += esIngreso ? monto : -monto;
+        // Se prueba primero contra las cajas de efectivo y luego contra los bancos
+        // débito, usando TODOS los candidatos de identidad del movimiento (no solo
+        // el primero que traiga valor), para que nunca quede huérfano ni se cuele
+        // en la cuenta equivocada por una etiqueta decorada que no calza textual.
+        const cajaMatch = cajasConAliases.find(c => window.movimientoPerteneceACuenta(m, c.aliases));
+        if (cajaMatch) {
+            saldosCajas[cajaMatch.id] += signo;
+            return;
         }
+        const bancoMatch = debitoConAliases.find(t => window.movimientoPerteneceACuenta(m, t.aliases));
+        if (bancoMatch) {
+            saldosDebito[bancoMatch.id] += signo;
+        }
+        // Si no matchea ninguna, el movimiento no trae identidad de cuenta reconocible:
+        // se deja fuera de ambos totales en vez de forzarlo a la caja principal por
+        // adivinanza. Se puede detectar y reasignar desde Corte de Caja > pestaña "Todas".
     });
 
     return { saldosCajas, saldosDebito, cajas, cuentasDebito };

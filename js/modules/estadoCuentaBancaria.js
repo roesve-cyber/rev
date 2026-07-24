@@ -55,10 +55,15 @@ function _obtenerCuentasLiquidezECB() {
     return lista;
 }
 
-// 🔑 Normaliza a qué cuenta pertenece un movimiento (misma regla que _bancosCalcularSaldosDesdeMovimientos)
-function _claveMovimientoECB(m, cajaDefaultId) {
-    const cuentaRaw = m.cuenta || m.cuentaId || m.metodoPago || m.medioPago || 'efectivo';
-    return (cuentaRaw === 'efectivo' || cuentaRaw === 'caja') ? cajaDefaultId : cuentaRaw;
+// 🔑 Normaliza a qué cuenta pertenece un movimiento — delega en la ÚNICA función
+// compartida con bancos.js y corte-caja.js (window.movimientoPerteneceACuenta),
+// para que este estado de cuenta NUNCA cuente un movimiento bajo una cuenta
+// distinta a la que le asignan Mis Cuentas y Corte de Caja.
+function _perteneceCuentaECB(mov, cuentaInfo, cajaDefaultId) {
+    const aliases = cuentaInfo.tipo === 'caja'
+        ? [cuentaInfo.clave, cuentaInfo.nombre, String(cuentaInfo.clave) === String(cajaDefaultId) ? 'efectivo' : '', String(cuentaInfo.clave) === String(cajaDefaultId) ? 'caja' : ''].filter(Boolean)
+        : [cuentaInfo.clave, cuentaInfo.nombre].filter(Boolean);
+    return window.movimientoPerteneceACuenta(mov, aliases);
 }
 
 // 🎯 FUNCIÓN PRINCIPAL: arma el estado de cuenta de una cuenta en un rango
@@ -74,7 +79,7 @@ window.obtenerEstadoCuentaBancaria = function(claveCuenta, fechaDesde, fechaHast
 
     // Filtra movimientos de ESTA cuenta y los ordena cronológicamente (más antiguo primero)
     const movsCuenta = movimientos
-        .filter(m => String(_claveMovimientoECB(m, cajaDefaultId)) === String(cuentaInfo.clave))
+        .filter(m => _perteneceCuentaECB(m, cuentaInfo, cajaDefaultId))
         .map(m => ({ ...m, _fechaObj: _fechaObjECB(m.fecha) }))
         .sort((a, b) => a._fechaObj - b._fechaObj);
 

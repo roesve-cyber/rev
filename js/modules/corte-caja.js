@@ -138,14 +138,18 @@
         const movimientos = StorageService.get('movimientosCaja', []);
         const bancos = bancarias.map((c, index) => {
             const aliases = [c.id, c.banco, c.nombre].filter(Boolean);
-            const movCuenta = sumarNetoMovimientos(movimientos, aliases);
+            // El saldo recien calculado a partir de movimientosCaja (con la misma
+            // función de identidad de cuenta que usa todo el sistema) es siempre la
+            // fuente confiable; el campo "saldo" guardado puede haber quedado
+            // desactualizado o contaminado por una version anterior del resolvedor
+            // y ya no se usa como preferente.
             const saldoBase = Number(c.saldoInicial || 0);
-            const saldoGuardado = Number(c.saldo || 0);
+            const movCuenta = sumarNetoMovimientos(movimientos, aliases);
             return {
                 id: String(c.banco || c.id || `banco_${index + 1}`),
                 nombre: c.nombre || c.banco || `Banco ${index + 1}`,
                 tipo: 'banco',
-                saldoActual: saldoBase + (saldoGuardado || movCuenta),
+                saldoActual: saldoBase + movCuenta,
                 aliases
             };
         });
@@ -155,13 +159,17 @@
 
     function coincideCuenta(mov, cuenta) {
         if (!cuenta || cuenta.id === 'todas') return true;
-        
-        // CORRECCIÓN: 'etiquetaCuenta' es el campo real de identidad de cuenta (se usa para mostrarla
-        // en las tablas); debe ir antes que 'origen' y muy por delante de 'metodoPago'/'medioPago',
-        // que describen la FORMA de pago, no a qué cuenta pertenece el movimiento.
-        const valorMov = normalizarId(mov.etiquetaCuenta || mov.cuenta || mov.cuentaId || mov.origen || mov.metodoPago || mov.medioPago || 'efectivo');
-        
-        return cuenta.aliases.some(alias => normalizarId(alias) === valorMov);
+        // Única fuente de verdad para "de qué cuenta es este movimiento", compartida
+        // con Mis Cuentas (bancos.js) y el Estado de Cuenta Bancario. Nunca vuelvas a
+        // comparar mov.cuenta/mov.cuentaId a mano aquí: si hace falta ajustar la
+        // prioridad de campos, se ajusta UNA sola vez en window.movimientoPerteneceACuenta.
+        return window.movimientoPerteneceACuenta(mov, cuenta.aliases);
+    }
+
+    // Movimiento que no calza con NINGUNA cuenta/caja/banco conocida (huérfano):
+    // se detecta para poder mostrarlo, nunca para adivinar dónde meterlo.
+    function movimientoEsHuerfano(mov, todasLasCuentas) {
+        return !todasLasCuentas.some(c => window.movimientoPerteneceACuenta(mov, c.aliases));
     }
 
     function sumarNetoMovimientos(movimientos, aliases, desdeExclusive = null, hastaInclusive = null) {
@@ -369,6 +377,15 @@
         const egresos = movimientos.filter(m => m._tipo !== 'ingreso').reduce((s, m) => s + m._monto, 0);
         const neto = ingresos - egresos;
 
+        // Movimientos del periodo (de cualquier cuenta) que no calzan con NINGUNA
+        // caja/banco conocido: se muestran aparte para que Roberto los reasigne a
+        // mano, en vez de dejarlos invisibles o que se cuelen por adivinanza.
+        const huerfanos = (Array.isArray(movimientosRaw) ? movimientosRaw : [])
+            .filter(m => Number(m.monto || 0) > 0)
+            .map((m, index) => ({ ...m, _fechaObj: parseFechaLocal(m.fecha || m.fechaISO || m.createdAt), _monto: Number(m.monto || 0), _idx: index }))
+            .filter(m => m._fechaObj >= inicio && m._fechaObj <= fin)
+            .filter(m => movimientoEsHuerfano(m, cuentas));
+
         const cuentasIncluidas = cuenta.id === 'todas' ? cuentas : [cuenta];
         const saldoActual = cuentasIncluidas.reduce((s, c) => s + Number(c.saldoActual || 0), 0);
         const aliases = cuentasIncluidas.flatMap(c => c.aliases);
@@ -426,6 +443,7 @@
             neto,
             saldoFinalSistema,
             movimientos,
+            huerfanos,
             porCategoria: Object.values(porCategoria).sort((a, b) => (b.ingresos + b.egresos) - (a.ingresos + a.egresos))
         };
     }
@@ -503,14 +521,30 @@
         };
     }
 
-    function renderSelectCuentas(cuentaId) {
+    // 🗂️ Una pestaña fija por ubicación (caja/banco) + "Todas". Cada pestaña guarda
+    // su propia selección/filtros porque cada cuenta tiene su propio saldo inicial
+    // fijo e independiente (ver saldoInicialFijoCuenta). El input oculto #corteCuenta
+    // se mantiene por compatibilidad: el resto del archivo lee su .value.
+    function renderTabsCuentas(cuentaId) {
         const cuentas = obtenerCuentasCorte();
+        const tabs = [
+            { id: 'todas', nombre: '📊 Todas' },
+            ...cuentas.map(c => ({ id: c.id, nombre: `${c.tipo === 'banco' ? '🏦' : '💵'} ${c.nombre}` }))
+        ];
         return `
-            <select id="corteCuenta" onchange="renderCorteCaja()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
-                <option value="todas" ${cuentaId === 'todas' ? 'selected' : ''}>Todas las cajas y cuentas</option>
-                ${cuentas.map(c => `<option value="${esc(c.id)}" ${String(cuentaId) === String(c.id) ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}
-            </select>`;
+            <input type="hidden" id="corteCuenta" value="${esc(cuentaId)}">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid #e2e8f0;padding-bottom:0;margin-bottom:14px;">
+                ${tabs.map(t => {
+                    const activa = String(cuentaId) === String(t.id);
+                    return `<button onclick="cambiarPestanaCorteCaja('${escJs(t.id)}')" style="padding:10px 16px;border:0;border-radius:8px 8px 0 0;cursor:pointer;font-weight:800;font-size:13px;background:${activa ? '#1e40af' : '#f1f5f9'};color:${activa ? 'white' : '#475569'};border-bottom:3px solid ${activa ? '#1e40af' : 'transparent'};">${esc(t.nombre)}</button>`;
+                }).join('')}
+            </div>`;
     }
+
+    window.cambiarPestanaCorteCaja = function(cuentaId) {
+        guardarUbicacionFijaCorte(cuentaId);
+        renderCorteCaja();
+    };
 
     function renderKpi(titulo, valor, color, subtitulo = '', valorId = '', subtituloId = '') {
         return `
@@ -662,11 +696,21 @@
         const saldosInicialesManuales = window._saldosInicialesManuales || {};
         const saldoInicialGuardado = saldosInicialesManuales[filtros.cuentaId] || '';
 
+        const huerfanosHTML = (resumen.huerfanos && resumen.huerfanos.length > 0) ? `
+            <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;margin-bottom:16px;color:#7f1d1d;">
+                <strong>⚠️ ${resumen.huerfanos.length} movimiento(s) del periodo sin cuenta reconocida</strong>
+                <div style="font-size:12px;margin-top:4px;">No calzan con ninguna caja o banco registrado, así que <b>nunca</b> se cuentan por adivinanza en ningún corte. Revísalos y corrige su cuenta desde donde se originaron (venta, gasto, abono, etc.).</div>
+                <ul style="margin:8px 0 0 18px;padding:0;font-size:12px;">
+                    ${resumen.huerfanos.slice(0, 6).map(m => `<li>${esc(window.formatearFechaMX ? window.formatearFechaMX(m.fecha) : (m.fecha || '-'))} — ${esc(m.concepto || '-')} — ${dinero(m._monto)}</li>`).join('')}
+                    ${resumen.huerfanos.length > 6 ? `<li>${resumen.huerfanos.length - 6} más...</li>` : ''}
+                </ul>
+            </div>` : '';
+
         cont.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
                 <div>
                     <h3 style="margin:0;color:#0f172a;">Cierre operativo</h3>
-                    <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Base: movimientosCaja. El guardado del corte no altera saldos.</p>
+                    <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Base: movimientosCaja. El guardado del corte no altera saldos. Cada caja/cuenta tiene su propio saldo inicial fijo: solo cambia si lo editas a mano o al guardar un nuevo corte de esa misma cuenta.</p>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button onclick="renderCorteCaja()" style="padding:10px 16px;background:#0f766e;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">🔄 Actualizar</button>
@@ -674,6 +718,9 @@
                     <button onclick="imprimirCorteActual()" style="padding:10px 16px;background:#475569;color:white;border:0;border-radius:6px;cursor:pointer;font-weight:900;">PDF / Ticket / Imagen</button>
                 </div>
             </div>
+
+            ${renderTabsCuentas(filtros.cuentaId)}
+            ${huerfanosHTML}
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;background:white;border:1px solid #e2e8f0;border-radius:10px;padding:15px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <div>
@@ -685,12 +732,9 @@
                     <input id="corteFechaFin" type="date" value="${esc(filtros.fechaFin)}" onchange="renderCorteCaja()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
                 </div>
                 <div>
-                    <label style="font-size:11px;font-weight:800;color:#64748b;">CAJA / CUENTA</label>
-                    ${renderSelectCuentas(filtros.cuentaId)}
-                </div>
-                <div>
                     <label style="font-size:11px;font-weight:800;color:#64748b;">SALDO INICIAL MANUAL (opcional)</label>
                     <input id="corteSaldoInicialManual" type="number" step="0.01" value="${esc(saldoInicialGuardado)}" placeholder="Dejar vacío para calcular automático" onchange="guardarSaldoInicialManualCuenta(); recalcularSeleccionCorte()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+                    <small style="color:#94a3b8;">Cuenta actual: <b>${esc(resumen.cuenta.nombre)}</b></small>
                 </div>
             </div>
 
