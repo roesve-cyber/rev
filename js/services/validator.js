@@ -93,6 +93,49 @@ window.obtenerFechaCDMX = function(fechaManual = null) {
     return window.getFechaLocalMX(fechaManual);
 };
 
+// ============================================================================
+// 🔑 RESOLUCIÓN ÚNICA: ¿A QUÉ CUENTA (CAJA/BANCO) PERTENECE UN MOVIMIENTO?
+// ----------------------------------------------------------------------------
+// Antes existían 3-4 copias de esta lógica (bancos.js, corte-caja.js,
+// reportes.js...), cada una con su propio orden de prioridad de campos. Eso
+// provocaba que el MISMO movimiento apareciera bajo una caja en "Mis Cuentas"
+// y bajo otra distinta (o en ninguna) en "Corte de Caja". Esta es ahora la
+// ÚNICA fuente de verdad: todos los módulos deben llamar a
+// window.movimientoPerteneceACuenta(mov, aliasesDeLaCuenta) y a ninguna otra
+// comparación manual de mov.cuenta/mov.cuentaId/etc.
+// ============================================================================
+
+window.normalizarIdCuenta = function(valor) {
+    return String(valor || '').trim().toLowerCase().replace(/\s+/g, '_');
+};
+
+// Todos los campos que podrían identificar la cuenta real de un movimiento,
+// en orden de confiabilidad. Se devuelven TODOS (no solo el primero que traiga
+// algo) porque un campo como 'etiquetaCuenta' puede ser una etiqueta decorada
+// ("🏦 BBVA Débito") que nunca calzará textualmente con el alias de la cuenta,
+// mientras que 'cuenta' o 'cuentaId' sí. Probar contra todos evita falsos
+// negativos (movimiento que no aparece en NINGUNA caja) y falsos positivos
+// (movimiento que aparece en la caja equivocada).
+window.candidatosCuentaMovimiento = function(mov) {
+    if (!mov) return ['efectivo'];
+    const identidad = [mov.etiquetaCuenta, mov.cuenta, mov.cuentaId, mov.origen].filter(Boolean);
+    if (identidad.length) return identidad;
+    // Último recurso: campos que describen la FORMA de pago, no la cuenta.
+    // Solo se usan si el movimiento no trae ningún dato de identidad real.
+    return [mov.metodoPago || mov.medioPago || 'efectivo'];
+};
+
+// ÚNICA función de verdad para "¿este movimiento es de esta cuenta?".
+// aliases = lista de identificadores válidos de la cuenta (id, nombre, banco, etc.)
+window.movimientoPerteneceACuenta = function(mov, aliases) {
+    const listaAlias = (Array.isArray(aliases) ? aliases : [aliases])
+        .filter(Boolean)
+        .map(window.normalizarIdCuenta);
+    if (!listaAlias.length) return false;
+    const candidatos = window.candidatosCuentaMovimiento(mov).map(window.normalizarIdCuenta);
+    return candidatos.some(c => listaAlias.includes(c));
+};
+
 // Función de escape global para limpiar texto
 window._esc = function(estu) {
     if (!estu) return "";
