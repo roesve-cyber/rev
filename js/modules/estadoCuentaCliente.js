@@ -142,8 +142,55 @@ function _analizarFrecuencia(abonos) {
 }
 
 // 🎯 FUNCIÓN PRINCIPAL: Obtener estado consolidado de cliente
+// 📦 Helpers de APARTADOS dentro del Estado de Cuenta Consolidado.
+// Reutilizamos las funciones fuente de apartados.js cuando existen (son globales
+// por ser declaraciones de función de nivel superior en un script clásico), y
+// caemos a un cálculo local equivalente si el módulo no está cargado.
+function _eccApartadoAbonosVigentes(ap) {
+    if (typeof _apartadoAbonosVigentes === 'function') return _apartadoAbonosVigentes(ap);
+    return (ap?.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
+}
+
+function _eccApartadoAbonado(ap) {
+    if (typeof _apartadoTotalPagado === 'function') return _apartadoTotalPagado(ap);
+    return (Number(ap?.enganche || 0) || 0) + _eccApartadoAbonosVigentes(ap).reduce((s, a) => s + (Number(a.monto) || 0), 0);
+}
+
+// Clasifica el estado real del apartado. "esReal" indica si debe sumar a los
+// totales consolidados: un apartado Migrado a Crédito ya se refleja en la venta
+// a crédito resultante (se listaría dos veces si también sumara aquí), y uno
+// Cancelado no representa una cuenta por cobrar vigente.
+function _eccApartadoEstadoInfo(ap) {
+    const raw = String(ap?.estado || '').toLowerCase();
+    if (raw.includes('migrado') || raw.includes('conversion')) return { label: 'Migrado', esReal: false };
+    if (raw.includes('cancel')) return { label: 'Cancelado', esReal: false };
+    if (raw.includes('liquidado')) return { label: 'Saldado', esReal: true };
+    return { label: 'Vigente', esReal: true };
+}
+
+function _eccApartadoSaldoMostrado(ap, esReal) {
+    if (!esReal) return 0;
+    if (typeof _apartadoSaldoReal === 'function') return Math.max(0, _apartadoSaldoReal(ap));
+    return Math.max(0, (Number(ap?.importeApartado || ap?.total || 0) || 0) - _eccApartadoAbonado(ap));
+}
+
+// Colores de badge por estado (compartidos entre cuentas a crédito y apartados)
+function _eccBadgeColores(estadoTexto) {
+    const mapa = {
+        'Saldado': { bg: '#d1fae5', color: '#065f46' },
+        'Vencido': { bg: '#fee2e2', color: '#7f1d1d' },
+        'Próx. Vencer': { bg: '#fef3c7', color: '#92400e' },
+        'Al Corriente': { bg: '#e0f2fe', color: '#0c4a6e' },
+        'Vigente': { bg: '#e0f2fe', color: '#0c4a6e' },
+        'Migrado': { bg: '#ede9fe', color: '#5b21b6' },
+        'Cancelado': { bg: '#f1f5f9', color: '#475569' }
+    };
+    return mapa[estadoTexto] || { bg: '#e0f2fe', color: '#0c4a6e' };
+}
+
 window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '') {
     const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+    const apartadosTodos = StorageService.get('apartados', []);
     const idBuscado = String(clienteId || '').trim();
     const nombreBuscado = _normalizarCuentaTexto(clienteNombre);
     
@@ -154,8 +201,16 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
         return (idBuscado && idCuenta && idCuenta === idBuscado) ||
                (nombreBuscado && nombreCuenta && nombreCuenta === nombreBuscado);
     });
+
+    // Filtrar apartados del cliente (misma lógica de coincidencia por id/nombre)
+    const apartadosCliente = apartadosTodos.filter(a => {
+        const idAp = String(a?.clienteId ?? '').trim();
+        const nombreAp = _normalizarCuentaTexto(a?.clienteNombre);
+        return (idBuscado && idAp && idAp === idBuscado) ||
+               (nombreBuscado && nombreAp && nombreAp === nombreBuscado);
+    });
     
-    if (cuentasCliente.length === 0) {
+    if (cuentasCliente.length === 0 && apartadosCliente.length === 0) {
         return {
             clienteId,
             clienteNombre,
@@ -207,6 +262,7 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
         
         return {
             folio,
+            tipo: 'Crédito',
             fechaVenta,
             fechaVentaCorta: _fechaCortaCuenta(fechaVenta),
             totalVenta: totalCredito,
@@ -214,7 +270,56 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
             diasAntiguo,
             abonos: abonos.length,
             ultimoAbono: abonos.length > 0 ? _fechaCortaCuenta(_fechaAbonoCuenta(abonos[abonos.length - 1])) : '-',
-            estado: estadoEstatus.estado
+            estado: estadoEstatus.estado,
+            incluidoEnTotales: true
+        };
+    });
+    
+    // 📦 Agregar apartados del cliente al mismo detalle consolidado
+    const detallesApartados = apartadosCliente.map(ap => {
+        const folio = ap.folio;
+        const { label: estadoLabel, esReal } = _eccApartadoEstadoInfo(ap);
+        const totalApartado = Number(ap.importeApartado || ap.total || 0) || 0;
+        const abonosVigentes = _eccApartadoAbonosVigentes(ap);
+        const abonadoApartado = _eccApartadoAbonado(ap);
+        const saldo = _eccApartadoSaldoMostrado(ap, esReal);
+
+        // Solo los apartados "reales" (vigentes o saldados) suman a los totales
+        // consolidados; los migrados ya se cuentan en su venta a crédito resultante
+        // y los cancelados no son una cuenta por cobrar vigente.
+        if (esReal) {
+            totalSaldoConsolidado += saldo;
+            totalVendido += totalApartado;
+            totalAbonado += abonadoApartado;
+        }
+
+        abonosVigentes.forEach(a => {
+            abonosConsolidados.push({ ...a, folioReferencia: folio });
+        });
+
+        const fechaApartado = ap.fechaApartado;
+        if (fechaApartado) {
+            const d = window.parseFechaMX ? window.parseFechaMX(fechaApartado) : new Date(fechaApartado);
+            if (d && !isNaN(d.getTime())) {
+                if (!fechaMasAntigua || d < fechaMasAntigua) fechaMasAntigua = d;
+            }
+        }
+
+        const diasAntiguo = _diasTranscurridos(fechaApartado);
+
+        return {
+            folio,
+            tipo: 'Apartado',
+            fechaVenta: fechaApartado,
+            fechaVentaCorta: _fechaCortaCuenta(fechaApartado),
+            totalVenta: totalApartado,
+            saldo,
+            diasAntiguo,
+            abonos: abonosVigentes.length,
+            ultimoAbono: abonosVigentes.length > 0 ? _fechaCortaCuenta(_fechaAbonoCuenta(abonosVigentes[abonosVigentes.length - 1])) : '-',
+            estado: estadoLabel,
+            incluidoEnTotales: esReal,
+            folioCredito: ap.folioCredito || null
         };
     });
     
@@ -226,17 +331,18 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
     // nunca de la copia congelada que quedó guardada en la cuenta al
     // momento de la venta. Esto evita que ediciones de nombre/teléfono
     // queden "atrapadas" en reportes antiguos.
-    const snapshot = cuentasCliente[0];
+    const snapshot = cuentasCliente[0] || null;
+    const snapshotApartado = apartadosCliente[0] || null;
     const canonico = (typeof window.obtenerClienteCanonico === 'function')
-        ? window.obtenerClienteCanonico(clienteId, clienteNombre, _clienteTelefonoCuenta(snapshot))
+        ? window.obtenerClienteCanonico(clienteId, clienteNombre, snapshot ? _clienteTelefonoCuenta(snapshot) : '')
         : null;
 
     return {
         existe: true,
         clienteId: canonico?.id ?? clienteId,
-        clienteNombre: canonico?.nombre || _clienteNombreCuenta(snapshot) || clienteNombre,
-        clienteTelefono: canonico?.telefono || _clienteTelefonoCuenta(snapshot),
-        clienteDireccion: canonico?.direccion || _clienteDireccionCuenta(snapshot),
+        clienteNombre: canonico?.nombre || (snapshot ? _clienteNombreCuenta(snapshot) : '') || snapshotApartado?.clienteNombre || clienteNombre,
+        clienteTelefono: canonico?.telefono || (snapshot ? _clienteTelefonoCuenta(snapshot) : '-'),
+        clienteDireccion: canonico?.direccion || (snapshot ? _clienteDireccionCuenta(snapshot) : '-'),
         
         // CONSOLIDADOS
         totalVendido,
@@ -250,9 +356,10 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
         colorEstatus: estadoConsolidado.color,
         frecuenciaPago,
         
-        // DETALLE
-        cuentas: detallesCuentas,
+        // DETALLE (ventas a crédito + apartados)
+        cuentas: [...detallesCuentas, ...detallesApartados],
         abonosTotal: abonosConsolidados.length,
+        tieneApartados: detallesApartados.length > 0,
         
         // PRÓXIMA FECHA (estimada)
         proximaFecha: _estimarProximaCobro(abonosConsolidados)
@@ -379,37 +486,58 @@ function _eccFiltrarCuentasPorSaldo(cuentas, filtro) {
 }
 
 function _eccFilaFolio(c) {
+    const esApartado = c.tipo === 'Apartado';
+    const badge = _eccBadgeColores(c.estado);
+    const onclickFolio = esApartado ? `window._eccVerDetalleApartado('${c.folio}')` : `abrirDetalleVentaECC('${c.folio}')`;
+    const notaTipo = esApartado && !c.incluidoEnTotales
+        ? `<div style="font-size:10px; color:#94a3b8; font-weight:normal;">${c.estado === 'Migrado' ? `→ crédito ${c.folioCredito || ''}` : 'no suma a totales'}</div>`
+        : '';
     return `
         <tr style="border-bottom:1px solid #e2e8f0; background:${c.saldo <= 0.01 ? '#f0fdf4' : 'white'};">
-            <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="abrirDetalleVentaECC('${c.folio}'); return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer;">${_escCuenta(c.folio)}</a></td>
+            <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="${onclickFolio}; return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer;">${_escCuenta(c.folio)}</a>${notaTipo}</td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${esApartado ? '📦 Apartado' : '🧾 Crédito'}</td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.fechaVentaCorta}</td>
             <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dinéroCuenta(c.totalVenta)}</td>
             <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:${c.saldo > 0 ? '#7f1d1d' : '#065f46'};"><span style="background:${c.saldo <= 0.01 ? '#d1fae5' : '#fee2e2'}; padding:4px 8px; border-radius:4px; display:inline-block;">${_dinéroCuenta(c.saldo)}</span></td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.diasAntiguo}</td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><strong>${c.abonos}</strong></td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${c.ultimoAbono}</td>
-            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${c.estado === 'Saldado' ? '#d1fae5' : c.estado === 'Vencido' ? '#fee2e2' : c.estado === 'Próx. Vencer' ? '#fef3c7' : '#e0f2fe'}; color:${c.estado === 'Saldado' ? '#065f46' : c.estado === 'Vencido' ? '#7f1d1d' : c.estado === 'Próx. Vencer' ? '#92400e' : '#0c4a6e'}; padding:6px 12px; border-radius:6px; display:inline-block; font-weight:bold; font-size:11px;">${c.estado}</span></td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${badge.bg}; color:${badge.color}; padding:6px 12px; border-radius:6px; display:inline-block; font-weight:bold; font-size:11px;">${c.estado}</span></td>
         </tr>
     `;
 }
+
+// Visor mínimo de detalle para folios de tipo Apartado (folio distinto al de ventas/cuentas por cobrar)
+window._eccVerDetalleApartado = function(folio) {
+    if (typeof window.abrirHistorialAbonos === 'function' && document.getElementById('modalHistorialAbonos')) {
+        return window.abrirHistorialAbonos(folio);
+    }
+    const apartados = StorageService.get('apartados', []);
+    const ap = apartados.find(a => a.folio === folio);
+    if (!ap) return alert('❌ No se encontró el apartado.');
+    const abonado = _eccApartadoAbonado(ap);
+    const { label: estadoLabel } = _eccApartadoEstadoInfo(ap);
+    alert(`📦 APARTADO: ${folio}\nCliente: ${ap.clienteNombre || '-'}\nImporte: ${_dinéroCuenta(ap.importeApartado)}\nAbonado: ${_dinéroCuenta(abonado)}\nEstado: ${estadoLabel}\n\nPara ver el historial completo de abonos, entra a la vista de Apartados.`);
+};
 
 function _eccConstruirBloqueTabla(estado, filtro) {
     const cuentasFiltradas = _eccFiltrarCuentasPorSaldo(estado.cuentas, filtro);
     const etiquetaFiltro = filtro === 'pendiente' ? 'con saldo pendiente' : filtro === 'saldada' ? 'saldadas' : 'totales';
     const filasHtml = cuentasFiltradas.length > 0
         ? cuentasFiltradas.map(c => _eccFilaFolio(c)).join('')
-        : `<tr><td colspan="8" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
+        : `<tr><td colspan="9" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
 
     return `
-        <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio de Venta</h3>
-        <p style="margin:0 0 12px 0; color:#64748b; font-size:12px;">Mostrando ${cuentasFiltradas.length} de ${estado.cuentas.length} folios (${etiquetaFiltro})</p>
+        <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio (Ventas a Crédito y Apartados)</h3>
+        <p style="margin:0 0 12px 0; color:#64748b; font-size:12px;">Mostrando ${cuentasFiltradas.length} de ${estado.cuentas.length} folios (${etiquetaFiltro})${estado.tieneApartados ? ' · incluye apartados' : ''}</p>
         <div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse; font-size:13px;">
                 <thead>
                     <tr style="background:#1e40af; color:white; font-weight:bold;">
                         <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Folio</th>
-                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha Venta</th>
-                        <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Total Venta</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Tipo</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha</th>
+                        <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Total</th>
                         <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Saldo</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Días</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Abonos</th>
@@ -626,6 +754,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                 <thead>
                     <tr>
                         <th>Folio</th>
+                        <th style="text-align:center;">Tipo</th>
                         <th style="text-align:center;">Fecha</th>
                         <th style="text-align:right;">Total</th>
                         <th style="text-align:right;">Saldo</th>
@@ -637,6 +766,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                     ${cuentasImprimir.map(c => `
                         <tr>
                             <td><strong>${_escCuenta(c.folio)}</strong></td>
+                            <td style="text-align:center;">${c.tipo === 'Apartado' ? 'Apartado' : 'Crédito'}</td>
                             <td style="text-align:center;">${c.fechaVentaCorta}</td>
                             <td style="text-align:right;">${_dinéroCuenta(c.totalVenta)}</td>
                             <td style="text-align:right; font-weight:bold; color:${c.saldo > 0 ? '#dc2626' : '#059669'};">${_dinéroCuenta(c.saldo)}</td>
@@ -671,7 +801,7 @@ window.imprimirTicketEstadoCuentaCliente = function() {
     const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
     
     const lineasCuentas = cuentasImprimir.map(c => `
-        <div><b>FOLIO: ${c.folio}</b></div>
+        <div><b>FOLIO: ${c.folio}</b> ${c.tipo === 'Apartado' ? '(Apartado)' : ''}</div>
         <div style="display:flex; justify-content:space-between;"><span>Total:</span><span>${_dinéroCuenta(c.totalVenta)}</span></div>
         <div style="display:flex; justify-content:space-between;"><span>Saldo:</span><span style="font-weight:bold;">${_dinéroCuenta(c.saldo)}</span></div>
         <div style="display:flex; justify-content:space-between;"><span>Estatus:</span><span>${c.estado}</span></div>

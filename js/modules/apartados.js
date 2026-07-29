@@ -126,16 +126,49 @@ function obtenerApartados() {
     return StorageService.get('apartados', []);
 }
 
+// Clasifica el estado de un apartado en una de 4 categorías fijas para el filtro de la vista.
+function _apartadoClaveFiltro(ap) {
+    const raw = String(ap?.estado || '').toLowerCase();
+    if (raw.includes('migrado') || raw.includes('conversion')) return 'migrado';
+    if (raw.includes('cancel')) return 'cancelado';
+    if (raw.includes('liquidado')) return 'saldado';
+    return 'vigente';
+}
+
+window._apartadosFiltroEstado = window._apartadosFiltroEstado || 'todos';
+
+window._filtrarApartadosPorEstado = function() {
+    window._apartadosFiltroEstado = document.getElementById('apartadosFiltroEstado')?.value || 'todos';
+    renderApartados();
+};
+
 function renderApartados() {
     const apartados = obtenerApartados();
+    const filtro = window._apartadosFiltroEstado || 'todos';
+    const apartadosFiltrados = filtro === 'todos' ? apartados : apartados.filter(a => _apartadoClaveFiltro(a) === filtro);
+
     let html = `<h2>📦 Apartados</h2>`;
+
+    html += `
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:15px;">
+        <label style="font-weight:bold; color:#1e293b; font-size:14px;">🔎 Filtrar por estado:</label>
+        <select id="apartadosFiltroEstado" onchange="window._filtrarApartadosPorEstado()"
+                style="padding:10px 14px; border:2px solid #cbd5e1; border-radius:8px; font-size:14px; font-weight:bold; background:white; color:#1e293b;">
+            <option value="todos" ${filtro === 'todos' ? 'selected' : ''}>Todos</option>
+            <option value="vigente" ${filtro === 'vigente' ? 'selected' : ''}>Vigente</option>
+            <option value="saldado" ${filtro === 'saldado' ? 'selected' : ''}>Saldado</option>
+            <option value="migrado" ${filtro === 'migrado' ? 'selected' : ''}>Migrado a Crédito</option>
+            <option value="cancelado" ${filtro === 'cancelado' ? 'selected' : ''}>Cancelado</option>
+        </select>
+        <span style="color:#64748b; font-size:13px;">Mostrando ${apartadosFiltrados.length} de ${apartados.length}</span>
+    </div>`;
     
-    if (apartados.length === 0) {
-        html += '<p>No hay apartados registrados.</p>';
+    if (apartadosFiltrados.length === 0) {
+        html += `<p>No hay apartados ${filtro === 'todos' ? 'registrados' : 'con ese estado'}.</p>`;
     } else {
         html += `<table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Compromiso</th><th>Total</th><th>Abonado</th><th>Pendiente</th><th>Estado</th><th style="text-align:center;">Acciones</th></tr></thead><tbody>`;
         
-        apartados.forEach(a => {
+        apartadosFiltrados.forEach(a => {
             const abonado = _apartadoTotalPagado(a);
             const saldoVisible = _apartadoSaldoReal(a);
             html += `<tr>
