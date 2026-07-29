@@ -314,6 +314,15 @@ window.renderEstadoCuentaClienteSelector = function() {
                 </button>
             </div>
         </div>
+        <div style="min-width:200px;">
+            <label style="display:block; font-weight:bold; margin-bottom:8px; color:#1e293b;">🔎 Filtrar Folios:</label>
+            <select id="eccFiltroSaldo" onchange="window._eccAplicarFiltroSaldo()"
+                    style="width:100%; padding:12px; border:2px solid #cbd5e1; border-radius:8px; font-size:14px; background:white; font-weight:bold; color:#1e293b;">
+                <option value="todas">Todas las cuentas</option>
+                <option value="pendiente">Solo con saldo pendiente</option>
+                <option value="saldada">Solo saldadas</option>
+            </select>
+        </div>
         <div style="display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
             <button onclick="generarEstadoCuentaClienteConsolidado()" 
                     style="padding:12px 24px; background:#1e40af; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">
@@ -354,6 +363,74 @@ window._eccAbrirSelectorCliente = function() {
             window.generarEstadoCuentaClienteConsolidado();
         }
     });
+};
+
+// 🔎 Helpers de filtrado por estado de saldo (todas / con saldo pendiente / saldadas)
+// IMPORTANTE: el filtro solo decide qué folios se listan en la tabla; nunca oculta
+// ni recorta la información de un folio saldado, solo cambia si aparece o no.
+function _eccObtenerFiltroSaldo() {
+    return document.getElementById('eccFiltroSaldo')?.value || 'todas';
+}
+
+function _eccFiltrarCuentasPorSaldo(cuentas, filtro) {
+    if (filtro === 'pendiente') return cuentas.filter(c => c.saldo > 0.01);
+    if (filtro === 'saldada') return cuentas.filter(c => c.saldo <= 0.01);
+    return cuentas;
+}
+
+function _eccFilaFolio(c) {
+    return `
+        <tr style="border-bottom:1px solid #e2e8f0; background:${c.saldo <= 0.01 ? '#f0fdf4' : 'white'};">
+            <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="abrirDetalleVentaECC('${c.folio}'); return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer;">${_escCuenta(c.folio)}</a></td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.fechaVentaCorta}</td>
+            <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dinéroCuenta(c.totalVenta)}</td>
+            <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:${c.saldo > 0 ? '#7f1d1d' : '#065f46'};"><span style="background:${c.saldo <= 0.01 ? '#d1fae5' : '#fee2e2'}; padding:4px 8px; border-radius:4px; display:inline-block;">${_dinéroCuenta(c.saldo)}</span></td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.diasAntiguo}</td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><strong>${c.abonos}</strong></td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${c.ultimoAbono}</td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${c.estado === 'Saldado' ? '#d1fae5' : c.estado === 'Vencido' ? '#fee2e2' : c.estado === 'Próx. Vencer' ? '#fef3c7' : '#e0f2fe'}; color:${c.estado === 'Saldado' ? '#065f46' : c.estado === 'Vencido' ? '#7f1d1d' : c.estado === 'Próx. Vencer' ? '#92400e' : '#0c4a6e'}; padding:6px 12px; border-radius:6px; display:inline-block; font-weight:bold; font-size:11px;">${c.estado}</span></td>
+        </tr>
+    `;
+}
+
+function _eccConstruirBloqueTabla(estado, filtro) {
+    const cuentasFiltradas = _eccFiltrarCuentasPorSaldo(estado.cuentas, filtro);
+    const etiquetaFiltro = filtro === 'pendiente' ? 'con saldo pendiente' : filtro === 'saldada' ? 'saldadas' : 'totales';
+    const filasHtml = cuentasFiltradas.length > 0
+        ? cuentasFiltradas.map(c => _eccFilaFolio(c)).join('')
+        : `<tr><td colspan="8" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
+
+    return `
+        <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio de Venta</h3>
+        <p style="margin:0 0 12px 0; color:#64748b; font-size:12px;">Mostrando ${cuentasFiltradas.length} de ${estado.cuentas.length} folios (${etiquetaFiltro})</p>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr style="background:#1e40af; color:white; font-weight:bold;">
+                        <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Folio</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha Venta</th>
+                        <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Total Venta</th>
+                        <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Saldo</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Días</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Abonos</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Último Abono</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Estatus</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filasHtml}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+// Re-renderiza SOLO la tabla de folios cuando cambia el filtro, sin perder el resto del reporte
+window._eccAplicarFiltroSaldo = function() {
+    const estado = window._estadoClienteActual;
+    const wrap = document.getElementById('eccTablaFoliosWrap');
+    if (!estado || !wrap) return;
+    wrap.innerHTML = _eccConstruirBloqueTabla(estado, _eccObtenerFiltroSaldo());
 };
 
 window.generarEstadoCuentaClienteConsolidado = function() {
@@ -467,39 +544,9 @@ window.generarEstadoCuentaClienteConsolidado = function() {
             </div>
         </div>
         
-        <!-- TABLA DE FOLIOS -->
-        <div style="margin-bottom:30px;">
-            <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio de Venta</h3>
-            <div style="overflow-x:auto;">
-                <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                    <thead>
-                        <tr style="background:#1e40af; color:white; font-weight:bold;">
-                            <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Folio</th>
-                            <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha Venta</th>
-                            <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Total Venta</th>
-                            <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Saldo</th>
-                            <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Días</th>
-                            <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Abonos</th>
-                            <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Último Abono</th>
-                            <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Estatus</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${estado.cuentas.map(c => `
-                            <tr style="border-bottom:1px solid #e2e8f0; background:${c.saldo <= 0.01 ? '#f0fdf4' : 'white'};">
-                                <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="abrirDetalleVentaECC('${c.folio}'); return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer;">${_escCuenta(c.folio)}</a></td>
-                                <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.fechaVentaCorta}</td>
-                                <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dinéroCuenta(c.totalVenta)}</td>
-                                <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:${c.saldo > 0 ? '#7f1d1d' : '#065f46'};"><span style="background:${c.saldo <= 0.01 ? '#d1fae5' : '#fee2e2'}; padding:4px 8px; border-radius:4px; display:inline-block;">${_dinéroCuenta(c.saldo)}</span></td>
-                                <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.diasAntiguo}</td>
-                                <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><strong>${c.abonos}</strong></td>
-                                <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${c.ultimoAbono}</td>
-                                <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${c.estado === 'Saldado' ? '#d1fae5' : c.estado === 'Vencido' ? '#fee2e2' : c.estado === 'Próx. Vencer' ? '#fef3c7' : '#e0f2fe'}; color:${c.estado === 'Saldado' ? '#065f46' : c.estado === 'Vencido' ? '#7f1d1d' : c.estado === 'Próx. Vencer' ? '#92400e' : '#0c4a6e'}; padding:6px 12px; border-radius:6px; display:inline-block; font-weight:bold; font-size:11px;">${c.estado}</span></td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
+        <!-- TABLA DE FOLIOS (filtrable por estado de saldo) -->
+        <div id="eccTablaFoliosWrap" style="margin-bottom:30px;">
+            ${_eccConstruirBloqueTabla(estado, _eccObtenerFiltroSaldo())}
         </div>
         
         <div style="text-align:center; padding:20px; border-top:2px solid #e2e8f0; margin-top:30px; color:#64748b; font-size:12px;">
@@ -523,6 +570,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
     const estado = window._estadoClienteActual;
     const contenido = document.getElementById('contenidoReporteECC');
     if (!contenido) return;
+    const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
     
     const htmlDoc = `
     <!DOCTYPE html>
@@ -586,7 +634,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${estado.cuentas.map(c => `
+                    ${cuentasImprimir.map(c => `
                         <tr>
                             <td><strong>${_escCuenta(c.folio)}</strong></td>
                             <td style="text-align:center;">${c.fechaVentaCorta}</td>
@@ -620,8 +668,9 @@ window.imprimirPdfEstadoCuentaCliente = function() {
 window.imprimirTicketEstadoCuentaCliente = function() {
     if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
     const estado = window._estadoClienteActual;
+    const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
     
-    const lineasCuentas = estado.cuentas.map(c => `
+    const lineasCuentas = cuentasImprimir.map(c => `
         <div><b>FOLIO: ${c.folio}</b></div>
         <div style="display:flex; justify-content:space-between;"><span>Total:</span><span>${_dinéroCuenta(c.totalVenta)}</span></div>
         <div style="display:flex; justify-content:space-between;"><span>Saldo:</span><span style="font-weight:bold;">${_dinéroCuenta(c.saldo)}</span></div>
