@@ -1171,6 +1171,18 @@ window.renderConsultaInventario = function() {
  });
  });
 
+ // Stock en consignacion por producto: suma de cantidadPendiente de todos los
+ // lotes de consignacionesActivas que aun no se han reportado como vendidos.
+ // Esto es lo que sigue fisicamente en la tienda pero no es propiedad del negocio.
+ const consignacionesActivasInv = typeof StorageService !== 'undefined' ? StorageService.get("consignacionesActivas", []) : [];
+ const consignacionPendientePorProd = {};
+ (consignacionesActivasInv || []).forEach(c => {
+ if (!c || !c.productoId) return;
+ const pend = Number(c.cantidadPendiente || 0);
+ if (pend <= 0) return;
+ consignacionPendientePorProd[c.productoId] = (consignacionPendientePorProd[c.productoId] || 0) + pend;
+ });
+
  // 3. Filtrado de Productos
  let productosFiltrados = productosConsulta.filter(p => {
  const proveedorProducto = _invProveedorProducto(p);
@@ -1236,6 +1248,10 @@ window.renderConsultaInventario = function() {
 
  let totalGlobalUnidades = 0;
  let totalGlobalPesos = 0;
+ let subtotalUnidadesPropio = 0;
+ let subtotalPesosPropio = 0;
+ let subtotalUnidadesConsignacion = 0;
+ let subtotalPesosConsignacion = 0;
 
  productosFiltrados.forEach(p => {
  const proveedorProducto = _invProveedorProducto(p);
@@ -1253,6 +1269,20 @@ window.renderConsultaInventario = function() {
 
  totalGlobalUnidades += (p.stock || 0);
  totalGlobalPesos += valorTotal;
+
+ // Division propio vs consignacion para este producto. Se topa al stock
+ // actual por si algun ajuste manual dejo el pendiente de consignacion
+ // por encima de las piezas que realmente hay en el sistema.
+ const stockGeneralProd = Number(p.stock) || 0;
+ const stockConsignacionProd = Math.min(stockGeneralProd, Number(consignacionPendientePorProd[p.id] || 0));
+ const stockPropioProd = Math.max(0, stockGeneralProd - stockConsignacionProd);
+ const valorPropioProd = stockPropioProd * costoPromedio;
+ const valorConsignacionProd = stockConsignacionProd * costoPromedio;
+
+ subtotalUnidadesPropio += stockPropioProd;
+ subtotalPesosPropio += valorPropioProd;
+ subtotalUnidadesConsignacion += stockConsignacionProd;
+ subtotalPesosConsignacion += valorConsignacionProd;
 
  // --- LAGICA DINAMICA DE VARIANTES Y ASIGNACIAN ---
  let desgloseHtml = '';
@@ -1276,7 +1306,7 @@ window.renderConsultaInventario = function() {
  }
 
  // Detectar stock huerfano (stock general mayor a la suma de las variantes)
- const stockGeneral = Number(p.stock) || 0;
+ const stockGeneral = stockGeneralProd;
  const stockSinAsignar = stockGeneral - totalStockVariantes;
 
  // Panel de Asignacion Rapida
@@ -1315,6 +1345,7 @@ window.renderConsultaInventario = function() {
  </td>
  <td style="padding:12px; text-align:center;">
  <span style="font-size:18px; font-weight:bold; color:${stockGeneral>0?'#16a34a':'#dc2626'}">${stockGeneral}</span>
+ ${stockConsignacionProd > 0 ? `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:bold;color:#854d0e;background:#fef3c7;padding:2px 7px;border-radius:10px;">${stockConsignacionProd} en consignacion</span></div>` : ''}
  </td>
  <td style="padding:12px;">${desgloseHtml}</td>
  <td style="padding:12px; text-align:right;">
@@ -1329,14 +1360,29 @@ window.renderConsultaInventario = function() {
  });
 
  // 5. Pie de Tabla con Totales
+ const fmtDinero = v => typeof dinero === 'function' ? dinero(v) : v;
  html += `
  </tbody>
  <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
+ <tr style="border-bottom:1px solid #e2e8f0;">
+ <td style="padding:12px 15px; text-align:right; color:#475569;">Subtotal propio:</td>
+ <td style="padding:12px 15px; text-align:center; font-size:15px; color:#16a34a;">${subtotalUnidadesPropio}</td>
+ <td></td>
+ <td style="padding:12px 15px; text-align:right; font-size:15px; color:#16a34a;">${fmtDinero(subtotalPesosPropio)}</td>
+ <td></td>
+ </tr>
+ <tr style="border-bottom:1px solid #e2e8f0;">
+ <td style="padding:12px 15px; text-align:right; color:#854d0e;">Subtotal en consignacion:</td>
+ <td style="padding:12px 15px; text-align:center; font-size:15px; color:#854d0e;">${subtotalUnidadesConsignacion}</td>
+ <td></td>
+ <td style="padding:12px 15px; text-align:right; font-size:15px; color:#854d0e;">${fmtDinero(subtotalPesosConsignacion)}</td>
+ <td></td>
+ </tr>
  <tr>
- <td style="padding:15px; text-align:right;">TOTALES:</td>
+ <td style="padding:15px; text-align:right;">GRAN TOTAL:</td>
  <td style="padding:15px; text-align:center; font-size:18px; color:#16a34a;">${totalGlobalUnidades}</td>
  <td></td>
- <td style="padding:15px; text-align:right; font-size:18px; color:#1e40af;">${typeof dinero === 'function' ? dinero(totalGlobalPesos) : totalGlobalPesos}</td>
+ <td style="padding:15px; text-align:right; font-size:18px; color:#1e40af;">${fmtDinero(totalGlobalPesos)}</td>
  <td></td>
  </tr>
  </tfoot>
