@@ -5090,25 +5090,37 @@ window.descartarBorradorDevolucionConsignacion = function(folioKey) {
     }
 };
 
+// Devuelve { ok, varianteEncontrada } en vez de fallar en silencio: ok=false
+// significa que el productoId no corresponde a NINGÚN producto del catálogo
+// (registro corrupto/huérfano) y el inventario NO se tocó en absoluto.
+// varianteEncontrada=false significa que sí se descontó el stock general del
+// producto, pero no existía la variante exacta (color/ubicación) para descontar
+// el desglose por bodega.
 function _consigDescontarInventario(productoId, cantidad, color, ubicacion) {
-    if (!productoId || !(cantidad > 0)) return;
+    if (!productoId || !(cantidad > 0)) return { ok: false, motivo: 'sin_producto_o_cantidad' };
     const productos = StorageService.get('productos', []);
     const idx = productos.findIndex(p => String(p.id) === String(productoId));
-    if (idx === -1) return;
+    if (idx === -1) return { ok: false, motivo: 'producto_no_encontrado' };
 
     const prod = productos[idx];
     prod.stock = Math.max(0, (Number(prod.stock) || 0) - cantidad);
 
+    let varianteEncontrada = true;
     if (Array.isArray(prod.variantes)) {
         const variante = prod.variantes.find(v =>
             (v.color || 'General').toUpperCase() === String(color || 'General').toUpperCase() &&
             (v.ubicacion || 'General').toUpperCase() === String(ubicacion || 'General').toUpperCase()
         );
-        if (variante) variante.stock = Math.max(0, (Number(variante.stock) || 0) - cantidad);
+        if (variante) {
+            variante.stock = Math.max(0, (Number(variante.stock) || 0) - cantidad);
+        } else {
+            varianteEncontrada = false;
+        }
     }
 
     productos[idx] = prod;
     StorageService.set('productos', productos);
+    return { ok: true, varianteEncontrada };
 }
 
 window.abrirPreviaDevolucionConsignacion = function(folioKey) {
@@ -5349,6 +5361,8 @@ window.ejecutarDevolucionConsignacion = function(payload) {
 
     let consigArr = StorageService.get('consignacionesActivas', []);
     let totalCantidad = 0, totalImporte = 0;
+    const fallosInventario = [];   // productoId huérfano: el stock NO se tocó
+    const avisosVariante = [];     // se descontó el stock general pero no la variante exacta
 
     items.forEach(it => {
         const idx = consigArr.findIndex(c => String(c.id) === String(it.consignacionId));
@@ -5357,7 +5371,12 @@ window.ejecutarDevolucionConsignacion = function(payload) {
         const cantidad = Math.min(Number(it.cantidad || 0), Number(c.cantidadPendiente || 0));
         if (cantidad <= 0) return;
 
-        _consigDescontarInventario(c.productoId, cantidad, c.color, c.ubicacion);
+        const resultado = _consigDescontarInventario(c.productoId, cantidad, c.color, c.ubicacion);
+        if (!resultado.ok) {
+            fallosInventario.push(`${c.producto} (productoId: ${c.productoId || 'vacío'})`);
+        } else if (!resultado.varianteEncontrada) {
+            avisosVariante.push(`${c.producto} (${c.color || 'General'} / ${c.ubicacion || 'General'})`);
+        }
 
         c.cantidadPendiente = Math.max(0, Number(c.cantidadPendiente || 0) - cantidad);
         c.cantidadDevuelta = Number(c.cantidadDevuelta || 0) + cantidad;
@@ -5378,16 +5397,24 @@ window.ejecutarDevolucionConsignacion = function(payload) {
             modulo: 'Consignaciones',
             entidad: 'folio',
             entidadId: data.folioKey || null,
-            detalle: `Devolución de ${totalCantidad} pieza(s) a proveedor (Acta: ${data.actaFolio || 'N/A'})`,
+            detalle: `Devolución de ${totalCantidad} pieza(s) a proveedor (Acta: ${data.actaFolio || 'N/A'})${fallosInventario.length ? ` — ⚠️ ${fallosInventario.length} SIN DESCUENTO DE INVENTARIO (producto no encontrado)` : ''}`,
             monto: totalImporte,
-            severidad: 'riesgo',
-            datos: { items, actaFolio: data.actaFolio || null }
+            severidad: fallosInventario.length ? 'critico' : 'riesgo',
+            datos: { items, actaFolio: data.actaFolio || null, fallosInventario, avisosVariante }
         });
     }
 
     document.querySelector('[data-modal="previa-devolucion-consignacion"]')?.remove();
     if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
-    alert(`✅ Devolución ejecutada: ${totalCantidad} pieza(s) por ${dinero(totalImporte)}.\nSe descontó del inventario y se actualizó la consignación.`);
+
+    let mensaje = `✅ Devolución ejecutada: ${totalCantidad} pieza(s) por ${dinero(totalImporte)}.`;
+    if (fallosInventario.length > 0) {
+        mensaje += `\n\n🚨 ATENCIÓN — el inventario NO se descontó para:\n- ${fallosInventario.join('\n- ')}\n\nEl productoId guardado en esta consignación ya no corresponde a ningún producto de tu catálogo (registro huérfano). La consignación quedó marcada como devuelta, pero debes corregir el stock de ese/esos producto(s) manualmente en Inventario.`;
+    }
+    if (avisosVariante.length > 0) {
+        mensaje += `\n\n⚠️ Se descontó del stock general pero NO se encontró la ubicación/color exacto para:\n- ${avisosVariante.join('\n- ')}\n\nRevisa el desglose por bodega en Inventario, puede quedar descuadrado ahí.`;
+    }
+    alert(mensaje);
 };
 
 window.seleccionarProveedorConsignacion = function(proveedorKey) {
