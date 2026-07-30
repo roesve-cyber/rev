@@ -233,7 +233,18 @@ function _renderCotizadorHTML(modo) {
         ${isMayoreo ? `
         <div style="background:#ecfeff;border:1px solid #67e8f9;border-radius:8px;padding:14px;margin-bottom:16px;">
           <h4 style="margin:0 0 6px;color:#0e7490;font-size:13px;">🏷️ Ajustar precios en bloque</h4>
-          <p style="font-size:11px;color:#0e7490;margin:0 0 10px;">Se aplica a todos los artículos ya agregados a la tabla de abajo. Ningún precio puede quedar por debajo del costo de compra del producto: si el ajuste rebasa ese límite, el precio de esa pieza se detiene en su costo.</p>
+          <p style="font-size:11px;color:#0e7490;margin:0 0 10px;">Se aplica a todos los artículos ya agregados a la tabla de abajo.</p>
+
+          <div style="background:white;border:1px solid #a5f3fc;border-radius:6px;padding:10px;margin-bottom:10px;">
+            <label style="font-size:11px;font-weight:bold;color:#0e7490;">MARGEN FIJO (%) SOBRE COSTO</label>
+            <p style="font-size:10px;color:#64748b;margin:2px 0 6px;">Recalcula el precio de cada producto directo desde su costo (precio = costo ÷ (1 − margen)). Es la forma de controlar el margen real, no un descuento sobre el precio actual. Si se usa, ignora los campos de descuento de abajo.</p>
+            <div style="display:flex;gap:10px;align-items:end;">
+              <input type="number" id="cotMargenBloque" min="0" max="99" step="0.1" placeholder="Ej: 20" style="width:140px;padding:8px;border:1px solid #67e8f9;border-radius:6px;">
+              <button type="button" onclick="_cotAplicarAjusteBloque()" style="padding:9px 14px;background:#0e7490;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;white-space:nowrap;">Aplicar margen a todos</button>
+            </div>
+          </div>
+
+          <p style="font-size:11px;color:#0e7490;margin:0 0 6px;">— o bien, descuenta sobre el precio actual (nunca baja del costo) —</p>
           <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
             <div>
               <label style="font-size:11px;font-weight:bold;color:#0e7490;">DESCUENTO (%)</label>
@@ -647,9 +658,27 @@ window._cotEditarPrecioLinea = function(idx, valor) {
 window._cotAplicarAjusteBloque = function() {
     const arts = window._articulosCot || [];
     if (arts.length === 0) return alert('⚠️ Agrega artículos a la cotización antes de ajustar precios.');
+
+    const margenFijo = parseFloat(document.getElementById('cotMargenBloque')?.value) || 0;
+
+    if (margenFijo > 0) {
+        if (margenFijo >= 100) return alert('⚠️ El margen debe ser menor a 100%.');
+        let sinCosto = 0;
+        arts.forEach(a => {
+            const costo = Number(a.costo || 0);
+            if (costo <= 0) { sinCosto++; return; } // sin costo conocido no se puede calcular el margen
+            const nuevoPrecio = Math.round((costo / (1 - margenFijo / 100)) * 100) / 100;
+            a.precio = nuevoPrecio;
+            a.subtotal = a.cantidad * nuevoPrecio;
+        });
+        _renderTablaArticulosCot();
+        if (sinCosto > 0) alert(`⚠️ ${sinCosto} producto(s) no tienen costo registrado, así que no se les pudo aplicar el margen. Edítales el precio manualmente en la tabla.`);
+        return;
+    }
+
     const pct = parseFloat(document.getElementById('cotDescuentoBloquePct')?.value) || 0;
     const montoFijo = parseFloat(document.getElementById('cotDescuentoBloqueMonto')?.value) || 0;
-    if (pct <= 0 && montoFijo <= 0) return alert('⚠️ Indica un porcentaje de descuento o una rebaja fija por pieza.');
+    if (pct <= 0 && montoFijo <= 0) return alert('⚠️ Indica un margen fijo, un porcentaje de descuento o una rebaja fija por pieza.');
 
     let tocaronPiso = 0;
     arts.forEach(a => {
