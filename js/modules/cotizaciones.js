@@ -12,6 +12,7 @@ function renderCotizaciones() {
             <div style="display:flex; gap:10px; margin-top:15px;">
                 <button onclick="abrirCotizador()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">➕ Nueva Cotización (Simple)</button>
                 <button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>
+                <button onclick="abrirCotizadorMayoreo()" style="padding:10px 20px; background:#0891b2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🏷️ Nueva Cotización (Mayoreo)</button>
             </div>
         </div>
         <div id="listaCotizaciones" style="background:white; padding:20px; border-radius:8px; margin-top:20px;"></div>
@@ -45,22 +46,32 @@ const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {
 // Llama al cotizador simple (Ventas)
 function abrirCotizador() {
     window._customPlanesAuditoria = [];
-    _renderCotizadorHTML(false);
+    _renderCotizadorHTML('simple');
 }
 
 // Llama al cotizador avanzado (Auditoría)
 function abrirCotizadorAuditoria() {
     window._customPlanesAuditoria = [];
-    _renderCotizadorHTML(true);
+    _renderCotizadorHTML('auditoria');
+}
+
+// Llama al cotizador de Mayoreo (pago de contado, sin planes de crédito)
+function abrirCotizadorMayoreo() {
+    window._customPlanesAuditoria = [];
+    _renderCotizadorHTML('mayoreo');
 }
 
 // Generador dinámico de la vista según el rol/sección
-function _renderCotizadorHTML(isAuditoria) {
+function _renderCotizadorHTML(modo) {
+    const isAuditoria = modo === 'auditoria';
+    const isMayoreo = modo === 'mayoreo';
+    const conCosto = isAuditoria || isMayoreo; // ambos modos capturan costo del producto libre
     window._isCotizadorAuditoria = isAuditoria;
+    window._isCotizadorMayoreo = isMayoreo;
     document.querySelector('[data-modal="cotizador"]')?.remove();
 
     // Campos condicionales para producto libre
-    const camposLibre = isAuditoria ? `
+    const camposLibre = conCosto ? `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
             <div>
                 <label style="font-size:11px;font-weight:bold;color:#374151;">NOMBRE DEL PRODUCTO</label>
@@ -113,10 +124,27 @@ function _renderCotizadorHTML(isAuditoria) {
         </div>
     ` : '';
 
+    const tituloModal = isMayoreo ? '🏷️ Cotización de Mayoreo (Pago de Contado)' : `📄 Nueva Cotización ${isAuditoria ? '(Avanzada)' : ''}`;
+    const colorModal = isMayoreo ? '#0891b2' : (isAuditoria ? '#d97706' : '#1e40af');
+
+    const campoPeriodicidad = isMayoreo ? `
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">FORMA DE PAGO</label>
+            <div style="width:100%;padding:9px;border:1px solid #a5f3fc;border-radius:6px;margin-top:4px;background:#ecfeff;color:#0e7490;font-weight:bold;text-align:center;">💵 CONTADO</div>
+          </div>` : `
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">PERIODICIDAD DE PAGO</label>
+            <select id="cotPeriodicidad" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              <option value="semanal">Semanal</option>
+              <option value="quincenal">Quincenal</option>
+              <option value="mensual">Mensual</option>
+            </select>
+          </div>`;
+
     const html = `
     <div data-modal="cotizador" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:760px;padding:28px;margin:auto;">
-        <h2 style="margin:0 0 20px;color:${isAuditoria ? '#d97706' : '#1e40af'};">📄 Nueva Cotización ${isAuditoria ? '(Avanzada)' : ''}</h2>
+        <h2 style="margin:0 0 20px;color:${colorModal};">${tituloModal}</h2>
 
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
@@ -144,14 +172,7 @@ function _renderCotizadorHTML(isAuditoria) {
             <label style="font-size:12px;font-weight:bold;color:#374151;">VIGENCIA (días)</label>
             <input type="number" id="cotVigencia" value="15" min="1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
-          <div>
-            <label style="font-size:12px;font-weight:bold;color:#374151;">PERIODICIDAD DE PAGO</label>
-            <select id="cotPeriodicidad" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-              <option value="semanal">Semanal</option>
-              <option value="quincenal">Quincenal</option>
-              <option value="mensual">Mensual</option>
-            </select>
-          </div>
+          ${campoPeriodicidad}
         </div>
 
         <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px;">
@@ -209,6 +230,23 @@ function _renderCotizadorHTML(isAuditoria) {
           </div>
         </div>
 
+        ${isMayoreo ? `
+        <div style="background:#ecfeff;border:1px solid #67e8f9;border-radius:8px;padding:14px;margin-bottom:16px;">
+          <h4 style="margin:0 0 6px;color:#0e7490;font-size:13px;">🏷️ Ajustar precios en bloque</h4>
+          <p style="font-size:11px;color:#0e7490;margin:0 0 10px;">Se aplica a todos los artículos ya agregados a la tabla de abajo. Ningún precio puede quedar por debajo del costo de compra del producto: si el ajuste rebasa ese límite, el precio de esa pieza se detiene en su costo.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+            <div>
+              <label style="font-size:11px;font-weight:bold;color:#0e7490;">DESCUENTO (%)</label>
+              <input type="number" id="cotDescuentoBloquePct" min="0" max="100" step="0.1" placeholder="Ej: 10" style="width:100%;padding:8px;border:1px solid #67e8f9;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:bold;color:#0e7490;">O REBAJA FIJA POR PIEZA ($)</label>
+              <input type="number" id="cotDescuentoBloqueMonto" min="0" step="0.01" placeholder="Ej: 200" style="width:100%;padding:8px;border:1px solid #67e8f9;border-radius:6px;margin-top:3px;">
+            </div>
+            <button type="button" onclick="_cotAplicarAjusteBloque()" style="padding:9px 14px;background:#0891b2;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;white-space:nowrap;">Aplicar a todos</button>
+          </div>
+        </div>` : ''}
+
         <div id="tablaArticulosCot" style="margin-bottom:16px;"></div>
 
         <div style="margin-bottom:12px;">
@@ -217,9 +255,10 @@ function _renderCotizadorHTML(isAuditoria) {
         </div>
 
         <div style="background:#f8fafc;border-radius:8px;padding:14px;margin-bottom:14px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${isMayoreo ? '0' : '10px'};">
             <strong style="font-size:16px;">Subtotal: <span id="cotTotal" style="color:#1e40af;font-size:18px;">$0.00</span></strong>
           </div>
+          ${isMayoreo ? '' : `
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:bold;">
               <input type="checkbox" id="cotizEngancheCheck" onchange="_toggleEngancheCot()" style="width:16px;height:16px;">
@@ -231,15 +270,16 @@ function _renderCotizadorHTML(isAuditoria) {
           </div>
           <div id="cotSaldoDiv" style="display:none;font-size:14px;color:#6b7280;margin-bottom:8px;">
             Saldo a financiar: <strong id="cotSaldoFinanciar" style="color:#1e40af;">$0.00</strong>
-          </div>
+          </div>`}
         </div>
 
         ${camposCustomPlan}
 
+        ${isMayoreo ? '' : `
         <div id="cotPlanesDiv" style="margin-bottom:14px;display:none;">
           <h4 style="margin:0 0 8px;color:#374151;font-size:14px;">📅 Tabla de Plazos de Crédito</h4>
           <div id="cotTablaPlanesContainer"></div>
-        </div>
+        </div>`}
 
         <div style="display:flex;gap:10px;">
           <button onclick="generarCotizacion()" style="flex:1;padding:12px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Generar Cotización</button>
@@ -563,13 +603,14 @@ function agregarArticuloCotizacion() {
         const prod = productosLista.find(p => String(p.id) === String(sel.value) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
         if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la cotizacion.');
         const precio = parseFloat(prod.precio) || 0;
+        const costoProd = parseFloat(prod.costo) || 0;
         const idx = window._articulosCot.findIndex(a => String(a.productoId) === String(prod.id));
         if (idx !== -1) {
             window._articulosCot[idx].cantidad += cant;
-            window._articulosCot[idx].subtotal = window._articulosCot[idx].cantidad * precio;
+            window._articulosCot[idx].subtotal = window._articulosCot[idx].cantidad * window._articulosCot[idx].precio;
             if (window._cotImagenTemp) window._articulosCot[idx].imagen = window._cotImagenTemp;
         } else {
-            window._articulosCot.push({ productoId: prod.id, nombre: prod.nombre, precio, cantidad: cant, subtotal: cant * precio, imagen: window._cotImagenTemp || prod.imagen || null });
+            window._articulosCot.push({ productoId: prod.id, nombre: prod.nombre, precio, costo: costoProd, cantidad: cant, subtotal: cant * precio, imagen: window._cotImagenTemp || prod.imagen || null });
         }
     }
 
@@ -581,6 +622,49 @@ function agregarArticuloCotizacion() {
     _cotQuitarImagen();
     _renderTablaArticulosCot();
 }
+
+// Aplica el piso permitido (nunca por debajo del costo de compra) y redondea a centavos.
+function _cotClampAlCosto(precio, costo) {
+    const c = Number(costo || 0);
+    let p = Number(precio) || 0;
+    if (p < 0) p = 0;
+    let ajustado = false;
+    if (c > 0 && p < c) { p = c; ajustado = true; }
+    return { precio: Math.round(p * 100) / 100, ajustado };
+}
+
+window._cotEditarPrecioLinea = function(idx, valor) {
+    const arts = window._articulosCot || [];
+    const a = arts[idx];
+    if (!a) return;
+    const { precio: nuevoPrecio, ajustado } = _cotClampAlCosto(valor, a.costo);
+    if (ajustado) alert(`⚠️ El precio de "${a.nombre}" no puede quedar por debajo de su costo de compra (${dinero(a.costo)}). Se ajustó al costo.`);
+    a.precio = nuevoPrecio;
+    a.subtotal = a.cantidad * nuevoPrecio;
+    _renderTablaArticulosCot();
+};
+
+window._cotAplicarAjusteBloque = function() {
+    const arts = window._articulosCot || [];
+    if (arts.length === 0) return alert('⚠️ Agrega artículos a la cotización antes de ajustar precios.');
+    const pct = parseFloat(document.getElementById('cotDescuentoBloquePct')?.value) || 0;
+    const montoFijo = parseFloat(document.getElementById('cotDescuentoBloqueMonto')?.value) || 0;
+    if (pct <= 0 && montoFijo <= 0) return alert('⚠️ Indica un porcentaje de descuento o una rebaja fija por pieza.');
+
+    let tocaronPiso = 0;
+    arts.forEach(a => {
+        let precioCalculado = a.precio;
+        if (pct > 0) precioCalculado = precioCalculado * (1 - pct / 100);
+        if (montoFijo > 0) precioCalculado = precioCalculado - montoFijo;
+        const { precio: nuevoPrecio, ajustado } = _cotClampAlCosto(precioCalculado, a.costo);
+        if (ajustado) tocaronPiso++;
+        a.precio = nuevoPrecio;
+        a.subtotal = a.cantidad * nuevoPrecio;
+    });
+
+    _renderTablaArticulosCot();
+    if (tocaronPiso > 0) alert(`⚠️ ${tocaronPiso} producto(s) llegaron a su costo mínimo: no se descontaron más allá de eso para no vender con pérdida.`);
+};
 
 function _renderTablaArticulosCot() {
     const cont = document.getElementById('tablaArticulosCot');
@@ -596,10 +680,13 @@ function _renderTablaArticulosCot() {
     let total = 0;
     let rows = arts.map((a, i) => {
         total += a.subtotal;
+        const celdaPrecio = window._isCotizadorMayoreo
+            ? `<input type="number" value="${a.precio}" min="0" step="0.01" onchange="_cotEditarPrecioLinea(${i}, this.value)" style="width:95px;padding:5px;border:1px solid #67e8f9;border-radius:5px;text-align:right;">`
+            : dinero(a.precio);
         return `<tr>
           <td style="padding:8px;text-align:center;">${a.imagen ? `<img src="${a.imagen}" style="width:34px;height:34px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;">` : '<span style="color:#cbd5e1;font-size:11px;">—</span>'}</td>
           <td style="padding:8px;">${a.nombre}${a.esLibre ? ' <span style="font-size:10px;color:#7c3aed;background:#f3e8ff;padding:2px 6px;border-radius:10px;">libre</span>' : ''}</td>
-          <td style="padding:8px;text-align:center;">${dinero(a.precio)}</td>
+          <td style="padding:8px;text-align:center;">${celdaPrecio}</td>
           <td style="padding:8px;text-align:center;">${a.cantidad}</td>
           <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
           <td style="padding:8px;text-align:center;"><button onclick="window._articulosCot.splice(${i},1);_renderTablaArticulosCot();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
@@ -665,6 +752,7 @@ function generarCotizacion() {
       vigenciaDias: vigDias,
       notas,
       estado: 'Vigente',
+      modalidad: window._isCotizadorMayoreo ? 'mayoreo' : 'normal',
       customPlanes // Se guarda el arreglo de plazos personalizados
     };
     
@@ -696,7 +784,7 @@ function abrirListaCotizaciones() {
     const rows = lista.slice().reverse().map(c => {
         const color = c.estado === 'Vigente' ? '#16a34a' : c.estado === 'Convertida' ? '#2563eb' : '#dc2626';
         return `<tr>
-          <td style="padding:10px;">${c.folio}</td>
+          <td style="padding:10px;">${c.folio}${c.modalidad === 'mayoreo' ? ' <span style="font-size:10px;background:#cffafe;color:#0e7490;padding:2px 7px;border-radius:10px;font-weight:bold;">MAYOREO</span>' : ''}</td>
           <td style="padding:10px;">${c.clienteNombre}</td>
           <td style="padding:10px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
           <td style="padding:10px;">${new Date(c.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
@@ -773,7 +861,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
     let planeRows = '';
     let hasCustom = false;
     
-    if (c.saldoFinanciar > 0) {
+    if (c.saldoFinanciar > 0 && c.modalidad !== 'mayoreo') {
       const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
       const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
       
@@ -881,6 +969,7 @@ if (c.customPlanes && c.customPlanes.length > 0) {
 
         <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
 
+        ${c.modalidad === 'mayoreo' ? '<div class="seccion-titulo">COTIZACIÓN DE MAYOREO — PAGO DE CONTADO</div>' : ''}
         ${typeof c.enganche === 'number' && c.enganche > 0 ? `<div class="enganche-box">Enganche: <strong>${fmtMXN(c.enganche)}</strong></div>` : ''}
         ${c.notas && c.notas.length > 0 ? `<div class="notas-box">Observaciones: ${c.notas}</div>` : ''}
 
@@ -994,6 +1083,7 @@ window._cotPegarImagen = _cotPegarImagen;
 window._cotQuitarImagen = _cotQuitarImagen;
 window.abrirCotizador = abrirCotizador;
 window.abrirCotizadorAuditoria = abrirCotizadorAuditoria;
+window.abrirCotizadorMayoreo = abrirCotizadorMayoreo;
 window.renderCotizaciones = renderCotizaciones;
 window._onCotProductoChange = _onCotProductoChange;
 window._actualizarPrecioSugerido = _actualizarPrecioSugerido;
