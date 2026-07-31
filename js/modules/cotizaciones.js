@@ -322,8 +322,19 @@ function _renderCotizadorHTML(modo, cotExistente) {
     window._cotImagenTemp = null;
 
     if (cotExistente) {
-        // Precarga de artículos (se clonan para no mutar el registro guardado hasta confirmar).
-        window._articulosCot = cotExistente.articulos.map(a => ({ ...a }));
+        // Precarga de artículos vinculando las imágenes dinámicamente
+        window._articulosCot = cotExistente.articulos.map((a, index) => {
+            let img = null;
+            if (a.productoId) {
+                // Referenciar imagen desde base de datos de inventario
+                const prod = StorageService.get('productos', []).find(p => String(p.id) === String(a.productoId));
+                if (prod) img = prod.imagen;
+            } else if (a.esLibre) {
+                // Referenciar imagen libre desde el disco duro local
+                img = localStorage.getItem(`cot_img_${cotExistente.id}_${index}`) || null;
+            }
+            return { ...a, imagen: img };
+        });
 
         if (cotExistente.clienteId) {
             const inputCliente = document.getElementById('cotCliente');
@@ -813,25 +824,36 @@ function generarCotizacion() {
     // Capturar TODOS los planes custom creados
     const customPlanes = window._isCotizadorAuditoria ? [...(window._customPlanesAuditoria || [])] : [];
 
-    // Las imágenes son solo para la impresión inmediata: NUNCA se guardan en StorageService/Firebase.
-    const articulosParaGuardar = arts.map(a => {
-        const { imagen, ...resto } = a;
-        return resto;
-    });
-
     const editandoId = window._cotEditandoId || null;
     const lista = StorageService.get('cotizaciones', []);
     const idxExistente = editandoId ? lista.findIndex(c => c.id === editandoId) : -1;
     const original = idxExistente !== -1 ? lista[idxExistente] : null;
+    
+    // Generamos el ID antes para poder asociar las imágenes locales
+    const cotId = original ? original.id : Date.now();
+
+    const articulosParaGuardar = arts.map((a, index) => {
+        const { imagen, ...resto } = a;
+        
+        // Guardado exclusivo en equipo local para productos ajenos al catálogo
+        if (a.esLibre && imagen) {
+            try {
+                localStorage.setItem(`cot_img_${cotId}_${index}`, imagen);
+            } catch (e) {
+                console.warn('No se pudo guardar la imagen localmente (posible límite de almacenamiento).');
+            }
+        }
+        return resto;
+    });
 
     const cot = {
-      id: original ? original.id : Date.now(),
+      id: cotId,
       folio: original ? original.folio : _foliosCot(),
       fecha: original ? original.fecha : window.localISO(hoy),
       fechaVencimiento: window.localISO(fechaVenc),
       clienteNombre,
       clienteId: selCliente?.value || null,
-      articulos: articulosParaGuardar,
+      articulos: articulosParaGuardar, // Se guarda sin imágenes pesadas para no subir a la nube
       total,
       enganche,
       saldoFinanciar,
@@ -840,7 +862,7 @@ function generarCotizacion() {
       notas,
       estado: 'Vigente',
       modalidad: window._isCotizadorMayoreo ? 'mayoreo' : 'normal',
-      customPlanes // Se guarda el arreglo de plazos personalizados
+      customPlanes 
     };
 
     if (idxExistente !== -1) {
@@ -980,9 +1002,19 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
     const c = lista.find(x => x.id === id);
     if (!c) return alert('Cotización no encontrada.');
     
-    // articulosConImagenTemporal solo llega justo al generar la cotización (en memoria).
-    // Nunca se lee de StorageService/Firebase: las imágenes no se guardan ahí.
-    const articulos = articulosConImagenTemporal || c.articulos;
+    // Carga dinámica de imágenes al momento de la impresión
+    const articulos = (articulosConImagenTemporal || c.articulos).map((a, index) => {
+        let img = a.imagen;
+        if (!img) {
+            if (a.productoId) {
+                const prod = StorageService.get('productos', []).find(p => String(p.id) === String(a.productoId));
+                if (prod) img = prod.imagen;
+            } else if (a.esLibre) {
+                img = localStorage.getItem(`cot_img_${c.id}_${index}`);
+            }
+        }
+        return { ...a, imagen: img };
+    });
     
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
@@ -1217,6 +1249,17 @@ function convertirCotizacionAVenta(id) {
 function eliminarCotizacion(id) {
     if (!confirm('¿Eliminar esta cotización?')) return;
     let lista = StorageService.get('cotizaciones', []);
+    
+    // Limpiar imágenes locales de productos libres antes de borrar
+    const cot = lista.find(c => c.id === id);
+    if (cot) {
+        cot.articulos.forEach((a, i) => {
+            if (a.esLibre) {
+                localStorage.removeItem(`cot_img_${id}_${i}`);
+            }
+        });
+    }
+    
     lista = lista.filter(c => c.id !== id);
     StorageService.set('cotizaciones', lista);
     abrirListaCotizaciones();
