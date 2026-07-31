@@ -525,14 +525,19 @@ function documentToolbar(options = {}) {
     }
 
     async function _renderCanvas(node) {
+        // 🛡️ CORRECCIÓN: antes se forzaba un "viewport" mínimo de 800x1000, lo que hacía que
+        // html2canvas capturara de más (espacio en blanco alrededor del contenido real) cuando
+        // el documento/ticket era más pequeño que eso. Usamos el tamaño real del nodo para que
+        // la imagen/PDF quede ajustado al contenido (más el margen que ya define cada plantilla),
+        // sin necesidad de recortarla después.
         return await window.html2canvas(node, {
             scale: 2,
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
             logging: false,
-            windowWidth: Math.max(node.scrollWidth, 800),
-            windowHeight: Math.max(node.scrollHeight, 1000)
+            windowWidth: node.scrollWidth,
+            windowHeight: node.scrollHeight
         });
     }
 
@@ -626,14 +631,17 @@ function documentToolbar(options = {}) {
             doc.getElementById('ticket-contenido') ||
             doc.querySelector('.ticket-contenido,.mmp-ticket-body') ||
             doc.body;
+        // 🛡️ CORRECCIÓN: igual que en _renderCanvas, no forzamos un viewport mínimo de 800x1000;
+        // usamos el tamaño real del documento para que la imagen quede ajustada al contenido
+        // (con el margen que ya define la plantilla) y no requiera recorte manual.
         const canvas = await window.html2canvas(node, {
             scale: 2,
             useCORS: true,
             allowTaint: false,
             backgroundColor: '#ffffff',
             logging: false,
-            windowWidth: Math.max(node.scrollWidth, 800),
-            windowHeight: Math.max(node.scrollHeight, 1000)
+            windowWidth: node.scrollWidth,
+            windowHeight: node.scrollHeight
         });
         iframe.remove();
         return canvas;
