@@ -5099,11 +5099,61 @@ function _consigProductoRows(folio) {
             <td style="padding:10px;text-align:right;"><strong>${dinero(_consigImporte(c))}</strong><br><small style="color:#64748b;">Pendiente inventario: ${dinero(Number(c.cantidadPendiente || 0) * Number(c.costoUnitario || 0))}</small>${saldoPendienteVentas ? `<br><small style="color:#be123c;font-weight:bold;">Por pagar ventas: ${dinero(saldoPendienteVentas)}</small>` : ''}</td>
             <td style="padding:10px;text-align:center;vertical-align:middle;">
                 ${Number(c.cantidadPendiente) > 0 ? `<button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="width:100%; padding:8px 12px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Reportar venta</button>` : ''}
+                ${Number(c.cantidadPendiente) > 0 ? `<button onclick="liquidarConsignacionComoPropia('${String(c.id).replace(/'/g, "\\'")}')" style="width:100%; margin-top:6px; padding:8px 12px;background:#0f172a;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">🏠 Ya es mía</button>` : ''}
                 ${btnPago}
             </td>
         </tr>`;
     }).join('');
 }
+
+// ===== LIQUIDAR PIEZA DE CONSIGNACION COMO INVENTARIO PROPIO =====
+// Para cuando ya se le pagó/liquidó al proveedor (fuera del flujo de "Reportar venta")
+// y la pieza se queda físicamente en la tienda como propiedad del negocio.
+// A diferencia de la Devolución (que saca la pieza y descuenta stock) esta accion
+// NO toca el stock del producto: solo deja de contarse como "en consignacion".
+window.liquidarConsignacionComoPropia = function(idConsig) {
+    if (!_comprasRequireAdmin('Liquidar consignación como inventario propio')) return;
+    let consigArr = StorageService.get("consignacionesActivas", []);
+    const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
+    if (idx === -1) return alert('No se encontró el registro de consignación.');
+    const c = consigArr[idx];
+    const pendiente = Number(c.cantidadPendiente || 0);
+    if (pendiente <= 0) return alert('Esta pieza ya no tiene cantidad pendiente en consignación.');
+
+    const resumenGlobal = typeof _consigResumenGlobal === 'function' ? _consigResumenGlobal() : { folios: [] };
+    const folioKeyDeC = typeof _consigFolioKey === 'function' ? _consigFolioKey(c) : null;
+    const folioDeC = resumenGlobal.folios?.find(f => f.key === folioKeyDeC);
+    const saldoFolio = Number(folioDeC?.saldoNeto || 0);
+
+    let avisoSaldo = '';
+    if (saldoFolio > 0.01) {
+        avisoSaldo = `\n\n⚠️ Ojo: este folio todavía muestra un saldo pendiente de ${dinero(saldoFolio)}. Si ya lo liquidaste por otro medio, continúa. Si no, cancela y abona primero.`;
+    }
+
+    const cantidadInput = prompt(`¿Cuántas piezas de "${c.producto}" ya son tuyas (pagadas/liquidadas, se quedan en tu inventario)?\n\nPendiente en consignación: ${pendiente}${avisoSaldo}`, String(pendiente));
+    if (cantidadInput === null) return;
+    const cantidad = parseInt(cantidadInput);
+    if (isNaN(cantidad) || cantidad <= 0 || cantidad > pendiente) return alert('❌ Cantidad inválida.');
+
+    if (!confirm(`Vas a marcar ${cantidad} pieza(s) de "${c.producto}" como inventario propio.\n\nEsto NO mueve el stock (la pieza sigue físicamente donde está), solo deja de contarse como consignación pendiente. Úsalo solo si ya liquidaste/pagaste esa mercancía al proveedor.\n\n¿Continuar?`)) return;
+
+    c.cantidadPendiente = pendiente - cantidad;
+    c.cantidadLiquidadaPropia = (Number(c.cantidadLiquidadaPropia) || 0) + cantidad;
+    consigArr[idx] = c;
+    StorageService.set('consignacionesActivas', consigArr);
+
+    window.AuditService?.log?.({
+        accion: 'CONSIGNACION_LIQUIDADA_PROPIA',
+        modulo: 'Consignaciones',
+        entidad: c.producto || 'producto',
+        entidadId: c.id,
+        detalle: `${cantidad} pieza(s) de "${c.producto}" marcadas como inventario propio (ya liquidadas al proveedor). El stock físico no se modificó.`,
+        datos: { productoId: c.productoId || null, cantidad, consignacionId: c.id, saldoFolioAlMomento: saldoFolio }
+    });
+
+    alert('Listo. Esa mercancía ya no se contará como pendiente en consignación.');
+    if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+};
 
 // ===== BORRADOR DE DEVOLUCIÓN DE CONSIGNACIÓN =====
 function _consigBorradoresDevolucion() {
