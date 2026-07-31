@@ -1040,31 +1040,32 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
             // width y height en auto aseguran que la imagen JAMÁS se deforme.
             // max-width y max-height aseguran que ocupe el máximo espacio posible dentro de la tarjeta.
             const imgHtml = a.imagen 
-                ? `<img src="${a.imagen}" style="max-width:100%; max-height:280px; width:auto; height:auto; display:block; margin:0 auto; border-radius:4px;">` 
-                : `<div style="width:100%; height:200px; border:1px dashed #cbd5e1; border-radius:4px; background:#f8fafc; display:flex; align-items:center; justify-content:center;"><span style="font-size:12px; color:#94a3b8;">Sin imagen</span></div>`;
+                ? `<img src="${a.imagen}" style="max-width:100%; max-height:270px; width:auto; height:auto; display:block; margin:0 auto; border-radius:6px;">` 
+                : `<div style="width:100%; height:190px; border:1.5px dashed #cbd5e1; border-radius:6px; background:#f8fafc; display:flex; align-items:center; justify-content:center;"><span style="font-size:12px; color:#94a3b8; letter-spacing:.5px;">SIN IMAGEN DISPONIBLE</span></div>`;
 
             return `
               <td style="padding: 0; vertical-align: top; width:49%;">
-                 <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #fff; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid;">
-                     
+                 <div class="product-card">
+                     <!-- Barra de acento superior -->
+                     <div class="product-card-accent"></div>
+
                      <!-- ENCABEZADO: NOMBRE DEL PRODUCTO -->
-                     <div style="font-size:14px; font-weight:bold; color:#0f172a; text-align:center; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 10px; min-height:20px; display:flex; align-items:center; justify-content:center;">
-                         ${a.nombre}
-                     </div>
-                     
+                     <div class="product-card-title">${a.nombre}</div>
+
                      <!-- IMAGEN PROPORCIONAL Y AMPLIA -->
-                     <div style="flex-grow: 1; display:flex; justify-content:center; align-items:center; padding: 5px 0;">
+                     <div style="flex-grow: 1; display:flex; justify-content:center; align-items:center; padding: 6px 4px;">
                          ${imgHtml}
                      </div>
-                     
+
                      <!-- PIE DE TARJETA: CANTIDAD E IMPORTE -->
-                     <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:10px; padding-top:8px; border-top:1px dashed #e2e8f0;">
-                         <div style="font-size:13px; font-weight:bold; color:#475569;">
-                             Cant: <span style="font-size:16px; color:#0f172a;">${a.cantidad} pz</span>
+                     <div class="product-card-footer">
+                         <div class="product-card-cant">
+                             <span class="product-card-cant-label">Cantidad</span>
+                             <span class="product-card-cant-value">${a.cantidad} pz</span>
                          </div>
-                         <div style="text-align:right;">
-                             <div style="font-size:12px; color:#64748b;">P.U. ${fmtMXN(a.precio)}</div>
-                             <div style="font-size:15px; font-weight:bold; color:#0369a1;">Sub: ${fmtMXN(a.precio * a.cantidad)}</div>
+                         <div class="product-card-precio">
+                             <div class="product-card-pu">P.U. ${fmtMXN(a.precio)}</div>
+                             <div class="product-card-sub">${fmtMXN(a.precio * a.cantidad)}</div>
                          </div>
                      </div>
                  </div>
@@ -1093,23 +1094,65 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
                 size: letter; 
                 margin: 4mm; /* Márgenes de milímetros para impresión */
             }
-            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #e2e8f0; display:flex; justify-content:center; }
-            #cotizacion-wrapper { background: white; width: 100%; max-width: 215.9mm; min-height: 279.4mm; margin: 0 auto; padding: 5mm; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-            
+            * { box-sizing: border-box; }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #e2e8f0; display:flex; justify-content:center; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            #cotizacion-wrapper { position:relative; background: white; width: 100%; max-width: 215.9mm; min-height: 279.4mm; margin: 0 auto; padding: 0 6mm 6mm; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.12); overflow:hidden; }
+
+            /* Franja de acento tipo membrete en la parte superior de la hoja */
+            .letterhead-bar { height: 7mm; margin: 0 -6mm 5mm; background: linear-gradient(90deg, #0f172a 0%, #0e7490 55%, #0891b2 100%); }
+
             table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
             tr { break-inside: avoid; page-break-inside: avoid; }
-            
-            .header-container { display:flex; justify-content:space-between; align-items:flex-start; border-bottom: 3px solid #0369a1; padding-bottom: 10px; margin-bottom: 10px; }
-            .empresa-info h1 { margin: 0 0 4px 0; font-size: 22px; color: #0f172a; text-transform:uppercase; }
-            .empresa-info p { margin: 0; font-size: 12px; color: #475569; }
-            .cot-info { text-align: right; }
-            .cot-info h2 { margin: 0 0 4px 0; font-size: 18px; color: #0369a1; }
-            .cot-info p { margin: 2px 0; font-size: 12px; color: #334155; }
-            .notas-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin-top: 15px; font-size: 12px; color: #334155; break-inside: avoid; page-break-inside: avoid; }
-            
+
+            /* ===== Encabezado / membrete ===== */
+            .header-container { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; border-bottom: 2px solid #0e7490; padding-bottom: 12px; margin-bottom: 12px; }
+            .logo-empresa { display:flex; align-items:center; gap:12px; }
+            .logo-empresa img { width:58px; height:58px; object-fit:contain; flex:0 0 58px; }
+            .empresa-info h1 { margin: 0 0 3px 0; font-size: 21px; color: #0f172a; letter-spacing:.3px; }
+            .empresa-info .empresa-subtitulo { margin:0 0 4px 0; font-size:10px; font-weight:700; color:#0e7490; letter-spacing:1.4px; text-transform:uppercase; }
+            .empresa-info p { margin: 0; font-size: 11.5px; color: #64748b; line-height:1.5; }
+
+            .cot-info { text-align: right; flex-shrink:0; }
+            .cot-badge { display:inline-block; background:#0f172a; color:#fff; font-size:12px; font-weight:800; letter-spacing:.6px; padding:6px 14px; border-radius:5px; margin-bottom:8px; }
+            .cot-meta { border-collapse:collapse; margin-left:auto; }
+            .cot-meta td { font-size:11.5px; padding:1.5px 0; }
+            .cot-meta td:first-child { color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; font-size:9.5px; padding-right:8px; }
+            .cot-meta td:last-child { color:#0f172a; font-weight:700; text-align:right; }
+
+            .cliente-box { display:flex; align-items:center; gap:8px; background:#f0fdfa; border:1px solid #ccfbf1; border-left:4px solid #0e7490; border-radius:6px; padding:8px 12px; margin-bottom:14px; }
+            .cliente-label { font-size:9.5px; font-weight:800; letter-spacing:1px; color:#0e7490; text-transform:uppercase; }
+            .cliente-nombre { font-size:15px; font-weight:700; color:#0f172a; }
+
+            /* ===== Tarjetas de producto ===== */
+            .product-card { position:relative; border: 1px solid #e2e8f0; border-radius: 9px; padding: 12px 10px 10px; background: #fff; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; box-shadow: 0 1px 3px rgba(15,23,42,0.05); }
+            .product-card-accent { position:absolute; top:0; left:12px; right:12px; height:3px; border-radius:0 0 3px 3px; background: linear-gradient(90deg, #0e7490, #0891b2); }
+            .product-card-title { font-size:13.5px; font-weight:700; color:#0f172a; text-align:center; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 8px; min-height:18px; display:flex; align-items:center; justify-content:center; }
+            .product-card-footer { display:flex; justify-content:space-between; align-items:flex-end; margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0; }
+            .product-card-cant-label { display:block; font-size:9px; color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; }
+            .product-card-cant-value { font-size:15px; font-weight:800; color:#0f172a; }
+            .product-card-pu { font-size:10.5px; color:#94a3b8; }
+            .product-card-sub { font-size:15px; font-weight:800; color:#0e7490; }
+
+            .notas-box { background: #f8fafc; border: 1px solid #e2e8f0; border-left:3px solid #94a3b8; border-radius: 6px; padding: 10px 12px; margin-top: 14px; font-size: 11.5px; color: #334155; break-inside: avoid; page-break-inside: avoid; }
+            .notas-box strong { color:#0f172a; }
+
+            /* ===== Totales y pie de página ===== */
+            .totales-banner { display:flex; justify-content:space-between; align-items:center; background:#0f172a; border-radius:8px; padding:12px 16px; margin-top:6px; break-inside: avoid; page-break-inside: avoid; }
+            .totales-piezas { font-size:12.5px; color:#94a3b8; font-weight:600; }
+            .totales-piezas strong { color:#fff; font-size:15px; }
+            .totales-monto-label { font-size:11px; color:#5eead4; font-weight:700; letter-spacing:1px; text-transform:uppercase; }
+            .totales-monto-valor { margin:0; font-size:23px; font-weight:800; color:#fff; }
+
+            .footer-final { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+            .footer-firma { font-size:10.5px; color:#94a3b8; }
+            .footer-firma span { display:block; width:150px; border-top:1px solid #cbd5e1; margin-top:24px; padding-top:4px; text-align:center; }
+            .footer-gracias { text-align:right; font-size:11px; letter-spacing:1px; color:#0e7490; font-weight:700; text-transform:uppercase; }
+            .footer-gracias small { display:block; margin-top:2px; font-size:9.5px; color:#94a3b8; font-weight:500; letter-spacing:.3px; text-transform:none; }
+
             @media print {
                 body { background: white; margin: 0; display:block; }
-                #cotizacion-wrapper { width: 100%; max-width: 100%; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+                #cotizacion-wrapper { width: 100%; max-width: 100%; min-height: auto; margin: 0; padding: 0 0 4mm; box-shadow: none; }
+                .letterhead-bar { margin: 0 0 5mm; }
                 thead { display: table-header-group; }
                 tfoot { display: table-footer-group; }
                 tr { page-break-inside: avoid; break-inside: avoid; }
@@ -1118,25 +1161,33 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
         </head>
         <body>
           <div id="cotizacion-wrapper">
+             <div class="letterhead-bar"></div>
              <table>
                 <thead>
                    <tr>
                       <td colspan="3" style="border:none; padding:0;">
                          <div class="header-container">
-                             <div class="empresa-info">
-                                 <h1>${empresa}</h1>
-                                 <p>${cfg.direccion || ''}</p>
-                                 <p>Tel: ${cfg.telefono || '---'}</p>
+                             <div class="logo-empresa">
+                                 <img src="img/Logo.svg" onerror="this.onerror=null; this.src='img/Logo.png';" alt="${empresa}">
+                                 <div class="empresa-info">
+                                     <h1>${empresa}</h1>
+                                     <p class="empresa-subtitulo">Ventas al mayoreo</p>
+                                     <p>${cfg.direccion || ''}</p>
+                                     <p>Tel: ${cfg.telefono || '---'}</p>
+                                 </div>
                              </div>
                              <div class="cot-info">
-                                 <h2>COTIZACIÓN MAYOREO</h2>
-                                 <p>Folio: <strong>${c.folio}</strong></p>
-                                 <p>Fecha: <strong>${new Date(c.fecha).toLocaleDateString('es-MX')}</strong></p>
-                                 <p>Vigencia: <strong>${c.vigenciaDias} días</strong></p>
+                                 <div class="cot-badge">COTIZACIÓN MAYOREO</div>
+                                 <table class="cot-meta">
+                                     <tr><td>Folio</td><td>${c.folio}</td></tr>
+                                     <tr><td>Fecha</td><td>${new Date(c.fecha).toLocaleDateString('es-MX')}</td></tr>
+                                     <tr><td>Vigencia</td><td>${c.vigenciaDias} días</td></tr>
+                                 </table>
                              </div>
                          </div>
-                         <div style="margin-bottom: 15px; font-size: 14px; color:#0f172a;">
-                             Cliente: <strong style="font-size:16px;">${c.clienteNombre.toUpperCase()}</strong>
+                         <div class="cliente-box">
+                             <span class="cliente-label">Cliente</span>
+                             <span class="cliente-nombre">${c.clienteNombre.toUpperCase()}</span>
                          </div>
                       </td>
                    </tr>
@@ -1147,15 +1198,17 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
                 <tfoot>
                    <tr>
                       <td colspan="3" style="border:none; padding-top:5px;">
-                          <div style="display:flex; justify-content:space-between; align-items:center; border-top:2px solid #cbd5e1; padding-top:10px; break-inside: avoid; page-break-inside: avoid;">
-                              <div style="font-size:16px; color:#475569; font-weight:bold;">
-                                  Total de piezas: <span style="color:#0f172a; font-size:18px;">${totalPiezas}</span>
+                          <div class="totales-banner">
+                              <div class="totales-piezas">Total de piezas <strong>${totalPiezas}</strong></div>
+                              <div style="text-align:right;">
+                                  <div class="totales-monto-label">Total a pagar</div>
+                                  <p class="totales-monto-valor">${fmtMXN(c.total)}</p>
                               </div>
-                              <h2 style="margin:0; font-size:20px; color:#0f172a;">TOTAL: <span style="color:#0369a1;">${fmtMXN(c.total)}</span></h2>
                           </div>
                           ${c.notas ? `<div class="notas-box"><strong>Observaciones:</strong><br>${c.notas}</div>` : ''}
-                          <div style="margin-top: 20px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 8px;">
-                              *** GRACIAS POR SU PREFERENCIA ***
+                          <div class="footer-final">
+                              <div class="footer-firma"><span>Atendido por ${empresa}</span></div>
+                              <div class="footer-gracias">Gracias por su preferencia<small>Documento generado por ${empresa}</small></div>
                           </div>
                       </td>
                    </tr>
