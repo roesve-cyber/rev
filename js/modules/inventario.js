@@ -3040,7 +3040,11 @@ window.ejecutarAjusteInv = function() {
  modal.classList.add('oculto');
  modal.style.display = 'none';
  
- if(typeof renderInventario === 'function') renderInventario();
+ // Refresco instantaneo: se aplica en cualquier vista donde se haya abierto el ajuste
+ // (Inventario, Consulta de Inventario o el Visor de producto), no solo en Inventario.
+ if (typeof renderInventario === 'function') renderInventario();
+ if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
+ if (typeof mostrarDetalleProductoMaestro === 'function' && window._visorProductoIdActual) mostrarDetalleProductoMaestro(window._visorProductoIdActual);
 };
 
 // --- TRANSFERENCIAS ENTRE BODEGAS ---
