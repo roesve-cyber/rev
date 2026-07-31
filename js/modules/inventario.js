@@ -1242,6 +1242,7 @@ window.renderConsultaInventario = function() {
  <th style="padding:15px; width: 45%;">Desglose por Ubicacion y Color</th>
  <th style="padding:15px; text-align:right;">Valorizacion</th>
  <th style="padding:15px; text-align:center;">Estado</th>
+ <th style="padding:15px; text-align:center;">Acción</th>
  </tr>
  </thead>
  <tbody>`;
@@ -1356,6 +1357,9 @@ window.renderConsultaInventario = function() {
  <div style="font-size:11px; font-weight:bold;">${labelPedido}</div>
  <div style="font-size:10px; color:#64748b; margin-top:4px;">Antiguedad: ${antiguedad}</div>
  </td>
+ <td style="padding:12px; text-align:center;">
+ <button onclick="abrirAjusteProductoDesdeVisor('${p.id}')" title="Ajustar existencia (merma/sobrante)" style="padding:7px 10px;background:#f59e0b;color:white;border:0;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;white-space:nowrap;">⚖️ Ajuste</button>
+ </td>
  </tr>`;
  });
 
@@ -1370,6 +1374,7 @@ window.renderConsultaInventario = function() {
  <td></td>
  <td style="padding:12px 15px; text-align:right; font-size:15px; color:#16a34a;">${fmtDinero(subtotalPesosPropio)}</td>
  <td></td>
+ <td></td>
  </tr>
  <tr style="border-bottom:1px solid #e2e8f0;">
  <td style="padding:12px 15px; text-align:right; color:#854d0e;">Subtotal en consignacion:</td>
@@ -1377,12 +1382,14 @@ window.renderConsultaInventario = function() {
  <td></td>
  <td style="padding:12px 15px; text-align:right; font-size:15px; color:#854d0e;">${fmtDinero(subtotalPesosConsignacion)}</td>
  <td></td>
+ <td></td>
  </tr>
  <tr>
  <td style="padding:15px; text-align:right;">GRAN TOTAL:</td>
  <td style="padding:15px; text-align:center; font-size:18px; color:#16a34a;">${totalGlobalUnidades}</td>
  <td></td>
  <td style="padding:15px; text-align:right; font-size:18px; color:#1e40af;">${fmtDinero(totalGlobalPesos)}</td>
+ <td></td>
  <td></td>
  </tr>
  </tfoot>
@@ -2021,6 +2028,8 @@ function mostrarDetalleProductoMaestro(id) {
  const cont = document.getElementById("detalle-producto-maestro");
  if (!cont) return;
 
+ try {
+
  p.variantes = p.variantes || [];
  const stockAsignado = p.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
  const stockSistema = Number(p.stock || 0);
@@ -2030,9 +2039,18 @@ function mostrarDetalleProductoMaestro(id) {
  const estadoStock = stockSistema > 0 ? 'Con inventario' : 'Sin inventario';
  const configCreditoTxt = p.configCredito?.usaReglaGlobal === false ? 'Regla especial de credito' : 'Regla global de credito';
 
+ let historialHtml = '';
+ try {
+ historialHtml = _invRenderHistorialProducto(p);
+ } catch (errHistorial) {
+ console.error('Error al construir el historial del producto en el Visor Maestro:', errHistorial);
+ historialHtml = `<div style="margin-top:18px;padding:18px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;color:#b91c1c;font-size:13px;">No se pudo cargar el historial de este producto (${_kardexEsc(errHistorial.message || 'error desconocido')}). El resto de la ficha sigue disponible arriba. Revisa la consola (F12) para mas detalle.</div>`;
+ }
+
  cont.innerHTML = `
  <div style="max-width:1400px;margin:0 auto;padding:10px;">
  <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 4px 15px rgba(15,23,42,0.06);overflow:hidden;">
+
  <div style="display:grid;grid-template-columns:280px 1fr 330px;gap:0;">
  <div style="padding:22px;border-right:1px solid #e2e8f0;background:#f8fafc;">
  <div style="height:210px;background:white;border:1px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:14px;">
@@ -2088,78 +2106,19 @@ function mostrarDetalleProductoMaestro(id) {
  </div>
  </div>
  </div>
- ${_invRenderHistorialProducto(p)}
+ ${historialHtml}
  </div>`;
- return;
 
- // Asegurar que existan las variantes
- p.variantes = p.variantes || [];
- const totalStock = p.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-
- // HTML mejorado para el Visor Maestro
- let html = `
- <div style="max-width: 1400px; margin: 0 auto; padding: 10px;">
- <div style="display: grid; grid-template-columns: 300px 1fr 350px; gap: 20px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px;">
- 
- <div style="text-align: center; border-right: 1px solid #eee; padding-right: 20px;">
- <img id="imgVisorPrevia" src="${p.imagen || ''}" style="width: 100%; height: 200px; object-fit: contain; margin-bottom: 15px;">
- <div style="padding: 15px; background: #f8fafc; border-radius: 10px; border: 1px solid #e2e8f0;">
- <span style="font-size: 11px; color: #64748b; font-weight: bold; text-transform: uppercase;">Inventario Total</span>
- <h2 style="margin: 5px 0; color: ${totalStock > 0 ? '#10b981' : '#ef4444'}; font-size: 32px;">${totalStock} <small style="font-size: 14px;">pzs</small></h2>
- </div>
- </div>
-
- <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
- <div class="campo"><label>Nombre</label><input type="text" id="editNombre" value="${p.nombre}"></div>
- <div class="campo"><label>Marca</label><input type="text" id="editMarca" value="${p.marca || ''}"></div>
- <div class="campo"><label>Costo</label><input type="number" id="editCosto" value="${p.costo || 0}"></div>
- <div class="campo"><label>Precio</label><input type="number" id="editPrecio" value="${p.precio || 0}"></div>
- <div class="campo" style="grid-column: span 2;">
- <label>Caracteristicas</label>
- <textarea id="editCaracteristicas" rows="3" style="width:100%; border-radius:6px; border:1px solid #d1d5db;">${p.caracteristicas || ''}</textarea>
- </div>
- </div>
-
- <!-- GESTIAN DE STOCK POR UBICACIAN Y COLOR -->
- <div style="background: #f1f5f9; padding: 20px; border-radius: 12px; border: 1px solid #cbd5e1;">
- <h4 style="margin: 0 0 15px 0; color: #1e293b; font-size: 14px; display: flex; align-items: center; gap: 8px;">Control de Existencias</h4>
- 
- <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
- <select id="newVarUbicacion" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
- <option value="Tienda">Tienda Principal</option>
- <option value="Bodega">Bodega / Almacen</option>
- </select>
- <input type="text" id="newVarColor" placeholder="Color (Ej: Chocolate, Rojo...)" style="padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
- <div style="display: flex; gap: 5px;">
- <input type="number" id="newVarCant" placeholder="Cant." style="width: 70px; padding: 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
- <button onclick="agregarVarianteStock('${p.id}')" style="flex: 1; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">+ Anadir</button>
- </div>
- </div>
-
- <div id="listaVariantes" style="max-height: 180px; overflow-y: auto; background: white; border-radius: 8px; border: 1px solid #cbd5e1;">
- ${renderTablaVariantes(p.variantes, p.id)}
- </div>
- 
- <button onclick="guardarCambiosVisor(${p.id})" style="width: 100%; margin-top: 15px; padding: 12px; background: #10b981; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">GUARDAR CAMBIOS</button>
- </div>
- </div>
- 
- <!-- Kardex Historico (Igual que antes) -->
- <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
- <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
- <h3 style="color: #10b981; border-bottom: 2px solid #10b981; padding-bottom: 10px;">Entradas</h3>
- <table><tbody>${renderFilasKardex(id, 'entrada')}</tbody></table>
- </div>
- <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
- <h3 style="color: #f59e0b; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Salidas</h3>
- <table><tbody>${renderFilasKardex(id, 'salida')}</tbody></table>
- </div>
- </div>
- </div>
- `;
-
- cont.innerHTML = html;
+ } catch (errVisor) {
+ console.error('Error al renderizar el Visor Maestro de producto:', errVisor);
+ cont.innerHTML = `<div style="padding:40px;text-align:center;color:#b91c1c;">
+ <strong style="display:block;margin-bottom:8px;">Ocurrio un error al mostrar este producto.</strong>
+ <span style="font-size:13px;color:#7f1d1d;">${_kardexEsc(errVisor.message || 'Error desconocido')}</span><br>
+ <span style="font-size:12px;color:#64748b;">Revisa la consola (F12) para mas detalle, o regresa e intenta con otro producto.</span>
+ </div>`;
+ }
 }
+
 function cerrarProductoForm() {
  const modal = document.getElementById("modalProductoForm");
  if (modal) {
