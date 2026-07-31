@@ -1991,6 +1991,7 @@ window.guardarAjusteAuditoria = function() {
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
 window.renderCuentasBancarias = renderCuentasBancarias;
+window._bancosCalcularSaldosDesdeMovimientos = _bancosCalcularSaldosDesdeMovimientos;
 window.recalcularSaldosGuardadosDesdeMovimientos = recalcularSaldosGuardadosDesdeMovimientos;
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;

@@ -14,12 +14,13 @@ function renderGestionVendedores() {
     const rows = vendedores.map(v => {
         const comisVend = comisiones.filter(c => c.vendedorId === v.id);
         const pendVend = comisVend.filter(c => c.estado === 'Pendiente').reduce((s, c) => s + c.montoComision, 0);
-        const tipoLabel = v.tipoComision === 'por_abono' ? 'Por abono' : 'Al cierre';
+        const baseLabels = { venta_total: 'Venta total', precio_base: 'Precio base', utilidad: 'Utilidad' };
+        const baseLabel = baseLabels[v.baseComision] || 'Precio base';
         return `<tr>
           <td style="padding:10px;">${v.nombre}</td>
           <td style="padding:10px;text-align:center;">${v.telefono || '-'}</td>
           <td style="padding:10px;text-align:center;">${v.porcentajeComision || 0}%</td>
-          <td style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">${tipoLabel}</td>
+          <td style="padding:10px;text-align:center;font-size:12px;color:#7c3aed;">${baseLabel}</td>
           <td style="padding:10px;text-align:right;">${dinero(pendVend)}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${v.activo ? '#16a34a' : '#9ca3af'};font-weight:bold;">${v.activo ? '✅ Activo' : '⛔ Inactivo'}</span></td>
           <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
@@ -56,7 +57,7 @@ function renderGestionVendedores() {
               <th style="padding:10px;text-align:left;">Nombre</th>
               <th style="padding:10px;text-align:center;">Teléfono</th>
               <th style="padding:10px;text-align:center;">% Comisión</th>
-              <th style="padding:10px;text-align:center;">Tipo</th>
+              <th style="padding:10px;text-align:center;">Base de comisión</th>
               <th style="padding:10px;text-align:right;">Comisión Pendiente</th>
               <th style="padding:10px;text-align:center;">Estado</th>
               <th style="padding:10px;text-align:center;">Acciones</th>
@@ -65,6 +66,7 @@ function renderGestionVendedores() {
           </table>
         </div>`}
       </div>
+      <div id="sugerenciasRecuperacionArea" style="margin-bottom:20px;"></div>
       <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:20px;">
         <h3 style="margin:0 0 16px;color:#7c3aed;">📊 Reporte de Comisiones por Período</h3>
         <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
@@ -80,13 +82,135 @@ function renderGestionVendedores() {
         </div>
         <div id="reporteComisionesArea"></div>
       </div>`;
+    renderSugerenciasRecuperacionCartera();
+}
+
+// ===== SUGERENCIAS: RECUPERACIÓN DE CARTERA EN ATRASO =====
+// El vendedor solo cobra comisión por venta (al cierre). Cuando una cuenta que
+// estuvo en atraso termina saldándose, el sistema SUGIERE aquí una posible
+// comisión extra por la gestión de cobranza, pero no la calcula ni la aplica
+// de forma automática: el admin decide si otorgarla y por cuánto.
+function obtenerSugerenciasRecuperacionCartera(diasGracia = 3) {
+    const cuentas = StorageService.get('cuentasPorCobrar', []);
+    const pagares = StorageService.get('pagaresSistema', []);
+    const comisiones = StorageService.get('comisionesRegistradas', []);
+    const descartadas = StorageService.get('sugerenciasComisionDescartadas', []);
+    const vendedores = StorageService.get('vendedores', []);
+
+    const sugerencias = [];
+    cuentas.forEach(c => {
+        if (String(c.estado || '').toLowerCase() !== 'saldado') return;
+        if (!c.vendedorId) return;
+        const abonos = c.abonos || [];
+        if (abonos.length === 0) return;
+
+        let ultimoAbono = null;
+        let ultimoAbonoMs = 0;
+        abonos.forEach(ab => {
+            const ms = new Date(ab.fechaAbonoIso || ab.fecha || 0).getTime();
+            if (ms > ultimoAbonoMs) { ultimoAbonoMs = ms; ultimoAbono = ab; }
+        });
+        if (!ultimoAbono || !ultimoAbonoMs) return;
+
+        const pagaresCuenta = pagares.filter(p => String(p.folio) === String(c.folio));
+        if (pagaresCuenta.length === 0) return;
+        const ultimoVencimiento = Math.max(...pagaresCuenta.map(p => Number(p.fechaVencimiento || 0)));
+        if (!ultimoVencimiento) return;
+
+        const diasAtraso = Math.floor((ultimoAbonoMs - ultimoVencimiento) / 86400000);
+        if (diasAtraso <= diasGracia) return; // se pagó a tiempo o con poca demora
+
+        if (descartadas.includes(c.folio)) return;
+        if (comisiones.some(cm => cm.tipo === 'recuperacion_cartera' && cm.folio === c.folio)) return;
+
+        const v = vendedores.find(x => String(x.id) === String(c.vendedorId));
+        sugerencias.push({
+            folio: c.folio,
+            clienteNombre: c.nombre || '',
+            vendedorId: c.vendedorId,
+            vendedorNombre: v ? v.nombre : (c.vendedorNombre || 'Vendedor'),
+            diasAtraso,
+            fechaRecuperacion: ultimoAbono.fecha || ultimoAbono.fechaAbonoIso || ''
+        });
+    });
+    return sugerencias.sort((a, b) => b.diasAtraso - a.diasAtraso);
+}
+
+function renderSugerenciasRecuperacionCartera() {
+    const cont = document.getElementById('sugerenciasRecuperacionArea');
+    if (!cont) return;
+    const sugerencias = obtenerSugerenciasRecuperacionCartera();
+    if (sugerencias.length === 0) { cont.innerHTML = ''; return; }
+
+    const filas = sugerencias.map(s => `
+      <tr>
+        <td style="padding:8px;">${s.vendedorNombre}</td>
+        <td style="padding:8px;">${s.folio}</td>
+        <td style="padding:8px;">${s.clienteNombre}</td>
+        <td style="padding:8px;text-align:center;color:#b45309;font-weight:bold;">${s.diasAtraso} días</td>
+        <td style="padding:8px;">${s.fechaRecuperacion}</td>
+        <td style="padding:8px;text-align:center;display:flex;gap:6px;justify-content:center;">
+          <button onclick="otorgarComisionRecuperacion('${s.folio}', ${s.vendedorId})" style="padding:6px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">➕ Dar comisión</button>
+          <button onclick="descartarSugerenciaRecuperacion('${s.folio}')" style="padding:6px 10px;background:#e5e7eb;color:#4b5563;border:none;border-radius:4px;cursor:pointer;font-size:12px;">🚫 Descartar</button>
+        </td>
+      </tr>`).join('');
+
+    cont.innerHTML = `
+      <div style="background:#fffbeb;border:1px solid #fde68a;padding:20px;border-radius:10px;">
+        <h3 style="margin:0 0 6px;color:#b45309;">💡 Sugerencias: recuperación de cartera en atraso</h3>
+        <p style="margin:0 0 14px;font-size:13px;color:#92400e;">Estas cuentas se saldaron después de estar en atraso. No se otorga comisión automáticamente: revisa y decide si aplica un extra por la gestión de cobranza.</p>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="background:#fef3c7;">
+              <th style="padding:8px;text-align:left;">Vendedor</th>
+              <th style="padding:8px;text-align:left;">Folio</th>
+              <th style="padding:8px;text-align:left;">Cliente</th>
+              <th style="padding:8px;text-align:center;">Días de atraso</th>
+              <th style="padding:8px;text-align:left;">Recuperada el</th>
+              <th style="padding:8px;text-align:center;">Acción</th>
+            </tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+      </div>`;
+}
+
+function otorgarComisionRecuperacion(folio, vendedorId) {
+    const vendedores = StorageService.get('vendedores', []);
+    const v = vendedores.find(x => String(x.id) === String(vendedorId));
+    if (!v) return;
+    const entrada = prompt(`Monto de comisión extra por recuperar la cuenta ${folio} (se redondeará al siguiente 10):`, '');
+    if (entrada === null) return;
+    const monto = _redondearComisionSiguienteDiez(parseFloat(entrada) || 0);
+    if (monto <= 0) return alert('⚠️ Ingresa un monto válido.');
+    const comisiones = StorageService.get('comisionesRegistradas', []);
+    comisiones.push({
+        id: Date.now(),
+        vendedorId: v.id,
+        vendedorNombre: v.nombre,
+        folio,
+        totalVenta: 0,
+        montoComision: monto,
+        fecha: Date.now(),
+        tipo: 'recuperacion_cartera',
+        estado: 'Pendiente'
+    });
+    StorageService.set('comisionesRegistradas', comisiones);
+    renderGestionVendedores();
+}
+
+function descartarSugerenciaRecuperacion(folio) {
+    const descartadas = StorageService.get('sugerenciasComisionDescartadas', []);
+    if (!descartadas.includes(folio)) descartadas.push(folio);
+    StorageService.set('sugerenciasComisionDescartadas', descartadas);
+    renderSugerenciasRecuperacionCartera();
 }
 
 function abrirFormVendedor(id) {
     const vendedores = StorageService.get('vendedores', []);
     const v = id ? vendedores.find(x => x.id === id) : null;
     const comisionApartado = v ? (v.porcentajeComisionApartado ?? v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0) : 0;
-    const tipoActual = v ? (v.tipoComision || 'al_cierre') : 'al_cierre';
+    const baseActual = v ? (v.baseComision || 'precio_base') : 'precio_base';
     const html = `
     <div data-modal="form-vendedor" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:480px;padding:28px;">
@@ -114,10 +238,11 @@ function abrirFormVendedor(id) {
             <input type="number" id="vndComisionApartado" value="${comisionApartado}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
           <div>
-            <label style="font-size:12px;font-weight:bold;color:#374151;">TIPO DE COMISIÓN</label>
-            <select id="vndTipoComision" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-              <option value="al_cierre" ${tipoActual === 'al_cierre' ? 'selected' : ''}>Al cierre de la venta</option>
-              <option value="por_abono" ${tipoActual === 'por_abono' ? 'selected' : ''}>Por abono recibido</option>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">BASE DE CÁLCULO DE COMISIÓN</label>
+            <select id="vndBaseComision" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              <option value="venta_total" ${baseActual === 'venta_total' ? 'selected' : ''}>% de la venta total (incluye intereses de crédito)</option>
+              <option value="precio_base" ${baseActual === 'precio_base' ? 'selected' : ''}>% del precio base (contado)</option>
+              <option value="utilidad" ${baseActual === 'utilidad' ? 'selected' : ''}>% de la utilidad (venta - costo)</option>
             </select>
           </div>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -141,7 +266,7 @@ function guardarVendedor() {
     const porcentajeComisionContado = parseFloat(document.getElementById('vndComisionContado')?.value) || 0;
     const porcentajeComisionCredito = parseFloat(document.getElementById('vndComisionCredito')?.value) || 0;
     const porcentajeComisionApartado = parseFloat(document.getElementById('vndComisionApartado')?.value) || 0;
-    const tipoComision = document.getElementById('vndTipoComision')?.value || 'al_cierre';
+    const baseComision = document.getElementById('vndBaseComision')?.value || 'precio_base';
     const activo = document.getElementById('vndActivo')?.checked ?? true;
     if (!nombre) return alert('⚠️ El nombre es obligatorio.');
     const vendedores = StorageService.get('vendedores', []);
@@ -155,7 +280,7 @@ function guardarVendedor() {
           porcentajeComisionContado,
           porcentajeComisionCredito,
           porcentajeComisionApartado,
-          tipoComision,
+          baseComision,
           activo
         };
       }
@@ -167,7 +292,7 @@ function guardarVendedor() {
         porcentajeComisionContado,
         porcentajeComisionCredito,
         porcentajeComisionApartado,
-        tipoComision,
+        baseComision,
         activo
       });
     }
@@ -186,12 +311,49 @@ function eliminarVendedor(id) {
     renderGestionVendedores();
 }
 
-function registrarComisionVenta(folio, total, vendedorId) {
+// Redondea el monto de comisión SIEMPRE hacia arriba al siguiente múltiplo de 10.
+// Ej: 123.40 -> 130, 120.00 -> 120, 0.5 -> 10
+function _redondearComisionSiguienteDiez(monto) {
+    const n = Number(monto) || 0;
+    if (n <= 0) return 0;
+    return Math.ceil(n / 10) * 10;
+}
+
+// Suma el costo de mercancía de una lista de artículos vendidos, buscando el
+// costo unitario en el catálogo de productos (costo | costoPromedio | precioCompra).
+function calcularCostoMercanciaVenta(articulos, listaProductos) {
+    if (!Array.isArray(articulos) || articulos.length === 0) return 0;
+    const productos = Array.isArray(listaProductos) ? listaProductos : (window.productos || []);
+    return articulos.reduce((sum, art) => {
+        const prodId = art.productoId ?? art.id;
+        const prod = productos.find(p => String(p.id) === String(prodId));
+        const costoUnit = Number(prod?.costo ?? prod?.costoPromedio ?? prod?.precioCompra ?? 0);
+        return sum + costoUnit * Number(art.cantidad || 1);
+    }, 0);
+}
+
+// Determina el monto base sobre el cual se calcula el % de comisión, según la
+// configuración del vendedor (baseComision): venta_total, precio_base o utilidad.
+function _montoBaseComision(v, { totalVenta = 0, totalContado = 0, costoMercancia = 0 } = {}) {
+    const base = v.baseComision || 'precio_base';
+    if (base === 'venta_total') return Number(totalVenta) || Number(totalContado) || 0;
+    if (base === 'utilidad') return Math.max(0, (Number(totalContado) || Number(totalVenta) || 0) - (Number(costoMercancia) || 0));
+    // precio_base (default)
+    return Number(totalContado) || Number(totalVenta) || 0;
+}
+
+// datos puede ser un número (compatibilidad: totalContado plano) o un objeto:
+// { totalContado, totalVenta, articulos, listaProductos }
+function registrarComisionVenta(folio, datos, vendedorId) {
     const vendedores = StorageService.get('vendedores', []);
     const v = vendedores.find(x => String(x.id) === String(vendedorId));
     if (!v) return;
-    const tipoComision = v.tipoComision || 'al_cierre';
-    if (tipoComision === 'por_abono') return;
+
+    const esObjeto = datos && typeof datos === 'object';
+    const totalContado = esObjeto ? Number(datos.totalContado || 0) : Number(datos || 0);
+    const totalVenta = esObjeto ? Number(datos.totalVenta || datos.totalContado || 0) : Number(datos || 0);
+    const costoMercancia = esObjeto ? calcularCostoMercanciaVenta(datos.articulos, datos.listaProductos) : 0;
+
     // Detectar tipo de venta: contado, transferencia, credito, apartado
     let tipoVenta = 'contado';
     if (window._ultimaVentaMetodo) tipoVenta = window._ultimaVentaMetodo;
@@ -207,7 +369,10 @@ function registrarComisionVenta(folio, total, vendedorId) {
     } else {
       porcentaje = v.porcentajeComisionContado ?? v.porcentajeComision ?? 0;
     }
-    const montoComision = total * (porcentaje / 100);
+
+    const montoBase = _montoBaseComision(v, { totalVenta, totalContado, costoMercancia });
+    const montoComisionCalculado = montoBase * (porcentaje / 100);
+    const montoComision = _redondearComisionSiguienteDiez(montoComisionCalculado);
     if (montoComision <= 0) return;
     const comisiones = StorageService.get('comisionesRegistradas', []);
     comisiones.push({
@@ -215,32 +380,13 @@ function registrarComisionVenta(folio, total, vendedorId) {
         vendedorId: v.id,
         vendedorNombre: v.nombre,
         folio,
-        totalVenta: total,
+        totalVenta: totalContado,
+        baseComision: v.baseComision || 'precio_base',
+        montoBaseComision: montoBase,
+        montoComisionSinRedondeo: montoComisionCalculado,
         montoComision,
         fecha: Date.now(),
         tipo: 'al_cierre',
-        estado: 'Pendiente'
-    });
-    StorageService.set('comisionesRegistradas', comisiones);
-}
-
-function registrarComisionAbono(folio, montoAbono, vendedorId) {
-    const vendedores = StorageService.get('vendedores', []);
-    const v = vendedores.find(x => String(x.id) === String(vendedorId));
-    if (!v) return;
-    if ((v.tipoComision || 'al_cierre') !== 'por_abono') return;
-    const montoComision = montoAbono * (v.porcentajeComision / 100);
-    if (montoComision <= 0) return;
-    const comisiones = StorageService.get('comisionesRegistradas', []);
-    comisiones.push({
-        id: Date.now(),
-        vendedorId: v.id,
-        vendedorNombre: v.nombre,
-        folio,
-        totalVenta: montoAbono,
-        montoComision,
-        fecha: Date.now(),
-        tipo: 'por_abono',
         estado: 'Pendiente'
     });
     StorageService.set('comisionesRegistradas', comisiones);
@@ -325,7 +471,7 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
       <td style="padding:8px;text-align:right;">${dinero(c.totalVenta)}</td>
       <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
       <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
-      <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre'}</td>
+      <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'recuperacion_cartera' ? '💡 Recuperación' : (c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre')}</td>
       <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
       <td style="padding:8px;text-align:center;">${c.estado === 'Pendiente' ? `<button onclick="pagarComision(${c.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Pagar</button>` : '✅'}</td>
     </tr>`).join('');
@@ -468,10 +614,14 @@ window.abrirFormVendedor = abrirFormVendedor;
 window.guardarVendedor = guardarVendedor;
 window.editarVendedor = editarVendedor;
 window.eliminarVendedor = eliminarVendedor;
+window.calcularCostoMercanciaVenta = calcularCostoMercanciaVenta;
 window.registrarComisionVenta = registrarComisionVenta;
-window.registrarComisionAbono = registrarComisionAbono;
 window.calcularComisionesVendedor = calcularComisionesVendedor;
 window.calcularComisionesFiltradas = calcularComisionesFiltradas;
 window.renderReporteComisiones = renderReporteComisiones;
 window.pagarComision = pagarComision;
 window.pagarComisionVendedor = pagarComisionVendedor;
+window.obtenerSugerenciasRecuperacionCartera = obtenerSugerenciasRecuperacionCartera;
+window.renderSugerenciasRecuperacionCartera = renderSugerenciasRecuperacionCartera;
+window.otorgarComisionRecuperacion = otorgarComisionRecuperacion;
+window.descartarSugerenciaRecuperacion = descartarSugerenciaRecuperacion;

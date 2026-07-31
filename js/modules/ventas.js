@@ -2372,7 +2372,18 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
 
     if (typeof window.registrarComisionVenta === "function" && window._vendedorSeleccionado?.id) {
         window._ultimaVentaMetodo = metodoPago;
-        window.registrarComisionVenta(folioVenta, totalContado, window._vendedorSeleccionado.id);
+        // "totalVenta" = lo que realmente se cobra (incluye intereses de crédito);
+        // "totalContado" = precio base sin intereses; los artículos se usan para
+        // calcular el costo de mercancía cuando la base de comisión es "utilidad".
+        const totalVentaReal = metodoPago === "credito"
+            ? Number(enganche || 0) + Number(registroVentaAutorizada.saldoAFinanciar || 0)
+            : totalContado;
+        window.registrarComisionVenta(folioVenta, {
+            totalContado,
+            totalVenta: totalVentaReal,
+            articulos: datosVentaP.articulos,
+            listaProductos: productosActuales
+        }, window._vendedorSeleccionado.id);
     }
 
     const entregaYaDocumentada = StorageService.get("documentosEntrega", [])
