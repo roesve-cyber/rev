@@ -46,23 +46,40 @@ const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {
 // Llama al cotizador simple (Ventas)
 function abrirCotizador() {
     window._customPlanesAuditoria = [];
+    window._cotEditandoId = null;
     _renderCotizadorHTML('simple');
 }
 
 // Llama al cotizador avanzado (Auditoría)
 function abrirCotizadorAuditoria() {
     window._customPlanesAuditoria = [];
+    window._cotEditandoId = null;
     _renderCotizadorHTML('auditoria');
 }
 
 // Llama al cotizador de Mayoreo (pago de contado, sin planes de crédito)
 function abrirCotizadorMayoreo() {
     window._customPlanesAuditoria = [];
+    window._cotEditandoId = null;
     _renderCotizadorHTML('mayoreo');
 }
 
+// Abre el cotizador precargado con los datos de una cotización ya existente para modificarla.
+function editarCotizacion(id) {
+    const lista = StorageService.get('cotizaciones', []);
+    const cot = lista.find(c => c.id === id);
+    if (!cot) return alert('⚠️ Cotización no encontrada.');
+    if (cot.estado === 'Convertida') return alert('⚠️ No se puede editar una cotización ya convertida a venta.');
+
+    const modo = cot.modalidad === 'mayoreo' ? 'mayoreo' : ((cot.customPlanes && cot.customPlanes.length > 0) ? 'auditoria' : 'simple');
+    window._customPlanesAuditoria = cot.customPlanes ? cot.customPlanes.map(p => ({ ...p })) : [];
+    window._cotEditandoId = cot.id;
+    _renderCotizadorHTML(modo, cot);
+}
+
 // Generador dinámico de la vista según el rol/sección
-function _renderCotizadorHTML(modo) {
+// cotExistente (opcional): si se pasa, el formulario se precarga para EDITAR esa cotización en vez de crear una nueva.
+function _renderCotizadorHTML(modo, cotExistente) {
     const isAuditoria = modo === 'auditoria';
     const isMayoreo = modo === 'mayoreo';
     const conCosto = isAuditoria || isMayoreo; // ambos modos capturan costo del producto libre
@@ -124,7 +141,9 @@ function _renderCotizadorHTML(modo) {
         </div>
     ` : '';
 
-    const tituloModal = isMayoreo ? '🏷️ Cotización de Mayoreo (Pago de Contado)' : `📄 Nueva Cotización ${isAuditoria ? '(Avanzada)' : ''}`;
+    const tituloModal = cotExistente
+        ? `✏️ Editar Cotización ${cotExistente.folio}`
+        : (isMayoreo ? '🏷️ Cotización de Mayoreo (Pago de Contado)' : `📄 Nueva Cotización ${isAuditoria ? '(Avanzada)' : ''}`);
     const colorModal = isMayoreo ? '#0891b2' : (isAuditoria ? '#d97706' : '#1e40af');
 
     const campoPeriodicidad = isMayoreo ? `
@@ -293,7 +312,7 @@ function _renderCotizadorHTML(modo) {
         </div>`}
 
         <div style="display:flex;gap:10px;">
-          <button onclick="generarCotizacion()" style="flex:1;padding:12px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Generar Cotización</button>
+          <button onclick="generarCotizacion()" id="cotBtnGenerar" style="flex:1;padding:12px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">${cotExistente ? '💾 Actualizar Cotización' : '✅ Generar Cotización'}</button>
           <button onclick="document.querySelector('[data-modal=cotizador]')?.remove()" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
         </div>
       </div>
@@ -301,6 +320,40 @@ function _renderCotizadorHTML(modo) {
     document.body.insertAdjacentHTML('beforeend', html);
     window._articulosCot = [];
     window._cotImagenTemp = null;
+
+    if (cotExistente) {
+        // Precarga de artículos (se clonan para no mutar el registro guardado hasta confirmar).
+        window._articulosCot = cotExistente.articulos.map(a => ({ ...a }));
+
+        if (cotExistente.clienteId) {
+            const inputCliente = document.getElementById('cotCliente');
+            const dispCliente = document.getElementById('cotCliente-display');
+            if (inputCliente) inputCliente.value = cotExistente.clienteId;
+            if (dispCliente) { dispCliente.textContent = cotExistente.clienteNombre; dispCliente.style.color = '#111827'; }
+        } else if (cotExistente.clienteNombre && cotExistente.clienteNombre !== 'Cliente general') {
+            const libreCliente = document.getElementById('cotClienteLibre');
+            if (libreCliente) libreCliente.value = cotExistente.clienteNombre;
+        }
+
+        const vigenciaInput = document.getElementById('cotVigencia');
+        if (vigenciaInput) vigenciaInput.value = cotExistente.vigenciaDias;
+
+        const notasInput = document.getElementById('cotNotas');
+        if (notasInput) notasInput.value = cotExistente.notas || '';
+
+        const periodicidadSel = document.getElementById('cotPeriodicidad');
+        if (periodicidadSel) periodicidadSel.value = cotExistente.periodicidad || 'semanal';
+
+        if (cotExistente.enganche > 0) {
+            const chk = document.getElementById('cotizEngancheCheck');
+            const montoInput = document.getElementById('cotizEngancheMonto');
+            if (montoInput) montoInput.value = cotExistente.enganche;
+            if (chk) { chk.checked = true; _toggleEngancheCot(); }
+        }
+
+        if (isAuditoria) _renderCustomPlanes();
+    }
+
     _renderTablaArticulosCot();
 }
 
@@ -766,10 +819,15 @@ function generarCotizacion() {
         return resto;
     });
 
+    const editandoId = window._cotEditandoId || null;
+    const lista = StorageService.get('cotizaciones', []);
+    const idxExistente = editandoId ? lista.findIndex(c => c.id === editandoId) : -1;
+    const original = idxExistente !== -1 ? lista[idxExistente] : null;
+
     const cot = {
-      id: Date.now(),
-      folio: _foliosCot(),
-      fecha: window.localISO(hoy),
+      id: original ? original.id : Date.now(),
+      folio: original ? original.folio : _foliosCot(),
+      fecha: original ? original.fecha : window.localISO(hoy),
       fechaVencimiento: window.localISO(fechaVenc),
       clienteNombre,
       clienteId: selCliente?.value || null,
@@ -784,13 +842,17 @@ function generarCotizacion() {
       modalidad: window._isCotizadorMayoreo ? 'mayoreo' : 'normal',
       customPlanes // Se guarda el arreglo de plazos personalizados
     };
-    
-    const lista = StorageService.get('cotizaciones', []);
-    lista.push(cot);
+
+    if (idxExistente !== -1) {
+        lista[idxExistente] = cot;
+    } else {
+        lista.push(cot);
+    }
     StorageService.set('cotizaciones', lista);
-    
+    window._cotEditandoId = null;
+
     document.querySelector('[data-modal="cotizador"]')?.remove();
-    alert(`✅ Cotización ${cot.folio} generada correctamente.`);
+    alert(original ? `✅ Cotización ${cot.folio} actualizada correctamente.` : `✅ Cotización ${cot.folio} generada correctamente.`);
     if (document.getElementById('listaCotizaciones')) abrirListaCotizaciones();
     // Se pasan los artículos originales (con imagen en memoria) solo para esta impresión;
     // no quedan guardados en ningún lado una vez cerrada la ventana.
@@ -810,9 +872,16 @@ function abrirListaCotizaciones() {
         </div>`;
         return;
     }
+    // Se conserva la selección de checkboxes entre re-renders (p.ej. al eliminar una vencida).
+    if (!window._cotSeleccionadas) window._cotSeleccionadas = new Set();
+    const idsVigentes = new Set(lista.map(c => c.id));
+    window._cotSeleccionadas.forEach(id => { if (!idsVigentes.has(id)) window._cotSeleccionadas.delete(id); });
+
     const rows = lista.slice().reverse().map(c => {
         const color = c.estado === 'Vigente' ? '#16a34a' : c.estado === 'Convertida' ? '#2563eb' : '#dc2626';
+        const checked = window._cotSeleccionadas.has(c.id) ? 'checked' : '';
         return `<tr>
+          <td style="padding:10px;text-align:center;"><input type="checkbox" class="cotChk" data-id="${c.id}" onchange="_cotToggleSeleccion(${c.id}, this.checked)" ${checked} style="width:16px;height:16px;cursor:pointer;"></td>
           <td style="padding:10px;">${c.folio}${c.modalidad === 'mayoreo' ? ' <span style="font-size:10px;background:#cffafe;color:#0e7490;padding:2px 7px;border-radius:10px;font-weight:bold;">MAYOREO</span>' : ''}</td>
           <td style="padding:10px;">${c.clienteNombre}</td>
           <td style="padding:10px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
@@ -821,19 +890,29 @@ function abrirListaCotizaciones() {
           <td style="padding:10px;text-align:center;"><span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${c.estado}</span></td>
           <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
             <button onclick="imprimirCotizacion(${c.id})" title="Imprimir" style="background:none;border:none;cursor:pointer;font-size:18px;">🖨️</button>
+            ${c.estado !== 'Convertida' ? `<button onclick="editarCotizacion(${c.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:18px;">✏️</button>` : ''}
             ${c.estado === 'Vigente' ? `<button onclick="convertirCotizacionAVenta(${c.id})" title="Convertir a Venta" style="background:none;border:none;cursor:pointer;font-size:18px;">🛒</button>` : ''}
             <button onclick="eliminarCotizacion(${c.id})" title="Eliminar" style="background:none;border:none;cursor:pointer;font-size:18px;">🗑️</button>
           </td>
         </tr>`;
     }).join('');
+
+    const numVencidas = lista.filter(c => c.estado === 'Vencida').length;
+    const numSeleccionadas = window._cotSeleccionadas.size;
+
     cont.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <h3 style="margin:0;color:#1e40af;">📋 Cotizaciones (${lista.length})</h3>
-        <button onclick="abrirCotizador()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📄 Nueva Cotización</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${numSeleccionadas > 0 ? `<button onclick="eliminarCotizacionesSeleccionadas()" style="padding:10px 16px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🗑️ Eliminar seleccionadas (${numSeleccionadas})</button>` : ''}
+          ${numVencidas > 0 ? `<button onclick="eliminarCotizacionesVencidas()" style="padding:10px 16px;background:#f97316;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🧹 Eliminar vencidas (${numVencidas})</button>` : ''}
+          <button onclick="abrirCotizador()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📄 Nueva Cotización</button>
+        </div>
       </div>
       <div style="overflow-x:auto;background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
         <table style="width:100%;border-collapse:collapse;font-size:14px;">
           <thead><tr style="background:#f3f4f6;">
+            <th style="padding:10px;text-align:center;"><input type="checkbox" id="cotChkTodas" onchange="_cotToggleSeleccionTodas(this.checked)" style="width:16px;height:16px;cursor:pointer;"></th>
             <th style="padding:10px;text-align:left;">Folio</th>
             <th style="padding:10px;text-align:left;">Cliente</th>
             <th style="padding:10px;text-align:left;">Fecha</th>
@@ -845,6 +924,43 @@ function abrirListaCotizaciones() {
           <tbody>${rows}</tbody>
         </table>
       </div>`;
+
+    const chkTodas = document.getElementById('cotChkTodas');
+    if (chkTodas) chkTodas.checked = lista.length > 0 && numSeleccionadas === lista.length;
+}
+
+function _cotToggleSeleccion(id, marcado) {
+    if (!window._cotSeleccionadas) window._cotSeleccionadas = new Set();
+    if (marcado) window._cotSeleccionadas.add(id);
+    else window._cotSeleccionadas.delete(id);
+    abrirListaCotizaciones();
+}
+
+function _cotToggleSeleccionTodas(marcado) {
+    const lista = StorageService.get('cotizaciones', []);
+    window._cotSeleccionadas = marcado ? new Set(lista.map(c => c.id)) : new Set();
+    abrirListaCotizaciones();
+}
+
+function eliminarCotizacionesSeleccionadas() {
+    const ids = window._cotSeleccionadas ? Array.from(window._cotSeleccionadas) : [];
+    if (ids.length === 0) return;
+    if (!confirm(`¿Eliminar ${ids.length} cotización(es) seleccionada(s)? Esta acción no se puede deshacer.`)) return;
+    let lista = StorageService.get('cotizaciones', []);
+    lista = lista.filter(c => !ids.includes(c.id));
+    StorageService.set('cotizaciones', lista);
+    window._cotSeleccionadas = new Set();
+    abrirListaCotizaciones();
+}
+
+function eliminarCotizacionesVencidas() {
+    let lista = StorageService.get('cotizaciones', []);
+    const numVencidas = lista.filter(c => c.estado === 'Vencida').length;
+    if (numVencidas === 0) return;
+    if (!confirm(`¿Eliminar las ${numVencidas} cotización(es) con estado "Vencida"? Esta acción no se puede deshacer.`)) return;
+    lista = lista.filter(c => c.estado !== 'Vencida');
+    StorageService.set('cotizaciones', lista);
+    abrirListaCotizaciones();
 }
 
 function _actualizarEstadosCotizaciones(lista) {
@@ -1125,3 +1241,8 @@ window.abrirListaCotizaciones = abrirListaCotizaciones;
 window.imprimirCotizacion = imprimirCotizacion;
 window.convertirCotizacionAVenta = convertirCotizacionAVenta;
 window.eliminarCotizacion = eliminarCotizacion;
+window.editarCotizacion = editarCotizacion;
+window._cotToggleSeleccion = _cotToggleSeleccion;
+window._cotToggleSeleccionTodas = _cotToggleSeleccionTodas;
+window.eliminarCotizacionesSeleccionadas = eliminarCotizacionesSeleccionadas;
+window.eliminarCotizacionesVencidas = eliminarCotizacionesVencidas;
