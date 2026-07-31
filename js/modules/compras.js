@@ -4718,9 +4718,60 @@ window.marcarConsignacionVendida = function(idConsig) {
 // ============================================================
 
 function _consigUiState() {
-    window._consigUiState = window._consigUiState || { proveedorKey: '', folioKey: '' };
+    window._consigUiState = window._consigUiState || { proveedorKey: '', folioKey: '', vistaHistorial: false };
     return window._consigUiState;
 }
+
+// ===== Archivado manual de folios concluidos (Historial) =====
+function _consigConcluidasMap() {
+    return StorageService.get('consignacionesConcluidas', {}) || {};
+}
+
+window.marcarConsignacionConcluida = function(folioKey) {
+    if (!_comprasRequireAdmin('Marcar consignación como concluida')) return;
+    if (!folioKey) return;
+    if (!confirm('¿Marcar este folio como concluido?\n\nSe moverá al Historial y dejará de aparecer en el control principal. Podrás reabrirlo desde el Historial cuando quieras.')) return;
+    const mapa = _consigConcluidasMap();
+    mapa[folioKey] = { fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString() };
+    StorageService.set('consignacionesConcluidas', mapa);
+    window.AuditService?.log?.({
+        accion: 'CONSIGNACION_CONCLUIDA',
+        modulo: 'Consignaciones',
+        entidad: 'folio',
+        entidadId: folioKey,
+        detalle: 'Folio de consignación marcado como concluido manualmente y movido a Historial.'
+    });
+    const s = _consigUiState();
+    s.folioKey = '';
+    abrirGestorConsignaciones();
+};
+
+window.reabrirConsignacion = function(folioKey) {
+    if (!_comprasRequireAdmin('Reabrir consignación')) return;
+    if (!folioKey) return;
+    const mapa = _consigConcluidasMap();
+    delete mapa[folioKey];
+    StorageService.set('consignacionesConcluidas', mapa);
+    window.AuditService?.log?.({
+        accion: 'CONSIGNACION_REABIERTA',
+        modulo: 'Consignaciones',
+        entidad: 'folio',
+        entidadId: folioKey,
+        detalle: 'Folio de consignación reabierto desde el Historial.'
+    });
+    const s = _consigUiState();
+    s.vistaHistorial = false;
+    s.folioKey = folioKey;
+    abrirGestorConsignaciones();
+};
+
+window.toggleHistorialConsignaciones = function() {
+    const s = _consigUiState();
+    s.vistaHistorial = !s.vistaHistorial;
+    s.proveedorKey = '';
+    s.folioKey = '';
+    abrirGestorConsignaciones();
+};
 
 function _consigAnticipoLectura(alcance = {}) {
     const entregado = Number(alcance.anticiposTotal || 0);
@@ -5440,7 +5491,18 @@ window.abrirGestorConsignaciones = function() {
 
     const resumen = _consigResumenGlobal();
     const state = _consigUiState();
-    let proveedor = resumen.grupos.find(g => g.key === state.proveedorKey) || null;
+    const concluidasMap = _consigConcluidasMap();
+    resumen.grupos.forEach(g => {
+        g.folios.forEach(f => { f.concluida = !!concluidasMap[f.key]; });
+    });
+    const vistaHistorial = !!state.vistaHistorial;
+    // En vista principal solo entran proveedores con al menos un folio activo.
+    // En vista historial solo entran proveedores con al menos un folio concluido.
+    const gruposVista = resumen.grupos
+        .map(g => ({ ...g, folios: g.folios.filter(f => vistaHistorial ? f.concluida : !f.concluida) }))
+        .filter(g => g.folios.length > 0);
+
+    let proveedor = gruposVista.find(g => g.key === state.proveedorKey) || null;
     if (!proveedor) {
         state.proveedorKey = '';
         state.folioKey = '';
@@ -5454,8 +5516,9 @@ window.abrirGestorConsignaciones = function() {
     const totalAnticipos = resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0);
     const totalAnticiposAplicados = resumen.grupos.reduce((s, g) => s + g.anticiposAplicados, 0);
     const totalSaldo = resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0);
+    const totalFoliosConcluidos = resumen.grupos.reduce((s, g) => s + g.folios.filter(f => f.concluida).length, 0);
 
-    const proveedoresHtml = resumen.grupos.map(g => {
+    const proveedoresHtml = gruposVista.map(g => {
         const activo = g.key === state.proveedorKey;
         const anticiposDisponibles = Math.max(0, Number(g.anticiposTotal || 0) - Number(g.anticiposAplicados || 0));
         const badgeAnticipo = anticiposDisponibles > 0.01 
@@ -5492,7 +5555,11 @@ window.abrirGestorConsignaciones = function() {
             <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(f.saldoNeto)}</td>
             <td style="padding:10px;text-align:center;white-space:nowrap;">
                 <button onclick="seleccionarFolioConsignacion('${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#1e40af;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Detalle</button>
+                ${vistaHistorial ? `
+                <button onclick="reabrirConsignacion('${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#15803d;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">↺ Reabrir</button>
+                ` : `
                 <button onclick="abrirModalAbonoConsignacion('folio:${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#4338ca;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Abonar</button>
+                `}
                 <button onclick="abrirEstadoCuentaConsignaciones('folio','${_comprasEscAttr(f.key)}')" style="padding:7px 10px;background:#0f766e;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Estado</button>
             </td>
         </tr>`;
@@ -5531,9 +5598,14 @@ window.abrirGestorConsignaciones = function() {
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button onclick="seleccionarFolioConsignacion('')" style="padding:9px 12px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cambiar folio</button>
+                        ${vistaHistorial ? `
+                        <button onclick="reabrirConsignacion('${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#15803d;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">↺ Reabrir</button>
+                        ` : `
                         <button onclick="abrirModalAbonoConsignacion('folio:${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#4338ca;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Abonar folio</button>
-                        <button onclick="abrirEstadoCuentaConsignaciones('folio','${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Estado folio</button>
                         <button onclick="abrirPreviaDevolucionConsignacion('${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#b45309;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">↩️ Devolución</button>
+                        <button onclick="marcarConsignacionConcluida('${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#334155;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">✅ Marcar concluida</button>
+                        `}
+                        <button onclick="abrirEstadoCuentaConsignaciones('folio','${_comprasEscAttr(folio.key)}')" style="padding:9px 12px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Estado folio</button>
                     </div>
                 </div>
                 <div style="margin-top:12px;">${_consigResumenKPIs({ ...folio, montoDevuelto: folio.montoDevuelto })}</div>
@@ -5559,10 +5631,13 @@ window.abrirGestorConsignaciones = function() {
     const html = `
         <div class="vista-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px;">
             <div>
-                <h2 style="margin:0;color:#0f172a;">Gestor de Consignaciones</h2>
-                <p style="margin:4px 0 0;color:#64748b;">Flujo por proveedor, folio y producto. Los anticipos a folio se reflejan en su propio estado de cuenta.</p>
+                <h2 style="margin:0;color:#0f172a;">Gestor de Consignaciones ${vistaHistorial ? '— Historial' : ''}</h2>
+                <p style="margin:4px 0 0;color:#64748b;">${vistaHistorial ? 'Folios marcados como concluidos. No cuentan para el control principal.' : 'Flujo por proveedor, folio y producto. Los anticipos a folio se reflejan en su propio estado de cuenta.'}</p>
             </div>
-            <button onclick="abrirGestorConsignaciones()" style="padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">Actualizar</button>
+            <div style="display:flex;gap:8px;">
+                <button onclick="toggleHistorialConsignaciones()" style="padding:10px 14px;background:${vistaHistorial ? '#1e40af' : '#334155'};color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">${vistaHistorial ? '← Volver a activas' : `📜 Historial${totalFoliosConcluidos ? ' (' + totalFoliosConcluidos + ')' : ''}`}</button>
+                <button onclick="abrirGestorConsignaciones()" style="padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">Actualizar</button>
+            </div>
         </div>
         ${_consigResumenKPIs({ compraOriginal: totalImporte, montoDevuelto: totalDevuelto, pagadoPorVentas: totalPagadoVentas, anticiposTotal: totalAnticipos, anticiposAplicados: totalAnticiposAplicados, saldoNeto: totalSaldo })}
         <div style="display:grid;grid-template-columns:minmax(260px,360px) minmax(0,1fr);gap:14px;align-items:start;">
