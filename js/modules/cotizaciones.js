@@ -1019,169 +1019,313 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     
-    const rows = articulos.map(a => {
-        const filaTexto = `
-        <tr>
-            <td style="padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px;">${a.nombre}</td>
-            <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:center; font-size:10px;">${a.cantidad}</td>
-            <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
-        </tr>`;
-        const filaImagen = a.imagen ? `
-        <tr>
-            <td colspan="3" style="padding:4px 0; border-bottom:1px dashed #ccc; text-align:center;">
-                <img src="${a.imagen}" style="max-width:35mm; max-height:28mm; object-fit:contain; border-radius:3px;">
-            </td>
-        </tr>` : '';
-        return filaTexto + filaImagen;
-    }).join('');
+    let cotizacionHTML = '';
 
-    let planeRows = '';
-    let hasCustom = false;
-    
-    if (c.saldoFinanciar > 0 && c.modalidad !== 'mayoreo') {
-      const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
-      const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
-      
-      // Recalcular TODOS los planes custom para impresión
-if (c.customPlanes && c.customPlanes.length > 0) {
-    let mult = 1;
-    if (c.periodicidad === 'quincenal') mult = 2;
-    if (c.periodicidad === 'mensual') mult = 4;
+    // ============================================================
+    // 1. FORMATO CARTA (MAYOREO) - 2 COLUMNAS TIPO TARJETA, PDF E IMAGEN
+    // ============================================================
+    if (c.modalidad === 'mayoreo') {
+        // Calcular el total de piezas de la cotización
+        const totalPiezas = articulos.reduce((acc, art) => acc + (parseInt(art.cantidad) || 0), 0);
 
-    let totalAnteriorCustom = 0;
-
-    // Ordenar ANTES de calcular para que la progresividad funcione correctamente
-    const customOrdenados = [...c.customPlanes].sort((a, b) => a.meses - b.meses);
-
-    customOrdenados.forEach(custom => {
-        const tasaDecimal = custom.tasa / 100;
-        const semanas = custom.meses * 4;
-
-        // ✅ Misma fórmula que calcularCredito()
-        let totalBase = c.saldoFinanciar * (1 + (tasaDecimal * custom.meses));
-        let pagoSemanal = totalBase / semanas;
-
-        // ✅ Mismo redondeo: múltiplo de 10 superior
-        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
-        let totalFinal = pagoSemanal * semanas;
-
-        // ✅ Progresividad con guard de seguridad
-        let intentos = 0;
-        while (totalFinal <= totalAnteriorCustom && intentos++ < 100) {
-            pagoSemanal += 5;
-            totalFinal = pagoSemanal * semanas;
+        // Agrupar los artículos de 2 en 2 para las columnas
+        const filasArticulos = [];
+        for (let i = 0; i < articulos.length; i += 2) {
+            filasArticulos.push([articulos[i], articulos[i+1]]);
         }
 
-        if (intentos >= 100) return;
+        const renderCartaCell = (a) => {
+            if (!a) return `<td style="border:none; width:49%;"></td>`; 
+            
+            // width y height en auto aseguran que la imagen JAMÁS se deforme.
+            // max-width y max-height aseguran que ocupe el máximo espacio posible dentro de la tarjeta.
+            const imgHtml = a.imagen 
+                ? `<img src="${a.imagen}" style="max-width:100%; max-height:280px; width:auto; height:auto; display:block; margin:0 auto; border-radius:4px;">` 
+                : `<div style="width:100%; height:200px; border:1px dashed #cbd5e1; border-radius:4px; background:#f8fafc; display:flex; align-items:center; justify-content:center;"><span style="font-size:12px; color:#94a3b8;">Sin imagen</span></div>`;
 
-        totalAnteriorCustom = totalFinal;
+            return `
+              <td style="padding: 0; vertical-align: top; width:49%;">
+                 <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #fff; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid;">
+                     
+                     <!-- ENCABEZADO: NOMBRE DEL PRODUCTO -->
+                     <div style="font-size:14px; font-weight:bold; color:#0f172a; text-align:center; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 10px; min-height:20px; display:flex; align-items:center; justify-content:center;">
+                         ${a.nombre}
+                     </div>
+                     
+                     <!-- IMAGEN PROPORCIONAL Y AMPLIA -->
+                     <div style="flex-grow: 1; display:flex; justify-content:center; align-items:center; padding: 5px 0;">
+                         ${imgHtml}
+                     </div>
+                     
+                     <!-- PIE DE TARJETA: CANTIDAD E IMPORTE -->
+                     <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:10px; padding-top:8px; border-top:1px dashed #e2e8f0;">
+                         <div style="font-size:13px; font-weight:bold; color:#475569;">
+                             Cant: <span style="font-size:16px; color:#0f172a;">${a.cantidad} pz</span>
+                         </div>
+                         <div style="text-align:right;">
+                             <div style="font-size:12px; color:#64748b;">P.U. ${fmtMXN(a.precio)}</div>
+                             <div style="font-size:15px; font-weight:bold; color:#0369a1;">Sub: ${fmtMXN(a.precio * a.cantidad)}</div>
+                         </div>
+                     </div>
+                 </div>
+              </td>
+            `;
+        };
 
-        planes.push({
-            meses: custom.meses,
-            pagos: Math.round(semanas / mult),
-            abono: pagoSemanal * mult,
-            total: totalFinal,   // ✅ SIN sumar enganche
-            custom: true
-        });
-        hasCustom = true;
-    });
+        // Forzamos page-break-inside en cada fila para evitar cortes a mitad de la tarjeta
+        const rowsCarta = filasArticulos.map(par => `
+            <tr style="break-inside: avoid; page-break-inside: avoid;">
+                ${renderCartaCell(par[0])}
+                <td style="width:2%; border:none;"></td> <!-- Separador mínimo entre columnas -->
+                ${renderCartaCell(par[1])}
+            </tr>
+            <tr style="break-inside: avoid; page-break-inside: avoid;"><td colspan="3" style="height:10px; border:none;"></td></tr>
+        `).join('');
 
-    planes.sort((a, b) => a.meses - b.meses);
-}
+        cotizacionHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>COT-${c.folio}</title>
+          <style>
+            @page { 
+                size: letter; 
+                margin: 4mm; /* Márgenes de milímetros para impresión */
+            }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #e2e8f0; display:flex; justify-content:center; }
+            #cotizacion-wrapper { background: white; width: 100%; max-width: 215.9mm; min-height: 279.4mm; margin: 0 auto; padding: 5mm; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+            
+            table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+            
+            .header-container { display:flex; justify-content:space-between; align-items:flex-start; border-bottom: 3px solid #0369a1; padding-bottom: 10px; margin-bottom: 10px; }
+            .empresa-info h1 { margin: 0 0 4px 0; font-size: 22px; color: #0f172a; text-transform:uppercase; }
+            .empresa-info p { margin: 0; font-size: 12px; color: #475569; }
+            .cot-info { text-align: right; }
+            .cot-info h2 { margin: 0 0 4px 0; font-size: 18px; color: #0369a1; }
+            .cot-info p { margin: 2px 0; font-size: 12px; color: #334155; }
+            .notas-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; margin-top: 15px; font-size: 12px; color: #334155; break-inside: avoid; page-break-inside: avoid; }
+            
+            @media print {
+                body { background: white; margin: 0; display:block; }
+                #cotizacion-wrapper { width: 100%; max-width: 100%; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+                thead { display: table-header-group; }
+                tfoot { display: table-footer-group; }
+                tr { page-break-inside: avoid; break-inside: avoid; }
+            }
+          </style>
+        </head>
+        <body>
+          <div id="cotizacion-wrapper">
+             <table>
+                <thead>
+                   <tr>
+                      <td colspan="3" style="border:none; padding:0;">
+                         <div class="header-container">
+                             <div class="empresa-info">
+                                 <h1>${empresa}</h1>
+                                 <p>${cfg.direccion || ''}</p>
+                                 <p>Tel: ${cfg.telefono || '---'}</p>
+                             </div>
+                             <div class="cot-info">
+                                 <h2>COTIZACIÓN MAYOREO</h2>
+                                 <p>Folio: <strong>${c.folio}</strong></p>
+                                 <p>Fecha: <strong>${new Date(c.fecha).toLocaleDateString('es-MX')}</strong></p>
+                                 <p>Vigencia: <strong>${c.vigenciaDias} días</strong></p>
+                             </div>
+                         </div>
+                         <div style="margin-bottom: 15px; font-size: 14px; color:#0f172a;">
+                             Cliente: <strong style="font-size:16px;">${c.clienteNombre.toUpperCase()}</strong>
+                         </div>
+                      </td>
+                   </tr>
+                </thead>
+                <tbody>
+                   ${rowsCarta}
+                </tbody>
+                <tfoot>
+                   <tr>
+                      <td colspan="3" style="border:none; padding-top:5px;">
+                          <div style="display:flex; justify-content:space-between; align-items:center; border-top:2px solid #cbd5e1; padding-top:10px; break-inside: avoid; page-break-inside: avoid;">
+                              <div style="font-size:16px; color:#475569; font-weight:bold;">
+                                  Total de piezas: <span style="color:#0f172a; font-size:18px;">${totalPiezas}</span>
+                              </div>
+                              <h2 style="margin:0; font-size:20px; color:#0f172a;">TOTAL: <span style="color:#0369a1;">${fmtMXN(c.total)}</span></h2>
+                          </div>
+                          ${c.notas ? `<div class="notas-box"><strong>Observaciones:</strong><br>${c.notas}</div>` : ''}
+                          <div style="margin-top: 20px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 8px;">
+                              *** GRACIAS POR SU PREFERENCIA ***
+                          </div>
+                      </td>
+                   </tr>
+                </tfoot>
+             </table>
+          </div>
+        </body>
+        </html>`;
+    }
+    // ============================================================
+    // 2. FORMATO TICKET (ORIGINAL / VENTAS Y AUDITORIA)
+    // ============================================================
+    else {
+        const rows = articulos.map(a => {
+            const filaTexto = `
+            <tr>
+                <td style="padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px;">${a.nombre}</td>
+                <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:center; font-size:10px;">${a.cantidad}</td>
+                <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
+            </tr>`;
+            const filaImagen = a.imagen ? `
+            <tr>
+                <td colspan="3" style="padding:4px 0; border-bottom:1px dashed #ccc; text-align:center;">
+                    <img src="${a.imagen}" style="max-width:35mm; max-height:28mm; object-fit:contain; border-radius:3px;">
+                </td>
+            </tr>` : '';
+            return filaTexto + filaImagen;
+        }).join('');
 
-      planeRows = planes.map(plan => `
-        <tr>
-          <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
-          <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
-          <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
-        </tr>`).join('');
+        let planeRows = '';
+        let hasCustom = false;
+        
+        if (c.saldoFinanciar > 0) {
+          const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+          const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
+          
+          if (c.customPlanes && c.customPlanes.length > 0) {
+              let mult = 1;
+              if (c.periodicidad === 'quincenal') mult = 2;
+              if (c.periodicidad === 'mensual') mult = 4;
+
+              let totalAnteriorCustom = 0;
+              const customOrdenados = [...c.customPlanes].sort((a, b) => a.meses - b.meses);
+
+              customOrdenados.forEach(custom => {
+                  const tasaDecimal = custom.tasa / 100;
+                  const semanas = custom.meses * 4;
+                  let totalBase = c.saldoFinanciar * (1 + (tasaDecimal * custom.meses));
+                  let pagoSemanal = totalBase / semanas;
+                  pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+                  let totalFinal = pagoSemanal * semanas;
+                  let intentos = 0;
+                  while (totalFinal <= totalAnteriorCustom && intentos++ < 100) {
+                      pagoSemanal += 5;
+                      totalFinal = pagoSemanal * semanas;
+                  }
+                  if (intentos >= 100) return;
+                  totalAnteriorCustom = totalFinal;
+                  planes.push({
+                      meses: custom.meses,
+                      pagos: Math.round(semanas / mult),
+                      abono: pagoSemanal * mult,
+                      total: totalFinal,
+                      custom: true
+                  });
+                  hasCustom = true;
+              });
+              planes.sort((a, b) => a.meses - b.meses);
+          }
+
+          planeRows = planes.map(plan => `
+            <tr>
+              <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
+            </tr>`).join('');
+        }
+
+        cotizacionHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>COT-${c.folio}</title>
+          <style>
+            @page { size: 80mm auto; margin: 0; }
+            body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
+            #area-impresion { width: 72mm; padding: 4mm; background: white; box-sizing: border-box; }
+            .controles { margin: 10px 0; display: flex; gap: 5px; }
+            h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
+            .separator { border-top: 1px double #000; margin: 5px 0; }
+            .info-box { font-size: 9px; text-align: center; line-height: 1.2; }
+            .folio-line { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin: 5px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th { font-size: 9px; text-align: left; border-bottom: 1px solid #000; padding: 2px 0; }
+            .totales { text-align: right; margin-top: 5px; font-size: 11px; font-weight: bold; }
+            .seccion-titulo { font-size: 9px; font-weight: bold; margin-top: 8px; text-align: center; background: #eee; }
+            .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
+            .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
+            .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
+            @media print { .controles { display: none !important; } body { background: white; } #area-impresion { width: 100%; padding: 2mm; } }
+          </style>
+        </head>
+        <body>
+          <div id="area-impresion">
+            <h2>${empresa}</h2>
+            <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
+                
+            <div class="separator"></div>
+            <div class="folio-line">
+              <span>FOLIO: ${c.folio}</span>
+            </div>
+            <div style="font-size: 9px;">
+              FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}<br>
+              CLIENTE: ${c.clienteNombre.toUpperCase()}
+            </div>
+            <div class="separator"></div>
+
+            <table>
+              <thead>
+                <tr><th>ART</th><th style="text-align:center;">CT</th><th style="text-align:right;">PREC</th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+
+            <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
+
+            ${typeof c.enganche === 'number' && c.enganche > 0 ? `<div class="enganche-box">Enganche: <strong>${fmtMXN(c.enganche)}</strong></div>` : ''}
+            ${c.notas && c.notas.length > 0 ? `<div class="notas-box">Observaciones: ${c.notas}</div>` : ''}
+
+            ${planeRows ? `
+              <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
+              <table>
+                <thead>
+                  <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
+                </thead>
+                <tbody>${planeRows}</tbody>
+              </table>
+              ${hasCustom ? '<div style="font-size:8px; margin-top:4px;">* Plan personalizado</div>' : ''}
+            ` : ''}
+
+            <div class="footer">
+              Válido por ${c.vigenciaDias} días.<br>
+              *** GRACIAS POR SU PREFERENCIA ***
+            </div>
+          </div>
+        </body>
+        </html>`;
     }
 
-    const cotizacionHTML = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <title>COT-${c.folio}</title>
-      <style>
-        @page { size: 80mm auto; margin: 0; }
-        body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
-        #area-impresion { width: 72mm; padding: 4mm; background: white; box-sizing: border-box; }
-        .controles { margin: 10px 0; display: flex; gap: 5px; }
-        h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
-        .separator { border-top: 1px double #000; margin: 5px 0; }
-        .info-box { font-size: 9px; text-align: center; line-height: 1.2; }
-        .folio-line { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin: 5px 0; }
-        table { width: 100%; border-collapse: collapse; }
-        th { font-size: 9px; text-align: left; border-bottom: 1px solid #000; padding: 2px 0; }
-        .totales { text-align: right; margin-top: 5px; font-size: 11px; font-weight: bold; }
-        .seccion-titulo { font-size: 9px; font-weight: bold; margin-top: 8px; text-align: center; background: #eee; }
-        .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
-        .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
-        .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
-        @media print { .controles { display: none !important; } body { background: white; } #area-impresion { width: 100%; padding: 2mm; } }
-      </style>
-    </head>
-    <body>
-      <div id="area-impresion">
-        <h2>${empresa}</h2>
-        <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
-            
-        <div class="separator"></div>
-        <div class="folio-line">
-          <span>FOLIO: ${c.folio}</span>
-        </div>
-        <div style="font-size: 9px;">
-          FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}<br>
-          CLIENTE: ${c.clienteNombre.toUpperCase()}
-        </div>
-        <div class="separator"></div>
-
-        <table>
-          <thead>
-            <tr><th>ART</th><th style="text-align:center;">CT</th><th style="text-align:right;">PREC</th></tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
-
-        ${c.modalidad === 'mayoreo' ? '<div class="seccion-titulo">COTIZACIÓN DE MAYOREO — PAGO DE CONTADO</div>' : ''}
-        ${typeof c.enganche === 'number' && c.enganche > 0 ? `<div class="enganche-box">Enganche: <strong>${fmtMXN(c.enganche)}</strong></div>` : ''}
-        ${c.notas && c.notas.length > 0 ? `<div class="notas-box">Observaciones: ${c.notas}</div>` : ''}
-
-        ${planeRows ? `
-          <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
-          <table>
-            <thead>
-              <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
-            </thead>
-            <tbody>${planeRows}</tbody>
-          </table>
-          ${hasCustom ? '<div style="font-size:8px; margin-top:4px;">* Plan personalizado</div>' : ''}
-        ` : ''}
-
-        <div class="footer">
-          Válido por ${c.vigenciaDias} días.<br>
-          *** GRACIAS POR SU PREFERENCIA ***
-        </div>
-      </div>
-    </body>
-    </html>`;
+    // ============================================================
+    // 3. ENVÍO A IMPRESIÓN / SERVICIO
+    // ============================================================
     if (window.TicketService?.elegirFormato) {
       window.TicketService.elegirFormato({
         html: cotizacionHTML,
         title: `Cotizacion ${c.folio}`,
         filename: `cotizacion_${c.folio}`,
-        pageSize: 'letter'
+        pageSize: c.modalidad === 'mayoreo' ? 'letter' : 'roll' // Hint adaptado
       });
       return;
     }
+    
     if (window.TicketService?.openHtml) {
       window.TicketService.openHtml(cotizacionHTML, { title: `Cotizacion ${c.folio}`, filename: `cotizacion_${c.folio}` });
       return;
     }
-    const w = window.open('', '_blank', 'width=400,height=600');
+    
+    // Fallback estándar a ventana emergente
+    const w = window.open('', '_blank', c.modalidad === 'mayoreo' ? 'width=850,height=900' : 'width=400,height=600');
     w.document.write(cotizacionHTML);
     w.document.close();
 }
