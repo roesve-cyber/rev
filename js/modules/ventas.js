@@ -5613,11 +5613,22 @@ function _authResolverAbonoPendiente(index) {
     const abonosP = StorageService.get("abonosPendientes", []);
     const ctx = window._authAbonoPendienteCtx;
     if (ctx) {
-        const idxCtx = abonosP.findIndex(a =>
-            String(a.idCuarentena || a.id || '') === String(ctx.id || '') ||
-            (_authFolioAbonoPendiente(a) === ctx.folio && Number(a.montoAbonado || a.monto || 0) === Number(ctx.monto || 0))
+        // 🎯 Prioridad 1: match exacto por id/idCuarentena. Esto es lo único
+        // que distingue de forma confiable a dos abonos con el MISMO folio y
+        // el MISMO monto (p. ej. dos pagos idénticos de $190 en fechas
+        // distintas) — antes se buscaba por id "O" por folio+monto en una
+        // sola condición, y como el match por folio+monto siempre encuentra
+        // primero al abono más antiguo del arreglo, terminaba resolviendo
+        // siempre al abono equivocado cuando había un duplicado de importe.
+        if (ctx.id) {
+            const idxPorId = abonosP.findIndex(a => String(a.idCuarentena || a.id || '') === String(ctx.id));
+            if (idxPorId !== -1) return { abonosP, index: idxPorId, abono: abonosP[idxPorId] };
+        }
+        // Prioridad 2 (solo si no hubo id o no se encontró): folio + monto.
+        const idxPorFolioMonto = abonosP.findIndex(a =>
+            _authFolioAbonoPendiente(a) === ctx.folio && Number(a.montoAbonado || a.monto || 0) === Number(ctx.monto || 0)
         );
-        if (idxCtx !== -1) return { abonosP, index: idxCtx, abono: abonosP[idxCtx] };
+        if (idxPorFolioMonto !== -1) return { abonosP, index: idxPorFolioMonto, abono: abonosP[idxPorFolioMonto] };
     }
     return { abonosP, index, abono: abonosP[index] };
 }

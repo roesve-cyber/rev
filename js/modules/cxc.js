@@ -1598,7 +1598,10 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         });
     }
 
-    StorageService.set("pagaresSistema", _todosActualizados);
+    // 🛡️ IMPORTANTE: ya no persistimos pagaresSistema aquí. Se difiere hasta
+    // después de confirmar el ingreso a caja (ver abajo), para que si
+    // _ingresarCuenta falla, NADA quede escrito — ni pagarés, ni cuenta por
+    // cobrar, ni saldo — y el abono siga intacto en la bóveda para reintentar.
 
     const cuentasXCobrar = StorageService.get("cuentasPorCobrar", []);
     const idxCuenta = cuentasXCobrar.findIndex(c => c.folio === a.folioCXC);
@@ -1608,18 +1611,31 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         cuentaAct.abonos.push({ idOperacion: a.idCuarentena || a.id || a.idOperacion || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null });
         _cxcAplicarPagoAMoratorios(cuentaAct, _montoRestante);
 
-        const _pagaresAct = StorageService.get("pagaresSistema", []);
-        let nuevoSaldoReal = _pagaresAct.filter(p => p.folio === a.folioCXC && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
+        let nuevoSaldoReal = _todosActualizados.filter(p => p.folio === a.folioCXC && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
         nuevoSaldoReal += _cxcTotalMoratoriosPendientes(cuentaAct);
 
+        // 🛡️ Confirmamos el ingreso a caja ANTES de dar por aplicado el abono.
+        // Antes, si _ingresarCuenta fallaba (p. ej. cuentaId inexistente),
+        // el abono quedaba marcado en cuentaAct.abonos y el saldo ya reducido
+        // aunque el dinero nunca llegara a movimientosCaja: un abono
+        // "fantasma" — descontado del cliente pero invisible en caja.
+        if (typeof window._ingresarCuenta !== 'function') {
+            alert("No se pudo registrar el abono: el módulo de caja no está disponible. Nada se aplicó.");
+            return false;
+        }
+        const _ingresoOk = window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null, grupoConciliacion: a.grupoConciliacion || '', referenciaBancaria: a.referenciaBancaria || '', foliosGrupo: a.grupoConciliacion ? [a.folioCXC] : [] });
+        if (!_ingresoOk) {
+            alert(`No se pudo registrar el ingreso a caja para la cuenta "${a.etiquetaCuenta || a.cuentaId || 'destino'}".\n\nEl abono NO se aplicó a la cuenta por cobrar (nada se guardó). Verifica que esa cuenta de efectivo/banco exista y vuelve a intentar.`);
+            return false;
+        }
+
+        // Solo ahora, con el ingreso a caja confirmado, persistimos pagarés,
+        // saldo y cuenta por cobrar.
+        StorageService.set("pagaresSistema", _todosActualizados);
         cuentaAct.saldoActual = nuevoSaldoReal;
         if (nuevoSaldoReal <= 0.01) { cuentaAct.estado = "Saldado"; cuentaAct.saldoActual = 0; }
         cuentasXCobrar[idxCuenta] = cuentaAct;
         StorageService.set("cuentasPorCobrar", cuentasXCobrar);
-
-        if (typeof window._ingresarCuenta === 'function') {
-            window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null, grupoConciliacion: a.grupoConciliacion || '', referenciaBancaria: a.referenciaBancaria || '', foliosGrupo: a.grupoConciliacion ? [a.folioCXC] : [] });
-        }
     } else {
         alert("No se encontro la cuenta por cobrar para aplicar el abono.");
         return false;
