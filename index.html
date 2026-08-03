@@ -187,6 +187,9 @@
                 
                 <!-- 👇 BOTÓN DE REGLAS DE CRÉDITO AGREGADO AQUÍ 👇 -->
                 <button onclick="navA('configuracion'); setTimeout(renderConfiguracion, 100);">💳 Reglas de Crédito</button> 
+
+                <!-- 👇 PUSH: vista independiente, ya no vive dentro de Reglas de Crédito 👇 -->
+                <button onclick="navA('notificaciones-push'); setTimeout(() => { if (typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig(); }, 100);">🔔 Notificaciones Push</button>
                 
                 <li id="menuItemUsuarios" style="display:none;list-style:none;" onclick="navA('usuarios');renderGestionUsuarios();">👤 Usuarios del sistema</li>
             </div>
@@ -592,7 +595,7 @@
     <div id="configuracion" class="vista oculto">
  <div class="vista-header" style="margin-bottom:20px;">
  <h2>Configuracion del Sistema</h2>
- <p style="color:#718096; margin:0;">Ajustes globales de credito y reglas de la tienda.</p>
+ <p style="color:#718096; margin:0;">Ajustes globales de credito de la tienda.</p>
  </div>
  
  <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px;">
@@ -618,8 +621,16 @@
  <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Agregar Plazo</button>
  </div>
  </div>
- 
- <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px; margin-top:18px;">
+ </div>
+
+    <!-- NOTIFICACIONES PUSH (vista propia, independiente de Reglas de Credito) -->
+    <div id="notificaciones-push" class="vista oculto">
+ <div class="vista-header" style="margin-bottom:20px;">
+ <h2>Notificaciones Push</h2>
+ <p style="color:#718096; margin:0;">Alertas al celular para la Boveda de autorizaciones.</p>
+ </div>
+
+ <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px;">
  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">
  <h3 style="color:#c2410c; margin:0;">Alertas al celular para Boveda</h3>
  <button onclick="if(typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig()" style="background:none; border:none; cursor:pointer; font-size:18px;">Actualizar</button>
