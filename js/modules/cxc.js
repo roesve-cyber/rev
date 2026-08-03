@@ -1454,11 +1454,30 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
     // Esta lista empieza con "_" → StorageService NUNCA la sube ni la baja de
     // Firebase. Sobrevive a cualquier syncAll() con datos viejos de la nube.
     // Es la barrera definitiva contra dobles autorizaciones por conflicto de sync.
+    //
+    // Auto-corrección: si el ID está en esta lista local pero los datos reales
+    // (cuentasPorCobrar / apartados) NO muestran el abono aplicado -- típicamente
+    // porque un restore de backup regresó las colecciones sincronizadas a un
+    // punto anterior a la aprobación, mientras esta lista local (que nunca se
+    // sincroniza) sobrevivió tal cual -- se saca el ID de la lista y se deja
+    // continuar, en vez de bloquear con un falso "ya autorizado".
     const _idsAprobados = StorageService.get('_idsAprobadosLocal', []);
     const _idOp = String(a.idCuarentena || a.id || a.idOperacion || '');
     if (_idOp && _idsAprobados.includes(_idOp)) {
-        alert("⚠️ Este abono ya fue autorizado anteriormente en este dispositivo.\n\nNo se duplicará.");
-        return false;
+        const _esApartadoGuard0 = a && (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado);
+        const _folioRealGuard0 = a.folioApartado || a.folioCXC || '';
+        const _registroRealGuard0 = _esApartadoGuard0
+            ? StorageService.get("apartados", []).find(ap => ap.folio === _folioRealGuard0)
+            : StorageService.get("cuentasPorCobrar", []).find(c => c.folio === _folioRealGuard0);
+        const _yaAplicadoReal0 = _registroRealGuard0 && (_registroRealGuard0.abonos || []).some(ab =>
+            String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idOp
+        );
+        if (_yaAplicadoReal0) {
+            alert("⚠️ Este abono ya fue autorizado anteriormente en este dispositivo.\n\nNo se duplicará.");
+            return false;
+        }
+        console.warn(`[ejecutarAbonoAutorizadoReal] Auto-corrección: ID "${_idOp}" estaba marcado como aprobado en _idsAprobadosLocal pero NO aparece aplicado en los datos reales (probablemente por un restore de backup). Se remueve de la lista local y se permite continuar.`);
+        StorageService.set('_idsAprobadosLocal', _idsAprobados.filter(id => id !== _idOp));
     }
     // ──────────────────────────────────────────────────────────────────────
     const _folioGuard = a.folioApartado || a.folioCXC || '';
