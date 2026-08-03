@@ -109,6 +109,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'descuentos' && typeof renderGestionDescuentos === 'function') renderGestionDescuentos();
         if (vistaId === 'ubicaciones' && typeof renderUbicaciones === 'function') renderUbicaciones();
         if (vistaId === 'usuarios' && typeof renderGestionUsuarios === 'function') renderGestionUsuarios();
+        if (vistaId === 'notificaciones-push' && typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig();
         if (vistaId === 'puntos' && typeof renderPanelPuntos === 'function') renderPanelPuntos();
         if (redireccionRetirada?.render === 'compromisos' && typeof renderReporteCompromisos === 'function') renderReporteCompromisos();
         if (redireccionRetirada?.render === 'cartera' && typeof renderARC_v3 === 'function') renderARC_v3();
