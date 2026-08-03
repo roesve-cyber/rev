@@ -1450,39 +1450,49 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         return false;
     }
 
+    const _folioGuard = a.folioApartado || a.folioCXC || '';
+    const _montoGuard = Number(a.montoAbonado || a.monto || 0);
+    const _fechaGuard = String(a.fechaAbonoIso || a.fecha || '').slice(0, 10);
+
     // ── CAPA 0: Lista local de IDs ya aprobados ────────────────────────────
     // Esta lista empieza con "_" → StorageService NUNCA la sube ni la baja de
     // Firebase. Sobrevive a cualquier syncAll() con datos viejos de la nube.
     // Es la barrera definitiva contra dobles autorizaciones por conflicto de sync.
     //
-    // Auto-corrección: si el ID está en esta lista local pero los datos reales
-    // (cuentasPorCobrar / apartados) NO muestran el abono aplicado -- típicamente
-    // porque un restore de backup regresó las colecciones sincronizadas a un
-    // punto anterior a la aprobación, mientras esta lista local (que nunca se
-    // sincroniza) sobrevivió tal cual -- se saca el ID de la lista y se deja
-    // continuar, en vez de bloquear con un falso "ya autorizado".
+    // 🩹 AUTO-SANACIÓN: esta lista es local al dispositivo y por lo tanto NO
+    // se revierte cuando se restaura un backup (que solo toca las colecciones
+    // sincronizadas). Si el ID quedó marcado como aprobado aquí pero los datos
+    // reales (cuentasPorCobrar / apartados) NO tienen ese abono aplicado —por
+    // ejemplo, tras restaurar un backup anterior a esa aprobación—, la marca
+    // local quedó obsoleta. En ese caso la depuramos y dejamos continuar en
+    // vez de bloquear con un falso "ya autorizado".
     const _idsAprobados = StorageService.get('_idsAprobadosLocal', []);
     const _idOp = String(a.idCuarentena || a.id || a.idOperacion || '');
     if (_idOp && _idsAprobados.includes(_idOp)) {
-        const _esApartadoGuard0 = a && (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado);
-        const _folioRealGuard0 = a.folioApartado || a.folioCXC || '';
-        const _registroRealGuard0 = _esApartadoGuard0
-            ? StorageService.get("apartados", []).find(ap => ap.folio === _folioRealGuard0)
-            : StorageService.get("cuentasPorCobrar", []).find(c => c.folio === _folioRealGuard0);
-        const _yaAplicadoReal0 = _registroRealGuard0 && (_registroRealGuard0.abonos || []).some(ab =>
-            String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idOp
-        );
-        if (_yaAplicadoReal0) {
+        const _yaAplicadoReal = (() => {
+            if (a && (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado)) {
+                const _ap = StorageService.get("apartados", []).find(ap => ap.folio === _folioGuard);
+                return !!(_ap && (_ap.abonos || []).some(ab =>
+                    String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idOp
+                ));
+            }
+            const _cta = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === _folioGuard);
+            return !!(_cta && (_cta.abonos || []).some(ab =>
+                String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idOp
+            ));
+        })();
+
+        if (_yaAplicadoReal) {
             alert("⚠️ Este abono ya fue autorizado anteriormente en este dispositivo.\n\nNo se duplicará.");
             return false;
         }
-        console.warn(`[ejecutarAbonoAutorizadoReal] Auto-corrección: ID "${_idOp}" estaba marcado como aprobado en _idsAprobadosLocal pero NO aparece aplicado en los datos reales (probablemente por un restore de backup). Se remueve de la lista local y se permite continuar.`);
+
+        // Falso positivo: la marca local quedó huérfana (probablemente por un
+        // restore de backup). La limpiamos y dejamos que el flujo continúe.
+        console.warn(`[CxC] _idsAprobadosLocal tenía el ID ${_idOp} marcado como aprobado, pero no está aplicado en los datos reales (folio ${_folioGuard}). Se depura la marca local y se permite la autorización.`);
         StorageService.set('_idsAprobadosLocal', _idsAprobados.filter(id => id !== _idOp));
     }
     // ──────────────────────────────────────────────────────────────────────
-    const _folioGuard = a.folioApartado || a.folioCXC || '';
-    const _montoGuard = Number(a.montoAbonado || a.monto || 0);
-    const _fechaGuard = String(a.fechaAbonoIso || a.fecha || '').slice(0, 10);
     if (a && (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado)) {
         const folioApartado = a.folioApartado || a.folioCXC;
         const apartadoGuard = StorageService.get("apartados", []).find(ap => ap.folio === folioApartado);
