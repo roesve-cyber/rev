@@ -85,14 +85,15 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
         etiquetaCuenta,
         autorizado: opciones.autorizado !== false
     });
-    ap.saldoPendiente = Math.max(0, _apartadoSaldoReal(ap));
-    ap.estado = ap.saldoPendiente <= 0.01 ? 'Liquidado' : 'Pendiente';
-    
-    StorageService.set('apartados', apartados);
-    
-    // Inyectar el dinero en Finanzas (Flujo de Caja)
+    const _saldoPendienteNuevo = Math.max(0, _apartadoSaldoReal(ap));
+    const _estadoNuevo = _saldoPendienteNuevo <= 0.01 ? 'Liquidado' : 'Pendiente';
+
+    // 🛡️ Mismo criterio que en cxc.js: confirmamos el ingreso a caja ANTES
+    // de persistir el apartado como abonado. Antes, si _ingresarCuenta
+    // fallaba (p. ej. cuentaId inexistente), el apartado quedaba marcado
+    // como pagado/liquidado sin que el dinero llegara nunca a caja.
     if (typeof window._ingresarCuenta === 'function') {
-        window._ingresarCuenta({
+        const _ingresoOk = window._ingresarCuenta({
             monto: montoAplicado,
             cuentaId: cuentaId,
             etiqueta: etiquetaCuenta,
@@ -101,6 +102,10 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
             fecha: fechaAbono,
             idOperacion: opciones.idOperacion || opciones.idCuarentena || null
         });
+        if (!_ingresoOk) {
+            if (!opciones.silencioso) alert(`No se pudo registrar el ingreso a caja para la cuenta "${etiquetaCuenta || cuentaId || 'destino'}".\n\nEl abono NO se aplicó al apartado (nada se guardó). Verifica que esa cuenta de efectivo/banco exista y vuelve a intentar.`);
+            return false;
+        }
     } else {
         let movimientos = StorageService.get("movimientosCaja", []);
         movimientos.push({
@@ -116,7 +121,11 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
         });
         StorageService.set("movimientosCaja", movimientos);
     }
-    
+
+    ap.saldoPendiente = _saldoPendienteNuevo;
+    ap.estado = _estadoNuevo;
+    StorageService.set('apartados', apartados);
+
     // Disparar la impresión del ticket térmico
     if (opciones.imprimir !== false) imprimirTicketAbonoApartado(ap, montoAplicado, etiquetaCuenta, fechaAbono);
     return true;
