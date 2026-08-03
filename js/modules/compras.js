@@ -1183,11 +1183,22 @@ function procesarRecepcionFisica(idRecepcion) {
 // Lógica de ejecución atada al botón del modal
 window.ejecutarRecepcionFisica = function(idRecepcion) {
     // ── CAPA 0: Lista local de recepciones ya procesadas ──────────────────
+    // 🩹 AUTO-SANACIÓN (mismo criterio que en cxc.js): esta lista es local al
+    // dispositivo y no se revierte con un restore de backup. Si la marca dice
+    // "ya procesada" pero la recepción real sigue con cantidadPendiente > 0
+    // (no completada), la marca quedó obsoleta: se depura y se deja continuar.
     const _recAprobadas = StorageService.get('_idsAprobadosLocal', []);
     const _claveRec = `recepcion-${idRecepcion}`;
     if (_recAprobadas.includes(_claveRec)) {
-        alert(`⚠️ Esta recepción ya fue procesada en este dispositivo.\n\nNo se duplicará el inventario.`);
-        return;
+        const _recsCheck = StorageService.get("recepciones", []);
+        const _recCheck = _recsCheck.find(r => r.id == idRecepcion);
+        const _yaCompletadaReal = !_recCheck || _recCheck.estatus === "Completado" || Number(_recCheck.cantidadPendiente || 0) <= 0;
+        if (_yaCompletadaReal) {
+            alert(`⚠️ Esta recepción ya fue procesada en este dispositivo.\n\nNo se duplicará el inventario.`);
+            return;
+        }
+        console.warn(`[Compras] _idsAprobadosLocal tenía "${_claveRec}" marcada como procesada, pero la recepción real sigue con ${_recCheck.cantidadPendiente} pendientes. Se depura la marca local y se permite continuar.`);
+        StorageService.set('_idsAprobadosLocal', _recAprobadas.filter(id => id !== _claveRec));
     }
     // ──────────────────────────────────────────────────────────────────────
 

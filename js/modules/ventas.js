@@ -4262,11 +4262,18 @@ function _authResolverVentaPendiente(index) {
     const ventasP = StorageService.get("ventasPendientes", []);
     const ctx = window._authVentaPendienteCtx;
     if (ctx) {
-        const idxCtx = ventasP.findIndex(v =>
-            String(v.idCuarentena || '') === String(ctx.idCuarentena || '') ||
-            (_authFolioVentaPendiente(v) && _authFolioVentaPendiente(v) === ctx.folio)
-        );
-        if (idxCtx !== -1) return { ventasP, index: idxCtx, venta: ventasP[idxCtx] };
+        // 🎯 Mismo criterio que _authResolverAbonoPendiente: prioridad estricta
+        // por idCuarentena. Si dos ventas provisionales llegaran a compartir
+        // folio (p. ej. un reintento que generó un duplicado), buscar "por id
+        // O por folio" en una sola condición puede resolver a la venta
+        // equivocada. Primero intentamos id exacto; solo si no hay match
+        // caemos a folio.
+        if (ctx.idCuarentena) {
+            const idxPorId = ventasP.findIndex(v => String(v.idCuarentena || '') === String(ctx.idCuarentena));
+            if (idxPorId !== -1) return { ventasP, index: idxPorId, venta: ventasP[idxPorId] };
+        }
+        const idxPorFolio = ventasP.findIndex(v => _authFolioVentaPendiente(v) && _authFolioVentaPendiente(v) === ctx.folio);
+        if (idxPorFolio !== -1) return { ventasP, index: idxPorFolio, venta: ventasP[idxPorFolio] };
     }
     return { ventasP, index, venta: ventasP[index] };
 }
