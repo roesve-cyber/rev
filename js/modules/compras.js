@@ -1054,10 +1054,13 @@ function registrarCompra() {
     }
 
     if (metodo === "contado") {
-        window._egresarCuenta({
+        const _egresoOkContado = window._egresarCuenta({
             monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
             concepto: `Compra de contado — ${producto.nombre} a ${prov.nombre}`, referencia: `COMPRA-${nuevaCompra.id}`
         });
+        if (!_egresoOkContado) {
+            alert(`⚠️ La mercancía SÍ se registró en inventario, pero NO se pudo descontar ${dinero(totalCompra)} de "${cuentaOrigenNombre || cuentaOrigenId}" porque esa cuenta no existe.\n\nRegistra el egreso manualmente en Finanzas para que caja cuadre.`);
+        }
     }
 
     alert(`✅ Registro Exitoso\nProveedor: ${prov.nombre}${avisoActualizacion}`);
@@ -1700,8 +1703,8 @@ window.confirmarAbonoProveedor = function(idCuenta) {
     const msjConf = `¿CONFIRMAR PAGO A PROVEEDOR?\n\nProveedor: ${cuenta.proveedor}\nMonto a abonar: ${dinero(montoAbono)}\nOrigen del dinero: ${etiqueta}\n\n¿Deseas continuar?`;
     if (!confirm(msjConf)) return;
 
-    // 1. Descontar el dinero del banco o caja
-    window._egresarCuenta({
+    // 1. Descontar el dinero del banco o caja — SOLO si tiene éxito seguimos.
+    const _egresoOkPagoProv = window._egresarCuenta({
         monto: montoAbono,
         cuentaId,
         etiqueta,
@@ -1709,6 +1712,10 @@ window.confirmarAbonoProveedor = function(idCuenta) {
         referencia: `ABONO-PROV-${idCuenta}`,
         fecha: fechaPagoFinal 
     });
+    if (!_egresoOkPagoProv) {
+        alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}".\n\nEl pago NO se aplicó a la cuenta del proveedor. Verifica que esa cuenta exista.`);
+        return;
+    }
 
     // 2. Registrar abono en Cuenta Por Pagar
     cuenta.saldoPendiente -= montoAbono;
@@ -2019,9 +2026,10 @@ function guardarOrdenCompra() {
     const ocId = Date.now();
     const fechaAnticipo = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     const anticipoRef = `ANTICIPO-OC-${ocId}`;
+    let _anticipoOkOC = true;
     if (anticipo > 0 && cuentaOrigen) {
         const etiqueta = document.getElementById('ocCuentaOrigen')?.options[document.getElementById('ocCuentaOrigen')?.selectedIndex]?.text || cuentaOrigen;
-        _egresarCuenta({
+        _anticipoOkOC = _egresarCuenta({
             monto: anticipo,
             cuentaId: cuentaOrigen,
             etiqueta,
@@ -2029,8 +2037,11 @@ function guardarOrdenCompra() {
             referencia: anticipoRef,
             idOperacion: anticipoRef
         });
+        if (!_anticipoOkOC) {
+            alert(`No se pudo registrar el egreso del anticipo para "${etiqueta || cuentaOrigen}".\n\nLa orden de compra se guardará SIN anticipo. Verifica que esa cuenta exista y registra el anticipo por separado si aplica.`);
+        }
     }
-    if (metodoPago === 'consignacion' && anticipo > 0) {
+    if (metodoPago === 'consignacion' && anticipo > 0 && _anticipoOkOC) {
         const etiqueta = document.getElementById('ocCuentaOrigen')?.options[document.getElementById('ocCuentaOrigen')?.selectedIndex]?.text || cuentaOrigen || 'Sin cuenta';
         _registrarAnticipoConsignacionGlobal({
             monto: anticipo,
@@ -2624,8 +2635,9 @@ StorageService.set('movimientosInventario', kardex);
 movimientosInventario = kardex;   // ✅ sincronizar global
 
     // ── 2. Afectar flujo si hay pago ───────────────────────────
+    let _egresoOkRecepcionOC = true;
     if (metodoPago !== 'no' && montoPagado > 0) {
-        _egresarCuenta({
+        _egresoOkRecepcionOC = _egresarCuenta({
             monto: montoPagado,
             cuentaId: cuentaPagoId,
             etiqueta: cuentaPagoEtiqueta,
@@ -2633,6 +2645,10 @@ movimientosInventario = kardex;   // ✅ sincronizar global
             referencia: `OC-REC-${oc.id}`,
             idOperacion: `OC-REC-${oc.id}`
         });
+        if (!_egresoOkRecepcionOC) {
+            alert(`No se pudo registrar el egreso de caja para "${cuentaPagoEtiqueta || cuentaPagoId}".\n\nLa mercancía SÍ se recibió, pero el pago NO se descontó de caja — se registrará como saldo pendiente en Cuentas por Pagar. Verifica esa cuenta y registra el pago por separado.`);
+            montoPagado = 0;
+        }
     }
 
     // ── 3. Si queda saldo sin pagar → Cuenta por Pagar o Consignación ─────────
@@ -3693,10 +3709,13 @@ function guardarCompraDirectaFinal() {
 
     if (metodoPago === "contado") {
         if (totalAPagarReal > 0) {
-            window._egresarCuenta({
+            const _egresoOkContadoMulti = window._egresarCuenta({
                 monto: totalAPagarReal, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
                 concepto: conceptoCombinado, referencia: `COMPRA-${idCompraUnico}`
             });
+            if (!_egresoOkContadoMulti) {
+                alert(`⚠️ La mercancía SÍ se registró en inventario, pero NO se pudo descontar ${dinero(totalAPagarReal)} de "${cuentaOrigenNombre || cuentaOrigenId}" porque esa cuenta no existe.\n\nRegistra el egreso manualmente en Finanzas para que caja cuadre.`);
+            }
         }
     } 
     else if (metodoPago === "credito_proveedor" || metodoPago === "consignacion") {
@@ -3854,8 +3873,8 @@ window.ejecutarReembolsoFavor = function(idSaldo) {
     const saldo = saldos[idx];
     const select = document.getElementById('cuentaReembolso');
     
-    // El dinero entra a tu caja o banco
-    window._ingresarCuenta({
+    // El dinero entra a tu caja o banco — confirmamos ANTES de agotar el saldo.
+    const _ingresoOkReembolso = window._ingresarCuenta({
         monto: saldo.montoDisponible,
         cuentaId: select.value,
         etiqueta: select.options[select.selectedIndex].text,
@@ -3863,7 +3882,11 @@ window.ejecutarReembolsoFavor = function(idSaldo) {
         referencia: `REEMBOLSO-${saldo.id}`,
         fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
     });
-    
+    if (!_ingresoOkReembolso) {
+        alert(`No se pudo registrar el ingreso a caja para "${select.options[select.selectedIndex]?.text || select.value}".\n\nEl saldo a favor del proveedor NO se modificó. Verifica que esa cuenta exista.`);
+        return;
+    }
+
     const montoRegresado = saldo.montoDisponible;
     saldo.montoDisponible = 0; // Se agota el saldo
     StorageService.set("saldosFavorProveedores", saldos);
@@ -4048,8 +4071,8 @@ window.confirmarAbonoOC = function(idOC) {
 
     if (monto <= 0 || monto > saldoPendiente) return alert("⚠️ Monto inválido. Verifica el saldo pendiente.");
 
-    // 1. Registrar el egreso en el flujo de caja (mandando la fecha)
-    window._egresarCuenta({
+    // 1. Registrar el egreso en el flujo de caja — confirmamos éxito primero.
+    const _egresoOkAbonoOC = window._egresarCuenta({
         monto: monto,
         cuentaId: cuentaId,
         etiqueta: cuentaNombre,
@@ -4058,6 +4081,10 @@ window.confirmarAbonoOC = function(idOC) {
         idOperacion: `ABONO-OC-${ordenes[idx].id}-${Date.now()}`,
         fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
     });
+    if (!_egresoOkAbonoOC) {
+        alert(`No se pudo registrar el egreso de caja para "${cuentaNombre || cuentaId}".\n\nEl abono NO se aplicó a la orden de compra. Verifica que esa cuenta exista.`);
+        return;
+    }
 
     if (ordenes[idx].esConsignacion || ordenes[idx].condicionesComerciales?.metodoPago === 'consignacion') {
         const folioOrigen = ordenes[idx].folio;
@@ -4415,7 +4442,7 @@ window.confirmarAbonoConsignacion = function(idConsig) {
     if (!confirm(`Confirmas abonar ${dinero(monto)} a ${c.proveedor || 'proveedor'} por consignacion?`)) return;
 
     if (typeof _egresarCuenta === 'function') {
-        _egresarCuenta({
+        const _egresoOkConsig = _egresarCuenta({
             monto,
             cuentaId,
             etiqueta,
@@ -4423,6 +4450,10 @@ window.confirmarAbonoConsignacion = function(idConsig) {
             referencia: `CONSIG-${c.consignacionId || c.id}`,
             fecha
         });
+        if (_egresoOkConsig === false) {
+            alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}".\n\nEl abono NO se aplicó a la consignación. Verifica que esa cuenta exista.`);
+            return;
+        }
     }
 
     c.abonos = _consigAbonos(c);
