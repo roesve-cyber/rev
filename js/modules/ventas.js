@@ -2083,11 +2083,27 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     // ── CAPA 0: Lista local de folios ya autorizados ───────────────────────
     // Clave con prefijo "_": nunca sube ni baja de Firebase.
     // Sobrevive a cualquier syncAll() con datos viejos de la nube.
+    //
+    // 🩹 AUTO-SANACIÓN (mismo criterio que en cxc.js y compras.js): esta lista
+    // es local al dispositivo y por lo tanto NO se revierte cuando se restaura
+    // un backup (que solo toca las colecciones sincronizadas). Si el folio
+    // quedó marcado como aprobado aquí pero la venta real NO existe en
+    // ventasRegistradas —por ejemplo, tras restaurar un backup anterior a esa
+    // autorización—, la marca local quedó obsoleta y bloquearía para siempre
+    // la reautorización de una venta pendiente legítima. En ese caso la
+    // depuramos y dejamos continuar en vez de bloquear con un falso
+    // "ya autorizada".
     const _ventasAprobadas = StorageService.get('_idsAprobadosLocal', []);
     const _claveVenta = `venta-${folioNormalizado}`;
     if (folioNormalizado && _ventasAprobadas.includes(_claveVenta)) {
-        alert(`⚠️ La venta ${folioNormalizado} ya fue autorizada en este dispositivo.\n\nNo se duplicará.`);
-        return false;
+        const _ventaYaAplicadaReal = StorageService.get('ventasRegistradas', [])
+            .some(v => String(v.folio || '').trim() === folioNormalizado);
+        if (_ventaYaAplicadaReal) {
+            alert(`⚠️ La venta ${folioNormalizado} ya fue autorizada en este dispositivo.\n\nNo se duplicará.`);
+            return false;
+        }
+        console.warn(`[Ventas] _idsAprobadosLocal tenía "${_claveVenta}" marcada como aprobada, pero la venta no está en ventasRegistradas (probablemente por un restore de backup). Se depura la marca local y se permite continuar.`);
+        StorageService.set('_idsAprobadosLocal', _ventasAprobadas.filter(id => id !== _claveVenta));
     }
     // ──────────────────────────────────────────────────────────────────────
 
@@ -2207,7 +2223,16 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
         const etiqueta = window._estadoPago?.etiquetaCuenta || cuentaDefaultIngreso.etiqueta;
 
         if (typeof window._ingresarCuenta === 'function') {
-            window._ingresarCuenta({ monto: montoIngresoHoy, cuentaId: cuentaId, etiqueta: etiqueta, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre} (Folio: ${folioVenta})`, referencia: `VENTA-${folioVenta}`, fecha: fechaVentaIso });
+            // 🛡️ A este punto PASO 1 (stock) y PASO 2 (entregas/requisiciones) ya se
+            // aplicaron, así que abortar aquí dejaría la venta en un estado peor
+            // (inventario descontado sin folio, sin caja y sin CxC/apartado). Igual
+            // que en compras.js con las compras de contado: si el ingreso a caja
+            // falla, la venta se registra de todas formas y se avisa con claridad
+            // para que se corrija el ingreso manualmente en Finanzas.
+            const _ventaIngresoOk = window._ingresarCuenta({ monto: montoIngresoHoy, cuentaId: cuentaId, etiqueta: etiqueta, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre} (Folio: ${folioVenta})`, referencia: `VENTA-${folioVenta}`, fecha: fechaVentaIso });
+            if (!_ventaIngresoOk) {
+                alert(`⚠️ La venta ${folioVenta} SÍ se registrará (mercancía y entregas ya se aplicaron), pero NO se pudo ingresar ${dinero(montoIngresoHoy)} a "${etiqueta || cuentaId}" porque esa cuenta no existe.\n\nRegistra el ingreso manualmente en Finanzas para que caja cuadre.`);
+            }
         } else {
             movimientosCaja.push({ id: Date.now(), folio: folioVenta, fecha: fechaVentaIso, tipo: "ingreso", monto: montoIngresoHoy, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre}`, referencia: `VENTA-${folioVenta}`, cuenta: cuentaId, etiquetaCuenta: etiqueta });
             StorageService.set("movimientosCaja", movimientosCaja);
@@ -3846,21 +3871,44 @@ window.ejecutarCambioFinancieroEnMemoria = function(index, nuevoEstado, monto, t
     const cuentaId = selCuenta ? selCuenta.value : 'efectivo';
     const etiquetaCuenta = selCuenta && selCuenta.selectedIndex >= 0 ? selCuenta.options[selCuenta.selectedIndex].text : 'Efectivo';
 
-    if (tipo === 'egreso' && typeof window._egresarCuenta === 'function') {
-        window._egresarCuenta({
+    // 🛡️ Nada de esto se persiste todavía (el pagaré queda editado solo en
+    // memoria hasta que se presiona "GUARDAR CAMBIOS"), así que si el
+    // movimiento de caja falla no tiene sentido continuar: abortamos ANTES
+    // de tocar p.estado/montoAbonado/fechaAbono. Antes, si _egresarCuenta o
+    // _ingresarCuenta fallaban (o ni siquiera existían como función),
+    // p.estado igual se sobrescribía al final —la propia herramienta
+    // pensada para corregir descuadres de caja terminaba causando uno—.
+    if (tipo === 'egreso') {
+        if (typeof window._egresarCuenta !== 'function') {
+            alert("No se pudo registrar el reverso: el módulo de caja no está disponible. Nada se aplicó.");
+            return;
+        }
+        const _egresoOkAudit = window._egresarCuenta({
             monto: monto, cuentaId: cuentaId, etiqueta: etiquetaCuenta,
             concepto: `Reverso por Auditoría - Pagaré ${p.numeroPagere || p.folio}`,
             referencia: `REV-AUDIT-${p.folio}`
         });
+        if (!_egresoOkAudit) {
+            alert(`No se pudo registrar el egreso de caja para "${etiquetaCuenta || cuentaId}".\n\nEl reverso NO se aplicó al pagaré. Verifica que esa cuenta exista.`);
+            return;
+        }
         p.montoAbonado = 0;
         p.fechaAbono = null;
-    } 
-    else if (tipo === 'ingreso' && typeof window._ingresarCuenta === 'function') {
-        window._ingresarCuenta({
+    }
+    else if (tipo === 'ingreso') {
+        if (typeof window._ingresarCuenta !== 'function') {
+            alert("No se pudo registrar el cobro: el módulo de caja no está disponible. Nada se aplicó.");
+            return;
+        }
+        const _ingresoOkAudit = window._ingresarCuenta({
             monto: monto, cuentaId: cuentaId, etiqueta: etiquetaCuenta,
             concepto: `Cobro por Auditoría - Pagaré ${p.numeroPagere || p.folio}`,
             referencia: `COB-AUDIT-${p.folio}`
         });
+        if (!_ingresoOkAudit) {
+            alert(`No se pudo registrar el ingreso a caja para "${etiquetaCuenta || cuentaId}".\n\nEl cobro NO se aplicó al pagaré. Verifica que esa cuenta exista.`);
+            return;
+        }
         p.montoAbonado = monto;
         p.fechaAbono = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     }
