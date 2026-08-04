@@ -1753,6 +1753,16 @@ function _agregarConsignacionesActivasDesdeArticulos({ compraId, proveedor, prov
 
     const actuales = StorageService.get("consignacionesActivas", []);
     let creadas = 0;
+    // 🛡️ Ledger de consignación vs. stock: este ledger (consignacionesActivas)
+    // se alimenta en un paso separado del que realmente suma producto.stock /
+    // variantes (ver los 4 puntos de suma de stock). No hay ningún campo en
+    // producto/variante que marque "esto es consignación", así que no se
+    // puede validar 1-a-1 en tiempo real. Lo que SÍ podemos detectar aquí es
+    // la mitad barata del problema: por cada artículo, cuántas piezas se
+    // están registrando como pendientes de consignación. Esto se usa después
+    // de la llamada (ver _verificarInvarianteConsignacion) para cotejarlo
+    // contra el stock actual del producto y detectar ledgers huérfanos.
+    const cantidadRegistradaPorProducto = {};
 
     articulos.forEach((art, index) => {
         const cantidad = Number(art[cantidadCampo] ?? art.cantidad ?? art.cantidadRec ?? 0);
@@ -1785,11 +1795,136 @@ function _agregarConsignacionesActivasDesdeArticulos({ compraId, proveedor, prov
             cantidadVendida: 0
         });
         creadas++;
+
+        if (art.productoId) {
+            const key = String(art.productoId);
+            cantidadRegistradaPorProducto[key] = (cantidadRegistradaPorProducto[key] || 0) + cantidad;
+        }
     });
 
-    if (creadas > 0) StorageService.set("consignacionesActivas", actuales);
+    if (creadas > 0) {
+        StorageService.set("consignacionesActivas", actuales);
+        try {
+            _verificarInvarianteConsignacion({ compraId, proveedor, folioOrigen, origen, cantidadRegistradaPorProducto });
+        } catch (e) {
+            // La verificación es solo diagnóstica: nunca debe tumbar el registro
+            // de la consignación en curso.
+            console.error('No se pudo verificar el invariante de consignación', e);
+        }
+    }
     return creadas;
 }
+
+// 🛡️ Verificación de integridad: el ledger de consignación (cantidadPendiente
+// por producto en consignacionesActivas) NUNCA debería superar el stock
+// actual de ese producto, porque las piezas en consignación son un
+// subconjunto del stock físico. Si un día alguno de los 4 puntos de suma de
+// stock (ver auditoría) falla o se salta al mismo tiempo que este ledger sí
+// se alimenta, esta función lo detecta en el momento en vez de dejarlo como
+// un huérfano invisible.
+function _verificarInvarianteConsignacion({ compraId, proveedor, folioOrigen, origen, cantidadRegistradaPorProducto = {} }) {
+    const productoIds = Object.keys(cantidadRegistradaPorProducto);
+    if (!productoIds.length) return { ok: true, incidencias: [] };
+
+    const productos = StorageService.get('productos', []);
+    const consignaciones = StorageService.get('consignacionesActivas', []);
+    const incidencias = [];
+
+    productoIds.forEach(pid => {
+        const prod = productos.find(p => String(p.id) === pid);
+        const stockActual = Number(prod?.stock || 0);
+        const pendienteTotalConsignacion = consignaciones
+            .filter(c => String(c.productoId) === pid && !c.canceladoPorAjuste)
+            .reduce((sum, c) => sum + Number(c.cantidadPendiente || 0), 0);
+
+        if (pendienteTotalConsignacion > stockActual + 0.01) {
+            const incidencia = {
+                productoId: pid,
+                productoNombre: prod?.nombre || pid,
+                stockActual,
+                pendienteTotalConsignacion,
+                diferencia: Number((pendienteTotalConsignacion - stockActual).toFixed(2)),
+                compraId,
+                proveedor,
+                folioOrigen,
+                origen,
+                fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+            };
+            incidencias.push(incidencia);
+
+            const msg = `⚠️ Invariante de consignación roto: "${incidencia.productoNombre}" tiene ${pendienteTotalConsignacion} piezas pendientes de consignación pero solo ${stockActual} en stock (faltan ${incidencia.diferencia}). Origen: ${origen} / ${folioOrigen || compraId}.`;
+            console.error(msg);
+
+            if (window.AuditService?.log) {
+                window.AuditService.log({
+                    accion: 'Invariante de consignación roto',
+                    modulo: 'Compras/Consignaciones',
+                    entidad: incidencia.productoNombre,
+                    entidadId: pid,
+                    detalle: msg,
+                    severidad: 'critica',
+                    datos: incidencia
+                });
+            }
+
+            // Además del audit log (que puede pasar desapercibido), se guarda
+            // en su propia colección para poder listar/alertar incidencias
+            // de consignación desde el gestor sin tener que bucear el log
+            // general de auditoría.
+            const alertas = StorageService.get('alertasIntegridadConsignacion', []);
+            alertas.push(incidencia);
+            StorageService.set('alertasIntegridadConsignacion', alertas);
+        }
+    });
+
+    return { ok: incidencias.length === 0, incidencias };
+}
+window._verificarInvarianteConsignacion = _verificarInvarianteConsignacion;
+
+// Auditoría manual/global: recorre TODO el ledger de consignaciones activas
+// (no solo lo tocado por la última operación) y lo coteja contra el stock
+// actual, producto por producto. Útil para correr desde consola o desde un
+// botón en el gestor de consignaciones cuando se sospecha de un descuadre
+// histórico, no solo el de la última compra/recepción.
+function verificarIntegridadConsignaciones() {
+    const consignaciones = StorageService.get('consignacionesActivas', []).filter(c => Number(c.cantidadPendiente || 0) > 0 && c.productoId);
+    const porProducto = {};
+    consignaciones.forEach(c => {
+        const key = String(c.productoId);
+        porProducto[key] = (porProducto[key] || 0) + Number(c.cantidadPendiente || 0);
+    });
+
+    const productoIds = Object.keys(porProducto);
+    if (!productoIds.length) return { ok: true, incidencias: [] };
+
+    const resultado = _verificarInvarianteConsignacion({
+        compraId: null,
+        proveedor: null,
+        folioOrigen: 'auditoria-manual',
+        origen: 'auditoriaManual',
+        cantidadRegistradaPorProducto: porProducto
+    });
+
+    if (resultado.ok) {
+        console.log('✅ Auditoría de consignaciones: sin incidencias. El pendiente de consignación por producto no excede el stock actual en ningún caso.');
+    }
+    return resultado;
+}
+window.verificarIntegridadConsignaciones = verificarIntegridadConsignaciones;
+
+// Botón "🔍 Auditar" del gestor de consignaciones: corre la auditoría global
+// y muestra un resumen legible. No modifica nada, solo diagnostica.
+window._uiAuditarConsignaciones = function() {
+    const resultado = verificarIntegridadConsignaciones();
+    if (resultado.ok) {
+        alert('✅ Auditoría de consignaciones: sin incidencias.\n\nEl total pendiente de consignación por producto no excede el stock actual en ningún caso.');
+        return;
+    }
+    const detalle = resultado.incidencias.map(i =>
+        `• ${i.productoNombre}: ${i.pendienteTotalConsignacion} pendientes de consignación vs ${i.stockActual} en stock (faltan ${i.diferencia})`
+    ).join('\n');
+    alert(`⚠️ Se encontraron ${resultado.incidencias.length} incidencia(s) de integridad en consignaciones:\n\n${detalle}\n\nQuedaron guardadas en el log de auditoría y en "alertasIntegridadConsignacion" para revisión.`);
+};
 
 // ===== ÓRDENES DE COMPRA =====
 function _foliosOC() {
@@ -5693,6 +5828,7 @@ window.abrirGestorConsignaciones = function() {
             </div>
             <div style="display:flex;gap:8px;">
                 <button onclick="toggleHistorialConsignaciones()" style="padding:10px 14px;background:${vistaHistorial ? '#1e40af' : '#334155'};color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">${vistaHistorial ? '← Volver a activas' : `📜 Historial${totalFoliosConcluidos ? ' (' + totalFoliosConcluidos + ')' : ''}`}</button>
+                <button onclick="_uiAuditarConsignaciones()" style="padding:10px 14px;background:#7c2d12;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;" title="Coteja el pendiente de consignación por producto contra el stock actual, para detectar ledgers huérfanos.">🔍 Auditar</button>
                 <button onclick="abrirGestorConsignaciones()" style="padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">Actualizar</button>
             </div>
         </div>

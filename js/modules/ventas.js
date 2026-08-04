@@ -2106,7 +2106,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
 }
 
 // aEJECUTOR REAL: Esta es la función original que escribe a la Base de Datos
-window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
+window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock, datosVentaP) {
 
     productosConStock = _desenvolverListaVentaPendiente(productosConStock);
@@ -2170,54 +2170,84 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
     let inventarioVentaActualizado = false;
 
     // PASO 1: ACTUALIZAR STOCK 
-    productosConStock.forEach(x => {
-        if (x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada) return;
+    // 🛡️ Condición de carrera multi-caja: antes esto era un simple
+    // "leer stock local -> validar -> restar -> guardar" sin ningún tipo de
+    // lock. Con Firebase sincronizando entre dispositivos y un debounce de
+    // 1.5s antes de subir cada cambio, dos ventas del mismo artículo en dos
+    // cajas podían pasar la validación local en ambas y sobrevender (el
+    // stock quedaba negativo y otros puntos del sistema lo clampeaban a 0,
+    // escondiendo el problema en vez de mostrarlo).
+    //
+    // Ahora el descuento pasa por decrementarStockVentaAtomico() (storage2.js),
+    // que -cuando hay Firebase activo- valida y descuenta dentro de una
+    // transacción de Firestore contra el documento real del servidor, no
+    // contra la copia local. Si esta venta pierde la carrera contra otra
+    // caja, se trata como si nunca hubiera habido stock disponible: se
+    // manda a entrega pendiente / requisición de compra en vez de vender
+    // lo que ya no existe.
+    for (const x of productosConStock) {
+        if (x.salidaOperativaAplicada || x.item?.salidaOperativaAplicada) continue;
         const cantRequerida = x.item.cantidad || 1;
         const prodPersistente = productosActuales.find(p => String(p.id) === String(x.prod?.id || x.item?.id || x.item?.productoId));
         const prodVenta = prodPersistente || x.prod;
-        if (!prodVenta) return;
-        const stockActual = prodVenta.stock || 0;
+        if (!prodVenta) continue;
         const colorElegido = x.item.colorElegido || '';
-        const ubicacionElegida = x.item.ubicacionElegida || ''; 
+        const ubicacionElegida = x.item.ubicacionElegida || '';
 
         const validacionOrigen = _validarOrigenEntregaVenta(prodVenta, x.item, { color: colorElegido, ubicacion: ubicacionElegida });
-        if (stockActual >= cantRequerida && validacionOrigen.ok) {
-            if (
-                prodVenta.variantes &&
-                prodVenta.variantes.length > 0 &&
-                ubicacionElegida &&
-                _normalizarClaveInventario(ubicacionElegida) !== 'STOCK GENERAL'
-            ) {
-                let restante = cantRequerida;
-                prodVenta.variantes.forEach(v => {
-                    const coincideColor = !colorElegido || (v.color && v.color.toUpperCase() === colorElegido.toUpperCase());
-                    const coincideUbicacion = !ubicacionElegida || (v.ubicacion && v.ubicacion.toUpperCase() === ubicacionElegida.toUpperCase());
-                    if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
-                        const deducir = Math.min(Number(v.stock), restante);
-                        v.stock -= deducir;
-                        restante -= deducir;
-                    }
+        if (!validacionOrigen.ok) continue;
+
+        const resultadoStock = await StorageService.decrementarStockVentaAtomico({
+            productoId: prodVenta.id,
+            cantidad: cantRequerida,
+            color: colorElegido,
+            ubicacion: ubicacionElegida
+        });
+
+        if (!resultadoStock.ok) {
+            console.warn(`Venta ${folioVenta}: se perdio la carrera de stock para "${prodVenta.nombre}" (${resultadoStock.motivo}). Se pasa a pendiente en vez de sobrevender.`, resultadoStock);
+            if (window.AuditService?.log) {
+                window.AuditService.log({
+                    accion: 'Venta pierde carrera de stock multi-caja',
+                    modulo: 'Ventas',
+                    entidad: prodVenta.nombre,
+                    entidadId: prodVenta.id,
+                    detalle: `Folio ${folioVenta}: se intento vender ${cantRequerida} de "${prodVenta.nombre}" pero el stock ya no alcanzaba al momento de autorizar (motivo: ${resultadoStock.motivo}). Se genero entrega pendiente / requisicion en su lugar.`,
+                    severidad: 'advertencia',
+                    datos: { folioVenta, productoId: prodVenta.id, cantidad: cantRequerida, resultadoStock }
                 });
-                if (restante > 0) return;
             }
-            prodVenta.stock = stockActual - cantRequerida;
-            if (prodPersistente) {
-                x.prod = prodPersistente;
-                inventarioVentaActualizado = true;
-            }
-            const concepto = colorElegido ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})` : `Venta - ${folioVenta}`;
-            if (typeof registrarMovimiento === 'function') registrarMovimiento(prodVenta.id, concepto, cantRequerida, "salida", { folioVenta });
-            entregadosAhora.push({
-                productoId: prodVenta.id,
-                nombre: prodVenta.nombre,
-                colorElegido,
-                ubicacionElegida,
-                cantidad: cantRequerida
+            productosSinStock.push({
+                item: x.item,
+                prod: prodVenta,
+                requiereCompra: true,
+                generarEntregaPendiente: metodoPago !== 'apartado',
+                motivo: 'Otra caja vendio esta pieza antes de que se autorizara esta venta'
             });
+            continue;
         }
-    });
+
+        prodVenta.stock = resultadoStock.stockRestante;
+        if (prodPersistente) {
+            x.prod = prodPersistente;
+            inventarioVentaActualizado = true;
+        }
+        const concepto = colorElegido ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})` : `Venta - ${folioVenta}`;
+        if (typeof registrarMovimiento === 'function') registrarMovimiento(prodVenta.id, concepto, cantRequerida, "salida", { folioVenta });
+        entregadosAhora.push({
+            productoId: prodVenta.id,
+            nombre: prodVenta.nombre,
+            colorElegido,
+            ubicacionElegida,
+            cantidad: cantRequerida
+        });
+    }
 
     if (inventarioVentaActualizado) {
+        // El descuento real ya se aplicó y persistió de forma atómica dentro
+        // de decrementarStockVentaAtomico(); este StorageService.set() solo
+        // sincroniza la copia en memoria (`productos`) usada por el resto de
+        // la pantalla, no vuelve a escribir el stock desde cero.
         StorageService.set("productos", productosActuales);
         productos = productosActuales;
         window.productos = productosActuales;
@@ -2308,9 +2338,13 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
         StorageService.set("pagaresSistema", pagaresSistema);
 
     } else if (metodoPago === "apartado") {
-        let apartadosBD = StorageService.get("apartados", []);
-        apartadosBD.push({
-            id: Date.now(),
+        // 🛡️ Se centraliza en registrarApartado() (apartados.js) en vez de
+        // construir el registro aquí en línea. Antes había dos esquemas
+        // paralelos para crear un apartado y solo este (el inline) era el
+        // que realmente se ejecutaba; registrarApartado() estaba muerta.
+        // Unificar en una sola función evita que ambos esquemas diverjan
+        // otra vez sin que nadie lo note.
+        window.registrarApartado({
             folio: folioVenta,
             clienteId: datosVentaP.cliente.id,
             clienteNombre: datosVentaP.cliente.nombre,
@@ -2318,17 +2352,12 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
             fechaCompromiso: datosVentaP.apartadoFechaCompromiso || window._estadoPago?.apartadoFechaCompromiso || null,
             condiciones: datosVentaP.apartadoCondiciones || window._estadoPago?.apartadoCondiciones || _condicionesApartadoDefault(),
             importeApartado: totalContado,
-            enganche: enganche,
             saldoPendiente: saldoAFinanciar,
+            enganche: enganche,
             articulos: datosVentaP.articulos,
-            abonos: [],
-            estado: 'Pendiente',
-            cuentaIdEnganche: window._estadoPago?.cuentaReceptora || null,
-            etiquetaCuentaEnganche: window._estadoPago?.etiquetaCuenta || null,
             vendedorId: window._vendedorSeleccionado?.id || null,
             vendedorNombre: window._vendedorSeleccionado?.nombre || null
         });
-        StorageService.set("apartados", apartadosBD);
 
         // 🔒 Reservar el stock de cada artículo del apartado para que no se
         // pueda vender a alguien más mientras el cliente lo está liquidando.
@@ -4564,7 +4593,7 @@ window.revisarVentaPendiente = function(index) {
 };
 
 // 3. PROCESADOR DE APROBACIONES (MODO SILENCIOSO)
-window.aprobarVentaCuarentena = function(index) {
+window.aprobarVentaCuarentena = async function(index) {
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
@@ -4673,7 +4702,7 @@ window.aprobarVentaCuarentena = function(index) {
 
     // 3. Ejecutar el motor de transacciones del POS original (GUARDA SILENCIOSAMENTE EN DB)
     window._vendedorSeleccionado = v.vendedorSeleccionado;
-    const autorizada = window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
+    const autorizada = await window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
     if (autorizada === false) return;
 
     // 🔒 Si esta venta autorizada era una conversión de apartado a crédito,

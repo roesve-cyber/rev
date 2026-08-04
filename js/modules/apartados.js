@@ -31,9 +31,21 @@ function _apartadoNombreCliente(ap) {
     return ap?.clienteNombre || 'Cliente';
 }
 
-function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, importeApartado, fechaCompromiso, saldoPendiente, articulos, condiciones}) {
+// 🛡️ Fuente ÚNICA para crear un apartado. Antes existían dos caminos:
+// esta función (registrarApartado) y un `apartadosBD.push({...})` inline
+// duplicado en ventas.js con un esquema ligeramente distinto (por ejemplo,
+// sin vendedorId/vendedorNombre). Como nada llamaba a esta función, era
+// código muerto que podía inducir a error a quien la "arreglara" pensando
+// que afectaba el flujo real. Ahora ventas.js llama a esta función y
+// cualquier cambio futuro al esquema de un apartado solo se hace aquí.
+function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, importeApartado, fechaCompromiso, saldoPendiente, articulos, condiciones, vendedorId = null, vendedorNombre = null, cuentaIdEnganche, etiquetaCuentaEnganche, enganche}) {
     const apartados = StorageService.get('apartados', []);
-    apartados.push({
+    // El enganche real puede venir explícito (por ejemplo, calculado con un
+    // total distinto al importeApartado por descuentos aplicados en el
+    // momento). Si no se pasa, se deriva de importeApartado - saldoPendiente
+    // como comportamiento por defecto.
+    const engancheFinal = enganche !== undefined ? enganche : (importeApartado - saldoPendiente);
+    const nuevoApartado = {
         id: Date.now(),
         folio,
         clienteId,
@@ -44,13 +56,17 @@ function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, impo
         condiciones: condiciones || '',
         saldoPendiente,
         articulos,
-        enganche: importeApartado - saldoPendiente,
-        cuentaIdEnganche: window._estadoPago?.cuentaReceptora || null,
-        etiquetaCuentaEnganche: window._estadoPago?.etiquetaCuenta || null,
+        enganche: engancheFinal,
+        cuentaIdEnganche: cuentaIdEnganche !== undefined ? cuentaIdEnganche : (window._estadoPago?.cuentaReceptora || null),
+        etiquetaCuentaEnganche: etiquetaCuentaEnganche !== undefined ? etiquetaCuentaEnganche : (window._estadoPago?.etiquetaCuenta || null),
+        vendedorId,
+        vendedorNombre,
         abonos: [],
         estado: 'Pendiente'
-    });
+    };
+    apartados.push(nuevoApartado);
     StorageService.set('apartados', apartados);
+    return nuevoApartado;
 }
 
 function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo', etiquetaCuenta = 'Efectivo', opciones = {}) {

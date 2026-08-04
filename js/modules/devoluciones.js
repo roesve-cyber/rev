@@ -114,6 +114,30 @@ function buscarVentaDevolucion() {
     if (btn) btn.addEventListener('click', function() { procesarDevolucion(folio); });
 }
 
+// 🛡️ Punto 12: para una venta a crédito, el precio contado de una pieza NO
+// es lo que el cliente realmente debía por ella — el plan de crédito
+// (saldosPorMes/plan) carga capital + interés sobre el total financiado, y
+// esa es la fuente que ya se usa para todo lo demás relacionado a crédito
+// (pagarés, saldosPorMes, etc.). Usar precioContado para descontar
+// cuentasPorCobrar.saldoActual subvalúa el ajuste en cualquier venta con
+// interés, dejando un saldo distinto al que el cliente realmente debía por
+// esa pieza. Aquí se escala el precio contado de la pieza a su proporción
+// equivalente dentro del monto realmente financiado.
+function _devolucionMontoAjusteCredito(venta, montoContadoPieza) {
+    const totalMercanciaVenta = Number(venta?.totalMercancia) || 0;
+    const montoFinanciadoVenta = Number(venta?.plan?.total) || Number(venta?.saldoAFinanciar) || 0;
+
+    if (totalMercanciaVenta <= 0 || montoFinanciadoVenta <= 0) {
+        // Sin datos suficientes para prorratear (venta antigua sin estos
+        // campos, por ejemplo): se cae al precio contado como antes, en vez
+        // de dividir entre 0 o descontar 0.
+        return montoContadoPieza;
+    }
+
+    const proporcion = montoContadoPieza / totalMercanciaVenta;
+    return Number((proporcion * montoFinanciadoVenta).toFixed(2));
+}
+
 function procesarDevolucion(folio) {
     // 🔒 Punto 5: gate de autorización — antes cualquier usuario podía mover
     // stock, caja y saldo de CxC/pagarés desde aquí sin checkpoint de rol.
@@ -238,7 +262,13 @@ function procesarDevolucion(folio) {
             const cuentas = StorageService.get('cuentasPorCobrar', []);
             const idxCuenta = cuentas.findIndex(c => (c.folioVenta || c.folio) === folio);
             if (idxCuenta !== -1) {
-                cuentas[idxCuenta].saldoActual = Math.max(0, (cuentas[idxCuenta].saldoActual || 0) - devolucion.monto);
+                // 🛡️ Punto 12: el ajuste de saldo/pagarés de una venta a
+                // crédito debe usar el monto proporcional dentro del plan
+                // financiado (capital + interés), no el precio contado plano
+                // de la pieza — ver _devolucionMontoAjusteCredito arriba.
+                const montoAjusteCxC = _devolucionMontoAjusteCredito(venta, devolucion.monto);
+
+                cuentas[idxCuenta].saldoActual = Math.max(0, (cuentas[idxCuenta].saldoActual || 0) - montoAjusteCxC);
                 StorageService.set('cuentasPorCobrar', cuentas);
                 
                 // --- CORRECCIÓN: Cancelar Pagarés (de los últimos a los primeros) ---
@@ -246,7 +276,7 @@ function procesarDevolucion(folio) {
                 let pagaresFolio = pagares.filter(p => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'))
                                           .sort((a,b) => new Date(b.fechaVencimiento) - new Date(a.fechaVencimiento)); 
                 
-                let montoADescontar = devolucion.monto;
+                let montoADescontar = montoAjusteCxC;
                 pagaresFolio.forEach(p => {
                     if (montoADescontar <= 0) return;
                     const saldoPagare = (p.estado === 'Parcial') ? (p.monto - (p.montoAbonado || 0)) : p.monto;
