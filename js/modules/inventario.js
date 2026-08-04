@@ -1840,6 +1840,132 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
  }
 }
 
+// ============================================================
+// 🔒 RESERVAS DE INVENTARIO (Apartados)
+// ------------------------------------------------------------
+// Fuente única de verdad para "cuánto está prometido a un
+// apartado pero todavía no se ha entregado ni descontado del
+// stock físico". Se guarda en su propia colección
+// (reservasInventario) precisamente para NO tocar los objetos
+// de producto/variante — así el stock físico y el kardex nunca
+// se desincronizan por esto, y toda la disponibilidad "real"
+// (stock - reservas activas) se calcula al vuelo en el momento
+// de consulta, nunca se persiste como un número que pueda
+// quedar desactualizado.
+// ============================================================
+
+function _resInvNormalizar(valor) {
+    if (typeof window._normalizarClaveInventario === 'function') return window._normalizarClaveInventario(valor);
+    return String(valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toUpperCase();
+}
+
+function obtenerReservasInventario() {
+    return StorageService.get("reservasInventario", []);
+}
+
+function _guardarReservasInventario(lista) {
+    if (!StorageService.set("reservasInventario", lista)) {
+        console.error("Error guardando reservasInventario");
+        return false;
+    }
+    return true;
+}
+
+// Suma cantidades reservadas (estado 'Activa') para un producto,
+// opcionalmente filtrando por color/ubicación con la misma
+// normalización que usa la venta para decidir disponibilidad.
+function calcularStockReservado(productoId, colorElegido = '', ubicacionElegida = '') {
+    if (!productoId) return 0;
+    const colorNorm = _resInvNormalizar(colorElegido);
+    const ubicNorm = _resInvNormalizar(ubicacionElegida);
+    return obtenerReservasInventario()
+        .filter(r => r.estado === 'Activa' && String(r.productoId) === String(productoId))
+        .filter(r => !ubicNorm || _resInvNormalizar(r.ubicacion || 'General') === ubicNorm)
+        .filter(r => !colorNorm || _resInvNormalizar(r.color || 'General') === colorNorm)
+        .reduce((s, r) => s + (Number(r.cantidad) || 0), 0);
+}
+
+function obtenerReservasActivasPorFolio(folio) {
+    return obtenerReservasInventario().filter(r => r.folio === folio && r.estado === 'Activa');
+}
+
+// Crea una reserva. No valida disponibilidad aquí a propósito:
+// esa validación ya la hace _validarOrigenEntregaVenta/_resolverOrigenEntregaVenta
+// (que ahora también restan calcularStockReservado) ANTES de llegar
+// a este punto, para no duplicar la regla de negocio en dos lugares.
+function crearReservaInventario({ folio, clienteNombre = '', productoId, nombreProducto = '', color = '', ubicacion = '', cantidad }) {
+    const cant = Number(cantidad || 0);
+    if (!folio || !productoId || cant <= 0) {
+        console.error('crearReservaInventario: datos incompletos', { folio, productoId, cantidad });
+        return { ok: false, mensaje: 'Datos incompletos para crear la reserva de inventario.' };
+    }
+    const reserva = {
+        id: `RES-${folio}-${productoId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        folio,
+        clienteNombre,
+        productoId,
+        nombreProducto,
+        color: color || '',
+        ubicacion: ubicacion || '',
+        cantidad: cant,
+        estado: 'Activa',
+        motivoLiberacion: null,
+        fechaCreacion: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        fechaResolucion: null
+    };
+    const reservas = obtenerReservasInventario();
+    reservas.push(reserva);
+    if (!_guardarReservasInventario(reservas)) {
+        return { ok: false, mensaje: 'No se pudo guardar la reserva de inventario.' };
+    }
+    return { ok: true, reserva };
+}
+
+// Libera (sin consumir) todas las reservas activas de un folio.
+// Se usa en cancelación de apartado y en conversión autorizada a
+// crédito (ahí el seguimiento de la mercancía pasa a manos del
+// mecanismo normal de entrega de venta a crédito).
+function liberarReservasPorFolio(folio, motivo = 'Liberada') {
+    if (!folio) return 0;
+    const reservas = obtenerReservasInventario();
+    let liberadas = 0;
+    reservas.forEach(r => {
+        if (r.folio === folio && r.estado === 'Activa') {
+            r.estado = 'Liberada';
+            r.motivoLiberacion = motivo;
+            r.fechaResolucion = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+            liberadas++;
+        }
+    });
+    if (liberadas > 0) _guardarReservasInventario(reservas);
+    return liberadas;
+}
+
+// Marca como 'Consumida' una reserva puntual (ya se entregó y se
+// descontó stock real para ella). Distinto de "Liberada": consumida
+// significa que sí se convirtió en una salida física real.
+function marcarReservaConsumida(reservaId) {
+    if (!reservaId) return false;
+    const reservas = obtenerReservasInventario();
+    const r = reservas.find(x => x.id === reservaId);
+    if (!r) return false;
+    r.estado = 'Consumida';
+    r.fechaResolucion = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    return _guardarReservasInventario(reservas);
+}
+
+window.obtenerReservasInventario = obtenerReservasInventario;
+window.calcularStockReservado = calcularStockReservado;
+window.obtenerReservasActivasPorFolio = obtenerReservasActivasPorFolio;
+window.crearReservaInventario = crearReservaInventario;
+window.liberarReservasPorFolio = liberarReservasPorFolio;
+window.marcarReservaConsumida = marcarReservaConsumida;
+
 function eliminarProducto(id) {
  if (!_invRequireAdmin('Eliminar producto')) return;
  window.productos = window.productos.filter(p => String(p.id) !== String(id));

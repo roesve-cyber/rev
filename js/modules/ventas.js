@@ -721,6 +721,15 @@ function _normalizarClaveInventario(valor) {
         .toUpperCase();
 }
 
+// Nota: "reservado" = piezas prometidas a apartados activos (ver
+// inventario.js:calcularStockReservado). Se resta de la disponibilidad
+// para que un apartado no pueda venderse dos veces mientras se liquida.
+function _stockReservadoSeguro(prod, colorElegido, ubicacionElegida) {
+    return (typeof window.calcularStockReservado === 'function')
+        ? Number(window.calcularStockReservado(prod?.id, colorElegido, ubicacionElegida) || 0)
+        : 0;
+}
+
 function _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida) {
     if (!prod || !ubicacionElegida) return 0;
 
@@ -728,20 +737,23 @@ function _stockDisponibleEnOrigen(prod, colorElegido, ubicacionElegida) {
     const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
     const ubicNorm = _normalizarClaveInventario(ubicacionElegida);
     const colorNorm = _normalizarClaveInventario(colorElegido);
+    const reservado = _stockReservadoSeguro(prod, colorElegido, ubicacionElegida);
 
     if (ubicNorm === 'STOCK GENERAL') {
         const asignadoAVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
-        return Math.max(0, cantidadTotal - asignadoAVariantes);
+        return Math.max(0, cantidadTotal - asignadoAVariantes - reservado);
     }
 
     if (variantes.length === 0) {
-        return ubicNorm === 'GENERAL' ? cantidadTotal : 0;
+        return ubicNorm === 'GENERAL' ? Math.max(0, cantidadTotal - reservado) : 0;
     }
 
-    return variantes
+    const disponibleVariante = variantes
         .filter(v => _normalizarClaveInventario(v.ubicacion || 'General') === ubicNorm)
         .filter(v => !colorNorm || _normalizarClaveInventario(v.color || 'General') === colorNorm)
         .reduce((s, v) => s + (Number(v.stock) || 0), 0);
+
+    return Math.max(0, disponibleVariante - reservado);
 }
 
 function _stockDisponibleEnUbicacionVenta(prod, ubicacionElegida) {
@@ -749,19 +761,22 @@ function _stockDisponibleEnUbicacionVenta(prod, ubicacionElegida) {
     const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
     const ubicNorm = _normalizarClaveInventario(ubicacionElegida);
     const cantidadTotal = Number(prod.stock || 0);
+    const reservado = _stockReservadoSeguro(prod, '', ubicacionElegida);
 
     if (ubicNorm === 'STOCK GENERAL') {
         const asignadoAVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
-        return Math.max(0, cantidadTotal - asignadoAVariantes);
+        return Math.max(0, cantidadTotal - asignadoAVariantes - reservado);
     }
 
     if (variantes.length === 0) {
-        return ubicNorm === 'GENERAL' ? cantidadTotal : 0;
+        return ubicNorm === 'GENERAL' ? Math.max(0, cantidadTotal - reservado) : 0;
     }
 
-    return variantes
+    const disponibleUbicacion = variantes
         .filter(v => _normalizarClaveInventario(v.ubicacion || 'General') === ubicNorm)
         .reduce((s, v) => s + (Number(v.stock) || 0), 0);
+
+    return Math.max(0, disponibleUbicacion - reservado);
 }
 
 function _resolverOrigenEntregaVenta(prod, item, decision) {
@@ -804,7 +819,8 @@ function _stockDisponibleParaSolicitudVenta(prod, item) {
     if (!prod) return 0;
     const cantidadTotal = Number(prod.stock || 0);
     const colorNorm = _normalizarClaveInventario(item?.colorElegido || '');
-    if (!colorNorm) return cantidadTotal;
+    const reservadoTotal = _stockReservadoSeguro(prod, item?.colorElegido || '', '');
+    if (!colorNorm) return Math.max(0, cantidadTotal - reservadoTotal);
 
     const variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
     const stockEnVariantes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
@@ -813,7 +829,7 @@ function _stockDisponibleParaSolicitudVenta(prod, item) {
         .filter(v => _normalizarClaveInventario(v.color || 'General') === colorNorm)
         .reduce((s, v) => s + (Number(v.stock) || 0), 0);
 
-    return stockGeneralSinAsignar + stockColor;
+    return Math.max(0, stockGeneralSinAsignar + stockColor - reservadoTotal);
 }
 
 function _validarOrigenEntregaVenta(prod, item, decision) {
@@ -2295,6 +2311,32 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
             vendedorNombre: window._vendedorSeleccionado?.nombre || null
         });
         StorageService.set("apartados", apartadosBD);
+
+        // 🔒 Reservar el stock de cada artículo del apartado para que no se
+        // pueda vender a alguien más mientras el cliente lo está liquidando.
+        // No descontamos stock real: el apartado sigue físicamente en la
+        // tienda hasta que se entrega (ver entregarMercanciaApartado en
+        // apartados.js). Solo bloqueamos su disponibilidad para nuevas ventas.
+        if (typeof window.crearReservaInventario === 'function') {
+            (datosVentaP.articulos || []).forEach(art => {
+                // Los apartados no pasan por el selector de ubicación de salida
+                // (ver metodoPago !== "apartado" en la clasificación de carrito),
+                // así que casi siempre llegan sin ubicacionElegida. Se reserva
+                // contra "STOCK GENERAL" (la bolsa sin asignar a variantes),
+                // que es exactamente cómo el resto del sistema interpreta un
+                // origen no especificado.
+                const r = window.crearReservaInventario({
+                    folio: folioVenta,
+                    clienteNombre: datosVentaP.cliente?.nombre || '',
+                    productoId: art.productoId ?? art.id,
+                    nombreProducto: art.nombre || '',
+                    color: art.colorElegido || '',
+                    ubicacion: art.ubicacionElegida || 'STOCK GENERAL',
+                    cantidad: art.cantidad || 1
+                });
+                if (!r.ok) console.error('No se pudo reservar inventario del apartado', folioVenta, art, r.mensaje);
+            });
+        }
     }
 
     if (metodoPago === "credito" && datosVentaP.origenApartadoFolio) {
@@ -4615,7 +4657,18 @@ window.aprobarVentaCuarentena = function(index) {
     window._vendedorSeleccionado = v.vendedorSeleccionado;
     const autorizada = window.ejecutarVentaAutorizadaReal(...v.args, v.datosVenta);
     if (autorizada === false) return;
-    
+
+    // 🔒 Si esta venta autorizada era una conversión de apartado a crédito,
+    // la mercancía deja de depender de la reserva del apartado: a partir de
+    // aquí el seguimiento lo hace el mecanismo normal de entrega de venta a
+    // crédito (documentosEntrega / decisión de entrega), igual que cualquier
+    // otra venta a crédito.
+    const esConversionApartadoAutorizada = !!(v.tipo === "conversion_apartado_credito" || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio);
+    if (esConversionApartadoAutorizada && typeof window.liberarReservasPorFolio === 'function') {
+        const folioApartadoOrigen = v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio || v.args?.[5];
+        window.liberarReservasPorFolio(folioApartadoOrigen, 'Convertido a crédito y autorizado en Bóveda');
+    }
+
     // 4. Marcar como aprobada y conservar el registro en la bóveda
     ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Aprobado', {
         fechaResolucionIso: _ventaFechaAhoraIso(),
@@ -5620,6 +5673,16 @@ window.ejecutarCancelacionApartado = function() {
     const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo);
     const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
 
+    // 🔒 Liberar la reserva de stock del apartado (y de un posible folio de
+    // crédito relacionado, por si la reserva sobrevivió a una conversión
+    // rechazada) para que la mercancía vuelva a estar disponible para venta.
+    let reservasLiberadas = 0;
+    if (typeof window.liberarReservasPorFolio === 'function') {
+        foliosRelacionados.forEach(folioRel => {
+            reservasLiberadas += window.liberarReservasPorFolio(folioRel, `Cancelación de apartado: ${motivo}`);
+        });
+    }
+
     let movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
         folio: ctx.folio,
         referenciaBase: `VENTA-${ctx.folio}`,
@@ -5650,7 +5713,7 @@ window.ejecutarCancelacionApartado = function() {
         motivo,
         emitirComprobante: emitir
     });
-    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
+    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion, reservasLiberadas });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
     alert("Apartado cancelado y reversado.");
     if (reversaConsignacion.reversadas || reversaConsignacion.revision) {

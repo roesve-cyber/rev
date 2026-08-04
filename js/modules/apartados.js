@@ -151,12 +151,180 @@ window._filtrarApartadosPorEstado = function() {
     renderApartados();
 };
 
+// ============================================================
+// 📦 ENTREGA DE MERCANCÍA DE APARTADO LIQUIDADO
+// ------------------------------------------------------------
+// Único punto donde un apartado 100% pagado deja de ser una
+// promesa (reserva) y se convierte en una salida real de stock,
+// con su movimiento de Kardex correspondiente. Antes de esto,
+// el apartado NUNCA tocaba producto.stock.
+// ============================================================
+window.entregarMercanciaApartado = function(folio) {
+    const apartados = StorageService.get("apartados", []);
+    const idx = apartados.findIndex(a => a.folio === folio);
+    if (idx === -1) return alert("No se encontró el apartado.");
+    const ap = apartados[idx];
+
+    if (String(ap.estado || '').toLowerCase() !== 'pendiente') {
+        return alert(`Este apartado está en estado "${ap.estado}" y no puede entregarse desde aquí.`);
+    }
+    const saldo = _apartadoSaldoReal(ap);
+    if (saldo > 0) {
+        return alert(`Este apartado todavía tiene un saldo pendiente de ${dinero(saldo)}. Debe liquidarse al 100% antes de poder entregar la mercancía.`);
+    }
+
+    const reservas = typeof window.obtenerReservasActivasPorFolio === 'function'
+        ? window.obtenerReservasActivasPorFolio(folio)
+        : [];
+    if (reservas.length === 0) {
+        return alert("No hay reserva de inventario activa para este apartado (puede que ya haya sido entregado o liberado). Revisa el historial antes de continuar.");
+    }
+
+    const resumenArticulos = reservas.map(r => `- ${r.nombreProducto || r.productoId} x${r.cantidad}${r.color ? ` (${r.color})` : ''}${r.ubicacion ? ` [${r.ubicacion}]` : ''}`).join('\n');
+    if (!confirm(`⚠️ ENTREGA DE APARTADO ${folio}\n\nEsto descontará del inventario físico:\n${resumenArticulos}\n\nEsta acción queda registrada en el Kardex y no se puede deshacer desde aquí. ¿Confirmas la entrega?`)) {
+        return;
+    }
+
+    const ejecutar = () => {
+        const productos = StorageService.get("productos", []);
+        const fallidas = [];
+        const entregadas = [];
+
+        reservas.forEach(r => {
+            const prod = productos.find(p => String(p.id) === String(r.productoId));
+            if (!prod) {
+                fallidas.push(`${r.nombreProducto || r.productoId}: producto ya no existe en catálogo.`);
+                return;
+            }
+            const ok = (typeof window._descontarInventarioDesdeOrigenVenta === 'function')
+                ? window._descontarInventarioDesdeOrigenVenta(prod, r.cantidad, r.color, r.ubicacion)
+                : false;
+            if (!ok) {
+                fallidas.push(`${prod.nombre}: stock físico insuficiente en "${r.ubicacion || 'General'}" (${r.cantidad} reservado). Revisa con Toma de Inventario antes de forzar la entrega.`);
+                return;
+            }
+            if (typeof window.registrarMovimiento === 'function') {
+                window.registrarMovimiento(prod.id, `Entrega de apartado liquidado - Folio ${folio}`, r.cantidad, "salida");
+            }
+            if (typeof window.marcarReservaConsumida === 'function') {
+                window.marcarReservaConsumida(r.id);
+            }
+            entregadas.push(r);
+        });
+
+        if (entregadas.length > 0) {
+            StorageService.set("productos", productos);
+        }
+
+        if (fallidas.length > 0) {
+            alert(`⚠️ Algunas piezas NO se pudieron descontar del inventario físico:\n\n${fallidas.join('\n')}\n\nEstas reservas siguen activas. Corrige el stock físico (Toma de Inventario) y vuelve a intentar la entrega.`);
+        }
+
+        if (entregadas.length === reservas.length) {
+            ap.estado = 'Entregado';
+            ap.fechaEntrega = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+            StorageService.set("apartados", apartados);
+            alert(`✅ Apartado ${folio} entregado. Inventario actualizado y trazado en Kardex.`);
+        } else if (entregadas.length > 0) {
+            alert(`Entrega parcial registrada para ${folio}. El apartado sigue como "Pendiente" hasta resolver las piezas faltantes.`);
+        }
+
+        renderApartados();
+    };
+
+    if (typeof window.requireAdmin === 'function') {
+        window.requireAdmin(ejecutar);
+    } else {
+        ejecutar();
+    }
+};
+
+// ============================================================
+// 🔁 MIGRACIÓN ÚNICA: crear reservas para apartados vigentes
+// ------------------------------------------------------------
+// Los apartados creados ANTES de este cambio no tienen ninguna
+// reserva en reservasInventario. Esta función la crea de forma
+// retroactiva para cada apartado con estado 'Pendiente' que aún
+// no tenga reserva activa. Es idempotente: correrla varias veces
+// no duplica reservas de un folio que ya las tiene.
+// ============================================================
+function _apartadosPendientesSinReserva() {
+    const apartados = StorageService.get("apartados", []);
+    if (typeof window.obtenerReservasActivasPorFolio !== 'function') return [];
+    return apartados.filter(a =>
+        String(a.estado || '').toLowerCase() === 'pendiente' &&
+        window.obtenerReservasActivasPorFolio(a.folio).length === 0
+    );
+}
+
+window.migrarReservasApartadosExistentes = function() {
+    if (typeof window.crearReservaInventario !== 'function') {
+        return alert('No se encontró crearReservaInventario. Actualiza inventario.js antes de migrar.');
+    }
+
+    const pendientesSinReserva = _apartadosPendientesSinReserva();
+    if (pendientesSinReserva.length === 0) {
+        alert('No hay apartados vigentes sin reserva. No hace falta migrar nada.');
+        return;
+    }
+
+    const resumen = pendientesSinReserva.map(a => `- ${a.folio} (${a.clienteNombre || 'Cliente'})`).join('\n');
+    if (!confirm(`Se van a crear reservas de inventario retroactivas para ${pendientesSinReserva.length} apartado(s) vigente(s):\n\n${resumen}\n\nEsto NO toca el stock físico ni el Kardex, solo bloquea esa mercancía para que no se venda dos veces. ¿Continuar?`)) {
+        return;
+    }
+
+    const ejecutar = () => {
+        let creadas = 0, sinArticulos = 0;
+        const avisos = [];
+
+        pendientesSinReserva.forEach(ap => {
+            const articulos = ap.articulos || [];
+            if (articulos.length === 0) {
+                sinArticulos++;
+                avisos.push(`⚠️ ${ap.folio} (${ap.clienteNombre || 'Cliente'}): no tiene artículos guardados, no se pudo reservar. Revísalo a mano.`);
+                return;
+            }
+            articulos.forEach(art => {
+                const r = window.crearReservaInventario({
+                    folio: ap.folio,
+                    clienteNombre: ap.clienteNombre || '',
+                    productoId: art.productoId ?? art.id,
+                    nombreProducto: art.nombre || '',
+                    color: art.colorElegido || '',
+                    ubicacion: art.ubicacionElegida || 'STOCK GENERAL',
+                    cantidad: art.cantidad || 1
+                });
+                if (r.ok) creadas++;
+                else avisos.push(`⚠️ ${ap.folio}: ${r.mensaje}`);
+            });
+        });
+
+        alert(`Migración completada.\n\nApartados procesados: ${pendientesSinReserva.length}\nReservas creadas: ${creadas}\nApartados sin artículos guardados: ${sinArticulos}${avisos.length ? '\n\n' + avisos.slice(0, 10).join('\n') : ''}`);
+        renderApartados();
+    };
+
+    if (typeof window.requireAdmin === 'function') {
+        window.requireAdmin(ejecutar);
+    } else {
+        ejecutar();
+    }
+};
+
 function renderApartados() {
     const apartados = obtenerApartados();
     const filtro = window._apartadosFiltroEstado || 'todos';
     const apartadosFiltrados = filtro === 'todos' ? apartados : apartados.filter(a => _apartadoClaveFiltro(a) === filtro);
+    const pendientesSinReserva = _apartadosPendientesSinReserva();
 
     let html = `<h2>📦 Apartados</h2>`;
+
+    if (pendientesSinReserva.length > 0) {
+        html += `
+        <div style="background:#fffbeb; border:2px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:15px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+            <span style="color:#92400e; font-size:13px; font-weight:bold;">⚠️ ${pendientesSinReserva.length} apartado(s) vigente(s) todavía no tiene(n) reserva de inventario (creados antes de esta actualización).</span>
+            <button onclick="migrarReservasApartadosExistentes()" style="padding:8px 14px; background:#f59e0b; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px;">🔁 Migrar reservas ahora</button>
+        </div>`;
+    }
 
     html += `
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:15px;">
@@ -191,7 +359,10 @@ function renderApartados() {
                 <td>${a.estado}</td>
                 <td style="text-align:center;">
                     <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
-                        ${a.estado === 'Pendiente' ? `
+                        ${a.estado === 'Pendiente' && saldoVisible <= 0 ? `
+                            <button onclick="entregarMercanciaApartado('${a.folio}')" style="padding:6px 10px; background:#059669; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📦 Entregar</button>
+                        ` : ''}
+                        ${a.estado === 'Pendiente' && saldoVisible > 0 ? `
                             <button onclick="abrirModalAbonoApartado('${a.folio}')" style="padding:6px 10px; background:#10b981; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">💵 Abonar</button>
                             <button onclick="abrirModalConvertirApartado('${a.folio}')" style="padding:6px 10px; background:#8b5cf6; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">💳 Convertir</button>
                         ` : ''}
