@@ -564,11 +564,22 @@ function ejecutarPagoComision(tipo, id, fechaDesde, fechaHasta, monto, nombre) {
     const cuentaId = sel.value;
     const etiqueta = sel.options[sel.selectedIndex].text;
     
-    // 1. Descontar el dinero usando el Enchufe Universal
-    window._egresarCuenta({
+    // 1. Confirmar el egreso ANTES de marcar comisiones como pagadas. Antes,
+    //    el resultado de _egresarCuenta se ignoraba y las comisiones (una o
+    //    todo un rango de fechas) quedaban marcadas 'Pagada' aunque la
+    //    cuenta seleccionada no existiera y el dinero nunca saliera.
+    if (typeof window._egresarCuenta !== 'function') {
+        alert("No se pudo registrar el pago: el módulo de caja no está disponible. Nada se aplicó.");
+        return;
+    }
+    const _egresoOkComision = window._egresarCuenta({
         monto: monto, cuentaId: cuentaId, etiqueta: etiqueta,
         concepto: `Pago comisiones - ${nombre}`, referencia: `COMISION-${id}`
     });
+    if (!_egresoOkComision) {
+        alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}".\n\nLas comisiones NO se marcaron como pagadas. Verifica que esa cuenta exista.`);
+        return;
+    }
 
     // 2. Marcar comisiones como pagadas
     const comisiones = StorageService.get('comisionesRegistradas', []);

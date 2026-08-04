@@ -212,16 +212,27 @@ function guardarGasto() {
 
     const hoyStr = window.obtenerHoyInputMX();
     const gasto = { id: Date.now(), categoria, descripcion, monto, fecha, cuentaDebito: cuentaId, etiquetaCuenta: etiqueta, recurrente, periodicidad, ultimaVez: recurrente ? hoyStr : null };
-    
-    const gastos = StorageService.get('gastosOperativos', []);
-    gastos.push(gasto);
-    StorageService.set('gastosOperativos', gastos);
-    
-    // Descontar usando el enchufe universal
-    window._egresarCuenta({
+
+    // 🛡️ Confirmamos el egreso de caja ANTES de persistir el gasto. Antes, el
+    // gasto se guardaba en gastosOperativos y se avisaba "restado de la
+    // cuenta" sin revisar el resultado de _egresarCuenta: si la cuenta no
+    // existía, el gasto quedaba registrado igual sin que el dinero saliera.
+    if (typeof window._egresarCuenta !== 'function') {
+        alert("No se pudo registrar el gasto: el módulo de caja no está disponible. Nada se guardó.");
+        return;
+    }
+    const _egresoOkGasto = window._egresarCuenta({
         monto: monto, cuentaId: cuentaId, etiqueta: etiqueta,
         concepto: `Gasto: ${categoria} — ${descripcion}`, referencia: `GASTO-${gasto.id}`
     });
+    if (!_egresoOkGasto) {
+        alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}".\n\nEl gasto NO se guardó. Verifica que esa cuenta exista.`);
+        return;
+    }
+
+    const gastos = StorageService.get('gastosOperativos', []);
+    gastos.push(gasto);
+    StorageService.set('gastosOperativos', gastos);
 
     document.querySelector('[data-modal="registrar-gasto"]')?.remove();
     alert(`✅ Gasto registrado: ${dinero(monto)} (Restado de ${etiqueta})`);
