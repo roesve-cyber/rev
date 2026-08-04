@@ -156,72 +156,73 @@ window.importarBackupJSON = function(event) {
     lector.readAsText(archivo);
 };
 
-// ── OneDrive ──────────────────────────────────────────────────────────────────
-const _msalConfig = {
-    auth: {
-        clientId:    "TU_AZURE_CLIENT_ID",
-        authority:   "https://login.microsoftonline.com/common",
-        redirectUri: window.location.origin,
-    },
-    cache: { cacheLocation: "localStorage", storeAuthStateInCookie: false },
-};
-const _GRAPH_SCOPES  = ["Files.ReadWrite", "User.Read"];
-const _BACKUP_FOLDER = "REV-POS-Backups";
+// ── Firebase Storage (respaldos automáticos en la nube) ────────────────────
+// Reemplaza al antiguo backup por OneDrive (nunca llegó a funcionar: client ID
+// sin configurar y el flag de conexión nunca se guardaba). Como el proyecto ya
+// usa Firebase, esto no requiere cuentas ni OAuth adicionales.
+const _BACKUP_FOLDER        = "backups";
+const _BACKUP_RETENCION_DIAS = 7; // se borran automáticamente los más viejos
 
-window.conectarOneDrive = async function () {
-    try {
-        if (typeof msal === "undefined") { alert("❌ MSAL no cargado."); return null; }
-        const app   = new msal.PublicClientApplication(_msalConfig);
-        const token = await app.loginPopup({ scopes: _GRAPH_SCOPES });
-        window._msalToken = token.accessToken;
-        alert(`✅ Conectado como ${token.account.username}`);
-        return token.accessToken;
-    } catch (err) {
-        alert("❌ No se pudo conectar con OneDrive.");
-        return null;
-    }
-};
+function _storageDisponible() {
+    return !!(window._firebaseActivo && typeof firebase !== 'undefined' && firebase.storage);
+}
 
-window.subirBackupOneDrive = async function () {
-    const token = window._msalToken || (await window.conectarOneDrive());
-    if (!token) return false;
+// Sube el respaldo del día a Firebase Storage y limpia los que ya rebasaron
+// la retención (7 días) para no acumular archivos indefinidamente.
+window.subirBackupStorage = async function () {
+    if (!_storageDisponible()) { console.warn("Firebase Storage no disponible; se omite el respaldo a la nube."); return false; }
     try {
         const backup = await _construirBackup();   // ← usa StorageService dinámico, no localStorage
         const json   = JSON.stringify(backup, null, 2);
-        const fecha  = window.getFechaLocalMX();
+        const fecha  = window.getFechaLocalMX ? window.getFechaLocalMX() : new Date().toISOString().slice(0, 10);
         const nombre = `REV-BACKUP-v${BACKUP_VERSION}-${fecha}.json`;
-        const res = await fetch(
-            `https://graph.microsoft.com/v1.0/me/drive/root:/${_BACKUP_FOLDER}/${nombre}:/content`,
-            { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: json }
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        console.log(`☁️ Backup subido: ${nombre}`);
+        const ref    = firebase.storage().ref(`${_BACKUP_FOLDER}/${nombre}`);
+        await ref.putString(json, 'raw', { contentType: 'application/json' });
+        console.log(`☁️ Backup subido a Storage: ${nombre}`);
+        _limpiarBackupsAntiguosStorage().catch(() => {});
         return true;
     } catch (err) {
-        alert(`❌ No se pudo subir: ${err.message}`);
+        console.error("Error subiendo backup a Storage:", err);
+        alert(`❌ No se pudo subir el respaldo a la nube: ${err.message}`);
         return false;
     }
 };
 
+// Borra respaldos con más de _BACKUP_RETENCION_DIAS días, según la fecha
+// codificada en el nombre del archivo (REV-BACKUP-v2-YYYY-MM-DD.json).
+async function _limpiarBackupsAntiguosStorage() {
+    const carpeta = firebase.storage().ref(_BACKUP_FOLDER);
+    const lista   = await carpeta.listAll();
+    const limiteMs = Date.now() - _BACKUP_RETENCION_DIAS * 24 * 60 * 60 * 1000;
+    for (const item of lista.items) {
+        const m = item.name.match(/(\d{4}-\d{2}-\d{2})\.json$/);
+        if (!m) continue;
+        const fechaArchivo = new Date(`${m[1]}T00:00:00`).getTime();
+        if (!isNaN(fechaArchivo) && fechaArchivo < limiteMs) {
+            await item.delete().catch(e => console.warn(`No se pudo borrar respaldo antiguo ${item.name}:`, e));
+        }
+    }
+}
+
 window.mostrarListaBackups = async function () {
-    const token = window._msalToken || (await window.conectarOneDrive());
-    if (!token) return;
-    const cont = document.getElementById("listaBackupsOneDrive");
+    if (!_storageDisponible()) { alert("❌ Firebase Storage no está disponible."); return; }
+    const cont = document.getElementById("listaBackupsStorage");
     if (cont) cont.innerHTML = "<p style='color:#6b7280;font-size:13px;'>Cargando...</p>";
     try {
-        const res   = await fetch(
-            `https://graph.microsoft.com/v1.0/me/drive/root:/${_BACKUP_FOLDER}:/children`,
-            { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const data  = await res.json();
-        const items = (data.value || []).filter(f => f.name.endsWith(".json")).reverse();
+        const carpeta = firebase.storage().ref(_BACKUP_FOLDER);
+        const lista   = await carpeta.listAll();
+        const items = await Promise.all(lista.items.map(async item => {
+            const meta = await item.getMetadata();
+            return { name: item.name, size: meta.size || 0 };
+        }));
+        items.sort((a, b) => b.name.localeCompare(a.name));
         if (!cont) return;
         if (items.length === 0) { cont.innerHTML = "<p style='color:#9ca3af;font-size:13px;'>No hay respaldos.</p>"; return; }
         cont.innerHTML = items.map(f => `
             <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
                 <span style="font-size:13px;flex:1;color:#374151;">📄 ${f.name}</span>
                 <span style="font-size:11px;color:#9ca3af;">${(f.size/1024).toFixed(1)} KB</span>
-                <button onclick="restaurarDesdeOneDrive('${f.id}','${f.name}')"
+                <button onclick="restaurarDesdeStorage('${f.name}')"
                     style="padding:4px 10px;background:#8b5cf6;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">
                     ♻️ Restaurar
                 </button>
@@ -231,15 +232,13 @@ window.mostrarListaBackups = async function () {
     }
 };
 
-window.restaurarDesdeOneDrive = async function (fileId, nombre) {
-    const token = window._msalToken;
-    if (!token) { alert("Conecta OneDrive primero."); return; }
+window.restaurarDesdeStorage = async function (nombre) {
+    if (!_storageDisponible()) { alert("❌ Firebase Storage no está disponible."); return; }
     if (!confirm(`¿Restaurar "${nombre}"? Los datos actuales serán reemplazados.`)) return;
     try {
-        const res  = await fetch(
-            `https://graph.microsoft.com/v1.0/me/drive/items/${fileId}/content`,
-            { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const ref  = firebase.storage().ref(`${_BACKUP_FOLDER}/${nombre}`);
+        const url  = await ref.getDownloadURL();
+        const res  = await fetch(url);
         const text = await res.text();
         const fakeEvent = { target: { files: [new File([text], nombre, { type: "application/json" })], value: "" } };
         window.importarBackupJSON(fakeEvent);
