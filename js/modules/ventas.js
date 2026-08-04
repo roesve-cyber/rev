@@ -5041,6 +5041,10 @@ function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, refere
 
 function _cancelReingresarInventarioPorVenta(folio, motivo) {
     const productosActuales = StorageService.get("productos", []);
+    // Sincronizar el global YA — registrarMovimiento() busca el costo del
+    // producto en window.productos, y queremos que use estos mismos objetos
+    // (los que este función va a mutar), no una copia vieja.
+    window.productos = productosActuales;
     const movimientosInv = StorageService.get("movimientosInventario", []);
     const docs = StorageService.get("documentosEntrega", []);
     const docsActivos = docs.filter(d => d.folioVenta === folio && d.estado !== 'Cancelado');
@@ -5086,30 +5090,30 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
                 });
                 m.reversadoCancelacion = true;
             });
+        // Persistimos las banderas reversadoCancelacion AHORA, antes de que el
+        // ciclo de abajo empiece a llamar a registrarMovimiento() — esa
+        // función hace su propio get/push/set de movimientosInventario en
+        // cada llamada, así que si no guardamos primero, sus escrituras
+        // pisarían estas banderas con una copia vieja leída de storage.
+        StorageService.set("movimientosInventario", movimientosInv);
     }
 
     articulos.forEach(a => {
         if (!a.productoId || !a.cantidad) return;
-        const p = productosActuales.find(prod => String(prod.id) === String(a.productoId));
-        if (!p) return;
-        p.stock = (Number(p.stock) || 0) + Number(a.cantidad || 0);
-        if (!Array.isArray(p.variantes)) p.variantes = [];
-        const color = a.color || 'General';
-        const ubicacion = a.ubicacion || 'General';
-        let variante = p.variantes.find(v =>
-            String(v.color || 'General').toUpperCase() === String(color).toUpperCase() &&
-            String(v.ubicacion || 'General').toUpperCase() === String(ubicacion).toUpperCase()
-        );
-        if (variante) variante.stock = (Number(variante.stock) || 0) + Number(a.cantidad || 0);
-        else p.variantes.push({ color, ubicacion, stock: Number(a.cantidad || 0) });
+        // Fuente única: suma stock general + variante (color/ubicación).
+        const resultado = ajustarStockVariante(productosActuales, a.productoId, a.cantidad, {
+            color: a.color || 'General',
+            ubicacion: a.ubicacion || 'General',
+            modo: 'entrada',
+            concepto: `Reingreso por cancelación - Folio ${folio}`
+        });
+        if (!resultado.ok) return;
 
-        movimientosInv.push({
-            id: Date.now() + Math.random(),
-            productoId: a.productoId,
-            tipo: 'entrada',
-            cantidad: Number(a.cantidad || 0),
-            concepto: `Reingreso por cancelación - Folio ${folio}`,
-            fecha: window.formatearFechaMX ? window.formatearFechaMX(new Date()) : _cancelIsoAhora(),
+        // Misma función que usa el resto del sistema para el kardex: así
+        // el movimiento trae costoUnitario/costo/precioCompra/valor igual
+        // que cualquier otra entrada, en vez de quedar con huecos.
+        registrarMovimiento(a.productoId, `Reingreso por cancelación - Folio ${folio}`, a.cantidad, "entrada", {
+            folioVenta: folio,
             referencia: `CANCEL-${folio}`
         });
     });
@@ -5117,7 +5121,6 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
     StorageService.set("productos", productosActuales);
     productos = productosActuales;
     window.productos = productosActuales;
-    StorageService.set("movimientosInventario", movimientosInv);
     StorageService.set("documentosEntrega", docs);
     return articulos;
 }

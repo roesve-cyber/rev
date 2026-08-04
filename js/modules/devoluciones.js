@@ -206,18 +206,14 @@ function procesarDevolucion(folio) {
 
         if (resultado.ok) {
             StorageService.set('productos', prods);
-            
-            const movs = StorageService.get('movimientosInventario', []);
-            movs.push({
-                id: Date.now(),
-                productoId: productoIdArt,
-                tipo: 'entrada',
-                cantidad,
-                concepto: `Devolución ${devolucion.folio} — ${motivo}`,
-                fecha: window.formatearFechaMX(new Date()),
+            window.productos = prods;
+
+            // Mismo kardex que usa el resto del sistema (registrarMovimiento):
+            // así el movimiento trae costoUnitario/costo/precioCompra/valor,
+            // en vez de quedar con huecos como antes.
+            registrarMovimiento(productoIdArt, `Devolución ${devolucion.folio} — ${motivo}`, cantidad, "entrada", {
                 folioVenta: folio
             });
-            StorageService.set('movimientosInventario', movs);
         }
     }
 
