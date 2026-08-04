@@ -21,8 +21,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
-    <!-- MSAL.js para autenticación OneDrive -->
-    <script src="https://alcdn.msauth.net/browser/2.30.0/js/msal-browser.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
     <!-- Configuración Firebase -->
     <script src="/js/services/firebase-config.js?v=3"></script>
 </head>
@@ -873,7 +872,7 @@
     <div id="configuracion-nube" class="vista oculto">
  <div class="vista-header">
  <h2>Nube y Respaldos</h2>
- <p>Sincronizacion con Firebase, respaldos en OneDrive y exportacion manual de datos.</p>
+ <p>Sincronizacion con Firebase, respaldos automaticos en la nube y exportacion manual de datos.</p>
  </div>
 
  <div id="backup-panel" style="max-width:700px;">
@@ -894,16 +893,12 @@
  </div>
  </div>
 
- <!-- OneDrive -->
+ <!-- Respaldos en la nube (Firebase Storage) -->
  <div style="background:white; padding:20px; border-radius:10px; margin-bottom:16px; border:1px solid #e5e7eb;">
- <h3 style="margin:0 0 8px; color:#374151;">OneDrive (respaldos fisicos)</h3>
- <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Conecta tu cuenta de Microsoft para subir y restaurar respaldos automaticamente.</p>
+ <h3 style="margin:0 0 8px; color:#374151;">Respaldos en la nube</h3>
+ <p style="color:#6b7280; font-size:13px; margin:0 0 14px;">Se sube un respaldo automaticamente una vez al dia al iniciar sesion como admin. Se conservan los ultimos 7 dias.</p>
  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
- <button onclick="conectarOneDrive()"
- style="padding:10px 16px; background:#0078d4; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
- Conectar OneDrive
- </button>
- <button onclick="subirBackupOneDrive().then(r=>r&&alert('Respaldo guardado en OneDrive'))"
+ <button onclick="subirBackupStorage().then(r=>r&&alert('Respaldo guardado en la nube'))"
  style="padding:10px 16px; background:#106ebe; color:white; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:bold;">
  Crear respaldo ahora
  </button>
@@ -912,7 +907,7 @@
  Ver respaldos
  </button>
  </div>
- <div id="listaBackupsOneDrive"></div>
+ <div id="listaBackupsStorage"></div>
  </div>
 
  <!-- Backup local JSON -->
