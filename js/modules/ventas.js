@@ -279,7 +279,7 @@ function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
         }
         prod.stock = Math.max(0, _stockCrudoSalidaOp);
         if (typeof window.registrarMovimiento === 'function') {
-            window.registrarMovimiento(prod.id, `Salida operativa por venta en cuarentena - Folio ${folioVenta}`, cant, "salida");
+            window.registrarMovimiento(prod.id, `Salida operativa por venta en cuarentena - Folio ${folioVenta}`, cant, "salida", { folioVenta });
         }
         x.salidaOperativaAplicada = true;
         if (x.item) x.item.salidaOperativaAplicada = true;
@@ -2206,7 +2206,7 @@ window.ejecutarVentaAutorizadaReal = function(metodoPago, totalContado, enganche
                 inventarioVentaActualizado = true;
             }
             const concepto = colorElegido ? `Venta - ${folioVenta} (${colorElegido} - ${ubicacionElegida || 'General'})` : `Venta - ${folioVenta}`;
-            if (typeof registrarMovimiento === 'function') registrarMovimiento(prodVenta.id, concepto, cantRequerida, "salida");
+            if (typeof registrarMovimiento === 'function') registrarMovimiento(prodVenta.id, concepto, cantRequerida, "salida", { folioVenta });
             entregadosAhora.push({
                 productoId: prodVenta.id,
                 nombre: prodVenta.nombre,
@@ -3033,7 +3033,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
                 
                 // Afectar el Kardex
                 if (typeof window.registrarMovimiento === 'function') {
-                    window.registrarMovimiento(item.productoId, `Entrega diferida - Folio ${s.folioVenta} (${ubicacionSeleccionada})${notaColor}`, cantAEntregar, "salida");
+                    window.registrarMovimiento(item.productoId, `Entrega diferida - Folio ${s.folioVenta} (${ubicacionSeleccionada})${notaColor}`, cantAEntregar, "salida", { folioVenta: s.folioVenta });
                 }
 
                 entregadosHoy.push({
@@ -5060,8 +5060,21 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
     });
 
     if (articulos.length === 0) {
+        const folioNorm = String(folio || '').trim().toUpperCase();
+        // Preferimos el campo estructurado folioVenta (ver registrarMovimiento).
+        // Solo para movimientos viejos que no lo tengan (de antes de esta
+        // reparación) caemos a un match por texto, pero acotado con límites
+        // de palabra para no confundir "VTA-100" con "VTA-1005".
+        const folioEscapado = folioNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const folioComoPalabra = new RegExp(`(^|[^A-Z0-9])${folioEscapado}([^A-Z0-9]|$)`);
         movimientosInv
-            .filter(m => m.tipo === 'salida' && String(m.concepto || '').includes(folio) && !m.reversadoCancelacion)
+            .filter(m => {
+                if (m.tipo !== 'salida' || m.reversadoCancelacion) return false;
+                if (m.folioVenta !== undefined && m.folioVenta !== null && m.folioVenta !== '') {
+                    return String(m.folioVenta).trim().toUpperCase() === folioNorm;
+                }
+                return folioComoPalabra.test(String(m.concepto || '').toUpperCase());
+            })
             .forEach(m => {
                 const prod = productosActuales.find(p => String(p.id) === String(m.productoId));
                 articulos.push({

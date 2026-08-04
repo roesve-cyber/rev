@@ -1,5 +1,38 @@
 // ===== DEVOLUCIONES Y GARANTÍAS =====
 
+// 🔒 Gate de autorización — mismo patrón que _comprasRequireAdmin (compras.js)
+// e _invRequireAdmin (inventario.js). Sin esto, cualquier usuario podía
+// procesar una devolución que mueve stock, caja y saldo de CxC/pagarés.
+function _devolucionesRequireAdmin(accion) {
+    if (typeof window.esAdmin === 'function' && window.esAdmin()) return true;
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ACCESO_DENEGADO',
+            modulo: 'Devoluciones',
+            entidad: accion,
+            detalle: `Intento sin permisos: ${accion}`,
+            severidad: 'alerta'
+        });
+    }
+    alert('Operación restringida. Solo administrador puede continuar.');
+    return false;
+}
+
+// 🔎 Fuente de la venta a devolver.
+// `ventasRegistradas` es la fuente activa de ventas autorizadas (ver
+// ventas.js). `registroTickets` se dejó de escribir (su único punto de
+// guardado, guardarTicketEnRegistro, está comentado en ventas.js), pero se
+// conserva como respaldo por si hay folios históricos guardados ahí antes
+// de esa migración. Sin este cambio, buscarVentaDevolucion() buscaba
+// exclusivamente en una colección que ya no se llena.
+function _devolucionesBuscarVenta(folioUpper) {
+    const nuevas = StorageService.get('ventasRegistradas', []);
+    const legacy = StorageService.get('registroTickets', []);
+    return nuevas.find(v => (v.folio || '').toUpperCase() === folioUpper)
+        || legacy.find(v => (v.folio || '').toUpperCase() === folioUpper)
+        || null;
+}
+
 function abrirModalDevolucion() {
     const html = `
     <div data-modal="devolucion" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
@@ -19,8 +52,7 @@ function buscarVentaDevolucion() {
     const folio = document.getElementById('devFolio')?.value.trim().toUpperCase();
     const cont = document.getElementById('devResultado');
     if (!folio || !cont) return;
-    const ventas = StorageService.get('registroTickets', []);
-    const venta = ventas.find(v => (v.folio || '').toUpperCase() === folio);
+    const venta = _devolucionesBuscarVenta(folio);
     if (!venta) {
         cont.textContent = '';
         const p = document.createElement('p');
@@ -83,6 +115,10 @@ function buscarVentaDevolucion() {
 }
 
 function procesarDevolucion(folio) {
+    // 🔒 Punto 5: gate de autorización — antes cualquier usuario podía mover
+    // stock, caja y saldo de CxC/pagarés desde aquí sin checkpoint de rol.
+    if (!_devolucionesRequireAdmin('Procesar devolución')) return;
+
     const idxArt = parseInt(document.getElementById('devArticulo')?.value) || 0;
     const cantidad = parseInt(document.getElementById('devCantidad')?.value) || 1;
     const motivo = document.getElementById('devMotivo')?.value || 'Otro';
@@ -91,8 +127,8 @@ function procesarDevolucion(folio) {
     
     // 🛡️ REPARACIÓN: Leer la cuenta seleccionada en el modal
     const cuentaReembolsoId = document.getElementById('devCuentaReembolso')?.value || 'efectivo';
-    const ventas = StorageService.get('registroTickets', []);
-    const venta = ventas.find(v => (v.folio || '').toUpperCase() === folio.toUpperCase());
+    const folioUpper = folio.toUpperCase();
+    const venta = _devolucionesBuscarVenta(folioUpper);
     if (!venta) return;
 
     // Detectar si la venta fue a crédito
@@ -101,6 +137,24 @@ function procesarDevolucion(folio) {
     const arts = venta.venta?.articulos || venta.articulos || venta.carrito || [];
     const art = arts[idxArt];
     if (!art) return;
+
+    if (cantidad <= 0) {
+        alert('La cantidad a devolver debe ser mayor a 0.');
+        return;
+    }
+
+    // 🔢 Punto 4: no dejar devolver más de lo vendido, ni acumular
+    // devoluciones repetidas del mismo folio+producto sin tope.
+    const productoIdArt = art.id || art.productoId;
+    const yaDevuelta = StorageService.get('historialDevoluciones', [])
+        .filter(d => String(d.folioVenta || '').toUpperCase() === folioUpper && String(d.productoId) === String(productoIdArt))
+        .reduce((sum, d) => sum + (Number(d.cantidad) || 0), 0);
+    const vendida = Number(art.cantidad || 0);
+    const disponibleParaDevolver = Math.max(0, vendida - yaDevuelta);
+    if (cantidad > disponibleParaDevolver) {
+        alert(`No se puede devolver ${cantidad} pieza(s) de "${art.nombre}".\n\nVendidas en este folio: ${vendida}\nYa devueltas anteriormente: ${yaDevuelta}\nDisponibles para devolver: ${disponibleParaDevolver}`);
+        return;
+    }
 
     // --- NUEVO: RESUMEN Y CONFIRMACIÓN ---
     const selectCta = document.getElementById('devCuentaReembolso');
@@ -118,8 +172,10 @@ function procesarDevolucion(folio) {
         folioVenta: folio,
         clienteNombre: venta.clienteNombre || venta.nombre || 'Cliente',
         clienteId: venta.clienteId || null,
-        productoId: art.id || art.productoId,
+        productoId: productoIdArt,
         productoNombre: art.nombre,
+        colorElegido: art.colorElegido || 'General',
+        ubicacionElegida: art.ubicacionElegida || 'General',
         cantidad,
         motivo,
         notas,
@@ -134,11 +190,15 @@ function procesarDevolucion(folio) {
     if (reingresarStock) {
         const prods = StorageService.get('productos', []);
         const colorOriginal = art.colorElegido || 'General';
+        // 🏷️ Punto 6: usar la ubicación real de donde salió la pieza, no una
+        // 'General' fija — si no se registró ubicación específica en la
+        // venta, 'General' sigue siendo el valor correcto por default.
+        const ubicacionOriginal = art.ubicacionElegida || 'General';
         // Fuente única: suma stock general + variante (color/ubicación).
         const resultado = window.ajustarStockVariante
-            ? window.ajustarStockVariante(prods, art.id || art.productoId, cantidad, {
+            ? window.ajustarStockVariante(prods, productoIdArt, cantidad, {
                   color: colorOriginal,
-                  ubicacion: 'General',
+                  ubicacion: ubicacionOriginal,
                   modo: 'entrada',
                   concepto: `Devolución — ${motivo}`
               })
@@ -150,11 +210,12 @@ function procesarDevolucion(folio) {
             const movs = StorageService.get('movimientosInventario', []);
             movs.push({
                 id: Date.now(),
-                productoId: art.id || art.productoId,
+                productoId: productoIdArt,
                 tipo: 'entrada',
                 cantidad,
                 concepto: `Devolución ${devolucion.folio} — ${motivo}`,
-                fecha: window.formatearFechaMX(new Date())
+                fecha: window.formatearFechaMX(new Date()),
+                folioVenta: folio
             });
             StorageService.set('movimientosInventario', movs);
         }
@@ -261,8 +322,7 @@ function renderHistorialDevoluciones() {
 
 // ===== GARANTÍAS =====
 function registrarGarantia({ folio, productoId, clienteId, mesesGarantia }) {
-    const ventas = StorageService.get('registroTickets', []);
-    const venta = ventas.find(v => (v.folio || '') === folio);
+    const venta = _devolucionesBuscarVenta((folio || '').toUpperCase());
     const fecha = venta ? (venta.fecha || venta.fechaVenta || window.localISO(new Date())) : window.localISO(new Date());
     const fechaVenc = new Date(fecha);
     fechaVenc.setMonth(fechaVenc.getMonth() + (mesesGarantia || 12));

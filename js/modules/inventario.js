@@ -1815,7 +1815,7 @@ function actualizarStock(id, cant, concepto) {
  }
 }
 
-function registrarMovimiento(productoId, concepto, cantidad, tipo) {
+function registrarMovimiento(productoId, concepto, cantidad, tipo, extra = {}) {
  const kardexActual = StorageService.get("movimientosInventario", []);
  const producto = (window.productos || []).find(p => String(p.id) === String(productoId)) || {};
  const costoUnitario = Number(producto.costo || producto.precioCompra || 0);
@@ -1830,7 +1830,11 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
  costoUnitario,
  costo: costoUnitario,
  precioCompra: costoUnitario,
- valor: Math.abs(Number(cantidad || 0)) * costoUnitario
+ valor: Math.abs(Number(cantidad || 0)) * costoUnitario,
+ // Campos estructurados opcionales (p.ej. folioVenta, referencia) para que
+ // otros flujos puedan encontrar este movimiento por FK real en vez de
+ // tener que adivinar por texto libre dentro de `concepto`.
+ ...(extra && typeof extra === 'object' ? extra : {})
  };
  kardexActual.push(movimiento);
  movimientosInventario = kardexActual;
