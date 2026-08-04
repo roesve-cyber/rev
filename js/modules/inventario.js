@@ -1841,6 +1841,116 @@ function registrarMovimiento(productoId, concepto, cantidad, tipo) {
 }
 
 // ============================================================
+// 🔒 FUENTE ÚNICA: sumar/restar stock general + variante (color/ubicación)
+// ------------------------------------------------------------
+// Antes esta misma lógica ("buscar producto, sumar/restar stock,
+// buscar/crear la variante color+ubicación") estaba copiada casi
+// textual en 5 lugares distintos (compra directa 1 artículo,
+// recepción de OC, compra directa multi-artículo, descuento por
+// consignación y devoluciones). Es el mismo patrón que causó los
+// bugs de Corte de Caja: corregías una condición de borde en una
+// copia y las demás quedaban desactualizadas. Ahora todos esos
+// sitios llaman a esta única función.
+//
+// - `productosArr` es el array de productos YA CARGADO (el llamador
+//   decide cuándo persistir con StorageService.set — algunos flujos
+//   procesan varios artículos en un ciclo y guardan una sola vez al
+//   final, no en cada iteración).
+// - `opciones.modo`: 'entrada' (suma, default) o 'salida' (resta).
+// - Si la variante (color+ubicación) no existe:
+//     · en 'entrada' se crea.
+//     · en 'salida' NO se crea (no se puede restar de algo que no
+//       existe) — se reporta con varianteEncontrada:false para que
+//       el llamador decida cómo avisar del huérfano.
+// - Si una resta dejaría el stock (general o de variante) por debajo
+//   de 0, NO se oculta como antes (Math.max(0, ...) silencioso): se
+//   registra el descuadre en la bitácora de auditoría (severidad
+//   'critica') y en consola vía reportarDescuadreInventario, y el
+//   resultado devuelto trae stockNegativoDetectado:true + el
+//   faltante real. El valor guardado se sigue acotando a 0 (no
+//   queremos negativos visibles en el inventario), pero ahora el
+//   descuadre queda registrado en vez de desaparecer sin aviso.
+function reportarDescuadreInventario(producto, contexto = {}) {
+    const faltante = Math.abs(Number(contexto.valorCrudo) || 0);
+    const nombre = (producto && producto.nombre) || contexto.productoId || 'producto desconocido';
+    const msg = `⚠️ Descuadre de inventario: "${nombre}"${contexto.campo ? ' [' + contexto.campo + ']' : ''} quedaría en ${contexto.valorCrudo} (faltan ${faltante}). Se acotó a 0.${contexto.origen ? ' Origen: ' + contexto.origen : ''}`;
+    console.warn(msg);
+    try {
+        if (window.AuditService && typeof window.AuditService.log === 'function') {
+            window.AuditService.log({
+                accion: 'Descuadre de inventario detectado',
+                modulo: 'Inventario',
+                entidad: nombre,
+                entidadId: (producto && producto.id) || contexto.productoId || '',
+                detalle: msg,
+                severidad: 'critica',
+                datos: contexto
+            });
+        }
+    } catch (e) {
+        // La auditoría nunca debe tumbar la operación de inventario en curso.
+        console.error('No se pudo registrar el descuadre en la bitácora', e);
+    }
+}
+window.reportarDescuadreInventario = reportarDescuadreInventario;
+
+function ajustarStockVariante(productosArr, productoId, cantidad, opciones = {}) {
+    const { color = 'General', ubicacion = 'General', modo = 'entrada', concepto = '' } = opciones;
+    const cant = Number(cantidad) || 0;
+    if (!Array.isArray(productosArr) || !productoId || cant <= 0) {
+        return { ok: false, motivo: 'parametros_invalidos' };
+    }
+    const idx = productosArr.findIndex(p => String(p.id) === String(productoId));
+    if (idx === -1) return { ok: false, motivo: 'producto_no_encontrado' };
+
+    const prod = productosArr[idx];
+    const delta = modo === 'salida' ? -cant : cant;
+
+    const stockAntes = Number(prod.stock) || 0;
+    const stockCrudo = stockAntes + delta;
+    let stockNegativoDetectado = false;
+    let faltante = 0;
+    if (stockCrudo < 0) {
+        stockNegativoDetectado = true;
+        faltante = Math.abs(stockCrudo);
+        reportarDescuadreInventario(prod, { campo: 'stock general', valorCrudo: stockCrudo, productoId, origen: concepto });
+    }
+    prod.stock = Math.max(0, stockCrudo);
+
+    const colFinal = String(color || 'General');
+    const ubiFinal = String(ubicacion || 'General');
+    prod.variantes = Array.isArray(prod.variantes) ? prod.variantes : [];
+    let variante = prod.variantes.find(v =>
+        (v.color || 'General').toUpperCase() === colFinal.toUpperCase() &&
+        (v.ubicacion || 'General').toUpperCase() === ubiFinal.toUpperCase()
+    );
+
+    let varianteEncontrada = true;
+    if (!variante) {
+        if (modo === 'salida') {
+            varianteEncontrada = false;
+        } else {
+            variante = { color: colFinal, ubicacion: ubiFinal, stock: 0 };
+            prod.variantes.push(variante);
+        }
+    }
+
+    if (variante) {
+        const vAntes = Number(variante.stock) || 0;
+        const vCrudo = vAntes + delta;
+        if (vCrudo < 0) {
+            stockNegativoDetectado = true;
+            faltante = Math.max(faltante, Math.abs(vCrudo));
+            reportarDescuadreInventario(prod, { campo: `variante ${colFinal}/${ubiFinal}`, valorCrudo: vCrudo, productoId, origen: concepto });
+        }
+        variante.stock = Math.max(0, vCrudo);
+    }
+
+    return { ok: true, varianteEncontrada, stockNegativoDetectado, faltante, producto: prod };
+}
+window.ajustarStockVariante = ajustarStockVariante;
+
+// ============================================================
 // 🔒 RESERVAS DE INVENTARIO (Apartados)
 // ------------------------------------------------------------
 // Fuente única de verdad para "cuánto está prometido a un

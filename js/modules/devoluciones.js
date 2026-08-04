@@ -133,24 +133,18 @@ function procesarDevolucion(folio) {
 
     if (reingresarStock) {
         const prods = StorageService.get('productos', []);
-        const pidx = prods.findIndex(p => String(p.id) === String(art.id || art.productoId));
-        if (pidx !== -1) {
-            prods[pidx].stock = (prods[pidx].stock || 0) + cantidad;
-            
-            // --- CORRECCIÓN: Reingresar también en la variante correspondiente ---
-            if (!prods[pidx].variantes) prods[pidx].variantes = [];
-            const colorOriginal = art.colorElegido || 'General';
-            const varExistente = prods[pidx].variantes.find(v => 
-                (v.color||'General').toUpperCase() === colorOriginal.toUpperCase() && 
-                (v.ubicacion||'General').toUpperCase() === 'GENERAL'
-            );
-            if(varExistente) {
-                varExistente.stock = (Number(varExistente.stock) || 0) + cantidad;
-            } else {
-                prods[pidx].variantes.push({ ubicacion: 'General', color: colorOriginal, stock: cantidad });
-            }
-            // ---------------------------------------------------------------------
+        const colorOriginal = art.colorElegido || 'General';
+        // Fuente única: suma stock general + variante (color/ubicación).
+        const resultado = window.ajustarStockVariante
+            ? window.ajustarStockVariante(prods, art.id || art.productoId, cantidad, {
+                  color: colorOriginal,
+                  ubicacion: 'General',
+                  modo: 'entrada',
+                  concepto: `Devolución — ${motivo}`
+              })
+            : { ok: false, motivo: 'ajustarStockVariante_no_disponible' };
 
+        if (resultado.ok) {
             StorageService.set('productos', prods);
             
             const movs = StorageService.get('movimientosInventario', []);

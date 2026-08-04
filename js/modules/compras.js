@@ -974,26 +974,16 @@ function registrarCompra() {
 
     // 👇 2. DISTRIBUIR EL STOCK EN LAS VARIANTES SI ENTRA INMEDIATAMENTE 👇
     if (ingresoInmediato) {
-        // Actualiza el stock general (tu función original)
-        actualizarStock(productoId, cantidad, `Compra a ${prov.nombre} (${colorNuevo})`);
-
-        // Actualizamos la "cajita" específica (Color + Ubicación)
-        if (!producto.variantes) producto.variantes = [];
-        
-        const varianteExistente = producto.variantes.find(v => 
-            (v.color || "General").toUpperCase() === colorNuevo.toUpperCase() && 
-            (v.ubicacion || "General").toUpperCase() === ubicacionNueva.toUpperCase()
-        );
-
-        if (varianteExistente) {
-            varianteExistente.stock = (Number(varianteExistente.stock) || 0) + cantidad;
-        } else {
-            producto.variantes.push({
-                color: colorNuevo,
-                ubicacion: ubicacionNueva,
-                stock: cantidad
-            });
-        }
+        // Fuente única: suma stock general + variante (color/ubicación) y
+        // reporta cualquier descuadre. `producto` es el mismo objeto dentro
+        // de `productos`, así que queda actualizado por referencia.
+        ajustarStockVariante(productos, productoId, cantidad, {
+            color: colorNuevo,
+            ubicacion: ubicacionNueva,
+            modo: 'entrada',
+            concepto: `Compra a ${prov.nombre}`
+        });
+        registrarMovimiento(productoId, `Compra a ${prov.nombre} (${colorNuevo})`, cantidad, "entrada");
     }
 
     if (metodo !== "contado") {
@@ -2583,24 +2573,13 @@ itemsRecibidos.forEach(art => {
         return; 
     }
 
-    const pidx = prods.findIndex(p => String(p.id) === String(art.productoId));
-    if (pidx !== -1) {
-        prods[pidx].stock = (prods[pidx].stock || 0) + art.cantidadRec;
-        // Afectar la ubicación específica y color
-        prods[pidx].variantes = prods[pidx].variantes || [];
-        const ubiFinal = art.ubicacionRec || 'General';
-        const colFinal = art.colorRec || 'General';
-        
-        const existente = prods[pidx].variantes.find(
-            v => (v.ubicacion || 'General').toUpperCase() === ubiFinal.toUpperCase() && 
-                 (v.color || 'General').toUpperCase() === colFinal.toUpperCase()
-        );
-        if (existente) {
-            existente.stock = (Number(existente.stock) || 0) + art.cantidadRec;
-        } else {
-            prods[pidx].variantes.push({ ubicacion: ubiFinal, color: colFinal, stock: art.cantidadRec });
-        }
-    }
+    // Fuente única: suma stock general + variante (color/ubicación).
+    ajustarStockVariante(prods, art.productoId, art.cantidadRec, {
+        color: art.colorRec || 'General',
+        ubicacion: art.ubicacionRec || 'General',
+        modo: 'entrada',
+        concepto: `Recepción OC ${oc.folio} — ${oc.proveedorNombre}`
+    });
 });
 StorageService.set('productos', prods);
 productos = prods;          // ← ESTA línea sincroniza el global
@@ -3626,17 +3605,15 @@ function guardarCompraDirectaFinal() {
                     p.precio = nuevoPrecio;
                 }
 
-                p.stock = (Number(p.stock) || 0) + art.cantidad;
-                p.variantes = p.variantes || [];
+                // Fuente única: suma stock general + variante (color/ubicación).
                 const colFinal = art.color || 'General';
                 const ubiFinal = art.ubicacion || 'General';
-                const existente = p.variantes.find(v => (v.ubicacion || 'General').toUpperCase() === ubiFinal.toUpperCase() && (v.color || 'General').toUpperCase() === colFinal.toUpperCase());
-                
-                if (existente) {
-                    existente.stock = (Number(existente.stock) || 0) + art.cantidad;
-                } else {
-                    p.variantes.push({ ubicacion: ubiFinal, color: colFinal, stock: art.cantidad });
-                }
+                ajustarStockVariante(productos, art.productoId, art.cantidad, {
+                    color: colFinal,
+                    ubicacion: ubiFinal,
+                    modo: 'entrada',
+                    concepto: `Compra Directa Múltiple a ${prov.nombre}`
+                });
 
                 movimientosInventario.push({
                     id: Date.now() + Math.random(),
@@ -5242,28 +5219,16 @@ window.descartarBorradorDevolucionConsignacion = function(folioKey) {
 function _consigDescontarInventario(productoId, cantidad, color, ubicacion) {
     if (!productoId || !(cantidad > 0)) return { ok: false, motivo: 'sin_producto_o_cantidad' };
     const productos = StorageService.get('productos', []);
-    const idx = productos.findIndex(p => String(p.id) === String(productoId));
-    if (idx === -1) return { ok: false, motivo: 'producto_no_encontrado' };
+    // Fuente única: resta stock general + variante (color/ubicación); si el
+    // resultado quedaría negativo, ya no se oculta — se registra el
+    // descuadre en la bitácora de auditoría (ver ajustarStockVariante).
+    const resultado = ajustarStockVariante(productos, productoId, cantidad, {
+        color, ubicacion, modo: 'salida', concepto: 'Descuento por consignación'
+    });
+    if (!resultado.ok) return resultado;
 
-    const prod = productos[idx];
-    prod.stock = Math.max(0, (Number(prod.stock) || 0) - cantidad);
-
-    let varianteEncontrada = true;
-    if (Array.isArray(prod.variantes)) {
-        const variante = prod.variantes.find(v =>
-            (v.color || 'General').toUpperCase() === String(color || 'General').toUpperCase() &&
-            (v.ubicacion || 'General').toUpperCase() === String(ubicacion || 'General').toUpperCase()
-        );
-        if (variante) {
-            variante.stock = Math.max(0, (Number(variante.stock) || 0) - cantidad);
-        } else {
-            varianteEncontrada = false;
-        }
-    }
-
-    productos[idx] = prod;
     StorageService.set('productos', productos);
-    return { ok: true, varianteEncontrada };
+    return { ok: true, varianteEncontrada: resultado.varianteEncontrada };
 }
 
 window.abrirPreviaDevolucionConsignacion = function(folioKey) {

@@ -268,7 +268,16 @@ function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
             if (restante > 0) return;
         }
 
-        prod.stock = Math.max(0, (Number(prod.stock) || 0) - cant);
+        const _stockCrudoSalidaOp = (Number(prod.stock) || 0) - cant;
+        if (_stockCrudoSalidaOp < 0 && typeof window.reportarDescuadreInventario === 'function') {
+            window.reportarDescuadreInventario(prod, {
+                campo: 'stock general',
+                valorCrudo: _stockCrudoSalidaOp,
+                productoId: prod.id,
+                origen: `Salida operativa por venta en cuarentena - Folio ${folioVenta}`
+            });
+        }
+        prod.stock = Math.max(0, _stockCrudoSalidaOp);
         if (typeof window.registrarMovimiento === 'function') {
             window.registrarMovimiento(prod.id, `Salida operativa por venta en cuarentena - Folio ${folioVenta}`, cant, "salida");
         }
@@ -1047,7 +1056,16 @@ function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '',
         if (restante > 0) return false;
     }
 
-    prod.stock = Math.max(0, (Number(prod.stock) || 0) - cant);
+    const _stockCrudoDescuentoVenta = (Number(prod.stock) || 0) - cant;
+    if (_stockCrudoDescuentoVenta < 0 && typeof window.reportarDescuadreInventario === 'function') {
+        window.reportarDescuadreInventario(prod, {
+            campo: 'stock general',
+            valorCrudo: _stockCrudoDescuentoVenta,
+            productoId: prod.id,
+            origen: `Venta — descuento desde origen (${colorElegido || 'General'}/${ubicacionElegida || 'General'})`
+        });
+    }
+    prod.stock = Math.max(0, _stockCrudoDescuentoVenta);
     return true;
 }
 
