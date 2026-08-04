@@ -595,14 +595,14 @@ async function iniciarSesion() {
             await _sincronizarFirebaseDespuesDeLogin();
             _recargarVariablesGlobales();
             if (typeof navA === 'function') navA('dashboard');
-            // Respaldo automático diario a OneDrive (solo admin)
+            // Respaldo automático diario a Firebase Storage (solo admin)
             if (sesion.rol === 'admin') {
                 const hoy = window.obtenerHoyInputMX();
-                const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoOneDrive');
-                if (ultimoRespaldo !== hoy && localStorage.getItem('_onedriveConectado') === 'true') {
-                    if (typeof subirBackupOneDrive === 'function') {
-                        subirBackupOneDrive().then(() => {
-                            localStorage.setItem('_ultimoRespaldoOneDrive', hoy);
+                const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoStorage');
+                if (ultimoRespaldo !== hoy && window._firebaseActivo) {
+                    if (typeof subirBackupStorage === 'function') {
+                        subirBackupStorage().then(() => {
+                            localStorage.setItem('_ultimoRespaldoStorage', hoy);
                         }).catch(() => {});
                     }
                 }
@@ -656,11 +656,11 @@ function _iniciarSesionLocalFallback(email, pass) {
     if (typeof navA === 'function') navA('dashboard');
     if (match.rol === 'admin') {
         const hoy = window.obtenerHoyInputMX();
-        const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoOneDrive');
-        if (ultimoRespaldo !== hoy && localStorage.getItem('_onedriveConectado') === 'true') {
-            if (typeof subirBackupOneDrive === 'function') {
-                subirBackupOneDrive().then(() => {
-                    localStorage.setItem('_ultimoRespaldoOneDrive', hoy);
+        const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoStorage');
+        if (ultimoRespaldo !== hoy && window._firebaseActivo) {
+            if (typeof subirBackupStorage === 'function') {
+                subirBackupStorage().then(() => {
+                    localStorage.setItem('_ultimoRespaldoStorage', hoy);
                 }).catch(() => {});
             }
         }
