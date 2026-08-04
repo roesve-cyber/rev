@@ -936,6 +936,130 @@ const StorageService = {
     },
     // -----------------------------------------------------------
 
+    // 🚀 DESCUENTO ATÓMICO DE STOCK EN VENTA (multi-caja)
+    // Antes: ventas.js leía `productos` LOCAL, validaba disponibilidad y
+    // escribía el nuevo stock con un StorageService.set() normal (debounce
+    // de 1.5s antes de subir a Firebase). Con dos cajas vendiendo la misma
+    // pieza casi al mismo tiempo, cada una valida contra su propia copia
+    // local -que todavía no vio el descuento de la otra- y ambas pasan la
+    // validación: sobreventa. El clamp a 0 que existe en otros puntos del
+    // sistema (ajustarStockVariante, etc.) esconde el negativo en vez de
+    // mostrarlo, así que el hueco queda invisible.
+    //
+    // Esta función usa el mismo patrón de transacción atómica de Firestore
+    // que ya usan pushAtomo/removeAtomo arriba: lee el documento 'productos'
+    // DESDE EL SERVIDOR dentro de la transacción (no la copia local), valida
+    // stock suficiente ahí mismo, y descuenta en la misma operación atómica.
+    // Si dos cajas compiten por la última pieza, Firestore serializa ambas
+    // transacciones: la segunda relee el documento ya actualizado por la
+    // primera y falla la validación en vez de sobrevender.
+    //
+    // Sin Firebase activo (offline / un solo dispositivo) no hay con quién
+    // competir: se hace el mismo check-and-decrement contra el estado local,
+    // que es inherentemente seguro porque JS es single-threaded.
+    // Misma normalización que _normalizarClaveInventario en ventas.js (no
+    // está expuesta en window, así que se replica aquí para que el matching
+    // de color/ubicación en el descuento atómico sea idéntico al de la
+    // validación de disponibilidad que ya corrió en pantalla).
+    _normalizarClaveVenta(valor) {
+        return String(valor || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toUpperCase();
+    },
+
+    async decrementarStockVentaAtomico({ productoId, cantidad, color = '', ubicacion = '' }) {
+        const cant = Number(cantidad) || 0;
+        if (!productoId || cant <= 0) return { ok: false, motivo: 'parametros_invalidos' };
+
+        const ubicNorm = this._normalizarClaveVenta(ubicacion);
+        const colorNorm = this._normalizarClaveVenta(color);
+
+        // Aplica el descuento sobre una COPIA de trabajo del arreglo de
+        // productos; solo se usa/persiste si la validación pasa completa.
+        const intentarDescuento = (productosArr) => {
+            const idx = productosArr.findIndex(p => String(p.id) === String(productoId));
+            if (idx === -1) return { ok: false, motivo: 'producto_no_encontrado' };
+
+            const prod = JSON.parse(JSON.stringify(productosArr[idx]));
+            const stockActual = Number(prod.stock) || 0;
+            if (stockActual < cant) {
+                return { ok: false, motivo: 'stock_insuficiente', disponible: stockActual };
+            }
+
+            const tieneVariantes = Array.isArray(prod.variantes) && prod.variantes.length > 0 &&
+                ubicNorm && ubicNorm !== 'STOCK GENERAL';
+
+            if (tieneVariantes) {
+                let restante = cant;
+                prod.variantes.forEach(v => {
+                    const coincideColor = !colorNorm || (this._normalizarClaveVenta(v.color || 'General') === colorNorm);
+                    const coincideUbicacion = this._normalizarClaveVenta(v.ubicacion || 'General') === ubicNorm;
+                    if (restante > 0 && coincideColor && coincideUbicacion && Number(v.stock) > 0) {
+                        const deducir = Math.min(Number(v.stock), restante);
+                        v.stock = Number(v.stock) - deducir;
+                        restante -= deducir;
+                    }
+                });
+                if (restante > 0) {
+                    return { ok: false, motivo: 'stock_insuficiente_variante', disponible: cant - restante };
+                }
+            }
+
+            prod.stock = stockActual - cant;
+            productosArr[idx] = prod;
+            return { ok: true, stockRestante: prod.stock, productosArr, productoActualizado: prod };
+        };
+
+        if (window._firebaseActivo && window._db) {
+            const docRef = window._db.collection('posData').doc('productos');
+            let resultado = { ok: false, motivo: 'sin_intentar' };
+            try {
+                await window._db.runTransaction(async (transaction) => {
+                    const doc = await transaction.get(docRef);
+                    const data = doc.exists ? (doc.data().data || []) : [];
+                    resultado = intentarDescuento(data);
+                    if (!resultado.ok) {
+                        // No hay forma limpia de "abortar sin error" en runTransaction
+                        // entre versiones del SDK, así que usamos un error controlado
+                        // y lo interceptamos afuera para no escribir nada.
+                        throw new Error('STOCK_INSUFICIENTE');
+                    }
+                    transaction.update(docRef, { data: resultado.productosArr, _updatedAt: Date.now() });
+                });
+            } catch (e) {
+                if (e && e.message !== 'STOCK_INSUFICIENTE') {
+                    console.warn('decrementarStockVentaAtomico: fallo la transaccion Firestore, no se pudo verificar atomicamente', e);
+                    resultado = { ok: false, motivo: 'error_transaccion', error: e };
+                }
+            }
+
+            if (resultado.ok) {
+                // Reflejar el resultado autoritativo del servidor en la copia
+                // local para que la UI no muestre un stock desfasado.
+                const localActual = this.get('productos', []);
+                const idxLocal = localActual.findIndex(p => String(p.id) === String(productoId));
+                if (idxLocal !== -1) {
+                    localActual[idxLocal] = resultado.productoActualizado;
+                    await this._guardarLocalDirecto('productos', localActual);
+                }
+                await this._marcarCambioRemoto('productos', Date.now());
+            }
+            return resultado;
+        }
+
+        // Sin Firebase activo: check-and-decrement local (seguro, un solo hilo).
+        const local = this.get('productos', []);
+        const resultadoLocal = intentarDescuento(local);
+        if (resultadoLocal.ok) {
+            await this._guardarLocalDirecto('productos', resultadoLocal.productosArr);
+        }
+        return resultadoLocal;
+    },
+    // -----------------------------------------------------------
+
     // ☁️ FUNCIONES DE NUBE (Ahora sí conectadas a Firestore)
 
     // Devuelve el timestamp local de la última vez que guardamos una tabla
