@@ -645,6 +645,14 @@ function renderCuentasMSI() {
 }
 
 // ── Marcar la siguiente cuota como pagada ─────────────────────────────────────
+// 🛡️ REPARACIÓN: esta función registraba el egreso contra el NOMBRE de la
+// tarjeta de crédito (deuda.banco) como si fuera una cuenta real, sin pedir
+// nunca de qué cuenta de efectivo/débito salía el dinero — a diferencia de
+// procesarPagoTarjetaGlobal (pago de corte mensual), que sí lo hace bien. Ese
+// egreso fantasma no descontaba ningún saldo real, pero sí se sumaba en los
+// totales globales de dashboard.js (que suma TODOS los movimientosCaja sin
+// distinguir cuenta). Ahora se pide la cuenta de origen igual que en el pago
+// global, y se usa _egresarCuenta para que sí se descuente de verdad.
 function marcarPagoMSI(id, numeroCuota) {
     const cuentasMSI = StorageService.get("cuentasMSI", []);
     const idx = cuentasMSI.findIndex(c => c.id === id);
@@ -658,41 +666,97 @@ function marcarPagoMSI(id, numeroCuota) {
         return;
     }
 
-    // --- NUEVO: RESUMEN Y CONFIRMACIÓN ---
+    document.querySelector('[data-modal="pago-individual-msi"]')?.remove();
+    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
+    let opcionesCuenta = '';
+    cajas.forEach(c => opcionesCuenta += `<option value="${c.id}">${c.nombre}</option>`);
+    tarjetasConfig.filter(t => t.tipo === "debito").forEach(t => opcionesCuenta += `<option value="${t.banco}">🏦 ${t.banco} Débito</option>`);
+
+    const modalHTML = `
+    <div data-modal="pago-individual-msi" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:7000; display:flex; justify-content:center; align-items:center;">
+        <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:420px;">
+            <h2 style="margin-top:0; color:#1e40af;">💰 Pago Individual — Cuota ${numeroCuota}</h2>
+            <p style="color:#4b5563; font-size:13px; margin-top:-10px;">${deuda.banco} · ${deuda.producto || 'Compra'} · ${dinero(deuda.cuotaMensual)}</p>
+            <div style="margin-bottom:18px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569;">¿De dónde sale el dinero?</label>
+                <select id="cuentaOrigenPagoIndividualMSI" style="width:100%; padding:10px; margin-top:5px; border:1px solid #d1d5db; border-radius:6px;">${opcionesCuenta}</select>
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button onclick="confirmarPagoIndividualMSI(${id}, ${numeroCuota})" style="flex:1; padding:12px; background:#16a34a; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Confirmar Pago</button>
+                <button onclick="document.querySelector('[data-modal=&quot;pago-individual-msi&quot;]').remove()" style="flex:1; padding:12px; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+window.confirmarPagoIndividualMSI = function(id, numeroCuota) {
+    const sel = document.getElementById("cuentaOrigenPagoIndividualMSI");
+    const cuentaId = sel?.value;
+    const cuentaEtiqueta = sel?.options[sel.selectedIndex]?.text || cuentaId;
+    if (!cuentaId) return alert("❌ Selecciona una cuenta de origen.");
+
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const idx = cuentasMSI.findIndex(c => c.id === id);
+    if (idx === -1) return;
+    const deuda = cuentasMSI[idx];
+    const pagosActuales = deuda.pagosRealizados || 0;
+    if (numeroCuota !== pagosActuales + 1) {
+        document.querySelector('[data-modal="pago-individual-msi"]')?.remove();
+        return alert(`⚠️ Solo puedes marcar la cuota ${pagosActuales + 1} como pagada.`);
+    }
+
     const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
-    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿PAGAR CUOTA MSI?\n\nBanco: ${deuda.banco}\nCompra: ${deuda.producto || 'Compra'}\nCuota: ${numeroCuota} de ${deuda.meses}\nMonto a descontar: ${formatoDinero(deuda.cuotaMensual)}\n\n¿Deseas continuar con el registro?`;
+    const msjConf = `⚠️ RESUMEN DE OPERACIÓN - ¿PAGAR CUOTA MSI?\n\nBanco: ${deuda.banco}\nCompra: ${deuda.producto || 'Compra'}\nCuota: ${numeroCuota} de ${deuda.meses}\nMonto a descontar: ${formatoDinero(deuda.cuotaMensual)}\nOrigen del dinero: ${cuentaEtiqueta}\n\n¿Deseas continuar con el registro?`;
     if (!confirm(msjConf)) return;
-    // --- FIN DE CONFIRMACIÓN ---
 
-    // Registrar el movimiento de egreso en caja
+    if (typeof window._egresarCuenta !== 'function') return alert("❌ No se pudo registrar el pago: funciones de cuenta no disponibles.");
 
-    // Registrar el movimiento de egreso en caja
-    const movs = StorageService.get("movimientosCaja", []);
-    movs.push({
-        id: Date.now(),
-        tipo: "egreso",
-        concepto: `Pago MSI — ${deuda.banco}: ${deuda.producto || 'Compra'} (cuota ${numeroCuota}/${deuda.meses})`,
+    const refPago = `MSI-${deuda.compraId || id}-C${numeroCuota}`;
+    const egresoOk = window._egresarCuenta({
         monto: deuda.cuotaMensual,
-        fecha: window.localISO(new Date()),
-        cuenta: deuda.banco,
-        etiquetaCuenta: `💳 ${deuda.banco} Crédito`,
-        medioPago: "tarjeta_msi",
-        referencia: `MSI-${deuda.compraId || id}-C${numeroCuota}`
-    });
-    StorageService.set("movimientosCaja", movs);
+        cuentaId,
+        etiqueta: cuentaEtiqueta,
+        concepto: `Pago MSI — ${deuda.banco}: ${deuda.producto || 'Compra'} (cuota ${numeroCuota}/${deuda.meses})`,
+        referencia: refPago,
+        idOperacion: refPago
+    }) !== false;
+    if (!egresoOk) return alert(`❌ No se pudo descontar de [${cuentaEtiqueta}]. Verifica que la cuenta exista.`);
+
+    // Restaurar la etiqueta medioPago='tarjeta_msi' (distinta de 'efectivo'/
+    // 'transferencia' que asigna _egresarCuenta según el tipo de cuenta) para
+    // que este pago siga siendo identificable como cuota MSI en reportes.
+    const movimientos = StorageService.get("movimientosCaja", []);
+    movimientos.forEach(m => { if (m.idOperacion === refPago) m.medioPago = "tarjeta_msi"; });
+    StorageService.set("movimientosCaja", movimientos);
 
     deuda.pagosRealizados = pagosActuales + 1;
+    // 🛡️ Guardamos el idOperacion del movimiento en el propio calendario para
+    // que deshacerPagoMSI pueda revertirlo con precisión (antes no quedaba
+    // ningún rastro y el egreso fantasma se quedaba para siempre).
+    if (Array.isArray(deuda.calendario) && deuda.calendario[numeroCuota - 1]) {
+        deuda.calendario[numeroCuota - 1].estado = 'Pagado';
+        deuda.calendario[numeroCuota - 1].montoAbonado = deuda.cuotaMensual;
+        deuda.calendario[numeroCuota - 1].movRef = refPago;
+    }
     cuentasMSI[idx] = deuda;
     StorageService.set("cuentasMSI", cuentasMSI);
 
+    document.querySelector('[data-modal="pago-individual-msi"]')?.remove();
     alert(`✅ Cuota ${numeroCuota} de ${deuda.meses} marcada como pagada.\nRestantes: ${deuda.meses - deuda.pagosRealizados}`);
     renderCuentasMSI();
     renderDashboardMSI();
-}
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+};
 
 // ── Deshacer el último pago marcado ──────────────────────────────────────────
+// 🛡️ REPARACIÓN: antes esto solo restaba el contador de cuotas y dejaba el
+// egreso original (si lo hubo) como movimiento fantasma permanente en
+// movimientosCaja — deshacer nunca revertía el dinero. Ahora, si el pago que
+// se deshace tiene un movRef (pagos hechos con la versión corregida de
+// marcarPagoMSI), se reingresa el dinero a la cuenta de origen real.
 function deshacerPagoMSI(id) {
-    if (!confirm('¿Deshacer el último pago marcado? Esto revertirá el contador de cuotas.')) return;
     const cuentasMSI = StorageService.get("cuentasMSI", []);
     const idx = cuentasMSI.findIndex(c => c.id === id);
     if (idx === -1) return;
@@ -700,6 +764,36 @@ function deshacerPagoMSI(id) {
     const deuda = cuentasMSI[idx];
     if ((deuda.pagosRealizados || 0) === 0) { alert('No hay pagos que deshacer.'); return; }
 
+    const numeroCuota = deuda.pagosRealizados;
+    const pagoRef = Array.isArray(deuda.calendario) ? deuda.calendario[numeroCuota - 1] : null;
+
+    if (!confirm('¿Deshacer el último pago marcado? Esto revertirá el contador de cuotas y, si el pago tiene una cuenta de origen registrada, regresará el dinero a esa cuenta.')) return;
+
+    if (pagoRef?.movRef && typeof window._ingresarCuenta === 'function') {
+        const movimientos = StorageService.get("movimientosCaja", []);
+        const movOriginal = movimientos.find(m => m.idOperacion === pagoRef.movRef);
+        if (movOriginal) {
+            window._ingresarCuenta({
+                monto: movOriginal.monto,
+                cuentaId: movOriginal.cuenta,
+                etiqueta: movOriginal.etiquetaCuenta,
+                concepto: `Reversión pago MSI — ${deuda.banco}: ${deuda.producto || 'Compra'} (cuota ${numeroCuota}/${deuda.meses})`,
+                referencia: pagoRef.movRef,
+                idOperacion: `${pagoRef.movRef}-REV`
+            });
+        }
+        pagoRef.movRef = null;
+    } else if (pagoRef?.estado === 'Pagado') {
+        alert('⚠️ Este pago se había registrado con una versión anterior de la función y no tiene cuenta de origen asociada: el contador se revierte, pero no hay un movimiento de caja que deshacer automáticamente. Revisa manualmente en Mis Cuentas si hace falta un ajuste.');
+    }
+
+    if (pagoRef) {
+        pagoRef.estado = 'Pendiente';
+        delete pagoRef.montoAbonado;
+    }
+
+    const cuota = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+    if (deuda.montoPagado !== undefined) deuda.montoPagado = Math.max(0, deuda.montoPagado - cuota);
     deuda.pagosRealizados = deuda.pagosRealizados - 1;
     cuentasMSI[idx] = deuda;
     StorageService.set("cuentasMSI", cuentasMSI);
@@ -707,6 +801,7 @@ function deshacerPagoMSI(id) {
     alert('↩ Último pago deshecho.');
     renderCuentasMSI();
     renderDashboardMSI();
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 }
 
 // ===== FLUJO DE CAJA =====
@@ -1781,45 +1876,55 @@ window.ejecutarTransferenciaCuentas = function() {
     const nombreDestino = nombreDestinoFull.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '');
 
     const idTransf = Date.now();
-    const movimientos = StorageService.get("movimientosCaja", []);
+    const refTransf = `TR-${idTransf}`;
 
-    // 1. Egreso (Sale de la cuenta origen)
-    movimientos.push({
-        id: idTransf + 1,
-        fecha: fechaIso,
-        monto: monto,
-        tipo: "egreso",
+    // 🛡️ REPARACIÓN: usar _egresarCuenta/_ingresarCuenta en vez de escribir
+    // el par de movimientos a mano. El push directo dejaba el rastro en
+    // movimientosCaja pero nunca actualizaba cuentasEfectivo/cuentas-bancarias,
+    // descuadrando el saldo cacheado de origen Y destino hasta un recálculo
+    // manual. Si falla el egreso de origen, se aborta sin tocar nada; si el
+    // egreso sí aplicó pero el ingreso a destino falla (cuenta inexistente),
+    // se revierte el egreso para no dejar dinero "perdido".
+    if (typeof window._egresarCuenta !== 'function' || typeof window._ingresarCuenta !== 'function') {
+        return alert("❌ No se pudo registrar la transferencia: funciones de cuenta no disponibles.");
+    }
+
+    const egresoOk = window._egresarCuenta({
+        monto, cuentaId: origen, etiqueta: nombreOrigenFull,
         concepto: `Transferencia a: ${nombreDestino} (${motivo})`,
-        referencia: `TR-${idTransf}`,
-        cuenta: origen,
-        cuentaOrigen: origen,
-        cuentaDestino: destino,
-        cuentaOrigenNombre: nombreOrigenFull,
-        cuentaDestinoNombre: nombreDestinoFull,
-        tipoMovimiento: "transferencia_interna",
-        medioPago: "transferencia",
-        etiquetaCuenta: nombreOrigenFull
-    });
+        referencia: refTransf, fecha: fechaIso, idOperacion: refTransf
+    }) !== false;
+    if (!egresoOk) return alert(`❌ No se pudo egresar de [${nombreOrigenFull}]. Transferencia cancelada.`);
 
-    // 2. Ingreso (Entra a la cuenta destino)
-    movimientos.push({
-        id: idTransf + 2,
-        fecha: fechaIso,
-        monto: monto,
-        tipo: "ingreso",
+    const ingresoOk = window._ingresarCuenta({
+        monto, cuentaId: destino, etiqueta: nombreDestinoFull,
         concepto: `Transferencia de: ${nombreOrigen} (${motivo})`,
-        referencia: `TR-${idTransf}`,
-        cuenta: destino,
-        cuentaOrigen: origen,
-        cuentaDestino: destino,
-        cuentaOrigenNombre: nombreOrigenFull,
-        cuentaDestinoNombre: nombreDestinoFull,
-        tipoMovimiento: "transferencia_interna",
-        medioPago: "transferencia",
-        etiquetaCuenta: nombreDestinoFull
-    });
+        referencia: refTransf, fecha: fechaIso, idOperacion: refTransf
+    }) !== false;
+    if (!ingresoOk) {
+        window._ingresarCuenta({
+            monto, cuentaId: origen, etiqueta: nombreOrigenFull,
+            concepto: `Reversión transferencia fallida (${refTransf}) — no existía la cuenta destino`,
+            referencia: refTransf, fecha: fechaIso, idOperacion: `${refTransf}-REV`
+        });
+        return alert(`❌ No se pudo ingresar a [${nombreDestinoFull}]. Se revirtió el egreso de origen.`);
+    }
 
+    // Enriquecer los dos movimientos recién creados con los metadatos de
+    // transferencia interna (cuentaOrigen/cuentaDestino/tipoMovimiento) que usa
+    // el resto del sistema (corte de caja, conciliación) para clasificarlos.
+    const movimientos = StorageService.get("movimientosCaja", []);
+    movimientos.forEach(m => {
+        if (m.idOperacion === refTransf) {
+            m.cuentaOrigen = origen;
+            m.cuentaDestino = destino;
+            m.cuentaOrigenNombre = nombreOrigenFull;
+            m.cuentaDestinoNombre = nombreDestinoFull;
+            m.tipoMovimiento = "transferencia_interna";
+        }
+    });
     StorageService.set("movimientosCaja", movimientos);
+
     document.getElementById("modalTransferenciaCuentas").remove();
     alert(`✅ Transferencia de $${monto.toFixed(2)} registrada con éxito.`);
     
@@ -1948,22 +2053,32 @@ window.guardarAjusteAuditoria = function() {
     const fechaBase = new Date(fechaStr + 'T12:00:00');
     const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
     
-    const movimientos = StorageService.get("movimientosCaja", []);
     const idAjuste = Date.now();
+    const refAjuste = `AUD-${idAjuste}`;
 
-    movimientos.push({
-        id: idAjuste,
-        fecha: fechaIso,
-        monto: monto,
-        tipo: tipo,
+    // 🛡️ REPARACIÓN: usar _egresarCuenta/_ingresarCuenta en vez de escribir el
+    // movimiento a mano. El push directo dejaba el ajuste en movimientosCaja
+    // pero nunca actualizaba cuentasEfectivo/cuentas-bancarias, descuadrando el
+    // saldo cacheado de la cuenta ajustada hasta un recálculo manual — algo
+    // especialmente delicado tratándose de un ajuste que existe justamente
+    // para cuadrar saldos.
+    const fnMovimiento = tipo === 'ingreso' ? window._ingresarCuenta : window._egresarCuenta;
+    if (typeof fnMovimiento !== 'function') return alert("❌ No se pudo registrar el ajuste: funciones de cuenta no disponibles.");
+
+    const ajusteOk = fnMovimiento({
+        monto, cuentaId, etiqueta: cuentaNombre,
         concepto: `⚖️ AJUSTE AUDITORÍA: ${motivo}`,
-        referencia: `AUD-${idAjuste}`,
-        cuenta: cuentaId,
-        medioPago: "ajuste",
-        etiquetaCuenta: cuentaNombre
-    });
+        referencia: refAjuste, fecha: fechaIso, idOperacion: refAjuste
+    }) !== false;
+    if (!ajusteOk) return alert(`❌ No se pudo aplicar el ajuste a [${cuentaNombre}]. Verifica que la cuenta exista.`);
 
+    // Restaurar la etiqueta medioPago='ajuste' (distinta de 'efectivo'/'transferencia'
+    // que asigna _ingresarCuenta/_egresarCuenta según el tipo de cuenta) para que un
+    // ajuste de auditoría siga siendo identificable como tal en reportes futuros.
+    const movimientos = StorageService.get("movimientosCaja", []);
+    movimientos.forEach(m => { if (m.idOperacion === refAjuste) m.medioPago = "ajuste"; });
     StorageService.set("movimientosCaja", movimientos);
+
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'AJUSTE_SALDO_AUDITORIA',

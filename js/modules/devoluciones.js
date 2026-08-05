@@ -243,19 +243,39 @@ function procesarDevolucion(folio) {
 
 // ===== Ajuste de saldo y registro de reembolso en caja =====
     if (devolucion.monto > 0) {
-        const movs = StorageService.get('movimientosCaja', []);
-        movs.push({
-            id: Date.now() + 1,
-            folio: devolucion.folio,
-            tipo: "egreso",
-            concepto: `Reembolso devolución (${devolucion.folio}) — ${devolucion.productoNombre}`,
-            monto: devolucion.monto,
-            // 🛡️ REPARACIÓN: Usar hora local de México y la cuenta seleccionada
-            fecha: window.localISO(new Date()),
-            cuenta: cuentaReembolsoId, 
-            referencia: devolucion.folioVenta
-        });
-        StorageService.set('movimientosCaja', movs);
+        // 🛡️ REPARACIÓN: usar el mismo camino canónico que la cancelación de
+        // venta (_egresarCuenta) en vez de escribir el movimiento a mano. El
+        // push directo dejaba el egreso en movimientosCaja pero nunca tocaba
+        // cuentasEfectivo/cuentas-bancarias, descuadrando el saldo cacheado de
+        // la cuenta de reembolso hasta un recálculo manual.
+        let _egresoOkDevolucion = true;
+        if (typeof window._egresarCuenta === 'function') {
+            _egresoOkDevolucion = window._egresarCuenta({
+                monto: devolucion.monto,
+                cuentaId: cuentaReembolsoId,
+                etiqueta: cuentaNombre,
+                concepto: `Reembolso devolución (${devolucion.folio}) — ${devolucion.productoNombre}`,
+                referencia: devolucion.folioVenta,
+                fecha: window.localISO(new Date()),
+                idOperacion: devolucion.folio
+            }) !== false;
+        } else {
+            const movs = StorageService.get('movimientosCaja', []);
+            movs.push({
+                id: Date.now() + 1,
+                folio: devolucion.folio,
+                tipo: "egreso",
+                concepto: `Reembolso devolución (${devolucion.folio}) — ${devolucion.productoNombre}`,
+                monto: devolucion.monto,
+                fecha: window.localISO(new Date()),
+                cuenta: cuentaReembolsoId,
+                referencia: devolucion.folioVenta
+            });
+            StorageService.set('movimientosCaja', movs);
+        }
+        if (!_egresoOkDevolucion) {
+            alert('⚠️ La devolución se registró, pero el reembolso NO se pudo aplicar a la cuenta seleccionada (revisa que la cuenta exista). Verifica manualmente en Mis Cuentas.');
+        }
 
         // Si fue crédito, también reducir el saldo pendiente en CxC y cancelar Pagarés
         if (fueCredito) {

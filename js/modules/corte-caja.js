@@ -158,18 +158,31 @@
         const cajasRaw = StorageService.get('cuentasEfectivo', [
             { id: 'efectivo', nombre: 'Efectivo Principal', tipo: 'efectivo', saldo: 0 }
         ]);
-        const cajas = (Array.isArray(cajasRaw) && cajasRaw.length ? cajasRaw : [
+        const cajasBase = (Array.isArray(cajasRaw) && cajasRaw.length ? cajasRaw : [
             { id: 'efectivo', nombre: 'Efectivo Principal', tipo: 'efectivo', saldo: 0 }
-        ]).map((c, index) => ({
-            id: String(c.id || `caja_${index + 1}`),
-            nombre: c.nombre || `Caja ${index + 1}`,
-            tipo: 'efectivo',
-            saldoActual: Number(c.saldo || 0),
-            aliases: [c.id, c.nombre, index === 0 ? 'efectivo' : '', index === 0 ? 'caja' : ''].filter(Boolean)
-        }));
+        ]);
+
+        const movimientos = StorageService.get('movimientosCaja', []);
+
+        // El campo "saldo" guardado de cada caja de efectivo puede quedar
+        // desactualizado (p. ej. devoluciones, transferencias entre cuentas o
+        // ajustes de auditoría que no pasan por _ingresarCuenta/_egresarCuenta).
+        // Igual que con los bancos más abajo, la suma de movimientosCaja para
+        // esa caja (via el mismo resolvedor de identidad de cuenta que usa todo
+        // el sistema) es siempre la fuente confiable — las cajas nacen en 0 y
+        // solo se mueven por movimientos, así que no hace falta un "saldoBase".
+        const cajas = cajasBase.map((c, index) => {
+            const aliases = [c.id, c.nombre, index === 0 ? 'efectivo' : '', index === 0 ? 'caja' : ''].filter(Boolean);
+            return {
+                id: String(c.id || `caja_${index + 1}`),
+                nombre: c.nombre || `Caja ${index + 1}`,
+                tipo: 'efectivo',
+                saldoActual: sumarNetoMovimientos(movimientos, aliases),
+                aliases
+            };
+        });
 
         const bancarias = asegurarCuentasBancarias();
-        const movimientos = StorageService.get('movimientosCaja', []);
         const bancos = bancarias.map((c, index) => {
             const aliases = [c.id, c.banco, c.nombre].filter(Boolean);
             // El saldo recien calculado a partir de movimientosCaja (con la misma
