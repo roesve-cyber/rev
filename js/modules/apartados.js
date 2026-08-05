@@ -220,7 +220,7 @@ window.entregarMercanciaApartado = function(folio) {
                 return;
             }
             if (typeof window.registrarMovimiento === 'function') {
-                window.registrarMovimiento(prod.id, `Entrega de apartado liquidado - Folio ${folio}`, r.cantidad, "salida");
+                window.registrarMovimiento(prod.id, `Entrega de apartado liquidado - Folio ${folio}`, r.cantidad, "salida", { folioVenta: folio });
             }
             if (typeof window.marcarReservaConsumida === 'function') {
                 window.marcarReservaConsumida(r.id);

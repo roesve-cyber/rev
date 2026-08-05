@@ -3734,6 +3734,12 @@ function guardarCompraDirectaFinal() {
                 let p = productos[pidx];
                 if (art.costo > p.costo) {
                     let margenAplicar = 30;
+                    if (typeof categoriasData !== 'undefined' && Array.isArray(categoriasData)) {
+                        categoriasData.forEach(cat => {
+                            const sub = (cat.subcategorias || []).find(s => s.nombre === p.subcategoria);
+                            if (sub) margenAplicar = sub.margen;
+                        });
+                    }
                     const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(art.costo, margenAplicar);
                     avisoActualizacion += `\n- ${p.nombre}: Costo subió a ${dinero(art.costo)}.`;
                     p.costo = art.costo;
