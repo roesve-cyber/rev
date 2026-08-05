@@ -3,15 +3,49 @@
 (function() {
     const DENOMINACIONES = [1000, 500, 200, 100, 50, 20, 10, 5, 2, 1, 0.5];
 
-    // Cargar saldos iniciales manuales por cuenta desde localStorage
-    try {
-        const guardados = localStorage.getItem('saldosInicialesManualesCorte');
-        if (guardados) {
-            window._saldosInicialesManuales = JSON.parse(guardados);
+    // Saldos iniciales manuales/fijos por cuenta: ANTES vivian solo en localStorage
+    // (por eso no se veian igual en dos dispositivos distintos). Ahora se leen y
+    // guardan siempre a traves de StorageService, que es la unica capa con
+    // sincronizacion real a Firebase; asi el mismo valor aparece en cualquier
+    // dispositivo, igual que cortesCaja, movimientosCaja, etc. No se lee nada
+    // a nivel de archivo (StorageService puede no estar listo todavia al cargar
+    // el script): se consulta bajo demanda, cuando el modulo realmente se usa.
+    let _migracionSaldosInicialesIntentada = false;
+
+    // Migracion de un solo uso: si este dispositivo ya tenia saldos iniciales
+    // guardados con el metodo viejo (localStorage puro) y en StorageService/nube
+    // todavia no hay nada, se suben una vez para no perder lo que ya estaba
+    // fijado. Despues de esta migracion, StorageService manda siempre.
+    function migrarSaldosInicialesLegacySiHaceFalta(actualEnStorageService) {
+        if (_migracionSaldosInicialesIntentada) return null;
+        _migracionSaldosInicialesIntentada = true;
+        const yaHayDatosEnNube = actualEnStorageService && typeof actualEnStorageService === 'object' && Object.keys(actualEnStorageService).length > 0;
+        if (yaHayDatosEnNube) return null;
+        try {
+            const legacyRaw = localStorage.getItem('saldosInicialesManualesCorte');
+            if (!legacyRaw) return null;
+            const legacy = JSON.parse(legacyRaw);
+            if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy) || !Object.keys(legacy).length) return null;
+            console.warn('Corte de caja: migrando saldos iniciales de localStorage a StorageService (sincronizado).', legacy);
+            return legacy;
+        } catch (e) {
+            console.warn('No se pudo migrar saldos iniciales manuales heredados de localStorage:', e);
+            return null;
         }
-    } catch (e) {
-        console.warn('No se pudieron cargar saldos iniciales desde localStorage:', e);
-        window._saldosInicialesManuales = {};
+    }
+
+    function obtenerSaldosInicialesManualesCorte() {
+        const guardados = StorageService.get('saldosInicialesManualesCorte', {});
+        let obj = (guardados && typeof guardados === 'object' && !Array.isArray(guardados)) ? guardados : {};
+
+        const legacy = migrarSaldosInicialesLegacySiHaceFalta(obj);
+        if (legacy) {
+            obj = { ...legacy, ...obj };
+            StorageService.set('saldosInicialesManualesCorte', obj);
+        }
+
+        window._saldosInicialesManuales = obj; // compatibilidad: algunos lugares del archivo aun leen esta variable
+        return obj;
     }
 
     const dinero = (valor) => new Intl.NumberFormat('es-MX', {
@@ -296,13 +330,10 @@
 
     function persistirSaldoInicialManual(cuentaId, valor) {
         if (!cuentaId) return;
-        if (!window._saldosInicialesManuales) window._saldosInicialesManuales = {};
-        window._saldosInicialesManuales[cuentaId] = valor;
-        try {
-            localStorage.setItem('saldosInicialesManualesCorte', JSON.stringify(window._saldosInicialesManuales));
-        } catch (e) {
-            console.warn('No se pudo persistir el saldo inicial fijo en localStorage:', e);
-        }
+        const saldos = obtenerSaldosInicialesManualesCorte();
+        saldos[cuentaId] = valor;
+        window._saldosInicialesManuales = saldos;
+        StorageService.set('saldosInicialesManualesCorte', saldos);
     }
 
     // Saldo inicial FIJO: se hereda del ultimo corte guardado de esta cuenta y no se recalcula
@@ -329,7 +360,7 @@
         // 3) primera vez que se usa esa cuenta (nunca se corto ni se fijo a mano): se calcula UNA
         //    SOLA VEZ a partir de todo el historial de movimientos y se fija de inmediato, para que
         //    ningun movimiento futuro (venta, abono, correccion, etc.) lo vuelva a mover.
-        const saldosInicialesManuales = window._saldosInicialesManuales || {};
+        const saldosInicialesManuales = obtenerSaldosInicialesManualesCorte();
         if (cuentaObj.id in saldosInicialesManuales) {
             const valorManual = Number(saldosInicialesManuales[cuentaObj.id]);
             if (!Number.isNaN(valorManual)) return { valor: valorManual, origen: 'manual' };
@@ -416,7 +447,7 @@
         }
 
         // Obtener saldo inicial manual específico para esta cuenta (para mostrar "Manual" en la UI)
-        const saldosInicialesManuales = window._saldosInicialesManuales || {};
+        const saldosInicialesManuales = obtenerSaldosInicialesManualesCorte();
         const saldoInicialManualCuenta = (cuenta.id in saldosInicialesManuales) ? Number(saldosInicialesManuales[cuenta.id]) : null;
 
         const porCategoria = {};
@@ -693,7 +724,7 @@
         const seleccion = resumenSeleccionado(resumen);
 
         // Cargar saldo inicial manual guardado para esta cuenta específica
-        const saldosInicialesManuales = window._saldosInicialesManuales || {};
+        const saldosInicialesManuales = obtenerSaldosInicialesManualesCorte();
         const saldoInicialGuardado = saldosInicialesManuales[filtros.cuentaId] || '';
 
         const huerfanosHTML = (resumen.huerfanos && resumen.huerfanos.length > 0) ? `
@@ -847,25 +878,21 @@
         const input = document.getElementById('corteSaldoInicialManual');
         const cuentaId = document.getElementById('corteCuenta')?.value || obtenerUbicacionFijaCorte();
         if (!input || !cuentaId) return;
-        
+
         const valor = input.value !== '' ? Number(input.value) : null;
-        
-        if (!window._saldosInicialesManuales) {
-            window._saldosInicialesManuales = {};
-        }
-        
-        if (valor !== null) {
-            window._saldosInicialesManuales[cuentaId] = valor;
+        const saldos = obtenerSaldosInicialesManualesCorte();
+
+        if (valor !== null && !Number.isNaN(valor)) {
+            saldos[cuentaId] = valor;
         } else {
-            delete window._saldosInicialesManuales[cuentaId];
+            delete saldos[cuentaId];
         }
-        
-        // Guardar en localStorage para persistencia
-        try {
-            localStorage.setItem('saldosInicialesManualesCorte', JSON.stringify(window._saldosInicialesManuales));
-        } catch (e) {
-            console.warn('No se pudo guardar saldos iniciales en localStorage:', e);
-        }
+
+        // Se guarda a traves de StorageService (sincroniza a Firebase), no de
+        // localStorage: asi este saldo inicial se ve igual desde cualquier
+        // dispositivo, tal como el resto de la informacion del sistema.
+        window._saldosInicialesManuales = saldos;
+        StorageService.set('saldosInicialesManualesCorte', saldos);
     };
 
     window.recalcularSeleccionCorte = function() {
