@@ -647,12 +647,13 @@ function renderCuentasMSI() {
 // ── Marcar la siguiente cuota como pagada ─────────────────────────────────────
 // 🛡️ REPARACIÓN: esta función registraba el egreso contra el NOMBRE de la
 // tarjeta de crédito (deuda.banco) como si fuera una cuenta real, sin pedir
-// nunca de qué cuenta de efectivo/débito salía el dinero — a diferencia de
-// procesarPagoTarjetaGlobal (pago de corte mensual), que sí lo hace bien. Ese
-// egreso fantasma no descontaba ningún saldo real, pero sí se sumaba en los
-// totales globales de dashboard.js (que suma TODOS los movimientosCaja sin
-// distinguir cuenta). Ahora se pide la cuenta de origen igual que en el pago
-// global, y se usa _egresarCuenta para que sí se descuente de verdad.
+// nunca de qué cuenta de efectivo/débito salía el dinero. Ese egreso fantasma
+// no descontaba ningún saldo real, pero sí se sumaba en los totales globales
+// de dashboard.js (que suma TODOS los movimientosCaja sin distinguir cuenta).
+// Ahora se pide la cuenta de origen y se usa _egresarCuenta para que sí se
+// descuente de verdad — igual que procesarPagoTarjetaGlobal (pago de corte
+// mensual, más abajo), que tenía el defecto opuesto (silencioso: escribía el
+// movimiento igual aunque la cuenta no existiera) y ya también está reparado.
 function marcarPagoMSI(id, numeroCuota) {
     const cuentasMSI = StorageService.get("cuentasMSI", []);
     const idx = cuentasMSI.findIndex(c => c.id === id);
@@ -1252,6 +1253,12 @@ function abrirModalPagoTarjeta(banco) {
     cajas.forEach(c => opcionesCuenta += `<option value="${c.id}">${c.nombre}</option>`);
     tarjetasConfig.filter(t => t.tipo === "debito").forEach(t => opcionesCuenta += `<option value="${t.banco}">🏦 ${t.banco} Débito</option>`);
 
+    // ¿Hay un pago de corte reciente sin deshacer para este banco? Mostramos
+    // el botón de deshacer solo en ese caso, igual que el pago individual
+    // solo permite deshacer la última cuota marcada.
+    const logsPagoCorte = StorageService.get("pagosCorteTarjeta", []);
+    const hayPagoCortePorDeshacer = logsPagoCorte.some(l => l.banco === banco && !l.deshecho);
+
     const modalHTML = `
         <div data-modal="pago-tarjeta" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:7000; display:flex; justify-content:center; align-items:center;">
             <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:450px;">
@@ -1272,6 +1279,9 @@ function abrirModalPagoTarjeta(banco) {
                     <button onclick="procesarPagoTarjetaGlobal('${banco}')" style="flex:1; padding:14px; background:#8b5cf6; color:white; border:none; border-radius:6px; font-weight:bold;">✅ Pagar</button>
                     <button onclick="document.querySelector('[data-modal=&quot;pago-tarjeta&quot;]').remove()" style="flex:1; padding:14px; background:#e5e7eb; border:none; border-radius:6px;">✕ Cancelar</button>
                 </div>
+                ${hayPagoCortePorDeshacer ? `
+                <button onclick="deshacerUltimoPagoCorteTarjeta('${banco}')" style="width:100%; margin-top:10px; padding:10px; background:#f1f5f9; color:#b91c1c; border:1px solid #fecaca; border-radius:6px; font-weight:bold; cursor:pointer;">↩ Deshacer último pago de corte</button>
+                ` : ''}
             </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
@@ -1581,6 +1591,7 @@ function procesarPagoTarjetaGlobal(banco) {
 
                 todasLasCuotas.push({
                     deudaId: deuda.id,
+                    cuotaIndex: index,
                     pagoRef: pago,
                     cuotaOriginal: cuotaOriginal,
                     montoFaltante: pendienteCuota,
@@ -1597,9 +1608,22 @@ function procesarPagoTarjetaGlobal(banco) {
     // 3. APLICAR EL DINERO BARRÍENDO LAS CUOTAS MENSUALES
     // =========================================================================
     let dineroRestante = montoAbono;
+    // 🛡️ Cada cuota que se toca en este reparto queda registrada aquí con su
+    // estado ANTERIOR (deudaId + cuotaIndex + estado/montoAbonado de antes),
+    // para que deshacerUltimoPagoCorteTarjeta pueda restaurar exactamente lo
+    // que había — no solo "Pendiente" como en el pago individual, porque aquí
+    // una cuota pudo venir de 'Parcial' de un abono anterior y no de cero.
+    const cuotasTocadas = [];
 
     for (let item of todasLasCuotas) {
         if (dineroRestante <= 0.01) break; // Si ya no hay dinero, salimos del ciclo
+
+        cuotasTocadas.push({
+            deudaId: item.deudaId,
+            cuotaIndex: item.cuotaIndex,
+            estadoAnterior: item.pagoRef.estado,
+            montoAbonadoAnterior: item.pagoRef.montoAbonado !== undefined ? item.pagoRef.montoAbonado : null
+        });
 
         if (dineroRestante >= item.montoFaltante - 0.05) { 
             // El dinero alcanza para liquidar esta cuota del mes
@@ -1636,35 +1660,56 @@ function procesarPagoTarjetaGlobal(banco) {
         deuda.pagosRealizados = cuotasLiquidadas;
     });
 
+    // =========================================================================
+    // 5. MOVER EL DINERO PRIMERO — con _egresarCuenta, ANTES de persistir el
+    // reparto de cuotas. Así, si la cuenta no existe, no se guarda ningún
+    // cambio en cuentasMSI y el usuario puede reintentar sin quedar con
+    // cuotas marcadas como pagadas sin dinero movido.
+    // =========================================================================
+    // 🛡️ REPARACIÓN: antes esto escribía el movimiento a mano en
+    // movimientosCaja (siempre, sin validar la cuenta) y solo ajustaba el
+    // saldo real si un find() encontraba la cuenta — si no la encontraba, el
+    // pago quedaba registrado como si hubiera salido dinero, pero el saldo
+    // real nunca se descontaba, y no había ningún alert ni registro de
+    // auditoría. Ahora se usa _egresarCuenta (misma función que ya usan
+    // transferencia, ajuste de auditoría y MSI individual): valida la cuenta
+    // ANTES de escribir nada y aborta con alert si no existe.
+    if (typeof window._egresarCuenta !== 'function') {
+        return alert("❌ No se pudo registrar el pago: funciones de cuenta no disponibles.");
+    }
+
+    const fechaAbonoIso = window.localISO ? window.localISO(fechaAbonoStr + 'T12:00:00') : new Date(fechaAbonoStr + 'T12:00:00').toISOString();
+    const refPagoTC = `PAGO-TC-${banco}-${Date.now()}`;
+    const egresoOk = window._egresarCuenta({
+        monto: montoAbono,
+        cuentaId: cuentaOrigen,
+        etiqueta: cuentaOrigenEtiqueta,
+        concepto: `Pago a Corte Mensual Tarjeta de Crédito — ${banco}`,
+        referencia: refPagoTC,
+        fecha: fechaAbonoIso,
+        idOperacion: refPagoTC
+    }) !== false;
+    if (!egresoOk) return alert(`❌ No se pudo descontar de [${cuentaOrigenEtiqueta}]. Verifica que la cuenta exista.\n\nEl pago NO se aplicó: ninguna cuota quedó marcada como pagada.`);
+
+    // El dinero ya se movió con éxito — ahora sí persistimos el reparto de
+    // cuotas calculado en los pasos 1-4.
     StorageService.set("cuentasMSI", cuentasMSI);
 
-    // =========================================================================
-    // 5. REGISTROS DE CAJA Y FÍSICOS (Intactos) - CON FECHA AUDITORÍA
-    // =========================================================================
-    const fechaAbonoIso = window.localISO ? window.localISO(fechaAbonoStr + 'T12:00:00') : new Date(fechaAbonoStr + 'T12:00:00').toISOString();
-    const movs = StorageService.get("movimientosCaja", []);
-    movs.push({
-        id: Date.now(),
-        tipo: "egreso",
-        concepto: `Pago a Corte Mensual Tarjeta de Crédito — ${banco}`,
+    // Guardamos el log de reversión: qué cuotas se tocaron y cómo estaban
+    // antes, para que deshacerUltimoPagoCorteTarjeta pueda restaurarlas
+    // exactamente y revertir el dinero con _ingresarCuenta.
+    const logsPagosCorte = StorageService.get("pagosCorteTarjeta", []);
+    logsPagosCorte.push({
+        ref: refPagoTC,
+        banco,
+        cuentaOrigen,
+        cuentaOrigenEtiqueta,
         monto: montoAbono,
         fecha: fechaAbonoIso,
-        cuenta: cuentaOrigen,
-        etiquetaCuenta: cuentaOrigenEtiqueta,
-        medioPago: cuentaOrigen === "efectivo" || cuentaOrigen.startsWith("caja_") ? "efectivo" : "transferencia",
-        referencia: `PAGO-TC-${banco}`
+        deshecho: false,
+        cuotas: cuotasTocadas
     });
-    StorageService.set("movimientosCaja", movs);
-
-    if (cuentaOrigen === "efectivo" || cuentaOrigen.startsWith("caja_")) {
-        let cef = StorageService.get("cuentasEfectivo", []);
-        const c = cef.find(x => x.id === cuentaOrigen);
-        if (c) { c.saldo = (Number(c.saldo) || 0) - montoAbono; StorageService.set("cuentasEfectivo", cef); }
-    } else {
-        let cban = StorageService.get("cuentas-bancarias", []);
-        const c = cban.find(x => x.banco === cuentaOrigen || x.id === cuentaOrigen);
-        if (c) { c.saldo = (Number(c.saldo) || 0) - montoAbono; StorageService.set("cuentas-bancarias", cban); }
-    }
+    StorageService.set("pagosCorteTarjeta", logsPagosCorte);
 
     document.querySelector('[data-modal="pago-tarjeta"]').remove();
     alert(`✅ Pago de $${montoAbono.toFixed(2)} a la tarjeta ${banco} distribuido correctamente en el corte mensual.`);
@@ -1674,6 +1719,74 @@ function procesarPagoTarjetaGlobal(banco) {
     if (typeof renderDashboardMSI === 'function') renderDashboardMSI();
     if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 }
+
+// ── Deshacer el último pago de corte mensual de una tarjeta ─────────────────
+// Revierte SOLO el pago de corte más reciente (no deshecho todavía) de ese
+// banco: regresa el dinero a la cuenta de origen con _ingresarCuenta y
+// restaura cada cuota tocada a su estado/montoAbonado exacto de antes
+// (guardado en pagosCorteTarjeta al momento del pago) — no simplemente las
+// deja en 'Pendiente', porque una cuota pudo venir de un abono parcial
+// anterior.
+function deshacerUltimoPagoCorteTarjeta(banco) {
+    const logs = StorageService.get("pagosCorteTarjeta", []);
+    // Buscamos de atrás hacia adelante el log no deshecho más reciente de este banco
+    let log = null;
+    for (let i = logs.length - 1; i >= 0; i--) {
+        if (logs[i].banco === banco && !logs[i].deshecho) { log = logs[i]; break; }
+    }
+    if (!log) return alert("No hay ningún pago de corte reciente que deshacer para esta tarjeta.");
+
+    const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
+    if (!confirm(`↩ ¿Deshacer el pago de corte de ${formatoDinero(log.monto)} a ${banco} (${log.cuentaOrigenEtiqueta})?\n\nEsto regresará el dinero a la cuenta de origen y revertirá el estado de las ${log.cuotas.length} cuota(s) que tocó este pago.`)) return;
+
+    if (typeof window._ingresarCuenta !== 'function') return alert("❌ No se pudo deshacer: funciones de cuenta no disponibles.");
+
+    const ingresoOk = window._ingresarCuenta({
+        monto: log.monto,
+        cuentaId: log.cuentaOrigen,
+        etiqueta: log.cuentaOrigenEtiqueta,
+        concepto: `Reversión pago corte tarjeta — ${banco}`,
+        referencia: log.ref,
+        idOperacion: `${log.ref}-REV`
+    }) !== false;
+    if (!ingresoOk) return alert(`❌ No se pudo regresar el dinero a [${log.cuentaOrigenEtiqueta}]. Verifica que la cuenta siga existiendo. No se revirtió ninguna cuota.`);
+
+    // Restauramos cada cuota tocada a su estado exacto de antes del pago.
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    log.cuotas.forEach(c => {
+        const deuda = cuentasMSI.find(d => d.id === c.deudaId);
+        if (!deuda || !Array.isArray(deuda.calendario) || !deuda.calendario[c.cuotaIndex]) return;
+        const pagoRef = deuda.calendario[c.cuotaIndex];
+        pagoRef.estado = c.estadoAnterior;
+        if (c.montoAbonadoAnterior === null) delete pagoRef.montoAbonado;
+        else pagoRef.montoAbonado = c.montoAbonadoAnterior;
+    });
+
+    // Recalculamos montoPagado/pagosRealizados de cada deuda afectada, igual
+    // que hace el paso 4 de procesarPagoTarjetaGlobal.
+    const deudaIdsAfectadas = new Set(log.cuotas.map(c => c.deudaId));
+    cuentasMSI.filter(d => deudaIdsAfectadas.has(d.id)).forEach(deuda => {
+        let totalPagadoAqui = 0, cuotasLiquidadas = 0;
+        const cuota = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+        (deuda.calendario || []).forEach(pago => {
+            if (pago.estado === 'Pagado') { totalPagadoAqui += cuota; cuotasLiquidadas++; }
+            else if (pago.estado === 'Parcial') { totalPagadoAqui += parseFloat(pago.montoAbonado || 0); }
+        });
+        deuda.montoPagado = totalPagadoAqui;
+        deuda.pagosRealizados = cuotasLiquidadas;
+    });
+    StorageService.set("cuentasMSI", cuentasMSI);
+
+    log.deshecho = true;
+    StorageService.set("pagosCorteTarjeta", logs);
+
+    alert("↩ Pago de corte deshecho. El dinero regresó a la cuenta de origen y las cuotas volvieron a su estado anterior.");
+    document.querySelector('[data-modal="pago-tarjeta"]')?.remove();
+    if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    if (typeof renderDashboardMSI === 'function') renderDashboardMSI();
+    if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+}
+
 // =====================================================================
 // ⚙️ GESTIÓN DE BANCOS Y CAJAS (REVISADO LÍNEA POR LÍNEA)
 // =====================================================================
@@ -2111,3 +2224,4 @@ window.recalcularSaldosGuardadosDesdeMovimientos = recalcularSaldosGuardadosDesd
 window.renderDashboardMSI = renderDashboardMSI;
 window.abrirModalPagoTarjeta = abrirModalPagoTarjeta;
 window.procesarPagoTarjetaGlobal = procesarPagoTarjetaGlobal;
+window.deshacerUltimoPagoCorteTarjeta = deshacerUltimoPagoCorteTarjeta;
