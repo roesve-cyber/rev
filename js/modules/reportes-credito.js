@@ -424,12 +424,14 @@ window.renderARCTablaExcel = function() {
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
     // Estado de filtros guardados
-    window._arcExSort = window._arcExSort || 'riesgo';
+    // Por defecto: agrupado por cliente, orden de tiempo inverso (nuevo a
+    // antiguo) y escalera de cobros con el abono más reciente arriba.
+    window._arcExSort = window._arcExSort || 'ultimoPago';
     window._arcExSortDir = window._arcExSortDir || 'desc';
-    window._arcExDateSort = window._arcExDateSort || 'asc';
+    window._arcExDateSort = window._arcExDateSort || 'desc';
     window._arcExGroup = window._arcExGroup || 'semana'; 
     window._arcExClienteFilter = window._arcExClienteFilter || '';
-    window._arcExAgruparCliente = window._arcExAgruparCliente === true;
+    window._arcExAgruparCliente = (window._arcExAgruparCliente === undefined) ? true : window._arcExAgruparCliente === true;
 
     // --- Helpers para Agrupación de Tiempo ---
     const getMonday = (fecha) => {
@@ -673,7 +675,7 @@ window.renderARCTablaExcel = function() {
             </td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
             <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${descTooltip}">${desc}</td>
-            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${window.CxcNotas ? window.CxcNotas.escapar(window.CxcNotas.tooltipTexto(c.folios || c.folio) || c.nombre) : c.nombre}">${nombreCliente}${window.CxcNotas && window.CxcNotas.observacionesDe(c.folios || c.folio).length ? ' 📝' : ''}</td>
+            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1); cursor:pointer;" title="${window.CxcNotas ? window.CxcNotas.escapar(window.CxcNotas.tooltipTexto(c.folios || c.folio) || c.nombre) : c.nombre}" onclick="CxcNotas.abrirModal('${String((c.folios ? c.folios[0] : c.folio) || '').replace(/'/g, "\\'")}', '${String(c.nombre || '').replace(/'/g, "\\'")}')">${nombreCliente} <span style="opacity:.85;">🗒️</span></td>
             <td class="ex-stky ex-col-5" style="background:#fef3c7; color:#92400e; text-align:center; font-weight:bold;">${fechaUltPagoStr}</td>
             <td class="ex-stky ex-col-6" style="background:#f8fafc; color:#0f172a; text-align:right;">$${importeReal.toLocaleString('en-US')}</td>
             <td class="ex-stky ex-col-7" style="background:#dcfce7; color:#166534; text-align:center; font-weight:bold;">${pctCubierto}%</td>
