@@ -1,0 +1,40 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Firebase Storage sí puede leer documentos de Firestore dentro de sus
+    // propias reglas (firestore.get). Reutilizamos el mismo perfil de
+    // usuarios/{uid} que ya usa firestore.rules, para no duplicar la fuente
+    // de verdad de quién es admin y quién está activo.
+    function perfilUsuario() {
+      return firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function activeUser() {
+      return signedIn() && perfilUsuario().activo != false;
+    }
+
+    function isAdmin() {
+      return activeUser() && perfilUsuario().rol in ['admin', 'Admin', 'ADMIN', 'administrador', 'Administrador'];
+    }
+
+    // Los respaldos son el dump completo del negocio (ventas, CxC, clientes,
+    // caja...). Solo un admin autenticado puede subir, listar, descargar o
+    // borrar respaldos — ni siquiera un vendedor activo normal.
+    match /backups/{archivo} {
+      allow read, write, delete: if isAdmin();
+    }
+
+    // Por defecto, todo lo demás queda cerrado. Si en el futuro guardas otros
+    // archivos en Storage (fotos de producto, etc.), agrega una regla
+    // específica para esa ruta en vez de abrir esto.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
