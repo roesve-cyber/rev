@@ -586,7 +586,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
                     <button onclick="exentarMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Exentar moratorio sugerido">Exentar</button>` : '';
 
         htmlTabla += `<tr>
-            <td><strong>${nombreCliente}</strong><br><small style="color:#718096;">${c.folio}</small></td>
+            <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong><br><small style="color:#718096;">${c.folio}</small></td>
             <td>${c.fechaVenta ? _cxcFechaVista(c.fechaVenta) : '-'}</td>
             <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
             <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}${textoMoratorio}</td>
@@ -598,6 +598,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
                     ${accionesMoratorio}
                     <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
+                    <button onclick="CxcNotas.abrirModal('${_cxcEscHTML(c.folio)}', '${String(nombreCliente).replace(/'/g, "\\'")}')" style="padding:6px 9px; background:#eab308; color:#422006; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Observación y notas de cobranza">🗒️ Notas</button>
                 </div>
             </td>
         </tr>`;

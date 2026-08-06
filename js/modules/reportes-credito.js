@@ -297,7 +297,7 @@ window.renderARC_v3 = function() {
                     <div style="display:flex; gap:8px; align-items:flex-start;">
                         <input type="checkbox" class="chk-cobrador" value="${indexFila}" style="width:16px; height:16px; cursor:pointer; margin-top:2px;">
                         <div>
-                            <div style="font-weight:900;color:#0f172a;font-size:14px;">${c.nombre || 'Sin nombre'}</div>
+                            <div style="font-weight:900;color:#0f172a;font-size:14px;">${c.nombre || 'Sin nombre'}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</div>
                             <div style="font-size:11px;color:#64748b;">${c.folio}</div>
                         </div>
                     </div>
@@ -673,7 +673,7 @@ window.renderARCTablaExcel = function() {
             </td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
             <td class="ex-stky ex-col-3" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${descTooltip}">${desc}</td>
-            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${c.nombre}">${nombreCliente}</td>
+            <td class="ex-stky ex-col-4" style="background:${bgStatus}; color:${colorText}; border-right:1px solid rgba(0,0,0,0.1);" title="${window.CxcNotas ? window.CxcNotas.escapar(window.CxcNotas.tooltipTexto(c.folios || c.folio) || c.nombre) : c.nombre}">${nombreCliente}${window.CxcNotas && window.CxcNotas.observacionesDe(c.folios || c.folio).length ? ' 📝' : ''}</td>
             <td class="ex-stky ex-col-5" style="background:#fef3c7; color:#92400e; text-align:center; font-weight:bold;">${fechaUltPagoStr}</td>
             <td class="ex-stky ex-col-6" style="background:#f8fafc; color:#0f172a; text-align:right;">$${importeReal.toLocaleString('en-US')}</td>
             <td class="ex-stky ex-col-7" style="background:#dcfce7; color:#166534; text-align:center; font-weight:bold;">${pctCubierto}%</td>
@@ -1147,7 +1147,7 @@ window.renderComportamiento = function() {
             <td style="padding:10px 12px;min-width:160px; display:flex; gap:8px; align-items:center;">
                 <input type="checkbox" class="chk-cobrador" value="${i}" style="width:16px; height:16px; cursor:pointer; accent-color:#7c3aed;">
                 <div>
-                    <b style="font-size:13px;">${c.nombre || '—'}</b><br>
+                    <b style="font-size:13px;">${c.nombre || '—'}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.agrupado ? c.folios : c.folio) : ''}</b><br>
                     <small style="color:#64748b;">${c.agrupado ? `${c.cuentasGrupo.length} cuentas: ${c.folios.join(', ')}` : c.folio}</small>
                 </div>
             </td>
@@ -1485,7 +1485,7 @@ window.renderConcentracion = function() {
         return `<tr style="border-bottom:1px solid #f1f5f9;${i < 3 ? 'background:#fffbeb;' : ''}">
             <td style="padding:10px 12px;font-weight:bold;color:#64748b;text-align:center;">${i + 1}</td>
             <td style="padding:10px 12px;">
-                <b>${c.nombre || '—'}</b><br><small style="color:#64748b;">${c.folio}</small>
+                <b>${c.nombre || '—'}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</b><br><small style="color:#64748b;">${c.folio}</small>
             </td>
             <td style="padding:10px 12px;text-align:right;font-weight:900;color:#dc2626;">${_rc.fmt(c.saldoActual)}</td>
             <td style="padding:10px 12px;text-align:right;">

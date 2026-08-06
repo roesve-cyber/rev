@@ -1418,6 +1418,11 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
                     <strong>Suma total de pagos: ${dinero(plan.total)}</strong>
                 </p>
             </div>
+            <div style="margin-top:12px;">
+                <label style="display:block; font-size:12px; font-weight:bold; color:#1e3a5c; margin-bottom:4px;">📝 Observación de cartera (opcional)</label>
+                <textarea id="obsCarteraCreditoInput" placeholder="Ej. El cliente pagará el 10 de octubre y el resto la 2da semana de noviembre." oninput="window._estadoPago = window._estadoPago || {}; window._estadoPago.observacionCartera = this.value;" style="width:100%; min-height:55px; padding:8px; border:1px solid #bee3f8; border-radius:6px; box-sizing:border-box; font-size:13px; font-family:inherit;">${_escapeHtml(window._estadoPago?.observacionCartera || "")}</textarea>
+                <small style="color:#64748b;">Se mostrará en el estado de cuenta y en los reportes de cartera de este cliente.</small>
+            </div>
         `;
         
         _planElegidoPendiente = plan;
@@ -2332,7 +2337,11 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
         const saldoCreditoPagares = Number(pagaresNuevos.reduce((sum, p) => sum + Number(p.monto || 0), 0).toFixed(2));
         const planCreditoFinal = { ...planElegido, total: saldoCreditoPagares, pagos: totalPagos };
         let saldosPorMes = CalculatorService.calcularCreditoConPeriodicidad ? CalculatorService.calcularCreditoConPeriodicidad((totalMercanciaCredito - enganche), datosVentaP.periodicidad).map(p => ({ meses: p.meses, total: p.total })) : [];
-        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalMercanciaCredito, engancheRecibido: enganche, saldoActual: saldoCreditoPagares, saldoOriginal: saldoCreditoPagares, metodo: metodoPago, plan: planCreditoFinal, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalMercanciaCredito, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes, origenApartadoFolio: datosVentaP.origenApartadoFolio || null, engancheOrigenApartado: datosVentaP.origenApartadoFolio ? enganche : 0 });
+        const observacionCarteraInicial = String(datosVentaP.observacionCartera || window._estadoPago?.observacionCartera || "").trim();
+        cuentasPorCobrar.push({ folio: folioVenta, nombre: datosVentaP.cliente.nombre, clienteId: datosVentaP.cliente.id, direccion: datosVentaP.cliente.direccion || "", telefono: datosVentaP.cliente.telefono || "", fechaVenta: fechaVentaIso, totalContadoOriginal: totalMercanciaCredito, engancheRecibido: enganche, saldoActual: saldoCreditoPagares, saldoOriginal: saldoCreditoPagares, metodo: metodoPago, plan: planCreditoFinal, estado: "Pendiente", abonos: [], articulos: datosVentaP.articulos, totalMercancia: totalMercanciaCredito, periodicidad: datosVentaP.periodicidad, vendedorId: window._vendedorSeleccionado?.id || null, vendedorNombre: window._vendedorSeleccionado?.nombre || null, saldosPorMes, origenApartadoFolio: datosVentaP.origenApartadoFolio || null, engancheOrigenApartado: datosVentaP.origenApartadoFolio ? enganche : 0, observacionCartera: observacionCarteraInicial, observacionCarteraFecha: observacionCarteraInicial ? fechaVentaIso : null, observacionCarteraUsuario: observacionCarteraInicial ? (window.usuarioActivo?.nombre || window._usuarioActual?.nombre || "") : "" });
+        if (observacionCarteraInicial && typeof window.CxcNotas?.agregarComentario === "function") {
+            window.CxcNotas.agregarComentario(folioVenta, `Observación registrada al crear la venta a crédito: ${observacionCarteraInicial}`, { clienteId: datosVentaP.cliente.id });
+        }
         pagaresSistema.push(...pagaresNuevos);
         StorageService.set("cuentasPorCobrar", cuentasPorCobrar);
         StorageService.set("pagaresSistema", pagaresSistema);

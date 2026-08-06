@@ -391,8 +391,10 @@ function _eccFiltrarCuentasPorSaldo(cuentas, filtro) {
     return cuentas;
 }
 
-function _eccFilaFolio(c) {
+function _eccFilaFolio(c, clienteNombre = '') {
     const badge = _eccBadgeColores(c.estado);
+    const observacion = window.CxcNotas ? window.CxcNotas.obtenerObservacion(c.folio) : '';
+    const nombreClienteFila = String(clienteNombre || '').replace(/'/g, "\\'");
     return `
         <tr style="border-bottom:1px solid #e2e8f0; background:${c.saldo <= 0.01 ? '#f0fdf4' : 'white'};">
             <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="abrirDetalleVentaECC('${c.folio}'); return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer;">${_escCuenta(c.folio)}</a></td>
@@ -403,6 +405,9 @@ function _eccFilaFolio(c) {
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><strong>${c.abonos}</strong></td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${c.ultimoAbono}</td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${badge.bg}; color:${badge.color}; padding:6px 12px; border-radius:6px; display:inline-block; font-weight:bold; font-size:11px;">${c.estado}</span></td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">
+                <button onclick="CxcNotas.abrirModal('${c.folio}', '${nombreClienteFila}')" title="${observacion ? window.CxcNotas.escapar(observacion) : 'Agregar observación / ver historial de cobranza'}" style="padding:6px 10px; background:${observacion ? '#fef3c7' : '#e2e8f0'}; color:${observacion ? '#92400e' : '#475569'}; border:0; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; white-space:nowrap;">🗒️${observacion ? ' Nota' : ''}</button>
+            </td>
         </tr>
     `;
 }
@@ -411,8 +416,8 @@ function _eccConstruirBloqueTabla(estado, filtro) {
     const cuentasFiltradas = _eccFiltrarCuentasPorSaldo(estado.cuentas, filtro);
     const etiquetaFiltro = filtro === 'pendiente' ? 'con saldo pendiente' : filtro === 'saldada' ? 'saldadas' : 'totales';
     const filasHtml = cuentasFiltradas.length > 0
-        ? cuentasFiltradas.map(c => _eccFilaFolio(c)).join('')
-        : `<tr><td colspan="8" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
+        ? cuentasFiltradas.map(c => _eccFilaFolio(c, estado.clienteNombre)).join('')
+        : `<tr><td colspan="9" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
 
     return `
         <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio de Venta</h3>
@@ -429,6 +434,7 @@ function _eccConstruirBloqueTabla(estado, filtro) {
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Abonos</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Último Abono</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Estatus</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Cobranza</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -479,7 +485,18 @@ window.generarEstadoCuentaClienteConsolidado = function() {
     estado.cuentas.forEach(c => {
         abonosPorFolio[c.folio] = c;
     });
-    
+
+    // Observaciones generales de cartera (una por cuenta/folio) — siempre
+    // visibles arriba del estado de cuenta, sin necesidad de abrir nada.
+    const observacionesCliente = window.CxcNotas
+        ? window.CxcNotas.observacionesDe(estado.cuentas.map(c => c.folio))
+        : [];
+    const bloqueObservaciones = observacionesCliente.length ? `
+        <div style="margin-bottom:20px; padding:16px; background:#fef3c7; border:2px solid #f59e0b; border-radius:8px;">
+            <p style="margin:0 0 8px 0; font-size:12px; color:#92400e; font-weight:bold; text-transform:uppercase;">📝 Observaciones de Cartera</p>
+            ${observacionesCliente.map(o => `<p style="margin:4px 0; font-size:14px; color:#78350f;"><strong>${_escCuenta(o.folio)}:</strong> ${_escCuenta(o.texto)}</p>`).join('')}
+        </div>` : '';
+
     const html = `
     <div style="background:white; border-radius:12px; padding:30px; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
         
@@ -514,7 +531,9 @@ window.generarEstadoCuentaClienteConsolidado = function() {
                 <p style="margin:0; font-size:14px; color:#1e293b;">${_escCuenta(estado.clienteDireccion)}</p>
             </div>
         </div>
-        
+
+        ${bloqueObservaciones}
+
         <!-- MÉTRICAS CONSOLIDADAS -->
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:15px; margin-bottom:30px;">
             <div style="background:#eff6ff; border:2px solid #0ea5e9; border-radius:8px; padding:15px;">
