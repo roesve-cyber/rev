@@ -1022,6 +1022,76 @@ const StorageService = {
     },
     // -----------------------------------------------------------
 
+    // 🔒 Actualiza UN solo registro dentro de una tabla-arreglo-único en documento
+    // gigante (ventasPendientes, abonosPendientes) de forma atómica, con el mismo
+    // patrón de transacción que pushAtomo/removeAtomo de arriba.
+    //
+    // Por qué existe: aprobar/rechazar algo en la Bóveda de Autorizaciones subía el
+    // ARREGLO LOCAL COMPLETO con StorageService.set()/setInmediato(). Eso es seguro si
+    // solo hay un dispositivo tocando la cola, pero con multi-caja/multi-celular es una
+    // condición de carrera clásica: si mientras tu celular aprobaba algo, CUALQUIER otro
+    // dispositivo subía su propia copia local (aunque fuera para agregar una solicitud
+    // nueva con pushAtomo), esa subida podía llegar después y pisar tu aprobación entera,
+    // regresándola a "Pendiente" en la nube aunque la venta/abono real ya se hubiera
+    // aplicado -de ahí el "ya existe" al reintentar.
+    //
+    // actualizarAtomo() nunca sube la copia local completa: dentro de una transacción,
+    // lee el arreglo DESDE EL SERVIDOR, modifica solo el registro identificado por
+    // idValue (comparando contra idCuarentena o id, según la tabla) y escribe de vuelta.
+    // Si dos dispositivos resuelven registros distintos casi al mismo tiempo, Firestore
+    // serializa las dos transacciones y ninguna pisa el cambio de la otra.
+    async actualizarAtomo(key, idValue, cambios) {
+        // 1. UI local instantánea
+        let currentList = this.get(key, []);
+        if (!Array.isArray(currentList)) currentList = [];
+        const idxLocal = currentList.findIndex(i => String(i?.idCuarentena ?? i?.id ?? '') === String(idValue));
+        if (idxLocal === -1) return { encontrado: false, subioANube: false };
+        currentList[idxLocal] = { ...currentList[idxLocal], ...cambios };
+        await this._guardarLocalDirecto(key, currentList);
+
+        const tsAhora = Date.now();
+        this._cache[`_ts_${key}`] = tsAhora;
+        await localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
+
+        if (!(window._firebaseActivo && window._db)) return { encontrado: true, subioANube: false };
+
+        // Cancelamos cualquier debounce viejo de set() para esta clave: ya no aplica,
+        // vamos a escribir por transacción ahora mismo.
+        if (this._syncTimers[key]) {
+            clearTimeout(this._syncTimers[key]);
+            delete this._syncTimers[key];
+        }
+
+        const cambiosLimpios = this._limpiarParaFirestore(cambios, true);
+        const docRef = window._db.collection('posData').doc(key);
+        try {
+            await window._db.runTransaction(async (transaction) => {
+                const doc = await transaction.get(docRef);
+                let data = doc.exists ? (doc.data().data || []) : [];
+                const idx = data.findIndex(i => String(i?.idCuarentena ?? i?.id ?? '') === String(idValue));
+                if (idx === -1) {
+                    // El registro todavía no llegó al servidor (p. ej. otro dispositivo
+                    // sigue offline) — lo agregamos ya resuelto en vez de perder el cambio.
+                    data.push(this._limpiarParaFirestore({ ...currentList[idxLocal] }, true));
+                } else {
+                    data[idx] = { ...data[idx], ...cambiosLimpios };
+                }
+                if (!doc.exists) {
+                    transaction.set(docRef, { data, _updatedAt: tsAhora });
+                } else {
+                    transaction.update(docRef, { data, _updatedAt: tsAhora });
+                }
+            });
+            await this._marcarCambioRemoto(key, tsAhora);
+            console.log(`✅ actualizarAtomo: ${key}/${idValue} actualizado de forma atómica en Firebase`);
+            return { encontrado: true, subioANube: true };
+        } catch (e) {
+            console.warn(`⚠️ actualizarAtomo falló para ${key}/${idValue}, pero quedó guardado localmente:`, e);
+            this._notificarFalloSync(key, e);
+            return { encontrado: true, subioANube: false, error: e };
+        }
+    },
+
     // 🚀 DESCUENTO ATÓMICO DE STOCK EN VENTA (multi-caja)
     // Antes: ventas.js leía `productos` LOCAL, validaba disponibilidad y
     // escribía el nuevo stock con un StorageService.set() normal (debounce
