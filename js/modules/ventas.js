@@ -4611,12 +4611,12 @@ window.aprobarVentaCuarentena = async function(index) {
     const bloqueo = _authVentaBloqueadaPorEstado(v);
     if (bloqueo.bloqueada) {
         alert(`${bloqueo.motivo} Se retirara de la boveda para evitar duplicidad.`);
-        ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Rechazado', {
+        const resSyncBloqueo = await StorageService.actualizarAtomo("ventasPendientes", v.idCuarentena, {
+            estado: 'Rechazado', status: 'Rechazado', estatus: 'Rechazado',
             fechaResolucionIso: _ventaFechaAhoraIso(),
             fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
             motivoResolucion: 'Bloqueada por estado'
         });
-        const resSyncBloqueo = await StorageService.setInmediato("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
         if (resSyncBloqueo.subioANube === false) {
             alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
         }
@@ -4729,12 +4729,12 @@ window.aprobarVentaCuarentena = async function(index) {
     }
 
     // 4. Marcar como aprobada y conservar el registro en la bóveda
-    ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Aprobado', {
+    const resSyncAprobada = await StorageService.actualizarAtomo("ventasPendientes", v.idCuarentena, {
+        estado: 'Aprobado', status: 'Aprobado', estatus: 'Aprobado',
         fechaResolucionIso: _ventaFechaAhoraIso(),
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Autorizado por auditoría'
     });
-    const resSyncAprobada = await StorageService.setInmediato("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
     if (resSyncAprobada.subioANube === false) {
         alert("⚠️ La venta se autorizó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal, o otras cajas podrían seguir viéndola como pendiente.");
     }
@@ -4790,12 +4790,12 @@ window.rechazarVentaCuarentena = async function(index) {
     if (tieneSalidaOperativa && folio) {
         _cancelReingresarInventarioPorVenta(folio, 'Rechazo de venta provisional en Boveda');
     }
-    ventasP[index] = _marcarEstadoBoveda(ventasP[index], 'Rechazado', {
+    const resSyncRechazo = await StorageService.actualizarAtomo("ventasPendientes", v.idCuarentena, {
+        estado: 'Rechazado', status: 'Rechazado', estatus: 'Rechazado',
         fechaResolucionIso: _ventaFechaAhoraIso(),
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Rechazado por auditoría'
     });
-    const resSyncRechazo = await StorageService.setInmediato("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
     if (resSyncRechazo.subioANube === false) {
         alert("⚠️ Se rechazó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
     }
@@ -5924,12 +5924,12 @@ window.aprobarAbonoCuarentena = async function(index) {
     const bloqueo = _authAbonoBloqueadoPorEstado(a);
     if (bloqueo.bloqueado) {
         alert(`${bloqueo.motivo} Se retirara de la boveda para evitar duplicidad.`);
-        abonosP[index] = _marcarEstadoBoveda(abonosP[index], 'Rechazado', {
+        const resSyncBloqueoAbono = await StorageService.actualizarAtomo("abonosPendientes", a.idCuarentena || a.id, {
+            estado: 'Rechazado', status: 'Rechazado', estatus: 'Rechazado',
             fechaResolucionIso: _ventaFechaAhoraIso(),
             fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
             motivoResolucion: 'Bloqueado por estado'
         });
-        const resSyncBloqueoAbono = await StorageService.setInmediato("abonosPendientes", abonosP);
         if (resSyncBloqueoAbono.subioANube === false) {
             alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
         }
@@ -5951,12 +5951,12 @@ window.aprobarAbonoCuarentena = async function(index) {
     const aplicado = window.ejecutarAbonoAutorizadoReal(a);
     if (aplicado === false) return;
     
-    abonosP[index] = _marcarEstadoBoveda(abonosP[index], 'Aprobado', {
+    const resSyncAbonoAprobado = await StorageService.actualizarAtomo("abonosPendientes", a.idCuarentena || a.id, {
+        estado: 'Aprobado', status: 'Aprobado', estatus: 'Aprobado',
         fechaResolucionIso: _ventaFechaAhoraIso(),
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Autorizado por auditoría'
     });
-    const resSyncAbonoAprobado = await StorageService.setInmediato("abonosPendientes", abonosP);
     if (resSyncAbonoAprobado.subioANube === false) {
         alert("⚠️ El abono se autorizó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal, o otras cajas podrían seguir viéndolo como pendiente.");
     }
@@ -5986,12 +5986,12 @@ window.rechazarAbonoCuarentena = async function(index) {
     const abonosP = resAbono.abonosP;
     index = resAbono.index;
     if (!resAbono.abono) return;
-    abonosP[index] = _marcarEstadoBoveda(abonosP[index], 'Rechazado', {
+    const resSyncAbonoRechazo = await StorageService.actualizarAtomo("abonosPendientes", resAbono.abono.idCuarentena || resAbono.abono.id, {
+        estado: 'Rechazado', status: 'Rechazado', estatus: 'Rechazado',
         fechaResolucionIso: _ventaFechaAhoraIso(),
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Rechazado por auditoría'
     });
-    const resSyncAbonoRechazo = await StorageService.setInmediato("abonosPendientes", abonosP);
     if (resSyncAbonoRechazo.subioANube === false) {
         alert("⚠️ Se rechazó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
     }
