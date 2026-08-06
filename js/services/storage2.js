@@ -49,6 +49,7 @@ const StorageService = {
         'gastos',
         'gastosOperativos',
         'historialCancelaciones',
+        'historialCobranza',
         'historialCostos',
         'historialSolicitudesClientes',
         'movimientosCaja',
@@ -94,7 +95,12 @@ const StorageService = {
         cuentasPorCobrar: 'folio',
         bitacoraAuditoria: 'id',
         compras: 'id',
-        movimientosInventario: 'id'
+        movimientosInventario: 'id',
+        // Historial de cobranza: cada comentario es su propio documento
+        // (posData/historialCobranza/registros/{id}) porque es una bitácora que
+        // solo crece con el tiempo. Así nunca compite por espacio con el resto
+        // de la cuenta ni corre riesgo de tocar el límite de 1 MiB por documento.
+        historialCobranza: 'id'
     },
 
     _claveRegistro(tabla, item) {
