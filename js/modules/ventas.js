@@ -4616,7 +4616,10 @@ window.aprobarVentaCuarentena = async function(index) {
             fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
             motivoResolucion: 'Bloqueada por estado'
         });
-        StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+        const resSyncBloqueo = await StorageService.setInmediato("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+        if (resSyncBloqueo.subioANube === false) {
+            alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
+        }
         document.querySelector('[data-modal=auth-venta]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         return;
@@ -4731,7 +4734,10 @@ window.aprobarVentaCuarentena = async function(index) {
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Autorizado por auditoría'
     });
-    StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+    const resSyncAprobada = await StorageService.setInmediato("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+    if (resSyncAprobada.subioANube === false) {
+        alert("⚠️ La venta se autorizó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal, o otras cajas podrían seguir viéndola como pendiente.");
+    }
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'BOVEDA_VENTA_APROBADA',
@@ -4757,7 +4763,7 @@ window.aprobarVentaCuarentena = async function(index) {
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
 };
 
-window.rechazarVentaCuarentena = function(index) {
+window.rechazarVentaCuarentena = async function(index) {
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
@@ -4789,7 +4795,10 @@ window.rechazarVentaCuarentena = function(index) {
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Rechazado por auditoría'
     });
-    StorageService.set("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+    const resSyncRechazo = await StorageService.setInmediato("ventasPendientes", ventasP.map(_normalizarVentaPendienteFirestore));
+    if (resSyncRechazo.subioANube === false) {
+        alert("⚠️ Se rechazó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
+    }
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'BOVEDA_VENTA_RECHAZADA',
@@ -5906,7 +5915,7 @@ window.revisarAbonoPendiente = function(index) {
     document.body.insertAdjacentHTML('beforeend', html);
 };
 
-window.aprobarAbonoCuarentena = function(index) {
+window.aprobarAbonoCuarentena = async function(index) {
     const resAbono = _authResolverAbonoPendiente(index);
     const abonosP = resAbono.abonosP;
     index = resAbono.index;
@@ -5920,7 +5929,10 @@ window.aprobarAbonoCuarentena = function(index) {
             fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
             motivoResolucion: 'Bloqueado por estado'
         });
-        StorageService.set("abonosPendientes", abonosP);
+        const resSyncBloqueoAbono = await StorageService.setInmediato("abonosPendientes", abonosP);
+        if (resSyncBloqueoAbono.subioANube === false) {
+            alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
+        }
         document.querySelector('[data-modal=auth-abono]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         return;
@@ -5944,7 +5956,10 @@ window.aprobarAbonoCuarentena = function(index) {
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Autorizado por auditoría'
     });
-    StorageService.set("abonosPendientes", abonosP);
+    const resSyncAbonoAprobado = await StorageService.setInmediato("abonosPendientes", abonosP);
+    if (resSyncAbonoAprobado.subioANube === false) {
+        alert("⚠️ El abono se autorizó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal, o otras cajas podrían seguir viéndolo como pendiente.");
+    }
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'BOVEDA_ABONO_APROBADO',
@@ -5965,7 +5980,7 @@ window.aprobarAbonoCuarentena = function(index) {
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 };
 
-window.rechazarAbonoCuarentena = function(index) {
+window.rechazarAbonoCuarentena = async function(index) {
     if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
     const resAbono = _authResolverAbonoPendiente(index);
     const abonosP = resAbono.abonosP;
@@ -5976,7 +5991,10 @@ window.rechazarAbonoCuarentena = function(index) {
         fechaResolucion: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : null,
         motivoResolucion: 'Rechazado por auditoría'
     });
-    StorageService.set("abonosPendientes", abonosP);
+    const resSyncAbonoRechazo = await StorageService.setInmediato("abonosPendientes", abonosP);
+    if (resSyncAbonoRechazo.subioANube === false) {
+        alert("⚠️ Se rechazó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
+    }
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'BOVEDA_ABONO_RECHAZADO',
