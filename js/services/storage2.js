@@ -131,6 +131,15 @@ const StorageService = {
         if (key.startsWith('msal.')) return false;
         if (key.includes('msal')) return false;
         if (key.includes('firebase')) return false;
+        // 🛡️ REPARACIÓN: el SDK de Firestore guarda su propia coordinación entre
+        // pestañas (elección de pestaña líder, detección de pestañas zombie, etc.)
+        // directamente en localStorage con claves que empiezan "firestore_" (p.ej.
+        // "firestore_clients_firestore/[DEFAULT]/...", "firestore_zombie_...").
+        // El filtro de arriba solo buscaba "firebase" y esas claves dicen
+        // "firestore", así que se colaban y getTablasDinamicas() las trataba como
+        // tablas de negocio, intentando subirlas a posData/ (fallando con "Invalid
+        // document reference" por el "/" que traen dentro, o "Missing permissions").
+        if (key.startsWith('firestore_')) return false;
         if (key.includes('Auth')) return false;
         if (key.toLowerCase().includes('token')) return false;
 
