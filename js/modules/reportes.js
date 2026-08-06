@@ -725,7 +725,7 @@ window.renderReporteCompromisos = function() {
     for (let i = 0; i < 6; i++) {
         const d = new Date(hoy.getFullYear(), hoy.getMonth() + i, 1);
         etiquetasMeses.push(new Intl.DateTimeFormat('es-MX', { month: 'short', year: 'numeric' }).format(d).toUpperCase());
-        meses.push({ puntuales: 0, bajo: 0, medio: 0, alto: 0, cxp: 0, msi: 0 });
+        meses.push({ puntuales: 0, bajo: 0, medio: 0, alto: 0, cxp: 0, msi: 0, desgloseMsi: {}, desgloseCxp: {} });
     }
 
     let stats = {
@@ -808,6 +808,8 @@ window.renderReporteCompromisos = function() {
         const diffMeses = (d.getFullYear() - hoy.getFullYear()) * 12 + (d.getMonth() - hoy.getMonth());
         const idx = Math.max(0, Math.min(diffMeses, 5));
         meses[idx].cxp += Number(p.saldoPendiente || 0);
+        const etiquetaProveedor = p.proveedor || 'Proveedor';
+        meses[idx].desgloseCxp[etiquetaProveedor] = (meses[idx].desgloseCxp[etiquetaProveedor] || 0) + Number(p.saldoPendiente || 0);
     });
 
     msi.forEach(tarjeta => {
@@ -816,7 +818,11 @@ window.renderReporteCompromisos = function() {
             if (monto <= 0) return;
             const d = new Date(pago.fecha);
             const diffMeses = (d.getFullYear() - hoy.getFullYear()) * 12 + (d.getMonth() - hoy.getMonth());
-            if (diffMeses >= 0 && diffMeses < 6) meses[diffMeses].msi += monto;
+            if (diffMeses >= 0 && diffMeses < 6) {
+                meses[diffMeses].msi += monto;
+                const etiquetaTarjeta = tarjeta.banco || tarjeta.nombre || tarjeta.alias || 'Tarjeta';
+                meses[diffMeses].desgloseMsi[etiquetaTarjeta] = (meses[diffMeses].desgloseMsi[etiquetaTarjeta] || 0) + monto;
+            }
         });
     });
 
@@ -864,6 +870,18 @@ window.dibujarTablaCashFlow = function() {
         const s = stats[tier];
         const pct = carteraTotal > 0 ? ((s.saldo / carteraTotal) * 100).toFixed(1) : 0;
         return `${s.cuentas} cuentas detectadas.\nSaldo en este bloque: ${fmt(s.saldo)} (${pct}% de la cartera activa).\nPromedio de atraso: ${s.diasPromedio} días.\nComportamiento: ${s.label}.`;
+    };
+
+    const tooltipMsi = (mes) => {
+        const entradas = Object.entries(mes.desgloseMsi || {}).filter(([, v]) => Math.abs(v) > 0);
+        if (!entradas.length) return 'Sin cargos MSI en este mes.';
+        return entradas.map(([banco, v]) => `${banco}: ${fmt(v)}`).join('\n');
+    };
+
+    const tooltipCxp = (mes) => {
+        const entradas = Object.entries(mes.desgloseCxp || {}).filter(([, v]) => Math.abs(v) > 0);
+        if (!entradas.length) return 'Sin compromisos con proveedores en este mes.';
+        return entradas.map(([proveedor, v]) => `${proveedor}: ${fmt(v)}`).join('\n');
     };
 
     const generarFilaIngreso = (tier, nombre, color, bg, icon) => {
@@ -921,8 +939,8 @@ window.dibujarTablaCashFlow = function() {
 
     // Egresos
     html += `<tr><td colspan="8" style="padding:8px 12px; background:#fef2f2; font-weight:900; color:#be123c; font-size:11px; border-top:2px solid white;">(-) OBLIGACIONES DE PAGO</td></tr>`;
-    html += `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Proveedores CXP</td>${sumatorias.map(s => `<td style="padding:10px; text-align:right; color:#dc2626;">${fmt(s.cxp)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.cxp)}</td></tr>`;
-    html += `<tr style="border-bottom:2px solid #cbd5e1;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Tarjetas MSI</td>${sumatorias.map(s => `<td style="padding:10px; text-align:right; color:#dc2626;">${fmt(s.msi)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.msi)}</td></tr>`;
+    html += `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Proveedores CXP</td>${sumatorias.map((s, i) => `<td title="${tooltipCxp(meses[i])}" style="padding:10px; text-align:right; color:#dc2626; cursor:help;">${fmt(s.cxp)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.cxp)}</td></tr>`;
+    html += `<tr style="border-bottom:2px solid #cbd5e1;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Tarjetas MSI</td>${sumatorias.map((s, i) => `<td title="${tooltipMsi(meses[i])}" style="padding:10px; text-align:right; color:#dc2626; cursor:help;">${fmt(s.msi)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.msi)}</td></tr>`;
 
     // Flujo Libre Neto
     html += `<tfoot><tr style="background:#0f172a; color:white;">
