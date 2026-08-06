@@ -31,6 +31,14 @@ function _fechaCortaNotaCxc(iso) {
     return d.toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function _productosCuentaCxc(cuenta) {
+    const articulos = Array.isArray(cuenta?.articulos) ? cuenta.articulos : [];
+    if (!articulos.length) return 'Sin artículos registrados';
+    const nombres = articulos.map(a => a?.nombre).filter(Boolean);
+    if (!nombres.length) return 'Sin artículos registrados';
+    return nombres.length > 2 ? `${nombres.slice(0, 2).join(', ')} +${nombres.length - 2} más` : nombres.join(', ');
+}
+
 function _usuarioActualCxcNotas() {
     return (window.usuarioActivo && (window.usuarioActivo.nombre || window.usuarioActivo.usuario)) ||
         (window._usuarioActual && (window._usuarioActual.nombre || window._usuarioActual.usuario)) ||
@@ -116,6 +124,61 @@ window.CxcNotas = {
         return StorageService.get('historialCobranza', [])
             .filter(h => h.folio === folio)
             .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    },
+
+    // Abre notas para una cuenta o, si el cliente tiene varias cuentas
+    // agrupadas, primero muestra el selector para elegir cuál.
+    abrir(folioOFolios, clienteNombre = '') {
+        const lista = Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios];
+        if (lista.length > 1) this.abrirSelector(lista, clienteNombre);
+        else this.abrirModal(lista[0], clienteNombre);
+    },
+
+    // Variante para usarse con data-folios (JSON) / data-cliente en el HTML,
+    // así se evitan problemas de comillas al inyectar arreglos en onclick="".
+    abrirDesdeElemento(el) {
+        let folios = [];
+        try { folios = JSON.parse(el.getAttribute('data-folios') || '[]'); } catch (e) { folios = []; }
+        const cliente = el.getAttribute('data-cliente') || '';
+        this.abrir(folios, cliente);
+    },
+
+    // Selector de cuenta cuando un cliente tiene varias cuentas agrupadas en
+    // una sola fila (Matriz de Cobranza, Scorecard). Muestra folio + producto
+    // comprado de cada una para poder diferenciarlas antes de anotar.
+    abrirSelector(folios, clienteNombre = '') {
+        const lista = Array.isArray(folios) ? folios : [folios];
+        if (lista.length <= 1) {
+            this.abrirModal(lista[0], clienteNombre);
+            return;
+        }
+        document.querySelector('[data-modal="cxc-notas-selector"]')?.remove();
+        const cuentas = StorageService.get('cuentasPorCobrar', []);
+        const filas = lista.map(folio => {
+            const cuenta = cuentas.find(c => c.folio === folio);
+            const producto = _productosCuentaCxc(cuenta);
+            const tieneObs = !!String(cuenta?.observacionCartera || '').trim();
+            return `
+                <button onclick="document.querySelector('[data-modal=&quot;cxc-notas-selector&quot;]')?.remove();CxcNotas.abrirModal('${String(folio).replace(/'/g, "\\'")}', '${String(clienteNombre).replace(/'/g, "\\'")}')"
+                    style="display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;background:${tieneObs ? '#fef3c7' : '#f8fafc'};border:1px solid ${tieneObs ? '#f59e0b' : '#e2e8f0'};border-radius:8px;cursor:pointer;">
+                    <div style="font-weight:900;color:#0f172a;font-size:13px;">${_escNotaCxc(folio)} ${tieneObs ? '📝' : ''}</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">${_escNotaCxc(producto)}</div>
+                </button>`;
+        }).join('');
+
+        document.body.insertAdjacentHTML('beforeend', `
+            <div data-modal="cxc-notas-selector" style="position:fixed;inset:0;background:rgba(15,23,42,.78);z-index:10049;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+                <div style="width:100%;max-width:480px;background:white;border-radius:12px;padding:22px;">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+                        <div>
+                            <h3 style="margin:0;color:#0f172a;">🗒️ ¿Sobre cuál cuenta?</h3>
+                            <p style="margin:4px 0 0;color:#64748b;font-size:12px;">${_escNotaCxc(clienteNombre)} tiene ${lista.length} cuentas activas</p>
+                        </div>
+                        <button onclick="document.querySelector('[data-modal=&quot;cxc-notas-selector&quot;]')?.remove()" style="padding:8px 12px;border:0;border-radius:6px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
+                    </div>
+                    ${filas}
+                </div>
+            </div>`);
     },
 
     // ────────────────────────────────────────────────────────────
