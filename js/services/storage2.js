@@ -100,7 +100,13 @@ const StorageService = {
         // (posData/historialCobranza/registros/{id}) porque es una bitácora que
         // solo crece con el tiempo. Así nunca compite por espacio con el resto
         // de la cuenta ni corre riesgo de tocar el límite de 1 MiB por documento.
-        historialCobranza: 'id'
+        historialCobranza: 'id',
+        // Gastos y cuentas por pagar: igual que cuentasPorCobrar, son
+        // bitácoras transaccionales que jamás se "vacían" — se acumulan por
+        // años. Antes vivían como un solo arreglo gigante; con esto cada
+        // gasto o cada deuda a proveedor es su propio documento.
+        gastosOperativos: 'id',
+        cuentasPorPagar: 'id'
     },
 
     _claveRegistro(tabla, item) {
@@ -817,39 +823,8 @@ const StorageService = {
                     return;
                 }
 
-                const valorFirestore = this._limpiarParaFirestore(value);
-
                 try {
-                    const docRef = window._db.collection('posData').doc(key);
-
-                    // ─── BLINDAJE MULTI-CAJA PARA ARREGLOS CRÍTICOS ───
-                    if (key === 'abonosPendientes' || key === 'ventasPendientes') {
-                        // En lugar de sobreescribir todo, usamos transacciones o mezcla inteligente.
-                        // Para no romper tu lógica local de arreglos, le pedimos a Firebase 
-                        // que guarde el estado actual pero manejado como documento único controlado.
-                        // NOTA: Si quieres seguridad absoluta entre cajas, lo ideal es usar arrayUnion/arrayRemove
-                        // al momento del clic. Pero si se prefiere mantener el bloque set(), usamos un merge:
-                        
-                        docRef.set({
-                            data: valorFirestore,
-                            _updatedAt: ts
-                        }, { merge: true })
-                            .then(() => this._marcarCambioRemoto(key, ts))
-                            .catch(e => this._notificarFalloSync(key, e));
-                        
-                    } else {
-                        // Comportamiento normal para configuraciones o tablas de un solo autor
-                        docRef.set({
-                            data: valorFirestore,
-                            _updatedAt: ts
-                        })
-                            .then(() => this._marcarCambioRemoto(key, ts))
-                            .catch(e => {
-                            this._notificarFalloSync(key, e);
-                        });
-                    }
-                    // ──────────────────────────────────────────────────
-
+                    this._subirTablaAFirestore(key, value, ts);
                 } catch (e) {
                     console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
                 }
@@ -857,6 +832,102 @@ const StorageService = {
         }
 
         return dbPromise;
+    },
+
+    // Escritura real a Firestore para tablas de documento único (config, ventasPendientes,
+    // abonosPendientes, etc). Extraído del setTimeout de set() para poder reutilizarlo
+    // tanto en el flujo normal con debounce como en setInmediato() (sin debounce).
+    // NOTA: no se usa para _tablasRegistroIndividual (pagaresSistema, cortesCaja), esas
+    // siguen su propio camino vía _sincronizarTablaPorRegistro.
+    _subirTablaAFirestore(key, value, ts) {
+        const valorFirestore = this._limpiarParaFirestore(value);
+        const docRef = window._db.collection('posData').doc(key);
+
+        // ─── BLINDAJE MULTI-CAJA PARA ARREGLOS CRÍTICOS ───
+        if (key === 'abonosPendientes' || key === 'ventasPendientes') {
+            // En lugar de sobreescribir todo, usamos transacciones o mezcla inteligente.
+            // Para no romper tu lógica local de arreglos, le pedimos a Firebase
+            // que guarde el estado actual pero manejado como documento único controlado.
+            // NOTA: Si quieres seguridad absoluta entre cajas, lo ideal es usar arrayUnion/arrayRemove
+            // al momento del clic. Pero si se prefiere mantener el bloque set(), usamos un merge:
+            return docRef.set({
+                data: valorFirestore,
+                _updatedAt: ts
+            }, { merge: true })
+                .then(() => this._marcarCambioRemoto(key, ts))
+                .catch(e => { this._notificarFalloSync(key, e); throw e; });
+        }
+
+        // Comportamiento normal para configuraciones o tablas de un solo autor
+        return docRef.set({
+            data: valorFirestore,
+            _updatedAt: ts
+        })
+            .then(() => this._marcarCambioRemoto(key, ts))
+            .catch(e => { this._notificarFalloSync(key, e); throw e; });
+        // ──────────────────────────────────────────────────
+    },
+
+    // 🔒 Escritura SIN DEBOUNCE para puntos de resolución de la Bóveda de Autorizaciones
+    // (aprobar/rechazar venta o abono). A diferencia de set(), aquí SÍ esperamos a que
+    // Firestore confirme antes de devolver el control, para que en móvil (donde la pestaña
+    // puede quedar en segundo plano o cerrarse en cualquier momento) el estado "Aprobado"/
+    // "Rechazado" no se quede varado solo en el celular sin llegar a la nube.
+    // Devuelve { subioANube: true|false, error? }.
+    async setInmediato(key, value) {
+        value = this._ordenarCronologicoSiTieneFechas(key, value);
+        this._cache[key] = value;
+        this._actualizarVariableGlobal(key, value);
+
+        if (this._usandoLocalForage) {
+            await localforage.setItem(key, value).catch(err => console.error("Error guardando local:", err));
+        } else {
+            localStorage.setItem(key, JSON.stringify(value));
+        }
+
+        if (!(window._firebaseActivo && window._db && this._esTablaValida(key, value))) {
+            return { subioANube: false };
+        }
+
+        // Cancelamos cualquier debounce pendiente para esta clave: ya vamos a subir ahora mismo,
+        // y no queremos que un setTimeout viejo pise esta escritura después.
+        if (this._syncTimers[key]) {
+            clearTimeout(this._syncTimers[key]);
+            delete this._syncTimers[key];
+        }
+
+        const tsAhora = Date.now();
+        this._cache[`_ts_${key}`] = tsAhora;
+        localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
+
+        if (this._esTablaCriticaVacia(key, value)) {
+            console.warn(`Firebase protegido: no se sube ${key} vacia.`);
+            return { subioANube: false };
+        }
+
+        try {
+            // Igual que en el flujo normal de set(): las tablas configuradas como
+            // "registro individual" (cuentasPorCobrar, pagaresSistema, gastosOperativos,
+            // cuentasPorPagar, etc.) NUNCA deben subirse como un solo documento gigante
+            // vía _subirTablaAFirestore — eso reintroduciría el límite de 1 MiB por
+            // documento que ese modo existe para evitar. Si algún día se llama
+            // setInmediato() con una de esas tablas (hoy no ocurre, pero está listo por
+            // si se conecta a la Bóveda de Autorizaciones u otro flujo futuro), la
+            // enrutamos por _sincronizarTablaPorRegistro igual que el resto del sistema.
+            if (this._tablasRegistroIndividual[key] && Array.isArray(value)) {
+                const { errores } = await this._sincronizarTablaPorRegistro(key, value, tsAhora);
+                if (errores && errores.length) {
+                    return { subioANube: false, error: new Error(`Fallaron ${errores.length} registro(s) de "${key}"`) };
+                }
+                this._marcarCambioRemoto(key, tsAhora);
+                return { subioANube: true };
+            }
+
+            await this._subirTablaAFirestore(key, value, tsAhora);
+            return { subioANube: true };
+        } catch (e) {
+            return { subioANube: false, error: e };
+        }
     },
 
     remove(key) {
