@@ -13,7 +13,7 @@
 
     const STOPWORDS = new Set(['DE', 'CON', 'PARA', 'COLOR', 'MOD', 'MODELO', 'EL', 'LA', 'LOS', 'LAS', 'Y', 'PIEZAS', 'PZA', 'PZAS', 'GENERAL']);
 
-    window._radarComprasState = window._radarComprasState || { rangoDias: 30, busqueda: '' };
+    window._radarComprasState = window._radarComprasState || { rangoDias: 30, busqueda: '', mesesCobertura: 2 };
 
     function arr(key) {
         const val = StorageService.get(key, []);
@@ -104,8 +104,10 @@
 
         const rangoSel = document.getElementById('radarRangoDias');
         const buscSel = document.getElementById('radarBusqueda');
+        const coberturaSel = document.getElementById('radarMesesCobertura');
         if (rangoSel) window._radarComprasState.rangoDias = Number(rangoSel.value) || 30;
         if (buscSel) window._radarComprasState.busqueda = buscSel.value || '';
+        if (coberturaSel) window._radarComprasState.mesesCobertura = Number(coberturaSel.value) || 2;
         const rangoDias = window._radarComprasState.rangoDias;
         const busqueda = norm(window._radarComprasState.busqueda);
 
@@ -141,23 +143,33 @@
             });
         });
 
-        // --- 1. Reposición urgente: catalogados, con ventas en el rango, stock bajo ---
+        // --- 1. Reposición urgente: catalogados, con ventas en el rango, cobertura por debajo del objetivo ---
+        // Clave: NO se repone "lo vendido en la ventana completa" (eso sobre-compra en rangos largos),
+        // se convierte a una VELOCIDAD MENSUAL y se compra solo lo necesario para alcanzar
+        // "mesesCobertura" de inventario — así nunca se sugiere stock que tardaría varios meses en moverse.
+        const mesesCobertura = window._radarComprasState.mesesCobertura || 2;
+        const factorMes = 30 / rangoDias;
         const reposicion = [];
         Object.entries(ventaAgg).forEach(([nm, agg]) => {
             const p = prodByName[nm];
             if (!p) return;
             const stock = Number(p.stock) || 0;
-            if (stock > Math.max(1, Math.ceil(agg.qty * 0.3))) return; // stock razonable frente a lo vendido: no urge
+            const ventaMensual = agg.qty * factorMes;
+            if (ventaMensual <= 0) return;
+            const coberturaActual = stock / ventaMensual; // en meses
+            if (coberturaActual >= mesesCobertura) return; // ya tiene stock suficiente para el objetivo: no urge
+            const objetivoUnidades = ventaMensual * mesesCobertura;
+            const sugeridoComprar = Math.max(Math.round(objetivoUnidades - stock), 0);
+            if (sugeridoComprar <= 0) return;
             const ultimo = ultimoProveedorDe(p.id, historialCostos, compras);
             const costoRef = ultimo?.costo ?? p.costo ?? 0;
-            const sugeridoComprar = Math.max(agg.qty - stock, agg.qty > 0 ? 1 : 0);
             reposicion.push({
                 nombre: p.nombre, categoria: p.categoria, subcategoria: p.subcategoria,
-                vendidos: agg.qty, stock, costoRef, proveedor: ultimo?.proveedor || '',
+                vendidos: agg.qty, ventaMensual, stock, coberturaActual, costoRef, proveedor: ultimo?.proveedor || '',
                 sugeridoComprar, inversion: sugeridoComprar * costoRef
             });
         });
-        reposicion.sort((a, b) => b.vendidos - a.vendidos || a.stock - b.stock);
+        reposicion.sort((a, b) => a.coberturaActual - b.coberturaActual);
 
         // --- 2a. Requisiciones de compra pendientes (quiebres de stock ya detectados por el sistema) ---
         const requisicionesPendientes = requisiciones.filter(r => norm(r.estatus) === 'PENDIENTE');
@@ -219,6 +231,12 @@
                     <option value="60" ${rangoDias === 60 ? 'selected' : ''}>Últimos 60 días</option>
                     <option value="90" ${rangoDias === 90 ? 'selected' : ''}>Últimos 90 días</option>
                 </select>
+                <select id="radarMesesCobertura" onchange="renderRadarCompras()" title="Meses de inventario a mantener" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;">
+                    <option value="1" ${mesesCobertura === 1 ? 'selected' : ''}>Cobertura: 1 mes</option>
+                    <option value="1.5" ${mesesCobertura === 1.5 ? 'selected' : ''}>Cobertura: 1.5 meses</option>
+                    <option value="2" ${mesesCobertura === 2 ? 'selected' : ''}>Cobertura: 2 meses</option>
+                    <option value="3" ${mesesCobertura === 3 ? 'selected' : ''}>Cobertura: 3 meses</option>
+                </select>
                 <button onclick="renderRadarCompras()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Actualizar</button>
             </div>
         </div>
@@ -233,13 +251,14 @@
         <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:20px;overflow:hidden;">
             <div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;background:#fef2f2;">
                 <strong style="color:#0f172a;">🔴 Reposición urgente</strong>
-                <span style="color:#64748b;font-size:12px;"> — se está vendiendo y el stock ya no lo aguanta</span>
+                <span style="color:#64748b;font-size:12px;"> — cobertura actual por debajo de ${mesesCobertura} ${mesesCobertura == 1 ? 'mes' : 'meses'}. La cantidad a comprar es solo la necesaria para llegar a ese objetivo, no lo vendido en todo el rango.</span>
             </div>
             <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead><tr style="background:#f8fafc;text-align:left;">
                     <th style="padding:9px 12px;">Producto</th><th style="padding:9px 12px;">Categoría</th>
-                    <th style="padding:9px 12px;text-align:center;">Vendidos</th><th style="padding:9px 12px;text-align:center;">Stock</th>
+                    <th style="padding:9px 12px;text-align:center;">Venta/mes</th><th style="padding:9px 12px;text-align:center;">Stock</th>
+                    <th style="padding:9px 12px;text-align:center;">Cobertura actual</th>
                     <th style="padding:9px 12px;text-align:center;">Comprar</th><th style="padding:9px 12px;">Último proveedor</th>
                     <th style="padding:9px 12px;text-align:right;">Costo ref.</th><th style="padding:9px 12px;text-align:right;">Inversión</th>
                 </tr></thead>
@@ -248,13 +267,14 @@
                     <tr style="border-top:1px solid #f1f5f9;">
                         <td style="padding:9px 12px;font-weight:700;color:#0f172a;">${esc(r.nombre)}</td>
                         <td style="padding:9px 12px;color:#64748b;">${esc(r.categoria)}${r.subcategoria ? ' / ' + esc(r.subcategoria) : ''}</td>
-                        <td style="padding:9px 12px;text-align:center;font-weight:700;">${r.vendidos}</td>
+                        <td style="padding:9px 12px;text-align:center;">${r.ventaMensual.toFixed(1)}</td>
                         <td style="padding:9px 12px;text-align:center;">${badge(r.stock, r.stock === 0 ? '#fee2e2' : '#fef3c7', r.stock === 0 ? '#991b1b' : '#92400e')}</td>
+                        <td style="padding:9px 12px;text-align:center;">${r.coberturaActual.toFixed(1)} mes${r.coberturaActual.toFixed(1) == 1 ? '' : 'es'}</td>
                         <td style="padding:9px 12px;text-align:center;font-weight:900;color:#16a34a;">${r.sugeridoComprar}</td>
                         <td style="padding:9px 12px;">${esc(r.proveedor) || '<span style="color:#94a3b8;">Sin historial</span>'}</td>
                         <td style="padding:9px 12px;text-align:right;">${money(r.costoRef)}</td>
                         <td style="padding:9px 12px;text-align:right;font-weight:700;">${money(r.inversion)}</td>
-                    </tr>`).join('') : `<tr><td colspan="8" style="padding:20px;text-align:center;color:#94a3b8;">Sin quiebres de stock detectados en este rango.</td></tr>`}
+                    </tr>`).join('') : `<tr><td colspan="9" style="padding:20px;text-align:center;color:#94a3b8;">Sin quiebres de cobertura detectados en este rango.</td></tr>`}
                 </tbody>
             </table>
             </div>
