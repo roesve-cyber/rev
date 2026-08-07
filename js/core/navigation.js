@@ -12,6 +12,22 @@ function _navGrupoVista(vistaId) {
     return 'otro';
 }
 
+// Vistas a las que un vendedor puede llegar, sin importar por dónde llegue
+// (menú, hash de la URL escrito a mano, botón "atrás", etc). Debe reflejar
+// exactamente lo que hay dentro del submenú OPERACION (sub-ventas) en
+// index.html, más las vistas de flujo que no tienen botón propio.
+const _NAV_VISTAS_PERMITIDAS_VENDEDOR = new Set([
+    'inicio', 'tienda', 'carrito', 'seleccionarcliente',
+    'cotizaciones', 'listaprecios',
+    'apartados', 'entregas',
+    'cuentasxcobrar', 'estadoCuentaCliente', 'gestion-datos-cliente', 'reporte-abonos-enganches',
+    'reimprimir-venta', 'devoluciones', 'garantias'
+]);
+
+function _navPermitidoParaVendedor(vistaId) {
+    return _NAV_VISTAS_PERMITIDAS_VENDEDOR.has(vistaId);
+}
+
 function _navLimpiarFiltrosOperacion() {
     if (typeof window.resetFiltrosCatalogo === 'function') window.resetFiltrosCatalogo();
     [
@@ -41,6 +57,20 @@ window.navA = function(vistaId, isPopState = false) {
     };
     const redireccionRetirada = rutasRetiradas[vistaId] || null;
     if (redireccionRetirada) vistaId = redireccionRetirada.vista;
+
+    // CONTROL DE ACCESO REAL: hasta ahora el sidebar solo ocultaba botones,
+    // pero cualquier vista se podía alcanzar escribiendo el hash a mano o con
+    // el botón "atrás". Si la sesión activa es de vendedor, se bloquea aquí
+    // cualquier vista fuera de su lista permitida, sin importar cómo se haya
+    // invocado navA().
+    const _sesionNav = typeof getSesion === 'function' ? getSesion() : null;
+    if (_sesionNav?.rol === 'vendedor' && !_navPermitidoParaVendedor(vistaId)) {
+        console.warn('[nav] Acceso bloqueado a vista no autorizada para vendedor:', vistaId);
+        if (vistaId !== 'tienda') {
+            navA('tienda', isPopState);
+        }
+        return;
+    }
 
     const vistaAnterior = window._vistaActualSistema || '';
     const grupoAnterior = _navGrupoVista(vistaAnterior);
