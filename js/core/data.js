@@ -105,23 +105,5 @@ function migrarStorageCuentasPorCobrar() {
         console.warn("⚠️ Error en migración:", e.message);
     }
 }
-// Función puente para sincronizar con Firebase sin romper el modo local
-function sincronizarConNube(clave, datos) {
-    // Si Firebase está activo y NO estamos en una dirección local (localhost o archivo)
-    const esLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.protocol === "file:";
-    
-    if (window._firebaseActivo && window._db && !esLocal) {
-        window._db.collection('posData').doc(clave).set({
-            data: datos,
-            // 🛡️ REPARACIÓN: Timestamp de Firebase sincronizado con México
-            ultimaActualizacion: window.localISO(new Date())
-        })
-        .then(() => console.log(`☁️ Sincronizado en vivo: ${clave}`))
-        .catch(e => {
-            console.error(`❌ Error al sincronizar ${clave}:`, e);
-            if (window.StorageService?._notificarFalloSync) window.StorageService._notificarFalloSync(clave, e);
-        });
-    }
-}
 
 // 🌍 getFechaLocalMX y localISO viven en js/services/validator.js (cargado antes)
