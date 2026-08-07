@@ -93,6 +93,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
         if (vistaId === 'ordenescompra' && typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
         if (vistaId === 'requisiciones' && typeof renderRequisiciones === 'function') renderRequisiciones();
+        if (vistaId === 'radar-compras' && typeof renderRadarCompras === 'function') renderRadarCompras();
         if (vistaId === 'cuentasporpagar' && typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
         if (vistaId === 'consignaciones' && typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
         if (vistaId === 'compras' && typeof prepararVistaCompras === 'function') prepararVistaCompras();
