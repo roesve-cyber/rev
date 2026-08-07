@@ -82,6 +82,7 @@
                 <button onclick="navA('ordenescompra'); if(typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();">📋 Órdenes de Compra</button>
                 <button onclick="navA('recepcion')">🚚 Recepción</button>
                 <button onclick="navA('requisiciones'); renderRequisiciones();">📝 Requisiciones</button>
+                <button onclick="navA('radar-compras'); if(typeof renderRadarCompras === 'function') renderRadarCompras();" style="color:#dc2626; font-weight:bold;">📡 Radar de Reposición</button>
                 <button onclick="navA('proveedores')">👥 Mis Proveedores</button>
                 <button onclick="navA('cuentasporpagar'); if(typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();">💳 Cuentas por Pagar</button>
                 <button onclick="navA('consignaciones')" style="color:#fdfdfcfa; font-weight:bold;">📦 Gestor de Consignaciones</button>
@@ -662,6 +663,11 @@
  <div id="reporteComprasApp"></div>
  </div>
 
+    <!-- RADAR DE REPOSICIÓN -->
+    <div id="radar-compras" class="vista oculto">
+ <div id="radarComprasApp"></div>
+ </div>
+
     <div id="reporte-flujo" class="vista oculto"></div>
 
     <!-- REPORTE GLOBAL DE CLIENTE -->
@@ -1148,6 +1154,7 @@
 <script src="js/modules/bancos.js?v=13"></script>
 <script src="js/modules/reportes.js?v=21"></script>
 <script src="js/modules/reportes-plus.js?v=8"></script>
+<script src="js/modules/radar-compras.js?v=1"></script>
 <script src="js/modules/reportes-credito.js?v=6"></script>
 <script src="js/modules/dashboard.js?v=6"></script>
 <script src="js/modules/cotizaciones.js?v=6"></script>
