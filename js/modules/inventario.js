@@ -1804,17 +1804,6 @@ function confirmarEliminarProducto(id) {
  }
 }
 
-function actualizarStock(id, cant, concepto) {
- const idx = window.productos.findIndex(p => String(p.id) === String(id));
- if (idx !== -1) {
- window.productos[idx].stock = (window.productos[idx].stock || 0) + cant;
- registrarMovimiento(id, concepto, cant, "entrada");
- if (!StorageService.set("productos", window.productos)) {
- console.error("Error guardando productos");
- }
- }
-}
-
 function registrarMovimiento(productoId, concepto, cantidad, tipo, extra = {}) {
  const kardexActual = StorageService.get("movimientosInventario", []);
  const producto = (window.productos || []).find(p => String(p.id) === String(productoId)) || {};
@@ -2870,135 +2859,6 @@ window.volverDesdeVisorProducto = function() {
  if (destino === 'inventario' && typeof renderInventario === 'function') renderInventario();
 };
 
-function renderFilasKardex(id, tipoFiltro) {
- const movimientos = movimientosInventario.filter(m => String(m.productoId) === String(id) && m.tipo === tipoFiltro);
- if (movimientos.length === 0) {
- return `<tr><td colspan="3" style="text-align: center; padding: 20px; color: #ccc;">Sin registros de ${tipoFiltro}</td></tr>`;
- }
- return [...movimientos].reverse().map(m => `
- <tr style="border-bottom: 1px solid #f1f1f1; font-size: 13px;">
- <td style="padding: 8px 0;">${window.formatearFechaCortaMX(m.fecha)}</td>
- <td style="padding: 8px 0;">${m.concepto}</td>
- <td style="padding: 8px 0; text-align: right; font-weight: bold;">${m.cantidad}</td>
- </tr>
- `).join('');
-}
-
-function actualizarSubcategoriasVisor(valorSeleccionado = "") {
- const cat = document.getElementById("editCategoria")?.value;
- const subSelect = document.getElementById("editSubcategoria");
- if (!subSelect) return;
-
- let html = '<option value="">-- Seleccionar --</option>';
- if (cat) {
- const catInfo = categoriasData.find(c => c.nombre === cat);
- if (catInfo && catInfo.subcategorias) {
- catInfo.subcategorias.forEach(s => {
- html += `<option value="${s.nombre}" ${valorSeleccionado === s.nombre ? 'selected' : ''}>${s.nombre}</option>`;
- });
- }
- }
- subSelect.innerHTML = html;
-}
-
-
-function guardarCambiosVisor(id) {
- if (!_invRequireAdmin('Editar producto maestro')) return;
- const p = window.productos.find(prod => String(prod.id) === String(id));
- if (!p) return;
- if (!confirm(`Guardar cambios para "${p.nombre}"?`)) return;
-
- p.nombre = document.getElementById("editNombre")?.value || p.nombre;
- p.marca = document.getElementById("editMarca")?.value || '';
- p.costo = parseFloat(document.getElementById("editCosto")?.value) || p.costo;
- p.precio = parseFloat(document.getElementById("editPrecio")?.value) || p.precio;
- p.caracteristicas = document.getElementById("editCaracteristicas")?.value || '';
-
- // Borramos p.color, p.modelo, p.descripcion y p.imagen porque ya no estan en tu Visor Maestro
-
- if (!StorageService.set("productos", window.productos)) {
- alert("Error guardando cambios");
- return;
- }
- renderInventario(); 
- alert("Cambios guardados correctamente.");
-}
-
-function recalcularRentabilidad() {
- const costo = parseFloat(document.getElementById("editCosto")?.value) || 0;
- const precio = parseFloat(document.getElementById("editPrecio")?.value) || 0;
- const ganancia = precio - costo;
- const margenPct = CalculatorService.calcularMargen(precio, costo);
-
- const dispGanancia = document.getElementById("displayGanancia");
- const dispMargen = document.getElementById("displayMargen");
- if (dispGanancia) dispGanancia.innerText = dinero(ganancia);
- if (dispMargen) {
- dispMargen.innerText = margenPct.toFixed(1) + "%";
- dispMargen.style.color = margenPct < 20 ? "#e74c3c" : margenPct <= 35 ? "#f39c12" : "#27ae60";
- }
-}
-
-function insertarProductoSistema(p) {
- const validacion = ValidatorService.validarProducto({
- nombre: p.nombre,
- costo: p.costo,
- precio: p.precio
- });
-
- if (!validacion.valid) {
- return { ok: false, error: validacion.errores.join(", ") };
- }
-
- // Buscar categoria real
- let categoriaPadre = "";
- let subValida = false;
-
- categoriasData.forEach(cat => {
- const sub = cat.subcategorias.find(s => s.nombre === p.subcategoria);
- if (sub) {
- categoriaPadre = cat.nombre;
- subValida = true;
- }
- });
-
- if (!subValida) {
- return { ok: false, error: "Subcategoria no existe" };
- }
-
- // Evitar duplicados reales
- const duplicado = window.productos.some(prod =>
- prod.nombre.toUpperCase() === p.nombre.toUpperCase() &&
- prod.modelo === p.modelo &&
- prod.color === p.color
- );
-
- if (duplicado) {
- return { ok: false, error: "Producto duplicado" };
- }
-
- const margenCalculado = CalculatorService.calcularMargen(p.precio, p.costo);
-
- window.productos.push({
- id: Math.round(Date.now() * 1000 + Math.random() * 1000),
- nombre: p.nombre,
- costo: p.costo,
- precio: p.precio,
- margen: margenCalculado,
- imagen: p.imagen || "",
- color: p.color || "",
- marca: p.marca || "",
- modelo: p.modelo || "",
- categoria: categoriaPadre,
- subcategoria: p.subcategoria,
- stock: p.stock || 0,
- // === LA LINEA QUE FALTABA ES ESTA ===
- caracteristicas: p.caracteristicas || "" 
- // ===================================
- });
-
- return { ok: true };
-}
 
 // ============================================================
 // CATALOGO DE UBICACIONES (Bodegas, Sucursales, etc.)
@@ -3108,31 +2968,6 @@ function renderTablaVariantes(variantes, prodId) {
  </tbody>
  </table>`;
 }
-
-// CORRECCIAN PARA AAADIR VARIANTE
-window.agregarVarianteStock = function(prodId) {
- const ubicacion = document.getElementById('newVarUbicacion').value;
- const color = document.getElementById('newVarColor').value.trim();
- const stock = parseInt(document.getElementById('newVarCant').value);
-
- if (!color || isNaN(stock)) return alert("Indica color y cantidad");
-
- const p = window.productos.find(prod => String(prod.id) === String(prodId));
- p.variantes = p.variantes || [];
-
- const existente = p.variantes.find(v => v.ubicacion === ubicacion && v.color.toUpperCase() === color.toUpperCase());
- if (existente) {
- existente.stock += stock;
- } else {
- p.variantes.push({ ubicacion, color, stock });
- }
-
- // --- LINEA NUEVA: ACTUALIZAR STOCK GENERAL ---
- p.stock = (p.stock || 0) + stock; 
-
- registrarMovimiento(prodId, `Entrada - ${ubicacion} (${color})`, stock, "entrada");
- mostrarDetalleProductoMaestro(prodId);
-};
 
 window.abrirAjusteProductoDesdeVisor = function(prodId) {
  const p = (window.productos || []).find(prod => String(prod.id) === String(prodId));

@@ -70,16 +70,6 @@ function _esSolicitudBovedaPendiente(item) {
     return _resolverEstadoBoveda(item, 'Pendiente') === 'Pendiente';
 }
 
-function _marcarEstadoBoveda(item, estado, meta = {}) {
-    return {
-        ...(item || {}),
-        estado,
-        status: estado,
-        estatus: estado,
-        ...meta
-    };
-}
-
 function _escapeHtml(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

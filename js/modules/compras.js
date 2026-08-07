@@ -5586,21 +5586,6 @@ window.imprimirPreviaDevolucionConsignacion = function() {
     w.document.close();
 };
 
-function _cargarHtml2CanvasPreviaDevolucion(cb) {
-    if (typeof html2canvas !== 'undefined') return cb();
-    const existente = document.getElementById('html2canvas-devolucion-consignacion');
-    if (existente) {
-        existente.addEventListener('load', cb, { once: true });
-        return;
-    }
-    const script = document.createElement('script');
-    script.id = 'html2canvas-devolucion-consignacion';
-    script.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
-    script.onload = cb;
-    script.onerror = () => alert('No se pudo cargar el motor de imagen. Usa Imprimir / PDF o revisa tu conexion.');
-    document.head.appendChild(script);
-}
-
 window.ejecutarDevolucionConsignacion = function(payload) {
     if (!_comprasRequireAdmin('Ejecutar devolución de consignación')) return;
     let data = {};

@@ -884,39 +884,6 @@ window.cambiarPestanaCobranza = function(pestana) {
 // ==========================================
 // 3. LOGICA DE ABONOS Y POLÍTICAS
 // ==========================================
-window._actualizarCuentaEspecifica = function(idSufijo) {
-    const medio = document.getElementById('medioPago_' + idSufijo)?.value;
-    const divCuenta = document.getElementById('divCuentaEspecifica_' + idSufijo);
-    const selCuenta = document.getElementById('cuentaEspecifica_' + idSufijo);
-    if (!divCuenta || !selCuenta) return;
-    
-    const tarjetas = StorageService.get('tarjetasConfig', []);
-    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
-    
-    if (medio === 'efectivo') {
-        divCuenta.style.display = 'block'; 
-        selCuenta.innerHTML = cajas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
-    } else if (medio === 'transferencia') {
-        const cuentasDebito = tarjetas.filter(t => t.tipo === 'debito');
-        if (cuentasDebito.length === 0) {
-            divCuenta.style.display = 'none';
-            selCuenta.innerHTML = '<option value="">Sin cuentas débito registradas</option>';
-        } else {
-            divCuenta.style.display = 'block';
-            selCuenta.innerHTML = cuentasDebito.map(b => `<option value="${b.banco}">🏦 ${b.banco} Débito</option>`).join('');
-        }
-    } else if (medio === 'tarjeta_credito') {
-        const tarjetasCredito = tarjetas.filter(t => !t.tipo || t.tipo === 'credito');
-        if (tarjetasCredito.length === 0) {
-            divCuenta.style.display = 'none';
-            selCuenta.innerHTML = '<option value="">Sin tarjetas crédito registradas</option>';
-        } else {
-            divCuenta.style.display = 'block';
-            selCuenta.innerHTML = tarjetasCredito.map(b => `<option value="${b.banco}">💳 ${b.banco} Crédito</option>`).join('');
-        }
-    }
-};
-
 function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const pagares = StorageService.get("pagaresSistema", []);

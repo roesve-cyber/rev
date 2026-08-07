@@ -805,20 +805,6 @@ function deshacerPagoMSI(id) {
     if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
 }
 
-// ===== FLUJO DE CAJA =====
-function _etiquetaCuenta(m) {
-    if (m.etiquetaCuenta) return m.etiquetaCuenta;
-    const c = m.cuenta || "efectivo";
-    if (c === "efectivo" || c === "caja") {
-        const cajas = StorageService.get("cuentasEfectivo", []);
-        if (cajas[0]?.nombre) return cajas[0].nombre;
-    }
-    if (c === "efectivo" || c === "caja") return "💵 Efectivo";
-    const t = (tarjetasConfig || []).find(x => x.banco === c);
-    if (t) return t.tipo === "debito" ? `🏦 ${t.banco} Débito` : `💳 ${t.banco} Crédito`;
-    return "💵 Efectivo";
-}
-
 // ===== CUENTAS BANCARIAS DASHBOARD (LIQUIDEZ) =====
 
 // Variables globales para los filtros de liquidez
