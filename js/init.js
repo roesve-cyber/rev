@@ -145,9 +145,21 @@ function _logConteosArranque() {
 }
 
 function _renderVistaActualInicial(vistaId) {
-    if (typeof navA === 'function') navA(vistaId || 'inicio');
+    // Un vendedor nunca debe aterrizar en el Dashboard (datos financieros),
+    // sin importar qué diga el hash de la URL de una sesión anterior (ej. la
+    // app quedó abierta en #dashboard y se recarga). Si la sesión guardada
+    // ya es de un vendedor, forzamos "tienda" desde aquí mismo.
+    const sesionInicial = typeof getSesion === 'function' ? getSesion() : null;
+    let vistaResuelta = vistaId || 'inicio';
+    if (sesionInicial?.rol === 'vendedor' && vistaResuelta === 'dashboard') {
+        vistaResuelta = 'tienda';
+    }
+
+    if (typeof navA === 'function') navA(vistaResuelta);
     setTimeout(() => {
-        const actual = window._vistaActualSistema || vistaId || 'inicio';
+        const sesionActual = typeof getSesion === 'function' ? getSesion() : sesionInicial;
+        let actual = window._vistaActualSistema || vistaResuelta || 'inicio';
+        if (sesionActual?.rol === 'vendedor' && actual === 'dashboard') actual = 'tienda';
         if (typeof navA === 'function') navA(actual, true);
         if (actual === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
         if (actual === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
