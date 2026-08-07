@@ -594,7 +594,10 @@ async function iniciarSesion() {
             aplicarRolUI();
             await _sincronizarFirebaseDespuesDeLogin();
             _recargarVariablesGlobales();
-            if (typeof navA === 'function') navA('dashboard');
+            // Vendedor ya fue enviado a "tienda" por aplicarRolUI(); solo el
+            // admin entra al Dashboard (evita el flash del dashboard completo
+            // -con datos financieros- y el retraso de su render pesado).
+            if (sesion.rol === 'admin' && typeof navA === 'function') navA('dashboard');
             // Respaldo automático diario a Firebase Storage (solo admin)
             if (sesion.rol === 'admin') {
                 const hoy = window.obtenerHoyInputMX();
@@ -653,7 +656,10 @@ function _iniciarSesionLocalFallback(email, pass) {
     ocultarLoginScreen();
     aplicarRolUI();
     _recargarVariablesGlobales();
-    if (typeof navA === 'function') navA('dashboard');
+    // Vendedor ya fue enviado a "tienda" por aplicarRolUI(); solo el admin
+    // entra al Dashboard (evita el flash del dashboard completo -con datos
+    // financieros- y el retraso de su render pesado).
+    if (match.rol === 'admin' && typeof navA === 'function') navA('dashboard');
     if (match.rol === 'admin') {
         const hoy = window.obtenerHoyInputMX();
         const ultimoRespaldo = localStorage.getItem('_ultimoRespaldoStorage');
