@@ -842,6 +842,16 @@ function renderGestionUsuarios() {
 function abrirFormUsuario(id) {
     const usuarios = _getUsuarios();
     const u = (id !== undefined && id !== null && id !== '') ? usuarios.find(x => x.uid === id || x.id === id) : null;
+    // Única fuente de verdad para el rol inicial: si u.rol no es exactamente 'admin'
+    // (por ejemplo un usuario que vino de Firestore sin ese campo bien definido),
+    // se trata como 'vendedor' por defecto — igual que hace el <select> al no
+    // encontrar ninguna opción "selected". Antes esto se calculaba dos veces por
+    // separado (una para el <select>, otra para el <div id="usrVendedorWrap">) y
+    // podían no coincidir: el select mostraba "Vendedor" pero el campo vinculado
+    // seguía oculto, y como el valor del select no cambiaba al volver a elegir
+    // "Vendedor", el onchange nunca disparaba para mostrarlo.
+    const rolInicial = (u && u.rol === 'admin') ? 'admin' : 'vendedor';
+    document.querySelectorAll('[data-modal="form-usuario"]').forEach(el => el.remove());
     const html = `
     <div data-modal="form-usuario" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div style="background:white;border-radius:12px;width:100%;max-width:440px;padding:28px;">
@@ -861,11 +871,11 @@ function abrirFormUsuario(id) {
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">ROL</label>
             <select id="usrRol" onchange="document.getElementById('usrVendedorWrap').style.display=this.value==='vendedor'?'block':'none';" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-              <option value="vendedor" ${u && u.rol === 'vendedor' ? 'selected' : ''}>Vendedor</option>
-              <option value="admin" ${u && u.rol === 'admin' ? 'selected' : ''}>Administrador</option>
+              <option value="vendedor" ${rolInicial === 'vendedor' ? 'selected' : ''}>Vendedor</option>
+              <option value="admin" ${rolInicial === 'admin' ? 'selected' : ''}>Administrador</option>
             </select>
           </div>
-          <div id="usrVendedorWrap" style="display:${(!u || u.rol === 'vendedor') ? 'block' : 'none'};">
+          <div id="usrVendedorWrap" style="display:${rolInicial === 'vendedor' ? 'block' : 'none'};">
             <label style="font-size:12px;font-weight:bold;color:#374151;">VENDEDOR VINCULADO</label>
             <select id="usrVendedorId" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
               ${_opcionesVendedoresUsuario(u?.vendedorId)}
@@ -879,7 +889,7 @@ function abrirFormUsuario(id) {
         </div>
         <div style="display:flex;gap:10px;margin-top:20px;">
           <button onclick="guardarUsuario()" style="flex:1;padding:12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💾 Guardar</button>
-          <button onclick="document.querySelector('[data-modal=form-usuario]')?.remove()" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
+          <button onclick="document.querySelectorAll('[data-modal=form-usuario]').forEach(el=>el.remove())" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
         </div>
       </div>
     </div>`;
@@ -925,7 +935,7 @@ function guardarUsuario() {
             activo
         }, { merge: true }).catch(err => console.warn('No se pudo sincronizar el vendedor vinculado en Firebase:', err));
     }
-    document.querySelector('[data-modal="form-usuario"]')?.remove();
+    document.querySelectorAll('[data-modal="form-usuario"]').forEach(el => el.remove());
     renderGestionUsuarios();
 }
 
