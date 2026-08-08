@@ -756,48 +756,86 @@ function _opcionesVendedoresUsuario(vendedorId = '') {
         .join('');
 }
 
+function _pintarTablaUsuarios(usuarios) {
+    const cont = document.getElementById('contenidoUsuarios');
+    if (!cont) return;
+
+    const rows = usuarios.map(u => `
+    <tr>
+      <td style="padding:10px;">${_esc(u.nombre || u.usuario || u.email || '-')}</td>
+      <td style="padding:10px;text-align:center;"><span style="background:${u.rol==='admin'?'#dbeafe':'#d1fae5'};color:${u.rol==='admin'?'#1e40af':'#065f46'};padding:3px 10px;border-radius:999px;font-size:12px;font-weight:bold;">${u.rol}</span></td>
+      <td style="padding:10px;text-align:center;">${u.rol === 'vendedor' ? _esc(u.vendedorNombre || StorageService.get('vendedores', []).find(v => String(v.id) === String(u.vendedorId))?.nombre || 'Sin vincular') : '-'}</td>
+      <td style="padding:10px;text-align:center;"><span style="color:${u.activo?'#16a34a':'#9ca3af'};font-weight:bold;">${u.activo?'✅ Activo':'⛔ Inactivo'}</span></td>
+      <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
+        <button onclick="abrirFormUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Editar">✏️</button>
+        <button onclick="eliminarUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Eliminar">🗑️</button>
+      </td>
+    </tr>`).join('');
+
+    const firebaseBtn = (window._firebaseActivo && window._auth)
+        ? `<button onclick="abrirFormCrearUsuarioFirebase()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Crear usuario en Firebase</button>`
+        : '';
+
+    cont.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
+      <p style="margin:0;color:#6b7280;">Gestiona los accesos al sistema.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button onclick="abrirFormUsuario()" style="padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Nuevo Usuario</button>
+        ${firebaseBtn}
+      </div>
+    </div>
+    <div id="usuariosSyncAviso" style="font-size:12px;color:#9ca3af;margin-bottom:8px;"></div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <thead><tr style="background:#f1f5f9;">
+          <th style="padding:10px;text-align:left;">Usuario</th>
+          <th style="padding:10px;text-align:center;">Rol</th>
+          <th style="padding:10px;text-align:center;">Vendedor vinculado</th>
+          <th style="padding:10px;text-align:center;">Estado</th>
+          <th style="padding:10px;text-align:center;">Acciones</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#9ca3af;">Sin usuarios</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+// Fusiona lo que ya tenías en cache local (usuariosConfig, incluye PIN para login local)
+// con lo que Firestore reporta como fuente de verdad de cuentas activas (incluye
+// usuarios creados en otro dispositivo o directo en la consola de Firebase, que antes
+// simplemente no aparecían aquí porque listarUsuariosFirebase() nunca se llamaba).
+function _fusionarUsuariosConFirebase(remotos, locales) {
+    const fusionados = remotos.map(r => {
+        const local = locales.find(l => String(l.uid || l.id) === String(r.uid));
+        return { ...local, ...r, id: r.uid, uid: r.uid, usuario: r.nombre || local?.usuario, pin: local?.pin };
+    });
+    const soloLocales = locales.filter(l => !remotos.some(r => String(r.uid) === String(l.uid || l.id)));
+    return [...fusionados, ...soloLocales];
+}
+
 function renderGestionUsuarios() {
     requireAdmin(() => {
         const cont = document.getElementById('contenidoUsuarios');
         if (!cont) return;
-        const usuarios = _getUsuarios();
 
-        const rows = usuarios.map(u => `
-        <tr>
-          <td style="padding:10px;">${_esc(u.nombre || u.usuario || u.email || '-')}</td>
-          <td style="padding:10px;text-align:center;"><span style="background:${u.rol==='admin'?'#dbeafe':'#d1fae5'};color:${u.rol==='admin'?'#1e40af':'#065f46'};padding:3px 10px;border-radius:999px;font-size:12px;font-weight:bold;">${u.rol}</span></td>
-          <td style="padding:10px;text-align:center;">${u.rol === 'vendedor' ? _esc(u.vendedorNombre || StorageService.get('vendedores', []).find(v => String(v.id) === String(u.vendedorId))?.nombre || 'Sin vincular') : '-'}</td>
-          <td style="padding:10px;text-align:center;"><span style="color:${u.activo?'#16a34a':'#9ca3af'};font-weight:bold;">${u.activo?'✅ Activo':'⛔ Inactivo'}</span></td>
-          <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
-            <button onclick="abrirFormUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Editar">✏️</button>
-            <button onclick="eliminarUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Eliminar">🗑️</button>
-          </td>
-        </tr>`).join('');
+        // 1. Pintado inmediato con lo que ya hay en cache local (rápido, funciona offline).
+        _pintarTablaUsuarios(_getUsuarios());
 
-        const firebaseBtn = (window._firebaseActivo && window._auth)
-            ? `<button onclick="abrirFormCrearUsuarioFirebase()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Crear usuario en Firebase</button>`
-            : '';
-
-        cont.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
-          <p style="margin:0;color:#6b7280;">Gestiona los accesos al sistema.</p>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button onclick="abrirFormUsuario()" style="padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Nuevo Usuario</button>
-            ${firebaseBtn}
-          </div>
-        </div>
-        <div style="overflow-x:auto;">
-          <table style="width:100%;border-collapse:collapse;font-size:14px;">
-            <thead><tr style="background:#f1f5f9;">
-              <th style="padding:10px;text-align:left;">Usuario</th>
-              <th style="padding:10px;text-align:center;">Rol</th>
-              <th style="padding:10px;text-align:center;">Vendedor vinculado</th>
-              <th style="padding:10px;text-align:center;">Estado</th>
-              <th style="padding:10px;text-align:center;">Acciones</th>
-            </tr></thead>
-            <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#9ca3af;">Sin usuarios</td></tr>'}</tbody>
-          </table>
-        </div>`;
+        // 2. Si hay Firebase activo, se trae la lista real de /usuarios y se fusiona.
+        //    Esto es lo que hace visibles (y por lo tanto editables/vinculables a un
+        //    vendedor) a los usuarios ya activos que no estaban en el cache local.
+        if (window._firebaseActivo && window._db && typeof listarUsuariosFirebase === 'function') {
+            listarUsuariosFirebase().then(remotos => {
+                if (!Array.isArray(remotos) || remotos.length === 0) return;
+                const locales = _getUsuarios();
+                const fusionados = _fusionarUsuariosConFirebase(remotos, locales);
+                StorageService.set('usuariosConfig', fusionados);
+                _pintarTablaUsuarios(fusionados);
+            }).catch(e => {
+                console.warn('No se pudo sincronizar usuarios desde Firebase:', e);
+                const aviso = document.getElementById('usuariosSyncAviso');
+                if (aviso) aviso.textContent = '⚠️ No se pudo confirmar contra Firebase; se muestra solo el cache local.';
+            });
+        }
     });
 }
 
