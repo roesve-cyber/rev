@@ -1,5 +1,9 @@
 // ===== VENDEDORES Y COMISIONES =====
 
+function _vendEsc(v) {
+    return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+}
+
 function renderGestionVendedores() {
     const cont = document.getElementById('contenidoVendedores');
     if (!cont) return;
@@ -24,6 +28,7 @@ function renderGestionVendedores() {
           <td style="padding:10px;text-align:right;">${dinero(pendVend)}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${v.activo ? '#16a34a' : '#9ca3af'};font-weight:bold;">${v.activo ? '✅ Activo' : '⛔ Inactivo'}</span></td>
           <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
+            <button onclick="abrirModalAnticipoComision(${v.id})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Registrar anticipo">💵</button>
             <button onclick="editarVendedor(${v.id})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Editar">✏️</button>
             <button onclick="eliminarVendedor(${v.id})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Eliminar">🗑️</button>
           </td>
@@ -68,6 +73,12 @@ function renderGestionVendedores() {
       </div>
       <div id="sugerenciasRecuperacionArea" style="margin-bottom:20px;"></div>
       <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3 style="margin:0;color:#0f172a;">💵 Anticipos de Comisión</h3>
+        </div>
+        <div id="anticiposComisionArea"></div>
+      </div>
+      <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:20px;">
         <h3 style="margin:0 0 16px;color:#7c3aed;">📊 Reporte de Comisiones por Período</h3>
         <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
           <div>
@@ -83,8 +94,8 @@ function renderGestionVendedores() {
         <div id="reporteComisionesArea"></div>
       </div>`;
     renderSugerenciasRecuperacionCartera();
+    renderAnticiposComision();
 }
-
 // ===== SUGERENCIAS: RECUPERACIÓN DE CARTERA EN ATRASO =====
 // El vendedor solo cobra comisión por venta (al cierre). Cuando una cuenta que
 // estuvo en atraso termina saldándose, el sistema SUGIERE aquí una posible
@@ -620,6 +631,255 @@ function pagarComisionVendedor(vendedorId, fechaDesde, fechaHasta) {
     if(v) abrirModalPagoComision('multiple', vendedorId, fechaDesde, fechaHasta, res.pendiente, v.nombre);
 }
 
+// ===== ANTICIPOS DE COMISIÓN PARA VENDEDORES =====
+// Saldo llevado APARTE de comisionesRegistradas — no se descuenta automáticamente
+// de comisiones futuras, se liquida a mano cuando el admin decide. El dinero
+// que sale/entra siempre pasa por los movimientos de caja canónicos
+// (_egresarCuenta / _ingresarCuenta), nunca por escritura directa.
+
+function _anticipoSaldoPendiente(a) {
+    return Math.max(0, Number(a.saldoPendiente ?? a.monto) || 0);
+}
+
+function abrirModalAnticipoComision(vendedorId) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    if (!v) return alert('Vendedor no encontrado.');
+    const modalHTML = `
+    <div data-modal="anticipo-comision" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;">
+        <div style="background:white;padding:30px;border-radius:12px;width:90%;max-width:420px;box-shadow:0 10px 25px rgba(0,0,0,0.1);">
+            <h2 style="margin-top:0;color:#0f172a;">💵 Anticipo de comisión</h2>
+            <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(v.nombre)}</strong></p>
+            <div style="margin-bottom:14px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO</label>
+                <input type="number" id="anticipoMonto" min="1" step="0.01" placeholder="Ej. 1000" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿DE QUÉ CAJA/CUENTA SALE?</label>
+                ${window._buildSelectorCuentas('anticipoCuenta', false)}
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">NOTA (opcional)</label>
+                <input type="text" id="anticipoNota" placeholder="Motivo del anticipo" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button onclick="registrarAnticipoComision(${v.id})" style="flex:1;padding:12px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Registrar Anticipo</button>
+                <button onclick="document.querySelector('[data-modal=&quot;anticipo-comision&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function registrarAnticipoComision(vendedorId) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    if (!v) return alert('Vendedor no encontrado.');
+    const montoInput = document.getElementById('anticipoMonto');
+    const monto = Number(montoInput?.value);
+    if (!Number.isFinite(monto) || monto <= 0) {
+        alert('Ingresa un monto válido.');
+        return;
+    }
+    const sel = document.getElementById('anticipoCuenta');
+    if (!sel) { alert('No se pudo leer la cuenta seleccionada.'); return; }
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+    const nota = document.getElementById('anticipoNota')?.value || '';
+    const id = Date.now();
+
+    if (typeof window._egresarCuenta !== 'function') {
+        alert('No se pudo registrar el anticipo: el módulo de caja no está disponible. Nada se aplicó.');
+        return;
+    }
+    const egresoOk = window._egresarCuenta({
+        monto, cuentaId, etiqueta,
+        concepto: `Anticipo de comisión - ${v.nombre}${nota ? ' (' + nota + ')' : ''}`,
+        referencia: `ANTICIPO-COM-${id}`,
+        idOperacion: `anticipo-comision-${id}`
+    });
+    if (!egresoOk) {
+        alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}". El anticipo NO se guardó.`);
+        return;
+    }
+
+    const anticipos = StorageService.get('anticiposComisionVendedor', []);
+    anticipos.push({
+        id,
+        vendedorId: v.id,
+        vendedorNombre: v.nombre,
+        monto,
+        saldoPendiente: monto,
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        cuentaId, cuentaEtiqueta: etiqueta,
+        nota,
+        estado: 'Pendiente',
+        liquidaciones: []
+    });
+    StorageService.set('anticiposComisionVendedor', anticipos);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ANTICIPO_COMISION_REGISTRADO',
+            modulo: 'Vendedores',
+            entidad: 'anticiposComisionVendedor',
+            entidadId: id,
+            detalle: `Anticipo de comisión a ${v.nombre}`,
+            monto,
+            severidad: 'riesgo',
+            datos: { vendedorId: v.id, cuentaId, etiqueta, nota }
+        });
+    }
+
+    document.querySelector('[data-modal="anticipo-comision"]')?.remove();
+    alert(`✅ Anticipo de ${dinero(monto)} registrado para ${v.nombre}, pagado desde ${etiqueta}.\n\nEste saldo NO se descuenta automáticamente de sus comisiones — lo liquidas tú manualmente cuando corresponda.`);
+    renderGestionVendedores();
+}
+
+function abrirModalLiquidarAnticipo(anticipoId) {
+    const anticipos = StorageService.get('anticiposComisionVendedor', []);
+    const a = anticipos.find(x => x.id === anticipoId);
+    if (!a) return alert('Anticipo no encontrado.');
+    const saldo = _anticipoSaldoPendiente(a);
+    if (saldo <= 0) return alert('Este anticipo ya está liquidado.');
+
+    const modalHTML = `
+    <div data-modal="liquidar-anticipo" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;">
+        <div style="background:white;padding:30px;border-radius:12px;width:90%;max-width:420px;box-shadow:0 10px 25px rgba(0,0,0,0.1);">
+            <h2 style="margin-top:0;color:#0f172a;">💵 Liquidar anticipo</h2>
+            <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(a.vendedorNombre)}</strong><br>Saldo pendiente: <strong style="color:#dc2626;">${dinero(saldo)}</strong></p>
+            <div style="margin-bottom:14px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO A LIQUIDAR</label>
+                <input type="number" id="liquidarMonto" min="0.01" max="${saldo}" step="0.01" value="${saldo}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿CÓMO SE LIQUIDA?</label>
+                <select id="liquidarMetodo" onchange="document.getElementById('liquidarCuentaWrap').style.display=this.value==='efectivo'?'block':'none'" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+                    <option value="efectivo">El vendedor devuelve efectivo (entra a caja)</option>
+                    <option value="manual">Se aplica de otra forma (sin movimiento de caja aquí)</option>
+                </select>
+            </div>
+            <div id="liquidarCuentaWrap" style="margin-bottom:14px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿A QUÉ CAJA/CUENTA ENTRA?</label>
+                ${window._buildSelectorCuentas('liquidarCuenta', false)}
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button onclick="liquidarAnticipoComision(${a.id})" style="flex:1;padding:12px;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar</button>
+                <button onclick="document.querySelector('[data-modal=&quot;liquidar-anticipo&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function liquidarAnticipoComision(anticipoId) {
+    const anticipos = StorageService.get('anticiposComisionVendedor', []);
+    const idx = anticipos.findIndex(x => x.id === anticipoId);
+    if (idx === -1) return alert('Anticipo no encontrado.');
+    const a = anticipos[idx];
+    const saldo = _anticipoSaldoPendiente(a);
+
+    const montoInput = document.getElementById('liquidarMonto');
+    const monto = Number(montoInput?.value);
+    if (!Number.isFinite(monto) || monto <= 0 || monto > saldo + 0.01) {
+        alert(`Ingresa un monto válido (máximo ${dinero(saldo)}).`);
+        return;
+    }
+    const metodo = document.getElementById('liquidarMetodo')?.value || 'manual';
+
+    if (metodo === 'efectivo') {
+        const sel = document.getElementById('liquidarCuenta');
+        if (!sel) { alert('No se pudo leer la cuenta seleccionada.'); return; }
+        const cuentaId = sel.value;
+        const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+        if (typeof window._ingresarCuenta !== 'function') {
+            alert('No se pudo registrar el ingreso: el módulo de caja no está disponible. Nada se aplicó.');
+            return;
+        }
+        const ingresoOk = window._ingresarCuenta({
+            monto, cuentaId, etiqueta,
+            concepto: `Liquidación anticipo de comisión - ${a.vendedorNombre}`,
+            referencia: `LIQ-ANTICIPO-COM-${a.id}`,
+            idOperacion: `liquidacion-anticipo-comision-${a.id}-${Date.now()}`
+        });
+        if (!ingresoOk) {
+            alert(`No se pudo registrar el ingreso de caja para "${etiqueta || cuentaId}". La liquidación NO se aplicó.`);
+            return;
+        }
+    }
+
+    const nuevoSaldo = Math.max(0, saldo - monto);
+    const liquidaciones = Array.isArray(a.liquidaciones) ? a.liquidaciones.slice() : [];
+    liquidaciones.push({
+        monto, metodo,
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+    });
+    anticipos[idx] = {
+        ...a,
+        saldoPendiente: nuevoSaldo,
+        liquidaciones,
+        estado: nuevoSaldo <= 0.01 ? 'Liquidado' : 'Pendiente'
+    };
+    StorageService.set('anticiposComisionVendedor', anticipos);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ANTICIPO_COMISION_LIQUIDADO',
+            modulo: 'Vendedores',
+            entidad: 'anticiposComisionVendedor',
+            entidadId: a.id,
+            detalle: `Liquidación de anticipo - ${a.vendedorNombre}`,
+            monto,
+            severidad: 'info',
+            datos: { metodo, saldoRestante: nuevoSaldo }
+        });
+    }
+
+    document.querySelector('[data-modal="liquidar-anticipo"]')?.remove();
+    renderGestionVendedores();
+}
+
+function renderAnticiposComision() {
+    const cont = document.getElementById('anticiposComisionArea');
+    if (!cont) return;
+    const anticipos = StorageService.get('anticiposComisionVendedor', []);
+    if (anticipos.length === 0) {
+        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:16px;">No hay anticipos registrados.</p>';
+        return;
+    }
+    const totalPendiente = anticipos.reduce((s, a) => s + _anticipoSaldoPendiente(a), 0);
+    const rows = anticipos.slice().sort((x, y) => new Date(y.fecha) - new Date(x.fecha)).map(a => {
+        const saldo = _anticipoSaldoPendiente(a);
+        return `<tr>
+          <td style="padding:8px;">${_vendEsc(a.vendedorNombre)}</td>
+          <td style="padding:8px;text-align:right;">${dinero(a.monto)}</td>
+          <td style="padding:8px;text-align:right;font-weight:bold;color:${saldo > 0 ? '#dc2626' : '#16a34a'};">${dinero(saldo)}</td>
+          <td style="padding:8px;">${a.fecha ? new Date(a.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' }) : '-'}</td>
+          <td style="padding:8px;color:#6b7280;">${_vendEsc(a.cuentaEtiqueta || '-')}</td>
+          <td style="padding:8px;text-align:center;"><span style="color:${saldo > 0 ? '#d97706' : '#16a34a'};font-weight:bold;">${saldo > 0 ? 'Pendiente' : 'Liquidado'}</span></td>
+          <td style="padding:8px;text-align:center;">${saldo > 0 ? `<button onclick="abrirModalLiquidarAnticipo(${a.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Liquidar</button>` : '✅'}</td>
+        </tr>`;
+    }).join('');
+
+    cont.innerHTML = `
+      <div style="background:#fef2f2;padding:14px 18px;border-radius:8px;margin-bottom:14px;display:inline-block;">
+        <small style="color:#991b1b;">SALDO TOTAL DE ANTICIPOS SIN LIQUIDAR</small><br>
+        <strong style="font-size:22px;color:#991b1b;">${dinero(totalPendiente)}</strong>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:#f3f4f6;">
+            <th style="padding:8px;text-align:left;">Vendedor</th>
+            <th style="padding:8px;text-align:right;">Anticipo</th>
+            <th style="padding:8px;text-align:right;">Saldo</th>
+            <th style="padding:8px;text-align:left;">Fecha</th>
+            <th style="padding:8px;text-align:left;">Cuenta</th>
+            <th style="padding:8px;text-align:center;">Estado</th>
+            <th style="padding:8px;text-align:center;">Acción</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+}
+
 window.renderGestionVendedores = renderGestionVendedores;
 window.abrirFormVendedor = abrirFormVendedor;
 window.guardarVendedor = guardarVendedor;
@@ -636,3 +896,8 @@ window.obtenerSugerenciasRecuperacionCartera = obtenerSugerenciasRecuperacionCar
 window.renderSugerenciasRecuperacionCartera = renderSugerenciasRecuperacionCartera;
 window.otorgarComisionRecuperacion = otorgarComisionRecuperacion;
 window.descartarSugerenciaRecuperacion = descartarSugerenciaRecuperacion;
+window.abrirModalAnticipoComision = abrirModalAnticipoComision;
+window.registrarAnticipoComision = registrarAnticipoComision;
+window.abrirModalLiquidarAnticipo = abrirModalLiquidarAnticipo;
+window.liquidarAnticipoComision = liquidarAnticipoComision;
+window.renderAnticiposComision = renderAnticiposComision;

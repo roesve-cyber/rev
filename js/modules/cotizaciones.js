@@ -5,8 +5,11 @@ function renderCotizaciones() {
     const cont = document.getElementById('cotizaciones');
     if (!cont) return;
 
-    const esAdmin = typeof _esAdmin === 'function' && _esAdmin();
-    const botonAvanzada = esAdmin
+    // "Avanzada" es la cotización con planes de crédito multi-plazo
+    // personalizados — herramienta de auditoría/administración, no de venta
+    // en piso. Un vendedor no debe tener esa opción.
+    const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
+    const btnAvanzada = esAdminActual
         ? `<button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>`
         : '';
 
@@ -16,13 +19,13 @@ function renderCotizaciones() {
             <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
             <div style="display:flex; gap:10px; margin-top:15px;">
                 <button onclick="abrirCotizador()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">➕ Nueva Cotización (Simple)</button>
-                ${botonAvanzada}
+                ${btnAvanzada}
                 <button onclick="abrirCotizadorMayoreo()" style="padding:10px 20px; background:#0891b2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🏷️ Nueva Cotización (Mayoreo)</button>
             </div>
         </div>
         <div id="listaCotizaciones" style="background:white; padding:20px; border-radius:8px; margin-top:20px;"></div>
     `;
-
+    
     abrirListaCotizaciones();
 }
 
@@ -57,10 +60,6 @@ function abrirCotizador() {
 
 // Llama al cotizador avanzado (Auditoría)
 function abrirCotizadorAuditoria() {
-    if (typeof _esAdmin === 'function' && !_esAdmin()) {
-        alert("No autorizado");
-        return;
-    }
     window._customPlanesAuditoria = [];
     window._cotEditandoId = null;
     _renderCotizadorHTML('auditoria');
@@ -81,6 +80,15 @@ function editarCotizacion(id) {
     if (cot.estado === 'Convertida') return alert('⚠️ No se puede editar una cotización ya convertida a venta.');
 
     const modo = cot.modalidad === 'mayoreo' ? 'mayoreo' : ((cot.customPlanes && cot.customPlanes.length > 0) ? 'auditoria' : 'simple');
+
+    // El modo "auditoria" (Avanzada) expone costo de adquisición y planes de
+    // crédito personalizados: solo admin puede editarlo, aunque la cotización
+    // ya exista. El vendedor puede seguir convirtiéndola a venta normalmente
+    // (botón "Convertir a Venta"), solo no puede abrir este editor.
+    if (modo === 'auditoria' && !(typeof _esAdmin === 'function' && _esAdmin())) {
+        return alert('⚠️ Esta cotización es de tipo Avanzada y solo puede editarla un administrador. Puedes convertirla a venta directamente con el botón 🛒.');
+    }
+
     window._customPlanesAuditoria = cot.customPlanes ? cot.customPlanes.map(p => ({ ...p })) : [];
     window._cotEditandoId = cot.id;
     _renderCotizadorHTML(modo, cot);
@@ -722,7 +730,15 @@ window._cotEditarPrecioLinea = function(idx, valor) {
     const a = arts[idx];
     if (!a) return;
     const { precio: nuevoPrecio, ajustado } = _cotClampAlCosto(valor, a.costo);
-    if (ajustado) alert(`⚠️ El precio de "${a.nombre}" no puede quedar por debajo de su costo mínimo permitido. Se ajustó automáticamente.`);
+    if (ajustado) {
+        // El piso (no vender debajo del costo) se sigue aplicando siempre,
+        // pero el costo exacto solo se revela al admin. Al vendedor solo se
+        // le informa que el precio se ajustó, sin el número.
+        const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
+        alert(esAdminActual
+            ? `⚠️ El precio de "${a.nombre}" no puede quedar por debajo de su costo de compra (${dinero(a.costo)}). Se ajustó al costo.`
+            : `⚠️ El precio de "${a.nombre}" no puede quedar por debajo del mínimo autorizado. Se ajustó automáticamente.`);
+    }
     a.precio = nuevoPrecio;
     a.subtotal = a.cantidad * nuevoPrecio;
     _renderTablaArticulosCot();
