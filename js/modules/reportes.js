@@ -27,10 +27,10 @@ function _kpiCard(titulo, valor, color, icono) {
 function _tablaHTML(headers, filas) {
     const ths = headers.map(h => `<th style="background:#f1f5f9; padding:10px 12px; text-align:left; font-size:12px; color:#2c3e50; border-bottom:2px solid #e2e8f0;">${h}</th>`).join('');
     const trs = filas.map(cols => {
-        const tds = cols.map(c => `<td style="padding:9px 12px; font-size:12px; border-bottom:1px solid #f0f0f0;">${c}</td>`).join('');
+        const tds = cols.map((c, i) => `<td data-label="${_rvEsc(headers[i] || '')}" style="padding:9px 12px; font-size:12px; border-bottom:1px solid #f0f0f0;">${c}</td>`).join('');
         return `<tr>${tds}</tr>`;
     }).join('');
-    return `<table style="width:100%; border-collapse:collapse;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+    return `<table class="tabla-responsive" style="width:100%; border-collapse:collapse;"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
 }
 
 function _repParseDate(valor) {
@@ -348,16 +348,16 @@ window.renderReporteVentas = function() {
             : '<span style="color:#94a3b8;">Sin costo</span>';
         return `
             <tr style="border-bottom:1px solid #e2e8f0;">
-                <td style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.folio)}</strong><br>${_rvBadgeOrigen(v.origen)}<br>${_rvBadgeEstado(v.estado)}</td>
-                <td style="padding:12px; vertical-align:top; white-space:nowrap;">${_rvEsc(v.fechaTexto)}</td>
-                <td style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_rvEsc(v.vendedor)}</small>` : ""}</td>
-                <td style="padding:12px; vertical-align:top;">${_rvBadgeMetodo(v.metodo)}</td>
-                <td style="padding:12px; vertical-align:top; font-size:12px;">${articulosTxt}${v.articulos.length > 3 ? `<br><small style="color:#64748b;">+${v.articulos.length - 3} más</small>` : ""}</td>
-                <td style="padding:12px; vertical-align:top; text-align:center; font-weight:900;">${v.unidades}</td>
-                <td style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#1d4ed8;">${fmt(v.totalMercancia)}</strong><br><small style="color:#64748b;">Doc: ${fmt(v.totalDocumento)}</small></td>
-                <td style="padding:12px; vertical-align:top; text-align:right;">${utilidadTxt}</td>
-                <td style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#16a34a;">${fmt(v.enganche)}</strong></td>
-                <td style="padding:12px; vertical-align:top; text-align:right;">${saldoTxt}</td>
+                <td data-label="Folio" style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.folio)}</strong><br>${_rvBadgeOrigen(v.origen)}<br>${_rvBadgeEstado(v.estado)}</td>
+                <td data-label="Fecha" style="padding:12px; vertical-align:top; white-space:nowrap;">${_rvEsc(v.fechaTexto)}</td>
+                <td data-label="Cliente" style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_rvEsc(v.vendedor)}</small>` : ""}</td>
+                <td data-label="Método" style="padding:12px; vertical-align:top;">${_rvBadgeMetodo(v.metodo)}</td>
+                <td data-label="Artículos" style="padding:12px; vertical-align:top; font-size:12px;">${articulosTxt}${v.articulos.length > 3 ? `<br><small style="color:#64748b;">+${v.articulos.length - 3} más</small>` : ""}</td>
+                <td data-label="Piezas" style="padding:12px; vertical-align:top; text-align:center; font-weight:900;">${v.unidades}</td>
+                <td data-label="Mercancía" style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#1d4ed8;">${fmt(v.totalMercancia)}</strong><br><small style="color:#64748b;">Doc: ${fmt(v.totalDocumento)}</small></td>
+                <td data-label="Utilidad" style="padding:12px; vertical-align:top; text-align:right;">${utilidadTxt}</td>
+                <td data-label="Cobrado/Enganche" style="padding:12px; vertical-align:top; text-align:right;"><strong style="color:#16a34a;">${fmt(v.enganche)}</strong></td>
+                <td data-label="Saldo" style="padding:12px; vertical-align:top; text-align:right;">${saldoTxt}</td>
             </tr>`;
     }).join("");
 
@@ -368,7 +368,7 @@ window.renderReporteVentas = function() {
                 <span><strong>${canceladas.length}</strong> canceladas en vista</span>
                 <span><strong>${enBoveda.length}</strong> en bóveda pendientes de autorización</span>
            </div>
-           <table style="width:100%; border-collapse:collapse; min-width:980px;">
+           <table class="tabla-responsive" style="width:100%; border-collapse:collapse; min-width:980px;">
                 <thead>
                     <tr style="background:#f8fafc; color:#334155; text-align:left;">
                         <th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Cliente</th><th style="padding:12px;">Método</th><th style="padding:12px;">Artículos</th><th style="padding:12px; text-align:right;">Mercancía</th><th style="padding:12px; text-align:right;">Cobrado/Eng.</th><th style="padding:12px; text-align:right;">Saldo</th>
@@ -893,7 +893,7 @@ window.dibujarTablaCashFlow = function() {
 
     const generarFilaIngreso = (tier, nombre, color, bg, icon) => {
         const activo = esc[tier];
-        let celdas = meses.map(m => `<td style="padding:10px; text-align:right; color:${activo ? color : '#cbd5e1'}; font-weight:${activo ? 'bold' : 'normal'};">${fmt(m[tier])}</td>`).join('');
+        let celdas = meses.map((m, i) => `<td data-label="${_rvEsc(etiquetasMeses[i])}" style="padding:10px; text-align:right; color:${activo ? color : '#cbd5e1'}; font-weight:${activo ? 'bold' : 'normal'};">${fmt(m[tier])}</td>`).join('');
         return `
         <tr style="border-bottom:1px solid #f1f5f9; background:${activo ? bg : '#f8fafc'}; transition:0.3s;" title="${tooltip(tier)}">
             <td style="padding:10px;">
@@ -903,7 +903,7 @@ window.dibujarTablaCashFlow = function() {
                 </label>
             </td>
             ${celdas}
-            <td style="padding:10px; text-align:right; font-weight:900; color:${activo ? color : '#cbd5e1'}; border-left:2px solid #e2e8f0;">${fmt(totalFilas[tier])}</td>
+            <td data-label="Total" style="padding:10px; text-align:right; font-weight:900; color:${activo ? color : '#cbd5e1'}; border-left:2px solid #e2e8f0;">${fmt(totalFilas[tier])}</td>
         </tr>`;
     };
 
@@ -914,7 +914,7 @@ window.dibujarTablaCashFlow = function() {
 
     let html = `
     <div style="background:white; border-radius:12px; overflow:hidden; box-shadow:0 4px 15px rgba(0,0,0,0.05); border:1px solid #e2e8f0;">
-        <table style="width:100%; border-collapse:collapse; font-size:13px; min-width:800px;">
+        <table class="tabla-responsive" style="width:100%; border-collapse:collapse; font-size:13px; min-width:800px;">
             <thead style="background:#f8fafc; border-bottom:2px solid #cbd5e1; color:#475569;"><tr>${thead}</tr></thead>
             <tbody>
                 <tr><td colspan="8" style="padding:8px 12px; background:#eff6ff; font-weight:900; color:#1e40af; font-size:11px;">(+) LLAVES DE COBRANZA (Activa para simular)</td></tr>
@@ -940,20 +940,20 @@ window.dibujarTablaCashFlow = function() {
     // Fila Ingresos Totales Escenario
     html += `<tr style="border-bottom:2px solid #cbd5e1; background:#e0f2fe;">
                 <td style="padding:10px 12px; font-weight:900; color:#0369a1;">(=) TOTAL INGRESOS ESCENARIO</td>
-                ${sumatorias.map(s => `<td style="padding:10px; text-align:right; font-weight:900; color:#0369a1;">${fmt(s.ingresos)}</td>`).join('')}
-                <td style="padding:10px; text-align:right; font-weight:900; color:#0369a1; border-left:2px solid #bfdbfe;">${fmt(totalFilas.ingresosNetos)}</td>
+                ${sumatorias.map((s, i) => `<td data-label="${_rvEsc(etiquetasMeses[i])}" style="padding:10px; text-align:right; font-weight:900; color:#0369a1;">${fmt(s.ingresos)}</td>`).join('')}
+                <td data-label="Total" style="padding:10px; text-align:right; font-weight:900; color:#0369a1; border-left:2px solid #bfdbfe;">${fmt(totalFilas.ingresosNetos)}</td>
              </tr>`;
 
     // Egresos
     html += `<tr><td colspan="8" style="padding:8px 12px; background:#fef2f2; font-weight:900; color:#be123c; font-size:11px; border-top:2px solid white;">(-) OBLIGACIONES DE PAGO</td></tr>`;
-    html += `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Proveedores CXP</td>${sumatorias.map((s, i) => `<td title="${tooltipCxp(meses[i])}" style="padding:10px; text-align:right; color:#dc2626; cursor:help;">${fmt(s.cxp)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.cxp)}</td></tr>`;
-    html += `<tr style="border-bottom:2px solid #cbd5e1;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Tarjetas MSI</td>${sumatorias.map((s, i) => `<td title="${tooltipMsi(meses[i])}" style="padding:10px; text-align:right; color:#dc2626; cursor:help;">${fmt(s.msi)}</td>`).join('')}<td style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.msi)}</td></tr>`;
+    html += `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Proveedores CXP</td>${sumatorias.map((s, i) => `<td data-label="${_rvEsc(etiquetasMeses[i])}" title="${tooltipCxp(meses[i])}" style="padding:10px; text-align:right; color:#dc2626; cursor:help;">${fmt(s.cxp)}</td>`).join('')}<td data-label="Total" style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.cxp)}</td></tr>`;
+    html += `<tr style="border-bottom:2px solid #cbd5e1;"><td style="padding:10px 12px; color:#475569; font-weight:bold;">Tarjetas MSI</td>${sumatorias.map((s, i) => `<td data-label="${_rvEsc(etiquetasMeses[i])}" title="${tooltipMsi(meses[i])}" style="padding:10px; text-align:right; color:#dc2626; cursor:help;">${fmt(s.msi)}</td>`).join('')}<td data-label="Total" style="padding:10px; text-align:right; font-weight:900; color:#dc2626; border-left:2px solid #e2e8f0;">${fmt(totalFilas.msi)}</td></tr>`;
 
     // Flujo Libre Neto
     html += `<tfoot><tr style="background:#0f172a; color:white;">
                 <td style="padding:14px 12px; font-weight:900; font-size:14px;">(=) FLUJO DE CAJA NETO</td>
-                ${sumatorias.map(s => `<td style="padding:14px; text-align:right; font-weight:900; font-size:14px; color:${s.neto >= 0 ? '#4ade80' : '#f87171'};">${fmt(s.neto)}</td>`).join('')}
-                <td style="padding:14px; text-align:right; font-weight:900; font-size:14px; color:${totalFilas.flujoLibre >= 0 ? '#4ade80' : '#f87171'}; border-left:2px solid #334155;">${fmt(totalFilas.flujoLibre)}</td>
+                ${sumatorias.map((s, i) => `<td data-label="${_rvEsc(etiquetasMeses[i])}" style="padding:14px; text-align:right; font-weight:900; font-size:14px; color:${s.neto >= 0 ? '#4ade80' : '#f87171'};">${fmt(s.neto)}</td>`).join('')}
+                <td data-label="Total" style="padding:14px; text-align:right; font-weight:900; font-size:14px; color:${totalFilas.flujoLibre >= 0 ? '#4ade80' : '#f87171'}; border-left:2px solid #334155;">${fmt(totalFilas.flujoLibre)}</td>
              </tr></tfoot>`;
 
     html += `</tbody></table></div>`;
@@ -1118,7 +1118,7 @@ window.renderReporteLiquidezCortoPlazo = function() {
         </div>
 
         <div style="overflow-x:auto;">
-            <table style="width:100%; min-width:850px; border-collapse:collapse; font-size:13px;">
+            <table class="tabla-responsive" style="width:100%; min-width:850px; border-collapse:collapse; font-size:13px;">
                 <thead>
                     <tr>
                         <th style=\"padding:15px; background:#f1f5f9; text-align:left; border-bottom:2px solid #cbd5e1; width:260px;\">Cascada de Amortización</th>
@@ -1130,7 +1130,7 @@ window.renderReporteLiquidezCortoPlazo = function() {
                         <td style="padding:12px 15px; font-weight:bold; color:#16a34a;">💰 LIQUIDEZ INICIAL DISPONIBLE</td>
                         ${mesesProyeccion.map((m, i) => {
                             const tltp = i === 0 ? tooltipStr(Object.fromEntries(Object.entries(saldos).filter(([k,v])=>Math.abs(v)>0))) : `Remanente de ${mesesProyeccion[i-1].label}`;
-                            return `<td title="${tltp}" style="padding:12px; text-align:center; color:#16a34a; font-weight:bold; cursor:help; border-bottom:1px dotted #86efac;">${fmt(m.liquidezInicial)}</td>`;
+                            return `<td data-label="${_rvEsc(m.label)}" title="${tltp}" style="padding:12px; text-align:center; color:#16a34a; font-weight:bold; cursor:help; border-bottom:1px dotted #86efac;">${fmt(m.liquidezInicial)}</td>`;
                         }).join('')}
                     </tr>
                     
@@ -1138,18 +1138,18 @@ window.renderReporteLiquidezCortoPlazo = function() {
                     
                     <tr style="border-bottom:1px solid #f1f5f9;">
                         <td style="padding:10px 15px; color:#475569;">Tarjetas Bancarias (MSI Real)</td>
-                        ${mesesProyeccion.map(m => `<td title="${tooltipStr(m.desglose.tdc)}" style="padding:10px; text-align:center; color:#dc2626; cursor:help;">${fmt(m.egresos.tdc)}</td>`).join('')}
+                        ${mesesProyeccion.map(m => `<td data-label="${_rvEsc(m.label)}" title="${tooltipStr(m.desglose.tdc)}" style="padding:10px; text-align:center; color:#dc2626; cursor:help;">${fmt(m.egresos.tdc)}</td>`).join('')}
                     </tr>
                     <tr style="border-bottom:2px solid #cbd5e1;">
                         <td style="padding:10px 15px; color:#475569;">Proveedores CXP</td>
-                        ${mesesProyeccion.map(m => `<td title="${tooltipStr(m.desglose.proveedores)}" style="padding:10px; text-align:center; color:#dc2626; cursor:help;">${fmt(m.egresos.proveedores)}</td>`).join('')}
+                        ${mesesProyeccion.map(m => `<td data-label="${_rvEsc(m.label)}" title="${tooltipStr(m.desglose.proveedores)}" style="padding:10px; text-align:center; color:#dc2626; cursor:help;">${fmt(m.egresos.proveedores)}</td>`).join('')}
                     </tr>
 
                     <tr style="background:#eff6ff; border-bottom:2px solid #cbd5e1;">
                         <td style="padding:14px 15px; font-weight:900; color:#1e40af;">(=) LIQUIDEZ FINAL AL CIERRE</td>
                         ${mesesProyeccion.map(m => {
                             const neg = m.liquidezFinal < 0;
-                            return `<td style="padding:14px; text-align:center; font-weight:900; color:${neg ? '#dc2626' : '#1e40af'}; background:${neg ? '#fef2f2' : 'transparent'};">${fmt(m.liquidezFinal)}</td>`;
+                            return `<td data-label="${_rvEsc(m.label)}" style="padding:14px; text-align:center; font-weight:900; color:${neg ? '#dc2626' : '#1e40af'}; background:${neg ? '#fef2f2' : 'transparent'};">${fmt(m.liquidezFinal)}</td>`;
                         }).join('')}
                     </tr>
                 </tbody>
