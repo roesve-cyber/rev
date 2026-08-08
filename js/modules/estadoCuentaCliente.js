@@ -726,6 +726,7 @@ window.imprimirTicketEstadoCuentaCliente = function() {
         </style>
     </head>
     <body>
+    <div id="ticket-contenido">
         <div class="no-print"><button onclick="window.print()" style="padding:10px; font-weight:bold;">IMPRIMIR TICKET</button></div>
         <div class="centro">
             <img src="img/Logo.svg" alt="Mi Pueblito" style="width:50px; height:50px; object-fit:contain;" onerror="this.style.display='none'">
@@ -746,6 +747,7 @@ window.imprimirTicketEstadoCuentaCliente = function() {
         <div class="centro negrita" style="margin-bottom:6px;">DETALLE POR FOLIO</div>
         ${lineasCuentas}
         <div class="centro" style="margin-top:12px; font-size:9px;">Documento informativo de saldos.</div>
+    </div>
     </body>
     </html>`;
 

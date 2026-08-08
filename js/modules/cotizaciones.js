@@ -4,22 +4,14 @@
 function renderCotizaciones() {
     const cont = document.getElementById('cotizaciones');
     if (!cont) return;
-
-    // "Avanzada" es la cotización con planes de crédito multi-plazo
-    // personalizados — herramienta de auditoría/administración, no de venta
-    // en piso. Un vendedor no debe tener esa opción.
-    const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
-    const btnAvanzada = esAdminActual
-        ? `<button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>`
-        : '';
-
+    
     cont.innerHTML = `
         <div class="vista-header">
             <h2>📄 Cotizaciones</h2>
             <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
             <div style="display:flex; gap:10px; margin-top:15px;">
                 <button onclick="abrirCotizador()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">➕ Nueva Cotización (Simple)</button>
-                ${btnAvanzada}
+                <button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>
                 <button onclick="abrirCotizadorMayoreo()" style="padding:10px 20px; background:#0891b2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🏷️ Nueva Cotización (Mayoreo)</button>
             </div>
         </div>
@@ -80,15 +72,6 @@ function editarCotizacion(id) {
     if (cot.estado === 'Convertida') return alert('⚠️ No se puede editar una cotización ya convertida a venta.');
 
     const modo = cot.modalidad === 'mayoreo' ? 'mayoreo' : ((cot.customPlanes && cot.customPlanes.length > 0) ? 'auditoria' : 'simple');
-
-    // El modo "auditoria" (Avanzada) expone costo de adquisición y planes de
-    // crédito personalizados: solo admin puede editarlo, aunque la cotización
-    // ya exista. El vendedor puede seguir convirtiéndola a venta normalmente
-    // (botón "Convertir a Venta"), solo no puede abrir este editor.
-    if (modo === 'auditoria' && !(typeof _esAdmin === 'function' && _esAdmin())) {
-        return alert('⚠️ Esta cotización es de tipo Avanzada y solo puede editarla un administrador. Puedes convertirla a venta directamente con el botón 🛒.');
-    }
-
     window._customPlanesAuditoria = cot.customPlanes ? cot.customPlanes.map(p => ({ ...p })) : [];
     window._cotEditandoId = cot.id;
     _renderCotizadorHTML(modo, cot);
@@ -730,15 +713,7 @@ window._cotEditarPrecioLinea = function(idx, valor) {
     const a = arts[idx];
     if (!a) return;
     const { precio: nuevoPrecio, ajustado } = _cotClampAlCosto(valor, a.costo);
-    if (ajustado) {
-        // El piso (no vender debajo del costo) se sigue aplicando siempre,
-        // pero el costo exacto solo se revela al admin. Al vendedor solo se
-        // le informa que el precio se ajustó, sin el número.
-        const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
-        alert(esAdminActual
-            ? `⚠️ El precio de "${a.nombre}" no puede quedar por debajo de su costo de compra (${dinero(a.costo)}). Se ajustó al costo.`
-            : `⚠️ El precio de "${a.nombre}" no puede quedar por debajo del mínimo autorizado. Se ajustó automáticamente.`);
-    }
+    if (ajustado) alert(`⚠️ El precio de "${a.nombre}" no puede quedar por debajo de su costo de compra (${dinero(a.costo)}). Se ajustó al costo.`);
     a.precio = nuevoPrecio;
     a.subtotal = a.cantidad * nuevoPrecio;
     _renderTablaArticulosCot();
@@ -1321,7 +1296,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
           <style>
             @page { size: 80mm auto; margin: 0; }
             body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
-            #area-impresion { width: 72mm; padding: 4mm; background: white; box-sizing: border-box; }
+            #ticket-contenido { width: 72mm; padding: 4mm; background: white; box-sizing: border-box; }
             .controles { margin: 10px 0; display: flex; gap: 5px; }
             h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
             .separator { border-top: 1px double #000; margin: 5px 0; }
@@ -1334,11 +1309,11 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
             .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
             .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
             .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
-            @media print { .controles { display: none !important; } body { background: white; } #area-impresion { width: 100%; padding: 2mm; } }
+            @media print { .controles { display: none !important; } body { background: white; } #ticket-contenido { width: 100%; padding: 2mm; } }
           </style>
         </head>
         <body>
-          <div id="area-impresion">
+          <div id="ticket-contenido">
             <h2>${empresa}</h2>
             <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
                 

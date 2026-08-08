@@ -2677,6 +2677,7 @@ function generarTicketMediaHoja(datosVenta) {
     </style>
     </head>
     <body>
+    <div id="ticket-contenido">
         <div class="no-print"><button onclick="window.print()" style="padding:10px 20px; cursor:pointer;">IMPRIMIR TICKET</button></div>
 
         <div class="centro">
@@ -2769,6 +2770,7 @@ function generarTicketMediaHoja(datosVenta) {
             *** Gracias por su preferencia ***<br>
             Mueblería Mi Pueblito
         </div>
+    </div>
     </body>
     </html>`;
 
@@ -3733,6 +3735,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
     </style>
     </head>
     <body>
+    <div id="ticket-contenido">
         <div class="no-print">
             <button onclick="window.print()" style="padding:10px 20px; font-weight:bold; cursor:pointer;">IMPRIMIR COMPROBANTE</button>
         </div>
@@ -3788,6 +3791,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
             *** Documento generado únicamente por salida de inventario ***<br>
             Mueblería Mi Pueblito
         </div>
+    </div>
     </body>
     </html>`;
 
@@ -5307,6 +5311,7 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
         .centro{text-align:center}.negrita{font-weight:bold}.sep{border-top:1px dashed #000;margin:8px 0}.no-print{background:#eee;padding:10px;text-align:center;margin-bottom:10px}
         @media print{.no-print{display:none}}
     </style></head><body>
+    <div id="ticket-contenido">
         <div class="no-print"><button onclick="window.print()" style="padding:10px 18px;font-weight:bold;">Imprimir comprobante</button></div>
         <div class="centro">
             <img src="img/Logo.svg" style="width:50px;height:50px;object-fit:contain;" onerror="this.style.display='none'">
@@ -5332,6 +5337,7 @@ function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNomb
             <div class="negrita" style="font-size:10px;">FIRMA DE RECIBIDO DEL CLIENTE</div>
         </div>
         <div class="centro" style="margin-top:18px;font-size:9px;">Documento de reversa administrativa</div>
+    </div>
     </body></html>`;
     if (registrar) {
         const documentos = StorageService.get("documentosCancelacion", []);
