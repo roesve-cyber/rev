@@ -671,6 +671,29 @@ div[style*="background: white"], div[style*="background:white"] { border-radius:
   .grid-msi { grid-template-columns: 1fr !important; }
   table { min-width: 520px; }
 
+  /* ── Tablas de reportes como tarjetas apiladas en celular ──
+     Solo afecta a <table class="tabla-responsive">. En escritorio
+     (>768px) esta regla no existe, así que nada cambia ahí. */
+  table.tabla-responsive { min-width: 0 !important; width: 100%; }
+  table.tabla-responsive thead { display: none; }
+  table.tabla-responsive, table.tabla-responsive tbody,
+  table.tabla-responsive tr, table.tabla-responsive td {
+    display: block; width: 100%; box-sizing: border-box;
+  }
+  table.tabla-responsive tr {
+    margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 4px 12px; background: white;
+  }
+  table.tabla-responsive td {
+    padding: 8px 0 !important; border-bottom: 1px solid #f1f5f9 !important;
+    text-align: left !important; vertical-align: top !important;
+  }
+  table.tabla-responsive td:last-child { border-bottom: none !important; }
+  table.tabla-responsive td[data-label]::before {
+    content: attr(data-label); display: block; font-weight: 800; color: #64748b;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 3px;
+  }
+
   .modal, div[data-modal] {
     align-items: flex-end !important; padding: 0 !important; overflow-y: auto !important;
   }
