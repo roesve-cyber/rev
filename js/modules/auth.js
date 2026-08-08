@@ -767,8 +767,8 @@ function _pintarTablaUsuarios(usuarios) {
       <td style="padding:10px;text-align:center;">${u.rol === 'vendedor' ? _esc(u.vendedorNombre || StorageService.get('vendedores', []).find(v => String(v.id) === String(u.vendedorId))?.nombre || 'Sin vincular') : '-'}</td>
       <td style="padding:10px;text-align:center;"><span style="color:${u.activo?'#16a34a':'#9ca3af'};font-weight:bold;">${u.activo?'✅ Activo':'⛔ Inactivo'}</span></td>
       <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
-        <button onclick="abrirFormUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Editar">✏️</button>
-        <button onclick="eliminarUsuario(${JSON.stringify(u.uid || u.id)})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Eliminar">🗑️</button>
+        <button onclick='abrirFormUsuario(${JSON.stringify(u.uid || u.id)})' style="background:none;border:none;cursor:pointer;font-size:17px;" title="Editar">✏️</button>
+        <button onclick='eliminarUsuario(${JSON.stringify(u.uid || u.id)})' style="background:none;border:none;cursor:pointer;font-size:17px;" title="Eliminar">🗑️</button>
       </td>
     </tr>`).join('');
 
