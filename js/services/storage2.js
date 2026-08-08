@@ -71,7 +71,8 @@ const StorageService = {
         'usuariosConfig',
         'vendedores',
         'ventasPendientes',
-        'ventasRegistradas'
+        'ventasRegistradas',
+        'anticiposComisionVendedor'
     ]),
 
     _tablasCriticasConDatos: new Set([
