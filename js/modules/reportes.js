@@ -813,8 +813,15 @@ window.renderReporteCompromisos = function() {
     });
 
     msi.forEach(tarjeta => {
+        // 🛡️ REPARACIÓN: cada cuota del calendario (calcularCalendarioMSI en
+        // bancos.js) solo trae { n, fecha } — nunca tuvo su propio campo
+        // "monto". El monto real de cada cuota vive en tarjeta.cuotaMensual
+        // (nivel de la deuda, no de la cuota). Antes se leía pago.monto, que
+        // siempre era undefined -> 0, así que TODAS las cuotas pendientes se
+        // descartaban (monto <= 0) y la fila MSI del cash flow salía en ceros.
+        const cuota = Number(tarjeta.cuotaMensual || 0);
         (tarjeta.calendario || []).filter(p => p.estado !== 'Pagado').forEach(pago => {
-            const monto = Number(pago.monto || 0) - Number(pago.montoAbonado || 0);
+            const monto = cuota - Number(pago.montoAbonado || 0);
             if (monto <= 0) return;
             const d = new Date(pago.fecha);
             const diffMeses = (d.getFullYear() - hoy.getFullYear()) * 12 + (d.getMonth() - hoy.getMonth());
