@@ -653,7 +653,7 @@ function renderAbonosDirectos(filtroCliente = "") {
                             <td style="text-align:right;">
                                 <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
                                     ${accionesMoratorio}
-                                    <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: 'directo' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">Aplicar</button>
+                                    <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: (typeof _esAdmin === 'function' && _esAdmin()) ? 'directo' : 'pendiente' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">${(typeof _esAdmin === 'function' && _esAdmin()) ? 'Aplicar' : 'Registrar'}</button>
                                     <button onclick="marcarIncobrable('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#475569; color:white; font-weight:bold; cursor:pointer;">Incobrable</button>
                                 </div>
                             </td>
@@ -890,7 +890,20 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const cuenta = cuentas.find(c => c.folio === folio);
     
     if (!cuenta) return alert("Cuenta no encontrada.");
-    const modoAplicacion = opciones.modo === 'directo' ? 'directo' : 'pendiente';
+
+    // 🛡️ "Abono Directo" existe precisamente para SALTARSE la Bóveda de
+    // Autorizaciones (maker-checker) — por diseño solo debe poder usarlo un
+    // admin. El botón ya está oculto para vendedor en el menú, pero eso es
+    // solo cosmético: sin este candado, cualquiera que llegara a esta pantalla
+    // (ej. escribiendo #abonosdirectos en la URL) podría aplicar dinero
+    // directo a cualquier cuenta sin que nadie lo autorizara. Si no es admin,
+    // se fuerza el modo "pendiente" (pasa por la Bóveda como cualquier abono
+    // normal), sin importar qué se haya pedido al abrir el modal.
+    const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
+    if (opciones.modo === 'directo' && !esAdminActual) {
+        alert("⚠️ Solo un administrador puede aplicar abonos directos (sin autorización). Este abono se enviará a la Bóveda de Autorizaciones como cualquier otro.");
+    }
+    const modoAplicacion = (opciones.modo === 'directo' && esAdminActual) ? 'directo' : 'pendiente';
     const esDirecto = modoAplicacion === 'directo';
 
     const hoy = new Date();
@@ -1189,6 +1202,13 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
+    // 🛡️ Defensa adicional (además del candado al abrir el modal): si por
+    // cualquier vía se llega aquí pidiendo modo "directo" sin ser admin, se
+    // fuerza "pendiente" — nunca se salta la Bóveda de Autorizaciones para
+    // alguien que no sea admin.
+    if (modoAplicacion === 'directo' && !(typeof _esAdmin === 'function' && _esAdmin())) {
+        modoAplicacion = 'pendiente';
+    }
     const esDirecto = modoAplicacion === 'directo';
     const montoAbonoInput = parseFloat(document.getElementById("montoAbono").value);
     const fechaAbonoRaw = document.getElementById("fechaAbonoInput")?.value;
@@ -3740,8 +3760,13 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
     if (pendientes.some(p => p.origenApartadoFolio === folio || p.args?.[5] === folio)) {
         return alert("⚠️ Ya existe una conversión/venta pendiente para este folio en la Bóveda de Autorizaciones.");
     }
-    pendientes.push(cuarentena);
-    StorageService.set("ventasPendientes", pendientes);
+    // 🛡️ Mismo patrón que en ventas.js: pushAtomo (transacción real, solo
+    // APPEND) en vez de bajar+normalizar+resubir el arreglo completo, para no
+    // arriesgar pisar una aprobación/rechazo resuelta en otro dispositivo.
+    const cuarentenaNormalizada = typeof window._normalizarVentaPendienteFirestore === "function"
+        ? window._normalizarVentaPendienteFirestore(cuarentena)
+        : cuarentena;
+    StorageService.pushAtomo("ventasPendientes", cuarentenaNormalizada);
 
     if (ap) ap.estado = "Conversión a Crédito Pendiente";
     if (vnt) vnt.estado = "Conversión a Crédito Pendiente";

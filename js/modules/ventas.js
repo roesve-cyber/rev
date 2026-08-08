@@ -34,26 +34,38 @@ function _ventaFechaVisible(valor) {
     return window.formatearFechaCortaMX ? window.formatearFechaCortaMX(d) : d.toLocaleDateString('es-MX');
 }
 
-function _normalizarFechasPendientesAutorizacion() {
-    let cambioVentas = false;
-    const ventasPend = StorageService.get("ventasPendientes", []).map(v => {
+async function _normalizarFechasPendientesAutorizacion() {
+    // 🛡️ IMPORTANTE: antes esta función subía el ARREGLO COMPLETO de
+    // ventasPendientes/abonosPendientes con StorageService.set() apenas
+    // detectaba que a CUALQUIER registro le faltaba normalizar su fecha.
+    // Como esta función corre cada vez que se abre el Panel de
+    // Autorizaciones (docenas de puntos en el sistema), si el dispositivo
+    // tenía una copia local un poco vieja, ese .set() masivo podía pisar
+    // -en la nube- una aprobación/rechazo que OTRO dispositivo acababa de
+    // aplicar de forma atómica un instante antes, resucitando ese abono/venta
+    // como "Pendiente" aunque ya estuviera aplicado. Ahora se corrige SOLO el
+    // registro que de verdad cambió, con actualizarAtomo (transacción real
+    // contra Firestore), nunca el arreglo completo.
+    const ventasPend = StorageService.get("ventasPendientes", []);
+    for (const v of ventasPend) {
         const iso = v.fechaCapturaIso || v.datosVenta?.fechaIso || v.args?.[7] || null;
         const visible = _ventaFechaVisible(iso || v.fechaCaptura);
-        if (v.fechaCapturaIso === iso && v.fechaCaptura === visible) return v;
-        cambioVentas = true;
-        return { ...v, fechaCapturaIso: iso, fechaCaptura: visible };
-    });
-    if (cambioVentas) StorageService.set("ventasPendientes", ventasPend.map(_normalizarVentaPendienteFirestore));
+        if (v.fechaCapturaIso === iso && v.fechaCaptura === visible) continue;
+        const idVal = v.idCuarentena || v.id;
+        if (!idVal) continue;
+        const corregida = _normalizarVentaPendienteFirestore({ ...v, fechaCapturaIso: iso, fechaCaptura: visible });
+        await StorageService.actualizarAtomo("ventasPendientes", idVal, corregida);
+    }
 
-    let cambioAbonos = false;
-    const abonosPend = StorageService.get("abonosPendientes", []).map(a => {
+    const abonosPend = StorageService.get("abonosPendientes", []);
+    for (const a of abonosPend) {
         const iso = a.fechaCapturaIso || a.fechaAbonoIso || null;
         const visible = _ventaFechaVisible(iso || a.fechaCaptura || a.fechaAbonoStr);
-        if (a.fechaCapturaIso === iso && a.fechaCaptura === visible) return a;
-        cambioAbonos = true;
-        return { ...a, fechaCapturaIso: iso, fechaCaptura: visible };
-    });
-    if (cambioAbonos) StorageService.set("abonosPendientes", abonosPend);
+        if (a.fechaCapturaIso === iso && a.fechaCaptura === visible) continue;
+        const idVal = a.idCuarentena || a.id;
+        if (!idVal) continue;
+        await StorageService.actualizarAtomo("abonosPendientes", idVal, { fechaCapturaIso: iso, fechaCaptura: visible });
+    }
 }
 
 function _resolverEstadoBoveda(item, fallback = 'Pendiente') {
@@ -2020,9 +2032,12 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         vendedorSeleccionado: window._vendedorSeleccionado
     };
 
-    let pendientes = StorageService.get("ventasPendientes", []).map(_normalizarVentaPendienteFirestore);
-    pendientes.push(cuarentena);
-    StorageService.set("ventasPendientes", pendientes);
+    // 🛡️ Igual que con abonosPendientes: se agrega con pushAtomo (transacción
+    // real contra Firestore, solo APPEND) en vez de bajar el arreglo completo,
+    // normalizarlo entero y volver a subirlo — eso arriesgaba pisar la
+    // aprobación/rechazo de OTRA venta que otro dispositivo acababa de resolver
+    // justo en ese instante.
+    StorageService.pushAtomo("ventasPendientes", _normalizarVentaPendienteFirestore(cuarentena));
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'BOVEDA_VENTA_PENDIENTE',
@@ -5013,35 +5028,37 @@ function _cancelMarcarMovimientosOrigen({ folio, referenciaBase, motivo, tipoCan
     return marcados;
 }
 
-function _cancelLimpiarPendientesRelacionados(folio, motivo) {
+async function _cancelLimpiarPendientesRelacionados(folio, motivo) {
+    // 🛡️ Igual que en _normalizarFechasPendientesAutorizacion: se corrige
+    // registro por registro con removeAtomo/actualizarAtomo (transacción real
+    // contra Firestore), nunca subiendo el arreglo completo con .set() — para
+    // no arriesgarnos a pisar una aprobación/rechazo hecha en otro dispositivo
+    // justo en ese instante.
     const folioNorm = String(folio || '').toUpperCase();
 
-    let ventasPendientes = StorageService.get("ventasPendientes", []);
-    const ventasAntes = ventasPendientes.length;
-    ventasPendientes = ventasPendientes.filter(v => {
+    const ventasPendientes = StorageService.get("ventasPendientes", []);
+    for (const v of ventasPendientes) {
         const ref = String(v.datosVenta?.folio || v.folio || v.args?.[5] || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio || '').toUpperCase();
-        return ref !== folioNorm;
-    });
-    if (ventasPendientes.length !== ventasAntes) {
-        StorageService.set("ventasPendientes", ventasPendientes.map(_normalizarVentaPendienteFirestore));
+        if (ref !== folioNorm) continue;
+        const idVal = v.idCuarentena || v.id;
+        if (!idVal) continue;
+        await StorageService.removeAtomo("ventasPendientes", idVal);
     }
 
-    let abonosPendientes = StorageService.get("abonosPendientes", []);
-    let abonosModificados = false;
-    abonosPendientes = abonosPendientes.map(a => {
+    const abonosPendientes = StorageService.get("abonosPendientes", []);
+    for (const a of abonosPendientes) {
         const ref = String(a.folioCXC || a.folioApartado || '').toUpperCase();
-        if (ref !== folioNorm || a.estado === 'Cancelado') return a;
-        abonosModificados = true;
-        return {
-            ...a,
+        if (ref !== folioNorm || a.estado === 'Cancelado') continue;
+        const idVal = a.idCuarentena || a.id;
+        if (!idVal) continue;
+        await StorageService.actualizarAtomo("abonosPendientes", idVal, {
             estado: 'Cancelado',
+            status: 'Cancelado',
+            estatus: 'Cancelado',
             canceladoPor: 'cancelacion_relacionada',
             fechaCancelacion: _cancelIsoAhora(),
             motivoCancelacion: motivo
-        };
-    });
-    if (abonosModificados) {
-        StorageService.set("abonosPendientes", abonosPendientes);
+        });
     }
 }
 
@@ -5512,9 +5529,18 @@ window.ejecutarCancelacionVenta = function() {
         StorageService.set("ventasRegistradas", ventas);
     }
 
+    // 🛡️ Igual patrón que en los puntos anteriores: se elimina por id con
+    // removeAtomo (transacción real), nunca subiendo el arreglo filtrado
+    // completo. _cancelLimpiarPendientesRelacionados ya cubre el match por
+    // folio; aquí solo hace falta cubrir además el caso de venir señalada por
+    // índice (pendienteIndex), que puede no traer folio identificable.
     const pendientes = StorageService.get("ventasPendientes", []);
-    const pendientesRestantes = pendientes.filter((p, idx) => !(idx === ctx.pendienteIndex || p.datosVenta?.folio === ctx.folio || p.args?.[5] === ctx.folio));
-    StorageService.set("ventasPendientes", pendientesRestantes.map(_normalizarVentaPendienteFirestore));
+    pendientes.forEach((p, idx) => {
+        const coincide = idx === ctx.pendienteIndex || p.datosVenta?.folio === ctx.folio || p.args?.[5] === ctx.folio;
+        if (!coincide) return;
+        const idVal = p.idCuarentena || p.id;
+        if (idVal) StorageService.removeAtomo("ventasPendientes", idVal);
+    });
     _cancelLimpiarPendientesRelacionados(ctx.folio, motivo);
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -5871,8 +5897,13 @@ window.revisarAbonoPendiente = function(index) {
     const clienteNombre = a.clienteNombre || cuentaRef?.nombre || cuentaRef?.clienteNombre || cuentaRef?.cliente?.nombre || '-';
     if (!a.clienteNombre && clienteNombre !== '-') {
         a.clienteNombre = clienteNombre;
-        abonosP[index] = a;
-        StorageService.set("abonosPendientes", abonosP);
+        // 🛡️ Igual que en los otros dos puntos: se corrige SOLO este registro
+        // con actualizarAtomo (transacción real), nunca el arreglo completo —
+        // este backfill corre cada vez que alguien abre el modal de revisión,
+        // así que con .set() del arreglo completo se arriesgaba a pisar una
+        // aprobación hecha en otro dispositivo justo en ese momento.
+        const idVal = a.idCuarentena || a.id;
+        if (idVal) StorageService.actualizarAtomo("abonosPendientes", idVal, { clienteNombre });
     }
 
     const html = `

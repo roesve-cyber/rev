@@ -74,6 +74,18 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
     const ap = apartados.find(a => a.folio === folio);
     if (!ap) return false;
     if (String(ap.estado || '').toLowerCase().includes('cancel')) return false;
+    // 🛡️ Mientras una conversión a crédito de este apartado está pendiente
+    // de autorizar en la Bóveda, NO se acepta ningún abono nuevo. La
+    // conversión se aprueba con una foto congelada de "total ya abonado"
+    // tomada al momento de enviarla a la Bóveda: un abono capturado después
+    // de esa foto sí entraría bien a caja, pero jamás se reflejaría en la
+    // nueva cuenta por cobrar que se crea al aprobar — el cliente terminaría
+    // "debiendo" dinero que ya pagó. Hay que esperar a que la conversión se
+    // apruebe o se rechace antes de registrar más abonos a este folio.
+    if (String(ap.estado || '').toLowerCase().includes('conversi')) {
+        if (!opciones.silencioso) alert('Este apartado tiene una conversión a crédito pendiente de autorización en la Bóveda. No se pueden registrar más abonos hasta que esa conversión se apruebe o se rechace.');
+        return false;
+    }
 
     const cuentaDefault = _apartadoCuentaDefault();
     if (!cuentaId || cuentaId === 'efectivo') cuentaId = cuentaDefault.cuentaId;
