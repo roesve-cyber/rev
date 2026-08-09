@@ -115,6 +115,7 @@
     <button class="btn-desplegable" onclick="toggleSubmenu('sub-cobranza')">📂 COBRANZA <span id="badgeCobranzaVencidos" style="display:none; background:#ef4444; color:white; border-radius:9999px; padding:1px 7px; font-size:11px; margin-left:6px; font-weight:bold;"></span><span id="badgeCobranzaDocumental" title="Pagares sin aplicar (documental)" style="display:none; background:#fde68a; color:#92400e; border-radius:9999px; padding:0px 6px; font-size:9px; margin-left:3px; font-weight:bold; vertical-align:2px;"></span> <span>▾</span></button>
     <div id="sub-cobranza" class="submenu oculto-submenu">
         <button onclick="navA('arc-v3'); renderARC_v3();">📊 ARC v3 (Análisis de Riesgo)</button>
+        <button onclick="navA('reporte-rentabilidad-cartera'); if(typeof renderReporteRentabilidadCartera === 'function') renderReporteRentabilidadCartera();">💹 Rentabilidad de Cartera</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
@@ -143,6 +144,7 @@
             <button class="btn-desplegable" onclick="toggleSubmenu('sub-reportes')">📊 REPORTES <span>▾</span></button>
             <div id="sub-reportes" class="submenu oculto-submenu">
                 <button onclick="navA('reporte-ventas')">💰 Ventas</button>
+                <button onclick="navA('reporte-cubo-ventas'); if(typeof renderCuboVentas === 'function') renderCuboVentas();">🧊 Cubo de Ventas</button>
                 <button onclick="navA('reporte-global-cliente'); if(typeof renderReporteGlobalCliente === 'function') renderReporteGlobalCliente();">🌐 Reporte Global de Cliente</button>
                 <button onclick="navA('dashboard'); if(typeof renderDashboard === 'function') renderDashboard();">&#128200; Dashboard Principal</button>
                 <button onclick="navA('reporte-compras')">🛒 Compras</button>
@@ -673,6 +675,10 @@
     <!-- REPORTE GLOBAL DE CLIENTE -->
     <div id="reporte-global-cliente" class="vista oculto"></div>
 
+    <div id="reporte-rentabilidad-cartera" class="vista oculto"></div>
+
+    <div id="reporte-cubo-ventas" class="vista oculto"></div>
+
     <div id="reporte-rentabilidad" class="vista oculto">
  <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:28px;max-width:900px;margin:0 auto;">
  <h2 style="margin:0 0 8px;color:#0f172a;">Rentabilidad integrada</h2>
@@ -1170,6 +1176,8 @@
 <script src="js/modules/push-autorizaciones.js?v=5"></script>
 <script src="js/modules/estadoCuentaCliente.js?v=3"></script>
 <script src="js/modules/reporteGlobalCliente.js?v=1"></script>
+<script src="js/modules/reportes-rentabilidad-cartera.js?v=1"></script>
+<script src="js/modules/reportes-cubo-ventas.js?v=1"></script>
 <script src="js/modules/estadoCuentaBancaria.js?v=1"></script>
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
