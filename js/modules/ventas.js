@@ -5975,7 +5975,7 @@ window.aprobarAbonoCuarentena = async function(index) {
     a.grupoConciliacion = _authGrupoConciliacionDesdeReferencia(referenciaTransferencia);
     window._ultimaReferenciaTransferenciaAbono = referenciaTransferencia;
 
-    const aplicado = window.ejecutarAbonoAutorizadoReal(a);
+    const aplicado = await window.ejecutarAbonoAutorizadoReal(a);
     if (aplicado === false) return;
     
     const resSyncAbonoAprobado = await StorageService.actualizarAtomo("abonosPendientes", a.idCuarentena || a.id, {

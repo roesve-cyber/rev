@@ -1202,6 +1202,9 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
+    return _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion);
+}
+async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
     // 🛡️ Defensa adicional (además del candado al abrir el modal): si por
     // cualquier vía se llega aquí pidiendo modo "directo" sin ser admin, se
     // fuerza "pendiente" — nunca se salta la Bóveda de Autorizaciones para
@@ -1389,7 +1392,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
     let ticketEmitido = false;
     try {
         if (esDirecto) {
-            const aplicado = window.ejecutarAbonoAutorizadoReal(cuarentena);
+            const aplicado = await window.ejecutarAbonoAutorizadoReal(cuarentena);
             if (aplicado === false) throw new Error("El abono directo no fue aplicado por el ejecutor.");
         }
 
@@ -1432,7 +1435,7 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
 }
 
 // 🚀 EJECUTOR REAL: Llamado desde el Panel de Autorizaciones
-window.ejecutarAbonoAutorizadoReal = function(a) {
+window.ejecutarAbonoAutorizadoReal = async function(a) {
     if (!a || String(a.estado || '').toLowerCase().includes('cancel')) {
         alert("Este abono pendiente fue cancelado o ya no es valido.");
         return false;
@@ -1560,72 +1563,130 @@ window.ejecutarAbonoAutorizadoReal = function(a) {
         return false;
     }
 
-    const _todosLosPagares = StorageService.get("pagaresSistema", []);
-    let _pagaresDelFolio = _todosLosPagares.filter(p => p.folio === a.folioCXC && (p.estado === "Pendiente" || p.estado === "Parcial")).sort((x, y) => new Date(x.fechaVencimiento) - new Date(y.fechaVencimiento));
+    // 🛡️ Antes esta función leía pagarés/cuenta LOCALES, calculaba el nuevo
+    // estado, y subía los arreglos completos con StorageService.set(). Eso
+    // es seguro entre CLIENTES distintos (cada folio ya es su propio
+    // documento), pero si dos dispositivos aplicaban un abono a la MISMA
+    // cuenta casi al mismo tiempo, el que terminaba de subir su .set() al
+    // final podía pisar por completo el documento de esa cuenta, perdiendo
+    // el abono que el otro dispositivo acababa de aplicar. Ahora los
+    // pagarés y la cuenta se leen FRESCOS (desde el servidor, dentro de una
+    // transacción real) justo antes de escribir, así que sin importar qué
+    // tan vieja sea la copia local de este dispositivo, nunca se pisa un
+    // cambio que otro dispositivo ya aplicó.
+    const _idsPagaresCandidatos = StorageService.get("pagaresSistema", [])
+        .filter(p => p.folio === a.folioCXC)
+        .map(p => p.id);
 
-    let _montoRestante = a.montoAbonado;
-    const _pagaresCubiertos = [];
-    let _pagareParcial = null;
-
-    for (const pag of _pagaresDelFolio) {
-        const _montoNecesario = (pag.estado === 'Parcial') ? Math.max(0, pag.monto - (pag.montoAbonado || 0)) : pag.monto;
-        if (_montoRestante >= _montoNecesario - 0.01) { _pagaresCubiertos.push({ ...pag }); _montoRestante -= _montoNecesario; } 
-        else { if (_montoRestante > 0.01) { _pagareParcial = { ...pag, montoAplicado: _montoRestante }; _montoRestante = 0; } break; }
-    }
-
-    let _todosActualizados = _todosLosPagares.map(p => {
-        if (_pagaresCubiertos.find(pc => pc.id === p.id)) return { ...p, estado: "Pagado", fechaAbono: a.fechaAbonoStr, montoAbonado: p.monto };
-        if (_pagareParcial && p.id === _pagareParcial.id) return { ...p, estado: "Parcial", fechaAbono: a.fechaAbonoStr, montoAbonado: (p.montoAbonado || 0) + _pagareParcial.montoAplicado };
-        return p;
-    });
-
-    if (a.liquidacionPorPolitica) {
-        _todosActualizados = _todosActualizados.map(p => {
-            if (p.folio === a.folioCXC && (p.estado === "Pendiente" || p.estado === "Parcial")) return { ...p, estado: "Cancelado", nota: "Liquidado por política" };
-            return p;
-        });
-    }
-
-    // 🛡️ IMPORTANTE: ya no persistimos pagaresSistema aquí. Se difiere hasta
-    // después de confirmar el ingreso a caja (ver abajo), para que si
-    // _ingresarCuenta falla, NADA quede escrito — ni pagarés, ni cuenta por
-    // cobrar, ni saldo — y el abono siga intacto en la bóveda para reintentar.
-
-    const cuentasXCobrar = StorageService.get("cuentasPorCobrar", []);
-    const idxCuenta = cuentasXCobrar.findIndex(c => c.folio === a.folioCXC);
-    if (idxCuenta !== -1) {
-        const cuentaAct = cuentasXCobrar[idxCuenta];
-        cuentaAct.abonos = cuentaAct.abonos || [];
-        cuentaAct.abonos.push({ idOperacion: a.idCuarentena || a.id || a.idOperacion || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null });
-        _cxcAplicarPagoAMoratorios(cuentaAct, _montoRestante);
-
-        let nuevoSaldoReal = _todosActualizados.filter(p => p.folio === a.folioCXC && (p.estado === 'Pendiente' || p.estado === 'Parcial')).reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
-        nuevoSaldoReal += _cxcTotalMoratoriosPendientes(cuentaAct);
-
-        // 🛡️ Confirmamos el ingreso a caja ANTES de dar por aplicado el abono.
-        // Antes, si _ingresarCuenta fallaba (p. ej. cuentaId inexistente),
-        // el abono quedaba marcado en cuentaAct.abonos y el saldo ya reducido
-        // aunque el dinero nunca llegara a movimientosCaja: un abono
-        // "fantasma" — descontado del cliente pero invisible en caja.
-        if (typeof window._ingresarCuenta !== 'function') {
-            alert("No se pudo registrar el abono: el módulo de caja no está disponible. Nada se aplicó.");
-            return false;
-        }
-        const _ingresoOk = window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${cuentaAct.nombre} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null, grupoConciliacion: a.grupoConciliacion || '', referenciaBancaria: a.referenciaBancaria || '', foliosGrupo: a.grupoConciliacion ? [a.folioCXC] : [] });
-        if (!_ingresoOk) {
-            alert(`No se pudo registrar el ingreso a caja para la cuenta "${a.etiquetaCuenta || a.cuentaId || 'destino'}".\n\nEl abono NO se aplicó a la cuenta por cobrar (nada se guardó). Verifica que esa cuenta de efectivo/banco exista y vuelve a intentar.`);
-            return false;
-        }
-
-        // Solo ahora, con el ingreso a caja confirmado, persistimos pagarés,
-        // saldo y cuenta por cobrar.
-        StorageService.set("pagaresSistema", _todosActualizados);
-        cuentaAct.saldoActual = nuevoSaldoReal;
-        if (nuevoSaldoReal <= 0.01) { cuentaAct.estado = "Saldado"; cuentaAct.saldoActual = 0; }
-        cuentasXCobrar[idxCuenta] = cuentaAct;
-        StorageService.set("cuentasPorCobrar", cuentasXCobrar);
-    } else {
+    const cuentaLocalExiste = StorageService.get("cuentasPorCobrar", []).some(c => c.folio === a.folioCXC);
+    if (!cuentaLocalExiste) {
         alert("No se encontro la cuenta por cobrar para aplicar el abono.");
+        return false;
+    }
+
+    // 🛡️ Confirmamos el ingreso a caja ANTES de dar por aplicado el abono.
+    // Si _ingresarCuenta falla (p. ej. cuentaId inexistente), el abono NUNCA
+    // se marca en la cuenta ni se descuenta el saldo — nada queda escrito.
+    if (typeof window._ingresarCuenta !== 'function') {
+        alert("No se pudo registrar el abono: el módulo de caja no está disponible. Nada se aplicó.");
+        return false;
+    }
+    const _ingresoOk = window._ingresarCuenta({ monto: a.montoAbonado, cuentaId: a.cuentaId, etiqueta: a.etiquetaCuenta, concepto: `Abono a ${a.clienteNombre || ''} - ${a.folioCXC}`, referencia: `ABONO-${a.folioCXC}`, fecha: a.fechaAbonoIso, idOperacion: a.idCuarentena || a.id || a.idOperacion || null, grupoConciliacion: a.grupoConciliacion || '', referenciaBancaria: a.referenciaBancaria || '', foliosGrupo: a.grupoConciliacion ? [a.folioCXC] : [] });
+    if (!_ingresoOk) {
+        alert(`No se pudo registrar el ingreso a caja para la cuenta "${a.etiquetaCuenta || a.cuentaId || 'destino'}".\n\nEl abono NO se aplicó a la cuenta por cobrar (nada se guardó). Verifica que esa cuenta de efectivo/banco exista y vuelve a intentar.`);
+        return false;
+    }
+
+    const _idOperacionAbono = String(a.idCuarentena || a.id || a.idOperacion || '');
+    const lecturas = [
+        { tabla: 'cuentasPorCobrar', clave: a.folioCXC },
+        ..._idsPagaresCandidatos.map(id => ({ tabla: 'pagaresSistema', clave: id }))
+    ];
+
+    let resultadoTx;
+    try {
+        resultadoTx = await StorageService.transaccionRegistros(lecturas, (frescos) => {
+            const cuentaFresca = frescos[`cuentasPorCobrar:${a.folioCXC}`];
+            if (!cuentaFresca) return null; // la cuenta desapareció entre el pre-check y ahora (rarísimo)
+
+            // Idempotencia final, con el dato más fresco posible: si este
+            // idOperacion ya está aplicado en el servidor (otro dispositivo
+            // ganó la carrera), no lo volvemos a aplicar.
+            const yaAplicadoFresco = _idOperacionAbono && (cuentaFresca.abonos || []).some(ab =>
+                String(ab.idOperacion || ab.idCuarentena || ab.id || '') === _idOperacionAbono
+            );
+            if (yaAplicadoFresco) return { escrituras: [], resultado: { yaAplicado: true } };
+
+            const pagaresDelFolioFrescos = _idsPagaresCandidatos
+                .map(id => frescos[`pagaresSistema:${id}`])
+                .filter(p => p && p.folio === a.folioCXC);
+
+            const pendientesOrdenados = pagaresDelFolioFrescos
+                .filter(p => p.estado === "Pendiente" || p.estado === "Parcial")
+                .sort((x, y) => new Date(x.fechaVencimiento) - new Date(y.fechaVencimiento));
+
+            let montoRestante = a.montoAbonado;
+            const cubiertos = [];
+            let parcial = null;
+            for (const pag of pendientesOrdenados) {
+                const montoNecesario = (pag.estado === 'Parcial') ? Math.max(0, pag.monto - (pag.montoAbonado || 0)) : pag.monto;
+                if (montoRestante >= montoNecesario - 0.01) { cubiertos.push(pag); montoRestante -= montoNecesario; }
+                else { if (montoRestante > 0.01) { parcial = { ...pag, montoAplicado: montoRestante }; montoRestante = 0; } break; }
+            }
+
+            const pagaresEscritura = [];
+            pagaresDelFolioFrescos.forEach(p => {
+                if (cubiertos.find(pc => pc.id === p.id)) {
+                    pagaresEscritura.push({ tabla: 'pagaresSistema', clave: p.id, data: { ...p, estado: "Pagado", fechaAbono: a.fechaAbonoStr, montoAbonado: p.monto } });
+                } else if (parcial && p.id === parcial.id) {
+                    pagaresEscritura.push({ tabla: 'pagaresSistema', clave: p.id, data: { ...p, estado: "Parcial", fechaAbono: a.fechaAbonoStr, montoAbonado: (p.montoAbonado || 0) + parcial.montoAplicado } });
+                } else if (a.liquidacionPorPolitica && (p.estado === "Pendiente" || p.estado === "Parcial")) {
+                    pagaresEscritura.push({ tabla: 'pagaresSistema', clave: p.id, data: { ...p, estado: "Cancelado", nota: "Liquidado por política" } });
+                }
+            });
+
+            // Copia mutable de la cuenta fresca para aplicar el abono y los moratorios.
+            const cuentaAct = { ...cuentaFresca, abonos: [...(cuentaFresca.abonos || [])] };
+            cuentaAct.abonos.push({ idOperacion: _idOperacionAbono || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null });
+            _cxcAplicarPagoAMoratorios(cuentaAct, montoRestante);
+
+            // Saldo pendiente tras esta escritura: pagarés que sigan
+            // pendientes/parciales DESPUÉS de aplicar los cambios de arriba,
+            // más los pagarés del folio que ya venían así y no se tocaron.
+            const estadoPorId = {};
+            pagaresEscritura.forEach(e => { estadoPorId[e.data.id] = e.data; });
+            const pagaresFinales = pagaresDelFolioFrescos.map(p => estadoPorId[p.id] || p);
+            let nuevoSaldoReal = pagaresFinales
+                .filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial')
+                .reduce((s, p) => s + (p.estado === 'Parcial' ? Math.max(0, (p.monto || 0) - (p.montoAbonado || 0)) : (p.monto || 0)), 0);
+            nuevoSaldoReal += _cxcTotalMoratoriosPendientes(cuentaAct);
+
+            cuentaAct.saldoActual = nuevoSaldoReal;
+            if (nuevoSaldoReal <= 0.01) { cuentaAct.estado = "Saldado"; cuentaAct.saldoActual = 0; }
+
+            return {
+                escrituras: [{ tabla: 'cuentasPorCobrar', clave: a.folioCXC, data: cuentaAct }, ...pagaresEscritura],
+                resultado: { yaAplicado: false, cuentaAct }
+            };
+        });
+    } catch (e) {
+        // 🛡️ El dinero YA entró a caja (_ingresarCuenta arriba tuvo éxito),
+        // pero la actualización de la cuenta por cobrar / pagarés falló al
+        // subir a Firebase (p. ej. sin conexión en el momento exacto). Esto
+        // deja el abono aplicado en caja pero NO reflejado en el saldo del
+        // cliente — se avisa explícitamente para que se revise a mano en vez
+        // de fallar en silencio.
+        console.error('Error al aplicar abono (cuenta/pagarés):', e);
+        alert(`⚠️ El dinero SÍ se registró en caja, pero no se pudo actualizar el saldo de la cuenta por cobrar (falló la sincronización). Revisa manualmente la cuenta "${a.folioCXC}" y reintenta si el saldo no bajó.`);
+        return false;
+    }
+
+    if (resultadoTx?.yaAplicado) {
+        // Otro dispositivo ya había aplicado este mismo abono a la cuenta.
+        // El dinero de ESTE intento ya entró a caja arriba: se avisa para
+        // que se concilie manualmente (no se descontará dos veces del saldo
+        // del cliente, pero puede haber un ingreso de caja duplicado).
+        alert("Este abono ya fue aplicado a la cuenta por otro dispositivo justo antes. El dinero de este intento sí quedó registrado en caja — revisa que no haya quedado un ingreso duplicado.");
         return false;
     }
 
