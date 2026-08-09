@@ -1093,6 +1093,114 @@ const StorageService = {
         }
     },
 
+    // 🔒 Transacción atómica MULTI-DOCUMENTO para tablas "de registro
+    // individual" (cuentasPorCobrar, pagaresSistema, etc. — ver
+    // _tablasRegistroIndividual), donde cada registro vive en su propio
+    // documento Firestore (posData/{tabla}/registros/{clave}), NO como un
+    // arreglo dentro de un solo documento (ese es el esquema de
+    // actualizarAtomo/pushAtomo/removeAtomo, para ventasPendientes /
+    // abonosPendientes — esquemas distintos, no intercambiables).
+    //
+    // Por qué existe: aplicar un abono (ejecutarAbonoAutorizadoReal) leía la
+    // cuenta y los pagarés LOCALES, calculaba el nuevo estado, y subía los
+    // arreglos completos con StorageService.set(). _sincronizarTablaPorRegistro
+    // ya evita que eso pise CUENTAS DE OTROS CLIENTES (cada folio es su
+    // propio documento) — pero si DOS dispositivos aplicaban un abono a la
+    // MISMA cuenta casi al mismo tiempo, cada uno partía de una copia local
+    // que no veía el cambio del otro, y el que subía su .set() al final
+    // pisaba por completo el documento de esa cuenta, perdiendo el abono del
+    // otro dispositivo.
+    //
+    // Esta función lee TODOS los documentos pedidos (lecturas) DENTRO de una
+    // transacción de Firestore (siempre frescos, nunca la copia local),
+    // ejecuta fnTransform con esos datos frescos para calcular qué escribir,
+    // y escribe todo dentro de la MISMA transacción. Si otro dispositivo
+    // modifica cualquiera de esos documentos entre la lectura y la
+    // escritura, Firestore reintenta la transacción entera automáticamente
+    // con datos frescos otra vez — nunca se pisa un cambio ajeno.
+    //
+    // lecturas: [{ tabla, clave }, ...]
+    // fnTransform(frescos): recibe frescos["tabla:clave"] (dato actual en el
+    //   servidor, o null si el documento no existe) para cada lectura
+    //   pedida, y debe regresar { escrituras: [{ tabla, clave, data }, ...],
+    //   resultado } o null para abortar sin escribir nada.
+    async transaccionRegistros(lecturas, fnTransform) {
+        const claveDoc = (v) => String(v).replace(/\//g, '-').slice(0, 400);
+
+        // Sin Firebase activo (modo local/offline): no hay riesgo de carrera
+        // entre dispositivos, aplicamos directo sobre los datos locales.
+        if (!(window._firebaseActivo && window._db)) {
+            const frescos = {};
+            for (const { tabla, clave } of lecturas) {
+                const arr = this.get(tabla, []);
+                const campo = this._tablasRegistroIndividual[tabla];
+                const item = Array.isArray(arr) ? arr.find(i => String(i?.[campo]) === String(clave)) : null;
+                frescos[`${tabla}:${clave}`] = item ? { ...item } : null;
+            }
+            const salida = fnTransform(frescos);
+            if (!salida) return null;
+            for (const esc of salida.escrituras) {
+                const campo = this._tablasRegistroIndividual[esc.tabla];
+                const arr = this.get(esc.tabla, []);
+                const idx = Array.isArray(arr) ? arr.findIndex(i => String(i?.[campo]) === String(esc.clave)) : -1;
+                if (idx !== -1) arr[idx] = esc.data; else arr.push(esc.data);
+                await this._guardarLocalDirecto(esc.tabla, arr);
+            }
+            return salida.resultado;
+        }
+
+        const refsLectura = lecturas.map(({ tabla, clave }) => ({
+            tabla, clave,
+            ref: window._db.collection('posData').doc(tabla).collection('registros').doc(claveDoc(clave))
+        }));
+
+        let resultado = null;
+        let salidaFinal = null;
+        try {
+            await window._db.runTransaction(async (transaction) => {
+                const frescos = {};
+                for (const r of refsLectura) {
+                    const snap = await transaction.get(r.ref);
+                    frescos[`${r.tabla}:${r.clave}`] = snap.exists ? snap.data() : null;
+                }
+
+                const salida = fnTransform(frescos);
+                if (!salida) { resultado = null; salidaFinal = null; return; }
+
+                for (const esc of salida.escrituras) {
+                    const ref = window._db.collection('posData').doc(esc.tabla).collection('registros').doc(claveDoc(esc.clave));
+                    transaction.set(ref, this._limpiarParaFirestore(esc.data));
+                }
+                resultado = salida.resultado;
+                salidaFinal = salida;
+            });
+        } catch (e) {
+            console.warn('⚠️ transaccionRegistros falló:', e);
+            this._notificarFalloSync(lecturas[0]?.tabla || 'registros', e);
+            throw e; // el llamador decide cómo avisar al usuario; no hay copia local que aplicar aquí sin datos frescos
+        }
+
+        // Reflejamos las escrituras exitosas también en la copia local, para
+        // que la pantalla y el resto del sistema (que lee StorageService.get)
+        // vean el resultado sin esperar a un syncAll().
+        if (salidaFinal) {
+            const tsAhora = Date.now();
+            for (const esc of salidaFinal.escrituras) {
+                const campo = this._tablasRegistroIndividual[esc.tabla];
+                const arr = this.get(esc.tabla, []);
+                const idx = Array.isArray(arr) ? arr.findIndex(i => String(i?.[campo]) === String(esc.clave)) : -1;
+                if (idx !== -1) arr[idx] = esc.data; else arr.push(esc.data);
+                this._cache[esc.tabla] = arr;
+                this._actualizarVariableGlobal(esc.tabla, arr);
+                if (this._usandoLocalForage) await localforage.setItem(esc.tabla, arr);
+                else localStorage.setItem(esc.tabla, JSON.stringify(arr));
+                this._cache[`_ts_${esc.tabla}`] = tsAhora;
+            }
+        }
+
+        return resultado;
+    },
+
     // 🚀 DESCUENTO ATÓMICO DE STOCK EN VENTA (multi-caja)
     // Antes: ventas.js leía `productos` LOCAL, validaba disponibilidad y
     // escribía el nuevo stock con un StorageService.set() normal (debounce
