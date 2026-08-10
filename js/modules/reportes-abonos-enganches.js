@@ -280,11 +280,11 @@ window.renderReporteAbonEnganches = function() {
         </div>
 
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:15px; margin-bottom:20px;">
+            ${esAdminActual ? `
             <div style="background:#ecfdf5; border:1px solid #86efac; padding:18px; border-radius:10px;">
                 <div style="font-size:11px; font-weight:bold; color:#047857;">TOTAL MOVIMIENTOS</div>
                 <div style="font-size:28px; font-weight:900; color:#047857; margin-top:5px;">${listado.length}</div>
             </div>
-            ${esAdminActual ? `
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:18px; border-radius:10px;">
                 <div style="font-size:11px; font-weight:bold; color:#059669;">TOTAL COBRADO</div>
                 <div style="font-size:28px; font-weight:900; color:#059669; margin-top:5px;">${fmt(totalAbonos)}</div>
@@ -307,8 +307,8 @@ window.renderReporteAbonEnganches = function() {
         </style>
 
         <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center;">
-            ${esAdminActual ? `<button onclick="exportarReporteAbonEnganches()" style="padding:12px 20px; background:#3b82f6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📥 Descargar CSV</button>` : ''}
-            <button onclick="generarDocumentoReporteAbonEnganches()" style="padding:12px 20px; background:#8b5cf6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📄 Generar PDF/Imagen</button>
+            ${esAdminActual ? `<button onclick="exportarReporteAbonEnganches()" style="padding:12px 20px; background:#3b82f6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📥 Descargar CSV</button>
+            <button onclick="generarDocumentoReporteAbonEnganches()" style="padding:12px 20px; background:#8b5cf6; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:13px;">📄 Generar PDF/Imagen</button>` : ''}
         </div>
     `;
 
@@ -327,9 +327,9 @@ window.renderReporteAbonEnganches = function() {
                         <td style="padding:12px; vertical-align:top;\"><strong>${esc(m.cliente)}</strong><br><small style="color:#64748b;">${esc(m.vendedor)}</small></td>
                         <td class="col-fecha-venta" style="padding:8px 6px; vertical-align:top; font-size:11px; display:table-cell;">${m.fechaVenta}</td>
                         <td style="padding:8px 6px; vertical-align:top; font-size:11px;"><strong>${m.fechaAbono}</strong></td>
-                        <td class="col-saldo-anterior" style="padding:8px 6px; vertical-align:top; text-align:right; font-weight:bold; color:#2563eb; display:table-cell; font-size:11px;">${fmt(m.saldoAnterior)}</td>
-                        <td style="padding:8px 6px; vertical-align:top; text-align:right; font-weight:bold; color:#16a34a; font-size:11px;">${fmt(m.monto)}</td>
-                        <td class="col-saldo-pendiente" style="padding:8px 6px; vertical-align:top; text-align:right; font-weight:bold; color:#7c3aed; display:table-cell; font-size:11px;">${fmt(m.saldoPosterior)}</td>
+                        <td class="col-saldo-anterior" style="padding:8px 6px; vertical-align:top; text-align:right; font-weight:bold; color:#2563eb; display:${esAdminActual ? 'table-cell' : 'none'}; font-size:11px;">${fmt(m.saldoAnterior)}</td>
+                        ${esAdminActual ? `<td style="padding:8px 6px; vertical-align:top; text-align:right; font-weight:bold; color:#16a34a; font-size:11px;">${fmt(m.monto)}</td>` : ''}
+                        <td class="col-saldo-pendiente" style="padding:8px 6px; vertical-align:top; text-align:right; font-weight:bold; color:#7c3aed; display:${esAdminActual ? 'table-cell' : 'none'}; font-size:11px;">${fmt(m.saldoPosterior)}</td>
                         <td style="padding:8px 6px; vertical-align:top; text-align:center;">${icon}</td>
                     </tr>`;
             }).join('');
@@ -348,18 +348,18 @@ window.renderReporteAbonEnganches = function() {
                                     <th style="padding:8px 6px; text-align:left;">Cliente / Vendedor</th>
                                     <th class="header-fecha-venta" style="padding:8px 6px; text-align:center; display:table-cell; font-size:12px;">Fecha Venta</th>
                                     <th style="padding:8px 6px; text-align:center; font-size:12px;">Fecha</th>
-                                    <th class="header-saldo-anterior" style="padding:8px 6px; text-align:right; display:table-cell; font-size:12px;">Saldo Anterior</th>
-                                    <th style="padding:8px 6px; text-align:right; font-size:12px;">Monto Cobrado</th>
-                                    <th class="header-saldo-pendiente" style="padding:8px 6px; text-align:right; display:table-cell; font-size:12px;">Saldo Pendiente</th>
+                                    <th class="header-saldo-anterior" style="padding:8px 6px; text-align:right; display:${esAdminActual ? 'table-cell' : 'none'}; font-size:12px;">Saldo Anterior</th>
+                                    ${esAdminActual ? `<th style="padding:8px 6px; text-align:right; font-size:12px;">Monto Cobrado</th>` : ''}
+                                    <th class="header-saldo-pendiente" style="padding:8px 6px; text-align:right; display:${esAdminActual ? 'table-cell' : 'none'}; font-size:12px;">Saldo Pendiente</th>
                                     <th style="padding:8px 6px; text-align:center; font-size:12px;">Estado</th>
                                 </tr>
                             </thead>
                             <tbody style="font-size:12px;">${tablaFilas}</tbody>
                             <tfoot>
                                 <tr style="background:#f0fdf4; border-top:2px solid #cbd5e1; font-weight:bold;">
-                                    <td colspan="5" style="padding:12px; text-align:right;">SUBTOTAL ${esc(ubicacion)}:</td>
-                                    <td style="padding:12px; text-align:right; color:#16a34a;">${fmt(subtotalAbonos)}</td>
-                                    <td style="padding:12px; text-align:right; color:#7c3aed;">${fmt(subtotalSaldoPosterior)}</td>
+                                    <td colspan="${esAdminActual ? 5 : 4}" style="padding:12px; text-align:right;">SUBTOTAL ${esc(ubicacion)}:</td>
+                                    ${esAdminActual ? `<td style="padding:12px; text-align:right; color:#16a34a;">${fmt(subtotalAbonos)}</td>
+                                    <td style="padding:12px; text-align:right; color:#7c3aed;">${fmt(subtotalSaldoPosterior)}</td>` : ''}
                                     <td></td>
                                 </tr>
                             </tfoot>
@@ -386,6 +386,12 @@ window.renderReporteAbonEnganches = function() {
 };
 
 window.exportarReporteAbonEnganches = function() {
+    // 🛡️ El botón ya está oculto para no-admin, pero esto es invocable
+    // directo desde la consola — el candado real va aquí, no solo en la UI.
+    if (typeof window.esAdmin === 'function' && !window.esAdmin()) {
+        alert('No autorizado.');
+        return;
+    }
     const filtroDesde = document.getElementById('abonDesde')?.value || '';
     const filtroHasta = document.getElementById('abonHasta')?.value || '';
 
@@ -462,6 +468,13 @@ window.exportarReporteAbonEnganches = function() {
 // ========================================================================
 
 window.generarDocumentoReporteAbonEnganches = function() {
+    // 🛡️ Mismo candado que exportarReporteAbonEnganches: el botón ya está
+    // oculto para no-admin, pero esta función es global y se puede llamar
+    // directo desde la consola.
+    if (typeof window.esAdmin === 'function' && !window.esAdmin()) {
+        alert('No autorizado.');
+        return;
+    }
     const fmt = v => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(v || 0);
     const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
