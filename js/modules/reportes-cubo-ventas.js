@@ -133,7 +133,6 @@ window.construirHechosCuboVentas = function() {
         articulos.forEach(a => {
             const cantidad = Number(a.cantidad) || 1;
             const precioBaseUnit = Number(a.precioContado ?? a.precio ?? 0) || 0;
-            const precioVentaUnit = Number(a.precio ?? a.precioContado ?? 0) || 0;
 
             const costoInfo = (typeof window._rrcResolverCostoArticulo === 'function')
                 ? window._rrcResolverCostoArticulo(a, v.fechaVenta || v.fecha, historialCostos, productos)
@@ -144,6 +143,18 @@ window.construirHechosCuboVentas = function() {
             const interesLinea = interesTotalVenta * pesoLinea;
             const precioBaseTotalLinea = precioBaseUnit * cantidad;
             const utilidadLinea = precioBaseTotalLinea - costoTotalLinea;
+
+            // 🛡️ "Precio de venta" = lo que el cliente realmente paga por esta
+            // pieza, incluyendo su parte del interés si fue a crédito. El
+            // sistema NO guarda un "precio con intereses" por artículo — el
+            // campo `articulo.precio` es un espejo de `precioContado` (mismo
+            // valor siempre, confirmado contra datos reales); el interés solo
+            // existe a nivel de toda la venta (total vs. totalMercancia). Por
+            // eso se construye aquí como base + interés prorrateado, no
+            // leyendo `articulo.precio` directo (eso hacía que "Precio base" y
+            // "Precio de venta" salieran siempre idénticos).
+            const precioVentaTotalLinea = precioBaseTotalLinea + interesLinea;
+            const precioVentaUnit = cantidad > 0 ? precioVentaTotalLinea / cantidad : precioVentaTotalLinea;
 
             hechos.push({
                 folio: v.folio || '',
@@ -157,7 +168,7 @@ window.construirHechosCuboVentas = function() {
                 precioBaseUnit,
                 precioBaseTotal: precioBaseTotalLinea,
                 precioVentaUnit,
-                precioVentaTotal: precioVentaUnit * cantidad,
+                precioVentaTotal: precioVentaTotalLinea,
                 costoUnitario: costoInfo.costoUnitario || 0,
                 costoTotal: costoTotalLinea,
                 costoConfianza: costoInfo.confianza || 'sin_dato',

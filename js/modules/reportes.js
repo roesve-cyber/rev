@@ -149,8 +149,21 @@ function _rvUnidades(v) {
 }
 
 function _rvCostoEstimado(v) {
+    // 🛡️ Antes leía articulo.costo directo, que en la práctica SIEMPRE viene
+    // en 0 en ventasRegistradas (el costo nunca se captura ahí) — así que
+    // "Utilidad estimada" terminaba mostrando "Sin costo" en prácticamente
+    // toda venta. Ahora usa el mismo motor de costeo histórico que ya usan
+    // Rentabilidad de Cartera y el Cubo de Ventas (costo real por fecha de
+    // compra → costo actual de catálogo → estimado por margen), para que
+    // los tres reportes financieros del sistema cuenten la misma historia.
+    const historialCostos = StorageService.get('historialCostos', []);
+    const productos = StorageService.get('productos', []);
     return _rvArticulos(v).reduce((s, a) => {
         const cantidad = Number(a.cantidad || a.cant || 1) || 1;
+        if (typeof window._rrcResolverCostoArticulo === 'function') {
+            const info = window._rrcResolverCostoArticulo(a, v.fechaVenta || v.fecha, historialCostos, productos);
+            return s + (info.costoTotal != null ? info.costoTotal : (info.costoUnitario || 0) * cantidad);
+        }
         const costo = Number(a.costoUnitario || a.costo || a.precioCompra || a.costoPromedio || 0) || 0;
         return s + (cantidad * costo);
     }, 0);
@@ -159,6 +172,13 @@ function _rvCostoEstimado(v) {
 function _rvVentaNormalizada(v, origen = "registrada", index = null) {
     const totalMercancia = _rvTotalMercancia(v);
     const costoEstimado = _rvCostoEstimado(v);
+    const totalDocumento = _rvTotalDocumento(v);
+    // 🛡️ Interés: la diferencia entre lo que el cliente termina pagando
+    // (totalDocumento, ya incluye financiamiento si fue a crédito) y el
+    // precio de mercancía sin intereses (totalMercancia). En ventas de
+    // contado es $0 porque ambos totales son iguales.
+    const interes = Math.max(0, totalDocumento - totalMercancia);
+    const utilidadEstimada = costoEstimado > 0 ? Math.max(0, totalMercancia - costoEstimado) : 0;
     return {
         raw: v,
         index,
@@ -169,13 +189,22 @@ function _rvVentaNormalizada(v, origen = "registrada", index = null) {
         cliente: _rvCliente(v),
         metodo: _rvMetodo(v),
         totalMercancia,
-        totalDocumento: _rvTotalDocumento(v),
+        totalDocumento,
         enganche: _rvEnganche(v),
         saldo: _rvSaldo(v),
         articulos: _rvArticulos(v),
         unidades: _rvUnidades(v),
         costoEstimado,
-        utilidadEstimada: costoEstimado > 0 ? Math.max(0, totalMercancia - costoEstimado) : 0,
+        interes,
+        // Utilidad de mercancía: precio base (sin intereses) menos costo.
+        // Es la ganancia "del producto" en sí, sin importar cómo se pagó.
+        utilidadEstimada,
+        // Utilidad total: la de mercancía MÁS el interés cobrado por
+        // financiar la venta — el interés es ganancia real del negocio, sin
+        // costo asociado, así que nunca debe quedar fuera de la utilidad
+        // total. Antes este reporte solo mostraba utilidadEstimada, lo que
+        // subestimaba la ganancia real de toda venta a crédito.
+        utilidadTotal: (costoEstimado > 0 ? utilidadEstimada : 0) + interes,
         vendedor: v.vendedor || v.vendedorNombre || v.vendedorSeleccionado?.nombre || "",
         cuentaCobro: v.cuentaPago || v.cuenta || v.etiquetaCuenta || v.datosVenta?.cuentaPago || "",
         estado: origen === "cuarentena" ? "En bóveda" : (v.estado || v.estatus || "Registrada")
@@ -273,8 +302,11 @@ window.renderReporteVentas = function() {
     const unidades = registradas.reduce((s, v) => s + v.unidades, 0);
     const costoEstimado = registradas.reduce((s, v) => s + v.costoEstimado, 0);
     const utilidadEstimada = registradas.reduce((s, v) => s + v.utilidadEstimada, 0);
+    const interesTotal = registradas.reduce((s, v) => s + v.interes, 0);
+    const utilidadTotal = registradas.reduce((s, v) => s + v.utilidadTotal, 0);
     const ticketPromedio = registradas.length ? totalMercancia / registradas.length : 0;
     const margenEstimado = costoEstimado > 0 && totalMercancia > 0 ? (utilidadEstimada / totalMercancia) * 100 : 0;
+    const margenTotal = costoEstimado > 0 && totalMercancia > 0 ? (utilidadTotal / totalMercancia) * 100 : 0;
 
     const kpisHTML = `
         ${_kpiCard("Ventas registradas", String(registradas.length), "#0f172a", "📄")}
@@ -282,7 +314,9 @@ window.renderReporteVentas = function() {
         ${_kpiCard("Cobro inicial", fmt(cobradoInicial), "#16a34a", "💵")}
         ${_kpiCard("Cartera originada", fmt(carteraOriginada), "#7c3aed", "💳")}
         ${_kpiCard("Ticket promedio", fmt(ticketPromedio), "#0f766e", "AVG")}
-        ${_kpiCard("Utilidad estimada", costoEstimado > 0 ? `${fmt(utilidadEstimada)} (${margenEstimado.toFixed(1)}%)` : "Sin costo", "#dc2626", "M")}
+        ${_kpiCard("Utilidad de mercancía", costoEstimado > 0 ? `${fmt(utilidadEstimada)} (${margenEstimado.toFixed(1)}%)` : "Sin costo", "#dc2626", "M")}
+        ${_kpiCard("Interés cobrado (crédito)", fmt(interesTotal), "#b45309", "%")}
+        ${_kpiCard("Utilidad total (con interés)", costoEstimado > 0 ? `${fmt(utilidadTotal)} (${margenTotal.toFixed(1)}%)` : "Sin costo", "#166534", "M+")}
     `;
 
     const porMes = new Map();
@@ -344,7 +378,7 @@ window.renderReporteVentas = function() {
             ? `<div style="font-weight:800; color:#dc2626;">${fmt(v.saldo)}</div>`
             : '<span style="color:#94a3b8;">-</span>';
         const utilidadTxt = v.costoEstimado > 0
-            ? `<strong style="color:#0f766e;">${fmt(v.utilidadEstimada)}</strong><br><small style="color:#64748b;">Costo: ${fmt(v.costoEstimado)}</small>`
+            ? `<strong style="color:#0f766e;">${fmt(v.utilidadEstimada)}</strong><br><small style="color:#64748b;">Costo: ${fmt(v.costoEstimado)}</small>${v.interes > 0 ? `<br><small style="color:#b45309;">+ interés: ${fmt(v.interes)}</small><br><strong style="color:#166534;">Total: ${fmt(v.utilidadTotal)}</strong>` : ''}`
             : '<span style="color:#94a3b8;">Sin costo</span>';
         return `
             <tr style="border-bottom:1px solid #e2e8f0;">
@@ -484,10 +518,10 @@ window.renderReporteVentas = function() {
 
 window.exportarReporteVentas = function() {
     const ventas = _rvVentasFiltradas();
-    let csv = "Origen,Folio,Fecha,Cliente,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,CostoEstimado,UtilidadEstimada,EngancheCobrado,Saldo,Vendedor,Estado\n";
+    let csv = "Origen,Folio,Fecha,Cliente,Metodo,Articulos,Unidades,TotalMercancia,TotalDocumento,CostoEstimado,UtilidadEstimada,Interes,UtilidadTotal,EngancheCobrado,Saldo,Vendedor,Estado\n";
     ventas.forEach(v => {
         const articulos = v.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || ''}`).join(' | ');
-        csv += `"${v.origen}","${v.folio}","${v.fechaTexto}","${v.cliente}","${v.metodo}","${articulos}",${v.unidades},${v.totalMercancia},${v.totalDocumento},${v.costoEstimado},${v.utilidadEstimada},${v.enganche},${v.saldo},"${v.vendedor}","${v.estado}"\n`;
+        csv += `"${v.origen}","${v.folio}","${v.fechaTexto}","${v.cliente}","${v.metodo}","${articulos}",${v.unidades},${v.totalMercancia},${v.totalDocumento},${v.costoEstimado},${v.utilidadEstimada},${v.interes},${v.utilidadTotal},${v.enganche},${v.saldo},"${v.vendedor}","${v.estado}"\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
