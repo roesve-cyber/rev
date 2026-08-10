@@ -6187,7 +6187,7 @@ function reimprimirTicketEnganche(folio) {
             fecha:          cuenta.fechaVenta || cuenta.fecha || '',
             cliente:        { nombre: cuenta.nombre || cuenta.clienteNombre || '—', telefono: cuenta.telefono || '' },
             metodo:         'credito',
-            enganche:       Number(cuenta.enganche || cuenta.anticipo || 0),
+            enganche:       Number(cuenta.engancheRecibido || cuenta.enganche || cuenta.anticipo || 0),
             saldoPendiente: Number(cuenta.saldoActual ?? cuenta.saldoPendiente ?? cuenta.importeTotal ?? 0),
             articulos:      cuenta.articulos || []
         };
