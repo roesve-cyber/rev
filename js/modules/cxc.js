@@ -1405,6 +1405,16 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
               )
             : null;
 
+        // 🛡️ CORRECCIÓN: "deuda inicial" NO es precioContadoReal - enganche.
+        // precioContadoReal es el precio DE CONTADO (sin intereses), útil para
+        // la política de pago anticipado, pero NO es lo que realmente se
+        // financió a crédito. El monto real financiado (con intereses si el
+        // plan los aplica) es cuenta.plan.total o, si no hay plan, saldoOriginal
+        // — mismo criterio que ya usa _cancelRecalcularCredito() en ventas.js.
+        const deudaInicialReal = Number(
+            cuenta.plan?.total || cuenta.saldoOriginal || (precioContadoReal - Number(cuenta.engancheRecibido || cuenta.enganche || 0))
+        );
+
         ticketEmitido = generarTicketAbonoTermico({
         folio,
         cliente: { nombre: _cxcNombreClienteVigente(cuenta), telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
@@ -1419,6 +1429,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         articulos: cuenta.articulos || [],
         totalVenta: precioContadoReal,
         enganche: Number(cuenta.engancheRecibido || cuenta.enganche || 0),
+        deudaInicial: deudaInicialReal,
         abonoAnterior: _abonoAnterior ? { monto: Number(_abonoAnterior.monto || 0), fecha: _abonoAnterior.fecha || '' } : null,
         numeroDePago: _abonosPreviosVigentes.length + 1
         });
@@ -1723,9 +1734,12 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 function generarTicketAbonoTermico(datosAbono) {
     const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
         pagaresRestantes, etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro,
-        abonoAnterior, numeroDePago } = datosAbono;
+        abonoAnterior, numeroDePago, deudaInicial } = datosAbono;
 
-    const deudaInicial = Math.max(0, Number(totalVenta || 0) - Number(enganche || 0));
+    // Fallback (totalVenta - enganche) solo para llamadas viejas que no pasen
+    // deudaInicial explícito: es incorrecto si la cuenta tiene intereses,
+    // porque totalVenta ahí es el precio de CONTADO, no el monto financiado.
+    const deudaInicialFinal = deudaInicial != null ? Number(deudaInicial) : Math.max(0, Number(totalVenta || 0) - Number(enganche || 0));
 
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const dineroFmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1875,7 +1889,7 @@ function generarTicketAbonoTermico(datosAbono) {
     <hr>
     <div class="seccion-titulo">MOVIMIENTO DE CUENTA</div>
     <div style="display:flex; justify-content:space-between;">
-        <span>Deuda inicial:</span><span>${dineroFmt(deudaInicial)}</span>
+        <span>Deuda inicial:</span><span>${dineroFmt(deudaInicialFinal)}</span>
     </div>
     <div style="display:flex; justify-content:space-between;">
         <span>Saldo antes de este abono:</span><span>${dineroFmt(saldoAnterior != null ? saldoAnterior : (nuevoSaldo + montoAbono))}</span>
@@ -2139,7 +2153,11 @@ function reimprimirTicketAbono(folio, indexAbono) {
         cliente: { nombre: _cxcNombreClienteVigente(cuenta), telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: abono.monto || 0,
         nuevoSaldo: saldoActual,
-        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fecha) : new Date(abono.fecha).toLocaleDateString(),
+        // 🛡️ CORRECCIÓN: abono.fecha ya es un string formateado ("10-08-2026").
+        // Volver a pasarlo por formatearFechaCortaMX() lo re-parsea con
+        // new Date(), que interpreta ese formato como MES-DÍA-AÑO y invierte
+        // día/mes (10-08-2026 → "08-10-2026"). Hay que partir del ISO.
+        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fechaAbonoIso || abono.fecha) : new Date(abono.fechaAbonoIso || abono.fecha).toLocaleDateString(),
         metodoCobro: abono.etiquetaCuenta || abono.medioPago || 'Efectivo',
         cuentaDestino: abono.cuentaId || abono.etiquetaCuenta || '',
         pagaresCubiertos: pagaresDelFolio.filter(p => p.estado === "Pagado"),
@@ -2147,6 +2165,10 @@ function reimprimirTicketAbono(folio, indexAbono) {
         articulos: cuenta.articulos || [],
         totalVenta: Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0),
         enganche: Number(cuenta.engancheRecibido || 0),
+        // 🛡️ Mismo criterio que en procesarAbonoAvanzado: la deuda real
+        // financiada (con intereses si el plan los tiene) es plan.total o
+        // saldoOriginal, NO el precio de contado menos el enganche.
+        deudaInicial: Number(cuenta.plan?.total || cuenta.saldoOriginal || (Number(cuenta.totalContadoOriginal || 0) - Number(cuenta.engancheRecibido || 0))),
         abonoAnterior: _abonoAnteriorReimpresion ? { monto: Number(_abonoAnteriorReimpresion.monto || 0), fecha: _abonoAnteriorReimpresion.fecha || '' } : null,
         numeroDePago: _previosVigentes.length + 1
         // Nota: "saldo antes de este abono" no se reconstruye aquí porque una
