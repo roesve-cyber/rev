@@ -1396,10 +1396,20 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
             if (aplicado === false) throw new Error("El abono directo no fue aplicado por el ejecutor.");
         }
 
+        // 'cuenta' es la versión pre-abono (todavía no se le hizo push a este abono),
+        // así que su .abonos refleja el historial ANTES de este pago.
+        const _abonosPreviosVigentes = (cuenta.abonos || []).filter(_cxcAbonoVigente);
+        const _abonoAnterior = _abonosPreviosVigentes.length
+            ? _abonosPreviosVigentes.reduce((mas, ab) =>
+                new Date(ab.fechaAbonoIso || ab.fecha) > new Date(mas.fechaAbonoIso || mas.fecha) ? ab : mas
+              )
+            : null;
+
         ticketEmitido = generarTicketAbonoTermico({
         folio,
         cliente: { nombre: _cxcNombreClienteVigente(cuenta), telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: montoFinal,
+        saldoAnterior: saldoPagaresAntes + saldoMoratoriosAntes,
         nuevoSaldo: Math.max(0, nuevoSaldoReal),
         fecha: fechaAbonoStr, 
         metodoCobro: medioPago,
@@ -1408,7 +1418,9 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         pagaresRestantes: _pagaresRestantes,
         articulos: cuenta.articulos || [],
         totalVenta: precioContadoReal,
-        enganche: Number(cuenta.engancheRecibido || cuenta.enganche || 0)
+        enganche: Number(cuenta.engancheRecibido || cuenta.enganche || 0),
+        abonoAnterior: _abonoAnterior ? { monto: Number(_abonoAnterior.monto || 0), fecha: _abonoAnterior.fecha || '' } : null,
+        numeroDePago: _abonosPreviosVigentes.length + 1
         });
     } catch (err) {
         procesoOk = false;
@@ -1710,7 +1722,10 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 
 function generarTicketAbonoTermico(datosAbono) {
     const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
-        pagaresRestantes, etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro } = datosAbono;
+        pagaresRestantes, etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro,
+        abonoAnterior, numeroDePago } = datosAbono;
+
+    const deudaInicial = Math.max(0, Number(totalVenta || 0) - Number(enganche || 0));
 
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const dineroFmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1858,7 +1873,14 @@ function generarTicketAbonoTermico(datosAbono) {
     <hr>
     ${articulosHTML}
     <hr>
-    <div class="negrita">ABONO RECIBIDO:</div>
+    <div class="seccion-titulo">MOVIMIENTO DE CUENTA</div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Deuda inicial:</span><span>${dineroFmt(deudaInicial)}</span>
+    </div>
+    <div style="display:flex; justify-content:space-between;">
+        <span>Saldo antes de este abono:</span><span>${dineroFmt(saldoAnterior != null ? saldoAnterior : (nuevoSaldo + montoAbono))}</span>
+    </div>
+    <div class="negrita" style="margin-top:4px;">ABONO RECIBIDO:</div>
     <div class="monto-grande">${dineroFmt(montoAbono)}</div>
     <div style="display:flex; justify-content:space-between;">
         <span>Nuevo saldo:</span><span class="negrita">${dineroFmt(nuevoSaldo)}</span>
@@ -1866,6 +1888,7 @@ function generarTicketAbonoTermico(datosAbono) {
     <div style="display:flex; justify-content:space-between;">
         <span>Forma de pago:</span><span>${esc(cuentaDestino || etiquetaCuenta)}</span>
     </div>
+    ${numeroDePago ? `<div style="font-size:10px; color:#444; margin-top:4px;">Pago n.º ${esc(String(numeroDePago))}${abonoAnterior ? ` &nbsp;·&nbsp; Abono anterior: ${dineroFmt(abonoAnterior.monto)}${abonoAnterior.fecha ? ' (' + esc(abonoAnterior.fecha) + ')' : ''}` : ''}</div>` : ''}
     <hr>
     <div class="${mensajeClase}">${mensajeEstado}</div>
     <hr>
@@ -2100,6 +2123,12 @@ function reimprimirTicketAbono(folio, indexAbono) {
     if (indexAbono < 0 || indexAbono >= abonos.length) return alert("Abono no encontrado.");
 
     const abono = abonos[indexAbono];
+    const _previosVigentes = abonos.slice(0, indexAbono).filter(_cxcAbonoVigente);
+    const _abonoAnteriorReimpresion = _previosVigentes.length
+        ? _previosVigentes.reduce((mas, ab) =>
+            new Date(ab.fechaAbonoIso || ab.fecha) > new Date(mas.fechaAbonoIso || mas.fecha) ? ab : mas
+          )
+        : null;
     const pagaresDelFolio = pagaresSistema.filter(p => p.folio === folio);
     const pagaresPendientes = pagaresDelFolio.filter(p => p.estado !== "Pagado" && p.estado !== "Cancelado");
     const estadoCta = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(folio) : null;
@@ -2117,7 +2146,14 @@ function reimprimirTicketAbono(folio, indexAbono) {
         pagaresRestantes: pagaresPendientes,
         articulos: cuenta.articulos || [],
         totalVenta: Number(cuenta.totalContadoOriginal || cuenta.saldoOriginal || 0),
-        enganche: Number(cuenta.engancheRecibido || 0)
+        enganche: Number(cuenta.engancheRecibido || 0),
+        abonoAnterior: _abonoAnteriorReimpresion ? { monto: Number(_abonoAnteriorReimpresion.monto || 0), fecha: _abonoAnteriorReimpresion.fecha || '' } : null,
+        numeroDePago: _previosVigentes.length + 1
+        // Nota: "saldo antes de este abono" no se reconstruye aquí porque una
+        // reimpresión puede pedirse mucho después, con abonos posteriores ya
+        // aplicados; el ticket usa su fallback (nuevoSaldo + monto) que es
+        // aproximado en ese caso. Si se necesita exacto, habría que guardar
+        // el saldo snapshot en el propio registro del abono al crearlo.
     });
 }
 

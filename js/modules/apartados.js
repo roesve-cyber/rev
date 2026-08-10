@@ -155,7 +155,16 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
     StorageService.set('apartados', apartados);
 
     // Disparar la impresión del ticket térmico
-    if (opciones.imprimir !== false) imprimirTicketAbonoApartado(ap, montoAplicado, etiquetaCuenta, fechaAbono);
+    if (opciones.imprimir !== false) {
+        // ap.abonos ya incluye este abono (se hizo push arriba), así que el
+        // "anterior" es el penúltimo vigente y el número de pago es el total.
+        const _vigentes = _apartadoAbonosVigentes(ap);
+        const _abonoAnteriorApt = _vigentes.length >= 2 ? _vigentes[_vigentes.length - 2] : null;
+        imprimirTicketAbonoApartado(ap, montoAplicado, etiquetaCuenta, fechaAbono, {
+            abonoAnterior: _abonoAnteriorApt ? { monto: Number(_abonoAnteriorApt.monto || 0), fecha: _abonoAnteriorApt.fechaAbono || _abonoAnteriorApt.fecha || '' } : null,
+            numeroDePago: _vigentes.length
+        });
+    }
     return true;
 }
 
@@ -609,7 +618,16 @@ function registrarAbonoApartadoDesdeModal() {
     };
     StorageService.pushAtomo("abonosPendientes", cuarentenaAbono);
 
-    imprimirTicketAbonoApartado({ ...ap, saldoPendiente: nuevoSaldoEstimado }, monto, etiquetaCuenta, fechaIso, { provisional: true });
+    // Aquí ap.abonos todavía NO incluye este abono (va a la cuarentena de
+    // la Bóveda, no se hace push directo), así que el "anterior" es
+    // simplemente el último vigente y el número de pago es vigentes+1.
+    const _vigentesProvisional = _apartadoAbonosVigentes(ap);
+    const _abonoAnteriorAptProvisional = _vigentesProvisional.length ? _vigentesProvisional[_vigentesProvisional.length - 1] : null;
+    imprimirTicketAbonoApartado({ ...ap, saldoPendiente: nuevoSaldoEstimado }, monto, etiquetaCuenta, fechaIso, {
+        provisional: true,
+        abonoAnterior: _abonoAnteriorAptProvisional ? { monto: Number(_abonoAnteriorAptProvisional.monto || 0), fecha: _abonoAnteriorAptProvisional.fechaAbono || _abonoAnteriorAptProvisional.fecha || '' } : null,
+        numeroDePago: _vigentesProvisional.length + 1
+    });
     alert('⏳ Abono enviado a la Bóveda de Autorizaciones. El saldo y caja se moverán cuando Auditoría lo apruebe.');
     cerrarModalAbonoApartado();
     renderApartados();
@@ -681,6 +699,7 @@ function imprimirTicketAbonoApartado(ap, montoAbono, cuentaDestino, fecha, opcio
         <div style="display:flex; justify-content:space-between; margin-top:10px;">
             <span>Ingresó a:</span><span>${esc(cuentaDestino)}</span>
         </div>
+        ${opciones.numeroDePago ? `<div style="font-size:10px; color:#444; margin-top:4px;">Pago n.º ${esc(String(opciones.numeroDePago))}${opciones.abonoAnterior ? ` &nbsp;·&nbsp; Abono anterior: ${dineroFmt(opciones.abonoAnterior.monto)}${opciones.abonoAnterior.fecha ? ' (' + esc(window.formatearFechaCortaMX ? window.formatearFechaCortaMX(opciones.abonoAnterior.fecha) : opciones.abonoAnterior.fecha) + ')' : ''}` : ''}</div>` : ''}
         <hr>
         <div style="border: 1px dashed #000; padding: 6px; font-size: 10px; text-align: justify; margin: 6px 0; white-space:pre-line;">
             <b>CONDICIONES:</b><br>${esc(ap.condiciones || 'La mercancía permanecerá bajo resguardo de la empresa hasta su liquidación total. En caso de cancelación por parte del cliente, se aplicarán penalizaciones administrativas y por almacenaje de acuerdo a la política de la tienda.')}
