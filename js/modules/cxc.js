@@ -1123,7 +1123,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                 </div>
 
                 <div style="display:flex; gap:10px;">
-                    <button onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado}, '${modoAplicacion}')" 
+                    <button id="btnConfirmarAbonoAvanzado" onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado}, '${modoAplicacion}')" 
                             style="flex:2; padding:15px; background:${esDirecto ? '#0f766e' : '#22c55e'}; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
                         ${esDirecto ? 'Aplicar Abono Directo' : 'Enviar a Autorizacion'}
                     </button>
@@ -1202,7 +1202,35 @@ function evaluarPoliticaLiquidacion(folio, montoAbono) {
 
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
-    return _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion);
+    // 🛡️ CANDADO ANTI-DOBLE-TOQUE: en móvil la escritura atómica a Firestore
+    // tarda ~1-2s y el modal no se cerraba hasta que terminaba todo el proceso.
+    // Si el usuario tocaba "Aplicar" otra vez durante esa espera (sin ver
+    // ninguna señal de que ya se estaba procesando), se disparaba una segunda
+    // captura completa con un cuarentena.id distinto, generando dos abonos.
+    // Aquí se deshabilita el botón de inmediato al primer toque, antes de
+    // cualquier confirm(), y se reactiva solo cuando la operación completa
+    // (éxito, validación fallida, cancelación o error) — nunca durante la espera.
+    const btnAbono = document.getElementById('btnConfirmarAbonoAvanzado');
+    if (btnAbono && btnAbono.disabled) return; // ya se está procesando: ignora el toque repetido
+    if (btnAbono) {
+        btnAbono.disabled = true;
+        btnAbono.dataset.textoOriginal = btnAbono.textContent;
+        btnAbono.textContent = 'Procesando…';
+        btnAbono.style.opacity = '0.6';
+        btnAbono.style.cursor = 'not-allowed';
+    }
+    return _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion)
+        .finally(() => {
+            // Si el modal ya se cerró (abono aplicado con éxito), el botón ya no
+            // existe en el DOM y no hay nada que reactivar.
+            const btnFinal = document.getElementById('btnConfirmarAbonoAvanzado');
+            if (btnFinal) {
+                btnFinal.disabled = false;
+                btnFinal.textContent = btnFinal.dataset.textoOriginal || btnFinal.textContent;
+                btnFinal.style.opacity = '';
+                btnFinal.style.cursor = 'pointer';
+            }
+        });
 }
 async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
     // 🛡️ Defensa adicional (además del candado al abrir el modal): si por
