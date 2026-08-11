@@ -1,3 +1,66 @@
+// ============================================================
+// 🛡️ CANDADO ANTI-DOBLE-TOQUE PARA BOTONES DE ACCIÓN ASÍNCRONA
+// ============================================================
+// Utilidad compartida: deshabilita un botón de inmediato al primer toque
+// (antes de que corra cualquier confirm() o await) y lo reactiva solo
+// cuando la operación completa — éxito, error o validación cancelada.
+// Objetivo: en conexiones lentas (móvil) el usuario ve "Procesando…" en
+// vez de pensar que el sistema se pasmó y volver a tocar, generando un
+// registro duplicado (venta, abono, autorización, etc.).
+//
+// Uso típico en la función expuesta a onclick:
+//   window.miAccion = function(args) {
+//       return window.bloquearBotonDurante('idDelBoton', _miAccionAsync(args));
+//   };
+//   async function _miAccionAsync(args) { ...lógica real... }
+//
+// Si el botón ya está deshabilitado (proceso en curso), un toque repetido
+// no hace nada — no relanza la operación ni abre un segundo confirm().
+// Inyecta una sola vez el keyframe del spinner que usa bloquearBotonDurante.
+(function _revInyectarEstiloSpinner() {
+    if (document.getElementById('rev-spinner-style')) return;
+    const style = document.createElement('style');
+    style.id = 'rev-spinner-style';
+    style.textContent = `
+        @keyframes rev-spin { to { transform: rotate(360deg); } }
+        .rev-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.45);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: rev-spin 0.6s linear infinite;
+            vertical-align: -2px;
+            margin-right: 8px;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+window.bloquearBotonDurante = function(idBoton, promesa, textoProcesando = 'Procesando…') {
+    const btn = idBoton ? document.getElementById(idBoton) : null;
+    if (btn && btn.disabled) return Promise.resolve(undefined);
+    if (btn) {
+        btn.disabled = true;
+        if (btn.dataset.htmlOriginal === undefined) btn.dataset.htmlOriginal = btn.innerHTML;
+        btn.innerHTML = `<span class="rev-spinner"></span>${textoProcesando}`;
+        btn.style.opacity = '0.85';
+        btn.style.cursor = 'not-allowed';
+    }
+    return Promise.resolve(promesa).finally(() => {
+        // Si el modal/panel ya se cerró tras completar la operación, el botón
+        // ya no existe en el DOM y no hay nada que reactivar.
+        const btnFinal = idBoton ? document.getElementById(idBoton) : null;
+        if (btnFinal) {
+            btnFinal.disabled = false;
+            btnFinal.innerHTML = btnFinal.dataset.htmlOriginal ?? btnFinal.innerHTML;
+            btnFinal.style.opacity = '';
+            btnFinal.style.cursor = 'pointer';
+        }
+    });
+};
+
 // Variables globales
 var categoriasData = StorageService.get("categoriasData", [
     { nombre: "Recámaras", subcategorias: [{ nombre: "Roperos", margen: 35 }, { nombre: "Bases", margen: 30 }], posicion: 1 },
