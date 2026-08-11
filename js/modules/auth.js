@@ -343,7 +343,7 @@ function requireAdmin(callback) {
           onkeydown="if(event.key==='Enter') _verificarCredencialesAdmin(document.getElementById('adminEmailInput').value, this.value)">
         <div id="adminPinError" style="color:#dc2626;font-size:13px;min-height:20px;margin-top:8px;"></div>
         <div style="display:flex;gap:10px;margin-top:16px;">
-          <button onclick="_verificarCredencialesAdmin(document.getElementById('adminEmailInput').value, document.getElementById('adminPassInput').value)"
+          <button id="btnVerificarCredencialesAdmin" onclick="_verificarCredencialesAdmin(document.getElementById('adminEmailInput').value, document.getElementById('adminPassInput').value)"
             style="flex:1;padding:10px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Verificar</button>
           <button onclick="document.querySelector('[data-modal=req-admin]')?.remove()"
             style="padding:10px 18px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕</button>
@@ -419,7 +419,10 @@ function _verificarPinAdmin(pin) {
     }
 }
 
-async function _verificarCredencialesAdmin(email, pass) {
+function _verificarCredencialesAdmin(email, pass) {
+    return window.bloquearBotonDurante('btnVerificarCredencialesAdmin', _verificarCredencialesAdminAsync(email, pass));
+}
+async function _verificarCredencialesAdminAsync(email, pass) {
     const errEl = document.getElementById('adminPinError');
     if (!email || !pass) {
         if (errEl) errEl.textContent = '❌ Completa todos los campos.';

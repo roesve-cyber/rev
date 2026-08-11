@@ -80,10 +80,10 @@ function renderPushAutorizacionesConfig() {
             </div>
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
                 <button onclick="guardarConfigPushAutorizaciones()" style="padding:10px 16px; background:#475569; color:white; border:none; border-radius:7px; font-weight:bold; cursor:pointer;">Guardar llave</button>
-                <button onclick="activarPushAutorizaciones()" ${puedeActivar ? '' : 'disabled'} style="padding:10px 16px; background:${puedeActivar ? '#c2410c' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${puedeActivar ? 'pointer' : 'not-allowed'};">Activar en este celular</button>
-                <button onclick="probarPushAutorizaciones()" ${tokenLocal ? '' : 'disabled'} style="padding:10px 16px; background:${tokenLocal ? '#2563eb' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${tokenLocal ? 'pointer' : 'not-allowed'};">Probar aviso local</button>
-                <button onclick="probarPushAutorizacionesNube()" ${window._firebaseActivo ? '' : 'disabled'} style="padding:10px 16px; background:${window._firebaseActivo ? '#0f766e' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${window._firebaseActivo ? 'pointer' : 'not-allowed'};">Probar push real</button>
-                <button onclick="diagnosticarPushAutorizaciones()" style="padding:10px 16px; background:#334155; color:white; border:none; border-radius:7px; font-weight:bold; cursor:pointer;">Diagnosticar</button>
+                <button id="btnActivarPushAutorizaciones" onclick="activarPushAutorizaciones()" ${puedeActivar ? '' : 'disabled'} style="padding:10px 16px; background:${puedeActivar ? '#c2410c' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${puedeActivar ? 'pointer' : 'not-allowed'};">Activar en este celular</button>
+                <button id="btnProbarPushAutorizaciones" onclick="probarPushAutorizaciones()" ${tokenLocal ? '' : 'disabled'} style="padding:10px 16px; background:${tokenLocal ? '#2563eb' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${tokenLocal ? 'pointer' : 'not-allowed'};">Probar aviso local</button>
+                <button id="btnProbarPushAutorizacionesNube" onclick="probarPushAutorizacionesNube()" ${window._firebaseActivo ? '' : 'disabled'} style="padding:10px 16px; background:${window._firebaseActivo ? '#0f766e' : '#cbd5e1'}; color:white; border:none; border-radius:7px; font-weight:bold; cursor:${window._firebaseActivo ? 'pointer' : 'not-allowed'};">Probar push real</button>
+                <button id="btnDiagnosticarPushAutorizaciones" onclick="diagnosticarPushAutorizaciones()" style="padding:10px 16px; background:#334155; color:white; border:none; border-radius:7px; font-weight:bold; cursor:pointer;">Diagnosticar</button>
             </div>
             <div style="font-size:12px; color:#64748b; line-height:1.45;">
                 Usuario actual: <b>${sesion?.nombre || sesion?.email || sesion?.usuario || '-'}</b> (${sesion?.rol || '-'})
@@ -99,7 +99,10 @@ function guardarConfigPushAutorizaciones() {
     alert('Configuracion de push guardada.');
 }
 
-async function activarPushAutorizaciones() {
+function activarPushAutorizaciones() {
+    return window.bloquearBotonDurante('btnActivarPushAutorizaciones', _activarPushAutorizacionesAsync());
+}
+async function _activarPushAutorizacionesAsync() {
     const config = _pushAuthConfig();
     const vapidKey = document.getElementById('pushAuthVapidKey')?.value.trim() || config.vapidKey || '';
     if (!vapidKey) return alert('Primero pega y guarda la llave VAPID publica de Firebase Messaging.');
@@ -191,7 +194,10 @@ async function _pushAuthMostrarNotificacionLocal({ title, body, url }) {
     return true;
 }
 
-async function probarPushAutorizaciones() {
+function probarPushAutorizaciones() {
+    return window.bloquearBotonDurante('btnProbarPushAutorizaciones', _probarPushAutorizacionesAsync());
+}
+async function _probarPushAutorizacionesAsync() {
     const mostrado = await _pushAuthMostrarNotificacionLocal({
         title: 'Prueba Boveda de autorizaciones',
         body: 'Si ves este aviso, el celular puede mostrar notificaciones.',
@@ -200,7 +206,10 @@ async function probarPushAutorizaciones() {
     if (!mostrado) alert('No se pudo mostrar la prueba. Revisa permisos de notificacion.');
 }
 
-async function diagnosticarPushAutorizaciones() {
+function diagnosticarPushAutorizaciones() {
+    return window.bloquearBotonDurante('btnDiagnosticarPushAutorizaciones', _diagnosticarPushAutorizacionesAsync());
+}
+async function _diagnosticarPushAutorizacionesAsync() {
     const config = _pushAuthConfig();
     const sesion = _pushAuthSesion() || {};
     const firebaseUser = _pushAuthUsuarioFirebaseActual();
@@ -263,7 +272,10 @@ async function diagnosticarPushAutorizaciones() {
     console.log('Diagnostico push autorizaciones:', lineas);
 }
 
-async function probarPushAutorizacionesNube() {
+function probarPushAutorizacionesNube() {
+    return window.bloquearBotonDurante('btnProbarPushAutorizacionesNube', _probarPushAutorizacionesNubeAsync());
+}
+async function _probarPushAutorizacionesNubeAsync() {
     if (!window._firebaseActivo || !window._db) return alert('La prueba real requiere Firebase activo en produccion.');
     if (window._firebaseReady) {
         try { await window._firebaseReady; } catch {}
