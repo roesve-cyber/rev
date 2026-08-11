@@ -370,7 +370,12 @@
         const dateRaw = v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaIso || v.args?.[7] || '';
         const date = parseDate(dateRaw);
         const itemTotal = items.reduce((s, a) => s + ((Number(a.precioContado || a.precio || 0) || 0) * (Number(a.cantidad || 1) || 1)), 0);
-        const totalMerch = Number(v.totalMercancia || v.totalContadoOriginal || v.importeApartado || itemTotal || v.totalVenta || v.total || v.args?.[1] || 0) || 0;
+        // 🛡️ totalMerch/totalDoc: se resuelven con el motor compartido
+        // (window._rrcTotalesVenta) para que nunca puedan divergir de lo que
+        // calculan el Reporte de Ventas y el Cubo de Ventas.
+        const totalesCompartidos = (typeof window._rrcTotalesVenta === 'function') ? window._rrcTotalesVenta(v) : null;
+        const totalMerch = totalesCompartidos ? totalesCompartidos.totalMercancia
+            : Number(v.totalMercancia || v.totalContadoOriginal || v.importeApartado || itemTotal || v.totalVenta || v.total || v.args?.[1] || 0) || 0;
         const costoResuelto = items.map(a => resolverCostoItem(a, providerMaps));
         const cost = items.reduce((s, a, i) => s + costoResuelto[i].costo * (Number(a.cantidad || 1) || 1), 0);
         const costEstimated = costoResuelto.some(r => r.estimado);
@@ -382,11 +387,19 @@
             .sort((a, b) => a.localeCompare(b, 'es'));
         const subcategories = [...new Set(items.map(item => itemSubcategoryLabel(item, providerMaps)).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b, 'es'));
-        const totalDoc = Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || totalMerch || 0) || 0;
+        const totalDoc = totalesCompartidos ? totalesCompartidos.totalDocumento
+            : Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || totalMerch || 0) || 0;
         const profit = cost > 0 ? Math.max(0, totalMerch - cost) : 0;
-        // Interes/recargo por credito: diferencia entre el total documentado (con intereses) y la mercancia vendida.
-        const financialInterest = Math.max(0, totalDoc - totalMerch);
-        const financialProfit = profit + financialInterest;
+        // 🛡️ Interés/recargo por crédito: se resuelve con el motor
+        // compartido (window._rrcInteres, en reportes-rentabilidad-cartera.js)
+        // — la misma fórmula que usan el Reporte de Ventas y el Cubo de
+        // Ventas, para que el número nunca pueda desviarse entre reportes.
+        const financialInterest = (typeof window._rrcInteres === 'function')
+            ? window._rrcInteres(totalDoc, totalMerch)
+            : Math.max(0, totalDoc - totalMerch);
+        const financialProfit = (typeof window._rrcUtilidadTotal === 'function')
+            ? window._rrcUtilidadTotal(profit, financialInterest)
+            : profit + financialInterest;
         return {
             raw: v,
             index,

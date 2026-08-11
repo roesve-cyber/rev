@@ -114,12 +114,17 @@ function _rvArticulos(v) {
 }
 
 function _rvTotalMercancia(v) {
+    // 🛡️ Delegado al motor compartido (window._rrcTotalesVenta) para que
+    // esta resolución nunca pueda divergir de la que usan el Cubo de Ventas
+    // y los Reportes Ejecutivos.
+    if (typeof window._rrcTotalesVenta === 'function') return window._rrcTotalesVenta(v).totalMercancia;
     const articulos = _rvArticulos(v);
     const porArticulos = articulos.reduce((s, a) => s + (Number(a.precioContado || a.precio || 0) * Number(a.cantidad || 1)), 0);
     return Number(v.totalMercancia || v.totalContadoOriginal || v.importeApartado || porArticulos || v.totalVenta || v.total || v.args?.[1] || 0);
 }
 
 function _rvTotalDocumento(v) {
+    if (typeof window._rrcTotalesVenta === 'function') return window._rrcTotalesVenta(v).totalDocumento;
     return Number(v.total || v.totalVenta || v.datosVenta?.total || v.args?.[1] || _rvTotalMercancia(v) || 0);
 }
 
@@ -173,11 +178,13 @@ function _rvVentaNormalizada(v, origen = "registrada", index = null) {
     const totalMercancia = _rvTotalMercancia(v);
     const costoEstimado = _rvCostoEstimado(v);
     const totalDocumento = _rvTotalDocumento(v);
-    // 🛡️ Interés: la diferencia entre lo que el cliente termina pagando
-    // (totalDocumento, ya incluye financiamiento si fue a crédito) y el
-    // precio de mercancía sin intereses (totalMercancia). En ventas de
-    // contado es $0 porque ambos totales son iguales.
-    const interes = Math.max(0, totalDocumento - totalMercancia);
+    // 🛡️ Interés: se resuelve con el motor compartido (window._rrcInteres,
+    // en reportes-rentabilidad-cartera.js) — la misma fórmula que usan el
+    // Cubo de Ventas y los Reportes Ejecutivos, para que el número nunca
+    // pueda desviarse entre reportes.
+    const interes = (typeof window._rrcInteres === 'function')
+        ? window._rrcInteres(totalDocumento, totalMercancia)
+        : Math.max(0, totalDocumento - totalMercancia);
     const utilidadEstimada = costoEstimado > 0 ? Math.max(0, totalMercancia - costoEstimado) : 0;
     return {
         raw: v,
@@ -199,12 +206,11 @@ function _rvVentaNormalizada(v, origen = "registrada", index = null) {
         // Utilidad de mercancía: precio base (sin intereses) menos costo.
         // Es la ganancia "del producto" en sí, sin importar cómo se pagó.
         utilidadEstimada,
-        // Utilidad total: la de mercancía MÁS el interés cobrado por
-        // financiar la venta — el interés es ganancia real del negocio, sin
-        // costo asociado, así que nunca debe quedar fuera de la utilidad
-        // total. Antes este reporte solo mostraba utilidadEstimada, lo que
-        // subestimaba la ganancia real de toda venta a crédito.
-        utilidadTotal: (costoEstimado > 0 ? utilidadEstimada : 0) + interes,
+        // Utilidad total: se resuelve con el mismo motor compartido
+        // (window._rrcUtilidadTotal) — utilidad de mercancía + interés.
+        utilidadTotal: (typeof window._rrcUtilidadTotal === 'function')
+            ? window._rrcUtilidadTotal(costoEstimado > 0 ? utilidadEstimada : 0, interes)
+            : (costoEstimado > 0 ? utilidadEstimada : 0) + interes,
         vendedor: v.vendedor || v.vendedorNombre || v.vendedorSeleccionado?.nombre || "",
         cuentaCobro: v.cuentaPago || v.cuenta || v.etiquetaCuenta || v.datosVenta?.cuentaPago || "",
         estado: origen === "cuarentena" ? "En bóveda" : (v.estado || v.estatus || "Registrada")

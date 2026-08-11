@@ -210,6 +210,86 @@ window._rrcComisionCuenta = function(cuenta, comisiones) {
 };
 
 // ---------------------------------------------------------------
+// 💰 PRECIO BASE + INTERÉS — MOTOR COMPARTIDO ÚNICO
+// ---------------------------------------------------------------
+// Antes cada reporte (Cubo de Ventas, Reporte de Ventas, Reportes
+// Ejecutivos) calculaba por su cuenta la diferencia entre lo que el cliente
+// paga con financiamiento (totalDocumento) y el precio de mercancía sin
+// intereses (totalMercancia) — 3 copias de la misma fórmula, con riesgo real
+// de que un ajuste futuro se hiciera en un lugar y se olvidara en otro
+// (exactamente el tipo de desfase que hemos venido corrigiendo). A partir de
+// aquí TODOS los reportes deben llamar estas dos funciones en vez de
+// recalcular la resta ellos mismos.
+
+// Interés de una venta: lo que el cliente paga de más sobre el precio de
+// mercancía por haberla financiado. $0 en ventas de contado.
+window._rrcInteres = function(totalDocumento, totalMercancia) {
+    return Math.max(0, (Number(totalDocumento) || 0) - (Number(totalMercancia) || 0));
+};
+
+// Utilidad total real de una venta: la utilidad "de mercancía" (precio base
+// menos costo) más el interés cobrado — el interés no tiene costo asociado,
+// así que es ganancia pura y nunca debe quedar fuera de la utilidad total.
+window._rrcUtilidadTotal = function(utilidadMercancia, interes) {
+    return (Number(utilidadMercancia) || 0) + (Number(interes) || 0);
+};
+
+// Resuelve totalMercancia y totalDocumento de una venta con la MISMA cadena
+// de respaldo robusta que ya usaban reportes.js y reportes-plus.js (campo
+// directo → totalContadoOriginal → importeApartado → suma de artículos →
+// totalVenta → total → args[1]) — antes esta función compartida usaba una
+// cadena más corta, lo que causaba que el interés total calculado aquí no
+// cuadrara exacto con el de los otros dos reportes en algunos folios.
+window._rrcTotalesVenta = function(venta) {
+    const articulos = Array.isArray(venta?.articulos) ? venta.articulos
+        : (Array.isArray(venta?.datosVenta?.articulos) ? venta.datosVenta.articulos : []);
+    const sumaArticulos = articulos.reduce((s, a) => s + (Number(a.precioContado || a.precio || 0) * Number(a.cantidad || 1)), 0);
+
+    const totalMercancia = Number(
+        venta.totalMercancia || venta.totalContadoOriginal || venta.importeApartado || sumaArticulos || venta.totalVenta || venta.total || venta.args?.[1] || 0
+    ) || 0;
+
+    const totalDocumento = Number(
+        venta.total || venta.totalVenta || venta.datosVenta?.total || venta.args?.[1] || totalMercancia || 0
+    ) || 0;
+
+    return { totalMercancia, totalDocumento };
+};
+
+// Desglose por artículo: precio base, interés prorrateado y precio de venta
+// (base + interés) por cada renglón de una venta. El sistema NO guarda un
+// "precio con intereses" por artículo — el financiamiento se cotiza sobre el
+// total de la venta, así que el interés se reparte a prorrata del peso de
+// cada artículo en el precio base total. Devuelve un arreglo en el mismo
+// orden que venta.articulos.
+window._rrcResolverPreciosVenta = function(venta) {
+    const articulos = Array.isArray(venta?.articulos) ? venta.articulos
+        : (Array.isArray(venta?.datosVenta?.articulos) ? venta.datosVenta.articulos : []);
+    if (!articulos.length) return [];
+
+    const { totalMercancia, totalDocumento } = window._rrcTotalesVenta(venta);
+    const interesTotalVenta = window._rrcInteres(totalDocumento, totalMercancia);
+
+    const sumaPrecioBaseVenta = articulos.reduce((s, a) => {
+        const pb = Number(a.precioContado ?? a.precio ?? 0) || 0;
+        const cant = Number(a.cantidad) || 1;
+        return s + pb * cant;
+    }, 0) || 1;
+
+    return articulos.map(a => {
+        const cantidad = Number(a.cantidad) || 1;
+        const precioBaseUnit = Number(a.precioContado ?? a.precio ?? 0) || 0;
+        const precioBaseTotal = precioBaseUnit * cantidad;
+        const pesoLinea = precioBaseTotal / sumaPrecioBaseVenta;
+        const interesTotal = interesTotalVenta * pesoLinea;
+        const interesUnit = cantidad > 0 ? interesTotal / cantidad : interesTotal;
+        const precioVentaTotal = precioBaseTotal + interesTotal;
+        const precioVentaUnit = cantidad > 0 ? precioVentaTotal / cantidad : precioVentaTotal;
+        return { articulo: a, cantidad, precioBaseUnit, precioBaseTotal, interesUnit, interesTotal, precioVentaUnit, precioVentaTotal };
+    });
+};
+
+// ---------------------------------------------------------------
 // 📈 CRONOLOGÍA DE COBRANZA (enganche + abonos ordenados)
 // ---------------------------------------------------------------
 

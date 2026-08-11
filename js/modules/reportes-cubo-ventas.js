@@ -120,41 +120,31 @@ window.construirHechosCuboVentas = function() {
         const articulos = Array.isArray(v.articulos) ? v.articulos : [];
         if (!articulos.length) return;
 
-        const totalVenta = Number(v.total) || 0;
-        const totalMercancia = (v.totalMercancia != null) ? Number(v.totalMercancia) : totalVenta;
-        const interesTotalVenta = Math.max(0, totalVenta - totalMercancia);
+        // 🛡️ Precio base + interés prorrateado por artículo: se resuelve con
+        // el motor compartido (window._rrcResolverPreciosVenta, en
+        // reportes-rentabilidad-cartera.js) para que este número NUNCA pueda
+        // desviarse del que calculan el Reporte de Ventas y los Reportes
+        // Ejecutivos — una sola fórmula, no una copia por reporte.
+        const preciosPorArticulo = (typeof window._rrcResolverPreciosVenta === 'function')
+            ? window._rrcResolverPreciosVenta(v)
+            : [];
 
-        const sumaPrecioBaseVenta = articulos.reduce((s, a) => {
-            const pb = Number(a.precioContado ?? a.precio ?? 0) || 0;
-            const cant = Number(a.cantidad) || 1;
-            return s + pb * cant;
-        }, 0) || 1;
-
-        articulos.forEach(a => {
+        articulos.forEach((a, idx) => {
             const cantidad = Number(a.cantidad) || 1;
-            const precioBaseUnit = Number(a.precioContado ?? a.precio ?? 0) || 0;
+            const precios = preciosPorArticulo[idx] || {
+                precioBaseUnit: Number(a.precioContado ?? a.precio ?? 0) || 0,
+                precioBaseTotal: (Number(a.precioContado ?? a.precio ?? 0) || 0) * cantidad,
+                interesTotal: 0,
+                precioVentaUnit: Number(a.precioContado ?? a.precio ?? 0) || 0,
+                precioVentaTotal: (Number(a.precioContado ?? a.precio ?? 0) || 0) * cantidad
+            };
 
             const costoInfo = (typeof window._rrcResolverCostoArticulo === 'function')
                 ? window._rrcResolverCostoArticulo(a, v.fechaVenta || v.fecha, historialCostos, productos)
                 : { costoUnitario: 0, costoTotal: 0, confianza: 'sin_dato' };
 
             const costoTotalLinea = costoInfo.costoTotal != null ? costoInfo.costoTotal : (costoInfo.costoUnitario || 0) * cantidad;
-            const pesoLinea = (precioBaseUnit * cantidad) / sumaPrecioBaseVenta;
-            const interesLinea = interesTotalVenta * pesoLinea;
-            const precioBaseTotalLinea = precioBaseUnit * cantidad;
-            const utilidadLinea = precioBaseTotalLinea - costoTotalLinea;
-
-            // 🛡️ "Precio de venta" = lo que el cliente realmente paga por esta
-            // pieza, incluyendo su parte del interés si fue a crédito. El
-            // sistema NO guarda un "precio con intereses" por artículo — el
-            // campo `articulo.precio` es un espejo de `precioContado` (mismo
-            // valor siempre, confirmado contra datos reales); el interés solo
-            // existe a nivel de toda la venta (total vs. totalMercancia). Por
-            // eso se construye aquí como base + interés prorrateado, no
-            // leyendo `articulo.precio` directo (eso hacía que "Precio base" y
-            // "Precio de venta" salieran siempre idénticos).
-            const precioVentaTotalLinea = precioBaseTotalLinea + interesLinea;
-            const precioVentaUnit = cantidad > 0 ? precioVentaTotalLinea / cantidad : precioVentaTotalLinea;
+            const utilidadLinea = precios.precioBaseTotal - costoTotalLinea;
 
             hechos.push({
                 folio: v.folio || '',
@@ -165,16 +155,16 @@ window.construirHechosCuboVentas = function() {
                 metodoPago: v.metodoPago || 'contado',
                 clienteNombre: v.clienteNombre || '',
                 cantidad,
-                precioBaseUnit,
-                precioBaseTotal: precioBaseTotalLinea,
-                precioVentaUnit,
-                precioVentaTotal: precioVentaTotalLinea,
+                precioBaseUnit: precios.precioBaseUnit,
+                precioBaseTotal: precios.precioBaseTotal,
+                precioVentaUnit: precios.precioVentaUnit,
+                precioVentaTotal: precios.precioVentaTotal,
                 costoUnitario: costoInfo.costoUnitario || 0,
                 costoTotal: costoTotalLinea,
                 costoConfianza: costoInfo.confianza || 'sin_dato',
-                interes: interesLinea,
+                interes: precios.interesTotal,
                 utilidad: utilidadLinea,
-                margenPct: precioBaseTotalLinea > 0 ? (utilidadLinea / precioBaseTotalLinea) * 100 : 0
+                margenPct: precios.precioBaseTotal > 0 ? (utilidadLinea / precios.precioBaseTotal) * 100 : 0
             });
         });
     });
