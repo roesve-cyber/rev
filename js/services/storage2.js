@@ -619,13 +619,20 @@ const StorageService = {
         }
     },
 
-    async sincronizarCambiosRemotos(motivo = 'manual') {
+    // tablasForzar: null/undefined => forzar TODAS las tablas (comportamiento clásico, usado
+    // como red de seguridad en focus/visibility/online/intervalo). Un array => forzar solo esas
+    // tablas puntuales (usado cuando el listener de _syncStatus ya sabe cuál tabla cambió), y el
+    // resto de las tablas siguen protegidas por su comparación normal de timestamp.
+    async sincronizarCambiosRemotos(motivo = 'manual', tablasForzar = null) {
         if (!window._firebaseActivo || !window._db || !window._auth?.currentUser) return false;
         if (this._syncRemotoEnCurso) return this._syncRemotoEnCurso;
 
         this._syncRemotoEnCurso = (async () => {
             console.log(`Sincronizando cambios remotos (${motivo})...`);
-            const ok = await this.syncAll({ source: 'server', forzarDescarga: true });
+            const opciones = { source: 'server' };
+            if (tablasForzar) opciones.tablasForzar = tablasForzar;
+            else opciones.forzarDescarga = true;
+            const ok = await this.syncAll(opciones);
             this._refrescarVistaActualPostSync();
             return ok;
         })();
@@ -637,10 +644,30 @@ const StorageService = {
         }
     },
 
-    solicitarSyncRemoto(motivo = 'remoto', delay = 1200) {
+    // tabla: si se especifica, solo esa tabla se fuerza a re-descargar en el próximo sync (evita
+    // que un cambio remoto en, digamos, cuentasPorCobrar dispare la re-descarga completa de las
+    // otras 10 tablas de registro individual). Si se omite (focus/visibility/online/intervalo),
+    // se conserva el comportamiento anterior: forzar todo, como red de seguridad periódica.
+    // Varias llamadas dentro de la misma ventana de debounce acumulan sus tablas en vez de
+    // pisarse; si alguna llamada pide "forzar todo", eso gana sobre las tablas puntuales.
+    solicitarSyncRemoto(motivo = 'remoto', delay = 1200, tabla = null) {
+        if (!this._forzarTodoProximoSync) {
+            if (tabla) {
+                this._tablasForzarProximoSync = this._tablasForzarProximoSync || new Set();
+                this._tablasForzarProximoSync.add(tabla);
+            } else {
+                this._forzarTodoProximoSync = true;
+                this._tablasForzarProximoSync = null;
+            }
+        }
+
         if (this._syncRemotoTimer) clearTimeout(this._syncRemotoTimer);
         this._syncRemotoTimer = setTimeout(() => {
-            this.sincronizarCambiosRemotos(motivo).catch(e => console.warn('Sync remoto fallido:', e));
+            const forzarTodo = this._forzarTodoProximoSync;
+            const tablasForzar = forzarTodo ? null : (this._tablasForzarProximoSync ? Array.from(this._tablasForzarProximoSync) : null);
+            this._forzarTodoProximoSync = false;
+            this._tablasForzarProximoSync = null;
+            this.sincronizarCambiosRemotos(motivo, tablasForzar).catch(e => console.warn('Sync remoto fallido:', e));
         }, delay);
     },
 
@@ -1501,6 +1528,105 @@ const StorageService = {
         }
     },
 
+    // Procesa un único documento de posData durante syncAll(). Extraído para poder correr todas
+    // las tablas EN PARALELO (Promise.all) en vez de una por una: antes, cada tabla en modo
+    // "registro individual" (pagaresSistema, ventasRegistradas, movimientosCaja, etc) hacía un
+    // await secuencial de una consulta completa a su subcolección, así que el tiempo total de
+    // syncAll era la SUMA de todas esas consultas. En paralelo, el tiempo total es el de la más
+    // lenta de todas, no la suma.
+    // Devuelve 'descargada' | 'omitida' | null (null = ni se cuenta ni se descuenta, p.ej. tabla
+    // ignorada por no ser válida).
+    async _procesarDocSyncAll(doc, forzarDescarga) {
+        const tabla = doc.id;
+        try {
+            const payload = doc.data();
+
+            // ── BLINDAJE ANTI-SOBREESCRITURA ──────────────────────────────
+            // Solo bajamos si Firebase es MÁS RECIENTE que nuestro local.
+            // Esto evita que un syncAll() pise datos que ya teníamos
+            // correctos localmente pero que Firebase aún no recibió
+            // (por ejemplo, si la red falló justo después de aprobar la bóveda).
+            const tsFirebase = Number(payload?._updatedAt || 0);
+            const tsLocal    = this._tsLocal(tabla);
+            const datosLocalesAntes = this.get(tabla, null);
+            const localTieneDatos = Array.isArray(datosLocalesAntes)
+                ? datosLocalesAntes.length > 0
+                : !!(datosLocalesAntes && typeof datosLocalesAntes === 'object' && Object.keys(datosLocalesAntes).length > 0);
+            if (!forzarDescarga && localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
+                console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
+                return 'omitida';
+            }
+            // ──────────────────────────────────────────────────────────
+
+            // Tablas configuradas como "registro individual": el documento padre no trae
+            // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
+            // aparte desde su subcolección en vez de pasar por la normalización genérica.
+            if (payload?._registroIndividual) {
+                try {
+                    const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
+                    return huboDescarga ? 'descargada' : 'omitida';
+                } catch (e) {
+                    console.warn(`⚠️ Fallo al descargar "${tabla}" (registro individual):`, e);
+                    return 'omitida';
+                }
+            }
+
+            const datosRestaurados = this._asegurarTablaLista(
+                tabla,
+                this._normalizarTablaDesdeFirestore(tabla, payload)
+            );
+            this._logTablaFirebase(tabla, datosRestaurados);
+            if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
+                this._logPayloadVacio(tabla, payload);
+                if (this._tablasCriticasConDatos.has(tabla)) {
+                    console.warn(`${tabla}: Firebase esta vacio; no se guarda local ni se marca como descargado.`);
+                    return 'omitida';
+                }
+            }
+
+            if (!this._esTablaValida(tabla, datosRestaurados)) {
+                if (!this._clavesIgnoradas.has(tabla)) {
+                    console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
+                }
+                return null;
+            }
+
+            const datosLocalesActuales = this.get(tabla, null);
+            if (
+                !forzarDescarga &&
+                Array.isArray(datosRestaurados) &&
+                datosRestaurados.length === 0 &&
+                Array.isArray(datosLocalesActuales) &&
+                datosLocalesActuales.length > 0
+            ) {
+                console.warn(`${tabla}: nube vacia y local con ${datosLocalesActuales.length} registros; se conserva local.`);
+                return 'omitida';
+            }
+
+            await this._guardarLocalDirecto(tabla, datosRestaurados);
+            // Guardamos el timestamp de Firebase como referencia local
+            if (tsFirebase > 0) {
+                this._cache[`_ts_${tabla}`] = tsFirebase;
+                await localforage.setItem(`_ts_${tabla}`, tsFirebase).catch(() => {});
+            }
+            return 'descargada';
+        } catch (e) {
+            // CRÍTICO: si una sola tabla viene corrupta o falla al procesarse, esto NO debe
+            // tumbar la descarga de TODAS las demás tablas (antes sí pasaba: un solo error
+            // aquí abortaba syncAll completo, dejando tablas como cuentasPorCobrar o
+            // cuentasEfectivo sin descargar en otros dispositivos, aunque nada tuvieran
+            // que ver con la tabla que realmente falló).
+            console.warn(`⚠️ Fallo al procesar "${tabla}" durante la sincronización; se omite y se continúa con las demás:`, e);
+            return 'omitida';
+        }
+    },
+
+    // opciones.forzarDescarga: fuerza la re-descarga de TODAS las tablas, ignorando timestamps
+    // (usado en login/init como red de seguridad).
+    // opciones.tablasForzar: array de nombres de tabla; solo ESAS tablas se fuerzan, el resto
+    // sigue la comparación normal de timestamp. Se usa cuando ya sabemos, por el listener de
+    // _syncStatus, exactamente cuál tabla cambió remotamente — así no hace falta re-descargar
+    // las otras 10 tablas de registro individual con cada cambio ajeno.
     async syncAll(opciones = {}) {
         if (!window._firebaseActivo || !window._db) {
             return Promise.reject(new Error("Firebase no está configurado o activo en este entorno."));
@@ -1510,104 +1636,29 @@ const StorageService = {
             console.log("⬇️ Descargando datos dinámicos de Firebase...");
 
             const forzarDescarga = !!(opciones && opciones.forzarDescarga);
+            const tablasForzarSet = (!forzarDescarga && opciones && Array.isArray(opciones.tablasForzar))
+                ? new Set(opciones.tablasForzar)
+                : null;
             const source = opciones && opciones.source ? { source: opciones.source } : undefined;
             const snapshot = source
                 ? await window._db.collection('posData').get(source)
                 : await window._db.collection('posData').get();
-            let descargadas = 0;
-            let omitidas = 0;
 
-            for (const doc of snapshot.docs) {
+            const docsAProcesar = snapshot.docs.filter(doc => {
                 const tabla = doc.id;
                 // Ignorar claves de timestamps internos
-                if (tabla.startsWith('_ts_') || tabla === '_syncStatus') continue;
+                return !(tabla.startsWith('_ts_') || tabla === '_syncStatus');
+            });
 
-                try {
-                    const payload = doc.data();
+            // Todas las tablas se procesan en paralelo (ver _procesarDocSyncAll): el costo ya no
+            // se suma tabla por tabla, sino que queda acotado por la consulta más lenta.
+            const resultados = await Promise.all(docsAProcesar.map(doc => {
+                const forzarEstaTabla = forzarDescarga || (tablasForzarSet ? tablasForzarSet.has(doc.id) : false);
+                return this._procesarDocSyncAll(doc, forzarEstaTabla);
+            }));
 
-                    // ── BLINDAJE ANTI-SOBREESCRITURA ──────────────────────────────
-                    // Solo bajamos si Firebase es MÁS RECIENTE que nuestro local.
-                    // Esto evita que un syncAll() pise datos que ya teníamos
-                    // correctos localmente pero que Firebase aún no recibió
-                    // (por ejemplo, si la red falló justo después de aprobar la bóveda).
-                    const tsFirebase = Number(payload?._updatedAt || 0);
-                    const tsLocal    = this._tsLocal(tabla);
-                    const datosLocalesAntes = this.get(tabla, null);
-                    const localTieneDatos = Array.isArray(datosLocalesAntes)
-                        ? datosLocalesAntes.length > 0
-                        : !!(datosLocalesAntes && typeof datosLocalesAntes === 'object' && Object.keys(datosLocalesAntes).length > 0);
-                    if (!forzarDescarga && localTieneDatos && tsLocal > 0 && tsFirebase <= tsLocal) {
-                        console.log(`⏭️ ${tabla}: local más reciente (local=${tsLocal} > nube=${tsFirebase}), se conserva.`);
-                        omitidas++;
-                        continue;
-                    }
-                    // ──────────────────────────────────────────────────────────
-
-                    // Tablas configuradas como "registro individual": el documento padre no trae
-                    // el arreglo (solo _updatedAt y _registroIndividual), así que se descargan
-                    // aparte desde su subcolección en vez de pasar por la normalización genérica.
-                    if (payload?._registroIndividual) {
-                        try {
-                            const huboDescarga = await this._descargarTablaPorRegistro(tabla, payload, forzarDescarga);
-                            if (huboDescarga) descargadas++; else omitidas++;
-                        } catch (e) {
-                            console.warn(`⚠️ Fallo al descargar "${tabla}" (registro individual):`, e);
-                            omitidas++;
-                        }
-                        continue;
-                    }
-
-                    const datosRestaurados = this._asegurarTablaLista(
-                        tabla,
-                        this._normalizarTablaDesdeFirestore(tabla, payload)
-                    );
-                    this._logTablaFirebase(tabla, datosRestaurados);
-                    if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
-                        this._logPayloadVacio(tabla, payload);
-                        if (this._tablasCriticasConDatos.has(tabla)) {
-                            console.warn(`${tabla}: Firebase esta vacio; no se guarda local ni se marca como descargado.`);
-                            omitidas++;
-                            continue;
-                        }
-                    }
-
-                    if (!this._esTablaValida(tabla, datosRestaurados)) {
-                        if (!this._clavesIgnoradas.has(tabla)) {
-                            console.warn(`⏭️ Tabla ignorada al sincronizar: ${tabla}`);
-                        }
-                        continue;
-                    }
-
-                    const datosLocalesActuales = this.get(tabla, null);
-                    if (
-                        !forzarDescarga &&
-                        Array.isArray(datosRestaurados) &&
-                        datosRestaurados.length === 0 &&
-                        Array.isArray(datosLocalesActuales) &&
-                        datosLocalesActuales.length > 0
-                    ) {
-                        console.warn(`${tabla}: nube vacia y local con ${datosLocalesActuales.length} registros; se conserva local.`);
-                        omitidas++;
-                        continue;
-                    }
-
-                    await this._guardarLocalDirecto(tabla, datosRestaurados);
-                    // Guardamos el timestamp de Firebase como referencia local
-                    if (tsFirebase > 0) {
-                        this._cache[`_ts_${tabla}`] = tsFirebase;
-                        await localforage.setItem(`_ts_${tabla}`, tsFirebase).catch(() => {});
-                    }
-                    descargadas++;
-                } catch (e) {
-                    // CRÍTICO: si una sola tabla viene corrupta o falla al procesarse, esto NO debe
-                    // tumbar la descarga de TODAS las demás tablas (antes sí pasaba: un solo error
-                    // aquí abortaba syncAll completo, dejando tablas como cuentasPorCobrar o
-                    // cuentasEfectivo sin descargar en otros dispositivos, aunque nada tuvieran
-                    // que ver con la tabla que realmente falló).
-                    console.warn(`⚠️ Fallo al procesar "${tabla}" durante la sincronización; se omite y se continúa con las demás:`, e);
-                    omitidas++;
-                }
-            }
+            const descargadas = resultados.filter(r => r === 'descargada').length;
+            const omitidas = resultados.filter(r => r === 'omitida').length;
 
             console.log(`✅ Sync completada. Descargadas: ${descargadas}, conservadas por ser más recientes: ${omitidas}`);
             return true;
@@ -1714,7 +1765,9 @@ const StorageService = {
             try { localStorage.setItem('_syncStatusVisto', String(ts)); } catch(e) {}
 
             // Tambien verificamos en el mismo dispositivo: puede haber Chrome y PWA abiertos a la vez.
-            this.solicitarSyncRemoto(`cambio remoto ${data.tabla || ''}`.trim(), 800);
+            // Pasamos la tabla que realmente cambió para no forzar la re-descarga completa de las
+            // demás (ver comentario en solicitarSyncRemoto).
+            this.solicitarSyncRemoto(`cambio remoto ${data.tabla || ''}`.trim(), 800, data.tabla || null);
         }, (err) => {
             console.warn('No se pudo escuchar cambios remotos de Firebase:', err);
         });
