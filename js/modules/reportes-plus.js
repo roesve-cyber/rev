@@ -261,6 +261,27 @@
         }).join('');
     }
 
+    function statBars(items, formatFn, color) {
+        if (!items.length) return `<div style="padding:16px;text-align:center;color:#94a3b8;">Sin datos suficientes.</div>`;
+        const max = Math.max(...items.map(i => i.value), 1);
+        return items.map((it, idx) => {
+            const pct = Math.max(4, (it.value / max) * 100);
+            return `<div style="display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid #f1f5f9;">
+                <div style="font-weight:900;color:#94a3b8;">${idx + 1}</div>
+                <div>
+                    <div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:800;color:#0f172a;">
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.name)}</span>
+                        <span style="color:#64748b;">${esc(it.meta || '')}</span>
+                    </div>
+                    <div style="height:7px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin-top:5px;">
+                        <div style="height:100%;width:${pct}%;background:${color};border-radius:999px;"></div>
+                    </div>
+                </div>
+                <div style="font-size:13px;font-weight:900;color:${color};">${formatFn(it.value)}</div>
+            </div>`;
+        }).join('');
+    }
+
     function activeFilterChips(filters, specs, rendererName) {
         const chips = specs
             .filter(spec => String(filters[spec.key] || '').trim())
@@ -714,7 +735,60 @@
         return [];
     }
 
-    function normalizePurchase(doc, source, providerMaps = productProviderMaps()) {
+    function ordersById() {
+        const map = new Map();
+        arr('ordenesCompra').forEach(o => map.set(String(o.id), o));
+        return map;
+    }
+
+    function categoryStockMap() {
+        const map = new Map();
+        arr('productos').forEach(p => {
+            const cat = String(p.categoria || p.category || '').trim() || 'Sin categoria';
+            const stock = Number(p.stock) || 0;
+            map.set(cat, (map.get(cat) || 0) + stock);
+        });
+        return map;
+    }
+
+    function categorySalesUnits(days = 90, providerMaps = productProviderMaps()) {
+        const since = new Date();
+        since.setDate(since.getDate() - days);
+        const map = new Map();
+        arr('ventasRegistradas').forEach(v => {
+            const dateRaw = v.fechaVenta || v.fechaIso || v.fecha || v.datosVenta?.fechaIso || '';
+            const date = parseDate(dateRaw);
+            if (!(date instanceof Date) || isNaN(date.getTime()) || date < since) return;
+            saleItems(v).forEach(item => {
+                const cat = itemCategoryLabel(item, providerMaps) || 'Sin categoria';
+                const qty = Number(item.cantidad || 1) || 1;
+                map.set(cat, (map.get(cat) || 0) + qty);
+            });
+        });
+        return map;
+    }
+
+    // Resumen global de consignación (compras.js). Se usa para saber, por
+    // folio de recepción, cuanto de lo recibido ya es pasivo real (se vendio
+    // y genero CxP) vs. cuanto sigue siendo inventario en resguardo del
+    // proveedor (nunca es deuda hasta que se vende).
+    function consigResumenSeguro() {
+        try {
+            return typeof _consigResumenGlobal === 'function' ? _consigResumenGlobal() : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function consigFolioMapFrom(resumen) {
+        const map = new Map();
+        if (resumen && Array.isArray(resumen.folios)) {
+            resumen.folios.forEach(f => map.set(f.key, f));
+        }
+        return map;
+    }
+
+    function normalizePurchase(doc, source, providerMaps = productProviderMaps(), ocMap = null, consigFolioMap = null) {
         const items = purchaseItems(doc);
         const dateRaw = doc.fechaISO || doc.fechaIso || doc.fechaRecepcion || doc.fechaEmision || doc.fecha || doc.fechaPedido || '';
         const date = parseDate(dateRaw);
@@ -729,11 +803,77 @@
             .sort((a, b) => a.localeCompare(b, 'es'));
         const subcategories = [...new Set(items.map(item => itemSubcategoryLabel(item, providerMaps)).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b, 'es'));
+        const consignment = doc.esConsignacion === true || method === 'consignacion';
+
+        // Pasivo real de consignación: buscamos el folio correspondiente en
+        // el resumen de compras.js (que ya cruza ventas de la pieza, CxP
+        // generadas y anticipos aplicados). Si no lo encontramos (p.ej. dato
+        // muy viejo sin folio), caemos al saldoPendiente crudo del doc.
+        let consignReal = null;
+        if (consignment && source === 'compra' && consigFolioMap && consigFolioMap.size
+            && typeof _consigProveedorKey === 'function' && typeof _consigFolioKeyFromParts === 'function') {
+            const proveedorKey = _consigProveedorKey({ proveedor: doc.proveedor || doc.proveedorNombre || '', proveedorId: doc.proveedorId });
+            const folioLabel = String(doc.folio || doc.id || '').trim() || 'SIN FOLIO';
+            const folioKey = _consigFolioKeyFromParts(proveedorKey, folioLabel);
+            const f = consigFolioMap.get(folioKey);
+            if (f) {
+                consignReal = {
+                    compraOriginal: Number(f.compraOriginal || 0),
+                    montoDevuelto: Number(f.montoDevuelto || 0),
+                    inventarioPendiente: Number(f.inventarioPendiente || 0),
+                    vendidoReportado: Number(f.vendidoReportado || 0),
+                    pagadoPorVentas: Number(f.pagadoPorVentas || 0),
+                    anticiposTotal: Number(f.anticiposTotal || 0),
+                    anticiposAplicados: Number(f.anticiposAplicados || 0),
+                    anticiposDisponibles: Number(f.anticiposDisponibles || 0),
+                    creditoAnticipos: Number(f.creditoAnticipos || 0),
+                    saldoNeto: Number(f.saldoNeto || 0)
+                };
+            }
+        }
+
         let paid = Number(doc.totalPagado ?? doc.montoPagadoTotal ?? doc.pagado ?? doc.montoPagado ?? doc.anticipo_pagado ?? doc.anticipo ?? doc.pago?.monto ?? 0) || 0;
         if (doc.anticipoEsTransferido) paid = 0;
         if (paid <= 0 && (method === 'contado' || method.includes('contado')) && !doc.esConsignacion) {
             paid = Math.max(0, total - (Number(doc.saldoFavorAplicado || 0) || 0));
         }
+        if (consignReal) {
+            // "Pagado" en consignacion = lo que ya dejo de ser pasivo:
+            // ventas ya liquidadas al proveedor + anticipos aplicados.
+            paid = Math.max(0, (consignReal.compraOriginal - consignReal.montoDevuelto) - consignReal.saldoNeto);
+        }
+
+        // Tiempos: dias de entrega (emision de OC -> recepcion) y dias de
+        // atraso vs la fecha de entrega estimada, cuando hay datos.
+        let leadDays = null, lateDays = null, diasAbierta = null;
+        if (source === 'compra') {
+            const oc = doc.ordenCompraId && ocMap ? ocMap.get(String(doc.ordenCompraId)) : null;
+            if (oc && oc.fechaEmision) {
+                const emision = parseDate(oc.fechaEmision);
+                if (emision instanceof Date && !isNaN(emision.getTime()) && emision.getFullYear() >= 2000 && date.getFullYear() >= 2000) {
+                    leadDays = Math.max(0, Math.round((date - emision) / 86400000));
+                }
+                if (oc.fechaEntregaEstimada) {
+                    const est = parseDate(oc.fechaEntregaEstimada);
+                    if (est instanceof Date && !isNaN(est.getTime()) && est.getFullYear() >= 2000) {
+                        lateDays = Math.round((date - est) / 86400000);
+                    }
+                }
+            }
+        } else if (source === 'orden') {
+            const estadoLower = String(doc.estado || doc.estatus || '').toLowerCase();
+            if (!estadoLower.includes('recib') && !estadoLower.includes('cancel')) {
+                const hoy = new Date();
+                if (date.getFullYear() >= 2000) diasAbierta = Math.max(0, Math.round((hoy - date) / 86400000));
+                if (doc.fechaEntregaEstimada) {
+                    const est = parseDate(doc.fechaEntregaEstimada);
+                    if (est instanceof Date && !isNaN(est.getTime()) && est.getFullYear() >= 2000) {
+                        lateDays = Math.round((hoy - est) / 86400000);
+                    }
+                }
+            }
+        }
+
         return {
             source,
             folio: doc.folio || doc.id || '-',
@@ -745,13 +885,17 @@
             status: doc.estado || doc.estatus || (source === 'compra' ? 'Recibido' : 'Pendiente'),
             total,
             paid: Math.min(total, paid),
-            balance: Math.max(0, Number(doc.saldoPendiente ?? doc.saldo ?? 0) || 0),
+            balance: consignReal ? consignReal.saldoNeto : Math.max(0, Number(doc.saldoPendiente ?? doc.saldo ?? 0) || 0),
             items,
             categories,
             subcategories,
             units: items.reduce((s, a) => s + (Number(a.cantidadRec ?? a.cantidad ?? a.cant ?? 1) || 1), 0),
-            consignment: doc.esConsignacion === true || method === 'consignacion',
-            ref: doc.ordenCompraId || doc.compraId || doc.id || ''
+            consignment,
+            consignReal,
+            ref: doc.ordenCompraId || doc.compraId || doc.id || '',
+            leadDays,
+            lateDays,
+            diasAbierta
         };
     }
 
@@ -765,19 +909,23 @@
         const type = document.getElementById('rcTipo')?.value || 'todos';
         const status = document.getElementById('rcEstado')?.value || 'operativas';
         const order = document.getElementById('rcOrden')?.value || 'fecha_desc';
-        window._rplusCompraFiltros = { q, supplier, from, to, category, subcategory, type, status, order };
+        const consignacion = document.getElementById('rcConsignacion')?.value || '';
+        window._rplusCompraFiltros = { q, supplier, from, to, category, subcategory, type, status, order, consignacion };
         const fromD = from ? (window.fechaInicioDiaMX ? window.fechaInicioDiaMX(from) : new Date(from + 'T00:00:00')) : null;
         const toD = to ? (window.fechaFinDiaMX ? window.fechaFinDiaMX(to) : new Date(to + 'T23:59:59')) : null;
         const providerMaps = productProviderMaps();
+        const ocMap = ordersById();
+        const consigFolioMap = consigFolioMapFrom(consigResumenSeguro());
         return [
-            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', providerMaps)),
-            ...arr('compras').map(c => normalizePurchase(c, 'compra', providerMaps))
+            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', providerMaps, ocMap, consigFolioMap)),
+            ...arr('compras').map(c => normalizePurchase(c, 'compra', providerMaps, ocMap, consigFolioMap))
         ].filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && d.date.getFullYear() >= 1990)
             .filter(d => !supplier || supplierKey(d.supplier) === supplierKey(supplier))
             .filter(d => !category || d.categories.some(c => supplierKey(c) === supplierKey(category)))
             .filter(d => !subcategory || d.subcategories.some(s => supplierKey(s) === supplierKey(subcategory)))
             .filter(d => !fromD || d.date >= fromD)
             .filter(d => !toD || d.date <= toD)
+            .filter(d => !consignacion ? true : (consignacion === 'sin' ? !d.consignment : d.consignment))
             .filter(d => !q || `${d.supplier} ${d.folio} ${d.status} ${d.categories.join(' ')} ${d.subcategories.join(' ')} ${d.items.map(a => a.nombre || a.productoNombre || '').join(' ')}`.toLowerCase().includes(q))
             .filter(d => {
                 if (type === 'todos') return true;
@@ -821,11 +969,93 @@
         const avg = real.length ? receivedTotal / real.length : 0;
         const topSuppliers = groupTop(real, d => d.supplier, d => d.total).map(x => ({ name: x.name, value: x.value, meta: `${x.count} doc(s)` }));
         const topMethods = groupTop(real, d => d.consignment ? 'Consignacion' : d.method, d => d.total).map(x => ({ name: x.name, value: x.value, meta: `${x.count} doc(s)` }));
+
+        // ── Tiempos: entrega, atrasos, ordenes abiertas ──
+        const leadSamples = real.filter(d => d.leadDays !== null && d.leadDays !== undefined);
+        const avgLeadDays = leadSamples.length ? leadSamples.reduce((s, d) => s + d.leadDays, 0) / leadSamples.length : null;
+        const lateOrders = openOrders.filter(d => d.lateDays !== null && d.lateDays !== undefined && d.lateDays > 0);
+        const pendingUnits = openOrders.reduce((s, d) => s + d.units, 0);
+        const unitCost = units > 0 ? receivedTotal / units : 0;
+        const supplierLeadMap = new Map();
+        leadSamples.forEach(d => {
+            const row = supplierLeadMap.get(d.supplier) || { name: d.supplier, sum: 0, count: 0 };
+            row.sum += d.leadDays; row.count += 1;
+            supplierLeadMap.set(d.supplier, row);
+        });
+        const supplierLead = [...supplierLeadMap.values()]
+            .map(r => ({ name: r.name, value: Math.round((r.sum / r.count) * 10) / 10, meta: `${r.count} recepcion(es)` }))
+            .sort((a, b) => a.value - b.value).slice(0, 5);
+
+        // ── Cobertura y desplazamiento por categoria (ventana de 90 dias) ──
+        const coverageWindowDays = 90;
+        const stockByCat = categoryStockMap();
+        const soldByCat = categorySalesUnits(coverageWindowDays);
+        const purchasedByCat = new Map();
+        real.forEach(d => {
+            const cats = d.categories.length ? d.categories : ['Sin categoria'];
+            const per = d.units / cats.length;
+            cats.forEach(cat => purchasedByCat.set(cat, (purchasedByCat.get(cat) || 0) + per));
+        });
+        const coverageRows = [...new Set([...stockByCat.keys(), ...soldByCat.keys(), ...purchasedByCat.keys()])]
+            .map(cat => {
+                const stock = stockByCat.get(cat) || 0;
+                const sold = soldByCat.get(cat) || 0;
+                const purchased = purchasedByCat.get(cat) || 0;
+                const dailyRate = sold / coverageWindowDays;
+                const coverageDays = dailyRate > 0 ? stock / dailyRate : null;
+                const rotation = (stock + purchased) > 0 ? (sold / (stock + purchased)) * 100 : 0;
+                return { cat, stock, sold, purchased, coverageDays, rotation };
+            })
+            .filter(r => r.stock > 0.01 || r.sold > 0.01 || r.purchased > 0.01)
+            .sort((a, b) => (a.coverageDays === null ? Infinity : a.coverageDays) - (b.coverageDays === null ? Infinity : b.coverageDays))
+            .slice(0, 12);
+        const coverageTable = coverageRows.length ? `<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:#f8fafc;color:#334155;text-align:left;"><th style="padding:10px;">Categoria</th><th style="padding:10px;text-align:right;">Stock actual</th><th style="padding:10px;text-align:right;">Vendido (90d)</th><th style="padding:10px;text-align:right;">Comprado (90d)</th><th style="padding:10px;text-align:right;">Cobertura</th><th style="padding:10px;text-align:right;">Desplazamiento</th></tr></thead><tbody>${coverageRows.map(r => {
+            const coverageTxt = r.coverageDays === null ? (r.stock > 0 ? 'Sin venta' : '-') : (r.coverageDays > 365 ? '>365 d' : `${r.coverageDays.toFixed(0)} d`);
+            const coverageColor = r.coverageDays === null ? '#64748b' : (r.coverageDays < 15 ? '#dc2626' : (r.coverageDays > 120 ? '#d97706' : '#16a34a'));
+            return `<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:10px;font-weight:700;color:#0f172a;">${esc(r.cat)}</td><td style="padding:10px;text-align:right;">${r.stock.toFixed(0)}</td><td style="padding:10px;text-align:right;">${r.sold.toFixed(0)}</td><td style="padding:10px;text-align:right;">${r.purchased.toFixed(0)}</td><td style="padding:10px;text-align:right;font-weight:900;color:${coverageColor};">${coverageTxt}</td><td style="padding:10px;text-align:right;">${r.rotation.toFixed(0)}%</td></tr>`;
+        }).join('')}</tbody></table>` : `<div style="padding:24px;text-align:center;color:#94a3b8;">Sin datos de existencias o ventas para calcular cobertura.</div>`;
+
+        // ── Consignacion: pasivo real por proveedor ──
+        // La recepcion a consignacion NUNCA es deuda formal por si sola: el
+        // pasivo real solo nace cuando la pieza se vende (se genera una CxP
+        // con origenConsignacion) y se reduce con abonos y anticipos ya
+        // aplicados. Esta tabla usa el mismo motor de compras.js
+        // (_consigResumenGlobal) que alimenta el modulo de Consignaciones,
+        // para no duplicar ni desalinear la logica de negocio.
+        const consigResumenPanel = consigResumenSeguro();
+        const consigSupplierFiltro = document.getElementById('rcProveedorFiltro')?.value || '';
+        const consigGrupos = (consigResumenPanel?.grupos || [])
+            .filter(g => g.compraOriginal > 0.01 || g.anticiposTotal > 0.01 || g.inventarioPendiente > 0.01)
+            .filter(g => !consigSupplierFiltro || supplierKey(g.proveedor) === supplierKey(consigSupplierFiltro))
+            .sort((a, b) => b.saldoNeto - a.saldoNeto);
+        const consigLiabilityTotal = consigGrupos.reduce((s, g) => s + (g.saldoNeto || 0), 0);
+        const consigPendingStockTotal = consigGrupos.reduce((s, g) => s + (g.inventarioPendiente || 0), 0);
+        const consigAdvanceAvailableTotal = consigGrupos.reduce((s, g) => s + (g.anticiposDisponibles || 0), 0);
+        const consigPanelRows = consigGrupos.map(g => {
+            const inventarioNota = g.inventarioPendiente > 0.01
+                ? `<br><small style="color:#94a3b8;">+${money(g.inventarioPendiente)} en inventario sin vender (no es deuda aun)</small>` : '';
+            const anticipoNota = g.anticiposDisponibles > 0.01
+                ? `<br><small style="color:#0f766e;">disp: ${money(g.anticiposDisponibles)}</small>` : '';
+            return `<tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:10px;vertical-align:top;font-weight:700;color:#0f172a;">${esc(g.proveedor)}<br><small style="color:#94a3b8;font-weight:600;">${g.folios.length} folio(s)</small></td>
+                <td style="padding:10px;text-align:right;vertical-align:top;">${money(g.compraOriginal)}</td>
+                <td style="padding:10px;text-align:right;vertical-align:top;color:#64748b;">${g.montoDevuelto > 0.01 ? money(g.montoDevuelto) : '-'}</td>
+                <td style="padding:10px;text-align:right;vertical-align:top;">${money(g.pagadoPorVentas || 0)}</td>
+                <td style="padding:10px;text-align:right;vertical-align:top;">${money(g.creditoAnticipos || 0)}${anticipoNota}</td>
+                <td style="padding:10px;text-align:right;vertical-align:top;font-weight:900;color:${g.saldoNeto > 0.01 ? '#dc2626' : '#16a34a'};">${money(g.saldoNeto)}${inventarioNota}</td>
+            </tr>`;
+        }).join('');
+        const consigPanel = consigGrupos.length
+            ? `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px;"><thead><tr style="background:#f8fafc;color:#334155;text-align:left;"><th style="padding:10px;">Proveedor</th><th style="padding:10px;text-align:right;">Recibido</th><th style="padding:10px;text-align:right;">Devuelto</th><th style="padding:10px;text-align:right;">Pagado (por venta)</th><th style="padding:10px;text-align:right;">Anticipos</th><th style="padding:10px;text-align:right;">Saldo real hoy</th></tr></thead><tbody>${consigPanelRows}</tbody></table></div>
+                <div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:12px;color:#475569;">La deuda real con el proveedor nace hasta que la pieza se vende (se genera una CxP) y se reduce con pagos y anticipos ya aplicados. El inventario recibido y aun sin vender no cuenta como pasivo.</div>`
+            : `<div style="padding:24px;text-align:center;color:#94a3b8;">Sin consignaciones activas para el filtro actual.</div>`;
+
         const compraFilterState = window._rplusCompraFiltros || {};
         const purchaseProviderMaps = productProviderMaps();
+        const purchaseOcMap = ordersById();
         const allPurchaseRows = [
-            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', purchaseProviderMaps)),
-            ...arr('compras').map(c => normalizePurchase(c, 'compra', purchaseProviderMaps))
+            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', purchaseProviderMaps, purchaseOcMap)),
+            ...arr('compras').map(c => normalizePurchase(c, 'compra', purchaseProviderMaps, purchaseOcMap))
         ];
         const supplierSelectCompras = supplierOptions(compraFilterState.supplier || '', allPurchaseRows.map(d => d.supplier));
         const purchaseCategoryOptions = rowsForCategoryOptions(allPurchaseRows, compraFilterState.category || '');
@@ -836,28 +1066,52 @@
             { key: 'from', id: 'rcFechaDesde', label: 'Desde' },
             { key: 'to', id: 'rcFechaHasta', label: 'Hasta' },
             { key: 'supplier', id: 'rcProveedorFiltro', label: 'Proveedor' },
+            { key: 'consignacion', id: 'rcConsignacion', label: 'Consignacion', options: { sin: 'Solo compra propia', solo: 'Solo consignacion' } },
             { key: 'category', id: 'rcCategoria', label: 'Categoria' },
             { key: 'subcategory', id: 'rcSubcategoria', label: 'Subcategoria' },
             { key: 'type', id: 'rcTipo', label: 'Tipo', options: { compra: 'Compras/recepciones', orden: 'Ordenes', consignacion: 'Consignacion', credito: 'Credito proveedor', contado: 'Contado/debito' } }
         ], 'renderReporteCompras');
 
-        const table = rows.length ? `<table style="width:100%;border-collapse:collapse;min-width:1080px;"><thead><tr style="background:#f8fafc;color:#334155;text-align:left;"><th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Proveedor</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Total / Pagado</th><th style="padding:12px;text-align:right;">Saldo</th><th style="padding:12px;">Estado</th></tr></thead><tbody>${rows.map(d => {
+        const table = rows.length ? `<table style="width:100%;border-collapse:collapse;min-width:1180px;"><thead><tr style="background:#f8fafc;color:#334155;text-align:left;"><th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Proveedor</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Total / Pagado</th><th style="padding:12px;text-align:right;">Saldo</th><th style="padding:12px;">Estado</th><th style="padding:12px;">Tiempos</th></tr></thead><tbody>${rows.map(d => {
             const items = d.items.length ? d.items.slice(0, 3).map(a => `${a.cantidadRec ?? a.cantidad ?? 1}x ${esc(a.nombre || a.productoNombre || a.producto || '-')}`).join('<br>') : '<span style="color:#94a3b8;">Sin detalle</span>';
             const type = d.consignment ? badge('Consignacion', '#ede9fe', '#6d28d9') : badge(d.type, d.source === 'orden' ? '#dbeafe' : '#ecfdf5', d.source === 'orden' ? '#1d4ed8' : '#047857');
             const sLower = String(d.status).toLowerCase();
             const statusBadge = sLower.includes('cancel') ? badge(d.status, '#fee2e2', '#991b1b') : (sLower.includes('recib') || sLower.includes('complet') ? badge(d.status, '#dcfce7', '#166534') : badge(d.status, '#fef3c7', '#92400e'));
-            return `<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:12px;vertical-align:top;"><strong>${esc(d.folio)}</strong><br>${type}</td><td style="padding:12px;vertical-align:top;white-space:nowrap;">${esc(d.dateText)}</td><td style="padding:12px;vertical-align:top;"><strong>${esc(d.supplier)}</strong><br><small style="color:#64748b;">${esc(d.method || '-')}</small></td><td style="padding:12px;vertical-align:top;font-size:12px;">${items}${d.items.length > 3 ? `<br><small style="color:#64748b;">+${d.items.length - 3} mas</small>` : ''}</td><td style="padding:12px;vertical-align:top;text-align:center;font-weight:900;">${d.units}</td><td style="padding:12px;vertical-align:top;text-align:right;"><strong style="color:#1e40af;">${money(d.total)}</strong><br><small style="color:#64748b;">Pagado: ${money(d.paid)}</small></td><td style="padding:12px;vertical-align:top;text-align:right;color:${d.balance > 0 ? '#dc2626' : '#64748b'};font-weight:900;">${money(d.balance)}</td><td style="padding:12px;vertical-align:top;">${statusBadge}</td></tr>`;
+            let tiempoTxt = '<span style="color:#94a3b8;">-</span>';
+            if (d.leadDays !== null && d.leadDays !== undefined) {
+                const retraso = d.lateDays !== null && d.lateDays !== undefined && d.lateDays > 0;
+                tiempoTxt = `<span style="font-weight:800;color:#0891b2;">${d.leadDays} d entrega</span>${retraso ? `<br><small style="color:#dc2626;">+${d.lateDays} d vs estimado</small>` : ''}`;
+            } else if (d.diasAbierta !== null && d.diasAbierta !== undefined) {
+                const retraso = d.lateDays !== null && d.lateDays !== undefined && d.lateDays > 0;
+                tiempoTxt = `<span style="font-weight:800;color:${retraso ? '#dc2626' : '#334155'};">${d.diasAbierta} d abierta</span>${retraso ? `<br><small style="color:#dc2626;">+${d.lateDays} d de retraso</small>` : ''}`;
+            }
+            let saldoCell = `${money(d.balance)}`;
+            if (d.consignReal) {
+                const cr = d.consignReal;
+                saldoCell += `<br><small style="font-weight:700;color:#7c3aed;">Pasivo real</small>`;
+                if (cr.inventarioPendiente > 0.01) {
+                    saldoCell += `<br><small style="color:#94a3b8;font-weight:600;">+${money(cr.inventarioPendiente)} sin vender (no es deuda)</small>`;
+                }
+                if (cr.anticiposDisponibles > 0.01) {
+                    saldoCell += `<br><small style="color:#0f766e;font-weight:600;">Anticipo disp.: ${money(cr.anticiposDisponibles)}</small>`;
+                }
+            }
+            return `<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:12px;vertical-align:top;"><strong>${esc(d.folio)}</strong><br>${type}</td><td style="padding:12px;vertical-align:top;white-space:nowrap;">${esc(d.dateText)}</td><td style="padding:12px;vertical-align:top;"><strong>${esc(d.supplier)}</strong><br><small style="color:#64748b;">${esc(d.method || '-')}</small></td><td style="padding:12px;vertical-align:top;font-size:12px;">${items}${d.items.length > 3 ? `<br><small style="color:#64748b;">+${d.items.length - 3} mas</small>` : ''}</td><td style="padding:12px;vertical-align:top;text-align:center;font-weight:900;">${d.units}</td><td style="padding:12px;vertical-align:top;text-align:right;"><strong style="color:#1e40af;">${money(d.total)}</strong><br><small style="color:#64748b;">Pagado: ${money(d.paid)}</small></td><td style="padding:12px;vertical-align:top;text-align:right;color:${d.balance > 0 ? '#dc2626' : '#64748b'};font-weight:900;">${saldoCell}</td><td style="padding:12px;vertical-align:top;">${statusBadge}</td><td style="padding:12px;vertical-align:top;font-size:12px;">${tiempoTxt}</td></tr>`;
         }).join('')}</tbody></table>` : `<div style="padding:34px;text-align:center;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;">No hay compras para mostrar con los filtros actuales.</div>`;
 
         app.innerHTML = `<div class="vista-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:14px;flex-wrap:wrap;"><div><h2 style="margin:0;color:#0f172a;">Reporte de Compras</h2><p style="color:#64748b;margin:4px 0 0;">Abastecimiento, recepciones, compromisos y saldos por proveedor.</p></div><div style="display:flex;gap:10px;flex-wrap:wrap;"><button onclick="exportarReporteCompras()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Exportar CSV</button><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Actualizar</button></div></div>
-        <div style="background:white;border:1px solid #e2e8f0;padding:16px;border-radius:10px;margin-bottom:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;"><div style="grid-column:span 2;"><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">BUSCAR</label><input type="search" id="rcProveedor" value="${esc(document.getElementById('rcProveedor')?.value || '')}" placeholder="Proveedor, folio o producto" onkeydown="if(event.key==='Enter')renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">PROVEEDOR</label><select id="rcProveedorFiltro" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${supplierSelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">DESDE</label><input type="date" id="rcFechaDesde" value="${esc(document.getElementById('rcFechaDesde')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">HASTA</label><input type="date" id="rcFechaHasta" value="${esc(document.getElementById('rcFechaHasta')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#0f172a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Filtrar</button><details ${compraFilterState.type && compraFilterState.type !== 'todos' || compraFilterState.category || compraFilterState.subcategory || compraFilterState.status && compraFilterState.status !== 'operativas' || compraFilterState.order && compraFilterState.order !== 'fecha_desc' ? 'open' : ''} style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;"><summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;margin-top:12px;"><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CATEGORIA</label><select id="rcCategoria" onchange="document.getElementById('rcSubcategoria').value='';renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${categorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">SUBCATEGORIA</label><select id="rcSubcategoria" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${subcategorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">TIPO</label><select id="rcTipo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos</option><option value="compra">Compras/recepciones</option><option value="orden">Ordenes</option><option value="consignacion">Consignacion</option><option value="credito">Credito proveedor</option><option value="contado">Contado/debito</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rcEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="operativas">Operativas</option><option value="todas">Todas</option><option value="pendientes">Pendientes</option><option value="recibidas">Recibidas</option><option value="canceladas">Canceladas</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rcOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="saldo_desc">Mayor saldo</option><option value="proveedor">Proveedor A-Z</option></select></div></div></details></div>
+        <div style="background:white;border:1px solid #e2e8f0;padding:16px;border-radius:10px;margin-bottom:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;"><div style="grid-column:span 2;"><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">BUSCAR</label><input type="search" id="rcProveedor" value="${esc(document.getElementById('rcProveedor')?.value || '')}" placeholder="Proveedor, folio o producto" onkeydown="if(event.key==='Enter')renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">PROVEEDOR</label><select id="rcProveedorFiltro" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${supplierSelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CONSIGNACION</label><select id="rcConsignacion" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="">Con y sin consignacion</option><option value="sin">Solo compra propia</option><option value="solo">Solo consignacion</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">DESDE</label><input type="date" id="rcFechaDesde" value="${esc(document.getElementById('rcFechaDesde')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">HASTA</label><input type="date" id="rcFechaHasta" value="${esc(document.getElementById('rcFechaHasta')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#0f172a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Filtrar</button><details ${compraFilterState.type && compraFilterState.type !== 'todos' || compraFilterState.category || compraFilterState.subcategory || compraFilterState.status && compraFilterState.status !== 'operativas' || compraFilterState.order && compraFilterState.order !== 'fecha_desc' ? 'open' : ''} style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;"><summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;margin-top:12px;"><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CATEGORIA</label><select id="rcCategoria" onchange="document.getElementById('rcSubcategoria').value='';renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${categorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">SUBCATEGORIA</label><select id="rcSubcategoria" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${subcategorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">TIPO</label><select id="rcTipo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos</option><option value="compra">Compras/recepciones</option><option value="orden">Ordenes</option><option value="consignacion">Consignacion</option><option value="credito">Credito proveedor</option><option value="contado">Contado/debito</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rcEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="operativas">Operativas</option><option value="todas">Todas</option><option value="pendientes">Pendientes</option><option value="recibidas">Recibidas</option><option value="canceladas">Canceladas</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rcOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="saldo_desc">Mayor saldo</option><option value="proveedor">Proveedor A-Z</option></select></div></div></details></div>
         ${compraChips}
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Compras recibidas', money(receivedTotal), '#0f766e')}${kpi('Ordenes abiertas', `${openOrders.length} (${money(openOrders.reduce((s, d) => s + d.total, 0))})`, '#1e40af')}${kpi('Saldo pendiente', money(pending), '#dc2626')}${kpi('Consignacion', money(consignment), '#7c3aed')}${kpi('Piezas recibidas', units, '#334155')}${kpi('Ticket promedio', money(avg), '#d97706')}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Compras recibidas', money(receivedTotal), '#0f766e')}${kpi('Ordenes abiertas', `${openOrders.length} (${money(openOrders.reduce((s, d) => s + d.total, 0))})`, '#1e40af')}${kpi('Saldo pendiente', money(pending), '#dc2626', 'Consignacion ya cuenta solo el pasivo real')}${kpi('Consignacion recibida', money(consignment), '#7c3aed', 'Mercancia en resguardo, aun no es deuda')}${kpi('Pasivo real consignacion', money(consigLiabilityTotal), consigLiabilityTotal > 0 ? '#dc2626' : '#16a34a', `${money(consigPendingStockTotal)} en inventario sin vender`)}${kpi('Piezas recibidas', units, '#334155')}${kpi('Ticket promedio', money(avg), '#d97706')}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:15px;margin-bottom:20px;">${kpi('Tiempo promedio de entrega', avgLeadDays !== null ? `${avgLeadDays.toFixed(1)} dias` : 'Sin datos', '#0891b2', leadSamples.length ? `${leadSamples.length} recepcion(es) vinculada(s) a OC` : 'Requiere recepciones ligadas a una OC')}${kpi('OC retrasadas', `${lateOrders.length}`, lateOrders.length ? '#dc2626' : '#16a34a', lateOrders.length ? 'vs. fecha de entrega estimada' : 'Ninguna fuera de tiempo')}${kpi('Costo promedio por unidad', money(unitCost), '#0f766e', `${units} pza(s) recibidas`)}${kpi('Piezas en ordenes abiertas', pendingUnits, '#1e40af', `${openOrders.length} orden(es) pendiente(s)`)}</div>
         <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Compras recibidas por mes</h3>${chartByMonth(real, d => d.total, '#0f766e', '#1e40af')}</div><div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 12px;color:#0f172a;font-size:16px;">Por metodo / politica</h3>${bars(topMethods, receivedTotal, '#0f766e')}</div></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top proveedores</h3>${bars(topSuppliers, receivedTotal, '#1e40af')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Lectura de control</h3><div style="display:grid;gap:10px;font-size:13px;color:#334155;"><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Documentos mostrados</strong>${rows.length}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Recepciones / directas</strong>${real.length}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Saldo vs recibido</strong>${receivedTotal > 0 ? ((pending / receivedTotal) * 100).toFixed(1) : '0.0'}%</div></div></div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 4px;font-size:16px;color:#0f172a;">Tiempos de entrega por proveedor</h3><p style="margin:0 0 10px;font-size:12px;color:#64748b;">Dias promedio entre emision de OC y recepcion.</p>${statBars(supplierLead, v => `${v} d`, '#0891b2')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 4px;font-size:16px;color:#0f172a;">Cobertura y desplazamiento por categoria</h3><p style="margin:0 0 10px;font-size:12px;color:#64748b;">Stock actual vs. ventas de los ultimos 90 dias.</p><div style="overflow-x:auto;">${coverageTable}</div></div></div>
+        <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;margin-bottom:20px;"><h3 style="margin:0 0 4px;color:#0f172a;font-size:16px;">Consignacion: pasivo real por proveedor</h3><p style="margin:0 0 12px;font-size:12px;color:#64748b;">Independiente de los filtros de fecha: refleja el saldo vigente hoy, no el movimiento del periodo.${consigAdvanceAvailableTotal > 0.01 ? ` Anticipos disponibles sin aplicar: ${money(consigAdvanceAvailableTotal)}.` : ''}</p>${consigPanel}</div>
         <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Detalle de Compras</h3><div style="overflow-x:auto;">${table}</div></div>`;
         const cf = window._rplusCompraFiltros || {};
         if (document.getElementById('rcProveedorFiltro')) document.getElementById('rcProveedorFiltro').value = cf.supplier || '';
+        if (document.getElementById('rcConsignacion')) document.getElementById('rcConsignacion').value = cf.consignacion || '';
         if (document.getElementById('rcCategoria')) document.getElementById('rcCategoria').value = cf.category || '';
         if (document.getElementById('rcSubcategoria')) document.getElementById('rcSubcategoria').value = cf.subcategory || '';
         if (document.getElementById('rcTipo')) document.getElementById('rcTipo').value = cf.type || 'todos';
@@ -867,10 +1121,11 @@
 
     window.exportarReporteCompras = function() {
         const rows = filteredPurchases();
-        let csv = 'Folio,Fecha,Proveedor,Categoria,Subcategoria,Tipo,Metodo,Articulos,Unidades,Total,Pagado,Saldo,Estatus,Consignacion,Referencia\n';
+        const unitCostRow = d => d.units > 0 ? (d.total / d.units) : 0;
+        let csv = 'Folio,Fecha,Proveedor,Categoria,Subcategoria,Tipo,Metodo,Articulos,Unidades,CostoPorUnidad,Total,Pagado,Saldo,Estatus,Consignacion,Referencia,DiasEntrega,DiasAbierta,DiasDeRetraso\n';
         rows.forEach(d => {
             const items = d.items.map(a => `${a.cantidadRec ?? a.cantidad ?? 1}x ${a.nombre || a.productoNombre || a.producto || ''}`).join(' | ');
-            csv += `"${d.folio}","${d.dateText}","${d.supplier}","${(d.categories || []).join(' | ')}","${(d.subcategories || []).join(' | ')}","${d.type}","${d.method}","${items}",${d.units},${d.total},${d.paid},${d.balance},"${d.status}","${d.consignment ? 'Si' : 'No'}","${d.ref}"\n`;
+            csv += `"${d.folio}","${d.dateText}","${d.supplier}","${(d.categories || []).join(' | ')}","${(d.subcategories || []).join(' | ')}","${d.type}","${d.method}","${items}",${d.units},${unitCostRow(d).toFixed(2)},${d.total},${d.paid},${d.balance},"${d.status}","${d.consignment ? 'Si' : 'No'}","${d.ref}",${d.leadDays ?? ''},${d.diasAbierta ?? ''},${d.lateDays ?? ''}\n`;
         });
         downloadCsv('reporte_compras', csv);
     };
