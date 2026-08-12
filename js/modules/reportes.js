@@ -863,7 +863,14 @@ window.renderReporteCompromisos = function() {
         (tarjeta.calendario || []).filter(p => p.estado !== 'Pagado').forEach(pago => {
             const monto = cuota - Number(pago.montoAbonado || 0);
             if (monto <= 0) return;
-            const d = new Date(pago.fecha);
+            // 🛡️ REPARACIÓN: pago.fecha es un string "YYYY-MM-DD" (solo fecha, sin
+            // hora). new Date(pago.fecha) lo interpreta como medianoche UTC; al
+            // leerlo en hora de México (UTC-6) las cuotas con vencimiento el día 1
+            // de un mes caían en el mes ANTERIOR (ej. cuota de septiembre contada
+            // como agosto), inflando el total de ese mes. Se parsea a mano, igual
+            // que ya hace bancos.js (calendario MSI) para el mismo campo.
+            const [anioPago, mesPago] = pago.fecha.split('-').map(Number);
+            const d = new Date(anioPago, mesPago - 1, 1);
             const diffMeses = (d.getFullYear() - hoy.getFullYear()) * 12 + (d.getMonth() - hoy.getMonth());
             if (diffMeses >= 0 && diffMeses < 6) {
                 meses[diffMeses].msi += monto;
