@@ -2990,14 +2990,8 @@ window.abrirTransferenciaProductoDesdeVisor = function(prodId) {
  if (!p) return alert('Producto no encontrado.');
  if (typeof window.abrirModalTransferenciaInv === 'function') window.abrirModalTransferenciaInv();
  setTimeout(() => {
- const input = document.getElementById('transfProductoId');
- const display = document.getElementById('transfProductoDisplay');
- if (input) input.value = p.id;
- if (display) {
- display.innerText = p.nombre || 'Producto seleccionado';
- display.style.color = '#1e40af';
- display.style.fontWeight = 'bold';
- }
+ window._transfInvItems = [{ id: p.id, nombre: p.nombre, cantidad: 1 }];
+ if (typeof window._transfInvRenderItems === 'function') window._transfInvRenderItems();
  }, 50);
 };
 
@@ -3122,7 +3116,9 @@ window.ejecutarAjusteInv = function() {
  if (typeof mostrarDetalleProductoMaestro === 'function' && window._visorProductoIdActual) mostrarDetalleProductoMaestro(window._visorProductoIdActual);
 };
 
-// --- TRANSFERENCIAS ENTRE BODEGAS ---
+// --- TRANSFERENCIAS ENTRE BODEGAS (MASIVA) ---
+window._transfInvItems = [];
+
 window.abrirModalTransferenciaInv = function() {
  if (!_invRequireAdmin('Abrir transferencia de inventario')) return;
  const ubs = StorageService.get('ubicacionesConfig', [{id:'General', nombre:'Piso de Ventas (General)'}]);
@@ -3131,11 +3127,9 @@ window.abrirModalTransferenciaInv = function() {
  
  document.getElementById('transfOrigen').innerHTML = opts;
  document.getElementById('transfDestino').innerHTML = opts;
- 
- document.getElementById('transfProductoId').value = '';
- document.getElementById('transfProductoDisplay').innerText = 'Sin seleccionar';
- document.getElementById('transfProductoDisplay').style.color = '#64748b';
- document.getElementById('transfCantidad').value = '';
+
+ window._transfInvItems = [];
+ window._transfInvRenderItems();
  
  // Y MAGIA DEL CSS AQUI TAMBIAN
  const modal = document.getElementById('modalTransferenciaInv');
@@ -3143,51 +3137,121 @@ window.abrirModalTransferenciaInv = function() {
  modal.style.display = 'flex';
 };
 
+// Abre el buscador universal acotado solo a productos con existencia en sistema
+// (soloConStock). Si el usuario tiene la mercancia fisicamente pero no aparece
+// aqui, es un caso para las herramientas de Ajuste de Inventario, no de transferencia.
+window._transfInvAbrirPicker = function() {
+ abrirSelectorProducto({
+ titulo: '🔍 Agregar Producto (solo con existencia)',
+ soloConStock: true,
+ onSeleccion: p => {
+ if (window._transfInvItems.some(it => String(it.id) === String(p.id))) {
+ alert(`"${p.nombre}" ya esta en la lista.`);
+ return;
+ }
+ window._transfInvItems.push({ id: p.id, nombre: p.nombre, cantidad: 1 });
+ window._transfInvRenderItems();
+ }
+ });
+};
+
+window._transfInvQuitarItem = function(idProd) {
+ window._transfInvItems = window._transfInvItems.filter(it => String(it.id) !== String(idProd));
+ window._transfInvRenderItems();
+};
+
+window._transfInvActualizarCantidad = function(idProd, valor) {
+ const item = window._transfInvItems.find(it => String(it.id) === String(idProd));
+ if (item) item.cantidad = valor;
+};
+
+window._transfInvRenderItems = function() {
+ const cont = document.getElementById('transfItemsLista');
+ if (!cont) return;
+ const origen = document.getElementById('transfOrigen')?.value || '';
+ const productos = StorageService.get("productos", []);
+
+ if (window._transfInvItems.length === 0) {
+ cont.innerHTML = `<div style="text-align:center;padding:15px;color:#94a3b8;font-size:13px;">Sin productos agregados.</div>`;
+ return;
+ }
+
+ cont.innerHTML = window._transfInvItems.map(item => {
+ const p = productos.find(prod => String(prod.id) === String(item.id));
+ const stockOrigen = p ? (parseFloat((p.stockPorUbicacion || {})[origen]) || 0) : 0;
+ return `
+ <div style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc;">
+ <div style="flex:1; min-width:0;">
+ <div style="font-weight:bold; font-size:13px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.nombre}</div>
+ <div style="font-size:11px; color:#64748b;">Disponible en ${origen || '—'}: <strong style="color:${stockOrigen > 0 ? '#16a34a' : '#dc2626'}">${stockOrigen}</strong></div>
+ </div>
+ <input type="number" min="1" value="${item.cantidad}" oninput="_transfInvActualizarCantidad('${item.id}', this.value)" style="width:70px; text-align:center; padding:6px; border:1px solid #d1d5db; border-radius:5px;">
+ <button onclick="_transfInvQuitarItem('${item.id}')" style="padding:6px 10px; background:#fee2e2; color:#dc2626; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">✕</button>
+ </div>`;
+ }).join('');
+};
+
 window.ejecutarTransferenciaInv = function() {
  if (!_invRequireAdmin('Ejecutar transferencia de inventario')) return;
- const idProd = document.getElementById('transfProductoId').value;
- const cant = parseFloat(document.getElementById('transfCantidad').value);
  const origen = document.getElementById('transfOrigen').value;
  const destino = document.getElementById('transfDestino').value;
+ const items = window._transfInvItems || [];
 
- if(!idProd) return alert("Selecciona un producto.");
- if(isNaN(cant) || cant <= 0) return alert("Ingresa una cantidad valida.");
- if(origen === destino) return alert("El origen y el destino no pueden ser el mismo.");
+ if (items.length === 0) return alert("Agrega al menos un producto a la transferencia.");
+ if (origen === destino) return alert("El origen y el destino no pueden ser el mismo.");
 
  const productos = StorageService.get("productos", []);
- const idx = productos.findIndex(p => String(p.id) === String(idProd));
- 
- if(idx === -1) return alert("Producto no encontrado.");
- 
- let p = productos[idx];
+ const detalles = [];
 
- // --- NUEVO: RESUMEN Y CONFIRMACION ---
- const msjConf = `RESUMEN DE OPERACION - TRANSFERIR INVENTARIO?\n\nProducto: ${p.nombre}\nCantidad a mover: ${cant} pieza(s)\nOrigen: ${origen}\nDestino: ${destino}\n\nDeseas ejecutar esta transferencia de mercancia?`;
+ for (const item of items) {
+ const cant = parseFloat(item.cantidad);
+ if (isNaN(cant) || cant <= 0) return alert(`Ingresa una cantidad valida para "${item.nombre}".`);
+ const idx = productos.findIndex(p => String(p.id) === String(item.id));
+ if (idx === -1) return alert(`Producto "${item.nombre}" no encontrado.`);
+ detalles.push({ idx, cant });
+ }
+
+ // --- RESUMEN Y CONFIRMACION ---
+ const resumenLineas = detalles.map(d => `• ${productos[d.idx].nombre}: ${d.cant} pieza(s)`).join('\n');
+ const msjConf = `RESUMEN DE OPERACION - TRANSFERIR INVENTARIO?\n\n${resumenLineas}\n\nOrigen: ${origen}\nDestino: ${destino}\n\nDeseas ejecutar esta transferencia de mercancia?`;
  if (!confirm(msjConf)) return;
  // --- FIN DE CONFIRMACION ---
 
- p.stockPorUbicacion = p.stockPorUbicacion || {};
- 
- const stockOrigen = parseFloat(p.stockPorUbicacion[origen]) || 0;
- if(stockOrigen < cant) {
- if(!confirm(`ATENCION: Solo hay ${stockOrigen} piezas en [${origen}]. Deseas forzar el movimiento de todos modos y dejar la bodega en negativo?`)) {
+ // Validacion de stock insuficiente agrupada (una sola alerta, no una por producto)
+ const insuficientes = detalles.filter(d => {
+ const p = productos[d.idx];
+ const stockOrigen = parseFloat((p.stockPorUbicacion || {})[origen]) || 0;
+ return stockOrigen < d.cant;
+ });
+ if (insuficientes.length > 0) {
+ const lineas = insuficientes.map(d => {
+ const p = productos[d.idx];
+ const stockOrigen = parseFloat((p.stockPorUbicacion || {})[origen]) || 0;
+ return `• ${p.nombre}: solo hay ${stockOrigen} en [${origen}]`;
+ }).join('\n');
+ if (!confirm(`ATENCION: Stock insuficiente en algunos productos:\n\n${lineas}\n\nDeseas forzar el movimiento de todos modos y dejar esas bodegas en negativo?`)) {
  return;
  }
  }
 
- p.stockPorUbicacion[origen] = stockOrigen - cant;
- p.stockPorUbicacion[destino] = (parseFloat(p.stockPorUbicacion[destino]) || 0) + cant;
-
  const sesion = _invSesionActiva() || {};
  const movs = StorageService.get("movimientosInventario", []);
  const referenciaTransf = `TRANSF-${Date.now()}`;
+
+ detalles.forEach((d, i) => {
+ const p = productos[d.idx];
+ p.stockPorUbicacion = p.stockPorUbicacion || {};
+ const stockOrigen = parseFloat(p.stockPorUbicacion[origen]) || 0;
+ p.stockPorUbicacion[origen] = stockOrigen - d.cant;
+ p.stockPorUbicacion[destino] = (parseFloat(p.stockPorUbicacion[destino]) || 0) + d.cant;
+
  movs.push({
- id: Date.now(),
+ id: Date.now() + i,
  fecha: window.localISO(new Date()),
  tipo: 'Transferencia Interna',
  productoId: p.id,
  productoNombre: p.nombre,
- cantidad: cant,
+ cantidad: d.cant,
  origen: origen,
  destino: destino,
  motivo: `Mover mercancia de ${origen} a ${destino}`,
@@ -3196,22 +3260,25 @@ window.ejecutarTransferenciaInv = function() {
  rol: sesion.rol || ''
  });
 
- productos[idx] = p;
- StorageService.set("productos", productos);
- StorageService.set("movimientosInventario", movs);
- window.productos = productos;
- window.movimientosInventario = movs;
  window.AuditService?.log?.({
  accion: 'INVENTARIO_TRANSFERENCIA',
  modulo: 'Inventario',
  entidad: p.nombre,
  entidadId: p.id,
- detalle: `${cant} pieza(s) de ${origen} a ${destino}`,
- datos: { productoId: p.id, cantidad: cant, origen, destino, referencia: referenciaTransf }
+ detalle: `${d.cant} pieza(s) de ${origen} a ${destino}`,
+ datos: { productoId: p.id, cantidad: d.cant, origen, destino, referencia: referenciaTransf }
+ });
  });
 
- alert(`Transferencia completada: ${cant} pieza(s) enviadas a ${destino}.`);
- 
+ StorageService.set("productos", productos);
+ StorageService.set("movimientosInventario", movs);
+ window.productos = productos;
+ window.movimientosInventario = movs;
+
+ alert(`Transferencia completada: ${detalles.length} producto(s) enviados a ${destino}.`);
+
+ window._transfInvItems = [];
+
  // Cerrar y volver a poner candado
  const modal = document.getElementById('modalTransferenciaInv');
  modal.classList.add('oculto');

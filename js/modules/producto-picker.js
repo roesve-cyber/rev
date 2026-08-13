@@ -10,14 +10,23 @@ window.abrirSelectorProducto = function(opciones) {
         // 'precio' = precio cobrado al cliente (ventas/cotizaciones).
         // 'costo'  = costo de compra al proveedor (ordenes de compra).
         // No es lo mismo: cada modulo debe pedir el campo que le corresponde.
-        campoPrecio = 'precio'
+        campoPrecio = 'precio',
+        // Cuando es true, el buscador solo lista productos con existencia
+        // registrada en el sistema (stock > 0). Pensado para modulos como
+        // Transferencias, donde mover un producto en 0 no tiene sentido; si el
+        // producto se tiene fisicamente pero no aparece aqui, es un caso de
+        // Ajuste de Inventario, no de transferencia.
+        soloConStock = false
     } = opciones || {};
 
     // Obtener catálogo fresco
     const productosBase = StorageService.get("productos", []);
-    const prods = incluirInactivos || typeof window.filtrarProductosActivos !== 'function'
+    let prods = incluirInactivos || typeof window.filtrarProductosActivos !== 'function'
         ? productosBase
         : window.filtrarProductosActivos(productosBase);
+    if (soloConStock) {
+        prods = prods.filter(p => (Number(p.stock) || 0) > 0);
+    }
     const cats = StorageService.get("categoriasData", []);
 
     // Guardar estado global para navegación interna
