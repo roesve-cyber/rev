@@ -190,7 +190,16 @@ const _rc = {
             promedioAbono90, numAbonos: abonos.length,
             nivelRiesgo, colorRiesgo, emojiRiesgo, riesgoUltimoPago,
             saldoActual: saldoVivo || cuenta.saldoActual || 0,
-            totalVenta: cuenta.totalContadoOriginal || cuenta.totalMercancia || totalPlazo
+            // 🛡️ REPARACIÓN: antes usaba el precio de CONTADO (totalContadoOriginal/
+            // totalMercancia) como base para medir % cubierto/pendiente. En una venta
+            // a crédito el cliente no debe el precio de contado, debe el monto
+            // financiado (contado - enganche + tasa según plazo) — eso es lo que
+            // saldoOriginal guarda desde que se registró la venta (ventas.js:2346) y
+            // nunca se modifica con los abonos. totalPlazo (suma de pagarés) es el
+            // mismo número calculado desde la fuente viva, por si saldoOriginal
+            // faltara en una cuenta antigua. Sin ninguno de los dos, se cae al precio
+            // de contado como último recurso (cuentas muy viejas sin ese dato).
+            totalVenta: Number(cuenta.saldoOriginal || totalPlazo || cuenta.totalContadoOriginal || cuenta.totalMercancia || 0)
         };
     }
 };
@@ -531,7 +540,7 @@ window.renderARCTablaExcel = function() {
             const abonosCombinados = g.cuentas.flatMap(c => c.abonos || []);
             const articulosCombinados = g.cuentas.flatMap(c => c.articulos || []);
             const fechasUltimoPago = g.cuentas.map(c => c.sne.ultimaFechaAbono).filter(Boolean);
-            const totalMercanciaGrupo = g.cuentas.reduce((s, c) => s + Number(c.totalMercancia || c.totalContadoOriginal || c.total || 0), 0);
+            const montoOriginalGrupo = g.cuentas.reduce((s, c) => s + Number(c.sne.totalVenta || 0), 0);
 
             return {
                 ...masReciente,
@@ -540,10 +549,10 @@ window.renderARCTablaExcel = function() {
                 folios: g.cuentas.map(c => c.folio),
                 abonos: abonosCombinados,
                 articulos: articulosCombinados,
-                totalMercancia: totalMercanciaGrupo,
                 sne: {
                     ...peor.sne,
                     saldoActual: g.cuentas.reduce((s, c) => s + Number(c.sne.saldoActual || 0), 0),
+                    totalVenta: montoOriginalGrupo,
                     ultimaFechaAbono: fechasUltimoPago.length ? new Date(Math.max(...fechasUltimoPago.map(f => f.getTime()))) : null
                 },
                 agrupadoPorCliente: true,
@@ -588,20 +597,20 @@ window.renderARCTablaExcel = function() {
             return sortDir * (valA - valB);
         }
         if (window._arcExSort === 'importe') {
-            valA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
-            valB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
+            valA = Number(a.sne.totalVenta || 0);
+            valB = Number(b.sne.totalVenta || 0);
             return sortDir * (valA - valB);
         }
         if (window._arcExSort === 'cubierto') {
-            const impA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
-            const impB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
+            const impA = Number(a.sne.totalVenta || 0);
+            const impB = Number(b.sne.totalVenta || 0);
             valA = impA > 0 ? ((impA - a.sne.saldoActual) / impA) : 0;
             valB = impB > 0 ? ((impB - b.sne.saldoActual) / impB) : 0;
             return sortDir * (valA - valB);
         }
         if (window._arcExSort === 'pendiente') {
-            const impA = Number(a.totalMercancia || a.totalContadoOriginal || a.total || 0);
-            const impB = Number(b.totalMercancia || b.totalContadoOriginal || b.total || 0);
+            const impA = Number(a.sne.totalVenta || 0);
+            const impB = Number(b.sne.totalVenta || 0);
             valA = impA > 0 ? (a.sne.saldoActual / impA) : 0;
             valB = impB > 0 ? (b.sne.saldoActual / impB) : 0;
             return sortDir * (valA - valB);
@@ -658,7 +667,7 @@ window.renderARCTablaExcel = function() {
             ? `${String(s.ultimaFechaAbono.getDate()).padStart(2,'0')}/${String(s.ultimaFechaAbono.getMonth()+1).padStart(2,'0')}/${String(s.ultimaFechaAbono.getFullYear()).slice(-2)}`
             : 'S/A';
 
-        const importeReal = Number(c.totalMercancia || c.totalContadoOriginal || c.total || 0);
+        const importeReal = Number(s.totalVenta || 0);
         const saldoRestante = Number(s.saldoActual);
         const pagadoReal = Math.max(0, importeReal - saldoRestante);
         const pctCubierto = importeReal > 0 ? Math.round((pagadoReal / importeReal) * 100) : 0;
@@ -847,7 +856,7 @@ window.renderARCTablaExcel = function() {
                         ${thSort('desc', 'Descripción', 'ex-col-3')}
                         ${thSort('cliente', 'Cliente', 'ex-col-4')}
                         ${thSort('ultimoPago', 'Ult Pago', 'ex-col-5')}
-                        ${thSort('importe', 'Importe', 'ex-col-6')}
+                        ${thSort('importe', 'Deuda Original', 'ex-col-6')}
                         ${thSort('cubierto', '% Cub', 'ex-col-7')}
                         ${thSort('pendiente', '% Pen', 'ex-col-8')}
                         ${thSort('restante', 'Restante', 'ex-col-9')}
