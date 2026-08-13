@@ -1097,36 +1097,27 @@
 </div>
 
 <div id="modalTransferenciaInv" class="modal oculto" style="display:none;">
-    <div class="modal-content" style="max-width:450px;">
+    <div class="modal-content" style="max-width:480px;">
         <h2 style="color:#2563eb; margin-top:0;">🚚 Transferencia Interna</h2>
-        <p style="font-size:12px; color:#64748b; margin-bottom:20px;">Mueve mercancía de una bodega a otra sin afectar tu stock global.</p>
-        
-        <div style="display:flex; flex-direction:column; gap:12px;">
-            <div class="campo">
-                <label>PRODUCTO A MOVER</label>
-                <div style="display:flex; gap:8px;">
-                    <input type="hidden" id="transfProductoId">
-                    <div id="transfProductoDisplay" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:6px; background:#f8fafc; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Sin seleccionar</div>
-                    <button onclick="abrirSelectorProducto({titulo:'Seleccionar Producto', onSeleccion: p => { document.getElementById('transfProductoId').value = p.id; document.getElementById('transfProductoDisplay').innerText = p.nombre; document.getElementById('transfProductoDisplay').style.color = '#0f172a'; }})" style="padding:10px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer;">🔍</button>
-                </div>
-            </div>
-            
-            <div class="campo">
-                <label>CANTIDAD A MOVER</label>
-                <input type="number" id="transfCantidad" min="1" placeholder="Ej. 2" style="width:100%; text-align:center; font-size:16px;">
-            </div>
+        <p style="font-size:12px; color:#64748b; margin-bottom:20px;">Mueve mercancía de una bodega a otra sin afectar tu stock global. Puedes agregar varios productos a una misma transferencia.</p>
 
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#eff6ff; padding:15px; border-radius:8px; border:1px solid #bfdbfe;">
-                <div class="campo">
-                    <label style="color:#1e40af;">SALE DE (ORIGEN)</label>
-                    <select id="transfOrigen" style="width:100%; border-color:#93c5fd;"></select>
-                </div>
-                <div class="campo">
-                    <label style="color:#1e40af;">ENTRA A (DESTINO)</label>
-                    <select id="transfDestino" style="width:100%; border-color:#93c5fd;"></select>
-                </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#eff6ff; padding:15px; border-radius:8px; border:1px solid #bfdbfe; margin-bottom:14px;">
+            <div class="campo">
+                <label style="color:#1e40af;">SALE DE (ORIGEN)</label>
+                <select id="transfOrigen" onchange="_transfInvRenderItems()" style="width:100%; border-color:#93c5fd;"></select>
+            </div>
+            <div class="campo">
+                <label style="color:#1e40af;">ENTRA A (DESTINO)</label>
+                <select id="transfDestino" style="width:100%; border-color:#93c5fd;"></select>
             </div>
         </div>
+
+        <div class="campo" style="margin-bottom:10px;">
+            <label>PRODUCTOS A MOVER</label>
+            <button onclick="_transfInvAbrirPicker()" style="width:100%; padding:10px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🔍 + Agregar Producto</button>
+        </div>
+
+        <div id="transfItemsLista" style="display:flex; flex-direction:column; gap:8px; max-height:280px; overflow-y:auto;"></div>
 
         <div style="display:flex; gap:10px; margin-top:25px;">
             <button onclick="ejecutarTransferenciaInv()" style="flex:1; padding:12px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Confirmar Envío</button>
