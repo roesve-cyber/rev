@@ -21,6 +21,12 @@ function _cxcNombreClienteVigente(cuenta = {}) {
     return canonico?.nombre || snapshot;
 }
 
+function _cxcProductoCuenta(cuenta = {}) {
+    const articulos = Array.isArray(cuenta.articulos) ? cuenta.articulos : [];
+    const nombres = articulos.map(a => a.nombre).filter(Boolean);
+    return nombres.length ? nombres.join(', ') : 'Venta General';
+}
+
 function _cxcFechaClave(fecha) {
     if (window.fechaClaveMX) return window.fechaClaveMX(fecha, '');
     if (!fecha) return '';
@@ -4350,7 +4356,7 @@ window.marcarIncobrable = function(folio) {
 
     if (cuenta.incobrable) {
         // Revertir
-        if (!confirm(`¿Reactivar la cuenta ${folio} de ${_cxcNombreClienteVigente(cuenta)}?\nVolverá a aparecer en proyecciones y cobranza.`)) return;
+        if (!confirm(`¿Reactivar la cuenta de ${_cxcNombreClienteVigente(cuenta)} (${_cxcProductoCuenta(cuenta)})?\nVolverá a aparecer en proyecciones y cobranza.`)) return;
         delete cuentas[idx].incobrable;
         delete cuentas[idx].incobrableFecha;
         delete cuentas[idx].incobrableMotivo;
@@ -4367,7 +4373,7 @@ window.marcarIncobrable = function(folio) {
         return;
     }
 
-    const motivo = prompt(`Motivo para marcar ${folio} como incobrable:\n(Ej: "Sin contacto 3 meses", "Domicilio cambiado", "Acuerdo verbal")`, '');
+    const motivo = prompt(`Motivo para marcar como incobrable a ${_cxcNombreClienteVigente(cuenta)} (${_cxcProductoCuenta(cuenta)}):\n(Ej: "Sin contacto 3 meses", "Domicilio cambiado", "Acuerdo verbal")`, '');
     if (motivo === null) return;
     if (!motivo.trim()) return alert('El motivo es obligatorio.');
 
