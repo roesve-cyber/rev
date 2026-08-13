@@ -916,8 +916,22 @@
         const providerMaps = productProviderMaps();
         const ocMap = ordersById();
         const consigFolioMap = consigFolioMapFrom(consigResumenSeguro());
+        // Deduplicacion OC <-> Recepcion: al recibir una OC (confirmarRecepcionOC
+        // en compras.js), la OC NO se borra ni se cierra: se queda en
+        // ordenesCompra (estado Recibida/Recibida Parcial, con su
+        // saldoPendiente ORIGINAL congelado desde que se creo, nunca
+        // actualizado) y ademas se crea un registro nuevo en compras
+        // (folio "-REC") con los montos reales de esa recepcion. Sin este
+        // filtro cada OC recibida aparece dos veces en el reporte -una con
+        // saldo fantasma, otra con el saldo real- e infla "Saldo pendiente".
+        // Solo mostramos la OC como documento independiente mientras NO
+        // tenga ninguna recepcion registrada; en cuanto existe la "-REC",
+        // esa es la fuente de verdad.
+        const ocIdsConRecepcion = new Set(
+            arr('compras').map(c => c.ordenCompraId).filter(id => id !== undefined && id !== null).map(String)
+        );
         return [
-            ...arr('ordenesCompra').map(o => normalizePurchase(o, 'orden', providerMaps, ocMap, consigFolioMap)),
+            ...arr('ordenesCompra').filter(o => !ocIdsConRecepcion.has(String(o.id))).map(o => normalizePurchase(o, 'orden', providerMaps, ocMap, consigFolioMap)),
             ...arr('compras').map(c => normalizePurchase(c, 'compra', providerMaps, ocMap, consigFolioMap))
         ].filter(d => d.date instanceof Date && !isNaN(d.date.getTime()) && d.date.getFullYear() >= 1990)
             .filter(d => !supplier || supplierKey(d.supplier) === supplierKey(supplier))
