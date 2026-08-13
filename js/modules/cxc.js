@@ -654,7 +654,6 @@ function renderAbonosDirectos(filtroCliente = "") {
                                 <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
                                     ${accionesMoratorio}
                                     <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: (typeof _esAdmin === 'function' && _esAdmin()) ? 'directo' : 'pendiente' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">${(typeof _esAdmin === 'function' && _esAdmin()) ? 'Aplicar' : 'Registrar'}</button>
-                                    <button onclick="marcarIncobrable('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#475569; color:white; font-weight:bold; cursor:pointer;">Incobrable</button>
                                 </div>
                             </td>
                         </tr>
@@ -4363,6 +4362,7 @@ window.marcarIncobrable = function(folio) {
         });
         alert('Cuenta reactivada. Ya aparecerá en proyecciones.');
         if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+        _cxcRefrescarVistaArcActiva();
         renderCuentasIncobrables();
         return;
     }
@@ -4387,8 +4387,23 @@ window.marcarIncobrable = function(folio) {
     // Refrescar vistas
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    _cxcRefrescarVistaArcActiva();
     renderCuentasIncobrables();
 };
+
+// ARC v3 (tarjetas) y Matriz de Cobranza (Excel) pintan sobre el mismo
+// contenedor (#arc-v3-contenido, con fallback a #reportes/#dashboardContenido).
+// Si al marcar/reactivar una cuenta como incobrable refrescamos las dos sin
+// distinguir cuál está abierta, la segunda llamada le pisa la vista al
+// usuario sin que la haya pedido. Se detecta la vista activa por una marca
+// de DOM exclusiva de la tabla Excel (.ex-wrapper) y solo se repinta esa.
+function _cxcRefrescarVistaArcActiva() {
+    if (document.querySelector('.ex-wrapper') && typeof renderARCTablaExcel === 'function') {
+        renderARCTablaExcel();
+    } else if (typeof renderARC_v3 === 'function' && document.getElementById('arc-v3-contenido')) {
+        renderARC_v3();
+    }
+}
 
 window.renderCuentasIncobrables = function() {
     const contenedor = document.getElementById('tablaIncobrables');

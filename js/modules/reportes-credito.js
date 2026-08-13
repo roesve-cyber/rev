@@ -337,6 +337,7 @@ window.renderARC_v3 = function() {
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="flex:1;padding:7px;background:#16a34a;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">💰 Abonar</button>
                     <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="flex:1;padding:7px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">📋 Estado</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="flex:1;padding:7px;background:#25D366;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">💬 WA</button>
+                    <button onclick="marcarIncobrable('${c.folio}')" style="flex:1;padding:7px;background:#475569;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">⚫ Incobrable</button>
                 </div>
             </div>`;
         });
@@ -671,6 +672,7 @@ window.renderARCTablaExcel = function() {
                 <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                     <input type="checkbox" class="chk-cobrador" value="${i}" style="width:13px; height:13px; margin:0; cursor:pointer;">
                     ${s.emojiRiesgo}
+                    ${!c.agrupadoPorCliente ? `<span onclick="marcarIncobrable('${c.folio}')" title="Marcar incobrable" style="cursor:pointer; font-size:10px; line-height:1;">⚫</span>` : ''}
                 </div>
             </td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
