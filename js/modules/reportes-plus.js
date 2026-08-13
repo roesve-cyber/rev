@@ -809,13 +809,35 @@
         // el resumen de compras.js (que ya cruza ventas de la pieza, CxP
         // generadas y anticipos aplicados). Si no lo encontramos (p.ej. dato
         // muy viejo sin folio), caemos al saldoPendiente crudo del doc.
+        //
+        // OJO: cuando esta compra viene de recibir una OC (confirmarRecepcionOC
+        // en compras.js), el registro en 'compras' se guarda con folio
+        // "<folioOC>-REC", pero el ledger de consignación (consignacionesActivas,
+        // que es lo que alimenta consigFolioMap) se guarda con folioOrigen =
+        // "<folioOC>" SIN el sufijo "-REC". Si solo buscamos con doc.folio,
+        // esa búsqueda nunca coincide para recepciones de OC a consignación:
+        // consignReal se queda null y el reporte cae al saldoPendiente crudo
+        // del doc, que para consignación es básicamente el valor total
+        // recibido (no el saldo neto real ya descontando ventas/anticipos) —
+        // esto es lo que inflaba las cifras. Por eso probamos primero con el
+        // folio de la OC original (sin "-REC") y solo si no hay match caemos
+        // al folio del propio doc, para no romper otros orígenes (compra
+        // directa múltiple a consignación) que sí guardan el folio igual en
+        // ambos lados.
         let consignReal = null;
         if (consignment && source === 'compra' && consigFolioMap && consigFolioMap.size
             && typeof _consigProveedorKey === 'function' && typeof _consigFolioKeyFromParts === 'function') {
             const proveedorKey = _consigProveedorKey({ proveedor: doc.proveedor || doc.proveedorNombre || '', proveedorId: doc.proveedorId });
-            const folioLabel = String(doc.folio || doc.id || '').trim() || 'SIN FOLIO';
-            const folioKey = _consigFolioKeyFromParts(proveedorKey, folioLabel);
-            const f = consigFolioMap.get(folioKey);
+            const ocOrigen = doc.ordenCompraId && ocMap ? ocMap.get(String(doc.ordenCompraId)) : null;
+            const folioCandidatos = [];
+            if (ocOrigen && ocOrigen.folio) folioCandidatos.push(String(ocOrigen.folio).trim());
+            folioCandidatos.push(String(doc.folio || doc.id || '').trim() || 'SIN FOLIO');
+            let f = null;
+            for (const folioLabel of folioCandidatos) {
+                const folioKey = _consigFolioKeyFromParts(proveedorKey, folioLabel || 'SIN FOLIO');
+                f = consigFolioMap.get(folioKey);
+                if (f) break;
+            }
             if (f) {
                 consignReal = {
                     compraOriginal: Number(f.compraOriginal || 0),
