@@ -735,6 +735,110 @@
         return [];
     }
 
+    // Detalle de compras por producto: aplana los articulos de cada compra
+    // (ya filtrada por el reporte) y los agrupa por producto para poder ver
+    // el historial de precios pagados, fechas y unidades por producto.
+    function buildProductPurchaseDetail(purchases) {
+        const map = new Map();
+        purchases.forEach(d => {
+            (d.items || []).forEach(item => {
+                const qty = Number(item.cantidadRec ?? item.cantidad ?? item.cant ?? 1) || 1;
+                const subtotalRaw = Number(item.subtotal || 0) || 0;
+                let costo = Number(item.costo ?? item.costoUnitario ?? item.precioCompra ?? 0) || 0;
+                if (costo <= 0 && subtotalRaw > 0 && qty > 0) costo = subtotalRaw / qty;
+                const subtotal = subtotalRaw > 0 ? subtotalRaw : qty * costo;
+                const name = String(item.nombre || item.productoNombre || item.producto || 'Producto sin nombre').trim() || 'Producto sin nombre';
+                const idKey = String(item.productoId || item.idProducto || item.id || '').trim();
+                const key = idKey || name.toLowerCase();
+                const row = map.get(key) || { key, name, units: 0, totalSpent: 0, purchases: [], minCost: Infinity, maxCost: -Infinity };
+                row.units += qty;
+                row.totalSpent += subtotal;
+                const unitCost = costo > 0 ? costo : (qty > 0 ? subtotal / qty : 0);
+                if (unitCost > 0) {
+                    row.minCost = Math.min(row.minCost, unitCost);
+                    row.maxCost = Math.max(row.maxCost, unitCost);
+                }
+                row.purchases.push({
+                    date: d.date,
+                    dateText: d.dateText,
+                    folio: d.folio,
+                    supplier: d.supplier,
+                    qty,
+                    costo: unitCost,
+                    subtotal,
+                    consignment: d.consignment
+                });
+                map.set(key, row);
+            });
+        });
+        return [...map.values()].map(r => {
+            r.purchases.sort((a, b) => b.date - a.date);
+            r.avgCost = r.units > 0 ? r.totalSpent / r.units : 0;
+            r.lastPurchase = r.purchases[0] || null;
+            if (r.minCost === Infinity) r.minCost = 0;
+            if (r.maxCost === -Infinity) r.maxCost = 0;
+            return r;
+        }).sort((a, b) => b.totalSpent - a.totalSpent);
+    }
+
+    function renderProductoDetalleHtml(productRows) {
+        if (!productRows.length) return `<div style="padding:34px;text-align:center;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;">No hay compras para mostrar con los filtros actuales.</div>`;
+        return `<div id="rcpListaProductos" style="display:grid;gap:8px;">${productRows.map(r => {
+            const purchaseRows = r.purchases.map(p => `<tr>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;">${esc(p.dateText)}</td>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;">${esc(p.folio)}</td>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;">${esc(p.supplier)}</td>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;text-align:right;">${p.qty}</td>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;text-align:right;">${money(p.costo)}</td>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;text-align:right;">${money(p.subtotal)}</td>
+                <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;">${p.consignment ? badge('Consignacion', '#ede9fe', '#7c3aed') : ''}</td>
+            </tr>`).join('');
+            return `<details data-nombre="${esc(r.name.toLowerCase())}" style="background:white;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+                <summary style="cursor:pointer;padding:12px 16px;display:grid;grid-template-columns:minmax(160px,2fr) repeat(4,minmax(90px,1fr));gap:10px;align-items:center;list-style:none;">
+                    <span style="font-weight:900;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.name)}</span>
+                    <span style="font-size:12px;color:#64748b;">${r.units} pza(s) &middot; ${r.purchases.length} compra(s)</span>
+                    <span style="font-size:13px;font-weight:800;color:#0f766e;">${money(r.avgCost)} prom.</span>
+                    <span style="font-size:13px;color:#334155;">${money(r.minCost)} - ${money(r.maxCost)}</span>
+                    <span style="font-size:13px;font-weight:800;color:#1e40af;">${money(r.totalSpent)}</span>
+                </summary>
+                <div style="overflow-x:auto;border-top:1px solid #e2e8f0;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+                        <thead><tr style="background:#f8fafc;">
+                            <th style="text-align:left;padding:7px 10px;">Fecha</th>
+                            <th style="text-align:left;padding:7px 10px;">Folio</th>
+                            <th style="text-align:left;padding:7px 10px;">Proveedor</th>
+                            <th style="text-align:right;padding:7px 10px;">Unidades</th>
+                            <th style="text-align:right;padding:7px 10px;">Costo unitario</th>
+                            <th style="text-align:right;padding:7px 10px;">Subtotal</th>
+                            <th style="text-align:left;padding:7px 10px;"></th>
+                        </tr></thead>
+                        <tbody>${purchaseRows}</tbody>
+                    </table>
+                </div>
+            </details>`;
+        }).join('')}</div>`;
+    }
+
+    window.filtrarDetalleProductoCompras = function(q) {
+        const query = String(q || '').trim().toLowerCase();
+        document.querySelectorAll('#rcpListaProductos > details').forEach(det => {
+            const name = det.getAttribute('data-nombre') || '';
+            det.style.display = !query || name.includes(query) ? '' : 'none';
+        });
+    };
+
+    window.exportarDetalleProductoCompras = function() {
+        const rows = filteredPurchases().filter(d => d.source === 'compra' && !String(d.status).toLowerCase().includes('cancel'));
+        const productRows = buildProductPurchaseDetail(rows);
+        let csv = 'Producto,Fecha,Folio,Proveedor,Unidades,CostoUnitario,Subtotal,Consignacion\n';
+        productRows.forEach(r => {
+            r.purchases.forEach(p => {
+                csv += `"${r.name}","${p.dateText}","${p.folio}","${p.supplier}",${p.qty},${p.costo.toFixed(2)},${p.subtotal.toFixed(2)},"${p.consignment ? 'Si' : 'No'}"\n`;
+            });
+        });
+        downloadCsv('reporte_compras_por_producto', csv);
+    };
+
     function ordersById() {
         const map = new Map();
         arr('ordenesCompra').forEach(o => map.set(String(o.id), o));
@@ -1135,6 +1239,9 @@
             return `<tr style="border-bottom:1px solid #e2e8f0;"><td style="padding:12px;vertical-align:top;"><strong>${esc(d.folio)}</strong><br>${type}</td><td style="padding:12px;vertical-align:top;white-space:nowrap;">${esc(d.dateText)}</td><td style="padding:12px;vertical-align:top;"><strong>${esc(d.supplier)}</strong><br><small style="color:#64748b;">${esc(d.method || '-')}</small></td><td style="padding:12px;vertical-align:top;font-size:12px;">${items}${d.items.length > 3 ? `<br><small style="color:#64748b;">+${d.items.length - 3} mas</small>` : ''}</td><td style="padding:12px;vertical-align:top;text-align:center;font-weight:900;">${d.units}</td><td style="padding:12px;vertical-align:top;text-align:right;"><strong style="color:#1e40af;">${money(d.total)}</strong><br><small style="color:#64748b;">Pagado: ${money(d.paid)}</small></td><td style="padding:12px;vertical-align:top;text-align:right;color:${d.balance > 0 ? '#dc2626' : '#64748b'};font-weight:900;">${saldoCell}</td><td style="padding:12px;vertical-align:top;">${statusBadge}</td><td style="padding:12px;vertical-align:top;font-size:12px;">${tiempoTxt}</td></tr>`;
         }).join('')}</tbody></table>` : `<div style="padding:34px;text-align:center;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;">No hay compras para mostrar con los filtros actuales.</div>`;
 
+        const productDetailRows = buildProductPurchaseDetail(real);
+        const productDetailHtml = renderProductoDetalleHtml(productDetailRows);
+
         app.innerHTML = `<div class="vista-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:14px;flex-wrap:wrap;"><div><h2 style="margin:0;color:#0f172a;">Reporte de Compras</h2><p style="color:#64748b;margin:4px 0 0;">Abastecimiento, recepciones, compromisos y saldos por proveedor.</p></div><div style="display:flex;gap:10px;flex-wrap:wrap;"><button onclick="exportarReporteCompras()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Exportar CSV</button><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Actualizar</button></div></div>
         <div style="background:white;border:1px solid #e2e8f0;padding:16px;border-radius:10px;margin-bottom:18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;"><div style="grid-column:span 2;"><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">BUSCAR</label><input type="search" id="rcProveedor" value="${esc(document.getElementById('rcProveedor')?.value || '')}" placeholder="Proveedor, folio o producto" onkeydown="if(event.key==='Enter')renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">PROVEEDOR</label><select id="rcProveedorFiltro" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${supplierSelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CONSIGNACION</label><select id="rcConsignacion" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="">Con y sin consignacion</option><option value="sin">Solo compra propia</option><option value="solo">Solo consignacion</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">DESDE</label><input type="date" id="rcFechaDesde" value="${esc(document.getElementById('rcFechaDesde')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">HASTA</label><input type="date" id="rcFechaHasta" value="${esc(document.getElementById('rcFechaHasta')?.value || '')}" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div><button onclick="renderReporteCompras()" style="padding:10px 18px;background:#0f172a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Filtrar</button><details ${compraFilterState.type && compraFilterState.type !== 'todos' || compraFilterState.category || compraFilterState.subcategory || compraFilterState.status && compraFilterState.status !== 'operativas' || compraFilterState.order && compraFilterState.order !== 'fecha_desc' ? 'open' : ''} style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;"><summary style="cursor:pointer;font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;">Filtros avanzados</summary><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end;margin-top:12px;"><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">CATEGORIA</label><select id="rcCategoria" onchange="document.getElementById('rcSubcategoria').value='';renderReporteCompras()" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${categorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">SUBCATEGORIA</label><select id="rcSubcategoria" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${subcategorySelectCompras}</select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">TIPO</label><select id="rcTipo" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos</option><option value="compra">Compras/recepciones</option><option value="orden">Ordenes</option><option value="consignacion">Consignacion</option><option value="credito">Credito proveedor</option><option value="contado">Contado/debito</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ESTADO</label><select id="rcEstado" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="operativas">Operativas</option><option value="todas">Todas</option><option value="pendientes">Pendientes</option><option value="recibidas">Recibidas</option><option value="canceladas">Canceladas</option></select></div><div><label style="font-size:11px;font-weight:800;color:#475569;display:block;margin-bottom:5px;">ORDEN</label><select id="rcOrden" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="fecha_desc">Mas recientes</option><option value="fecha_asc">Mas antiguas</option><option value="total_desc">Mayor importe</option><option value="total_asc">Menor importe</option><option value="saldo_desc">Mayor saldo</option><option value="proveedor">Proveedor A-Z</option></select></div></div></details></div>
         ${compraChips}
@@ -1144,7 +1251,8 @@
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Top proveedores</h3>${bars(topSuppliers, receivedTotal, '#1e40af')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Lectura de control</h3><div style="display:grid;gap:10px;font-size:13px;color:#334155;"><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Documentos mostrados</strong>${rows.length}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Recepciones / directas</strong>${real.length}</div><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;"><strong style="display:block;color:#0f172a;">Saldo vs recibido</strong>${receivedTotal > 0 ? ((pending / receivedTotal) * 100).toFixed(1) : '0.0'}%</div></div></div></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px;"><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 4px;font-size:16px;color:#0f172a;">Tiempos de entrega por proveedor</h3><p style="margin:0 0 10px;font-size:12px;color:#64748b;">Dias promedio entre emision de OC y recepcion.</p>${statBars(supplierLead, v => `${v} d`, '#0891b2')}</div><div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;"><h3 style="margin:0 0 4px;font-size:16px;color:#0f172a;">Cobertura y desplazamiento por categoria</h3><p style="margin:0 0 10px;font-size:12px;color:#64748b;">Stock actual vs. ventas de los ultimos 90 dias.</p><div style="overflow-x:auto;">${coverageTable}</div></div></div>
         <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;margin-bottom:20px;"><h3 style="margin:0 0 4px;color:#0f172a;font-size:16px;">Consignacion: pasivo real por proveedor</h3><p style="margin:0 0 12px;font-size:12px;color:#64748b;">Independiente de los filtros de fecha: refleja el saldo vigente hoy, no el movimiento del periodo.${consigAdvanceAvailableTotal > 0.01 ? ` Anticipos disponibles sin aplicar: ${money(consigAdvanceAvailableTotal)}.` : ''}</p>${consigPanel}</div>
-        <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Detalle de Compras</h3><div style="overflow-x:auto;">${table}</div></div>`;
+        <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;margin-bottom:20px;"><h3 style="margin:0 0 15px;color:#0f172a;font-size:16px;">Detalle de Compras</h3><div style="overflow-x:auto;">${table}</div></div>
+        <div style="background:white;border:1px solid #e2e8f0;padding:18px;border-radius:10px;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:15px;"><div><h3 style="margin:0;color:#0f172a;font-size:16px;">Detalle por Producto</h3><p style="margin:4px 0 0;font-size:12px;color:#64748b;">Precios pagados, fechas y unidades por producto, segun los filtros aplicados arriba. Da clic en un producto para ver su historial.</p></div><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;"><input type="search" id="rcpBuscarProducto" placeholder="Buscar producto..." oninput="filtrarDetalleProductoCompras(this.value)" style="padding:9px;border:1px solid #cbd5e1;border-radius:6px;min-width:200px;"><button onclick="exportarDetalleProductoCompras()" style="padding:10px 18px;background:#16a34a;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Exportar CSV</button></div></div>${productDetailHtml}</div>`;
         const cf = window._rplusCompraFiltros || {};
         if (document.getElementById('rcProveedorFiltro')) document.getElementById('rcProveedorFiltro').value = cf.supplier || '';
         if (document.getElementById('rcConsignacion')) document.getElementById('rcConsignacion').value = cf.consignacion || '';
