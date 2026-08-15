@@ -2003,7 +2003,13 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         vendedorNombre: window._vendedorSeleccionado?.nombre || null,
         acreedor: "Roberto Escobedo Vega",
         lugar: "Santiago Cuaula, Tlaxcala",
-        tasaMorosidad: 2
+        tasaMorosidad: 2,
+        // 🛡️ Se guarda la cuenta destino elegida al capturar, para que la
+        // autorización en la Bóveda (potencialmente en otro dispositivo/momento)
+        // use la cuenta real de esta venta y no la variable global _estadoPago,
+        // que para ese momento puede reflejar la venta de otra persona.
+        cuentaReceptora: window._estadoPago?.cuentaReceptora || null,
+        etiquetaCuenta: window._estadoPago?.etiquetaCuenta || null
     };
 
     // 2. Empaquetar todo en la Bóveda de Cuarentena
@@ -2293,8 +2299,12 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
 
     if (montoIngresoHoy > 0) {
         const cuentaDefaultIngreso = _ventaCuentaEfectivoDefault();
-        const cuentaId = window._estadoPago?.cuentaReceptora || cuentaDefaultIngreso.cuentaId;
-        const etiqueta = window._estadoPago?.etiquetaCuenta || cuentaDefaultIngreso.etiqueta;
+        // 🛡️ Prioridad: cuenta guardada en ESTA venta (elegida al capturar, o
+        // corregida por el admin en la Bóveda) > variable global _estadoPago
+        // (solo aplica cuando se vende de corrido, sin pasar por cuarentena) >
+        // cuenta por defecto del sistema.
+        const cuentaId = datosVentaP.cuentaReceptora || window._estadoPago?.cuentaReceptora || cuentaDefaultIngreso.cuentaId;
+        const etiqueta = datosVentaP.etiquetaCuenta || window._estadoPago?.etiquetaCuenta || cuentaDefaultIngreso.etiqueta;
 
         if (typeof window._ingresarCuenta === 'function') {
             // 🛡️ A este punto PASO 1 (stock) y PASO 2 (entregas/requisiciones) ya se
@@ -2446,8 +2456,8 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
         total: totalContado,
         totalMercancia: datosVentaP.totalMercancia || totalContado,
         enganche: enganche,
-        cuentaReceptora: window._estadoPago?.cuentaReceptora || null,
-        etiquetaCuenta: window._estadoPago?.etiquetaCuenta || null,
+        cuentaReceptora: datosVentaP.cuentaReceptora || window._estadoPago?.cuentaReceptora || null,
+        etiquetaCuenta: datosVentaP.etiquetaCuenta || window._estadoPago?.etiquetaCuenta || null,
         montoIngresoInicial: montoIngresoHoy,
         saldoAFinanciar: metodoPago === "credito" && planElegido?.total ? planElegido.total : saldoAFinanciar,
         metodoPago: metodoPago,
@@ -4450,12 +4460,28 @@ function _authVentaBloqueadaPorEstado(v) {
     return { bloqueada: false, motivo: "" };
 }
 
+// Alterna la fila de inventario del modal de auth-venta entre "se entrega"
+// (muestra selector de ubicación) y "pendiente" (muestra motivo).
+window._authInvToggleFila = function(rowId) {
+    const chk = document.querySelector(`.authInvEntregaChk[data-row="${rowId}"]`);
+    const ubiDiv = document.getElementById(`${rowId}_ubicacion`);
+    const motivoDiv = document.getElementById(`${rowId}_motivo`);
+    if (!chk || !ubiDiv || !motivoDiv) return;
+    ubiDiv.style.display = chk.checked ? '' : 'none';
+    motivoDiv.style.display = chk.checked ? 'none' : '';
+};
+
 window.revisarVentaPendiente = function(index) {
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
     const v = resPendiente.venta;
     if (!v) return;
+    // 🛡️ Nunca dejar dos modales de auth-venta apilados: si uno quedó abierto
+    // (p. ej. porque no se cerró correctamente), lo quitamos antes de abrir el
+    // nuevo. Evita que existan dos elementos con los mismos ids en el DOM y que
+    // getElementById() lea por accidente los datos de la venta anterior.
+    document.querySelectorAll('[data-modal="auth-venta"]').forEach(m => m.remove());
     window._authVentaPendienteCtx = { index, idCuarentena: v.idCuarentena, folio: _authFolioVentaPendiente(v) };
 
     const fechaActualIso = v.args[7] || new Date().toISOString();
@@ -4519,6 +4545,15 @@ window.revisarVentaPendiente = function(index) {
     const engancheYaRegistrado = v.datosVenta?.engancheYaRegistrado === true;
     const importeEfectivoCaja = engancheYaRegistrado ? 0 : ((metodoPago === "contado" || metodoPago === "transferencia") ? totalVenta : engancheActual);
 
+    // Selector de cuenta destino del ingreso/enganche, editable. Se preselecciona
+    // con la cuenta que se guardó al capturar la venta (ver _pushAuthConfig...
+    // datosVenta.cuentaReceptora); si no existe (ventas viejas antes de este fix)
+    // cae al selector con su propio default.
+    const cuentaGuardadaVenta = v.datosVenta?.cuentaReceptora || '';
+    const selectorCuentaEngancheHTML = window._buildSelectorCuentas
+        ? window._buildSelectorCuentas('authCuentaReceptora', false)
+        : '<select id="authCuentaReceptora" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="efectivo">Efectivo Principal</option></select>';
+
     // Construir tabla de productos del carrito provisional
     const articulos = v.datosVenta?.articulos || [];
     let tablaProductosHTML = "";
@@ -4530,6 +4565,74 @@ window.revisarVentaPendiente = function(index) {
                 <td style="padding:6px 0; text-align:right;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(art.precioContado || art.precio || 0)}</td>
             </tr>`;
     });
+
+    // Info de inventario: qué se entrega ahora (y de dónde sale) y qué queda
+    // pendiente. EDITABLE: el admin puede cambiar la ubicación de origen y
+    // mover un artículo entre "se entrega" y "pendiente" antes de autorizar.
+    // Los artículos que YA tuvieron salida operativa (mercancía físicamente
+    // entregada al capturar la venta) se muestran fijos, sin editar: el stock
+    // de esos ya se descontó de verdad y cambiarlos aquí no lo revertiría.
+    const productosConStockInfo = _desenvolverListaVentaPendiente(v.args?.[8]);
+    const productosSinStockInfo = _desenvolverListaVentaPendiente(v.args?.[9]);
+    const _authInvProductosMaestro = StorageService.get('productos', []);
+    const _authInvProductoCompleto = (x) => {
+        const id = x.prod?.id ?? x.item?.productoId ?? x.item?.id;
+        return _authInvProductosMaestro.find(p => String(p.id) === String(id)) || x.prod || null;
+    };
+
+    // Working list que se reconstruye al autorizar (ver aprobarVentaCuarentena).
+    // Solo contiene los artículos EDITABLES (sin salida operativa ya aplicada).
+    const _authInvFilasEditables = [];
+    let inventarioInfoHTML = "";
+
+    const _authInvRenderFila = (x, origenInicial, idx) => {
+        const nombre = x.item?.nombre || x.prod?.nombre || 'Producto';
+        const colorTxt = x.item?.colorElegido ? ` (${x.item.colorElegido})` : '';
+        const cantidad = x.item?.cantidad || 1;
+        const yaSalio = x.salidaOperativaAplicada === true;
+
+        if (yaSalio) {
+            const ubicacion = x.item?.ubicacionElegida || 'Sin ubicación asignada';
+            return `<div style="display:flex; justify-content:space-between; gap:8px; padding:5px 0; border-bottom:1px dashed #e2e8f0; font-size:12px;">
+                <span>⬢ ${nombre}${colorTxt} <b>×${cantidad}</b></span>
+                <span style="text-align:right; color:#0369a1; font-weight:bold;">🚚 Ya salió — ${ubicacion} <br><small style="font-weight:normal;">(entregado al capturar, no editable)</small></span>
+            </div>`;
+        }
+
+        const rowId = `authInv_${origenInicial}_${idx}`;
+        const prodCompleto = _authInvProductoCompleto(x);
+        const marcadoEntrega = origenInicial === 'con';
+        const opcionesUbicacion = _opcionesUbicacionSalidaVenta(prodCompleto, x.item?.colorElegido || '', x.item?.ubicacionElegida || '');
+        _authInvFilasEditables.push({ rowId, x, origenInicial });
+
+        return `<div class="auth-inv-fila" style="padding:6px 0; border-bottom:1px dashed #e2e8f0; font-size:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <span>⬢ ${nombre}${colorTxt} <b>×${cantidad}</b></span>
+                <label style="display:flex; align-items:center; gap:4px; font-weight:bold; color:#334155; cursor:pointer; white-space:nowrap;">
+                    <input type="checkbox" data-row="${rowId}" class="authInvEntregaChk" ${marcadoEntrega ? 'checked' : ''} onchange="_authInvToggleFila('${rowId}')">
+                    Se entrega
+                </label>
+            </div>
+            <div id="${rowId}_ubicacion" style="margin-top:4px; ${marcadoEntrega ? '' : 'display:none;'}">
+                <select data-row="${rowId}" class="authInvUbicacionSel" style="width:100%; padding:5px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                    ${opcionesUbicacion}
+                </select>
+            </div>
+            <div id="${rowId}_motivo" style="margin-top:4px; color:#b45309; ${marcadoEntrega ? 'display:none;' : ''}">
+                ${x.motivo ? `Motivo original: ${_escapeHtml(x.motivo)}` : 'Se enviará a pendiente de entrega / requisición.'}
+            </div>
+        </div>`;
+    };
+
+    productosConStockInfo.forEach((x, idx) => { inventarioInfoHTML += _authInvRenderFila(x, 'con', idx); });
+    productosSinStockInfo.forEach((x, idx) => { inventarioInfoHTML += _authInvRenderFila(x, 'sin', idx); });
+
+    if (!inventarioInfoHTML) {
+        inventarioInfoHTML = '<div style="font-size:12px; color:#64748b; padding:5px 0;">Sin artículos de inventario asociados (venta de apartado sin mercancía a descontar, u otro caso especial).</div>';
+    }
+    // Se guarda para que aprobarVentaCuarentena reconstruya args[8]/args[9]
+    // con lo que el admin haya decidido en pantalla.
+    window._authVentaInventarioEditableCtx = { filas: _authInvFilasEditables };
 
     const html = `
     <div data-modal="auth-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; padding:20px;">
@@ -4558,6 +4661,11 @@ window.revisarVentaPendiente = function(index) {
                 </table>
             </div>
 
+            <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">Inventario: Entrega y Origen</label>
+            <div style="margin:6px 0 15px; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; background:#f8fafc;">
+                ${inventarioInfoHTML}
+            </div>
+
             <label style="font-weight:bold; font-size:12px; color:#475569; text-transform:uppercase;">Condiciones de Venta (Editables):</label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:5px; margin-bottom:15px;">
                 <div>
@@ -4570,6 +4678,12 @@ window.revisarVentaPendiente = function(index) {
                 </div>
             </div>
 
+            <div style="margin-bottom:15px;">
+                <label style="font-size:11px; color:#64748b; font-weight:bold;">Cuenta destino del ${engancheYaRegistrado ? 'enganche (ya registrado, solo referencia)' : 'ingreso'}:</label>
+                ${selectorCuentaEngancheHTML}
+                ${importeEfectivoCaja <= 0 ? '<div style="font-size:11px; color:#64748b; margin-top:4px;">No entra dinero a caja al autorizar esta venta, esta cuenta no se usará.</div>' : ''}
+            </div>
+
             <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:10px; border-radius:8px; margin-bottom:15px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
                 <span style="color:#166534; font-weight:bold;">${engancheYaRegistrado ? 'Importe a caja al autorizar:' : 'Importe neto que ingresa a Caja:'}</span>
                 <strong style="color:#15803d; font-size:15px;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(importeEfectivoCaja)}</strong>
@@ -4580,14 +4694,23 @@ window.revisarVentaPendiente = function(index) {
             <input type="date" id="authFechaVenta" value="${fechaCorta}" style="width:100%; padding:8px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box; margin-bottom:20px;">
 
             <div style="display:flex; gap:10px;">
-                <button onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Autorizar a DB</button>
-                <button onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Anular Movimiento</button>
+                <button id="btnAutorizarVentaCuarentena" onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Autorizar a DB</button>
+                <button id="btnRechazarVentaCuarentena" onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Anular Movimiento</button>
                 <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
             </div>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
-    
+
+    // Preseleccionar la cuenta destino guardada en la venta, si el selector
+    // tiene esa opción disponible (si no, se queda con el default del selector).
+    setTimeout(() => {
+        const selCuenta = document.getElementById('authCuentaReceptora');
+        if (selCuenta && cuentaGuardadaVenta && [...selCuenta.options].some(o => o.value === cuentaGuardadaVenta)) {
+            selCuenta.value = cuentaGuardadaVenta;
+        }
+    }, 0);
+
     // Agregar listener para recalcular Valor Pagaré cuando se edite plazo o abono (CR0DITO)
     if (metodoPago === "credito") {
         setTimeout(() => {
@@ -4611,7 +4734,10 @@ window.revisarVentaPendiente = function(index) {
 };
 
 // 3. PROCESADOR DE APROBACIONES (MODO SILENCIOSO)
-window.aprobarVentaCuarentena = async function(index) {
+window.aprobarVentaCuarentena = function(index) {
+    return window.bloquearBotonDurante('btnAutorizarVentaCuarentena', _aprobarVentaCuarentenaAsync(index));
+};
+async function _aprobarVentaCuarentenaAsync(index) {
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
@@ -4639,6 +4765,64 @@ window.aprobarVentaCuarentena = async function(index) {
     const nuevoEnganche = parseFloat(document.getElementById('authEngancheVenta').value) || 0;
     const nuevaFechaCorta = document.getElementById('authFechaVenta').value;
     const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
+
+    // Cuenta destino del ingreso/enganche, editable en este modal (ver Bug 3:
+    // antes se usaba window._estadoPago global, que podía traer la cuenta de
+    // otra venta). Se sobreescribe aquí lo que se guardó al capturar.
+    const selCuentaReceptora = document.getElementById('authCuentaReceptora');
+    if (selCuentaReceptora && selCuentaReceptora.value) {
+        v.datosVenta.cuentaReceptora = selCuentaReceptora.value;
+        v.datosVenta.etiquetaCuenta = selCuentaReceptora.options[selCuentaReceptora.selectedIndex]?.text || selCuentaReceptora.value;
+    }
+
+    // Reconstruir productosConStock/productosSinStock según lo que el admin
+    // decidió en el bloque "Inventario: Entrega y Origen" (ubicación de
+    // origen y si se entrega ahora o pasa a pendiente). Los artículos con
+    // salida operativa ya aplicada (mercancía ya entregada al capturar) nunca
+    // entran a esta lista editable y se preservan tal cual.
+    const _invCtx = window._authVentaInventarioEditableCtx;
+    if (_invCtx && Array.isArray(_invCtx.filas) && _invCtx.filas.length > 0) {
+        const nuevosConStock = [];
+        const nuevosSinStock = [];
+        _desenvolverListaVentaPendiente(v.args[8]).forEach(x => {
+            if (x.salidaOperativaAplicada === true) nuevosConStock.push(x);
+        });
+        for (const fila of _invCtx.filas) {
+            const chk = document.querySelector(`.authInvEntregaChk[data-row="${fila.rowId}"]`);
+            const sel = document.querySelector(`.authInvUbicacionSel[data-row="${fila.rowId}"]`);
+            const seEntrega = chk ? chk.checked : false;
+            const nombreArt = fila.x.item?.nombre || fila.x.prod?.nombre || 'un producto';
+            if (seEntrega) {
+                const ubicacionElegida = sel ? sel.value : '';
+                if (!ubicacionElegida) {
+                    return alert(`Selecciona la ubicación de origen para "${nombreArt}" antes de autorizar, o desmárcalo de "Se entrega".`);
+                }
+                nuevosConStock.push({
+                    ...fila.x,
+                    item: { ...fila.x.item, ubicacionElegida },
+                    requiereCompra: false,
+                    generarEntregaPendiente: false,
+                    motivo: ''
+                });
+            } else if (fila.origenInicial === 'con') {
+                // Recién retenido por el admin: sí hay stock, solo no se entrega hoy.
+                nuevosSinStock.push({
+                    ...fila.x,
+                    requiereCompra: false,
+                    generarEntregaPendiente: true,
+                    motivo: 'Retenido por decisión de auditoría en la Bóveda'
+                });
+            } else {
+                // No se tocó: se conserva tal cual llegó (incluye su requiereCompra
+                // y motivo reales, p. ej. "sin stock disponible" — no cancelar la
+                // requisición de compra solo porque no se editó esta fila).
+                nuevosSinStock.push({ ...fila.x });
+            }
+        }
+        v.args[8] = _envolverListaVentaPendiente(nuevosConStock);
+        v.args[9] = _envolverListaVentaPendiente(nuevosSinStock);
+    }
+    window._authVentaInventarioEditableCtx = null;
     
     // NUEVOS CAMPOS: Capturar ajustes de crédito si aplica
     const nuevoPlazoCreditoInput = document.getElementById('authPlazoCreditoAjuste');
@@ -4770,9 +4954,12 @@ window.aprobarVentaCuarentena = async function(index) {
     if (typeof renderApartados === 'function') renderApartados();
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
-};
+}
 
-window.rechazarVentaCuarentena = async function(index) {
+window.rechazarVentaCuarentena = function(index) {
+    return window.bloquearBotonDurante('btnRechazarVentaCuarentena', _rechazarVentaCuarentenaAsync(index));
+};
+async function _rechazarVentaCuarentenaAsync(index) {
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
@@ -4827,7 +5014,7 @@ window.rechazarVentaCuarentena = async function(index) {
     document.querySelector('[data-modal=auth-venta]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (typeof renderApartados === 'function') renderApartados();
-};
+}
 
 // =====================================================================
 // : CENTRO DE CANCELACIONES
@@ -5891,6 +6078,9 @@ window.revisarAbonoPendiente = function(index) {
     const abonosP = StorageService.get("abonosPendientes", []);
     const a = abonosP[index];
     if (!a) return;
+    // 🛡️ Mismo criterio que en revisarVentaPendiente: nunca dos modales
+    // auth-abono apilados con ids duplicados en el DOM.
+    document.querySelectorAll('[data-modal="auth-abono"]').forEach(m => m.remove());
     window._authAbonoPendienteCtx = { index, id: a.idCuarentena || a.id, folio: _authFolioAbonoPendiente(a), monto: a.montoAbonado || a.monto || 0 };
 
     const fechaAbonoBase = a.fechaAbonoIso || a.fechaIso || a.fecha || (window.localISO ? window.localISO(new Date()) : new Date().toISOString());
@@ -5933,8 +6123,8 @@ window.revisarAbonoPendiente = function(index) {
             </small>
 
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Ingresar a Caja</button>
-                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Eliminar</button>
+                <button id="btnAprobarAbonoCuarentena" onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Ingresar a Caja</button>
+                <button id="btnRechazarAbonoCuarentena" onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Eliminar</button>
                 <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
@@ -5942,7 +6132,10 @@ window.revisarAbonoPendiente = function(index) {
     document.body.insertAdjacentHTML('beforeend', html);
 };
 
-window.aprobarAbonoCuarentena = async function(index) {
+window.aprobarAbonoCuarentena = function(index) {
+    return window.bloquearBotonDurante('btnAprobarAbonoCuarentena', _aprobarAbonoCuarentenaAsync(index));
+};
+async function _aprobarAbonoCuarentenaAsync(index) {
     const resAbono = _authResolverAbonoPendiente(index);
     const abonosP = resAbono.abonosP;
     index = resAbono.index;
@@ -6005,9 +6198,12 @@ window.aprobarAbonoCuarentena = async function(index) {
     document.querySelector('[data-modal=auth-abono]').remove();
     alert("Abono aprobado y registrado en flujo de caja.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
-};
+}
 
-window.rechazarAbonoCuarentena = async function(index) {
+window.rechazarAbonoCuarentena = function(index) {
+    return window.bloquearBotonDurante('btnRechazarAbonoCuarentena', _rechazarAbonoCuarentenaAsync(index));
+};
+async function _rechazarAbonoCuarentenaAsync(index) {
     if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
     const resAbono = _authResolverAbonoPendiente(index);
     const abonosP = resAbono.abonosP;
@@ -6039,7 +6235,7 @@ window.rechazarAbonoCuarentena = async function(index) {
     }
     document.querySelector('[data-modal=auth-abono]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
-};
+}
 
 // Exponer la función globalmente para poder llamarla desde un botón
 window.abrirAuditoriaCxC = abrirAuditoriaCxC;
