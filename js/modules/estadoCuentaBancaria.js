@@ -273,18 +273,19 @@ function _construirHtmlDocEstadoCuentaBancaria(estado) {
     filas.push(`
         <tr style="background:#eef2ff;">
             <td colspan="3" style="padding:8px; font-weight:bold; color:#312e81;">SALDO INICIAL AL ${_fechaCortaECB(estado.fechaDesde)}</td>
-            <td style="padding:8px; text-align:right; font-weight:bold; color:#312e81;">${_dineroECB(estado.saldoInicial)}</td>
+            <td colspan="2" style="padding:8px; text-align:right; font-weight:bold; color:#312e81;">${_dineroECB(estado.saldoInicial)}</td>
         </tr>`);
 
     if (estado.movimientos.length === 0) {
-        filas.push(`<tr><td colspan="4" style="padding:14px; text-align:center; color:#94a3b8;">Sin movimientos registrados en este rango.</td></tr>`);
+        filas.push(`<tr><td colspan="5" style="padding:14px; text-align:center; color:#94a3b8;">Sin movimientos registrados en este rango.</td></tr>`);
     } else {
         estado.movimientos.forEach(m => {
             filas.push(`
             <tr>
                 <td style="padding:7px 8px; white-space:nowrap;">${m.fechaCorta}</td>
                 <td style="padding:7px 8px;">${_escECB(m.concepto)}${m.referencia ? ` <span style="color:#94a3b8;">(Ref: ${_escECB(m.referencia)})</span>` : ''}</td>
-                <td style="padding:7px 8px; text-align:right; color:${m.esIngreso ? '#16a34a' : '#dc2626'}; font-weight:bold;">${m.esIngreso ? _dineroECB(m.monto) : '-'}</td>
+                <td style="padding:7px 8px; text-align:right; color:#16a34a; font-weight:bold;">${m.esIngreso ? _dineroECB(m.monto) : '-'}</td>
+                <td style="padding:7px 8px; text-align:right; color:#dc2626; font-weight:bold;">${!m.esIngreso ? _dineroECB(m.monto) : '-'}</td>
                 <td style="padding:7px 8px; text-align:right; font-weight:bold;">${_dineroECB(m.saldo)}</td>
             </tr>`);
         });
@@ -293,7 +294,7 @@ function _construirHtmlDocEstadoCuentaBancaria(estado) {
     filas.push(`
         <tr style="background:#eff6ff;">
             <td colspan="3" style="padding:9px 8px; font-weight:bold; color:#1e3a8a; font-size:13px;">SALDO ACTUAL AL ${_fechaCortaECB(estado.fechaHasta)}</td>
-            <td style="padding:9px 8px; text-align:right; font-weight:bold; color:#1e3a8a; font-size:13px;">${_dineroECB(estado.saldoFinal)}</td>
+            <td colspan="2" style="padding:9px 8px; text-align:right; font-weight:bold; color:#1e3a8a; font-size:13px;">${_dineroECB(estado.saldoFinal)}</td>
         </tr>`);
 
     return `
@@ -310,19 +311,20 @@ function _construirHtmlDocEstadoCuentaBancaria(estado) {
             <div><b>Fecha de emisión:</b> ${_fechaCortaECB(new Date())}</div>
         </div>
         <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:12px;">
-            <colgroup><col style="width:14%"><col style="width:46%"><col style="width:18%"><col style="width:22%"></colgroup>
+            <colgroup><col style="width:12%"><col style="width:38%"><col style="width:16%"><col style="width:16%"><col style="width:18%"></colgroup>
             <thead>
                 <tr style="background:#1e40af; color:white;">
                     <th style="padding:8px; text-align:left;">Fecha</th>
                     <th style="padding:8px; text-align:left;">Concepto</th>
                     <th style="padding:8px; text-align:right;">Entrada</th>
+                    <th style="padding:8px; text-align:right;">Salida</th>
                     <th style="padding:8px; text-align:right;">Saldo</th>
                 </tr>
             </thead>
         </table>
     </div>
     <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:12px;">
-        <colgroup><col style="width:14%"><col style="width:46%"><col style="width:18%"><col style="width:22%"></colgroup>
+        <colgroup><col style="width:12%"><col style="width:38%"><col style="width:16%"><col style="width:16%"><col style="width:18%"></colgroup>
         <tbody>${filas.join('')}</tbody>
     </table>
     <p style="text-align:center; margin-top:26px; font-size:11px; color:#64748b;">

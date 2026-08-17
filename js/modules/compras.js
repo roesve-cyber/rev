@@ -498,6 +498,12 @@ function mostrarHistorialCostosEnConsola(productoId) {
 function guardarHistorialCosto({ productoId, precioCompra, fecha, cantidad, proveedorId, proveedorNombre, origen }) {
     let historial = _comprasAsegurarArray(StorageService.get('historialCostos', []));
     historial.push({
+        // 🛡️ REPARACIÓN: esta tabla no tenía ningún campo único por registro, lo
+        // que impedía migrarla a _tablasRegistroIndividual (storage2.js) para
+        // dejar de subirse como un solo documento gigante. Se agrega 'id' igual
+        // que en el resto de bitácoras transaccionales (historialCancelaciones,
+        // gastosOperativos, etc.).
+        id: Date.now() + Math.random(),
         productoId,
         precioCompra,
         fecha,

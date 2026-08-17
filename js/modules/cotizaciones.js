@@ -909,8 +909,8 @@ function generarCotizacion() {
 function abrirListaCotizaciones() {
     const cont = document.getElementById('listaCotizaciones');
     if (!cont) return;
-    const lista = StorageService.get('cotizaciones', []);
-    _actualizarEstadosCotizaciones(lista);
+    let lista = StorageService.get('cotizaciones', []);
+    lista = _actualizarEstadosCotizaciones(lista);
     if (lista.length === 0) {
         cont.innerHTML = `<div style="text-align:center;padding:40px;color:#9ca3af;">
             <p style="font-size:48px;">📄</p>
@@ -1013,13 +1013,34 @@ function eliminarCotizacionesVencidas() {
 function _actualizarEstadosCotizaciones(lista) {
     const hoy = new Date();
     let cambios = false;
-    lista.forEach(c => {
-        if (c.estado === 'Vigente' && new Date(c.fechaVencimiento) < hoy) {
+
+    // 🛡️ Las cotizaciones normales (no mayoreo) son papel de trabajo de vida
+    // corta: si nadie las convierte en venta antes de que venza su vigencia,
+    // se eliminan por completo de la base de datos aquí mismo — no solo se
+    // marcan "Vencida" — para no acumular basura para siempre. Una vez
+    // Convertida (ya generó una venta) nunca se borra sola, sea o no
+    // mayoreo, porque queda como respaldo del origen de esa venta. Las
+    // cotizaciones de mayoreo tampoco se borran solas: conservan el
+    // comportamiento anterior (solo se marcan "Vencida") porque suelen ser
+    // documentos formales para clientes grandes que el usuario puede querer
+    // conservar o imprimir de nuevo; se siguen pudiendo borrar a mano con el
+    // botón "🧹 Eliminar vencidas".
+    const listaFiltrada = lista.filter(c => {
+        if (c.estado === 'Convertida' || c.modalidad === 'mayoreo') return true;
+        const yaVencio = new Date(c.fechaVencimiento) < hoy;
+        if (yaVencio) cambios = true;
+        return !yaVencio;
+    });
+
+    listaFiltrada.forEach(c => {
+        if (c.modalidad === 'mayoreo' && c.estado === 'Vigente' && new Date(c.fechaVencimiento) < hoy) {
             c.estado = 'Vencida';
             cambios = true;
         }
     });
-    if (cambios) StorageService.set('cotizaciones', lista);
+
+    if (cambios) StorageService.set('cotizaciones', listaFiltrada);
+    return listaFiltrada;
 }
 
 function imprimirCotizacion(id, articulosConImagenTemporal) {
@@ -1511,3 +1532,11 @@ window._cotToggleSeleccion = _cotToggleSeleccion;
 window._cotToggleSeleccionTodas = _cotToggleSeleccionTodas;
 window.eliminarCotizacionesSeleccionadas = eliminarCotizacionesSeleccionadas;
 window.eliminarCotizacionesVencidas = eliminarCotizacionesVencidas;
+
+// 🛡️ Limpieza automática al cargar el módulo, igual que _normalizarMovimientosEfectivoLegacy
+// en compras.js: así las cotizaciones normales vencidas se eliminan solas aunque nadie
+// abra la pantalla de "Cotizaciones" en la sesión (antes solo se limpiaban al abrir esa lista).
+setTimeout(() => {
+    const lista = StorageService.get('cotizaciones', []);
+    if (Array.isArray(lista) && lista.length > 0) _actualizarEstadosCotizaciones(lista);
+}, 0);
