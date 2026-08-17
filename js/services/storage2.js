@@ -72,7 +72,8 @@ const StorageService = {
         'vendedores',
         'ventasPendientes',
         'ventasRegistradas',
-        'anticiposComisionVendedor'
+        'anticiposComisionVendedor',
+        'prestamosOtorgados'
     ]),
 
     _tablasCriticasConDatos: new Set([
@@ -107,7 +108,26 @@ const StorageService = {
         // años. Antes vivían como un solo arreglo gigante; con esto cada
         // gasto o cada deuda a proveedor es su propio documento.
         gastosOperativos: 'id',
-        cuentasPorPagar: 'id'
+        cuentasPorPagar: 'id',
+        // Segunda tanda de migración (misma auditoría): tablas que también
+        // crecen para siempre y vivían como un solo documento gigante. Se
+        // confirmó que TODOS los puntos donde se agrega un registro nuevo
+        // en cada una ya traían un campo único (folio en apartados, igual
+        // que cuentasPorCobrar/ventasRegistradas; 'id' en el resto). En
+        // historialCostos no existía ningún campo único, así que se agregó
+        // 'id' en guardarHistorialCosto() (compras.js) para poder incluirla
+        // aquí. registroTickets se dejó fuera a propósito: es código muerto,
+        // guardarTicketEnRegistro() está deshabilitado desde hace tiempo
+        // (ver comentario en ventas.js) y nadie escribe en esa tabla hoy.
+        cotizaciones: 'id',
+        apartados: 'folio',
+        comisionesRegistradas: 'id',
+        ordenesCompra: 'id',
+        recepciones: 'id',
+        requisicionesCompra: 'id',
+        historialCancelaciones: 'id',
+        historialCostos: 'id',
+        historialSolicitudesClientes: 'id'
     },
 
     _claveRegistro(tabla, item) {
