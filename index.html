@@ -137,6 +137,7 @@
             <div id="sub-finanzas" class="submenu oculto-submenu">
                 <button onclick="navA('corte-caja');renderCorteCaja();">💵 Corte de Caja</button>
                 <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
+                <button onclick="navA('prestamos');renderGestionPrestamos();">🤝 Préstamos</button>
             </div>
         </div>
 
@@ -268,7 +269,6 @@
  </div>
 </div>
 
-<div id="auditoria-movimientos" class="vista oculto" style="display:none;">
  <div style="padding:24px;max-width:1400px;margin:0 auto;">
   <div id="contenidoBitacoraAuditoria"></div>
  </div>
@@ -815,6 +815,15 @@
  <div id="contenidoGastos"></div>
  </div>
 
+    <!-- PRÉSTAMOS -->
+    <div id="prestamos" class="vista oculto">
+ <div class="vista-header">
+ <h2>Préstamos</h2>
+ <p>Dinero que prestas a familiares, empleados o conocidos: quién debe, cuánto y qué ha abonado.</p>
+ </div>
+ <div id="contenidoPrestamos"></div>
+ </div>
+
     <!-- PROYECCIÓN DE FLUJO -->
     <div id="proyeccion" class="vista oculto">
  <div class="vista-header">
@@ -1144,7 +1153,7 @@
 <script src="js/modules/inventario.js?v=23"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=6"></script>
-<script src="js/modules/ventas.js?v=3.1"></script>
+<script src="js/modules/ventas.js?v=2.9"></script>
 <script src="js/modules/clientes.js?v=5"></script>
 <script src="js/modules/cxc.js?v=36"></script>
 <script src="js/modules/apartados.js?v=8"></script>
@@ -1161,6 +1170,7 @@
 <script src="js/modules/vendedores.js"></script>
 <script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js"></script>
+<script src="js/modules/prestamos.js"></script>
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/producto-picker.js?v=3"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
