@@ -428,6 +428,22 @@ function calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta) {
     return { totalVendido, totalComision, numVentas: filtradas.length, pendiente, pagada, comisiones: filtradas };
 }
 
+// Herramienta de liquidación: comisiones no pagadas (del período) menos
+// anticipos de comisión sin liquidar (saldo vigente, sin importar su fecha)
+// es igual a lo que realmente hay que desembolsar en efectivo/transferencia.
+// El anticipo pendiente NUNCA se limita al período del reporte: es un saldo
+// vivo del vendedor hasta que se liquida.
+function calcularLiquidacionVendedor(vendedorId, fechaDesde, fechaHasta) {
+    const res = calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta);
+    const anticipos = StorageService.get('anticiposComisionVendedor', [])
+        .filter(a => String(a.vendedorId) === String(vendedorId));
+    const anticipoPendiente = anticipos.reduce((s, a) => s + _anticipoSaldoPendiente(a), 0);
+    const anticipoAplicado = Math.min(res.pendiente, anticipoPendiente);
+    const porPagar = Math.max(0, res.pendiente - anticipoPendiente);
+    const anticipoSobrante = Math.max(0, anticipoPendiente - res.pendiente);
+    return { ...res, anticipoPendiente, anticipoAplicado, anticipoSobrante, porPagar };
+}
+
 function calcularComisionesFiltradas() {
     const fechaDesde = document.getElementById('fechaDesdeComision')?.value;
     const fechaHasta = document.getElementById('fechaHastaComision')?.value;
@@ -447,21 +463,24 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
 
     const _escHtml = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-    // Summary per vendor
+    // Summary per vendor — incluye el neto por pagar tras restar anticipos
+    // sin liquidar (comisiones no pagadas - anticipos pendientes = por pagar).
     const resumenRows = vendedores.map(v => {
-        const res = calcularComisionesVendedor(v.id, fechaDesde, fechaHasta);
-        if (res.numVentas === 0) return '';
+        const liq = calcularLiquidacionVendedor(v.id, fechaDesde, fechaHasta);
+        if (liq.numVentas === 0 && liq.anticipoPendiente <= 0) return '';
         const fDesdeEsc = _escHtml(fechaDesde || '');
         const fHastaEsc = _escHtml(fechaHasta || '');
+        const hayAlgoQueLiquidar = liq.pendiente > 0 || liq.anticipoPendiente > 0;
         return `<tr>
           <td style="padding:10px;">${_escHtml(v.nombre)}</td>
-          <td style="padding:10px;text-align:center;">${res.numVentas}</td>
-          <td style="padding:10px;text-align:right;">${dinero(res.totalVendido)}</td>
-          <td style="padding:10px;text-align:right;font-weight:bold;color:#7c3aed;">${dinero(res.totalComision)}</td>
-          <td style="padding:10px;text-align:right;color:#d97706;">${dinero(res.pendiente)}</td>
-          <td style="padding:10px;text-align:right;color:#16a34a;">${dinero(res.pagada)}</td>
+          <td style="padding:10px;text-align:center;">${liq.numVentas}</td>
+          <td style="padding:10px;text-align:right;">${dinero(liq.totalVendido)}</td>
+          <td style="padding:10px;text-align:right;color:#d97706;">${dinero(liq.pendiente)}</td>
+          <td style="padding:10px;text-align:right;color:#dc2626;">${liq.anticipoPendiente > 0 ? '- ' + dinero(liq.anticipoPendiente) : dinero(0)}</td>
+          <td style="padding:10px;text-align:right;font-weight:bold;color:${liq.porPagar > 0 ? '#7c3aed' : '#16a34a'};">${dinero(liq.porPagar)}</td>
+          <td style="padding:10px;text-align:right;color:#16a34a;">${dinero(liq.pagada)}</td>
           <td style="padding:10px;text-align:center;">
-            ${res.pendiente > 0 ? `<button onclick="pagarComisionVendedor(${v.id}, '${fDesdeEsc}', '${fHastaEsc}')" style="padding:6px 12px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">✅ Marcar Pagada</button>` : '<span style="color:#16a34a;">✅ Al día</span>'}
+            ${hayAlgoQueLiquidar ? `<button onclick="abrirModalLiquidacionComisiones(${v.id}, '${fDesdeEsc}', '${fHastaEsc}')" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🧮 Liquidar</button>` : '<span style="color:#16a34a;">✅ Al día</span>'}
           </td>
         </tr>`;
     }).filter(r => r !== '').join('');
@@ -484,23 +503,24 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
       <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
       <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'recuperacion_cartera' ? '💡 Recuperación' : (c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre')}</td>
       <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
-      <td style="padding:8px;text-align:center;">${c.estado === 'Pendiente' ? `<button onclick="pagarComision(${c.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Pagar</button>` : '✅'}</td>
     </tr>`).join('');
 
     cont.innerHTML = `
       <div style="overflow-x:auto;margin-bottom:20px;">
         <h4 style="color:#7c3aed;margin:0 0 10px;">Resumen por Vendedor</h4>
+        <p style="margin:0 0 10px;font-size:12px;color:#6b7280;">Por pagar = comisiones no pagadas del período menos anticipos de comisión sin liquidar (saldo vigente del vendedor, sin importar su fecha).</p>
         <table style="width:100%;border-collapse:collapse;font-size:14px;">
           <thead><tr style="background:#f3f4f6;">
             <th style="padding:10px;text-align:left;">Vendedor</th>
             <th style="padding:10px;text-align:center;">Registros</th>
             <th style="padding:10px;text-align:right;">Total Vendido</th>
-            <th style="padding:10px;text-align:right;">Comisión Total</th>
-            <th style="padding:10px;text-align:right;">Pendiente</th>
+            <th style="padding:10px;text-align:right;">Comisiones no pagadas</th>
+            <th style="padding:10px;text-align:right;">Anticipos pendientes</th>
+            <th style="padding:10px;text-align:right;">Por pagar</th>
             <th style="padding:10px;text-align:right;">Pagada</th>
             <th style="padding:10px;text-align:center;">Acción</th>
           </tr></thead>
-          <tbody>${resumenRows || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros en este período</td></tr>'}</tbody>
+          <tbody>${resumenRows || '<tr><td colspan="8" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros en este período</td></tr>'}</tbody>
         </table>
       </div>
       <div style="overflow-x:auto;">
@@ -514,121 +534,156 @@ function renderReporteComisiones(fechaDesde, fechaHasta) {
             <th style="padding:8px;text-align:left;">Fecha</th>
             <th style="padding:8px;text-align:center;">Tipo</th>
             <th style="padding:8px;text-align:center;">Estado</th>
-            <th style="padding:8px;text-align:center;">Acción</th>
           </tr></thead>
-          <tbody>${detalleRows || '<tr><td colspan="8" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros en este período</td></tr>'}</tbody>
+          <tbody>${detalleRows || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros en este período</td></tr>'}</tbody>
         </table>
       </div>`;
 }
 
-function pagarComision(id) {
-    const comisiones = StorageService.get('comisionesRegistradas', []);
-    const idx = comisiones.findIndex(c => c.id === id);
-    if (idx === -1) return;
-    const c = comisiones[idx];
-    comisiones[idx] = { ...c, estado: 'Pagada', fechaPago: window.localISO(new Date()) };
-    StorageService.set('comisionesRegistradas', comisiones);
-    // Register as egreso in movimientosCaja
-    const movimientos = StorageService.get('movimientosCaja', []);
-    movimientos.push({
-        id: Date.now(),
-        folio: c.folio,
-        fecha: window.formatearFechaCortaMX(new Date()),
-        tipo: 'egreso',
-        monto: c.montoComision,
-        concepto: `Pago comisión - ${c.vendedorNombre} (${c.folio})`,
-        referencia: 'Comisión vendedor',
-        cuenta: 'efectivo'
-    });
-    StorageService.set('movimientosCaja', movimientos);
-    const fechaDesde = document.getElementById('fechaDesdeComision')?.value;
-    const fechaHasta = document.getElementById('fechaHastaComision')?.value;
-    renderGestionVendedores();
-    renderReporteComisiones(fechaDesde, fechaHasta);
-}
+// ===== LIQUIDACIÓN DE COMISIONES (comisiones no pagadas - anticipos = por pagar) =====
+// Sustituye al viejo "pagar comisión" registro por registro: aquí se liquida
+// TODO el pendiente del vendedor en el período de una sola vez, aplicando
+// primero cualquier anticipo de comisión que tenga sin liquidar. Solo el
+// remanente neto (si lo hay) mueve caja de verdad.
+function abrirModalLiquidacionComisiones(vendedorId, fechaDesde, fechaHasta) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    if (!v) return alert('Vendedor no encontrado.');
+    const liq = calcularLiquidacionVendedor(vendedorId, fechaDesde, fechaHasta);
+    if (liq.pendiente <= 0 && liq.anticipoPendiente <= 0) return alert('⚠️ No hay nada que liquidar para este vendedor.');
 
-function abrirModalPagoComision(tipo, id, fechaDesde, fechaHasta, monto, nombre) {
-    if(monto <= 0) return alert("⚠️ No hay monto pendiente a pagar.");
-    
+    const fDesdeAttr = _vendEsc(fechaDesde || '');
+    const fHastaAttr = _vendEsc(fechaHasta || '');
+
     const modalHTML = `
-    <div data-modal="pago-comision" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;">
-        <div style="background:white;padding:30px;border-radius:12px;width:90%;max-width:400px;box-shadow:0 10px 25px rgba(0,0,0,0.1);">
-            <h2 style="margin-top:0;color:#7c3aed;">💰 Pagar Comisión</h2>
-            <p style="color:#4b5563;margin-bottom:20px;">Vendedor: <strong>${nombre}</strong><br>Monto a pagar: <strong style="color:#059669;font-size:18px;">${dinero(monto)}</strong></p>
-            
-            <div style="margin-bottom:20px;">
-                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿De qué caja/cuenta sale el dinero?</label>
-                ${window._buildSelectorCuentas('cuentaPagoComision', false)}
+    <div data-modal="liquidacion-comisiones" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;padding:16px;">
+        <div style="background:white;padding:30px;border-radius:12px;width:100%;max-width:440px;box-shadow:0 10px 25px rgba(0,0,0,0.1);">
+            <h2 style="margin-top:0;color:#7c3aed;">🧮 Liquidar comisiones</h2>
+            <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(v.nombre)}</strong>${fechaDesde || fechaHasta ? `<br><span style="font-size:12px;color:#9ca3af;">Período: ${_vendEsc(fechaDesde || '...')} a ${_vendEsc(fechaHasta || '...')}</span>` : ''}</p>
+            <div style="background:#f9fafb;border-radius:8px;padding:14px;margin-bottom:16px;font-size:14px;">
+                <div style="display:flex;justify-content:space-between;padding:4px 0;">
+                    <span style="color:#374151;">Comisiones no pagadas</span>
+                    <strong style="color:#d97706;">${dinero(liq.pendiente)}</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:4px 0;">
+                    <span style="color:#374151;">Anticipos aplicados</span>
+                    <strong style="color:#dc2626;">- ${dinero(liq.anticipoAplicado)}</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:8px 0 0;border-top:1px solid #e5e7eb;margin-top:6px;">
+                    <span style="color:#0f172a;font-weight:bold;">Por pagar (neto)</span>
+                    <strong style="color:#7c3aed;font-size:17px;">${dinero(liq.porPagar)}</strong>
+                </div>
+                ${liq.anticipoSobrante > 0 ? `<p style="margin:10px 0 0;font-size:12px;color:#6b7280;">El anticipo cubre todo lo pendiente y le sobran ${dinero(liq.anticipoSobrante)}, que quedan como saldo de anticipo para el vendedor.</p>` : ''}
             </div>
-
+            <div style="margin-bottom:14px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO NETO A DESEMBOLSAR</label>
+                <input type="number" id="liqComisionMonto" min="0" step="0.01" value="${liq.porPagar.toFixed(2)}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+                <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Puedes ajustarlo si acordaste pagar un monto distinto.</p>
+            </div>
+            ${liq.porPagar > 0 ? `<div style="margin-bottom:20px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿DE QUÉ CAJA/CUENTA SALE?</label>
+                ${window._buildSelectorCuentas('liqComisionCuenta', false)}
+            </div>` : '<p style="margin:0 0 20px;font-size:12px;color:#16a34a;">No hay salida de caja: el anticipo cubre todo lo pendiente.</p>'}
             <div style="display:flex;gap:10px;">
-                <button onclick="ejecutarPagoComision('${tipo}', ${id}, '${fechaDesde}', '${fechaHasta}', ${monto}, '${nombre}')" style="flex:1;padding:12px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar Pago</button>
-                <button onclick="document.querySelector('[data-modal=&quot;pago-comision&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
+                <button onclick="ejecutarLiquidacionComisiones(${v.id}, '${fDesdeAttr}', '${fHastaAttr}')" style="flex:1;padding:12px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar Liquidación</button>
+                <button onclick="document.querySelector('[data-modal=&quot;liquidacion-comisiones&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
             </div>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-function ejecutarPagoComision(tipo, id, fechaDesde, fechaHasta, monto, nombre) {
-    const sel = document.getElementById('cuentaPagoComision');
-    const cuentaId = sel.value;
-    const etiqueta = sel.options[sel.selectedIndex].text;
-    
-    // 1. Confirmar el egreso ANTES de marcar comisiones como pagadas. Antes,
-    //    el resultado de _egresarCuenta se ignoraba y las comisiones (una o
-    //    todo un rango de fechas) quedaban marcadas 'Pagada' aunque la
-    //    cuenta seleccionada no existiera y el dinero nunca saliera.
-    if (typeof window._egresarCuenta !== 'function') {
-        alert("No se pudo registrar el pago: el módulo de caja no está disponible. Nada se aplicó.");
-        return;
-    }
-    const _egresoOkComision = window._egresarCuenta({
-        monto: monto, cuentaId: cuentaId, etiqueta: etiqueta,
-        concepto: `Pago comisiones - ${nombre}`, referencia: `COMISION-${id}`
-    });
-    if (!_egresoOkComision) {
-        alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}".\n\nLas comisiones NO se marcaron como pagadas. Verifica que esa cuenta exista.`);
-        return;
+function ejecutarLiquidacionComisiones(vendedorId, fechaDesde, fechaHasta) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    if (!v) return alert('Vendedor no encontrado.');
+    const desde = fechaDesde && fechaDesde !== 'null' && fechaDesde !== '' ? fechaDesde : null;
+    const hasta = fechaHasta && fechaHasta !== 'null' && fechaHasta !== '' ? fechaHasta : null;
+    const liq = calcularLiquidacionVendedor(vendedorId, desde, hasta);
+    if (liq.pendiente <= 0 && liq.anticipoPendiente <= 0) return alert('⚠️ No hay nada que liquidar.');
+
+    const montoInput = document.getElementById('liqComisionMonto');
+    const montoNeto = Math.max(0, Number(montoInput?.value) || 0);
+
+    // 1. Si hay monto neto a desembolsar, el egreso de caja se confirma
+    //    ANTES de tocar comisiones o anticipos: si falla, nada se aplica.
+    let cuentaId = '', etiqueta = '';
+    if (montoNeto > 0) {
+        const sel = document.getElementById('liqComisionCuenta');
+        if (!sel) { alert('No se pudo leer la cuenta seleccionada.'); return; }
+        cuentaId = sel.value;
+        etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+        if (typeof window._egresarCuenta !== 'function') {
+            alert('No se pudo registrar el pago: el módulo de caja no está disponible. Nada se aplicó.');
+            return;
+        }
+        const egresoOk = window._egresarCuenta({
+            monto: montoNeto, cuentaId, etiqueta,
+            concepto: `Liquidación de comisiones - ${v.nombre}`,
+            referencia: `LIQ-COMISION-${v.id}-${Date.now()}`
+        });
+        if (!egresoOk) {
+            alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}". La liquidación NO se aplicó.`);
+            return;
+        }
     }
 
-    // 2. Marcar comisiones como pagadas
+    // 2. Marcar como pagadas todas las comisiones pendientes del período.
     const comisiones = StorageService.get('comisionesRegistradas', []);
-    
-    if (tipo === 'individual') {
-        const idx = comisiones.findIndex(c => c.id === id);
-        if(idx !== -1) comisiones[idx] = { ...comisiones[idx], estado: 'Pagada', fechaPago: window.localISO(new Date()) };
-    } else {
-        const desde = fechaDesde && fechaDesde !== 'null' ? new Date(fechaDesde + 'T00:00:00') : null;
-        const hasta = fechaHasta && fechaHasta !== 'null' ? new Date(fechaHasta + 'T23:59:59') : null;
-        comisiones.forEach((c, idx) => {
-            if (String(c.vendedorId) === String(id) && c.estado === 'Pendiente') {
-                const f = new Date(c.fecha);
-                let entra = true;
-                if (desde && f < desde) entra = false;
-                if (hasta && f > hasta) entra = false;
-                if (entra) comisiones[idx] = { ...c, estado: 'Pagada', fechaPago: window.localISO(new Date()) };
-            }
+    const desdeD = desde ? new Date(desde + 'T00:00:00') : null;
+    const hastaD = hasta ? new Date(hasta + 'T23:59:59') : null;
+    comisiones.forEach((c, idx) => {
+        if (String(c.vendedorId) === String(vendedorId) && c.estado === 'Pendiente') {
+            const f = new Date(c.fecha);
+            let entra = true;
+            if (desdeD && f < desdeD) entra = false;
+            if (hastaD && f > hastaD) entra = false;
+            if (entra) comisiones[idx] = { ...c, estado: 'Pagada', fechaPago: window.localISO(new Date()) };
+        }
+    });
+    StorageService.set('comisionesRegistradas', comisiones);
+
+    // 3. Consumir anticipos pendientes (FIFO por fecha) hasta cubrir
+    //    liq.anticipoAplicado — esto es una compensación interna, no mueve caja.
+    if (liq.anticipoAplicado > 0) {
+        const anticipos = StorageService.get('anticiposComisionVendedor', []);
+        let restante = liq.anticipoAplicado;
+        const ordenados = anticipos
+            .map((a, idx) => ({ a, idx }))
+            .filter(x => String(x.a.vendedorId) === String(vendedorId) && _anticipoSaldoPendiente(x.a) > 0)
+            .sort((x, y) => new Date(x.a.fecha) - new Date(y.a.fecha));
+        for (const { a, idx } of ordenados) {
+            if (restante <= 0.005) break;
+            const saldo = _anticipoSaldoPendiente(a);
+            const aplicar = Math.min(saldo, restante);
+            const nuevoSaldo = Math.max(0, saldo - aplicar);
+            const liquidaciones = Array.isArray(a.liquidaciones) ? a.liquidaciones.slice() : [];
+            liquidaciones.push({
+                monto: aplicar, metodo: 'aplicado_a_comision',
+                fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+            });
+            anticipos[idx] = { ...a, saldoPendiente: nuevoSaldo, liquidaciones, estado: nuevoSaldo <= 0.01 ? 'Liquidado' : 'Pendiente' };
+            restante -= aplicar;
+        }
+        StorageService.set('anticiposComisionVendedor', anticipos);
+    }
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'COMISIONES_LIQUIDADAS',
+            modulo: 'Vendedores',
+            entidad: 'comisionesRegistradas',
+            entidadId: vendedorId,
+            detalle: `Liquidación de comisiones - ${v.nombre}`,
+            monto: montoNeto,
+            severidad: 'info',
+            datos: { comisionesNoPagadas: liq.pendiente, anticipoAplicado: liq.anticipoAplicado, montoNeto, periodo: { desde, hasta } }
         });
     }
-    
-    StorageService.set('comisionesRegistradas', comisiones);
-    document.querySelector('[data-modal="pago-comision"]').remove();
-    alert(`✅ Comisión de ${dinero(monto)} pagada correctamente desde ${etiqueta}.`);
-    
-    renderGestionVendedores();
-    if(fechaDesde !== 'null') renderReporteComisiones(fechaDesde, fechaHasta);
-}
 
-// Renombrar los botones viejos para que llamen al modal
-function pagarComision(id) {
-    const c = StorageService.get('comisionesRegistradas', []).find(x => x.id === id);
-    if(c) abrirModalPagoComision('individual', id, null, null, c.montoComision, c.vendedorNombre);
-}
-function pagarComisionVendedor(vendedorId, fechaDesde, fechaHasta) {
-    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
-    const res = calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta);
-    if(v) abrirModalPagoComision('multiple', vendedorId, fechaDesde, fechaHasta, res.pendiente, v.nombre);
+    document.querySelector('[data-modal="liquidacion-comisiones"]')?.remove();
+    alert(`✅ Liquidación completada para ${v.nombre}.\n\nComisiones no pagadas: ${dinero(liq.pendiente)}\nAnticipos aplicados: ${dinero(liq.anticipoAplicado)}\nNeto desembolsado: ${dinero(montoNeto)}`);
+
+    renderGestionVendedores();
+    if (desde || hasta) renderReporteComisiones(desde, hasta);
 }
 
 // ===== ANTICIPOS DE COMISIÓN PARA VENDEDORES =====
@@ -837,6 +892,82 @@ function liquidarAnticipoComision(anticipoId) {
     renderGestionVendedores();
 }
 
+// Corrige el monto original de un anticipo ya registrado (p. ej. el banco
+// depositó un monto distinto al capturado). Solo ajusta el registro del
+// anticipo y su saldo pendiente — NO modifica el movimiento de caja que ya
+// se generó al registrarlo; si ese egreso también está mal, se corrige aparte
+// en Bancos/Corte de Caja.
+function abrirModalEditarMontoAnticipo(anticipoId) {
+    const anticipos = StorageService.get('anticiposComisionVendedor', []);
+    const a = anticipos.find(x => x.id === anticipoId);
+    if (!a) return alert('Anticipo no encontrado.');
+    const totalLiquidado = (Array.isArray(a.liquidaciones) ? a.liquidaciones : []).reduce((s, l) => s + (Number(l.monto) || 0), 0);
+
+    const modalHTML = `
+    <div data-modal="editar-anticipo" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;padding:16px;">
+        <div style="background:white;padding:30px;border-radius:12px;width:100%;max-width:400px;box-shadow:0 10px 25px rgba(0,0,0,0.1);">
+            <h2 style="margin-top:0;color:#0f172a;">✏️ Corregir monto de anticipo</h2>
+            <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(a.vendedorNombre)}</strong><br>Monto actual: <strong>${dinero(a.monto)}</strong>${totalLiquidado > 0 ? `<br><span style="font-size:12px;color:#6b7280;">Ya liquidado/aplicado: ${dinero(totalLiquidado)}</span>` : ''}</p>
+            <div style="margin-bottom:16px;">
+                <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO CORRECTO</label>
+                <input type="number" id="editarAnticipoMonto" min="0.01" step="0.01" value="${a.monto}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+                <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Esto solo corrige el registro del anticipo, no el movimiento de caja ya generado.</p>
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button onclick="guardarEdicionMontoAnticipo(${a.id})" style="flex:1;padding:12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💾 Guardar</button>
+                <button onclick="document.querySelector('[data-modal=&quot;editar-anticipo&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function guardarEdicionMontoAnticipo(anticipoId) {
+    const anticipos = StorageService.get('anticiposComisionVendedor', []);
+    const idx = anticipos.findIndex(x => x.id === anticipoId);
+    if (idx === -1) return alert('Anticipo no encontrado.');
+    const a = anticipos[idx];
+
+    const montoInput = document.getElementById('editarAnticipoMonto');
+    const nuevoMonto = Number(montoInput?.value);
+    if (!Number.isFinite(nuevoMonto) || nuevoMonto <= 0) {
+        alert('Ingresa un monto válido.');
+        return;
+    }
+
+    const totalLiquidado = (Array.isArray(a.liquidaciones) ? a.liquidaciones : []).reduce((s, l) => s + (Number(l.monto) || 0), 0);
+    if (nuevoMonto < totalLiquidado) {
+        if (!confirm(`Ya se liquidaron/aplicaron ${dinero(totalLiquidado)} de este anticipo, más que el nuevo monto (${dinero(nuevoMonto)}). El saldo pendiente quedará en $0. ¿Continuar?`)) return;
+    }
+    const nuevoSaldo = Math.max(0, nuevoMonto - totalLiquidado);
+    const montoAnterior = a.monto;
+
+    anticipos[idx] = {
+        ...a,
+        monto: nuevoMonto,
+        saldoPendiente: nuevoSaldo,
+        estado: nuevoSaldo <= 0.01 ? 'Liquidado' : 'Pendiente',
+        montoOriginalHistorico: a.montoOriginalHistorico ?? montoAnterior
+    };
+    StorageService.set('anticiposComisionVendedor', anticipos);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ANTICIPO_COMISION_MONTO_CORREGIDO',
+            modulo: 'Vendedores',
+            entidad: 'anticiposComisionVendedor',
+            entidadId: a.id,
+            detalle: `Corrección de monto de anticipo - ${a.vendedorNombre}: ${dinero(montoAnterior)} -> ${dinero(nuevoMonto)}`,
+            monto: nuevoMonto,
+            severidad: 'riesgo',
+            datos: { montoAnterior, montoNuevo: nuevoMonto, saldoPendiente: nuevoSaldo }
+        });
+    }
+
+    document.querySelector('[data-modal="editar-anticipo"]')?.remove();
+    renderGestionVendedores();
+}
+
 function renderAnticiposComision() {
     const cont = document.getElementById('anticiposComisionArea');
     if (!cont) return;
@@ -855,7 +986,12 @@ function renderAnticiposComision() {
           <td style="padding:8px;">${a.fecha ? new Date(a.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' }) : '-'}</td>
           <td style="padding:8px;color:#6b7280;">${_vendEsc(a.cuentaEtiqueta || '-')}</td>
           <td style="padding:8px;text-align:center;"><span style="color:${saldo > 0 ? '#d97706' : '#16a34a'};font-weight:bold;">${saldo > 0 ? 'Pendiente' : 'Liquidado'}</span></td>
-          <td style="padding:8px;text-align:center;">${saldo > 0 ? `<button onclick="abrirModalLiquidarAnticipo(${a.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Liquidar</button>` : '✅'}</td>
+          <td style="padding:8px;text-align:center;">
+            <div style="display:flex;gap:6px;justify-content:center;">
+              ${saldo > 0 ? `<button onclick="abrirModalLiquidarAnticipo(${a.id})" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">Liquidar</button>` : ''}
+              <button onclick="abrirModalEditarMontoAnticipo(${a.id})" style="padding:4px 8px;background:none;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;font-size:12px;" title="Corregir monto">✏️</button>
+            </div>
+          </td>
         </tr>`;
     }).join('');
 
@@ -888,10 +1024,11 @@ window.eliminarVendedor = eliminarVendedor;
 window.calcularCostoMercanciaVenta = calcularCostoMercanciaVenta;
 window.registrarComisionVenta = registrarComisionVenta;
 window.calcularComisionesVendedor = calcularComisionesVendedor;
+window.calcularLiquidacionVendedor = calcularLiquidacionVendedor;
 window.calcularComisionesFiltradas = calcularComisionesFiltradas;
 window.renderReporteComisiones = renderReporteComisiones;
-window.pagarComision = pagarComision;
-window.pagarComisionVendedor = pagarComisionVendedor;
+window.abrirModalLiquidacionComisiones = abrirModalLiquidacionComisiones;
+window.ejecutarLiquidacionComisiones = ejecutarLiquidacionComisiones;
 window.obtenerSugerenciasRecuperacionCartera = obtenerSugerenciasRecuperacionCartera;
 window.renderSugerenciasRecuperacionCartera = renderSugerenciasRecuperacionCartera;
 window.otorgarComisionRecuperacion = otorgarComisionRecuperacion;
@@ -900,4 +1037,6 @@ window.abrirModalAnticipoComision = abrirModalAnticipoComision;
 window.registrarAnticipoComision = registrarAnticipoComision;
 window.abrirModalLiquidarAnticipo = abrirModalLiquidarAnticipo;
 window.liquidarAnticipoComision = liquidarAnticipoComision;
+window.abrirModalEditarMontoAnticipo = abrirModalEditarMontoAnticipo;
+window.guardarEdicionMontoAnticipo = guardarEdicionMontoAnticipo;
 window.renderAnticiposComision = renderAnticiposComision;
