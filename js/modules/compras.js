@@ -6807,7 +6807,10 @@ function abrirModalDevolucionCompra() {
             <div id="listaDevolucionCompra" style="overflow-y:auto;flex:1;">
                 ${filas || '<div style="text-align:center;color:#94a3b8;padding:30px 0;">No hay compras con inventario disponible para devolver.</div>'}
             </div>
-            <button onclick="document.querySelector('[data-modal=&quot;buscar-devolucion-compra&quot;]').remove()" style="margin-top:14px;padding:11px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cerrar</button>
+            <div style="text-align:center;margin-top:12px;">
+                <span onclick="document.querySelector('[data-modal=&quot;buscar-devolucion-compra&quot;]').remove(); abrirDevolucionSinCompra();" style="color:#1e40af;font-size:12px;cursor:pointer;text-decoration:underline;">¿La compra es de antes de tener el sistema? Regístrala aquí →</span>
+            </div>
+            <button onclick="document.querySelector('[data-modal=&quot;buscar-devolucion-compra&quot;]').remove()" style="margin-top:10px;padding:11px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cerrar</button>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
@@ -6999,6 +7002,330 @@ function ejecutarDevolucionCompra(compraId) {
     if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
 }
 
+// ============================================================
+// DEVOLUCIÓN SIN COMPRA REGISTRADA (mercancía comprada antes de
+// tener el sistema, o cuyo folio de compra ya no existe). Genera
+// saldo a favor real con el proveedor y descuenta stock, SIN tocar
+// Cuentas por Pagar ni caja — no hay compra ni pago que revertir.
+// ============================================================
+window._articulosDevolucionSinCompra = [];
+
+function abrirDevolucionSinCompra() {
+    if (!_comprasRequireAdmin('Registrar devolución sin compra')) return;
+    document.querySelector('[data-modal="devolucion-sin-compra"]')?.remove();
+    window._articulosDevolucionSinCompra = [];
+
+    const provs = StorageService.get('proveedores', []);
+    const selProvs = provs.map(p => `<option value="${p.id}">${_comprasEscHTML(p.nombre)}</option>`).join('');
+
+    const html = `
+    <div data-modal="devolucion-sin-compra" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:9600;display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow-y:auto;">
+        <div style="background:white;padding:24px;border-radius:12px;width:100%;max-width:680px;margin-top:20px;box-shadow:0 10px 25px rgba(0,0,0,0.15);">
+            <h2 style="margin-top:0;color:#b91c1c;">↩️ Devolución sin compra registrada</h2>
+            <p style="color:#64748b;font-size:13px;margin-bottom:16px;">Para mercancía comprada antes de tener el sistema. Descuenta el stock real y genera un saldo a favor con el proveedor (aplicable en tu próxima compra o cuenta por pagar) — no crea ninguna compra, deuda ni movimiento de caja.</p>
+
+            <label style="font-weight:bold;font-size:12px;color:#374151;display:block;margin-bottom:5px;">PROVEEDOR</label>
+            <select id="dscProveedor" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;margin-bottom:14px;">
+                <option value="">-- Selecciona proveedor --</option>${selProvs}
+            </select>
+
+            <button onclick="_dscAbrirPicker()" style="width:100%;padding:11px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;margin-bottom:12px;">🔍 Agregar producto</button>
+
+            <div id="tablaDevolucionSinCompra"></div>
+
+            <div style="margin:16px 0;">
+                <label style="font-weight:bold;font-size:12px;color:#374151;display:block;margin-bottom:5px;">MOTIVO / NOTA</label>
+                <input type="text" id="dscNota" placeholder="Ej. compra hecha antes de usar el sistema, sin folio disponible..." style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+            </div>
+
+            <div style="display:flex;gap:10px;">
+                <button onclick="_dscGenerarPrevia()" style="flex:1;padding:12px;background:#b91c1c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📄 Generar acta y registrar</button>
+                <button onclick="document.querySelector('[data-modal=&quot;devolucion-sin-compra&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    _dscRenderTabla();
+}
+
+function _dscAbrirPicker() {
+    if (typeof window.abrirSelectorProducto !== 'function') return alert('El selector de productos no está disponible.');
+    window.abrirSelectorProducto({
+        titulo: '🔍 Producto a devolver',
+        campoPrecio: 'costo',
+        incluirInactivos: true,
+        onSeleccion: (prod) => {
+            window._articulosDevolucionSinCompra.push({
+                productoId: prod.id, nombre: prod.nombre,
+                color: 'General', ubicacion: 'General',
+                costo: Number(prod.costo || 0), cantidad: 1
+            });
+            _dscRenderTabla();
+        }
+    });
+}
+
+function _dscRenderTabla() {
+    const cont = document.getElementById('tablaDevolucionSinCompra');
+    if (!cont) return;
+    const arts = window._articulosDevolucionSinCompra || [];
+    if (!arts.length) {
+        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:12px;border:1px dashed #cbd5e1;border-radius:8px;">Aún no agregas productos.</p>';
+        return;
+    }
+    const ubicaciones = StorageService.get('ubicacionesConfig', [{ id: 'General', nombre: 'General' }]);
+    const optsUbi = ubicaciones.map(u => `<option value="${_comprasEscHTML(u.nombre)}">${_comprasEscHTML(u.nombre)}</option>`).join('');
+
+    let total = 0;
+    const filas = arts.map((a, i) => {
+        total += a.costo * a.cantidad;
+        return `<tr>
+            <td style="padding:8px;">${_comprasEscHTML(a.nombre)}</td>
+            <td style="padding:8px;text-align:center;"><input type="text" value="${_comprasEscHTML(a.color)}" placeholder="Color" onchange="window._articulosDevolucionSinCompra[${i}].color=this.value;" style="width:80px;padding:5px;border:1px solid #cbd5e1;border-radius:4px;"></td>
+            <td style="padding:8px;text-align:center;">
+                <select onchange="window._articulosDevolucionSinCompra[${i}].ubicacion=this.value;" style="width:100px;padding:5px;border:1px solid #cbd5e1;border-radius:4px;">
+                    ${optsUbi.replace(`value="${_comprasEscHTML(a.ubicacion)}"`, `value="${_comprasEscHTML(a.ubicacion)}" selected`)}
+                </select>
+            </td>
+            <td style="padding:8px;text-align:center;"><input type="number" min="0" step="0.01" value="${a.costo}" style="width:85px;text-align:right;padding:5px;border:1px solid #cbd5e1;border-radius:4px;" onchange="window._articulosDevolucionSinCompra[${i}].costo=parseFloat(this.value)||0;_dscRenderTabla();"></td>
+            <td style="padding:8px;text-align:center;"><input type="number" min="1" value="${a.cantidad}" style="width:60px;text-align:center;padding:5px;border:1px solid #cbd5e1;border-radius:4px;" onchange="window._articulosDevolucionSinCompra[${i}].cantidad=parseInt(this.value)||1;_dscRenderTabla();"></td>
+            <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(a.costo * a.cantidad)}</td>
+            <td style="padding:8px;text-align:center;"><button onclick="window._articulosDevolucionSinCompra.splice(${i},1);_dscRenderTabla();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
+        </tr>`;
+    }).join('');
+
+    cont.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Producto</th><th style="padding:8px;">Color</th><th style="padding:8px;">Bodega</th><th style="padding:8px;">Costo unit. <small style="font-weight:normal;color:#9ca3af;">(editable)</small></th><th style="padding:8px;">Cant.</th><th style="padding:8px;text-align:right;">Importe</th><th></th></tr></thead>
+        <tbody>${filas}</tbody>
+    </table></div>
+    <div style="text-align:right;margin-top:10px;font-weight:900;font-size:15px;color:#b91c1c;">Total: ${dinero(total)}</div>`;
+}
+
+function _dscGenerarPrevia() {
+    const provId = document.getElementById('dscProveedor')?.value;
+    if (!provId) return alert('Selecciona el proveedor.');
+    const provs = StorageService.get('proveedores', []);
+    const prov = provs.find(p => String(p.id) === String(provId));
+    if (!prov) return alert('Proveedor no encontrado.');
+
+    const arts = window._articulosDevolucionSinCompra || [];
+    if (!arts.length) return alert('Agrega al menos un producto.');
+    for (const a of arts) {
+        if (!a.cantidad || a.cantidad <= 0) return alert(`Cantidad inválida para "${a.nombre}".`);
+        if (a.costo < 0) return alert(`Costo inválido para "${a.nombre}".`);
+    }
+
+    const nota = document.getElementById('dscNota')?.value.trim() || '';
+    const totalImporte = arts.reduce((s, a) => s + a.costo * a.cantidad, 0);
+    const totalPiezas = arts.reduce((s, a) => s + a.cantidad, 0);
+
+    const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
+    const nombreEmpresa = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
+    const ahoraActa = new Date();
+    const fechaHoyTexto = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ahoraActa) : ahoraActa.toLocaleDateString('es-MX');
+    const actaFolio = `ACTA-DEV-HIST-${ahoraActa.getFullYear()}${String(ahoraActa.getMonth() + 1).padStart(2, '0')}${String(ahoraActa.getDate()).padStart(2, '0')}-${String(ahoraActa.getHours()).padStart(2, '0')}${String(ahoraActa.getMinutes()).padStart(2, '0')}${String(ahoraActa.getSeconds()).padStart(2, '0')}`;
+
+    const filas = arts.map(a => `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:4px 8px;">${_comprasEscHTML(a.nombre)}<br><small style="color:#64748b;">${_comprasEscHTML(a.color || 'General')}</small></td>
+            <td style="padding:4px 8px;text-align:center;">${a.cantidad}</td>
+            <td style="padding:4px 8px;text-align:right;">${dinero(a.costo)}</td>
+            <td style="padding:4px 8px;text-align:right;font-weight:bold;">${dinero(a.costo * a.cantidad)}</td>
+        </tr>`).join('');
+
+    const payload = encodeURIComponent(JSON.stringify({ proveedorId: prov.id, proveedorNombre: prov.nombre, arts, nota, actaFolio }));
+
+    document.querySelector('[data-modal="devolucion-sin-compra"]')?.remove();
+    const html = `
+    <div data-modal="previa-devolucion-sin-compra" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:9700;display:flex;align-items:center;justify-content:center;padding:18px;">
+        <div style="background:white;border-radius:12px;max-width:640px;width:100%;padding:22px;max-height:90vh;overflow:auto;">
+            <div id="doc-devolucion-sin-compra">
+                <div data-pdf-header>
+                    <div style="text-align:center;margin-bottom:14px;">
+                        <img src="img/Logo.svg" style="height:56px;" onerror="this.outerHTML='<span style=\\'font-size:28px;\\'>🏛️</span>'">
+                        <h2 style="margin:6px 0 0;font-size:17px;color:#0f172a;">${_comprasEscHTML(nombreEmpresa)}</h2>
+                    </div>
+                    <hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 10px;">
+                    <div style="text-align:center;margin-bottom:12px;">
+                        <div style="font-weight:900;font-size:15px;color:#0f172a;letter-spacing:0.3px;">ACTA DE DEVOLUCIÓN DE MERCANCÍA A PROVEEDOR</div>
+                        <div style="font-size:11px;color:#64748b;margin-top:2px;">Folio de acta: <strong>${_comprasEscHTML(actaFolio)}</strong></div>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                    <div style="font-size:12px;color:#64748b;">Proveedor: <strong>${_comprasEscHTML(prov.nombre)}</strong></div>
+                    <div style="text-align:right;font-size:12px;color:#64748b;">Fecha: <strong>${_comprasEscHTML(fechaHoyTexto)}</strong></div>
+                </div>
+                <div style="font-size:12px;color:#334155;text-align:justify;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;line-height:1.5;">
+                    Por medio del presente documento, <strong>${_comprasEscHTML(nombreEmpresa)}</strong> hace constar la devolución al proveedor <strong>${_comprasEscHTML(prov.nombre)}</strong> de la mercancía que se detalla a continuación, correspondiente a una compra anterior a la implementación del sistema de control interno. El importe total de esta devolución queda registrado como <strong>saldo a favor</strong> de ${_comprasEscHTML(nombreEmpresa)} con dicho proveedor, aplicable a su próxima compra o cuenta por pagar.
+                </div>
+                <div style="overflow:visible;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:8px;text-align:left;">Producto</th><th style="padding:8px;text-align:center;">Cantidad</th><th style="padding:8px;text-align:right;">Costo unit.</th><th style="padding:8px;text-align:right;">Importe</th></tr></thead>
+                        <tbody>${filas}</tbody>
+                    </table>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:2px solid #e2e8f0;font-weight:900;font-size:15px;">
+                    <span>Total a devolver: ${totalPiezas} pieza(s)</span>
+                    <span style="color:#b91c1c;">${dinero(totalImporte)}</span>
+                </div>
+                <div style="margin-top:10px;font-size:13px;color:#334155;display:flex;justify-content:space-between;padding-top:8px;border-top:1px dashed #cbd5e1;">
+                    <span>Saldo a favor generado con ${_comprasEscHTML(prov.nombre)}:</span>
+                    <strong style="color:#b45309;">${dinero(totalImporte)}</strong>
+                </div>
+                <div id="docObsSlotSinCompra" style="font-size:12px;color:#334155;margin-top:10px;">${nota ? `<strong>Nota:</strong> ${_comprasEscHTML(nota)}` : ''}</div>
+                <div style="display:flex;justify-content:space-between;gap:24px;margin-top:38px;">
+                    <div style="flex:1;text-align:center;">
+                        <div style="border-top:1px solid #334155;margin:0 10px 6px;"></div>
+                        <div style="font-size:12px;font-weight:bold;color:#0f172a;">Entrega — ${_comprasEscHTML(nombreEmpresa)}</div>
+                        <div style="font-size:11px;color:#64748b;">Nombre y firma</div>
+                    </div>
+                    <div style="flex:1;text-align:center;">
+                        <div style="border-top:1px solid #334155;margin:0 10px 6px;"></div>
+                        <div style="font-size:12px;font-weight:bold;color:#0f172a;">Recibe — ${_comprasEscHTML(prov.nombre)}</div>
+                        <div style="font-size:11px;color:#64748b;">Nombre y firma</div>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;">
+                <button onclick="_dscImprimirActa()" style="flex:1;min-width:140px;padding:11px;background:#1e40af;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">🖨️ Emitir documento (PDF / Imagen / Ticket)</button>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:10px;">
+                <button onclick="document.querySelector('[data-modal=&quot;previa-devolucion-sin-compra&quot;]')?.remove();" style="flex:1;padding:11px;background:#e2e8f0;color:#334155;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cancelar</button>
+                <button onclick="ejecutarDevolucionSinCompra('${payload}')" style="flex:1;padding:11px;background:#b91c1c;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Ejecutar devolución</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function _dscImprimirActa() {
+    const original = document.getElementById('doc-devolucion-sin-compra');
+    if (!original) return alert('Abre primero la vista previa de la devolución para imprimirla.');
+    const clone = original.cloneNode(true);
+    clone.style.width = '700px';
+    clone.style.maxWidth = '700px';
+    clone.style.margin = '0 auto';
+    clone.style.boxSizing = 'border-box';
+    clone.style.padding = '40px 40px 50px 40px';
+    clone.style.backgroundColor = '#ffffff';
+
+    if (window.TicketService?.elegirFormato) {
+        window.TicketService.elegirFormato({ html: clone.outerHTML, title: 'Acta de devolución a proveedor', filename: `acta_devolucion_historica_${Date.now()}`, pageSize: 'letter' });
+        return;
+    }
+    if (window.TicketService?.openDocument) {
+        window.TicketService.openDocument(clone.outerHTML, { title: 'Acta de devolución a proveedor', filename: `acta_devolucion_historica_${Date.now()}`, pageSize: 'letter', autoPrint: true });
+        return;
+    }
+    const w = window.open('', '_blank', 'width=900,height=1000');
+    if (!w) return alert('Habilita las ventanas emergentes para imprimir la devolución.');
+    w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+        <title>Acta de devolución a proveedor</title>
+        <style>
+            *{box-sizing:border-box}
+            body{font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:22px;color:#0f172a}
+            .toolbar{display:flex;justify-content:center;gap:10px;margin-bottom:16px}
+            .toolbar button{padding:10px 18px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:bold;cursor:pointer}
+            @media print{body{background:white;padding:0}.toolbar{display:none!important}@page{margin:12mm}}
+        </style></head><body>
+        <div class="toolbar"><button onclick="window.print()">Imprimir / Guardar PDF</button></div>
+        ${clone.outerHTML}
+        <script>setTimeout(function(){ window.focus(); }, 200);<\/script>
+    </body></html>`);
+    w.document.close();
+}
+
+function ejecutarDevolucionSinCompra(payload) {
+    if (!_comprasRequireAdmin('Ejecutar devolución sin compra')) return;
+    let data = {};
+    try { data = JSON.parse(decodeURIComponent(payload || '')); } catch (e) { data = {}; }
+    const { proveedorId, proveedorNombre, arts, nota, actaFolio } = data;
+    if (!Array.isArray(arts) || !arts.length) return alert('No hay productos para devolver.');
+
+    const totalImporte = arts.reduce((s, a) => s + Number(a.costo || 0) * Number(a.cantidad || 0), 0);
+    if (!confirm(`¿CONFIRMAR DEVOLUCIÓN A ${proveedorNombre}?\n\nTotal: ${dinero(totalImporte)}\n\nEsto descuenta el stock y genera un saldo a favor con ${proveedorNombre} por ese importe. No se crea ninguna compra, deuda ni movimiento de caja.`)) return;
+
+    // 1. Descontar stock real (misma función que usa la devolución de compra normal)
+    const productos = StorageService.get('productos', []);
+    const fallosInventario = [];
+    const avisosVariante = [];
+    arts.forEach(a => {
+        if (!a.productoId) { fallosInventario.push(`${a.nombre} (sin productoId)`); return; }
+        const resultado = ajustarStockVariante(productos, a.productoId, a.cantidad, {
+            color: a.color, ubicacion: a.ubicacion, modo: 'salida', concepto: `Devolución a proveedor ${proveedorNombre} (compra previa al sistema)`
+        });
+        if (!resultado.ok) fallosInventario.push(`${a.nombre} (${resultado.motivo || 'error'})`);
+        else if (!resultado.varianteEncontrada) avisosVariante.push(a.nombre);
+    });
+    StorageService.set('productos', productos);
+
+    // 2. Registrar movimiento de inventario para trazabilidad
+    const movs = StorageService.get('movimientosInventario', []);
+    arts.forEach(a => {
+        movs.push({
+            id: Date.now() + Math.random(),
+            productoId: a.productoId,
+            productoNombre: a.nombre,
+            tipo: 'salida',
+            cantidad: a.cantidad,
+            costoUnitario: Number(a.costo || 0),
+            costo: Number(a.costo || 0),
+            valor: Number(a.cantidad || 0) * Number(a.costo || 0),
+            proveedor: proveedorNombre || '',
+            referencia: actaFolio,
+            ubicacion: a.ubicacion,
+            color: a.color,
+            concepto: `Devolución a proveedor (compra previa al sistema) — ${actaFolio}`,
+            fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString(),
+            fechaISO: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+        });
+    });
+    StorageService.set('movimientosInventario', movs);
+
+    // 3. Generar saldo a favor real con el proveedor (mismo mecanismo que
+    // cualquier devolución de compra: se aplica solo en la próxima compra
+    // directa a este proveedor, o manualmente a cualquier CxP suya).
+    if (totalImporte > 0) {
+        const saldos = StorageService.get('saldosFavorProveedores', []);
+        saldos.push({
+            id: Date.now(),
+            proveedorId: proveedorId || null,
+            proveedorNombre: proveedorNombre || '',
+            montoDisponible: totalImporte,
+            montoOriginal: totalImporte,
+            fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+            nota: nota || 'Devolución de mercancía comprada antes de tener el sistema',
+            referencia: actaFolio,
+            origen: 'devolucionSinCompra'
+        });
+        StorageService.set('saldosFavorProveedores', saldos);
+    }
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'DEVOLUCION_SIN_COMPRA_REGISTRADA',
+            modulo: 'Compras',
+            entidad: 'proveedor',
+            entidadId: proveedorId,
+            detalle: `Devolución a ${proveedorNombre} sin compra en sistema (folio ${actaFolio})${fallosInventario.length ? ` — ⚠️ ${fallosInventario.length} SIN DESCUENTO DE INVENTARIO` : ''}`,
+            monto: totalImporte,
+            severidad: fallosInventario.length ? 'critico' : 'riesgo',
+            datos: { arts, nota, actaFolio, saldoFavorGenerado: totalImporte, fallosInventario, avisosVariante }
+        });
+    }
+
+    document.querySelector('[data-modal="previa-devolucion-sin-compra"]')?.remove();
+
+    let mensaje = `✅ Devolución registrada: ${arts.reduce((s, a) => s + Number(a.cantidad || 0), 0)} pieza(s) por ${dinero(totalImporte)}.\n\n`;
+    mensaje += `Se generó un saldo a favor de ${dinero(totalImporte)} con ${proveedorNombre}. Se aplica automáticamente en tu próxima Compra Directa a este proveedor, o puedes aplicarlo manualmente a cualquier cuenta por pagar suya desde "Cuentas por Pagar".\n`;
+    if (fallosInventario.length) mensaje += `\n🚨 ATENCIÓN — no se descontó inventario para:\n- ${fallosInventario.join('\n- ')}\n\nRevisa y corrige el stock manualmente en Inventario.`;
+    if (avisosVariante.length) mensaje += `\n⚠️ Se descontó del stock general pero no se encontró la ubicación/color exacto para:\n- ${avisosVariante.join('\n- ')}`;
+    alert(mensaje);
+
+    if (typeof renderInventario === 'function') renderInventario();
+    if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
+}
+
 // Aplica manualmente el saldo a favor de un proveedor a CUALQUIER cuenta
 // por pagar abierta suya (no solo a la compra de origen de la devolución).
 // No mueve caja: es una compensación interna, igual que el resto de
@@ -7103,6 +7430,12 @@ window.confirmarAbonoOC = confirmarAbonoOC;
 window.abrirModalDevolucionCompra = abrirModalDevolucionCompra;
 window.buscarCompraDevolucion = buscarCompraDevolucion;
 window._filtrarListaDevolucionCompra = _filtrarListaDevolucionCompra;
+window.abrirDevolucionSinCompra = abrirDevolucionSinCompra;
+window._dscAbrirPicker = _dscAbrirPicker;
+window._dscRenderTabla = _dscRenderTabla;
+window._dscGenerarPrevia = _dscGenerarPrevia;
+window._dscImprimirActa = _dscImprimirActa;
+window.ejecutarDevolucionSinCompra = ejecutarDevolucionSinCompra;
 window.ejecutarDevolucionCompra = ejecutarDevolucionCompra;
 window.aplicarSaldoFavorACxp = aplicarSaldoFavorACxp;
 
