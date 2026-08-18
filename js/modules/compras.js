@@ -6758,31 +6758,75 @@ function _devolucionCompraArticulos(compra) {
     }).filter(a => a.disponible > 0);
 }
 
+// Devuelve las compras (no consignación) que aún tienen algún artículo
+// disponible para devolver, más recientes primero.
+function _devolucionCompraElegibles() {
+    const compras = StorageService.get('compras', []);
+    return compras
+        .filter(c => !c.esConsignacion)
+        .map(compra => ({ compra, articulos: _devolucionCompraArticulos(compra) }))
+        .filter(x => x.articulos.length > 0)
+        .sort((a, b) => {
+            const fa = Date.parse(a.compra.fechaISO || '') || Number(a.compra.id) || 0;
+            const fb = Date.parse(b.compra.fechaISO || '') || Number(b.compra.id) || 0;
+            return fb - fa;
+        });
+}
+
 function abrirModalDevolucionCompra() {
     document.querySelector('[data-modal="buscar-devolucion-compra"]')?.remove();
+    const elegibles = _devolucionCompraElegibles();
+
+    const filas = elegibles.map(({ compra, articulos }) => {
+        const totalPiezas = articulos.reduce((s, a) => s + a.disponible, 0);
+        const resumenArt = articulos.slice(0, 3).map(a => a.nombre).join(', ') + (articulos.length > 3 ? '…' : '');
+        const folioTxt = compra.folio || 'Sin folio';
+        const provTxt = compra.proveedor || '-';
+        return `<div class="filaCompraDevolucion" data-folio="${_comprasEscHTML(folioTxt).toLowerCase()}" data-prov="${_comprasEscHTML(provTxt).toLowerCase()}"
+             onclick="buscarCompraDevolucion('${String(compra.id)}')"
+             style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;cursor:pointer;transition:background .15s;"
+             onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+                <div>
+                    <strong style="color:#0f172a;">${_comprasEscHTML(folioTxt)}</strong>
+                    <span style="color:#64748b;font-size:12px;"> · ${_comprasEscHTML(provTxt)}</span><br>
+                    <small style="color:#94a3b8;">${_comprasEscHTML(compra.fecha || '-')}</small>
+                </div>
+                <span style="background:#fee2e2;color:#b91c1c;padding:3px 9px;border-radius:9999px;font-size:12px;font-weight:bold;white-space:nowrap;">${totalPiezas} pza(s) disp.</span>
+            </div>
+            <div style="color:#64748b;font-size:12px;margin-top:6px;">${_comprasEscHTML(resumenArt)}</div>
+        </div>`;
+    }).join('');
+
     const html = `
     <div data-modal="buscar-devolucion-compra" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:9500;display:flex;align-items:center;justify-content:center;padding:18px;">
-        <div style="background:white;padding:26px;border-radius:12px;width:100%;max-width:420px;box-shadow:0 10px 25px rgba(0,0,0,0.15);">
+        <div style="background:white;padding:24px;border-radius:12px;width:100%;max-width:560px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 25px rgba(0,0,0,0.15);">
             <h2 style="margin-top:0;color:#b91c1c;">↩️ Devolución de Compra</h2>
-            <p style="color:#64748b;font-size:13px;margin-bottom:16px;">Busca la compra por su folio (el que aparece en Cuentas por Pagar / Historial de Compras). No aplica a mercancía recibida a consignación — esa se devuelve desde el Gestor de Consignaciones.</p>
-            <label style="font-weight:bold;font-size:12px;color:#374151;display:block;margin-bottom:5px;">FOLIO DE LA COMPRA</label>
-            <input type="text" id="folioDevolucionCompra" placeholder="Ej. CD-172839... o OC-045-REC" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;text-transform:uppercase;" onkeydown="if(event.key==='Enter') buscarCompraDevolucion();">
-            <div style="display:flex;gap:10px;margin-top:18px;">
-                <button onclick="buscarCompraDevolucion()" style="flex:1;padding:11px;background:#b91c1c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🔎 Buscar</button>
-                <button onclick="document.querySelector('[data-modal=&quot;buscar-devolucion-compra&quot;]').remove()" style="flex:1;padding:11px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cerrar</button>
+            <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Elige la compra a la que quieres devolver mercancía. Solo se muestran compras con artículos aún disponibles (no incluye consignación — esa se devuelve desde el Gestor de Consignaciones).</p>
+            <input type="text" id="filtroDevolucionCompra" placeholder="🔎 Filtrar por folio o proveedor..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;margin-bottom:12px;" oninput="_filtrarListaDevolucionCompra(this.value)">
+            <div id="listaDevolucionCompra" style="overflow-y:auto;flex:1;">
+                ${filas || '<div style="text-align:center;color:#94a3b8;padding:30px 0;">No hay compras con inventario disponible para devolver.</div>'}
             </div>
+            <button onclick="document.querySelector('[data-modal=&quot;buscar-devolucion-compra&quot;]').remove()" style="margin-top:14px;padding:11px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cerrar</button>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
-    setTimeout(() => document.getElementById('folioDevolucionCompra')?.focus(), 50);
+    setTimeout(() => document.getElementById('filtroDevolucionCompra')?.focus(), 50);
 }
 
-function buscarCompraDevolucion() {
-    const folio = (document.getElementById('folioDevolucionCompra')?.value || '').trim().toUpperCase();
-    if (!folio) return alert('Escribe el folio de la compra.');
+function _filtrarListaDevolucionCompra(texto) {
+    const q = (texto || '').trim().toLowerCase();
+    document.querySelectorAll('.filaCompraDevolucion').forEach(fila => {
+        const folio = fila.getAttribute('data-folio') || '';
+        const prov = fila.getAttribute('data-prov') || '';
+        fila.style.display = (!q || folio.includes(q) || prov.includes(q)) ? '' : 'none';
+    });
+}
+
+function buscarCompraDevolucion(compraId) {
     const compras = StorageService.get('compras', []);
-    const compra = compras.find(c => String(c.folio || '').toUpperCase() === folio);
-    if (!compra) return alert('No se encontró ninguna compra con ese folio.');
+    const compra = compras.find(c => String(c.id) === String(compraId));
+    if (!compra) return alert('No se encontró la compra.');
     if (compra.esConsignacion) return alert('Esta compra fue recibida a consignación. Para devolver esa mercancía usa el "Gestor de Consignaciones", no esta herramienta.');
 
     const articulos = _devolucionCompraArticulos(compra);
@@ -7058,6 +7102,7 @@ window.abrirModalAbonoOC = abrirModalAbonoOC;
 window.confirmarAbonoOC = confirmarAbonoOC;
 window.abrirModalDevolucionCompra = abrirModalDevolucionCompra;
 window.buscarCompraDevolucion = buscarCompraDevolucion;
+window._filtrarListaDevolucionCompra = _filtrarListaDevolucionCompra;
 window.ejecutarDevolucionCompra = ejecutarDevolucionCompra;
 window.aplicarSaldoFavorACxp = aplicarSaldoFavorACxp;
 
