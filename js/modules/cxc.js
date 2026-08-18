@@ -1556,7 +1556,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
             return false;
         }
         if (typeof window.registrarAbonoApartado === 'function') {
-            const aplicado = window.registrarAbonoApartado(
+            const aplicado = await window.registrarAbonoApartado(
                 folioApartado,
                 a.montoAbonado,
                 a.fechaAbonoIso,

@@ -69,7 +69,7 @@ function registrarApartado({folio, clienteId, clienteNombre, fechaApartado, impo
     return nuevoApartado;
 }
 
-function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo', etiquetaCuenta = 'Efectivo', opciones = {}) {
+async function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo', etiquetaCuenta = 'Efectivo', opciones = {}) {
     const apartados = StorageService.get('apartados', []);
     const ap = apartados.find(a => a.folio === folio);
     if (!ap) return false;
@@ -98,28 +98,17 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
         if (!opciones.silencioso) alert(`El abono (${dinero(montoAplicado)}) excede el saldo pendiente del apartado (${dinero(saldoActual)}).`);
         return false;
     }
-    
-    ap.abonos = ap.abonos || [];
+
     const idOperacion = String(opciones.idOperacion || opciones.idCuarentena || '');
-    if (idOperacion && ap.abonos.some(ab => String(ab.idOperacion || ab.idCuarentena || ab.id || '') === idOperacion)) {
+    if (idOperacion && (ap.abonos || []).some(ab => String(ab.idOperacion || ab.idCuarentena || ab.id || '') === idOperacion)) {
         if (!opciones.silencioso) alert("Este abono ya fue aplicado al apartado. No se duplicara.");
         return false;
     }
-    ap.abonos.push({
-        idOperacion: idOperacion || null,
-        monto: montoAplicado,
-        fechaAbono: fechaAbono || window.localISO(new Date()),
-        cuentaId,
-        etiquetaCuenta,
-        autorizado: opciones.autorizado !== false
-    });
-    const _saldoPendienteNuevo = Math.max(0, _apartadoSaldoReal(ap));
-    const _estadoNuevo = _saldoPendienteNuevo <= 0.01 ? 'Liquidado' : 'Pendiente';
 
-    // 🛡️ Mismo criterio que en cxc.js: confirmamos el ingreso a caja ANTES
-    // de persistir el apartado como abonado. Antes, si _ingresarCuenta
-    // fallaba (p. ej. cuentaId inexistente), el apartado quedaba marcado
-    // como pagado/liquidado sin que el dinero llegara nunca a caja.
+    // 🛡️ Confirmamos el ingreso a caja ANTES de persistir el apartado como
+    // abonado. Antes, si _ingresarCuenta fallaba (p. ej. cuentaId
+    // inexistente), el apartado quedaba marcado como pagado/liquidado sin
+    // que el dinero llegara nunca a caja.
     if (typeof window._ingresarCuenta === 'function') {
         const _ingresoOk = window._ingresarCuenta({
             monto: montoAplicado,
@@ -150,17 +139,81 @@ function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efectivo',
         StorageService.set("movimientosCaja", movimientos);
     }
 
-    ap.saldoPendiente = _saldoPendienteNuevo;
-    ap.estado = _estadoNuevo;
-    StorageService.set('apartados', apartados);
+    // 🛡️ PUNTO 1 (condición de carrera multi-dispositivo): esta función
+    // antes leía el arreglo LOCAL de apartados, mutaba el apartado en
+    // memoria y subía el arreglo completo con StorageService.set('apartados', ...).
+    // Eso es seguro entre apartados DISTINTOS (cada folio ya es su propio
+    // documento vía _tablasRegistroIndividual), pero si dos dispositivos
+    // aplicaban un abono al MISMO apartado casi al mismo tiempo, el que
+    // terminaba de subir su .set() al final podía pisar por completo el
+    // documento de ese apartado, perdiendo el abono que el otro dispositivo
+    // acababa de aplicar — el mismo problema ya corregido en
+    // ejecutarAbonoAutorizadoReal() (cxc.js) para cuentasPorCobrar/pagarés.
+    // Ahora el apartado se lee FRESCO (desde el servidor, dentro de una
+    // transacción real) justo antes de escribir, con el mismo helper
+    // StorageService.transaccionRegistros usado ahí.
+    let resultadoTx;
+    try {
+        resultadoTx = await StorageService.transaccionRegistros(
+            [{ tabla: 'apartados', clave: folio }],
+            (frescos) => {
+                const apFresco = frescos[`apartados:${folio}`];
+                if (!apFresco) return null; // el apartado desapareció entre el pre-check y ahora (rarísimo)
+
+                // Idempotencia final, con el dato más fresco posible: si este
+                // idOperacion ya está aplicado en el servidor (otro
+                // dispositivo ganó la carrera), no lo volvemos a aplicar.
+                const yaAplicadoFresco = idOperacion && (apFresco.abonos || []).some(ab =>
+                    String(ab.idOperacion || ab.idCuarentena || ab.id || '') === idOperacion
+                );
+                if (yaAplicadoFresco) return { escrituras: [], resultado: { yaAplicado: true } };
+
+                const apAct = { ...apFresco, abonos: [...(apFresco.abonos || [])] };
+                apAct.abonos.push({
+                    idOperacion: idOperacion || null,
+                    monto: montoAplicado,
+                    fechaAbono: fechaAbono || window.localISO(new Date()),
+                    cuentaId,
+                    etiquetaCuenta,
+                    autorizado: opciones.autorizado !== false
+                });
+                const _saldoPendienteNuevo = Math.max(0, _apartadoSaldoReal(apAct));
+                apAct.saldoPendiente = _saldoPendienteNuevo;
+                apAct.estado = _saldoPendienteNuevo <= 0.01 ? 'Liquidado' : 'Pendiente';
+
+                return {
+                    escrituras: [{ tabla: 'apartados', clave: folio, data: apAct }],
+                    resultado: { yaAplicado: false, apAct }
+                };
+            }
+        );
+    } catch (e) {
+        // 🛡️ El dinero YA entró a caja (_ingresarCuenta arriba tuvo éxito),
+        // pero la actualización del apartado falló al subir a Firebase (p.
+        // ej. sin conexión en el momento exacto). Se avisa explícitamente
+        // para que se revise a mano en vez de fallar en silencio.
+        console.error('Error al aplicar abono de apartado:', e);
+        if (!opciones.silencioso) alert(`⚠️ El dinero SÍ se registró en caja, pero no se pudo actualizar el saldo del apartado (falló la sincronización). Revisa manualmente el apartado "${folio}" y reintenta si el saldo no bajó.`);
+        return false;
+    }
+
+    if (resultadoTx?.yaAplicado) {
+        // Otro dispositivo ya había aplicado este mismo abono al apartado.
+        // El dinero de ESTE intento ya entró a caja arriba: se avisa para
+        // que se concilie manualmente.
+        if (!opciones.silencioso) alert("Este abono ya fue aplicado al apartado por otro dispositivo justo antes. El dinero de este intento sí quedó registrado en caja — revisa que no haya quedado un ingreso duplicado.");
+        return false;
+    }
+
+    const apAct = resultadoTx.apAct;
 
     // Disparar la impresión del ticket térmico
     if (opciones.imprimir !== false) {
-        // ap.abonos ya incluye este abono (se hizo push arriba), así que el
-        // "anterior" es el penúltimo vigente y el número de pago es el total.
-        const _vigentes = _apartadoAbonosVigentes(ap);
+        // apAct.abonos ya incluye este abono, así que el "anterior" es
+        // el penúltimo vigente y el número de pago es el total.
+        const _vigentes = _apartadoAbonosVigentes(apAct);
         const _abonoAnteriorApt = _vigentes.length >= 2 ? _vigentes[_vigentes.length - 2] : null;
-        imprimirTicketAbonoApartado(ap, montoAplicado, etiquetaCuenta, fechaAbono, {
+        imprimirTicketAbonoApartado(apAct, montoAplicado, etiquetaCuenta, fechaAbono, {
             abonoAnterior: _abonoAnteriorApt ? { monto: Number(_abonoAnteriorApt.monto || 0), fecha: _abonoAnteriorApt.fechaAbono || _abonoAnteriorApt.fecha || '' } : null,
             numeroDePago: _vigentes.length
         });
