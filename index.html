@@ -86,6 +86,7 @@
                 <button onclick="navA('proveedores')">👥 Mis Proveedores</button>
                 <button onclick="navA('cuentasporpagar'); if(typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();">💳 Cuentas por Pagar</button>
                 <button onclick="navA('consignaciones')" style="color:#fdfdfcfa; font-weight:bold;">📦 Gestor de Consignaciones</button>
+                <button onclick="abrirModalDevolucionCompra()">↩️ Devolución de Compra</button>
             </div>
         </div>
 
@@ -432,10 +433,6 @@
  <button onclick="abrirNuevaCompraDirectaBlanco()" 
  style="padding: 16px 36px; background: #1e40af; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(30,64,175,0.3);">
  Iniciar Nuevo Registro de Compra
- </button>
- <button onclick="abrirModalDevolucionCompra()" 
- style="padding: 16px 36px; background: #b91c1c; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(185,28,28,0.3); margin-left:12px;">
- ↩️ Devolución de Compra
  </button>
  </div>
  </div>
@@ -1161,7 +1158,7 @@
 <script src="js/modules/clientes.js?v=5"></script>
 <script src="js/modules/cxc.js?v=36"></script>
 <script src="js/modules/apartados.js?v=8"></script>
-<script src="js/modules/compras.js?v=50"></script>
+<script src="js/modules/compras.js?v=51"></script>
 <script src="js/modules/bancos.js?v=13"></script>
 <script src="js/modules/reportes.js?v=22"></script>
 <script src="js/modules/reportes-plus.js?v=9"></script>
