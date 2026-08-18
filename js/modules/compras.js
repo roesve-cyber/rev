@@ -498,12 +498,6 @@ function mostrarHistorialCostosEnConsola(productoId) {
 function guardarHistorialCosto({ productoId, precioCompra, fecha, cantidad, proveedorId, proveedorNombre, origen }) {
     let historial = _comprasAsegurarArray(StorageService.get('historialCostos', []));
     historial.push({
-        // 🛡️ REPARACIÓN: esta tabla no tenía ningún campo único por registro, lo
-        // que impedía migrarla a _tablasRegistroIndividual (storage2.js) para
-        // dejar de subirse como un solo documento gigante. Se agrega 'id' igual
-        // que en el resto de bitácoras transaccionales (historialCancelaciones,
-        // gastosOperativos, etc.).
-        id: Date.now() + Math.random(),
         productoId,
         precioCompra,
         fecha,
@@ -2391,6 +2385,18 @@ function recibirOrdenCompra(id) {
 
     const selectorCuentas = _buildSelectorCuentas('recCuentaPago', false);
 
+    // Saldo a favor del proveedor (de devoluciones de compra u otro origen)
+    // aplicable en ESTA recepción — a propósito no se ofrece al crear/
+    // autorizar la OC, solo hasta que la mercancía ya se recibió.
+    const saldosFavorProvModal = StorageService.get('saldosFavorProveedores', []);
+    const saldoFavorDisponibleModal = !esConsignacionOC ? saldosFavorProvModal.reduce((s, x) => {
+        const disponible = Number(x.montoDisponible || 0);
+        if (disponible <= 0) return s;
+        const match = (oc.proveedorId && String(x.proveedorId) === String(oc.proveedorId)) ||
+            (String(x.proveedorNombre || '').trim().toLowerCase() === String(oc.proveedorNombre || '').trim().toLowerCase());
+        return match ? s + disponible : s;
+    }, 0) : 0;
+
     document.querySelector('[data-modal="recepcion-oc"]')?.remove();
     const html = `
     <div data-modal="recepcion-oc" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:16px;">
@@ -2449,6 +2455,21 @@ function recibirOrdenCompra(id) {
         <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;">
           Ajusta las cantidades recibidas. Lo que falte quedará como <strong>Back Order</strong> automáticamente.
         </p>
+
+        <!-- Saldo a favor del proveedor, aplicable ahora que se recibe -->
+        ${saldoFavorDisponibleModal > 0 ? `
+        <div style="background:#ecfdf5;border:1px solid #10b981;border-radius:10px;padding:14px;margin-bottom:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div>
+              <div style="font-size:13px;font-weight:bold;color:#065f46;">💰 Saldo a favor con ${oc.proveedorNombre}</div>
+              <div style="font-size:12px;color:#047857;">Disponible: ${dinero(saldoFavorDisponibleModal)} — se aplica hasta ahora que confirmas que la mercancía llegó.</div>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:bold;color:#065f46;display:block;margin-bottom:4px;">APLICAR AHORA</label>
+              <input type="number" id="recSaldoFavorAplicar" min="0" max="${saldoFavorDisponibleModal}" value="${Math.min(saldoFavorDisponibleModal, Math.max(0, totalOC - anticipo)).toFixed(2)}" oninput="window._ocRecalcularPago()" style="width:130px;padding:8px;border:1px solid #10b981;border-radius:6px;text-align:right;">
+            </div>
+          </div>
+        </div>` : ''}
 
         <!-- Sección pago (solo si hay saldo) -->
         <div id="seccionPagoRecepcion" style="${saldoOC > 0 ? '' : 'display:none;'}">
@@ -2553,7 +2574,13 @@ function recibirOrdenCompra(id) {
         inp.value = val;
         if (pEl)  pEl.textContent  = total - val;
         if (sEl)  sEl.textContent  = dinero(val * costo);
-        // recalcular total
+        window._ocRecalcularPago();
+    };
+
+    // Recalcula el total recibido y la sección de pago (considerando
+    // anticipo y saldo a favor aplicado) sin tocar las celdas por artículo.
+    // Se llama tanto al editar cantidades como al editar el saldo a favor.
+    window._ocRecalcularPago = function() {
         let totalRec = 0;
         oc.articulos.forEach((a, j) => {
             const q = parseInt(document.getElementById(`recQ_${j}`)?.value) || 0;
@@ -2561,12 +2588,23 @@ function recibirOrdenCompra(id) {
         });
         const totEl = document.getElementById('recTotalMonto');
         if (totEl) totEl.textContent = dinero(totalRec);
-        // actualizar monto sugerido
-        const montoInp = document.getElementById('recMontoPago');
+
         const anticipoAplicable = Math.min(anticipo, totalRec);
-        const saldoDisp = Math.max(0, totalRec - anticipoAplicable);
-        if (montoInp && !montoInp.dataset.editado) montoInp.value = Math.min(totalRec, saldoDisp > 0 ? saldoDisp : totalRec).toFixed(2);
-        // saldo pendiente actualizado
+        const saldoTrasAnticipo = Math.max(0, totalRec - anticipoAplicable);
+
+        const inputFavor = document.getElementById('recSaldoFavorAplicar');
+        let saldoFavorAplicar = 0;
+        if (inputFavor) {
+            saldoFavorAplicar = Math.min(Math.max(0, parseFloat(inputFavor.value) || 0), saldoFavorDisponibleModal, saldoTrasAnticipo);
+            if (Math.abs((parseFloat(inputFavor.value) || 0) - saldoFavorAplicar) > 0.01) inputFavor.value = saldoFavorAplicar.toFixed(2);
+        }
+
+        const montoInp = document.getElementById('recMontoPago');
+        const saldoDisp = Math.max(0, saldoTrasAnticipo - saldoFavorAplicar);
+        if (montoInp) {
+            montoInp.max = saldoDisp;
+            if (!montoInp.dataset.editado) montoInp.value = saldoDisp > 0 ? saldoDisp.toFixed(2) : '0.00';
+        }
         const lblSaldo = document.getElementById('lblSaldoMax');
         if (lblSaldo) lblSaldo.textContent = dinero(saldoDisp);
     };
@@ -2574,6 +2612,9 @@ function recibirOrdenCompra(id) {
     // Marcar monto como editado manualmente
     const montoInputEl = document.getElementById('recMontoPago');
     if (montoInputEl) montoInputEl.addEventListener('input', () => { montoInputEl.dataset.editado = '1'; });
+
+    // Sincronizar la sección de pago con el saldo a favor prellenado
+    window._ocRecalcularPago();
 }
 
 function confirmarRecepcionOC(ocId) {
@@ -2627,7 +2668,26 @@ function confirmarRecepcionOC(ocId) {
     const anticipo      = oc.anticipo_pagado || 0;
     const anticipoAplicadoRecepcion = Math.min(anticipo, totalRecibido);
     const anticipoDisponibleBackOrder = Math.max(0, anticipo - anticipoAplicadoRecepcion);
-    const saldoDisp     = Math.max(0, totalRecibido - anticipoAplicadoRecepcion);
+    const saldoDispTrasAnticipo = Math.max(0, totalRecibido - anticipoAplicadoRecepcion);
+
+    // Saldo a favor del proveedor (de devoluciones de compra u otro origen):
+    // se aplica aquí, hasta que la mercancía ya se recibió — no en la
+    // creación/autorización de la OC — para no comprometerlo antes de
+    // confirmar que el proveedor sí entregó.
+    const saldosFavorProvRec = StorageService.get('saldosFavorProveedores', []);
+    const _matchSaldoFavorOC = (x) => Number(x.montoDisponible || 0) > 0 && (
+        (oc.proveedorId && String(x.proveedorId) === String(oc.proveedorId)) ||
+        (String(x.proveedorNombre || '').trim().toLowerCase() === String(oc.proveedorNombre || '').trim().toLowerCase())
+    );
+    const saldoFavorDisponibleOC = !esConsignacionOC
+        ? saldosFavorProvRec.filter(_matchSaldoFavorOC).reduce((s, x) => s + Number(x.montoDisponible || 0), 0)
+        : 0;
+    let saldoFavorAplicado = 0;
+    if (!esConsignacionOC && saldoFavorDisponibleOC > 0) {
+        const inputFavor = document.getElementById('recSaldoFavorAplicar');
+        saldoFavorAplicado = Math.min(Math.max(0, parseFloat(inputFavor?.value) || 0), saldoFavorDisponibleOC, saldoDispTrasAnticipo);
+    }
+    const saldoDisp = Math.max(0, saldoDispTrasAnticipo - saldoFavorAplicado);
 
     // Validar pago si eligió pagar
     let montoPagado = 0;
@@ -2653,7 +2713,7 @@ function confirmarRecepcionOC(ocId) {
 
     // --- NUEVO: RESUMEN Y CONFIRMACIÓN DE RECEPCIÓN DE ORDEN DE COMPRA ---
     const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2});
-    const msjConfRec = `⚠️ RESUMEN DE OPERACIÓN - ¿CONFIRMAR RECEPCIÓN?\n\nOrden de Compra: ${oc.folio}\nProveedor: ${oc.proveedorNombre}\nTotal de unidades a ingresar: ${itemsRecibidos.reduce((s, a) => s + a.cantidadRec, 0)}\nPago a registrar hoy: ${formatoDinero(montoPagado)}\n\n¿Deseas procesar la entrada al inventario y actualizar la OC?`;
+    const msjConfRec = `⚠️ RESUMEN DE OPERACIÓN - ¿CONFIRMAR RECEPCIÓN?\n\nOrden de Compra: ${oc.folio}\nProveedor: ${oc.proveedorNombre}\nTotal de unidades a ingresar: ${itemsRecibidos.reduce((s, a) => s + a.cantidadRec, 0)}\n${saldoFavorAplicado > 0.01 ? `Saldo a favor aplicado: ${formatoDinero(saldoFavorAplicado)}\n` : ''}Pago a registrar hoy: ${formatoDinero(montoPagado)}\n\n¿Deseas procesar la entrada al inventario y actualizar la OC?`;
     if (!confirm(msjConfRec)) return;
     // --- FIN DE CONFIRMACIÓN ---
 
@@ -2772,8 +2832,38 @@ movimientosInventario = kardex;   // ✅ sincronizar global
     }
 
     // ── 3. Si queda saldo sin pagar → Cuenta por Pagar o Consignación ─────────
-    const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipoAplicadoRecepcion);
-    
+    const saldoRestante = Math.max(0, totalRecibido - montoPagado - anticipoAplicadoRecepcion - saldoFavorAplicado);
+
+    // Consumir el saldo a favor usado (si se aplicó) — no mueve caja, es
+    // compensación interna, igual que en aplicarSaldoFavorACxp.
+    if (saldoFavorAplicado > 0.01) {
+        let restanteFavor = saldoFavorAplicado;
+        const saldosFavorActualizar = StorageService.get('saldosFavorProveedores', []);
+        saldosFavorActualizar
+            .map((s, i) => ({ s, i }))
+            .filter(({ s }) => _matchSaldoFavorOC(s))
+            .sort((a, b) => new Date(a.s.fecha || 0) - new Date(b.s.fecha || 0))
+            .forEach(({ s, i }) => {
+                if (restanteFavor <= 0.005) return;
+                const usar = Math.min(restanteFavor, Number(s.montoDisponible || 0));
+                saldosFavorActualizar[i] = { ...s, montoDisponible: Number(s.montoDisponible || 0) - usar };
+                restanteFavor -= usar;
+            });
+        StorageService.set('saldosFavorProveedores', saldosFavorActualizar);
+        if (window.AuditService?.log) {
+            window.AuditService.log({
+                accion: 'SALDO_FAVOR_APLICADO_RECEPCION_OC',
+                modulo: 'Compras',
+                entidad: 'ordenCompra',
+                entidadId: oc.id,
+                detalle: `Saldo a favor aplicado en recepción de OC ${oc.folio} — ${oc.proveedorNombre}`,
+                monto: saldoFavorAplicado,
+                severidad: 'riesgo',
+                datos: { proveedor: oc.proveedorNombre, proveedorId: oc.proveedorId, folio: oc.folio }
+            });
+        }
+    }
+
     if (esConsignacionOC) {
             if (anticipo > 0.01) {
                 const refBase = oc.anticipoTransferidoDeOC || oc.id;
@@ -2823,6 +2913,14 @@ movimientosInventario = kardex;   // ✅ sincronizar global
                     monto: anticipoAplicadoRecepcion,
                     cuenta: 'Anticipo OC',
                     nota: `Anticipo aplicado desde ${oc.folio}`
+                });
+            }
+            if (saldoFavorAplicado > 0.01) {
+                abonosAplicadosCxp.push({
+                    fecha: window.localISO ? window.localISO(fechaRec) : fechaRec.toISOString(),
+                    monto: saldoFavorAplicado,
+                    cuenta: 'Saldo a favor de proveedor',
+                    nota: `Saldo a favor aplicado al recibir ${oc.folio}`
                 });
             }
             if (montoPagado > 0.01) {
@@ -2906,6 +3004,7 @@ movimientosInventario = kardex;   // ✅ sincronizar global
         montoPagado,
         anticipo_pagado: anticipoAplicadoRecepcion,
         anticipoAplicado: anticipoAplicadoRecepcion,
+        saldoFavorAplicado,
         anticipoTransferidoBackOrder: anticipoDisponibleBackOrder,
         ordenCompraId: oc.id,
         esConsignacion: esConsignacionOC,
@@ -4043,8 +4142,20 @@ function renderCuentasPorPagar() {
     }
 
     let cuentas = StorageService.get("cuentasPorPagar", []) || [];
-
-    // ── Reparar saldos con bug de doble conteo antes de renderizar ──
+    // Mapa de saldo a favor disponible por proveedor (por id o por nombre),
+    // para decidir si mostramos el botón "Aplicar saldo a favor" en cada CxP.
+    const saldosFavorPorProveedor = new Map();
+    StorageService.get("saldosFavorProveedores", []).forEach(s => {
+        const disponible = Number(s.montoDisponible || 0);
+        if (disponible <= 0) return;
+        const claves = [String(s.proveedorId || ''), String(s.proveedorNombre || '').trim().toLowerCase()].filter(Boolean);
+        claves.forEach(k => saldosFavorPorProveedor.set(k, (saldosFavorPorProveedor.get(k) || 0) + disponible));
+    });
+    const _saldoFavorDisponibleProveedor = (c) => {
+        const porId = c.proveedorId ? saldosFavorPorProveedor.get(String(c.proveedorId)) : 0;
+        const porNombre = saldosFavorPorProveedor.get(String(c.proveedor || '').trim().toLowerCase());
+        return Math.max(porId || 0, porNombre || 0);
+    };
     const comprasList = StorageService.get("compras", []);
     const ordenesList = StorageService.get("ordenesCompra", []);
     let huboCambios = false;
@@ -4128,6 +4239,7 @@ function renderCuentasPorPagar() {
                         ? `<button onclick="abrirModalPagoConsignacion('${c.id}')" style="background:#be123c; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">💸 Pagar Venta</button>`
                         : `<button onclick="registrarAbonoProveedor('${c.id}')" style="background:#2c3e50; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold;">💵 Abonar</button>`
                     }
+                    ${_saldoFavorDisponibleProveedor(c) > 0 ? `<button onclick="aplicarSaldoFavorACxp('${c.id}')" style="background:#059669; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer; font-weight:bold; margin-top:6px; display:block;" title="Saldo a favor disponible: ${dinero(_saldoFavorDisponibleProveedor(c))}">🔁 Aplicar saldo a favor</button>` : ''}
                 </td>
             </tr>`;
     });
@@ -6589,6 +6701,324 @@ window.ejecutarPagoConsig = function(cxpId, btn = null) {
 // ============================================================
 // FIN DEL MÓDULO DE CONSIGNACIONES
 // ============================================================
+// 🔁 DEVOLUCIÓN DE COMPRAS NORMALES (no consignación)
+// ------------------------------------------------------------
+// A diferencia de la consignación (donde la mercancía nunca fue
+// "tuya" hasta venderse), aquí la compra ya se recibió y ya se
+// pagó o se debe. Devolver mercancía aquí implica:
+//   1) Descontar el stock (misma función que consignación).
+//   2) Si la compra tiene una CxP abierta con ese proveedor,
+//      el importe devuelto abona esa deuda primero.
+//   3) Lo que sobre (o el 100% si ya estaba pagada/liquidada)
+//      se guarda como "saldo a favor" del proveedor — reutiliza
+//      la tabla saldosFavorProveedores que YA existe y que ya se
+//      puede aplicar automáticamente al registrar una Compra
+//      Directa nueva. Aquí además se puede aplicar manualmente a
+//      cualquier CxP abierta de ese proveedor (ver
+//      aplicarSaldoFavorACxp), no solo a compras nuevas.
+// ============================================================
+
+function _devolucionCompraKey(art) {
+    return String(art.idx);
+}
+
+// Extrae los artículos devolvibles de una compra normal, restando
+// lo que ya se haya devuelto antes (compra.devolucionesCompra).
+function _devolucionCompraArticulos(compra) {
+    let lista = [];
+    if (Array.isArray(compra.articulos) && compra.articulos.length > 0) {
+        lista = compra.articulos;
+    } else {
+        const cant = parseFloat(compra.cantidad || 1);
+        const totalC = parseFloat(compra.total || 0);
+        lista = [{ producto: compra.producto || 'Mercancía General', cantidad: cant, costo: cant > 0 ? (totalC / cant) : totalC, productoId: compra.productoId || null }];
+    }
+
+    const yaDevuelto = new Map();
+    (Array.isArray(compra.devolucionesCompra) ? compra.devolucionesCompra : []).forEach(d => {
+        (d.items || []).forEach(it => {
+            const k = String(it.idxOrigen ?? it.productoId ?? it.nombre ?? '');
+            yaDevuelto.set(k, (yaDevuelto.get(k) || 0) + (Number(it.cantidad) || 0));
+        });
+    });
+
+    return lista.map((art, idx) => {
+        const cantidadOriginal = Number(art.cantidadRec ?? art.cantidad ?? art.cant ?? 1) || 1;
+        const costoUnitario = Number(art.costo ?? art.costoUnitario ?? art.precioOriginal ?? 0) || 0;
+        const nombre = art.nombre || art.producto || art.productoNombre || 'Artículo';
+        const productoId = art.productoId || art.idProducto || null;
+        const claveDevuelto = String(productoId || nombre);
+        const devuelto = yaDevuelto.get(String(idx)) ?? yaDevuelto.get(claveDevuelto) ?? 0;
+        const disponible = Math.max(0, cantidadOriginal - devuelto);
+        return {
+            idx, idxOrigen: idx, nombre, productoId,
+            color: art.color || '', ubicacion: art.ubicacion || '',
+            costoUnitario, cantidadOriginal, devuelto, disponible
+        };
+    }).filter(a => a.disponible > 0);
+}
+
+function abrirModalDevolucionCompra() {
+    document.querySelector('[data-modal="buscar-devolucion-compra"]')?.remove();
+    const html = `
+    <div data-modal="buscar-devolucion-compra" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:9500;display:flex;align-items:center;justify-content:center;padding:18px;">
+        <div style="background:white;padding:26px;border-radius:12px;width:100%;max-width:420px;box-shadow:0 10px 25px rgba(0,0,0,0.15);">
+            <h2 style="margin-top:0;color:#b91c1c;">↩️ Devolución de Compra</h2>
+            <p style="color:#64748b;font-size:13px;margin-bottom:16px;">Busca la compra por su folio (el que aparece en Cuentas por Pagar / Historial de Compras). No aplica a mercancía recibida a consignación — esa se devuelve desde el Gestor de Consignaciones.</p>
+            <label style="font-weight:bold;font-size:12px;color:#374151;display:block;margin-bottom:5px;">FOLIO DE LA COMPRA</label>
+            <input type="text" id="folioDevolucionCompra" placeholder="Ej. CD-172839... o OC-045-REC" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;text-transform:uppercase;" onkeydown="if(event.key==='Enter') buscarCompraDevolucion();">
+            <div style="display:flex;gap:10px;margin-top:18px;">
+                <button onclick="buscarCompraDevolucion()" style="flex:1;padding:11px;background:#b91c1c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🔎 Buscar</button>
+                <button onclick="document.querySelector('[data-modal=&quot;buscar-devolucion-compra&quot;]').remove()" style="flex:1;padding:11px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cerrar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    setTimeout(() => document.getElementById('folioDevolucionCompra')?.focus(), 50);
+}
+
+function buscarCompraDevolucion() {
+    const folio = (document.getElementById('folioDevolucionCompra')?.value || '').trim().toUpperCase();
+    if (!folio) return alert('Escribe el folio de la compra.');
+    const compras = StorageService.get('compras', []);
+    const compra = compras.find(c => String(c.folio || '').toUpperCase() === folio);
+    if (!compra) return alert('No se encontró ninguna compra con ese folio.');
+    if (compra.esConsignacion) return alert('Esta compra fue recibida a consignación. Para devolver esa mercancía usa el "Gestor de Consignaciones", no esta herramienta.');
+
+    const articulos = _devolucionCompraArticulos(compra);
+    if (!articulos.length) return alert('Esta compra ya no tiene artículos disponibles para devolver (o ya se devolvió todo).');
+
+    document.querySelector('[data-modal="buscar-devolucion-compra"]')?.remove();
+
+    const filas = articulos.map(a => `<tr data-item="${_devolucionCompraKey(a)}">
+        <td style="padding:8px;"><input type="checkbox" class="chkDevolucionCompra" value="${_devolucionCompraKey(a)}"></td>
+        <td style="padding:8px;">${_comprasEscHTML(a.nombre)}${a.devuelto > 0 ? `<br><small style="color:#9ca3af;">Ya devuelto: ${a.devuelto}</small>` : ''}</td>
+        <td style="padding:8px;text-align:center;">${a.disponible}</td>
+        <td style="padding:8px;text-align:right;">${dinero(a.costoUnitario)}</td>
+        <td style="padding:8px;text-align:center;"><input type="number" class="inputCantidadDevolucionCompra" data-item="${_devolucionCompraKey(a)}" min="0" max="${a.disponible}" value="0" style="width:70px;padding:5px;border:1px solid #d1d5db;border-radius:4px;text-align:center;"></td>
+    </tr>`).join('');
+
+    const html = `
+    <div data-modal="devolucion-compra-items" style="position:fixed;inset:0;background:rgba(15,23,42,0.75);z-index:9500;display:flex;align-items:center;justify-content:center;padding:18px;">
+        <div style="background:white;padding:24px;border-radius:12px;width:100%;max-width:680px;max-height:88vh;overflow-y:auto;box-shadow:0 10px 25px rgba(0,0,0,0.15);">
+            <h2 style="margin-top:0;color:#b91c1c;">↩️ Devolver mercancía — ${_comprasEscHTML(compra.folio)}</h2>
+            <p style="color:#64748b;font-size:13px;margin-bottom:14px;">Proveedor: <strong>${_comprasEscHTML(compra.proveedor || '-')}</strong></p>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:#f3f4f6;">
+                        <th style="padding:8px;"></th>
+                        <th style="padding:8px;text-align:left;">Producto</th>
+                        <th style="padding:8px;text-align:center;">Disponible</th>
+                        <th style="padding:8px;text-align:right;">Costo</th>
+                        <th style="padding:8px;text-align:center;">Cantidad a devolver</th>
+                    </tr></thead>
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>
+            <div style="margin:16px 0;">
+                <label style="font-weight:bold;font-size:12px;color:#374151;display:block;margin-bottom:5px;">MOTIVO / NOTA (opcional)</label>
+                <input type="text" id="devolucionCompraNota" placeholder="Ej. piezas dañadas, no correspondía al pedido..." style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button onclick="ejecutarDevolucionCompra('${String(compra.id)}')" style="flex:1;padding:12px;background:#b91c1c;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Ejecutar Devolución</button>
+                <button onclick="document.querySelector('[data-modal=&quot;devolucion-compra-items&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function ejecutarDevolucionCompra(compraId) {
+    if (!_comprasRequireAdmin('Ejecutar devolución de compra')) return;
+    const compras = StorageService.get('compras', []);
+    const idx = compras.findIndex(c => String(c.id) === String(compraId));
+    if (idx === -1) return alert('No se encontró la compra.');
+    const compra = compras[idx];
+
+    const disponibles = _devolucionCompraArticulos(compra);
+    const checks = Array.from(document.querySelectorAll('.chkDevolucionCompra:checked'));
+    if (!checks.length) return alert('Selecciona al menos un producto para devolver.');
+
+    const items = [];
+    let totalImporte = 0;
+    let error = null;
+    checks.forEach(chk => {
+        if (error) return;
+        const key = chk.value;
+        const art = disponibles.find(a => _devolucionCompraKey(a) === key);
+        if (!art) return;
+        const inputCant = document.querySelector(`.inputCantidadDevolucionCompra[data-item="${CSS.escape(key)}"]`);
+        const cantidad = parseInt(inputCant?.value, 10) || 0;
+        if (cantidad <= 0 || cantidad > art.disponible) {
+            error = `Cantidad inválida para "${art.nombre}" (disponible: ${art.disponible}).`;
+            return;
+        }
+        const importe = cantidad * art.costoUnitario;
+        items.push({ ...art, cantidad, importe });
+        totalImporte += importe;
+    });
+    if (error) return alert(error);
+    if (!items.length) return alert('No hay productos válidos para devolver.');
+
+    const nota = document.getElementById('devolucionCompraNota')?.value.trim() || '';
+
+    let resumen = `¿CONFIRMAR DEVOLUCIÓN A ${compra.proveedor || 'proveedor'}?\n\n`;
+    items.forEach(it => { resumen += `• ${it.nombre} x${it.cantidad} = ${dinero(it.importe)}\n`; });
+    resumen += `\nTotal a devolver: ${dinero(totalImporte)}\n\nEsto descuenta el stock y ajusta lo que le debes (o el saldo a favor que te queda) con ${compra.proveedor || 'el proveedor'}.`;
+    if (!confirm(resumen)) return;
+
+    // 1. Descontar stock (misma función que usa la devolución de consignación)
+    const productos = StorageService.get('productos', []);
+    const fallosInventario = [];
+    const avisosVariante = [];
+    items.forEach(it => {
+        if (!it.productoId) { fallosInventario.push(`${it.nombre} (sin productoId)`); return; }
+        const resultado = ajustarStockVariante(productos, it.productoId, it.cantidad, {
+            color: it.color, ubicacion: it.ubicacion, modo: 'salida', concepto: 'Devolución de compra a proveedor'
+        });
+        if (!resultado.ok) fallosInventario.push(`${it.nombre} (${resultado.motivo || 'error'})`);
+        else if (!resultado.varianteEncontrada) avisosVariante.push(it.nombre);
+    });
+    StorageService.set('productos', productos);
+
+    // 2. Aplicar primero a cualquier CxP abierta que venga de ESTA compra
+    let restante = totalImporte;
+    let aplicadoCxp = 0;
+    const cxpArr = StorageService.get('cuentasPorPagar', []);
+    cxpArr.forEach(c => {
+        if (restante <= 0.005) return;
+        if (String(c.compraId) !== String(compra.id)) return;
+        if (Number(c.saldoPendiente || 0) <= 0) return;
+        const aplicar = Math.min(restante, Number(c.saldoPendiente));
+        c.saldoPendiente = Math.max(0, Number(c.saldoPendiente) - aplicar);
+        if (!Array.isArray(c.abonos)) c.abonos = [];
+        c.abonos.push({
+            fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+            monto: aplicar, cuenta: 'Devolución de mercancía'
+        });
+        if (c.saldoPendiente <= 0.01) { c.saldoPendiente = 0; c.estatus = 'Liquidado'; c.estado = 'Liquidado'; c.liquidado = true; c.pagado = true; }
+        restante -= aplicar;
+        aplicadoCxp += aplicar;
+    });
+    if (aplicadoCxp > 0) StorageService.set('cuentasPorPagar', cxpArr);
+
+    // 3. Lo que sobre (o el 100% si ya no había deuda) es saldo a favor
+    let saldoFavorGenerado = 0;
+    if (restante > 0.005) {
+        const saldos = StorageService.get('saldosFavorProveedores', []);
+        saldos.push({
+            id: Date.now(),
+            proveedorId: compra.proveedorId || null,
+            proveedorNombre: compra.proveedor || 'Proveedor',
+            montoOriginal: restante,
+            montoDisponible: restante,
+            fecha: window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().slice(0, 10),
+            referencia: `Devolución compra ${compra.folio}`
+        });
+        StorageService.set('saldosFavorProveedores', saldos);
+        saldoFavorGenerado = restante;
+    }
+
+    // 4. Dejar rastro en la compra original
+    if (!Array.isArray(compra.devolucionesCompra)) compra.devolucionesCompra = [];
+    compra.devolucionesCompra.push({
+        id: Date.now(),
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        items: items.map(it => ({ idxOrigen: it.idxOrigen, productoId: it.productoId, nombre: it.nombre, cantidad: it.cantidad, costoUnitario: it.costoUnitario, importe: it.importe })),
+        totalDevuelto: totalImporte, aplicadoCxp, saldoFavorGenerado, nota
+    });
+    compras[idx] = compra;
+    StorageService.set('compras', compras);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'DEVOLUCION_COMPRA',
+            modulo: 'Compras',
+            entidad: 'compra',
+            entidadId: compra.id,
+            detalle: `Devolución a ${compra.proveedor || 'proveedor'} (folio ${compra.folio})${fallosInventario.length ? ` — ⚠️ ${fallosInventario.length} SIN DESCUENTO DE INVENTARIO` : ''}`,
+            monto: totalImporte,
+            severidad: fallosInventario.length ? 'critico' : 'riesgo',
+            datos: { items, aplicadoCxp, saldoFavorGenerado, nota, fallosInventario, avisosVariante }
+        });
+    }
+
+    document.querySelector('[data-modal="devolucion-compra-items"]')?.remove();
+
+    let mensaje = `✅ Devolución registrada: ${items.reduce((s, i) => s + i.cantidad, 0)} pieza(s) por ${dinero(totalImporte)}.\n\n`;
+    if (aplicadoCxp > 0) mensaje += `Se abonaron ${dinero(aplicadoCxp)} a la deuda pendiente con ${compra.proveedor}.\n`;
+    if (saldoFavorGenerado > 0) mensaje += `Se generó un saldo a favor de ${dinero(saldoFavorGenerado)} con ${compra.proveedor}. Se aplica automáticamente al registrar tu próxima Compra Directa a este proveedor, o puedes aplicarlo manualmente a cualquier cuenta por pagar suya desde "Cuentas por Pagar", o pedir su reembolso.\n`;
+    if (fallosInventario.length) mensaje += `\n🚨 ATENCIÓN — no se descontó inventario para:\n- ${fallosInventario.join('\n- ')}\n\nRevisa y corrige el stock manualmente en Inventario.`;
+    if (avisosVariante.length) mensaje += `\n⚠️ Se descontó del stock general pero no se encontró la ubicación/color exacto para:\n- ${avisosVariante.join('\n- ')}`;
+    alert(mensaje);
+
+    if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
+}
+
+// Aplica manualmente el saldo a favor de un proveedor a CUALQUIER cuenta
+// por pagar abierta suya (no solo a la compra de origen de la devolución).
+// No mueve caja: es una compensación interna, igual que el resto de
+// "netting" del sistema (anticipos de comisión, etc.).
+function aplicarSaldoFavorACxp(idCuenta) {
+    if (!_comprasRequireAdmin('Aplicar saldo a favor a cuenta por pagar')) return;
+    const cuentas = StorageService.get('cuentasPorPagar', []);
+    const idx = cuentas.findIndex(c => String(c.id) === String(idCuenta));
+    if (idx === -1) return alert('No se encontró la cuenta por pagar.');
+    const cuenta = cuentas[idx];
+    if (Number(cuenta.saldoPendiente || 0) <= 0) return alert('Esta cuenta ya no tiene saldo pendiente.');
+
+    const saldos = StorageService.get('saldosFavorProveedores', []);
+    const disponibles = saldos
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => Number(s.montoDisponible || 0) > 0 && (
+            (cuenta.proveedorId && String(s.proveedorId) === String(cuenta.proveedorId)) ||
+            (String(s.proveedorNombre || '').trim().toLowerCase() === String(cuenta.proveedor || '').trim().toLowerCase())
+        ))
+        .sort((a, b) => new Date(a.s.fecha || 0) - new Date(b.s.fecha || 0));
+
+    const totalDisponible = disponibles.reduce((sum, { s }) => sum + Number(s.montoDisponible || 0), 0);
+    if (totalDisponible <= 0) return alert(`${cuenta.proveedor || 'Este proveedor'} no tiene saldo a favor disponible.`);
+
+    const aplicar = Math.min(totalDisponible, Number(cuenta.saldoPendiente || 0));
+    if (!confirm(`¿Aplicar ${dinero(aplicar)} de saldo a favor de ${cuenta.proveedor} a esta cuenta por pagar?\n\nSaldo a favor disponible: ${dinero(totalDisponible)}\nSaldo pendiente de esta cuenta: ${dinero(cuenta.saldoPendiente)}\n\nNo se mueve dinero de ninguna caja — es solo una compensación contable.`)) return;
+
+    let restante = aplicar;
+    disponibles.forEach(({ s, i }) => {
+        if (restante <= 0.005) return;
+        const usar = Math.min(restante, Number(s.montoDisponible || 0));
+        saldos[i] = { ...s, montoDisponible: Number(s.montoDisponible || 0) - usar };
+        restante -= usar;
+    });
+    StorageService.set('saldosFavorProveedores', saldos);
+
+    cuenta.saldoPendiente = Math.max(0, Number(cuenta.saldoPendiente || 0) - aplicar);
+    if (!Array.isArray(cuenta.abonos)) cuenta.abonos = [];
+    cuenta.abonos.push({
+        fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        monto: aplicar, cuenta: 'Saldo a favor de proveedor'
+    });
+    if (cuenta.saldoPendiente <= 0.01) { cuenta.saldoPendiente = 0; cuenta.estatus = 'Liquidado'; cuenta.estado = 'Liquidado'; cuenta.liquidado = true; cuenta.pagado = true; }
+    cuentas[idx] = cuenta;
+    StorageService.set('cuentasPorPagar', cuentas);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'SALDO_FAVOR_APLICADO_CXP',
+            modulo: 'Compras',
+            entidad: 'cuentasPorPagar',
+            entidadId: idCuenta,
+            detalle: `Saldo a favor aplicado a cuenta por pagar de ${cuenta.proveedor || ''}`.trim(),
+            monto: aplicar,
+            severidad: 'riesgo',
+            datos: { proveedor: cuenta.proveedor, proveedorId: cuenta.proveedorId, saldoRestanteCxp: cuenta.saldoPendiente }
+        });
+    }
+
+    alert(`✅ Se aplicaron ${dinero(aplicar)} de saldo a favor a la cuenta de ${cuenta.proveedor}.`);
+    renderCuentasPorPagar();
+}
+
+// ============================================================
 
 window.renderRequisiciones = renderRequisiciones;
 window.renderProveedores = renderProveedores;
@@ -6626,5 +7056,9 @@ window.agregarArticuloCompraDirecta = agregarArticuloCompraDirecta;
 window.guardarCompraDirectaFinal = guardarCompraDirectaFinal;
 window.abrirModalAbonoOC = abrirModalAbonoOC;
 window.confirmarAbonoOC = confirmarAbonoOC;
+window.abrirModalDevolucionCompra = abrirModalDevolucionCompra;
+window.buscarCompraDevolucion = buscarCompraDevolucion;
+window.ejecutarDevolucionCompra = ejecutarDevolucionCompra;
+window.aplicarSaldoFavorACxp = aplicarSaldoFavorACxp;
 
 console.log('✅ compras.js cargado correctamente');

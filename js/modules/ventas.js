@@ -577,7 +577,7 @@ function renderCarrito() {
                 <!-- VENDEDOR -->
                 ${vendedorControlHtml}
 
-                <!-- M0TODO DE PAGO -->
+                <!-- MÉTODO DE PAGO -->
                 <div style="margin-bottom:12px;">
                     <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Método de pago</label>
                     <select id="selMetodoPago"
