@@ -29,10 +29,54 @@ service cloud.firestore {
 
     function publicCatalogDoc(tabla) {
       return tabla in [
-        'productos',
         'categoriasData',
-        'configCreditoGlobal'
+        'configCreditoGlobal',
+        'productosPublicos'
       ];
+    }
+
+    // 🛡️ AUDITORÍA "seguridad del modo offline": el vendedor sincroniza TODO
+    // el catálogo de posData a su dispositivo para poder trabajar sin
+    // internet (StorageService.syncAll). Eso está bien para las tablas que
+    // su propia pantalla necesita (ventas, apartados, cobranza, clientes),
+    // pero varias tablas son puro back-office — ningún vendedor las abre
+    // nunca (no están en _NAV_VISTAS_PERMITIDAS_VENDEDOR, navigation.js), así
+    // que no hay razón para que su dispositivo las descargue y las guarde en
+    // IndexedDB. Antes de este cambio, "activeUser()" les daba list/get
+    // parejo a TODO posData, incluyendo el costo real de cada compra
+    // (historialCostos), las comisiones cobradas por CUALQUIER vendedor
+    // (comisionesRegistradas), los gastos operativos y las deudas con
+    // proveedores.
+    //
+    // Estas tablas viven en la subcolección posData/{tabla}/registros/{clave}
+    // (esquema "registro individual" — ver _tablasRegistroIndividual en
+    // storage2.js), así que restringir get/list por tabla aquí SÍ es seguro:
+    // cada descarga real (_descargarTablaPorRegistro) pide esa subcolección
+    // de UNA tabla conocida a la vez, nunca una lista sin filtrar de varias
+    // tablas mezcladas. (El documento marcador en posData/{tabla} —sin
+    // "data", solo _registroIndividual:true— sigue siendo parejo para
+    // activeUser(): no contiene ningún dato real, y restringirlo ahí sí
+    // rompería el listado combinado que usa syncAll().)
+    function tablaAdminOnly(tabla) {
+      return tabla in [
+        'gastosOperativos',
+        'cuentasPorPagar',
+        'comisionesRegistradas',
+        'ordenesCompra',
+        'recepciones',
+        'historialCancelaciones',
+        'historialCostos',
+        'historialSolicitudesClientes'
+      ];
+    }
+
+    // requisicionesCompra es la única excepción: aunque nadie la LEE desde
+    // una pantalla de vendedor, SÍ se le escribe un registro nuevo desde el
+    // flujo normal de venta (ventas.js) cuando un vendedor vende un producto
+    // sin stock suficiente — necesita poder crear ese registro aunque no
+    // pueda ver el resto de la tabla.
+    function tablaVendedorSoloCrea(tabla) {
+      return tabla == 'requisicionesCompra';
     }
 
     match /usuarios/{uid} {
@@ -62,6 +106,12 @@ service cloud.firestore {
     match /posData/{tabla} {
       // Catalogo publico. Ojo: Firestore no filtra campos por regla; estos
       // documentos deben contener solo datos que aceptas exponer al cliente.
+      // ("productos" salió de esta lista: cada producto trae el campo
+      // "costo" real embebido, así que "publico" lo exponía sin necesidad
+      // de iniciar sesión — ver nota de tablaAdminOnly más arriba.
+      // "productosPublicos" es el espejo saneado que StorageService genera
+      // en automático a partir de "productos" — ver _subirCatalogoPublico
+      // en storage2.js — y es lo único que catalogo.html debe leer.)
       allow get: if publicCatalogDoc(tabla) || activeUser();
 
       // La app privada usa StorageService.syncAll(), que lista toda la coleccion.
@@ -71,6 +121,25 @@ service cloud.firestore {
       // Los permisos finos por rol se aplican hoy en la UI.
       allow create, update: if activeUser();
       allow delete: if isAdmin();
+
+      // 🛡️ Tablas "de registro individual" (ver _tablasRegistroIndividual en
+      // storage2.js): cada registro vive en su propio documento aquí abajo,
+      // NO como arreglo dentro del documento posData/{tabla} de arriba.
+      // Antes de esta regla, esta subcolección no coincidía con NINGÚN
+      // match de este archivo, así que caía en el catch-all final
+      // ("allow read, write: if false") y quedaba bloqueada para TODOS —
+      // admin incluido. Cualquier sincronización real de cuentasPorCobrar,
+      // pagarés, cotizaciones, apartados, etc. contra un proyecto de
+      // Firebase con estas reglas desplegadas debía estar fallando en
+      // silencio (el catch de _procesarDocSyncAll/_sincronizarTablaPorRegistro
+      // los reporta como "omitida"/advertencia en consola en vez de tronar
+      // toda la sincronización, así que es fácil que pasara desapercibido).
+      match /registros/{registroId} {
+        allow get, list: if isAdmin() || (activeUser() && !tablaAdminOnly(tabla));
+        allow create, update: if isAdmin()
+          || (activeUser() && (!tablaAdminOnly(tabla) || tablaVendedorSoloCrea(tabla)));
+        allow delete: if isAdmin();
+      }
     }
 
     match /pushTokens/{tokenId} {
