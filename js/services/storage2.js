@@ -882,6 +882,14 @@ const StorageService = {
 
                 try {
                     this._subirTablaAFirestore(key, value, ts);
+                    // 🛡️ Espejo público saneado del catálogo: "productos" trae el
+                    // costo real embebido (posData/productos ya NO es de lectura
+                    // pública, ver firestore.rules). catalogo.html es una vitrina
+                    // sin sesión, así que necesita SU PROPIA copia — sin costo ni
+                    // ningún otro campo interno — en un documento separado.
+                    if (key === 'productos') {
+                        this._subirCatalogoPublico(value, ts);
+                    }
                 } catch (e) {
                     console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
                 }
@@ -889,6 +897,53 @@ const StorageService = {
         }
 
         return dbPromise;
+    },
+
+    // 🛡️ AUDITORÍA: lista blanca explícita de campos que el catálogo público
+    // (catalogo.html, sin sesión) puede ver. Cualquier campo nuevo que se le
+    // agregue a "productos" en el futuro (costo, proveedor, márgenes, etc.)
+    // queda EXCLUIDO por default a menos que se agregue aquí a propósito —
+    // así el catálogo nunca vuelve a filtrar datos internos por accidente.
+    _CAMPOS_CATALOGO_PUBLICO: [
+        'id', 'nombre', 'precio', 'categoria', 'subcategoria', 'marca', 'modelo',
+        'color', 'imagen', 'stock', 'Activo', 'activo', 'destacadoCatalogo',
+        'caracteristicas', 'configCredito', 'ubicacion'
+    ],
+
+    _sanearProductoParaCatalogoPublico(p) {
+        const limpio = {};
+        this._CAMPOS_CATALOGO_PUBLICO.forEach(campo => {
+            if (p && p[campo] !== undefined) limpio[campo] = p[campo];
+        });
+        return limpio;
+    },
+
+    _subirCatalogoPublico(productosArr, ts) {
+        if (!window._firebaseActivo || !window._db) return;
+        const sanitizado = (Array.isArray(productosArr) ? productosArr : [])
+            .filter(p => p && p.id !== undefined)
+            .map(p => this._sanearProductoParaCatalogoPublico(p));
+        const valorFirestore = this._limpiarParaFirestore(sanitizado);
+        window._db.collection('posData').doc('productosPublicos').set({
+            data: valorFirestore,
+            _updatedAt: ts
+        }).catch(e => console.warn('No se pudo sincronizar el catálogo público (productosPublicos).', e));
+    },
+
+    // Backfill manual de un solo uso: sube el espejo público saneado a partir
+    // de lo que ya está cargado en RAM ahora mismo, sin esperar a que se
+    // vuelva a guardar "productos". Pensado para correrse UNA vez desde la
+    // consola del navegador (sincronizarCatalogoPublicoAhora()) justo después
+    // de desplegar este cambio, para no depender de la próxima edición de un
+    // producto para que el catálogo público quede poblado.
+    sincronizarCatalogoPublicoAhora() {
+        const productos = this.get('productos', []);
+        if (!Array.isArray(productos) || !productos.length) {
+            console.warn('No hay productos en RAM/local todavía. Abre primero Gestión de Productos para que se carguen, y vuelve a intentar.');
+            return;
+        }
+        this._subirCatalogoPublico(productos, Date.now());
+        console.log(`Catálogo público sincronizado: ${productos.length} producto(s).`);
     },
 
     // Escritura real a Firestore para tablas de documento único (config, ventasPendientes,
