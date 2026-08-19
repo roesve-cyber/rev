@@ -1376,6 +1376,10 @@ const StorageService = {
             }
 
             prod.stock = stockActual - cant;
+            if (prod.esUnicaCompra && prod.stock <= 0) {
+                prod.activo = false;
+                prod.Activo = 0;
+            }
             productosArr[idx] = prod;
             return { ok: true, stockRestante: prod.stock, productosArr, productoActualizado: prod };
         };
