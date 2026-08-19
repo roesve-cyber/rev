@@ -166,10 +166,11 @@ window.abrirSelectorProducto = function(opciones) {
             btn.onmouseover = () => btn.style.borderColor = '#1e40af';
             btn.onmouseout = () => btn.style.borderColor = '#e2e8f0';
             
+            const esUnicaBajaExistencia = prod.esUnicaCompra && Number(prod.stock) > 0 && Number(prod.stock) <= 3;
             btn.innerHTML = `
                 <img src="${prod.imagen || placeholderImg}" style="width:50px;height:50px;object-fit:cover;border-radius:4px;flex-shrink:0;">
                 <div style="flex:1;min-width:0;">
-                    <div style="font-weight:bold;color:#0f172a;font-size:14px;line-height:1.2;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${prod.nombre}</div>
+                    <div style="font-weight:bold;color:#0f172a;font-size:14px;line-height:1.2;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${prod.nombre}${esUnicaBajaExistencia ? ' <span style="color:#dc2626;font-size:10px;font-weight:bold;">⚡ ÚLTIMA PIEZA</span>' : ''}</div>
                     <div style="font-size:11px;color:#64748b;margin-bottom:4px;">${prod.codigo ? `Cód: ${prod.codigo}` : 'Sin código'}</div>
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-size:11px;color:#64748b;">Stock: <strong style="color:${prod.stock > 0 ? '#16a34a' : '#dc2626'}">${prod.stock || 0}</strong></span>

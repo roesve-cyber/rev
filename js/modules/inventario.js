@@ -2109,6 +2109,7 @@ function abrirProductoForm(id = null) {
  const inputDestacadoCatalogo = document.getElementById("pDestacadoCatalogo");
  const inputOrdenDestacadoCatalogo = document.getElementById("pOrdenDestacadoCatalogo");
  const inputActivo = document.getElementById("pActivo");
+ const inputEsUnicaCompra = document.getElementById("pEsUnicaCompra");
 
  let p = null; // <--- CORRECCIAN: Declaramos 'p' aqui para que exista en toda la funcion
 
@@ -2129,6 +2130,7 @@ function abrirProductoForm(id = null) {
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = !!p.destacadoCatalogo;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = p.ordenDestacadoCatalogo || '';
  if (inputActivo) inputActivo.checked = _invProductoActivo(p);
+ if (inputEsUnicaCompra) inputEsUnicaCompra.checked = !!p.esUnicaCompra;
  } else {
  productoEditando = null;
  document.getElementById("tituloModalProducto").innerText = "Nuevo Producto";
@@ -2143,6 +2145,7 @@ function abrirProductoForm(id = null) {
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = false;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = "";
  if (inputActivo) inputActivo.checked = true;
+ if (inputEsUnicaCompra) inputEsUnicaCompra.checked = false;
  }
  
  // --- LAGICA FINANCIERA DEL PRODUCTO ---
@@ -2179,6 +2182,7 @@ function guardarProductoDB() {
  const destacadoCatalogo = document.getElementById("pDestacadoCatalogo")?.checked || false;
  const ordenDestacadoCatalogoRaw = parseInt(document.getElementById("pOrdenDestacadoCatalogo")?.value, 10);
  const activo = document.getElementById("pActivo")?.checked !== false;
+ const esUnicaCompra = document.getElementById("pEsUnicaCompra")?.checked || false;
  const ordenDestacadoCatalogo = Number.isFinite(ordenDestacadoCatalogoRaw) && ordenDestacadoCatalogoRaw > 0
  ? ordenDestacadoCatalogoRaw
  : 999;
@@ -2210,6 +2214,7 @@ function guardarProductoDB() {
  caracteristicas,
  activo,
  Activo: activo ? 1 : 0,
+ esUnicaCompra,
  destacadoCatalogo,
  ordenDestacadoCatalogo,
  configCredito, // <----- ESTA ES LA LINEA MAGICA
