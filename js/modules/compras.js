@@ -3299,7 +3299,7 @@ function editarOrdenCompra(id) {
                    style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
           <div>
             <input type="hidden" id="editOcProductoSel" value="">
             <div style="display:flex;align-items:center;gap:6px;">
@@ -3314,6 +3314,7 @@ function editarOrdenCompra(id) {
 </button>
             </div>
           </div>
+          <input type="text" id="editOcCaracteristicas" placeholder="Características (tela, color, etc)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
           <input type="number" id="editOcCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
           <button onclick="agregarArticuloEditOC()" style="padding:9px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;">➕</button>
         </div>
@@ -3340,23 +3341,26 @@ function editarOrdenCompra(id) {
 function agregarArticuloEditOC() {
     const sel  = document.getElementById('editOcProductoSel');
     const cant = parseInt(document.getElementById('editOcCantidad').value) || 1;
+    const caracInput = document.getElementById('editOcCaracteristicas');
+    const caracteristicas = caracInput ? caracInput.value.trim() : '';
     if (!sel.value) return;
     const prods = StorageService.get('productos', []);
     const prod  = prods.find(p => String(p.id) === String(sel.value) && _comprasProductoActivo(p));
     if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la orden.');
     if (!window._editArticulosOC) window._editArticulosOC = [];
-    const idx = window._editArticulosOC.findIndex(a => String(a.productoId) === String(prod.id));
+    const idx = window._editArticulosOC.findIndex(a => String(a.productoId) === String(prod.id) && (a.caracteristicas || '') === caracteristicas);
     if (idx !== -1) {
         window._editArticulosOC[idx].cantidad += cant;
-        window._editArticulosOC[idx].subtotal  = window._editArticulosOC[idx].cantidad * prod.costo;
+        window._editArticulosOC[idx].subtotal  = window._editArticulosOC[idx].cantidad * window._editArticulosOC[idx].costo;
     } else {
-        window._editArticulosOC.push({ productoId: prod.id, nombre: prod.nombre, costo: prod.costo || 0, cantidad: cant, subtotal: cant * (prod.costo || 0) });
+        window._editArticulosOC.push({ productoId: prod.id, nombre: prod.nombre, costo: prod.costo || 0, cantidad: cant, subtotal: cant * (prod.costo || 0), caracteristicas });
     }
     // Resetear picker de producto en editar OC
     sel.value = '';
     const displayEditOC = document.getElementById('editOcProductoSel-display');
     if (displayEditOC) { displayEditOC.textContent = 'Sin seleccionar'; displayEditOC.style.color = '#6b7280'; }
     document.getElementById('editOcCantidad').value = 1;
+    if (caracInput) caracInput.value = '';
     _renderEditTablaOC();
 }
 
@@ -3365,15 +3369,27 @@ function _renderEditTablaOC() {
     if (!cont) return;
     const arts = window._editArticulosOC || [];
     if (arts.length === 0) { cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:10px;">Sin artículos</p>'; document.getElementById('editOcTotal').textContent = dinero(0); return; }
+    const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
     let total = 0;
     const rows = arts.map((a, i) => { total += a.subtotal; return `<tr>
         <td style="padding:8px;">${a.nombre}</td>
-        <td style="padding:8px;text-align:center;">${dinero(a.costo)}</td>
-        <td style="padding:8px;text-align:center;">${a.cantidad}</td>
+        <td style="padding:8px;">
+            <input type="text" value="${(a.caracteristicas || '').replace(/"/g, '&quot;')}" placeholder="Características"
+                   style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+                   onchange="window._editArticulosOC[${i}].caracteristicas = event.target.value.trim();">
+        </td>
+        <td style="padding:8px;text-align:center;">
+            <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'}
+                   onchange="if(${esAdmin}){window._editArticulosOC[${i}].costo = parseFloat(event.target.value)||0; window._editArticulosOC[${i}].subtotal = window._editArticulosOC[${i}].cantidad * window._editArticulosOC[${i}].costo; _renderEditTablaOC();}">
+        </td>
+        <td style="padding:8px;text-align:center;">
+            <input type="number" min="1" value="${a.cantidad}" style="width:65px;text-align:center;"
+                   onchange="window._editArticulosOC[${i}].cantidad = parseInt(event.target.value)||1; window._editArticulosOC[${i}].subtotal = window._editArticulosOC[${i}].cantidad * window._editArticulosOC[${i}].costo; _renderEditTablaOC();">
+        </td>
         <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
         <td style="padding:8px;text-align:center;"><button onclick="window._editArticulosOC.splice(${i},1);_renderEditTablaOC();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
     </tr>`; }).join('');
-    cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;"><thead><tr style="background:#f3f4f6;"><th style="padding:8px;">Artículo</th><th style="padding:8px;text-align:center;">Costo</th><th style="padding:8px;text-align:center;">Cant.</th><th style="padding:8px;text-align:right;">Subtotal</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;"><thead><tr style="background:#f3f4f6;"><th style="padding:8px;">Artículo</th><th style="padding:8px;">Características</th><th style="padding:8px;text-align:center;">Costo</th><th style="padding:8px;text-align:center;">Cant.</th><th style="padding:8px;text-align:right;">Subtotal</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     document.getElementById('editOcTotal').textContent = dinero(total);
 }
 
