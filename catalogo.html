@@ -1681,14 +1681,17 @@ function tarjetaProducto(p, index) {
   const planes = LogicaCredito.calcularCredito(Number(p.precio) || 0);
   const plan = planes[5] || planes[planes.length - 1] || null;
   const stock = Number(p.stock) || 0;
-  const badge = stock > 0 ? `${stock} disp.` : "Sobre pedido";
+  const esUnicaBajaExistencia = p.esUnicaCompra && stock > 0 && stock <= 3;
+  const badge = esUnicaBajaExistencia
+    ? `⚡ Última${stock > 1 ? 's ' + stock : ''} pieza${stock > 1 ? 's' : ''}`
+    : (stock > 0 ? `${stock} disp.` : "Sobre pedido");
   const facts = [p.color, p.marca].filter(Boolean).slice(0, 2);
   const img = p.imagen || "img/Logo.svg";
   const msg = encodeURIComponent(`Hola, me interesa ${p.nombre || "este producto"} (${fmt(p.precio)}).`);
   return `
     <article class="product-card">
       <div class="product-media" onclick="abrirModal('${escapeHtml(p.id)}')">
-        <span class="badge">${escapeHtml(badge)}</span>
+        <span class="badge"${esUnicaBajaExistencia ? ' style="background:#dc2626;"' : ''}>${escapeHtml(badge)}</span>
         <span class="badge order">#${index + 1}</span>
         <img src="${escapeHtml(img)}" alt="${escapeHtml(p.nombre || "Producto")}" loading="lazy" onerror="this.src='img/Logo.svg'">
       </div>
