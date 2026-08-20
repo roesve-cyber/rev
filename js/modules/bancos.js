@@ -496,6 +496,7 @@ window.abrirHistorialMSI = function(id) {
                 <div>
                     <h3 style="margin:0; color:#1e40af; font-size:24px;">🏦 ${deuda.banco}</h3>
                     <p style="margin:5px 0 0 0; color:#0f172a; font-weight:bold; font-size:16px;">${deuda.producto || deuda.concepto}</p>
+                    ${deuda.reembolsoProveedor?.activo ? `<p style="margin:8px 0 0 0; font-size:12px; color:#6b21a8; background:#ede9fe; padding:6px 10px; border-radius:6px; display:inline-block;">🔄 Reembolsada por proveedor: ${dinero(deuda.reembolsoProveedor.monto)} el ${window.formatearFechaCortaMX(deuda.reembolsoProveedor.fecha)} a ${deuda.reembolsoProveedor.cuentaEtiqueta} — el banco sigue cobrando las cuotas pendientes.${deuda.reembolsoProveedor.recepcionesCanceladas?.length ? ' El producto pendiente de recibir fue cancelado (no llegará stock).' : ''}</p>` : ''}
                 </div>
                 <button onclick="this.closest('[data-modal]').remove()" style="background:#f1f5f9; border:none; padding:10px 15px; border-radius:8px; cursor:pointer; font-weight:bold; color:#475569; transition: 0.2s;">✕ Cerrar</button>
             </div>
@@ -532,6 +533,200 @@ window.abrirHistorialMSI = function(id) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 };
 
+// ── Reembolso de proveedor sobre una compra MSI (producto no entregado) ──────
+// Escenario: el proveedor reembolsa el total/parcial de la compra, pero el
+// banco NO cancela las mensualidades restantes — las sigue cobrando igual.
+// Esto NO se trata como "liquidar" la deuda MSI (las cuotas siguen siendo
+// gasto real, se siguen pagando normal en marcarPagoMSI). Solo se registra
+// el ingreso del reembolso a la cuenta donde cayó y se deja una marca visual
+// para no confundir esta deuda con una compra de mercancía real recibida.
+window.abrirModalReembolsoProveedorMSI = function(id) {
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const deuda = cuentasMSI.find(c => c.id === id);
+    if (!deuda) return;
+
+    document.querySelector('[data-modal="reembolso-msi"]')?.remove();
+    const totalDeuda = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
+
+    const html = `
+    <div data-modal="reembolso-msi" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; justify-content:center; align-items:center; padding:20px;">
+        <div style="background:white; border-radius:12px; width:100%; max-width:460px; padding:26px;">
+            <h3 style="margin:0 0 6px; color:#6b21a8;">🔄 Reembolso de proveedor</h3>
+            <p style="margin:0 0 18px; font-size:12px; color:#7c2d12; background:#fffbeb; border:1px solid #fde68a; padding:8px 10px; border-radius:6px;">
+                Esto solo registra que ${deuda.banco} — ${deuda.producto || 'esta compra'} fue reembolsada por el proveedor. Las mensualidades pendientes con el banco NO se cancelan aquí; se siguen pagando normal desde el calendario de cuotas.
+            </p>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151;">MONTO REEMBOLSADO ($)</label>
+                    <input type="number" id="reembolsoMSI_monto" min="0" step="0.01" value="${totalDeuda}" style="width:100%; padding:9px; border:1px solid #d1d5db; border-radius:6px; margin-top:4px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151;">FECHA DEL REEMBOLSO</label>
+                    <input type="date" id="reembolsoMSI_fecha" value="${window.obtenerHoyInputMX()}" style="width:100%; padding:9px; border:1px solid #d1d5db; border-radius:6px; margin-top:4px;">
+                </div>
+                <div>
+                    <label style="font-size:12px; font-weight:bold; color:#374151;">¿A QUÉ CUENTA ENTRÓ EL DINERO?</label>
+                    ${window._buildSelectorCuentas('reembolsoMSI_cuenta', false)}
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="confirmarReembolsoProveedorMSI(${id})" style="flex:1; padding:12px; background:#7c3aed; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✅ Registrar reembolso</button>
+                <button onclick="document.querySelector('[data-modal=reembolso-msi]')?.remove()" style="padding:12px 18px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.confirmarReembolsoProveedorMSI = function(id) {
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const idx = cuentasMSI.findIndex(c => c.id === id);
+    if (idx === -1) return;
+    const deuda = cuentasMSI[idx];
+
+    const monto = parseFloat(document.getElementById('reembolsoMSI_monto')?.value) || 0;
+    const fecha = document.getElementById('reembolsoMSI_fecha')?.value || window.obtenerHoyInputMX();
+    const sel = document.getElementById('reembolsoMSI_cuenta');
+    const cuentaId = sel?.value;
+    const cuentaEtiqueta = sel?.options[sel.selectedIndex]?.text || cuentaId;
+
+    if (monto <= 0) return alert('⚠️ El monto debe ser mayor a 0.');
+    if (!cuentaId) return alert('⚠️ Selecciona a qué cuenta entró el dinero.');
+
+    if (!confirm(`Confirmar: ${dinero(monto)} entraron a "${cuentaEtiqueta}" como reembolso de ${deuda.banco} — ${deuda.producto || 'compra'}.\n\nLas mensualidades restantes del banco seguirán cobrándose normal. ¿Continuar?`)) return;
+
+    if (typeof window._ingresarCuenta !== 'function') {
+        alert("No se pudo registrar: el módulo de caja no está disponible.");
+        return;
+    }
+    const idOperacion = `MSI-${id}-REEMBOLSO-${Date.now()}`;
+    const ok = window._ingresarCuenta({
+        monto,
+        cuentaId,
+        etiqueta: cuentaEtiqueta,
+        concepto: `Reembolso de proveedor — compra MSI no entregada: ${deuda.banco}: ${deuda.producto || 'Compra'}`,
+        referencia: `MSI-${id}`,
+        idOperacion
+    });
+    if (!ok) {
+        alert(`No se pudo registrar el ingreso a "${cuentaEtiqueta}" (¿ya no existe esa cuenta?). Nada se guardó.`);
+        return;
+    }
+
+    // Cancelar la(s) recepción(es) pendientes ligadas a esta compra, si las
+    // hay — si no lo hacemos, el producto que nunca llegó se queda para
+    // siempre en el panel "Recepciones Pendientes" esperando algo que ya no
+    // va a llegar (y alguien podría terminar "recibiéndolo" por error,
+    // metiendo stock fantasma que en realidad no existe).
+    let recepcionesCanceladas = [];
+    if (deuda.compraId) {
+        const recepciones = StorageService.get("recepciones", []);
+        recepciones.forEach(r => {
+            if (String(r.compraId) === String(deuda.compraId) && r.estatus === "Pendiente") {
+                recepcionesCanceladas.push({ id: r.id, cantidadPendienteOriginal: r.cantidadPendiente, estatusOriginal: r.estatus });
+                r.estatus = "Cancelada";
+                r.motivoCancelacion = "Reembolso de proveedor — producto nunca entregado";
+                r.fechaCancelacion = fecha;
+                r.cantidadPendiente = 0;
+            }
+        });
+        if (recepcionesCanceladas.length > 0) {
+            StorageService.set("recepciones", recepciones);
+        }
+    }
+
+    cuentasMSI[idx] = {
+        ...deuda,
+        reembolsoProveedor: { activo: true, monto, fecha, cuentaId, cuentaEtiqueta, idOperacion, recepcionesCanceladas }
+    };
+    StorageService.set("cuentasMSI", cuentasMSI);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_REEMBOLSO_PROVEEDOR',
+            modulo: 'Bancos',
+            entidad: 'cuentaMSI',
+            entidadId: String(id),
+            detalle: `Reembolso de proveedor registrado: ${dinero(monto)} a "${cuentaEtiqueta}" por compra MSI no entregada (${deuda.banco} — ${deuda.producto || 'Compra'}). Las mensualidades del banco siguen su curso.${recepcionesCanceladas.length ? ` Se canceló la recepción pendiente ligada a esta compra (${recepcionesCanceladas.length} registro/s), sin agregar stock.` : ''}`,
+            monto,
+            severidad: 'alerta',
+            datos: { cuentaMSI: deuda, reembolso: { monto, fecha, cuentaId, cuentaEtiqueta }, recepcionesCanceladas }
+        });
+    }
+
+    document.querySelector('[data-modal="reembolso-msi"]')?.remove();
+    alert(`✅ Reembolso registrado. Las mensualidades restantes se seguirán pagando normal.${recepcionesCanceladas.length ? '\n\nTambién se canceló la recepción pendiente de este producto — ya no aparecerá en "Recepciones Pendientes".' : ''}`);
+    renderCuentasMSI();
+    if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
+    if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+};
+
+window.deshacerReembolsoProveedorMSI = function(id) {
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const idx = cuentasMSI.findIndex(c => c.id === id);
+    if (idx === -1) return;
+    const deuda = cuentasMSI[idx];
+    const r = deuda.reembolsoProveedor;
+    if (!r?.activo) return;
+
+    if (!confirm(`¿Deshacer la marca de reembolso de proveedor?\n\nSe sacará de nuevo ${dinero(r.monto)} de "${r.cuentaEtiqueta}" (reversión del ingreso registrado).`)) return;
+
+    if (typeof window._egresarCuenta !== 'function') {
+        alert("No se pudo deshacer: el módulo de caja no está disponible.");
+        return;
+    }
+    const ok = window._egresarCuenta({
+        monto: r.monto,
+        cuentaId: r.cuentaId,
+        etiqueta: r.cuentaEtiqueta,
+        concepto: `Reversión de reembolso de proveedor — MSI: ${deuda.banco}: ${deuda.producto || 'Compra'}`,
+        referencia: `MSI-${id}`,
+        idOperacion: `${r.idOperacion}-REV`
+    });
+    if (!ok) {
+        alert(`No se pudo revertir el ingreso en "${r.cuentaEtiqueta}" (¿ya no existe esa cuenta?). La marca de reembolso NO se quitó.`);
+        return;
+    }
+
+    // Restaurar las recepciones que se habían cancelado al marcar el
+    // reembolso, para que la mercancía vuelva a aparecer como pendiente de
+    // recibir (por si el deshacer fue porque en realidad sí va a llegar).
+    if (Array.isArray(r.recepcionesCanceladas) && r.recepcionesCanceladas.length > 0) {
+        const recepciones = StorageService.get("recepciones", []);
+        r.recepcionesCanceladas.forEach(rc => {
+            const rec = recepciones.find(x => x.id === rc.id);
+            if (rec && rec.estatus === "Cancelada") {
+                rec.estatus = rc.estatusOriginal || "Pendiente";
+                rec.cantidadPendiente = rc.cantidadPendienteOriginal;
+                delete rec.motivoCancelacion;
+                delete rec.fechaCancelacion;
+            }
+        });
+        StorageService.set("recepciones", recepciones);
+    }
+
+    const reembolsoAnterior = { ...r };
+    cuentasMSI[idx] = { ...deuda, reembolsoProveedor: { activo: false } };
+    StorageService.set("cuentasMSI", cuentasMSI);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_REEMBOLSO_PROVEEDOR_DESHECHO',
+            modulo: 'Bancos',
+            entidad: 'cuentaMSI',
+            entidadId: String(id),
+            detalle: `Marca de reembolso de proveedor deshecha para ${deuda.banco} — ${deuda.producto || 'Compra'}. Se revirtió el ingreso de ${dinero(reembolsoAnterior.monto)} en "${reembolsoAnterior.cuentaEtiqueta}".${reembolsoAnterior.recepcionesCanceladas?.length ? ' Se restauró la recepción pendiente ligada a esta compra.' : ''}`,
+            monto: reembolsoAnterior.monto,
+            severidad: 'alerta',
+            datos: { reembolsoDeshecho: reembolsoAnterior }
+        });
+    }
+
+    renderCuentasMSI();
+    if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
+    if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+};
+
 function renderCuentasMSI() {
     const contenedor = document.getElementById("listaCuentasMSI");
     if (!contenedor) return;
@@ -566,11 +761,15 @@ function renderCuentasMSI() {
                     <span style="font-size:18px; font-weight:bold; color:#1e40af;">🏦 ${c.banco}</span>
                     <span style="margin-left:10px; font-size:14px; color:#4b5563;">${c.producto || 'Compra'}</span>
                     ${estaTerminado ? '<span style="margin-left:8px; background:#d1fae5; color:#065f46; font-size:11px; padding:2px 8px; border-radius:9999px;">✅ Liquidado</span>' : ''}
+                    ${c.reembolsoProveedor?.activo ? `<span style="margin-left:8px; background:#ede9fe; color:#6b21a8; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;" title="El proveedor reembolsó ${dinero(c.reembolsoProveedor.monto)} el ${window.formatearFechaCortaMX(c.reembolsoProveedor.fecha)}, pero el banco seguirá cobrando las mensualidades restantes.${c.reembolsoProveedor.recepcionesCanceladas?.length ? ' Recepción pendiente cancelada.' : ''}">🔄 Reembolsada por proveedor — cobros del banco continúan${c.reembolsoProveedor.recepcionesCanceladas?.length ? ' · producto cancelado' : ''}</span>` : ''}
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:13px; color:#6b7280;">Total: <strong>${dinero(c.total)}</strong></div>
                     <div style="font-size:13px; color:#27ae60;">Mensualidad: <strong>${dinero(c.cuotaMensual)}</strong></div>
                     <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? window.formatearFechaCortaMX(c.fechaCompra) : '—'}</div>
+                    ${c.reembolsoProveedor?.activo
+                        ? `<button onclick="deshacerReembolsoProveedorMSI(${c.id})" style="margin-top:6px; padding:3px 8px; background:none; border:1px solid #fecaca; color:#b91c1c; border-radius:5px; cursor:pointer; font-size:11px;">↩ Deshacer marca de reembolso</button>`
+                        : `<button onclick="abrirModalReembolsoProveedorMSI(${c.id})" style="margin-top:6px; padding:3px 8px; background:none; border:1px solid #c4b5fd; color:#6b21a8; border-radius:5px; cursor:pointer; font-size:11px;">🔄 Marcar reembolso de proveedor</button>`}
                 </div>
             </div>
 
