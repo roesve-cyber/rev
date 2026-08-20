@@ -4202,6 +4202,14 @@ window.abrirMigracionMSITarjeta = function() {
                 <small style="color:#64748b; font-size:11px; display:block; margin-top:4px;">Deja en 0 si es una compra que acabas de hacer.</small>
             </div>
 
+            <div style="margin-bottom:25px;">
+                <label style="font-weight:bold; font-size:12px; color:#475569; display:block; margin-bottom:5px;">4. ¿Corresponde a una recepción pendiente de mercancía?</label>
+                <select id="migTdcRecepcion" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; box-sizing:border-box;">
+                    ${_cxcOpcionesRecepcionesPendientesMSI()}
+                </select>
+                <small style="color:#64748b; font-size:11px; display:block; margin-top:4px;">Si la eliges, un futuro reembolso de proveedor en esta deuda cancelará esa recepción sola, automático.</small>
+            </div>
+
             <div style="display:flex; gap:10px;">
                 <button onclick="ejecutarMigracionTdcMSI()" style="flex:2; padding:12px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:14px;">💾 Procesar Deuda</button>
                 <button onclick="document.querySelector('[data-modal=\\'migracion-msi-tarjeta\\']').remove()" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:14px;">Cancelar</button>
@@ -4210,6 +4218,15 @@ window.abrirMigracionMSITarjeta = function() {
     </div>`;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 };
+function _cxcOpcionesRecepcionesPendientesMSI() {
+    const recs = StorageService.get("recepciones", []).filter(r => r.estatus === "Pendiente");
+    let opciones = '<option value="">— Ninguna / no corresponde a inventario —</option>';
+    recs.forEach(r => {
+        opciones += `<option value="${r.id}">${r.productoNombre} · ${r.proveedor} · ${r.cantidadPendiente} pza(s) · ${r.fechaPedido}</option>`;
+    });
+    return opciones;
+}
+
 window.ejecutarMigracionTdcMSI = function() {
     const selector = document.getElementById("migTdcSeleccion");
     const tarjetaNombre = selector.value;
@@ -4267,6 +4284,7 @@ window.ejecutarMigracionTdcMSI = function() {
 
     // 🛡️ ESTRUCTURA HOMOLOGADA
     let fechaBaseStr = new Date(anioCompra, mesCompra, diaCompra, 12, 0, 0);
+    const recepcionSel = document.getElementById("migTdcRecepcion")?.value || null;
     const nuevaDeudaMSI = {
         id: Date.now(),
         banco: tarjetaNombre,
@@ -4277,7 +4295,8 @@ window.ejecutarMigracionTdcMSI = function() {
         fechaCompra: window.localISO ? window.localISO(fechaBaseStr).split('T')[0] : fechaBaseStr.toISOString().split('T')[0],
         calendario: calendarioPagos,
         pagosRealizados: yaPagadas,
-        montoPagado: montoYaPagado
+        montoPagado: montoYaPagado,
+        recepcionId: recepcionSel || null
     };
 
     let cuentasMSI = StorageService.get("cuentasMSI", []);

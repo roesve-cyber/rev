@@ -634,9 +634,23 @@ window.confirmarReembolsoProveedorMSI = function(id) {
     // siempre en el panel "Recepciones Pendientes" esperando algo que ya no
     // va a llegar (y alguien podría terminar "recibiéndolo" por error,
     // metiendo stock fantasma que en realidad no existe).
+    // Prioridad: recepcionId (vínculo explícito elegido al registrar la
+    // deuda MSI) → compraId (compras hechas directo por compras.js, si algún
+    // día se generan cuentasMSI desde ahí). La mayoría de deudas MSI vienen
+    // de la migración manual en cxc.js y no tienen ninguno de los dos —
+    // en ese caso no hay nada que cancelar automáticamente.
     let recepcionesCanceladas = [];
-    if (deuda.compraId) {
-        const recepciones = StorageService.get("recepciones", []);
+    const recepciones = StorageService.get("recepciones", []);
+    if (deuda.recepcionId) {
+        const r = recepciones.find(x => String(x.id) === String(deuda.recepcionId) && x.estatus === "Pendiente");
+        if (r) {
+            recepcionesCanceladas.push({ id: r.id, cantidadPendienteOriginal: r.cantidadPendiente, estatusOriginal: r.estatus });
+            r.estatus = "Cancelada";
+            r.motivoCancelacion = "Reembolso de proveedor — producto nunca entregado";
+            r.fechaCancelacion = fecha;
+            r.cantidadPendiente = 0;
+        }
+    } else if (deuda.compraId) {
         recepciones.forEach(r => {
             if (String(r.compraId) === String(deuda.compraId) && r.estatus === "Pendiente") {
                 recepcionesCanceladas.push({ id: r.id, cantidadPendienteOriginal: r.cantidadPendiente, estatusOriginal: r.estatus });
@@ -646,9 +660,9 @@ window.confirmarReembolsoProveedorMSI = function(id) {
                 r.cantidadPendiente = 0;
             }
         });
-        if (recepcionesCanceladas.length > 0) {
-            StorageService.set("recepciones", recepciones);
-        }
+    }
+    if (recepcionesCanceladas.length > 0) {
+        StorageService.set("recepciones", recepciones);
     }
 
     cuentasMSI[idx] = {

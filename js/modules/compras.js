@@ -1108,15 +1108,58 @@ function renderRecepciones() {
                 <td>${r.productoNombre}<br><small>Pago: ${r.metodoPago}</small></td>
                 <td>${r.cantidadTotal}</td>
                 <td style="color:red; font-weight:bold;">${r.cantidadPendiente}</td>
-                <td>
+                <td style="white-space:nowrap;">
                     <button onclick="procesarRecepcionFisica(${r.id})" style="background:#27ae60; color:white; border:none; padding:8px; border-radius:5px; cursor:pointer;">
                         📥 Recibir
+                    </button>
+                    <button onclick="cancelarRecepcionPendiente(${r.id})" style="background:none; color:#dc2626; border:1px solid #fecaca; padding:8px; border-radius:5px; cursor:pointer;" title="Cancelar — el producto no va a llegar">
+                        ✕ Cancelar
                     </button>
                 </td>
             </tr>`;
     });
 
     contenedor.innerHTML = html + "</tbody></table>";
+}
+
+// ── Cancelar una recepción pendiente que ya no va a llegar ──────────────────
+// Independiente de cualquier flujo de MSI/reembolso — esto es directo: el
+// producto pedido nunca llegará (proveedor no cumplió, se canceló el pedido,
+// etc.), así que se saca de la lista de pendientes sin agregar stock. No
+// toca dinero (eso se maneja aparte, en la deuda MSI o con el proveedor).
+function cancelarRecepcionPendiente(idRecepcion) {
+    if (!_comprasRequireAdmin('Cancelar recepción pendiente')) return;
+
+    let recs = StorageService.get("recepciones", []);
+    const idx = recs.findIndex(r => r.id == idRecepcion);
+    if (idx === -1) return alert("❌ Esa recepción ya no existe.");
+    const rec = recs[idx];
+    if (rec.estatus !== "Pendiente") return alert("Esa recepción ya no está pendiente.");
+
+    if (!confirm(`¿Cancelar esta recepción pendiente?\n\n${rec.productoNombre}\nProveedor: ${rec.proveedor}\nCantidad pendiente: ${rec.cantidadPendiente}\n\nEsto NO agrega stock ni mueve dinero — solo la saca de "Recepciones Pendientes" porque el producto no va a llegar.`)) return;
+
+    const cantidadPendienteOriginal = rec.cantidadPendiente;
+    rec.estatus = "Cancelada";
+    rec.cantidadPendienteOriginal = cantidadPendienteOriginal;
+    rec.cantidadPendiente = 0;
+    rec.motivoCancelacion = "Cancelada manualmente — el producto no va a llegar";
+    rec.fechaCancelacion = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    StorageService.set("recepciones", recs);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'RECEPCION_PENDIENTE_CANCELADA',
+            modulo: 'Compras',
+            entidad: 'recepcion',
+            entidadId: String(idRecepcion),
+            detalle: `Recepción pendiente cancelada: ${rec.productoNombre} (${rec.proveedor}), ${cantidadPendienteOriginal} unidad(es) que no llegarán.`,
+            severidad: 'alerta',
+            datos: { recepcionCancelada: rec }
+        });
+    }
+
+    alert("✅ Recepción cancelada. Ya no aparece como pendiente.");
+    renderRecepciones();
 }
 
 // --- MOTOR DE RECEPCIÓN FÍSICA MULTI-BODEGA ---
@@ -7436,6 +7479,7 @@ window.confirmarAbonoProveedor = confirmarAbonoProveedor;
 window.verDetalleCompra = verDetalleCompra;
 window.renderRecepciones = renderRecepciones;
 window.procesarRecepcionFisica = procesarRecepcionFisica;
+window.cancelarRecepcionPendiente = cancelarRecepcionPendiente;
 window.iniciarOrdenDesdeRequisiciones = iniciarOrdenDesdeRequisiciones;
 window.iniciarCompraDirectaDesdeRequisiciones = iniciarCompraDirectaDesdeRequisiciones;
 window.abrirModalCompraDirectaMulti = abrirModalCompraDirectaMulti;
