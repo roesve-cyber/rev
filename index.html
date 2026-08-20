@@ -128,6 +128,7 @@
             <div id="sub-bancos" class="submenu oculto-submenu">
                 <button onclick="navA('cuentas-bancarias')">🏦 Mis Cuentas</button>
                 <button onclick="navA('flujo-msi'); renderDashboardMSI('Todos');">💳 MSI (Flujo)</button>
+                <button onclick="navA('seguimiento-msi'); renderCuentasMSI();">📋 Compras MSI</button>
                 <button onclick="navA('bancos')">⚙️ Gestionar Tarjetas</button>
                 <button onclick="navA('conciliacion'); setTimeout(renderConciliacion, 100)">📑 Conciliación y Transf.</button>
             </div>
@@ -555,11 +556,13 @@
  <div id="listaMesesMSI" style="padding:15px;"></div>
  </div>
  </div>
- <div style="margin-top:20px;">
- <h3 style="color:#4a5568;">Seguimiento de Compras MSI</h3>
+    </div>
+
+    <!-- SEGUIMIENTO DE COMPRAS MSI (vista propia, separada del flujo de pagos) -->
+    <div id="seguimiento-msi" class="vista oculto">
+ <h2 style="color:#2c3e50; margin:0 0 20px;">📋 Seguimiento de Compras MSI</h2>
  <div id="listaCuentasMSI"></div>
- </div>
- </div>
+    </div>
 
     <!-- SELECCIONAR CLIENTE -->
     <div id="seleccionarcliente" class="vista oculto">
@@ -1166,7 +1169,7 @@
 <script src="js/modules/cxc.js?v=36"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=53"></script>
-<script src="js/modules/bancos.js?v=15"></script>
+<script src="js/modules/bancos.js?v=17"></script>
 <script src="js/modules/reportes.js?v=22"></script>
 <script src="js/modules/reportes-plus.js?v=9"></script>
 <script src="js/modules/radar-compras.js?v=1"></script>
@@ -1192,7 +1195,7 @@
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/modules/reportes-abonos-enganches.js"></script>
-<script src="js/core/navigation.js?v=9"></script>
+<script src="js/core/navigation.js?v=10"></script>
 <script src="js/init.js?v=8"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
