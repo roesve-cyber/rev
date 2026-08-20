@@ -140,6 +140,7 @@
                 <button onclick="navA('corte-caja');renderCorteCaja();">💵 Corte de Caja</button>
                 <button onclick="navA('gastos');renderGestionGastos();">💸 Gastos Operativos</button>
                 <button onclick="navA('prestamos');renderGestionPrestamos();">🤝 Préstamos</button>
+                <button onclick="navA('estados-financieros');renderEstadosFinancieros();">📈 Estados Financieros</button>
             </div>
         </div>
 
@@ -828,6 +829,15 @@
  <div id="contenidoPrestamos"></div>
  </div>
 
+    <!-- ESTADOS FINANCIEROS -->
+    <div id="estados-financieros" class="vista oculto">
+ <div class="vista-header">
+ <h2>Estados Financieros</h2>
+ <p>Estado de Resultados, Balance General y captura de aportaciones/retiros de capital.</p>
+ </div>
+ <div id="contenidoEstadosFinancieros"></div>
+ </div>
+
     <!-- PROYECCIÓN DE FLUJO -->
     <div id="proyeccion" class="vista oculto">
  <div class="vista-header">
@@ -1182,6 +1192,7 @@
 <script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js?v=3"></script>
 <script src="js/modules/prestamos.js"></script>
+<script src="js/modules/finanzas-estados.js?v=1"></script>
 <script src="js/modules/devoluciones.js"></script>
 <script src="js/modules/producto-picker.js?v=4"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
