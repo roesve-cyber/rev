@@ -120,6 +120,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'cuentas-bancarias' && typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
         if (vistaId === 'bancos' && typeof renderBancosConfig === 'function') renderBancosConfig();
         if (vistaId === 'flujo-msi' && typeof renderDashboardMSI === 'function') renderDashboardMSI('Todos');
+        if (vistaId === 'seguimiento-msi' && typeof renderCuentasMSI === 'function') renderCuentasMSI();
         if (vistaId === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
         if (vistaId === 'ordenescompra' && typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
         if (vistaId === 'requisiciones' && typeof renderRequisiciones === 'function') renderRequisiciones();
