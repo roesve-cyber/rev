@@ -405,9 +405,10 @@ function abrirModalHistorialPrestamo(prestamoId) {
 }
 
 // Corrige el monto original de un préstamo (p. ej. se capturó mal el
-// monto entregado). Solo ajusta el registro — NO modifica el movimiento de
-// caja ya generado; si ese egreso también está mal, se corrige aparte en
-// Bancos/Corte de Caja.
+// monto entregado). Si el préstamo es histórico (nunca movió caja), solo
+// ajusta el registro. Si es un préstamo generado en el sistema (sí generó
+// un egreso real), también ajusta ese movimiento de caja y el saldo de la
+// cuenta por la diferencia.
 function abrirModalEditarMontoPrestamo(prestamoId) {
     const p = StorageService.get('prestamosOtorgados', []).find(x => x.id === prestamoId);
     if (!p) return alert('Préstamo no encontrado.');
@@ -421,7 +422,7 @@ function abrirModalEditarMontoPrestamo(prestamoId) {
             <div style="margin-bottom:16px;">
                 <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO CORRECTO</label>
                 <input type="number" id="editarPrestamoMonto" min="0.01" step="0.01" value="${p.monto}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
-                <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Esto solo corrige el registro del préstamo, no el movimiento de caja ya generado.</p>
+                <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">${p.origen === 'historico' ? 'Es un préstamo histórico: esto solo corrige el registro, no mueve caja (nunca se generó un egreso).' : 'Esto también ajustará el movimiento de caja y el saldo de la cuenta por la diferencia.'}</p>
             </div>
             <div style="display:flex;gap:10px;">
                 <button onclick="guardarEdicionMontoPrestamo(${p.id})" style="flex:1;padding:12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💾 Guardar</button>
@@ -451,6 +452,48 @@ function guardarEdicionMontoPrestamo(prestamoId) {
     }
     const nuevoSaldo = Math.max(0, nuevoMonto - totalAbonado);
     const montoAnterior = p.monto;
+
+    // 🛡️ Solo los préstamos "nuevos" (origen !== 'historico') generaron un
+    // egreso real en _egresarCuenta al crearse. Los históricos se registraron
+    // a propósito SIN mover caja, así que para esos la corrección de monto
+    // debe seguir siendo solo de registro. Para los nuevos, si no reflejamos
+    // la diferencia en movimientosCaja y en el saldo de la cuenta, el flujo
+    // de dinero se desincroniza del registro del préstamo.
+    if (p.origen !== 'historico' && typeof _resolverCuentaMovimiento === 'function') {
+        const delta = nuevoMonto - montoAnterior; // aumento del préstamo = más egreso
+        const movs = StorageService.get('movimientosCaja', []);
+        let idxMov = -1;
+        for (let i = movs.length - 1; i >= 0; i--) {
+            if (movs[i].referencia === `PRESTAMO-${p.id}` && movs[i].tipo === 'egreso') { idxMov = i; break; }
+        }
+        if (idxMov === -1) {
+            alert('⚠️ No se encontró el movimiento de caja original de este préstamo. Se corrigió solo el registro del préstamo — revisa manualmente el flujo de dinero.');
+        } else {
+            const c = _resolverCuentaMovimiento(p.cuentaId);
+            if (!c.ok) {
+                alert(`⚠️ La cuenta original "${p.cuentaEtiqueta || p.cuentaId}" ya no existe. Se corrigió solo el registro del préstamo — el saldo de caja NO se ajustó.`);
+            } else {
+                const coleccion = c.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
+                const lista = StorageService.get(coleccion, []);
+                const idxCta = lista.findIndex(x => String(x.id) === String(c.cuentaRealId) || String(x.banco) === String(c.cuentaRealId));
+                if (idxCta === -1) {
+                    alert(`⚠️ No se encontró la cuenta "${p.cuentaEtiqueta || p.cuentaId}" en el storage. Se corrigió solo el registro del préstamo — el saldo de caja NO se ajustó.`);
+                } else {
+                    lista[idxCta].saldo = (Number(lista[idxCta].saldo) || 0) - delta;
+                    StorageService.set(coleccion, lista);
+
+                    const movsFrescos = StorageService.get('movimientosCaja', []);
+                    movsFrescos[idxMov] = {
+                        ...movsFrescos[idxMov],
+                        monto: nuevoMonto,
+                        corregido: true,
+                        ultimaCorreccionIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+                    };
+                    StorageService.set('movimientosCaja', movsFrescos);
+                }
+            }
+        }
+    }
 
     prestamos[idx] = {
         ...p,
