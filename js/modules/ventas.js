@@ -4472,6 +4472,12 @@ window._authInvToggleFila = function(rowId) {
 };
 
 window.revisarVentaPendiente = function(index) {
+    // 🛡️ Limpiar el contexto de la solicitud anterior ANTES de resolver esta.
+    // Sin esto, _authResolverVentaPendiente() le daba prioridad absoluta al
+    // idCuarentena de la última venta revisada (aunque ya se hubiera cerrado
+    // ese modal) e ignoraba el index que se acaba de pasar aquí, mostrando y
+    // autorizando la solicitud equivocada.
+    window._authVentaPendienteCtx = null;
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
@@ -4696,7 +4702,7 @@ window.revisarVentaPendiente = function(index) {
             <div style="display:flex; gap:10px;">
                 <button id="btnAutorizarVentaCuarentena" onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Autorizar a DB</button>
                 <button id="btnRechazarVentaCuarentena" onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Anular Movimiento</button>
-                <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
+                <button onclick="window._authVentaPendienteCtx=null; document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
             </div>
         </div>
     </div>`;
@@ -4755,6 +4761,7 @@ async function _aprobarVentaCuarentenaAsync(index) {
         if (resSyncBloqueo.subioANube === false) {
             alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
         }
+        window._authVentaPendienteCtx = null;
         document.querySelector('[data-modal=auth-venta]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         return;
@@ -4947,6 +4954,7 @@ async function _aprobarVentaCuarentenaAsync(index) {
             }
         });
     }
+    window._authVentaPendienteCtx = null;
     document.querySelector('[data-modal=auth-venta]').remove();
     
     alert("Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
@@ -5011,6 +5019,7 @@ async function _rechazarVentaCuarentenaAsync(index) {
             }
         });
     }
+    window._authVentaPendienteCtx = null;
     document.querySelector('[data-modal=auth-venta]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (typeof renderApartados === 'function') renderApartados();
@@ -6075,6 +6084,10 @@ function _authAbonoBloqueadoPorEstado(a) {
 }
 
 window.revisarAbonoPendiente = function(index) {
+    // 🛡️ Mismo fix que revisarVentaPendiente: limpiar el ctx de la sesión
+    // anterior antes de resolver, para que este open use el index recién
+    // clicado y no quede "pegado" al abono previamente revisado.
+    window._authAbonoPendienteCtx = null;
     const abonosP = StorageService.get("abonosPendientes", []);
     const a = abonosP[index];
     if (!a) return;
@@ -6125,7 +6138,7 @@ window.revisarAbonoPendiente = function(index) {
             <div style="display:flex; gap:10px; margin-top:20px;">
                 <button id="btnAprobarAbonoCuarentena" onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Ingresar a Caja</button>
                 <button id="btnRechazarAbonoCuarentena" onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Eliminar</button>
-                <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+                <button onclick="window._authAbonoPendienteCtx=null; document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
     </div>`;
@@ -6153,6 +6166,7 @@ async function _aprobarAbonoCuarentenaAsync(index) {
         if (resSyncBloqueoAbono.subioANube === false) {
             alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
         }
+        window._authAbonoPendienteCtx = null;
         document.querySelector('[data-modal=auth-abono]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         return;
@@ -6195,6 +6209,7 @@ async function _aprobarAbonoCuarentenaAsync(index) {
             }
         });
     }
+    window._authAbonoPendienteCtx = null;
     document.querySelector('[data-modal=auth-abono]').remove();
     alert("Abono aprobado y registrado en flujo de caja.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
@@ -6233,6 +6248,7 @@ async function _rechazarAbonoCuarentenaAsync(index) {
             }
         });
     }
+    window._authAbonoPendienteCtx = null;
     document.querySelector('[data-modal=auth-abono]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 }

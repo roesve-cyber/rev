@@ -239,6 +239,191 @@ function guardarGasto() {
     renderGestionGastos();
 }
 
+// ===== CORRECCIÓN DE GASTOS YA REGISTRADOS =====
+// Editar un gasto no solo cambia el registro en gastosOperativos: también
+// debe corregir el dinero que ya salió de la cuenta. El patrón es el mismo
+// que usa bancos.js para deshacer pagos de corte: nunca se reescribe el
+// movimiento viejo en movimientosCaja (se pierde el rastro), se revierte con
+// un INGRESO nuevo (regresa el monto viejo a la cuenta vieja) y se aplica un
+// EGRESO nuevo (saca el monto corregido de la cuenta corregida). Así la
+// bitácora de caja queda completa y auditable.
+function abrirEditarGasto(id) {
+    if (typeof requireAdmin !== 'function') { _renderModalEditarGasto(id); return; }
+    requireAdmin(() => _renderModalEditarGasto(id));
+}
+
+function _renderModalEditarGasto(id) {
+    const gastos = StorageService.get('gastosOperativos', []);
+    const g = gastos.find(x => x.id === id);
+    if (!g) return alert('⚠️ Ese gasto ya no existe.');
+
+    document.querySelector('[data-modal="editar-gasto"]')?.remove();
+    const html = `
+    <div data-modal="editar-gasto" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div style="background:white;border-radius:12px;width:100%;max-width:520px;padding:28px;max-height:90vh;overflow-y:auto;">
+        <h2 style="margin:0 0 6px;color:#dc2626;">✏️ Corregir Gasto</h2>
+        <p style="margin:0 0 20px;font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;padding:8px 10px;border-radius:6px;">
+          Esto ajusta también el dinero de caja: se regresa el monto original a "${g.etiquetaCuenta || g.cuentaDebito}" y se vuelve a sacar el monto corregido de la cuenta que elijas abajo. Queda registrado en auditoría.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">CATEGORÍA</label>
+            <select id="editGastoCategoria-${id}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              ${getCategoriasGasto().map(c => `<option value="${c.nombre}" ${c.nombre === g.categoria ? 'selected' : ''}>${c.icono || ''} ${c.nombre}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">DESCRIPCIÓN</label>
+            <input type="text" id="editGastoDescripcion-${id}" value="${_escGasto(g.descripcion)}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">MONTO ($)</label>
+            <input type="number" id="editGastoMonto-${id}" min="0" step="0.01" value="${g.monto}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA</label>
+            <input type="date" id="editGastoFecha-${id}" value="${g.fecha || window.obtenerHoyInputMX()}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">¿DE QUÉ CUENTA SALE EL DINERO?</label>
+            ${window._buildSelectorCuentas(`editGastoCuentaDebito-${id}`, false)}
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="editGastoRecurrente-${id}" ${g.recurrente ? 'checked' : ''} onchange="document.getElementById('editDivPeriodicidad-${id}').style.display = this.checked ? 'block' : 'none'" style="width:18px;height:18px;">
+            <span style="font-size:14px;font-weight:bold;">¿Es gasto recurrente?</span>
+          </label>
+          <div id="editDivPeriodicidad-${id}" style="display:${g.recurrente ? 'block' : 'none'};">
+            <label style="font-size:12px;font-weight:bold;color:#374151;">PERIODICIDAD</label>
+            <select id="editGastoPeriodicidad-${id}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              <option value="mensual" ${g.periodicidad === 'mensual' ? 'selected' : ''}>Mensual</option>
+              <option value="semanal" ${g.periodicidad === 'semanal' ? 'selected' : ''}>Semanal</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;">
+          <button onclick="guardarEdicionGasto(${id})" style="flex:1;padding:12px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">💾 Guardar Corrección</button>
+          <button onclick="document.querySelector('[data-modal=editar-gasto]')?.remove()" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    // Preseleccionar la cuenta que se usó originalmente, si sigue existiendo.
+    setTimeout(() => {
+        const selCuenta = document.getElementById(`editGastoCuentaDebito-${id}`);
+        if (selCuenta && g.cuentaDebito && [...selCuenta.options].some(o => o.value === g.cuentaDebito)) {
+            selCuenta.value = g.cuentaDebito;
+        }
+    }, 0);
+}
+
+function _escGasto(str) {
+    return String(str ?? '').replace(/"/g, '&quot;');
+}
+
+function guardarEdicionGasto(id) {
+    const gastos = StorageService.get('gastosOperativos', []);
+    const idx = gastos.findIndex(x => x.id === id);
+    if (idx === -1) return alert('⚠️ Ese gasto ya no existe.');
+    const gastoAnterior = { ...gastos[idx] };
+
+    const categoria = document.getElementById(`editGastoCategoria-${id}`)?.value;
+    const descripcion = document.getElementById(`editGastoDescripcion-${id}`)?.value.trim();
+    const monto = parseFloat(document.getElementById(`editGastoMonto-${id}`)?.value) || 0;
+    const fecha = document.getElementById(`editGastoFecha-${id}`)?.value || window.obtenerHoyInputMX();
+    const recurrente = document.getElementById(`editGastoRecurrente-${id}`)?.checked || false;
+    const periodicidad = document.getElementById(`editGastoPeriodicidad-${id}`)?.value || 'mensual';
+    const selCuenta = document.getElementById(`editGastoCuentaDebito-${id}`);
+    const cuentaId = selCuenta.value;
+    const etiqueta = selCuenta.options[selCuenta.selectedIndex].text;
+
+    if (!descripcion) return alert('⚠️ La descripción es obligatoria.');
+    if (monto <= 0) return alert('⚠️ El monto debe ser mayor a 0.');
+
+    const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2 });
+    const sinCambios = categoria === gastoAnterior.categoria && descripcion === gastoAnterior.descripcion &&
+        monto === Number(gastoAnterior.monto) && fecha === gastoAnterior.fecha && cuentaId === gastoAnterior.cuentaDebito &&
+        recurrente === !!gastoAnterior.recurrente && (!recurrente || periodicidad === gastoAnterior.periodicidad);
+    if (sinCambios) { alert('No hay cambios que guardar.'); return; }
+
+    const msjConf = `⚠️ CONFIRMAR CORRECCIÓN DE GASTO\n\n` +
+        `ANTES:\n${gastoAnterior.categoria} — ${gastoAnterior.descripcion}\n${formatoDinero(gastoAnterior.monto)} de ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}\n\n` +
+        `DESPUÉS:\n${categoria} — ${descripcion}\n${formatoDinero(monto)} de ${etiqueta}\n\n` +
+        `Se regresará ${formatoDinero(gastoAnterior.monto)} a "${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}" y se sacará ${formatoDinero(monto)} de "${etiqueta}". ¿Continuar?`;
+    if (!confirm(msjConf)) return;
+
+    if (typeof window._ingresarCuenta !== 'function' || typeof window._egresarCuenta !== 'function') {
+        alert("No se pudo corregir el gasto: el módulo de caja no está disponible. Nada se guardó.");
+        return;
+    }
+
+    // 1) Revertir el egreso original a la cuenta donde salió.
+    const idOpBase = `GASTO-${id}-CORR-${Date.now()}`;
+    const reversaOk = window._ingresarCuenta({
+        monto: gastoAnterior.monto,
+        cuentaId: gastoAnterior.cuentaDebito,
+        etiqueta: gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito,
+        concepto: `Corrección de gasto — reversión: ${gastoAnterior.categoria} — ${gastoAnterior.descripcion}`,
+        referencia: `GASTO-${id}`,
+        idOperacion: `${idOpBase}-REV`
+    });
+    if (!reversaOk) {
+        alert(`No se pudo regresar el dinero a "${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}" (¿ya no existe esa cuenta?). La corrección se canceló, nada se movió.`);
+        return;
+    }
+
+    // 2) Aplicar el egreso con los datos corregidos.
+    const egresoOk = window._egresarCuenta({
+        monto: monto,
+        cuentaId: cuentaId,
+        etiqueta: etiqueta,
+        concepto: `Gasto (corregido): ${categoria} — ${descripcion}`,
+        referencia: `GASTO-${id}`,
+        idOperacion: `${idOpBase}-APL`
+    });
+    if (!egresoOk) {
+        alert(`⚠️ Se regresó el dinero de la corrección anterior, pero NO se pudo sacar de "${etiqueta}" (¿ya no existe esa cuenta?).\n\nEl gasto quedó SIN egreso registrado en caja — revisa manualmente y vuelve a intentar la corrección con una cuenta válida.`);
+        // No seguimos: el registro del gasto se deja como estaba para no perder
+        // el rastro de que el dinero YA fue devuelto pero no vuelto a sacar.
+        return;
+    }
+
+    // 3) Actualizar el registro del gasto, guardando historial de la corrección.
+    const gastoCorregido = {
+        ...gastoAnterior,
+        categoria, descripcion, monto, fecha,
+        cuentaDebito: cuentaId, etiquetaCuenta: etiqueta,
+        recurrente, periodicidad: recurrente ? periodicidad : gastoAnterior.periodicidad
+    };
+    gastoCorregido.historialCorrecciones = Array.isArray(gastoAnterior.historialCorrecciones) ? [...gastoAnterior.historialCorrecciones] : [];
+    gastoCorregido.historialCorrecciones.push({
+        fechaCorreccionIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        anterior: {
+            categoria: gastoAnterior.categoria, descripcion: gastoAnterior.descripcion, monto: gastoAnterior.monto,
+            fecha: gastoAnterior.fecha, cuentaDebito: gastoAnterior.cuentaDebito, etiquetaCuenta: gastoAnterior.etiquetaCuenta
+        }
+    });
+    gastos[idx] = gastoCorregido;
+    StorageService.set('gastosOperativos', gastos);
+
+    // 4) Auditoría: se registra como un acceso/evento nuevo, no se sobreescribe nada.
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'GASTO_CORREGIDO',
+            modulo: 'Gastos',
+            entidad: 'gasto',
+            entidadId: String(id),
+            detalle: `Gasto corregido: "${gastoAnterior.categoria} — ${gastoAnterior.descripcion}" (${formatoDinero(gastoAnterior.monto)} de ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}) → "${categoria} — ${descripcion}" (${formatoDinero(monto)} de ${etiqueta})`,
+            monto: monto,
+            severidad: 'riesgo',
+            datos: { anterior: gastoAnterior, nuevo: gastoCorregido }
+        });
+    }
+
+    document.querySelector('[data-modal="editar-gasto"]')?.remove();
+    alert(`✅ Gasto corregido.\n\nSe regresó ${formatoDinero(gastoAnterior.monto)} a ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito} y se sacó ${formatoDinero(monto)} de ${etiqueta}.`);
+    renderGestionGastos();
+}
+
 function toggleRecurrente() {
     const cb = document.getElementById('gastoRecurrente');
     const div = document.getElementById('divPeriodicidad');
@@ -285,7 +470,10 @@ function renderGestionGastos() {
       <td style="padding:8px;text-align:right;">${dinero(g.monto)}</td>
       <td style="padding:8px;text-align:center;">${g.cuentaDebito || 'caja'}</td>
       <td style="padding:8px;text-align:center;">${g.recurrente ? `🔁 ${g.periodicidad}` : '-'}</td>
-      <td style="padding:8px;text-align:center;"><button onclick="eliminarGasto(${g.id})" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
+      <td style="padding:8px;text-align:center;white-space:nowrap;">
+        <button onclick="abrirEditarGasto(${g.id})" style="background:none;border:none;cursor:pointer;font-size:16px;" title="Corregir">✏️</button>
+        <button onclick="eliminarGasto(${g.id})" style="background:none;border:none;cursor:pointer;font-size:16px;" title="Eliminar">🗑️</button>
+      </td>
     </tr>`).join('');
 
     cont.innerHTML = `
@@ -338,10 +526,56 @@ function renderGestionGastos() {
 }
 
 function eliminarGasto(id) {
-    if (!confirm('¿Eliminar este gasto?')) return;
-    let gastos = StorageService.get('gastosOperativos', []);
-    gastos = gastos.filter(g => g.id !== id);
-    StorageService.set('gastosOperativos', gastos);
+    if (typeof requireAdmin !== 'function') { _ejecutarEliminarGasto(id); return; }
+    requireAdmin(() => _ejecutarEliminarGasto(id));
+}
+
+function _ejecutarEliminarGasto(id) {
+    const gastos = StorageService.get('gastosOperativos', []);
+    const g = gastos.find(x => x.id === id);
+    if (!g) return alert('⚠️ Ese gasto ya no existe.');
+
+    const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2 });
+    if (!confirm(`¿Eliminar este gasto?\n\n${g.categoria} — ${g.descripcion}\n${formatoDinero(g.monto)}\n\nSe regresará ese dinero a "${g.etiquetaCuenta || g.cuentaDebito}".`)) return;
+
+    // 🛡️ Igual que la corrección: nunca se borra el gasto sin devolver el
+    // dinero a la cuenta de donde salió. Se revierte con un INGRESO nuevo
+    // (mismo patrón que guardarEdicionGasto y deshacerUltimoPagoCorteTarjeta),
+    // conservando el rastro completo en movimientosCaja.
+    if (typeof window._ingresarCuenta !== 'function') {
+        alert("No se pudo eliminar el gasto: el módulo de caja no está disponible. Nada se borró.");
+        return;
+    }
+    const reversaOk = window._ingresarCuenta({
+        monto: g.monto,
+        cuentaId: g.cuentaDebito,
+        etiqueta: g.etiquetaCuenta || g.cuentaDebito,
+        concepto: `Eliminación de gasto — reversión: ${g.categoria} — ${g.descripcion}`,
+        referencia: `GASTO-${id}`,
+        idOperacion: `GASTO-${id}-DEL-${Date.now()}`
+    });
+    if (!reversaOk) {
+        alert(`No se pudo regresar el dinero a "${g.etiquetaCuenta || g.cuentaDebito}" (¿ya no existe esa cuenta?). El gasto NO se eliminó.`);
+        return;
+    }
+
+    const gastosRestantes = gastos.filter(x => x.id !== id);
+    StorageService.set('gastosOperativos', gastosRestantes);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'GASTO_ELIMINADO',
+            modulo: 'Gastos',
+            entidad: 'gasto',
+            entidadId: String(id),
+            detalle: `Gasto eliminado: "${g.categoria} — ${g.descripcion}" (${formatoDinero(g.monto)} de ${g.etiquetaCuenta || g.cuentaDebito}), dinero devuelto a caja`,
+            monto: g.monto,
+            severidad: 'riesgo',
+            datos: { gastoEliminado: g }
+        });
+    }
+
+    alert(`✅ Gasto eliminado. Se regresaron ${formatoDinero(g.monto)} a ${g.etiquetaCuenta || g.cuentaDebito}.`);
     renderGestionGastos();
 }
 
@@ -386,6 +620,8 @@ window.toggleRecurrente = toggleRecurrente;
 window.guardarGasto = guardarGasto;
 window.renderGestionGastos = renderGestionGastos;
 window.eliminarGasto = eliminarGasto;
+window.abrirEditarGasto = abrirEditarGasto;
+window.guardarEdicionGasto = guardarEdicionGasto;
 window.verificarGastosRecurrentes = verificarGastosRecurrentes;
 window.getCategoriasGasto = getCategoriasGasto;
 window.abrirGestionCategorias = abrirGestionCategorias;
