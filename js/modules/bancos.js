@@ -432,15 +432,18 @@ window.abrirHistorialMSI = function(id) {
     const totalDeuda = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
     const yaPagado = parseFloat(deuda.montoPagado || 0);
     const pct = Math.min(100, (yaPagado / totalDeuda) * 100).toFixed(0);
+    const pagosHechos = deuda.pagosRealizados || 0;
 
-    // 1. DIBUJAR CALENDARIO CON ESTADOS REALES
-    let filasCalendario = (deuda.calendario || []).map((p) => {
+    // 1. DIBUJAR CALENDARIO CON ESTADOS REALES + ACCIÓN POR CUOTA
+    let filasCalendario = (deuda.calendario || []).map((p, pIdx) => {
         const partes = p.fecha.split('-');
         const fechaPagoReal = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, diaLimite, 0, 0, 0);
         
         const estaPagada = p.estado === 'Pagado';
         const esParcial = p.estado === 'Parcial';
         const vencida = !estaPagada && fechaPagoReal < hoy;
+        const esHoyPago = !estaPagada && fechaPagoReal.toDateString() === hoy.toDateString();
+        const esSiguiente = !estaPagada && !vencida && pIdx === pagosHechos;
         
         let colorEstado = '#3b82f6';
         let txtEstado = '⏳ Pendiente';
@@ -461,12 +464,20 @@ window.abrirHistorialMSI = function(id) {
             textoMonto = `<span style="color:#10b981;">${dinero(cuotaOriginal)}</span>`;
         }
 
+        let accionBtn = '';
+        if (!estaPagada && !esParcial && (vencida || esSiguiente || esHoyPago)) {
+            accionBtn = `<button onclick="marcarPagoMSI(${deuda.id}, ${pIdx + 1})" style="padding:4px 10px; background:#16a34a; color:white; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">💰 Pagar</button>`;
+        } else if (estaPagada && pIdx === pagosHechos - 1) {
+            accionBtn = `<button onclick="deshacerPagoMSI(${deuda.id})" style="padding:4px 10px; background:#f1f5f9; color:#b91c1c; border:1px solid #fecaca; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">↩ Deshacer</button>`;
+        }
+
         return `
         <tr style="border-bottom:1px solid #f1f5f9; background:${estaPagada ? '#f0fdf4' : (vencida && !esParcial ? '#fef2f2' : (esParcial ? '#fff7ed' : 'transparent'))}">
             <td style="padding:12px; text-align:center; color:#64748b; font-weight:bold;">${p.n || p.numero}</td>
             <td style="padding:12px; font-weight:bold;">${window.formatearFechaCortaMX(fechaPagoReal)}</td>
             <td style="padding:12px; text-align:right;">${textoMonto}</td>
             <td style="padding:12px; text-align:center; font-weight:bold; color:${colorEstado}; font-size:12px;">${txtEstado}</td>
+            <td style="padding:12px; text-align:center;">${accionBtn}</td>
         </tr>`;
     }).join('');
 
@@ -497,6 +508,11 @@ window.abrirHistorialMSI = function(id) {
                     <h3 style="margin:0; color:#1e40af; font-size:24px;">🏦 ${deuda.banco}</h3>
                     <p style="margin:5px 0 0 0; color:#0f172a; font-weight:bold; font-size:16px;">${deuda.producto || deuda.concepto}</p>
                     ${deuda.reembolsoProveedor?.activo ? `<p style="margin:8px 0 0 0; font-size:12px; color:#6b21a8; background:#ede9fe; padding:6px 10px; border-radius:6px; display:inline-block;">🔄 Reembolsada por proveedor: ${dinero(deuda.reembolsoProveedor.monto)} el ${window.formatearFechaCortaMX(deuda.reembolsoProveedor.fecha)} a ${deuda.reembolsoProveedor.cuentaEtiqueta} — el banco sigue cobrando las cuotas pendientes.${deuda.reembolsoProveedor.recepcionesCanceladas?.length ? ' El producto pendiente de recibir fue cancelado (no llegará stock).' : ''}</p>` : ''}
+                    <div style="margin-top:8px;">
+                        ${deuda.reembolsoProveedor?.activo
+                            ? `<button onclick="deshacerReembolsoProveedorMSI(${deuda.id})" style="padding:4px 10px; background:none; border:1px solid #fecaca; color:#b91c1c; border-radius:5px; cursor:pointer; font-size:12px;">↩ Deshacer marca de reembolso</button>`
+                            : `<button onclick="abrirModalReembolsoProveedorMSI(${deuda.id})" style="padding:4px 10px; background:none; border:1px solid #c4b5fd; color:#6b21a8; border-radius:5px; cursor:pointer; font-size:12px;">🔄 Marcar reembolso de proveedor</button>`}
+                    </div>
                 </div>
                 <button onclick="this.closest('[data-modal]').remove()" style="background:#f1f5f9; border:none; padding:10px 15px; border-radius:8px; cursor:pointer; font-weight:bold; color:#475569; transition: 0.2s;">✕ Cerrar</button>
             </div>
@@ -515,7 +531,7 @@ window.abrirHistorialMSI = function(id) {
             <div style="border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; margin-bottom: 25px;">
                 <table style="width:100%; border-collapse:collapse; font-size:13px;">
                     <thead style="background:#f1f5f9;">
-                        <tr><th style="padding:12px; color:#475569;"># Cuota</th><th style="padding:12px; text-align:left; color:#475569;">Día Límite Pago</th><th style="padding:12px; text-align:right; color:#475569;">Monto</th><th style="padding:12px; color:#475569;">Estatus</th></tr>
+                        <tr><th style="padding:12px; color:#475569;"># Cuota</th><th style="padding:12px; text-align:left; color:#475569;">Día Límite Pago</th><th style="padding:12px; text-align:right; color:#475569;">Monto</th><th style="padding:12px; color:#475569;">Estatus</th><th style="padding:12px; color:#475569;">Acción</th></tr>
                     </thead>
                     <tbody>${filasCalendario}</tbody>
                 </table>
@@ -659,6 +675,7 @@ window.confirmarReembolsoProveedorMSI = function(id) {
     renderCuentasMSI();
     if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
     if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+    if (document.querySelector('[data-modal="historial-msi"]')) abrirHistorialMSI(id);
 };
 
 window.deshacerReembolsoProveedorMSI = function(id) {
@@ -725,7 +742,32 @@ window.deshacerReembolsoProveedorMSI = function(id) {
     renderCuentasMSI();
     if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
     if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+    if (document.querySelector('[data-modal="historial-msi"]')) abrirHistorialMSI(id);
 };
+
+// ===== SEGUIMIENTO DE COMPRAS MSI — lista dinámica con filtros y análisis =====
+// El detalle (calendario de cuotas, pagos, reembolso) YA NO va inline aquí;
+// vive en abrirHistorialMSI(), que se abre al seleccionar un producto de la
+// lista. Esta vista es solo el resumen: qué se debe, a quién, y qué tan
+// cubierto está cada uno — para poder escanearlo de un vistazo.
+window._msiSeguimientoFiltros = window._msiSeguimientoFiltros || { banco: 'Todos', estado: 'Todos', busqueda: '', orden: 'saldoDesc' };
+
+window._msiSeguimientoSetFiltro = function(campo, valor) {
+    window._msiSeguimientoFiltros[campo] = valor;
+    renderCuentasMSI();
+};
+
+function _msiCalcularResumen(c) {
+    const totalDeuda = parseFloat(String(c.total || 0).replace(/[$,]/g, '')) || 0;
+    const cuota = parseFloat(String(c.cuotaMensual || 0).replace(/[$,]/g, '')) || 0;
+    const yaPagado = c.montoPagado !== undefined ? c.montoPagado : ((c.pagosRealizados || 0) * cuota);
+    const saldo = Math.max(0, totalDeuda - yaPagado);
+    const porcentaje = totalDeuda > 0 ? Math.min(100, (yaPagado / totalDeuda) * 100) : 0;
+    const estaTerminado = yaPagado >= totalDeuda - 0.5;
+    const reembolsada = !!c.reembolsoProveedor?.activo;
+    const estado = reembolsada ? 'Reembolsada' : (estaTerminado ? 'Liquidada' : 'Activa');
+    return { totalDeuda, cuota, yaPagado, saldo, porcentaje, estaTerminado, reembolsada, estado };
+}
 
 function renderCuentasMSI() {
     const contenedor = document.getElementById("listaCuentasMSI");
@@ -737,108 +779,131 @@ function renderCuentasMSI() {
         return;
     }
 
-    const hoy = new Date();
-    let html = '';
+    const F = window._msiSeguimientoFiltros;
+    const enriquecidas = cuentasMSI.map(c => ({ c, r: _msiCalcularResumen(c) }));
 
-    cuentasMSI.forEach((c) => {
-        // 👉 BUG DE MIGRACIÓN CORREGIDO AQUÍ (plazo vs meses)
-        const plazoTotal = c.plazo || c.meses || 1;
-        const totalDeuda = parseFloat(String(c.total || 0).replace(/[$,]/g, ''));
-        const cuota = parseFloat(String(c.cuotaMensual || 0).replace(/[$,]/g, ''));
-        
-        // Calcular el progreso real usando el dinero
-        let yaPagado = c.montoPagado !== undefined ? c.montoPagado : ((c.pagosRealizados || 0) * cuota);
-        const porcentaje = totalDeuda > 0 ? Math.min(100, (yaPagado / totalDeuda) * 100).toFixed(0) : 0;
-        const estaTerminado = yaPagado >= totalDeuda - 0.5;
-        const pagosHechos = cuota > 0 ? Math.floor(yaPagado / cuota) : 0;
+    // ── Análisis global (sobre TODO, sin filtrar, para tener siempre el
+    // panorama completo aunque estés viendo un subconjunto abajo) ──────────
+    const totalMSI = enriquecidas.reduce((s, x) => s + x.r.totalDeuda, 0);
+    const totalPagado = enriquecidas.reduce((s, x) => s + x.r.yaPagado, 0);
+    const totalSaldo = enriquecidas.reduce((s, x) => s + x.r.saldo, 0);
+    const coberturaProm = enriquecidas.length ? (enriquecidas.reduce((s, x) => s + x.r.porcentaje, 0) / enriquecidas.length) : 0;
+    const nActivas = enriquecidas.filter(x => x.r.estado === 'Activa').length;
+    const nLiquidadas = enriquecidas.filter(x => x.r.estado === 'Liquidada').length;
+    const nReembolsadas = enriquecidas.filter(x => x.r.estado === 'Reembolsada').length;
 
-        const calendario = c.calendario || [];
+    const bancosDisponibles = [...new Set(cuentasMSI.map(c => c.banco).filter(Boolean))].sort();
 
-        html += `
-        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; margin-bottom:20px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.05);">
-            <div style="background:${estaTerminado ? '#f0fdf4' : '#eff6ff'}; padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                <div>
-                    <span style="font-size:18px; font-weight:bold; color:#1e40af;">🏦 ${c.banco}</span>
-                    <span style="margin-left:10px; font-size:14px; color:#4b5563;">${c.producto || 'Compra'}</span>
-                    ${estaTerminado ? '<span style="margin-left:8px; background:#d1fae5; color:#065f46; font-size:11px; padding:2px 8px; border-radius:9999px;">✅ Liquidado</span>' : ''}
-                    ${c.reembolsoProveedor?.activo ? `<span style="margin-left:8px; background:#ede9fe; color:#6b21a8; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;" title="El proveedor reembolsó ${dinero(c.reembolsoProveedor.monto)} el ${window.formatearFechaCortaMX(c.reembolsoProveedor.fecha)}, pero el banco seguirá cobrando las mensualidades restantes.${c.reembolsoProveedor.recepcionesCanceladas?.length ? ' Recepción pendiente cancelada.' : ''}">🔄 Reembolsada por proveedor — cobros del banco continúan${c.reembolsoProveedor.recepcionesCanceladas?.length ? ' · producto cancelado' : ''}</span>` : ''}
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:13px; color:#6b7280;">Total: <strong>${dinero(c.total)}</strong></div>
-                    <div style="font-size:13px; color:#27ae60;">Mensualidad: <strong>${dinero(c.cuotaMensual)}</strong></div>
-                    <div style="font-size:12px; color:#9ca3af;">Compra: ${c.fechaCompra ? window.formatearFechaCortaMX(c.fechaCompra) : '—'}</div>
-                    ${c.reembolsoProveedor?.activo
-                        ? `<button onclick="deshacerReembolsoProveedorMSI(${c.id})" style="margin-top:6px; padding:3px 8px; background:none; border:1px solid #fecaca; color:#b91c1c; border-radius:5px; cursor:pointer; font-size:11px;">↩ Deshacer marca de reembolso</button>`
-                        : `<button onclick="abrirModalReembolsoProveedorMSI(${c.id})" style="margin-top:6px; padding:3px 8px; background:none; border:1px solid #c4b5fd; color:#6b21a8; border-radius:5px; cursor:pointer; font-size:11px;">🔄 Marcar reembolso de proveedor</button>`}
-                </div>
-            </div>
-
-            <div style="padding:12px 20px; border-bottom:1px solid #f3f4f6;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <small style="color:#6b7280;">Progreso de pagos</small>
-                    <small style="font-weight:bold; color:#1e40af;">${dinero(yaPagado)} de ${dinero(totalDeuda)} (${porcentaje}%)</small>
-                </div>
-                <div style="background:#e2e8f0; border-radius:4px; height:8px; width:100%;">
-                    <div style="background:${estaTerminado ? '#16a34a' : '#3498db'}; height:100%; border-radius:4px; width:${porcentaje}%; transition:width 0.3s;"></div>
-                </div>
-            </div>
-
-            <div style="padding:16px 20px;">
-                <strong style="font-size:13px; color:#374151; display:block; margin-bottom:10px;">📋 Calendario de Cuotas</strong>
-                <div style="overflow-x:auto;">
-                <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                    <thead><tr style="background:#f8fafc;">
-                        <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #e2e8f0;">#</th>
-                        <th style="padding:8px 10px; text-align:left; border-bottom:2px solid #e2e8f0;">Fecha de Pago</th>
-                        <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #e2e8f0;">Importe</th>
-                        <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #e2e8f0;">Estado</th>
-                        <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #e2e8f0;">Acción</th>
-                    </tr></thead>
-                    <tbody>`;
-
-        if (calendario.length > 0) {
-            calendario.forEach((pago, pIdx) => {
-                // Ahora lee el estado real que seteamos en el abono global
-                const estaPagada = pago.estado === 'Pagado';
-                const esParcial = pago.estado === 'Parcial';
-                const fechaPago  = new Date(pago.fecha + 'T00:00:00');
-                const vencida    = !estaPagada && fechaPago < hoy;
-                const esHoyPago  = !estaPagada && fechaPago.toDateString() === hoy.toDateString();
-                const esSiguiente = !estaPagada && !vencida && pIdx === pagosHechos;
-
-                let rowBg = estaPagada ? '#f0fdf4' : (vencida ? '#fef2f2' : (esParcial ? '#fff7ed' : ''));
-                let estadoBadge = '';
-                
-                if (estaPagada) estadoBadge = '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:9999px;font-size:11px;">✅ Pagado</span>';
-                else if (esParcial) estadoBadge = `<span style="background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:9999px;font-size:11px;">⏳ Parcial (${dinero(pago.montoAbonado)})</span>`;
-                else if (vencida) estadoBadge = `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:9999px;font-size:11px;">⚠️ Vencido</span>`;
-                else if (esHoyPago) estadoBadge = '<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:9999px;font-size:11px;">🔔 Hoy</span>';
-                else estadoBadge = '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;font-size:11px;">⏳ Pendiente</span>';
-
-                let accionBtn = '';
-                if (!estaPagada && !esParcial && (vencida || esSiguiente || esHoyPago)) {
-                    accionBtn = `<button onclick="marcarPagoMSI(${c.id}, ${pIdx + 1})"
-                        style="padding:4px 10px; background:#16a34a; color:white; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">
-                        💰 Pago Individual
-                    </button>`;
-                } else if (estaPagada && pIdx === pagosHechos - 1) {
-                    accionBtn = `<button onclick="deshacerPagoMSI(${c.id})"
-                        style="padding:4px 10px; background:#f1f5f9; color:#b91c1c; border:1px solid #fecaca; border-radius:5px; cursor:pointer; font-size:12px; font-weight:bold;">
-                        ↩ Deshacer
-                    </button>`;
-                }
-
-                html += `<tr style="background:${rowBg}; border-bottom:1px solid #f3f4f6;">
-                    <td style="padding:8px 10px; text-align:center; font-weight:bold; color:${vencida ? '#dc2626' : '#374151'};">${pago.n || pago.numero}</td>
-                    <td style="padding:8px 10px; color:${vencida ? '#dc2626' : '#374151'}; font-weight:${vencida ? 'bold' : 'normal'};">${window.formatearFechaCortaMX(fechaPago)}</td>
-                    <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(pago.monto || c.cuotaMensual)}</td>
-                    <td style="padding:8px 10px; text-align:center;">${estadoBadge}</td>
-                    <td style="padding:8px 10px; text-align:center;">${accionBtn}</td>
-                </tr>`;
-            });
-        }
-        html += `</tbody></table></div></div></div>`;
+    // ── Filtrar ──────────────────────────────────────────────────────────
+    let filtradas = enriquecidas.filter(({ c, r }) => {
+        if (F.banco !== 'Todos' && c.banco !== F.banco) return false;
+        if (F.estado !== 'Todos' && r.estado !== F.estado) return false;
+        if (F.busqueda && !(String(c.producto || '').toLowerCase().includes(F.busqueda.toLowerCase()))) return false;
+        return true;
     });
+
+    // ── Ordenar ──────────────────────────────────────────────────────────
+    const ordenadores = {
+        saldoDesc: (a, b) => b.r.saldo - a.r.saldo,
+        pctAsc: (a, b) => a.r.porcentaje - b.r.porcentaje,
+        pctDesc: (a, b) => b.r.porcentaje - a.r.porcentaje,
+        reciente: (a, b) => new Date(b.c.fechaCompra || 0) - new Date(a.c.fechaCompra || 0)
+    };
+    filtradas.sort(ordenadores[F.orden] || ordenadores.saldoDesc);
+
+    // ── Barra de filtros ─────────────────────────────────────────────────
+    const opcionesBanco = ['Todos', ...bancosDisponibles].map(b =>
+        `<option value="${b}" ${F.banco === b ? 'selected' : ''}>${b}</option>`).join('');
+    const opcionesEstado = ['Todos', 'Activa', 'Liquidada', 'Reembolsada'].map(e =>
+        `<option value="${e}" ${F.estado === e ? 'selected' : ''}>${e === 'Todos' ? 'Todos los estados' : e}</option>`).join('');
+    const opcionesOrden = [
+        ['saldoDesc', 'Mayor saldo pendiente'],
+        ['pctAsc', 'Menor % cubierto'],
+        ['pctDesc', 'Mayor % cubierto'],
+        ['reciente', 'Más reciente']
+    ].map(([v, t]) => `<option value="${v}" ${F.orden === v ? 'selected' : ''}>${t}</option>`).join('');
+
+    let html = `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px; margin-bottom:18px;">
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; font-weight:bold;">Total en MSI</div>
+            <div style="font-size:17px; font-weight:900; color:#1e40af;">${dinero(totalMSI)}</div>
+        </div>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; font-weight:bold;">Ya pagado</div>
+            <div style="font-size:17px; font-weight:900; color:#16a34a;">${dinero(totalPagado)}</div>
+        </div>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; font-weight:bold;">Saldo pendiente</div>
+            <div style="font-size:17px; font-weight:900; color:#dc2626;">${dinero(totalSaldo)}</div>
+        </div>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; font-weight:bold;">Cobertura promedio</div>
+            <div style="font-size:17px; font-weight:900; color:#7c3aed;">${coberturaProm.toFixed(0)}%</div>
+        </div>
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; font-weight:bold;">Activas / Liquidadas / Reemb.</div>
+            <div style="font-size:15px; font-weight:900; color:#334155;">${nActivas} / ${nLiquidadas} / ${nReembolsadas}</div>
+        </div>
+    </div>
+
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px;">
+        <div style="flex:1; min-width:160px;">
+            <label style="font-size:11px; font-weight:bold; color:#6b7280; display:block; margin-bottom:3px;">BUSCAR PRODUCTO</label>
+            <input type="text" value="${F.busqueda}" oninput="window._msiSeguimientoSetFiltro('busqueda', this.value)" placeholder="Nombre del producto..." style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+        </div>
+        <div style="min-width:140px;">
+            <label style="font-size:11px; font-weight:bold; color:#6b7280; display:block; margin-bottom:3px;">BANCO</label>
+            <select onchange="window._msiSeguimientoSetFiltro('banco', this.value)" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">${opcionesBanco}</select>
+        </div>
+        <div style="min-width:150px;">
+            <label style="font-size:11px; font-weight:bold; color:#6b7280; display:block; margin-bottom:3px;">ESTADO</label>
+            <select onchange="window._msiSeguimientoSetFiltro('estado', this.value)" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">${opcionesEstado}</select>
+        </div>
+        <div style="min-width:170px;">
+            <label style="font-size:11px; font-weight:bold; color:#6b7280; display:block; margin-bottom:3px;">ORDENAR POR</label>
+            <select onchange="window._msiSeguimientoSetFiltro('orden', this.value)" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">${opcionesOrden}</select>
+        </div>
+    </div>`;
+
+    if (filtradas.length === 0) {
+        html += `<p style="text-align:center; color:#999; padding:30px;">Ningún producto coincide con estos filtros.</p>`;
+        contenedor.innerHTML = html;
+        return;
+    }
+
+    html += `<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">${filtradas.length} de ${cuentasMSI.length} compra${cuentasMSI.length === 1 ? '' : 's'}</div>`;
+
+    html += filtradas.map(({ c, r }) => {
+        const colorBarra = r.estado === 'Liquidada' ? '#16a34a' : (r.estado === 'Reembolsada' ? '#7c3aed' : '#3498db');
+        const badgeEstado = r.estado === 'Liquidada'
+            ? '<span style="background:#d1fae5; color:#065f46; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">✅ Liquidada</span>'
+            : r.estado === 'Reembolsada'
+                ? '<span style="background:#ede9fe; color:#6b21a8; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">🔄 Reembolsada</span>'
+                : '<span style="background:#dbeafe; color:#1e40af; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">⏳ Activa</span>';
+
+        return `
+        <div onclick="abrirHistorialMSI(${c.id})" style="cursor:pointer; background:white; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin-bottom:10px; display:flex; align-items:center; gap:14px; transition:box-shadow 0.15s;" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow='none'">
+            <div style="flex:2; min-width:140px;">
+                <div style="font-weight:bold; color:#0f172a; font-size:14px;">${c.producto || 'Compra'}</div>
+                <div style="font-size:12px; color:#6b7280;">🏦 ${c.banco} · ${c.fechaCompra ? window.formatearFechaCortaMX(c.fechaCompra) : '—'}</div>
+            </div>
+            <div style="flex:2; min-width:160px;">
+                <div style="display:flex; justify-content:space-between; font-size:11px; color:#6b7280; margin-bottom:3px;">
+                    <span>${dinero(r.yaPagado)} de ${dinero(r.totalDeuda)}</span>
+                    <span style="font-weight:bold;">${r.porcentaje.toFixed(0)}%</span>
+                </div>
+                <div style="background:#e2e8f0; border-radius:4px; height:7px; width:100%;">
+                    <div style="background:${colorBarra}; height:100%; border-radius:4px; width:${r.porcentaje}%;"></div>
+                </div>
+            </div>
+            <div style="flex:1; min-width:100px; text-align:right;">
+                <div style="font-size:11px; color:#6b7280;">Saldo</div>
+                <div style="font-weight:bold; color:${r.saldo > 0 ? '#dc2626' : '#16a34a'};">${dinero(r.saldo)}</div>
+            </div>
+            <div style="min-width:110px; text-align:right;">${badgeEstado}</div>
+        </div>`;
+    }).join('');
 
     contenedor.innerHTML = html;
 }
@@ -948,6 +1013,7 @@ window.confirmarPagoIndividualMSI = function(id, numeroCuota) {
     renderCuentasMSI();
     renderDashboardMSI();
     if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+    if (document.querySelector('[data-modal="historial-msi"]')) abrirHistorialMSI(id);
 };
 
 // ── Deshacer el último pago marcado ──────────────────────────────────────────
@@ -1002,6 +1068,7 @@ function deshacerPagoMSI(id) {
     renderCuentasMSI();
     renderDashboardMSI();
     if (typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
+    if (document.querySelector('[data-modal="historial-msi"]')) abrirHistorialMSI(id);
 }
 
 // ===== CUENTAS BANCARIAS DASHBOARD (LIQUIDEZ) =====
