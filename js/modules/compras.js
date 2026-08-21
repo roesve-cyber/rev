@@ -2289,52 +2289,123 @@ function imprimirOrdenCompra(id) {
     if (!oc) return;
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
-    const rows = oc.articulos.map(a =>
-        `<tr>
-            <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${a.nombre}</td>
-            <td style="padding:8px;border-bottom:1px solid #e5e7eb;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
-            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center;">${a.cantidad}</td>
-            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.costo)}</td>
-            <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">${dinero(a.subtotal)}</td>
+    const esConsignacionOC = oc.condicionesComerciales?.metodoPago === 'consignacion' || oc.esConsignacion === true;
+
+    const rows = (oc.articulos || []).map((a, i) =>
+        `<tr style="background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;">
+                <div style="font-weight:700;color:#0f172a;">${a.nombre}</div>
+                ${a.caracteristicas ? `<div style="color:#64748b;font-size:12px;margin-top:2px;">${a.caracteristicas}</div>` : ''}
+            </td>
+            <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#334155;">${a.cantidad}</td>
+            <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;text-align:right;color:#334155;">${dinero(a.costo)}</td>
+            <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#0f172a;">${dinero(a.subtotal)}</td>
         </tr>`
     ).join('');
-    const ocHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>OC ${oc.folio}</title>
-    <style>body{font-family:Arial,sans-serif;padding:32px;color:#111;}table{width:100%;border-collapse:collapse;}th{background:#f3f4f6;padding:8px;text-align:left;}@media print{button{display:none!important;}}</style>
-    </head><body>
-    <div style="text-align:center;margin-bottom:24px;">
-      <img src="img/Logo.svg" style="height:70px;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
-      <h2 style="margin:8px 0;">${empresa}</h2>
-    </div>
-    <hr>
-    <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
-      <div><strong>ORDEN DE COMPRA</strong><br><span style="font-size:20px;color:#1e40af;">${oc.folio}</span><br><span style="color:${oc.estado==='Enviada'?'#16a34a':'#d97706'}">${oc.estado}</span></div>
-      <div style="text-align:right;">
-        <div>Emisión: ${window.formatearFechaCortaMX(oc.fechaEmision)}</div>
-        ${oc.fechaEntregaEstimada ? `<div>Entrega est.: ${window.formatearFechaCortaMX(oc.fechaEntregaEstimada)}</div>` : ''}
-      </div>
-    </div>
-        <div style="margin-bottom:16px;"><strong>Proveedor:</strong> ${oc.proveedorNombre}</div>
-        <div style="margin-bottom:16px;"><strong>Condiciones comerciales:</strong><br>
-            Forma de pago: <b>${oc.condicionesComerciales?.metodoPago === 'contado' ? 'Contado' : oc.condicionesComerciales?.metodoPago === 'credito' ? 'Crédito Proveedor' : oc.condicionesComerciales?.metodoPago === 'msi' ? 'Meses sin Intereses' : '-'}</b><br>
-            ${oc.condicionesComerciales?.metodoPago === 'msi' ? `Meses: <b>${oc.condicionesComerciales?.meses}</b><br>` : ''}
-            ${oc.condicionesComerciales?.cuentaOrigen ? `Cuenta origen: <b>${oc.condicionesComerciales?.cuentaOrigen}</b><br>` : ''}
+
+    const estadoColor = oc.estado === 'Enviada' ? { bg: '#dcfce7', fg: '#166534' } : { bg: '#fef3c7', fg: '#92400e' };
+
+    const bannerConsignacion = esConsignacionOC ? `
+    <div style="display:flex;align-items:center;gap:10px;background:#f5f3ff;border:1px solid #c4b5fd;border-left:5px solid #7c3aed;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+        <span style="font-size:22px;">📦</span>
+        <div>
+            <div style="font-weight:900;color:#5b21b6;font-size:13px;letter-spacing:.03em;">ORDEN DE COMPRA A CONSIGNACIÓN</div>
+            <div style="color:#6d28d9;font-size:12.5px;">La mercancía se recibe en resguardo — el proveedor solo cobra lo que efectivamente se venda.</div>
         </div>
-        <table>
-            <thead><tr><th>Artículo</th><th>Características</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Costo Unit.</th><th style="text-align:right;">Subtotal</th></tr></thead>
-            <tbody>${rows}</tbody>
-        </table>
-    <div style="text-align:right;margin-top:16px;font-size:20px;font-weight:bold;">TOTAL: ${dinero(oc.total)}</div>
-    ${oc.notas ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:6px;"><strong>Notas:</strong> ${oc.notas}</div>` : ''}
-    <div style="margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px;text-align:center;">
-      <div><div style="border-top:1px solid #374151;padding-top:8px;margin-top:40px;">Firma del Proveedor</div></div>
-      <div><div style="border-top:1px solid #374151;padding-top:8px;margin-top:40px;">Autorizado por</div></div>
+    </div>` : '';
+
+    const condicionesComercialesHtml = esConsignacionOC ? '' : `
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:20px;">
+            <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Condiciones comerciales</div>
+            <div style="color:#0f172a;font-size:13.5px;line-height:1.7;">
+                Forma de pago: <strong>${oc.condicionesComerciales?.metodoPago === 'contado' ? 'Contado' : oc.condicionesComerciales?.metodoPago === 'credito' ? 'Crédito Proveedor' : oc.condicionesComerciales?.metodoPago === 'msi' ? 'Meses sin Intereses' : '—'}</strong><br>
+                ${oc.condicionesComerciales?.metodoPago === 'msi' ? `Meses: <strong>${oc.condicionesComerciales?.meses}</strong><br>` : ''}
+                ${oc.condicionesComerciales?.cuentaOrigen ? `Cuenta origen: <strong>${oc.condicionesComerciales?.cuentaOrigen}</strong>` : ''}
+            </div>
+        </div>`;
+
+    const ocHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>OC ${oc.folio}</title>
+    <style>
+        body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;}
+        table{width:100%;border-collapse:collapse;}
+        @media print{button{display:none!important;}}
+    </style>
+    </head><body>
+    <div style="border-top:6px solid #1e40af;border-radius:4px 4px 0 0;padding-top:22px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:22px;">
+            <div style="display:flex;align-items:center;gap:14px;">
+                <img src="img/Logo.svg" style="height:56px;" onerror="this.style.display='none'">
+                <div>
+                    <div style="font-weight:900;font-size:19px;color:#0f172a;">${empresa}</div>
+                    <div style="color:#64748b;font-size:12px;">Orden de compra a proveedor</div>
+                </div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.06em;">Orden de Compra</div>
+                <div style="font-size:24px;font-weight:900;color:#1e40af;line-height:1.2;">${oc.folio}</div>
+                <span style="display:inline-block;margin-top:4px;padding:3px 12px;border-radius:999px;background:${estadoColor.bg};color:${estadoColor.fg};font-size:11.5px;font-weight:800;">${oc.estado}</span>
+            </div>
+        </div>
+
+        ${bannerConsignacion}
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;">
+                <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Proveedor</div>
+                <div style="font-size:14.5px;font-weight:700;color:#0f172a;">${oc.proveedorNombre}</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;">
+                <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Fechas</div>
+                <div style="font-size:13px;color:#0f172a;line-height:1.6;">
+                    Emisión: <strong>${window.formatearFechaCortaMX(oc.fechaEmision)}</strong><br>
+                    ${oc.fechaEntregaEstimada ? `Entrega est.: <strong>${window.formatearFechaCortaMX(oc.fechaEntregaEstimada)}</strong>` : '<span style="color:#94a3b8;">Sin fecha de entrega estimada</span>'}
+                </div>
+            </div>
+        </div>
+
+        ${condicionesComercialesHtml}
+
+        <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:6px;">
+            <table>
+                <thead>
+                    <tr style="background:#1e293b;">
+                        <th style="padding:11px 12px;text-align:left;color:#f1f5f9;font-size:12px;text-transform:uppercase;letter-spacing:.04em;">Artículo</th>
+                        <th style="padding:11px 12px;text-align:center;color:#f1f5f9;font-size:12px;text-transform:uppercase;letter-spacing:.04em;">Cant.</th>
+                        <th style="padding:11px 12px;text-align:right;color:#f1f5f9;font-size:12px;text-transform:uppercase;letter-spacing:.04em;">Costo Unit.</th>
+                        <th style="padding:11px 12px;text-align:right;color:#f1f5f9;font-size:12px;text-transform:uppercase;letter-spacing:.04em;">Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-bottom:20px;">
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 22px;text-align:right;min-width:220px;">
+                <div style="font-size:11px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.05em;">Total</div>
+                <div style="font-size:24px;font-weight:900;color:#1e3a8a;">${dinero(oc.total)}</div>
+            </div>
+        </div>
+
+        ${oc.notas ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-left:4px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+            <div style="font-size:11px;font-weight:800;color:#92400e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Notas</div>
+            <div style="color:#78350f;font-size:13px;">${oc.notas}</div>
+        </div>` : ''}
+
+        <div style="margin-top:36px;display:grid;grid-template-columns:1fr 1fr;gap:50px;text-align:center;">
+            <div><div style="border-top:1.5px solid #94a3b8;padding-top:8px;margin-top:44px;color:#475569;font-size:12.5px;font-weight:600;">Firma del Proveedor</div></div>
+            <div><div style="border-top:1.5px solid #94a3b8;padding-top:8px;margin-top:44px;color:#475569;font-size:12.5px;font-weight:600;">Autorizado por</div></div>
+        </div>
+
+        <div style="margin-top:26px;padding-top:12px;border-top:1px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:10.5px;">
+            ${empresa} · Documento generado el ${window.formatearFechaCortaMX(new Date())}
+        </div>
     </div>
-    <div style="text-align:center;margin-top:12px;">
-      <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-size:15px;">🖨️ Imprimir</button>
+    <div style="text-align:center;margin-top:16px;">
+      <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
     if (window.TicketService?.elegirFormato) {
-        const pageSize = (oc.articulos || []).length <= 4 && !oc.notas ? 'half-letter' : 'letter';
+        const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC ? 'half-letter' : 'letter';
         window.TicketService.elegirFormato({
             html: ocHTML,
             title: `Orden de Compra ${oc.folio}`,
@@ -2344,7 +2415,7 @@ function imprimirOrdenCompra(id) {
         return;
     }
     if (window.TicketService?.openDocument) {
-        const pageSize = (oc.articulos || []).length <= 4 && !oc.notas ? 'half-letter' : 'letter';
+        const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC ? 'half-letter' : 'letter';
         window.TicketService.openDocument(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}`, pageSize });
         return;
     }

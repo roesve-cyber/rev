@@ -497,9 +497,13 @@ function abrirPickerClienteVenta() {
         onNuevo: () => abrirModalNuevoCliente({ seleccionar: true }),
         onSeleccion: (cliente) => {
             window.clienteSeleccionado = cliente;
-            renderSeleccionClienteVenta();
-            renderResumenVentaCliente();
-            mostrarInfoCliente();
+            if (typeof window._actualizarPanelClienteCarrito === 'function') {
+                window._actualizarPanelClienteCarrito();
+            } else {
+                renderSeleccionClienteVenta();
+                renderResumenVentaCliente();
+                mostrarInfoCliente();
+            }
         }
     });
 }
@@ -746,9 +750,13 @@ function guardarClienteDesdeModal() {
     document.querySelector('[data-modal="nuevo-cliente"]')?.remove();
     if (seleccionarVentaModal && autoSeleccionarModal) {
         window.clienteSeleccionado = nuevo;
-        renderSeleccionClienteVenta();
-        renderResumenVentaCliente();
-        mostrarInfoCliente();
+        if (typeof window._actualizarPanelClienteCarrito === 'function') {
+            window._actualizarPanelClienteCarrito();
+        } else {
+            renderSeleccionClienteVenta();
+            renderResumenVentaCliente();
+            mostrarInfoCliente();
+        }
     } else {
         cargarClientesSelect();
     }

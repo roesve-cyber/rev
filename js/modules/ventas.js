@@ -414,25 +414,223 @@ function agregarProductoDesdeCarrito() {
         titulo: '🔍 Agregar producto al carrito',
         onSeleccion: function (p) {
             agregarAlCarrito(p.id);
-            renderCarrito();
+            _carritoTrasCambio();
         }
     });
 }
+
+// ===== ESTADO DE SESIÓN DE PAGO =====
+// window._ventaSesionPagoActiva controla cuándo se reinician método de
+// pago/enganche/plan a sus valores por defecto. Solo debe pasar UNA vez por
+// venta (cuando el carrito arranca de cero), nunca cada vez que se toca una
+// cantidad, un precio o se agrega un producto más — antes cualquiera de esos
+// cambios volvía a poner "Contado" y borraba el plan de crédito que el
+// vendedor ya había armado, que era la principal fuente de fricción.
+function _ventaResetEstadoPago() {
+    const cuentaDefaultVenta = _ventaCuentaEfectivoDefault();
+    window._estadoPago = {
+        metodo: "contado",
+        enganche: 0,
+        periodicidad: "semanal",
+        modoEnganche: "efectivo",
+        cuentaReceptora: cuentaDefaultVenta.cuentaId,
+        etiquetaCuenta: cuentaDefaultVenta.etiqueta,
+        planIndex: null,
+        plan: null,
+        apartadoFechaCompromiso: _fechaInputDesdeHoy(30),
+        apartadoCondiciones: _condicionesApartadoDefault()
+    };
+    plazoSeleccionado = null;
+    window._ventaSesionPagoActiva = true;
+}
+
+// Segmented control táctil: pinta el botón activo de un grupo de pastillas.
+function _ventaResaltarSegmento(contId, valorActivo) {
+    const cont = document.getElementById(contId);
+    if (!cont) return;
+    cont.querySelectorAll('[data-val]').forEach(btn => {
+        const activo = btn.getAttribute('data-val') === String(valorActivo);
+        btn.style.background = activo ? btn.getAttribute('data-color') : '#f1f5f9';
+        btn.style.color = activo ? '#ffffff' : '#475569';
+        btn.style.boxShadow = activo ? '0 3px 8px rgba(0,0,0,.18)' : 'none';
+        btn.style.transform = activo ? 'translateY(-1px)' : 'none';
+    });
+}
+
+window._ventaSetMetodoPago = function(valor) {
+    const sel = document.getElementById('selMetodoPago');
+    if (sel) sel.value = valor;
+    _ventaResaltarSegmento('segMetodoPago', valor);
+    actualizarInterfazPago();
+};
+
+window._ventaSetPeriodicidad = function(valor) {
+    const sel = document.getElementById('selPeriodicidad');
+    if (sel) sel.value = valor;
+    _ventaResaltarSegmento('segPeriodicidad', valor);
+    actualizarInterfazPago();
+};
+
+// Refresca SOLO la lista de productos y el total tras agregar/quitar/editar
+// un artículo — sin tocar el panel de pago ni el cliente ya elegidos.
+function _refrescarListaCarrito() {
+    const cont = document.getElementById('listaProductosCarrito');
+    if (cont) cont.innerHTML = _renderListaProductosCarrito();
+    const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    const totalEl = document.getElementById('totalMercanciaCarrito');
+    if (totalEl) totalEl.textContent = dinero(totalContado);
+    const badge = document.getElementById('badgeItemsCarrito');
+    if (badge) badge.textContent = `${carrito.reduce((s, p) => s + (p.cantidad || 1), 0)} pza(s)`;
+    if (typeof actualizarInterfazPago === 'function') actualizarInterfazPago();
+}
+
+// Punto único tras cualquier cambio al carrito: si el panel completo todavía
+// no existe (carrito estaba vacío) hace un render completo; si el carrito
+// se vació, reinicia la sesión de pago; si no, solo refresca la lista.
+function _carritoTrasCambio() {
+    if (!document.getElementById('listaProductosCarrito')) {
+        renderCarrito();
+    } else if (carrito.length === 0) {
+        window._ventaSesionPagoActiva = false;
+        renderCarrito();
+    } else {
+        _refrescarListaCarrito();
+    }
+}
+
+function _carritoEliminarItem(index) {
+    eliminarDelCarrito(index);
+    _carritoTrasCambio();
+}
+
+// Tarjetas táctiles de producto (reemplaza la tabla apretada de antes):
+// stepper grande de cantidad, color como campo con sugerencias, y precio
+// editable solo para admin.
+function _renderListaProductosCarrito() {
+    const esAdmin = _esAdmin();
+    return carrito.map((p, index) => {
+        const cantidad = p.cantidad || 1;
+        const prod = productos.find(prod => prod.id === p.id);
+        const stock = prod ? (prod.stock || 0) : 0;
+        const colorStock = stock > 0 ? "#16a34a" : "#dc2626";
+        const textoStock = stock > 0 ? `${stock} en stock` : "Sin stock";
+
+        const coloresDisp = obtenerColoresDisponibles(p.id);
+        const colorSeleccionado = p.colorElegido || '';
+        const opcionesDatalist = coloresDisp.map(c => `<option value="${_escapeHtml(c.color)}">`).join('');
+
+        const subtotal = (p.precioContado || 0) * cantidad;
+
+        return `
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:14px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 4px rgba(15,23,42,.05);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+                <div style="min-width:0;">
+                    <strong style="font-size:15px;color:#0f172a;display:block;word-break:break-word;">${_escapeHtml(p.nombre)}</strong>
+                    <span style="font-size:12px;font-weight:bold;color:${colorStock};">${textoStock}</span>
+                </div>
+                <button onclick="_carritoEliminarItem(${index})" title="Quitar"
+                    style="flex-shrink:0;width:40px;height:40px;background:#fef2f2;color:#dc2626;border:none;border-radius:10px;cursor:pointer;font-size:18px;line-height:1;">🗑️</button>
+            </div>
+
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px;">
+                <div style="flex:1;min-width:130px;">
+                    <label style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px;">Color</label>
+                    <input type="text" list="colores-${index}" value="${_escapeHtml(colorSeleccionado)}"
+                        onchange="actualizarColorCarrito(${index}, this.value)"
+                        placeholder="Ej. Blanco"
+                        style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;box-sizing:border-box;">
+                    <datalist id="colores-${index}">${opcionesDatalist}</datalist>
+                </div>
+
+                <div>
+                    <label style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px;text-align:center;">Piezas</label>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <button onclick="actualizarCantidadCarrito(${index}, ${Math.max(1, cantidad - 1)})"
+                            style="width:40px;height:40px;border:none;border-radius:10px;background:#f1f5f9;color:#334155;font-size:20px;font-weight:900;cursor:pointer;">−</button>
+                        <input type="number" min="1" max="99" value="${cantidad}"
+                            onchange="actualizarCantidadCarrito(${index}, this.value)"
+                            style="width:46px;height:40px;text-align:center;border:1px solid #d1d5db;border-radius:10px;font-size:15px;font-weight:bold;box-sizing:border-box;">
+                        <button onclick="actualizarCantidadCarrito(${index}, ${cantidad + 1})"
+                            style="width:40px;height:40px;border:none;border-radius:10px;background:#f1f5f9;color:#334155;font-size:20px;font-weight:900;cursor:pointer;">+</button>
+                    </div>
+                </div>
+
+                <div style="text-align:right;min-width:100px;">
+                    <label style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px;">Subtotal</label>
+                    ${esAdmin ? `
+                        <input type="number" value="${p.precioContado || 0}"
+                            onchange="cambiarPrecioCarrito(${index}, this.value)"
+                            style="width:100px;padding:8px;text-align:right;border:1px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box;">
+                        <div style="font-size:15px;font-weight:900;color:#16a34a;margin-top:3px;">${dinero(subtotal)}</div>
+                    ` : `<div style="font-size:16px;font-weight:900;color:#16a34a;">${dinero(subtotal)}</div>`}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// Panel de cliente embebido — nada de navegar a otra pantalla. Se reutiliza
+// tal cual desde clientes.js (_actualizarPanelClienteCarrito) cada vez que
+// se elige o crea un cliente, así que #infoCliente y mostrarInfoCliente()
+// deben seguir funcionando exactamente igual que antes.
+function _clienteCardHtml() {
+    const c = window.clienteSeleccionado || null;
+    return `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${c ? '10px' : '0'};">
+            <span style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">👤 Cliente</span>
+            ${c ? `<button onclick="abrirPickerClienteVenta()" style="padding:6px 12px;background:#eff6ff;color:#1e40af;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">Cambiar</button>` : ''}
+        </div>
+        ${c ? `<div id="infoCliente"></div>` : `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <button onclick="abrirPickerClienteVenta()" style="padding:14px 8px;background:#2563eb;color:white;border:none;border-radius:10px;font-weight:bold;font-size:13px;cursor:pointer;">🔍 Buscar</button>
+                <button onclick="abrirModalNuevoCliente({seleccionar:true})" style="padding:14px 8px;background:#0f766e;color:white;border:none;border-radius:10px;font-weight:bold;font-size:13px;cursor:pointer;">➕ Nuevo</button>
+            </div>`}
+    `;
+}
+
+// Botón grande e inferior (sticky): si falta cliente, invita a elegirlo; si
+// ya hay uno, cobra directo — un solo botón, un solo significado a la vez.
+function _botonCobrarHtml() {
+    const c = window.clienteSeleccionado;
+    const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    if (!c) {
+        return `<button onclick="abrirPickerClienteVenta()" style="width:100%;padding:17px;background:#94a3b8;color:white;border:none;border-radius:12px;cursor:pointer;font-weight:900;font-size:15px;">👤 Selecciona un cliente para cobrar</button>`;
+    }
+    return `<button onclick="confirmarVentaFinal()" style="width:100%;padding:17px;background:#16a34a;color:white;border:none;border-radius:12px;cursor:pointer;font-weight:900;font-size:16px;letter-spacing:.02em;box-shadow:0 4px 10px rgba(22,163,74,.3);">💰 Cobrar ${dinero(totalContado)}</button>`;
+}
+
+function _actualizarBotonCobrar() {
+    const cont = document.getElementById('botonCobrarCarrito');
+    if (cont) cont.innerHTML = _botonCobrarHtml();
+}
+
+// Llamado por clientes.js cada vez que se elige/crea un cliente para la
+// venta: actualiza SOLO la tarjeta de cliente y el botón de cobrar, sin
+// reconstruir el resto del panel (que ya tiene método de pago, enganche,
+// plan, etc. configurados por el vendedor).
+function _actualizarPanelClienteCarrito() {
+    const cont = document.getElementById('panelClienteCarrito');
+    if (cont) cont.innerHTML = _clienteCardHtml();
+    if (window.clienteSeleccionado && typeof mostrarInfoCliente === 'function') mostrarInfoCliente();
+    _actualizarBotonCobrar();
+}
+window._actualizarPanelClienteCarrito = _actualizarPanelClienteCarrito;
 
 // ===== CARRITO =====
 function renderCarrito() {
     const vistaCarrito = document.getElementById("carrito");
     if (!vistaCarrito) return;
 
-    // Detectar admin
     const esAdmin = _esAdmin();
 
     if (carrito.length === 0) {
+        window._ventaSesionPagoActiva = false;
         vistaCarrito.innerHTML = `
             <div class="header-seccion"><h2>Carrito de Ventas</h2></div>
-            <div style="text-align:center; padding:40px; color:#718096; background:white; border-radius:8px;">
-                <p style="margin:0 0 16px;">El carrito está vacío.</p>
-                <button onclick="agregarProductoDesdeCarrito()" style="padding:11px 18px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:14px;">🔍 Agregar producto</button>
+            <div style="text-align:center; padding:50px 20px; color:#64748b; background:white; border-radius:14px;">
+                <div style="font-size:38px;margin-bottom:8px;">🛒</div>
+                <p style="margin:0 0 18px;">El carrito está vacío.</p>
+                <button onclick="agregarProductoDesdeCarrito()" style="padding:14px 24px; background:#1e40af; color:white; border:none; border-radius:12px; cursor:pointer; font-weight:bold; font-size:15px;">🔍 Agregar producto</button>
             </div>`;
         actualizarContadorCarrito();
         return;
@@ -449,232 +647,165 @@ function renderCarrito() {
 
     StorageService.set("carrito", carrito);
 
-    let totalContado = carrito.reduce((sum, p) => 
-        sum + (p.precioContado || 0) * (p.cantidad || 1), 0
-    );
+    const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    const piezasTotales = carrito.reduce((s, p) => s + (p.cantidad || 1), 0);
+
     const vendedorSesion = _ventaVendedorAsignadoSesion();
     const vendedoresActivos = StorageService.get("vendedores", []).filter(v => v.activo !== false);
     const vendedorControlHtml = esAdmin
         ? `
-                <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Vendedor</label>
-                    <select id="selVendedor" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
+                <div style="margin-bottom:14px;">
+                    <label style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:5px;">Vendedor</label>
+                    <select id="selVendedor" style="width:100%; padding:11px; border:1px solid #d1d5db; border-radius:10px; font-size:14px;">
                         <option value="">-- Sin vendedor asignado --</option>
                         ${vendedoresActivos.map(v => `<option value="${v.id}" ${window._vendedorSeleccionado && String(window._vendedorSeleccionado.id) === String(v.id) ? 'selected' : ''}>${_escapeHtml(v.nombre)}</option>`).join('')}
                     </select>
                 </div>`
         : `
-                <div style="margin-bottom:12px; padding:10px 12px; background:${vendedorSesion ? '#f0fdf4' : '#fff7ed'}; border:1px solid ${vendedorSesion ? '#bbf7d0' : '#fed7aa'}; border-radius:8px;">
-                    <div style="font-size:11px; font-weight:bold; color:${vendedorSesion ? '#166534' : '#92400e'}; margin-bottom:3px;">Vendedor asignado</div>
-                    <div style="font-size:14px; font-weight:800; color:${vendedorSesion ? '#14532d' : '#9a3412'};">${vendedorSesion ? _escapeHtml(vendedorSesion.nombre) : 'Sin vínculo de vendedor'}</div>
+                <div style="margin-bottom:14px; padding:12px 14px; background:${vendedorSesion ? '#f0fdf4' : '#fff7ed'}; border:1px solid ${vendedorSesion ? '#bbf7d0' : '#fed7aa'}; border-radius:12px;">
+                    <div style="font-size:11px; font-weight:800; color:${vendedorSesion ? '#166534' : '#92400e'};">VENDEDOR ASIGNADO</div>
+                    <div style="font-size:15px; font-weight:800; color:${vendedorSesion ? '#14532d' : '#9a3412'};">${vendedorSesion ? _escapeHtml(vendedorSesion.nombre) : 'Sin vínculo de vendedor'}</div>
                     ${vendedorSesion ? '' : '<div style="font-size:11px;color:#92400e;margin-top:4px;">Pide al administrador vincular tu usuario con un vendedor.</div>'}
                 </div>`;
 
-    let html = `
-        <div class="header-seccion" style="margin-bottom: 20px;">
-            <h2>Carrito de Ventas</h2>
+    const segMetodo = [
+        { val: 'contado', label: '💵 Contado', color: '#16a34a' },
+        { val: 'transferencia', label: '🏦 Transferencia', color: '#2563eb' },
+        { val: 'credito', label: '💳 Crédito', color: '#7c3aed' },
+        { val: 'apartado', label: '📦 Apartado', color: '#d97706' }
+    ];
+    const metodoActual = window._estadoPago?.metodo || 'contado';
+    const segMetodoHtml = `
+        <div id="segMetodoPago" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            ${segMetodo.map(m => `<button type="button" data-val="${m.val}" data-color="${m.color}" onclick="_ventaSetMetodoPago('${m.val}')"
+                style="padding:13px 6px;border:none;border-radius:11px;font-weight:800;font-size:13px;cursor:pointer;background:${metodoActual === m.val ? m.color : '#f1f5f9'};color:${metodoActual === m.val ? '#fff' : '#475569'};box-shadow:${metodoActual === m.val ? '0 3px 8px rgba(0,0,0,.18)' : 'none'};">${m.label}</button>`).join('')}
         </div>
-        
-        <div style="display:grid; grid-template-columns: 1.8fr 1.2fr; gap: 20px; align-items: start;">
-            
-            <div style="background:white; padding:20px; border-radius:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
-                    <h3 style="margin:0;">Productos seleccionados</h3>
-                    <button onclick="agregarProductoDesdeCarrito()" style="padding:9px 14px; background:#1e40af; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">🔍 Agregar producto</button>
+        <select id="selMetodoPago" style="display:none;">
+            <option value="contado">Contado</option>
+            <option value="transferencia">Transferencia / Depósito</option>
+            <option value="credito">Crédito</option>
+            <option value="apartado">Apartado</option>
+        </select>`;
+
+    const segPeriodo = [
+        { val: 'semanal', label: 'Semanal' },
+        { val: 'quincenal', label: 'Quincenal' },
+        { val: 'mensual', label: 'Mensual' }
+    ];
+    const periodoActual = window._estadoPago?.periodicidad || 'semanal';
+    const segPeriodoHtml = `
+        <div id="segPeriodicidad" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            ${segPeriodo.map(p => `<button type="button" data-val="${p.val}" data-color="#7c3aed" onclick="_ventaSetPeriodicidad('${p.val}')"
+                style="padding:11px 4px;border:none;border-radius:10px;font-weight:800;font-size:12px;cursor:pointer;background:${periodoActual === p.val ? '#7c3aed' : '#f1f5f9'};color:${periodoActual === p.val ? '#fff' : '#475569'};">${p.label}</button>`).join('')}
+        </div>
+        <select id="selPeriodicidad" style="display:none;">
+            <option value="semanal">Semanal</option>
+            <option value="quincenal">Quincenal</option>
+            <option value="mensual">Mensual</option>
+        </select>`;
+
+    const html = `
+        <div class="header-seccion" style="margin-bottom: 16px;">
+            <h2>🛒 Punto de Venta</h2>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1.6fr 1fr; gap: 18px; align-items: start;">
+
+            <!-- COLUMNA IZQUIERDA: PRODUCTOS -->
+            <div>
+                <div style="background:white; padding:16px; border-radius:14px; margin-bottom:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+                        <h3 style="margin:0;font-size:15px;">Productos <span id="badgeItemsCarrito" style="font-weight:normal;color:#64748b;font-size:13px;">${piezasTotales} pza(s)</span></h3>
+                        <button onclick="agregarProductoDesdeCarrito()" style="padding:11px 16px; background:#1e40af; color:white; border:none; border-radius:11px; cursor:pointer; font-weight:bold; font-size:13px;">🔍 Agregar producto</button>
+                    </div>
+                    <div id="listaProductosCarrito">${_renderListaProductosCarrito()}</div>
                 </div>
-                <table class="tabla-admin">
-                    <thead>
-                        <tr>
-                            <th>Producto</th>
-                            <th style="text-align:center;">Stock</th>
-                            <th style="text-align:center;">Color</th>
-                            <th style="text-align:center;">Piezas</th>
-                            <th style="text-align:right;">Precio</th>
-                            <th style="text-align:center;">Acción</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-    `;
-
-    carrito.forEach((p, index) => {
-        let cantidad = p.cantidad || 1;
-        const prod = productos.find(prod => prod.id === p.id);
-        const stock = prod ? (prod.stock || 0) : 0;
-        const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
-        const textoStock = stock > 0 ? stock : "Sin stock";
-
-        // === LGICA DE COLOR (TEXTO LIBRE CON SUGERENCIAS) ===
-        const coloresDisp = obtenerColoresDisponibles(p.id);
-        const colorSeleccionado = p.colorElegido || '';
-        
-        // Creamos sugerencias (datalist) por si ya hay colores registrados
-        let opcionesDatalist = coloresDisp.map(c => `<option value="${_escapeHtml(c.color)}">`).join('');
-        
-        let colorCell = `
-            <input type="text" list="colores-${index}" value="${_escapeHtml(colorSeleccionado)}" 
-                onchange="actualizarColorCarrito(${index}, this.value)"
-                placeholder="Escribe color..."
-                style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:12px; text-align:center;">
-            <datalist id="colores-${index}">
-                ${opcionesDatalist}
-            </datalist>
-        `;
-
-        html += `
-            <tr>
-                <td><strong>${p.nombre}</strong></td>
-
-                <td style="text-align:center; font-weight:bold; color:${colorStock};">
-                    ${textoStock}
-                </td>
-
-                <td style="text-align:center; min-width:110px;">
-                    ${colorCell}
-                </td>
-
-                <td style="text-align:center;">
-                    <input type="number" min="1" max="99" value="${cantidad}" 
-                        onchange="actualizarCantidadCarrito(${index}, this.value)"
-                        style="width:50px; padding:6px; text-align:center; border:1px solid #ddd; border-radius:4px;">
-                </td>
-
-                <td style="text-align:right; font-weight:bold; color:#27ae60;">
-                    ${
-                        esAdmin
-                        ? `
-                        <input type="number" value="${p.precioContado || 0}" 
-                            onchange="cambiarPrecioCarrito(${index}, this.value)"
-                            style="width:80px; padding:5px; text-align:right; border:1px solid #ddd; border-radius:4px;">
-                        <br>
-                        <small>${dinero((p.precioContado || 0) * cantidad)}</small>
-                        `
-                        : dinero((p.precioContado || 0) * cantidad)
-                    }
-                </td>
-
-                <td style="text-align:center;">
-                    <button onclick="eliminarDelCarrito(${index}); renderCarrito();" 
-                        style="background:#fed7d7; color:#c53030; border:none; padding:8px; border-radius:5px; cursor:pointer;">
-                        </button>
-                </td>
-            </tr>
-        `;
-    });
-
-    html += `
-                    </tbody>
-                </table>
             </div>
 
-            <div style="background:white; padding:20px; border-radius:10px;">
-                <h3 style="margin:0 0 15px 0;">Resumen</h3>
+            <!-- COLUMNA DERECHA: PAGO Y CLIENTE -->
+            <div style="position:sticky; top:10px;">
+                <div style="background:white; padding:18px; border-radius:14px; margin-bottom:14px;">
+                    <div style="text-align:center; margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid #f1f5f9;">
+                        <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px;">Total mercancía</div>
+                        <strong id="totalMercanciaCarrito" style="font-size:30px; color:#0f172a;">${dinero(totalContado)}</strong>
+                    </div>
 
-                <div style="text-align:center; margin-bottom:20px;">
-                    <div style="font-size:11px; color:#718096; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Total mercancía</div>
-                    <strong style="font-size:26px; color:#2d3748;">${dinero(totalContado)}</strong>
+                    <div id="panelClienteCarrito" style="margin-bottom:16px; padding:14px; background:#f8fafc; border-radius:12px; border:1px solid #e2e8f0;">
+                        ${_clienteCardHtml()}
+                    </div>
+
+                    ${vendedorControlHtml}
+
+                    <div style="margin-bottom:14px;">
+                        <label style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;">Método de pago</label>
+                        ${segMetodoHtml}
+                    </div>
+
+                    <div id="divEnganche" class="oculto" style="margin-bottom:14px;">
+                        <label style="font-size:11px; font-weight:800; color:#92400e; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:5px;">Enganche inicial</label>
+                        <input type="number" id="numEnganche" min="0" step="50" value="0"
+                               onchange="actualizarInterfazPago()"
+                               oninput="actualizarInterfazPago()"
+                               placeholder="0.00"
+                               style="width:100%; padding:13px; border:2px solid #f59e0b; border-radius:11px; font-size:18px; font-weight:bold; color:#92400e; box-sizing:border-box; text-align:right;">
+                        <div style="font-size:11px; color:#92400e; margin-top:4px;">Monto que paga el cliente hoy</div>
+                    </div>
+
+                    <div id="divCondicionesApartado" class="oculto" style="margin-bottom:14px; padding:14px; background:#fffbeb; border:1px solid #fcd34d; border-radius:12px;">
+                        <label style="font-size:11px; font-weight:800; color:#92400e; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:5px;">Fecha compromiso de liquidación</label>
+                        <input type="date" id="fechaCompromisoApartado"
+                               onchange="actualizarInterfazPago()"
+                               style="width:100%; padding:11px; border:1px solid #f59e0b; border-radius:10px; font-size:14px; box-sizing:border-box; margin-bottom:10px;">
+                        <label style="font-size:11px; font-weight:800; color:#92400e; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:5px;">Condiciones que acepta el cliente</label>
+                        <textarea id="condicionesApartado"
+                                  oninput="actualizarInterfazPago()"
+                                  style="width:100%; min-height:100px; padding:11px; border:1px solid #f59e0b; border-radius:10px; font-size:12px; box-sizing:border-box; resize:vertical;"></textarea>
+                    </div>
+
+                    <div id="divPeriodicidad" class="oculto" style="margin-bottom:14px;">
+                        <label style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;">Periodicidad de abonos</label>
+                        ${segPeriodoHtml}
+                    </div>
+
+                    <div id="divSelectorUniversal" class="oculto" style="margin-bottom:14px; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px;">
+                        <label style="font-size:12px; font-weight:800; color:#166534; display:block; margin-bottom:7px;">¿A qué caja o cuenta ingresa el dinero hoy?</label>
+                        ${window._buildSelectorCuentas ? window._buildSelectorCuentas('cuentaReceptora_venta', false) : '<select id="cuentaReceptora_venta" style="width:100%;padding:11px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;"><option value="efectivo">Efectivo Principal</option></select>'}
+                    </div>
+
+                    <div id="resultadosPago" style="margin-bottom:14px;"></div>
+
+                    <div style="margin-bottom:14px;">
+                        <label style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:5px;">Fecha de venta</label>
+                        <input type="date" id="inputFechaVenta"
+                               style="width:100%; padding:11px; border:1px solid #d1d5db; border-radius:10px; font-size:14px; font-weight:bold; box-sizing:border-box;"
+                               value="${window.obtenerHoyInputMX()}">
+                    </div>
+
+                    <div id="botonCobrarCarrito">${_botonCobrarHtml()}</div>
                 </div>
-
-                <!-- VENDEDOR -->
-                ${vendedorControlHtml}
-
-                <!-- MÉTODO DE PAGO -->
-                <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Método de pago</label>
-                    <select id="selMetodoPago"
-                            onchange="actualizarInterfazPago();"
-                            style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold;">
-                        <option value="contado">Contado</option>
-                        <option value="transferencia">Transferencia / Depósito</option>
-                        <option value="credito">Crédito</option>
-                        <option value="apartado">Apartado</option>
-                    </select>
-                </div>
-
-                <!-- ENGANCHE (visible para crédito y apartado) -->
-                <div id="divEnganche" class="oculto" style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Enganche inicial</label>
-                    <input type="number" id="numEnganche" min="0" step="50" value="0"
-                           onchange="actualizarInterfazPago()"
-                           oninput="actualizarInterfazPago()"
-                           placeholder="0.00"
-                           style="width:100%; padding:9px; border:2px solid #f59e0b; border-radius:6px; font-size:16px; font-weight:bold; color:#92400e; box-sizing:border-box; text-align:right;">
-                    <div style="font-size:11px; color:#92400e; margin-top:3px;">Monto que paga el cliente hoy</div>
-                </div>
-
-                <div id="divCondicionesApartado" class="oculto" style="margin-bottom:12px; padding:12px; background:#fffbeb; border:1px solid #fcd34d; border-radius:8px;">
-                    <label style="font-size:12px; font-weight:bold; color:#92400e; display:block; margin-bottom:4px;">Fecha compromiso de liquidación</label>
-                    <input type="date" id="fechaCompromisoApartado"
-                           onchange="actualizarInterfazPago()"
-                           style="width:100%; padding:9px; border:1px solid #f59e0b; border-radius:6px; font-size:14px; box-sizing:border-box; margin-bottom:10px;">
-                    <label style="font-size:12px; font-weight:bold; color:#92400e; display:block; margin-bottom:4px;">Condiciones que acepta el cliente</label>
-                    <textarea id="condicionesApartado"
-                              oninput="actualizarInterfazPago()"
-                              style="width:100%; min-height:110px; padding:9px; border:1px solid #f59e0b; border-radius:6px; font-size:12px; box-sizing:border-box; resize:vertical;"></textarea>
-                </div>
-
-                <!-- PERIODICIDAD (solo crédito) -->
-                <div id="divPeriodicidad" class="oculto" style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Periodicidad de abonos</label>
-                    <select id="selPeriodicidad"
-                            onchange="actualizarInterfazPago()"
-                            style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;">
-                        <option value="semanal">Semanal</option>
-                        <option value="quincenal">Quincenal</option>
-                        <option value="mensual">Mensual</option>
-                    </select>
-                </div>
-
-                <!-- ENCHUFE UNIVERSAL DE CAJAS/BANCOS -->
-                <div id="divSelectorUniversal" class="oculto" style="margin-bottom:12px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
-                    <label style="font-size:13px; font-weight:bold; color:#166534; display:block; margin-bottom:6px;">¿A qué caja o cuenta ingresa el dinero hoy?</label>
-                    ${window._buildSelectorCuentas ? window._buildSelectorCuentas('cuentaReceptora_venta', false) : '<select id="cuentaReceptora_venta" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">Efectivo Principal</option></select>'}
-                </div>
-
-                <!-- RESULTADOS DEL PLAN -->
-                <div id="resultadosPago" style="margin-bottom:12px;"></div>
-
-                <!-- NOTA DE INVENTARIO AUTOMÁTICO -->
-                <div style="background:#eff6ff; padding:10px; border-radius:6px; margin-bottom:16px; font-size:12px; border:1px solid #bfdbfe; color:#1e40af;">
-                    <strong>Inventario automático:</strong> Si hay stock se preguntará si se entrega; si no hay stock se genera requisición de compra automáticamente.
-                </div>
-
-                <!-- FECHA DE VENTA -->
-                <div style="margin-bottom:12px;">
-                    <label style="font-size:12px; font-weight:bold; color:#374151; display:block; margin-bottom:4px;">Fecha de venta</label>
-                    <input type="date" id="inputFechaVenta"
-                           style="width:100%; padding:9px; border:2px solid #d1d5db; border-radius:6px; font-size:14px; font-weight:bold; box-sizing:border-box;"
-                           value="${window.obtenerHoyInputMX()}">
-                </div>
-
-                <button onclick="irASeleccionCliente()"
-                    style="width:100%; padding:14px; background:#27ae60; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:15px; letter-spacing:0.5px;">
-                    Seleccionar cliente 
-                </button>
             </div>
         </div>
     `;
 
     vistaCarrito.innerHTML = html;
-    
-    // Resetear estado de pago al renderizar el carrito
-    const cuentaDefaultVenta = _ventaCuentaEfectivoDefault();
-    window._estadoPago = {
-        metodo: "contado",
-        enganche: 0,
-        periodicidad: "semanal",
-        modoEnganche: "efectivo",
-        cuentaReceptora: cuentaDefaultVenta.cuentaId,
-        etiquetaCuenta: cuentaDefaultVenta.etiqueta,
-        planIndex: null,
-        plan: null,
-        apartadoFechaCompromiso: _fechaInputDesdeHoy(30),
-        apartadoCondiciones: _condicionesApartadoDefault()
-    };
-    plazoSeleccionado = null;
+
+    if (!window._ventaSesionPagoActiva) {
+        _ventaResetEstadoPago();
+    }
+
     const fechaCompromisoEl = document.getElementById("fechaCompromisoApartado");
     if (fechaCompromisoEl) fechaCompromisoEl.value = window._estadoPago.apartadoFechaCompromiso;
     const condicionesEl = document.getElementById("condicionesApartado");
     if (condicionesEl) condicionesEl.value = window._estadoPago.apartadoCondiciones;
+    const selMetodoEl = document.getElementById("selMetodoPago");
+    if (selMetodoEl) selMetodoEl.value = window._estadoPago.metodo || 'contado';
+    const selPeriodoEl = document.getElementById("selPeriodicidad");
+    if (selPeriodoEl) selPeriodoEl.value = window._estadoPago.periodicidad || 'semanal';
+    const numEngancheEl = document.getElementById("numEnganche");
+    if (numEngancheEl) numEngancheEl.value = window._estadoPago.enganche || 0;
+
+    if (window.clienteSeleccionado && typeof mostrarInfoCliente === 'function') mostrarInfoCliente();
+
     setTimeout(() => actualizarInterfazPago(), 30);
 }
 
@@ -687,7 +818,7 @@ function cambiarPrecioCarrito(index, nuevoPrecio) {
     if (isNaN(nuevoPrecio) || nuevoPrecio <= 0) return;
     carrito[index].precioContado = nuevoPrecio;
     StorageService.set("carrito", carrito);
-    renderCarrito();
+    _carritoTrasCambio();
 }
 
 function actualizarCantidadCarrito(index, nuevaCantidad) {
@@ -701,7 +832,7 @@ function actualizarCantidadCarrito(index, nuevaCantidad) {
         if (!StorageService.set("carrito", carrito)) {
             console.error("Error actualizando cantidad");
         }
-        renderCarrito();
+        _carritoTrasCambio();
     }
 }
 
@@ -1166,13 +1297,18 @@ function actualizarInterfazPago() {
     let html = "";
 
     if (metodo === "contado" || metodo === "transferencia") {
-        html = `<p><strong>Total a pagar:</strong> ${dinero(totalContado)}</p>`;
+        html = `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px;text-align:center;">
+            <div style="font-size:11px;color:#166534;font-weight:800;text-transform:uppercase;">Total a pagar</div>
+            <strong style="font-size:22px;color:#14532d;">${dinero(totalContado)}</strong>
+        </div>`;
     }
 
     if (metodo === "apartado") {
         html = `
-            <p>Enganche: <strong>${dinero(enganche)}</strong></p>
-            <p>Saldo pendiente: <strong>${dinero(saldo)}</strong></p>
+            <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:14px;display:flex;justify-content:space-around;text-align:center;">
+                <div><div style="font-size:11px;color:#92400e;font-weight:800;">ENGANCHE</div><strong style="font-size:17px;color:#78350f;">${dinero(enganche)}</strong></div>
+                <div><div style="font-size:11px;color:#92400e;font-weight:800;">SALDO PENDIENTE</div><strong style="font-size:17px;color:#78350f;">${dinero(saldo)}</strong></div>
+            </div>
         `;
     }
 
@@ -1185,24 +1321,24 @@ function actualizarInterfazPago() {
         }
 
         html = `
-        <p>Enganche: <strong>${dinero(enganche)}</strong></p>
-        <p>Saldo financiado: <strong>${dinero(saldo)}</strong></p>
-        <hr>
-        <p><strong>Selecciona un plan:</strong></p>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px;display:flex;justify-content:space-around;text-align:center;margin-bottom:12px;">
+            <div><div style="font-size:11px;color:#1e40af;font-weight:800;">ENGANCHE</div><strong style="font-size:16px;color:#1e3a8a;">${dinero(enganche)}</strong></div>
+            <div><div style="font-size:11px;color:#1e40af;font-weight:800;">A FINANCIAR</div><strong style="font-size:16px;color:#1e3a8a;">${dinero(saldo)}</strong></div>
+        </div>
+        <label style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Elige un plazo</label>
     `;
         planes.forEach((plan, i) => {
-            const checked = (plazoSeleccionado === i) ? "checked" : "";
+            const activo = (plazoSeleccionado === i);
             const textoPeriodicidad = periodicidad === "semanal" ? "/sem" : periodicidad === "quincenal" ? "/quin" : "/mes";
             html += `
-            <div style="border:1px solid #e2e8f0; padding:10px; border-radius:8px; margin-bottom:8px; cursor:pointer;">
-                <label style="cursor:pointer; display:block;">
-                    <input type="radio" name="planCredito" value="${i}" ${checked}
-                        onchange="seleccionarPlan(${i})">
-                    ${plan.meses} meses 
-                    | Total: ${dinero(plan.total)} 
-                    | ${dinero(plan.abono)}${textoPeriodicidad} (${plan.pagos} pagos)
-                </label>
-            </div>`;
+            <label onclick="seleccionarPlan(${i})" style="display:flex;align-items:center;justify-content:space-between;gap:10px;border:2px solid ${activo ? '#7c3aed' : '#e2e8f0'};background:${activo ? '#f5f3ff' : 'white'};padding:12px 14px;border-radius:12px;margin-bottom:8px;cursor:pointer;">
+                <input type="radio" name="planCredito" value="${i}" ${activo ? 'checked' : ''} onchange="seleccionarPlan(${i})" style="width:18px;height:18px;flex-shrink:0;">
+                <div style="flex:1;">
+                    <div style="font-weight:900;font-size:14px;color:#0f172a;">${plan.meses} meses — ${plan.pagos} pagos</div>
+                    <div style="font-size:12px;color:#64748b;">Total: ${dinero(plan.total)}</div>
+                </div>
+                <strong style="font-size:16px;color:#7c3aed;white-space:nowrap;">${dinero(plan.abono)}${textoPeriodicidad}</strong>
+            </label>`;
         });
     }
 
@@ -1469,15 +1605,15 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
 
     const modalHTML = `
     <div class="modal" data-modal="resumen-venta" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
-        <div style="background:white; padding:30px; border-radius:15px; width:100%; max-width:700px; margin:0 auto;">
-            <h2 style="margin-top:0; color:#2c3e50;">Resumen de Transacción</h2>
-            <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
+        <div style="background:white; padding:26px; border-radius:16px; width:100%; max-width:700px; margin:0 auto;">
+            <h2 style="margin-top:0; color:#2c3e50;">🧾 Resumen antes de cobrar</h2>
+            <div style="background:#f0fdf4; padding:15px; border-radius:12px; margin-bottom:18px;">
                 <h4 style="margin:0 0 10px 0; color:#166534;">Cliente</h4>
                 <p style="margin:5px 0;"><strong>${clienteSeleccionado.nombre}</strong></p>
-                ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">~ ${clienteSeleccionado.telefono}</p>` : ''}
+                ${clienteSeleccionado.telefono ? `<p style="margin:5px 0;">📞 ${clienteSeleccionado.telefono}</p>` : ''}
                 ${clienteSeleccionado.direccion ? `<p style="margin:5px 0;">${clienteSeleccionado.direccion}</p>` : ''}
             </div>
-            <div style="margin-bottom:20px;">
+            <div style="margin-bottom:18px;">
                 <h4 style="color:#2c3e50; margin:0 0 10px 0;">Productos</h4>
                 <table class="tabla-admin" style="width:100%; font-size:14px;">
                     <thead>
@@ -1501,12 +1637,12 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
 
             <div style="display:flex; gap:10px;">
                 <button onclick="mostrarDialogoInventario('${metodoPago}', ${totalConDescuento ?? totalContado}, ${enganche}, ${saldoAFinanciar}, ${planSafeStr})"
-                    style="flex:1; padding:14px; background:#27ae60; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
-                    Confirmar Venta
+                    style="flex:1.4; padding:17px; background:#16a34a; color:white; border:none; border-radius:12px; cursor:pointer; font-weight:900; font-size:16px;">
+                    ✅ Confirmar y continuar
                 </button>
                 <button onclick="cancelarYVolverAlCarrito()"
-                    style="padding: 12px 24px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
-                    S" Cancelar
+                    style="flex:1; padding:17px; background:#f1f5f9; color:#475569; border:none; border-radius:12px; cursor:pointer; font-weight:800; font-size:14px;">
+                    ✕ Cancelar
                 </button>
             </div>
         </div>
@@ -1545,15 +1681,64 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
         }
     });
 
+    // Sin stock: siempre pasa a requisición/entrega pendiente, nunca hay
+    // nada que decidir aquí — se deja resuelto de una vez.
+    productosSinStock.forEach(x => {
+        decisionesInventario[x.prod.id] = { entregar: false, sinStock: true, confirmadoSobrePedido: true };
+    });
+
+    // Resolución automática: si un producto con existencia SOLO puede
+    // salir de un lugar (una única ubicación con stock), no hay decisión
+    // real que tomar — se autoasigna. "Apartado" tampoco decide nada aquí
+    // (queda en resguardo hasta liquidar). Solo cuando de verdad hay 2+
+    // ubicaciones posibles se le pregunta al vendedor.
+    let productosAmbiguos = [];
+    if (metodoPago !== "apartado") {
+        productosConStock.forEach(x => {
+            const colorElegido = x.item.colorElegido || '';
+            const opciones = _ubicacionesSalidaVentaDetalle(x.prod, colorElegido);
+            // Ojo: solo se autoasigna cuando hay EXACTAMENTE una ubicación
+            // posible. Si hay 0 (inconsistencia rara entre stock total y
+            // ubicaciones registradas) se trata como caso a revisar, no se
+            // asume nada solo.
+            if (opciones.length === 1) {
+                const ubicacion = opciones[0].ubicacion;
+                decisionesInventario[x.prod.id] = { entregar: true, ubicacion, confirmadoSobrePedido: false };
+                const idxCarrito = carrito.findIndex(i => String(i.id) === String(x.prod.id));
+                if (idxCarrito !== -1) {
+                    carrito[idxCarrito].ubicacionElegida = ubicacion;
+                }
+            } else {
+                productosAmbiguos.push(x);
+            }
+        });
+        StorageService.set("carrito", carrito);
+    }
+
+    // Nada que preguntar: se procesa directo, sin abrir el modal. Cubre la
+    // inmensa mayoría de las ventas (un solo almacén, o apartado).
+    if (metodoPago === "apartado" || productosAmbiguos.length === 0) {
+        confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido);
+        return;
+    }
+
+    const autoResueltos = productosConStock.length - productosAmbiguos.length;
     let htmlProductos = '';
 
-    if (productosConStock.length > 0) {
+    if (autoResueltos > 0) {
+        htmlProductos += `
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:#166534;font-weight:700;">
+                ✅ ${autoResueltos} producto(s) ya se resolvieron solos (única ubicación con existencia). Solo falta decidir lo de abajo.
+            </div>`;
+    }
+
+    if (productosAmbiguos.length > 0) {
         htmlProductos += `
             <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px; border-left:5px solid #27ae60;">
-                <h4 style="margin:0 0 15px 0; color:#166534;">PRODUCTOS CON STOCK</h4>
+                <h4 style="margin:0 0 15px 0; color:#166534;">¿DE DÓNDE SALE CADA PRODUCTO?</h4>
         `;
         
-        productosConStock.forEach(x => {
+        productosAmbiguos.forEach(x => {
             const idProd = x.prod.id;
             const idProdArg = _ventaJsArg(idProd);
             const cantRequerida = x.item.cantidad || 1;
@@ -1561,21 +1746,12 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             const colorElegido = x.item.colorElegido || '';
             const ubicacionElegida = x.item.ubicacionElegida || '';
 
-            let colorSelectorHtml = `
-                <div style="margin-top:6px;">
-                    <label style="font-size:11px; color:#374151;">}Color:</label>
-                    <input type="text" value="${_escapeHtml(colorElegido)}" 
-                        onchange="cambiarColorInventario('${idProdArg}', this.value)"
-                        placeholder="Ej. Rojo" 
-                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; width:120px;">
-                </div>`;
-            colorSelectorHtml = `
-                <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <label style="font-size:11px;color:#374151;font-weight:bold;">Color vendido:</label>
-                    <input type="text" value="${_escapeHtml(colorElegido)}"
-                        onchange="cambiarColorInventario('${idProdArg}', this.value)"
-                        placeholder="Ej. Blanco"
-                        style="padding:7px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:140px;">
+            // El color ya se eligió al agregar el producto al carrito — aquí
+            // solo se muestra como referencia, no se vuelve a capturar.
+            const colorSelectorHtml = `
+                <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
+                    <span style="font-size:11px;color:#64748b;font-weight:700;">Color:</span>
+                    <span style="background:#f1f5f9;color:#334155;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:800;">${colorElegido ? _escapeHtml(colorElegido) : 'Sin especificar'}</span>
                 </div>`;
 
             // 1. Armar las opciones del Combo Box con INVENTARIO DINAMICO
@@ -1584,61 +1760,55 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             const stockGeneralSinAsignar = Math.max(0, stockActual - stockEnVariantes);
 
             const opcionesUbi = _opcionesUbicacionSalidaVenta(x.prod, colorElegido, ubicacionElegida);
+            const opcionesDisponibles = _ubicacionesSalidaVentaDetalle(x.prod, colorElegido);
 
-            // 2. Crear el HTML del Selector
-            let ubicacionSelectorHtml = `
-                <div style="margin-top:6px;">
-                    <label style="font-size:11px; color:#374151;">Ubicacion de salida:</label>
-                    <select onchange="cambiarUbicacionInventario('${idProdArg}', this.value)"
-                        style="margin-left:4px; padding:4px; border:1px solid #ddd; border-radius:4px; font-size:12px; background:#f0fdf4; border-color:#86efac; width:230px; cursor:pointer;">
-                        ${opcionesUbi}
-                    </select>
-                </div>`;
-            ubicacionSelectorHtml = _renderOpcionesOrigenVenta(x.prod, x.item);
-            let accionesInventario = metodoPago === "apartado"
-                ? `<div style="padding:8px 12px; background:#fffbeb; color:#92400e; border:1px solid #fcd34d; border-radius:6px; font-size:12px; max-width:220px;">
+            // 2. Selector de ubicación de salida (grid táctil de tarjetas)
+            const ubicacionSelectorHtml = _renderOpcionesOrigenVenta(x.prod, x.item);
+
+            // Cuando SÍ hay ubicaciones para elegir, elegir una ya completa
+            // la decisión (seleccionarOrigenInventario marca "Tomar
+            // inventario" automáticamente) — solo se ofrece un enlace chico
+            // para mandar sobre pedido en su lugar, en vez de duplicar la
+            // decisión con un segundo par de botones grandes.
+            let accionesInventario;
+            if (metodoPago === "apartado") {
+                accionesInventario = `<div style="padding:10px 12px; background:#fffbeb; color:#92400e; border:1px solid #fcd34d; border-radius:10px; font-size:12px; max-width:220px;">
                         Apartado: queda en resguardo. No se descuenta inventario ni se emite entrega hasta liquidar.
-                   </div>`
-                : `<div style="display:flex; flex-direction:column; gap:8px; min-width:170px;">
-                        <button onclick="setDecisionInventario('${idProdArg}', true)" 
-                                id="btn-si-${idProd}"
-                                style="padding:9px 12px; background:#94a3b8; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold;">
-                            Tomar inventario
-                        </button>
-                        <button onclick="setDecisionInventario('${idProdArg}', false)" 
-                                id="btn-no-${idProd}"
-                                style="padding:9px 12px; background:#f59e0b; color:white; border:none; border-radius:7px; cursor:pointer; font-weight:bold; font-size:0;">
-                            <span style="font-size:13px;">Sobre pedido</span>
-                            ⏳ Pendiente
-                        </button>
-                        <small style="color:#64748b; line-height:1.3;">Sobre pedido: no descuenta inventario y quedara pendiente/requisicion.</small>
                    </div>`;
-            if (metodoPago !== "apartado") {
+            } else if (opcionesDisponibles.length > 0) {
+                accionesInventario = `
+                   <div style="min-width:170px;">
+                        <small id="estado-decision-${idProd}" style="display:block;color:#92400e; line-height:1.3; font-weight:bold;margin-bottom:6px;">Elige la ubicación de salida →</small>
+                        <button onclick="setDecisionInventario('${idProdArg}', false)"
+                                id="btn-no-${idProd}"
+                                style="padding:9px 12px; width:100%; background:none; color:#92400e; border:1px solid #fcd34d; border-radius:8px; cursor:pointer; font-weight:800; font-size:12px;">
+                            📦 Mandar sobre pedido
+                        </button>
+                        <button onclick="setDecisionInventario('${idProdArg}', true)" id="btn-si-${idProd}" style="display:none;"></button>
+                   </div>`;
+            } else {
                 accionesInventario = `
                    <div style="display:flex; flex-direction:column; gap:8px; min-width:180px;">
                         <button onclick="setDecisionInventario('${idProdArg}', true)"
                                 id="btn-si-${idProd}"
-                                style="padding:11px 12px; background:#94a3b8; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:none;">
-                            Tomar de inventario
+                                style="padding:13px 12px; background:#94a3b8; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:900; font-size:13px;">
+                            ✅ Tomar de inventario
                         </button>
                         <button onclick="setDecisionInventario('${idProdArg}', false)"
                                 id="btn-no-${idProd}"
-                                style="padding:11px 12px; background:#f59e0b; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:none;">
-                            Mandar sobre pedido
+                                style="padding:13px 12px; background:#f59e0b; color:white; border:none; border-radius:10px; cursor:pointer; font-weight:900; font-size:13px;">
+                            📦 Mandar sobre pedido
                         </button>
-                        <small id="estado-decision-${idProd}" style="color:#92400e; line-height:1.3; font-weight:bold;">Decision pendiente.</small>
+                        <small id="estado-decision-${idProd}" style="color:#92400e; line-height:1.3; font-weight:bold;">Decisión pendiente.</small>
                    </div>`;
             }
 
             htmlProductos += `
-                <div style="background:white; padding:14px; border-radius:8px; margin-bottom:12px; border:1px solid #bbf7d0; box-shadow:0 1px 4px rgba(15,23,42,.06);">
+                <div style="background:white; padding:16px; border-radius:12px; margin-bottom:12px; border:1px solid #bbf7d0; box-shadow:0 1px 4px rgba(15,23,42,.06);">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
                     <div style="flex:1; min-width:270px;">
-                        <strong>${x.prod.nombre}</strong><br>
+                        <strong style="font-size:15px;">${x.prod.nombre}</strong><br>
                         <small style="color:#718096;">Stock disponible: ${_stockDisponibleParaSolicitudVenta(x.prod, x.item)} | Solicitado: ${cantRequerida}</small>
-                        <div style="margin-top:8px; padding:9px 10px; background:#ecfdf5; border:1px solid #86efac; border-radius:7px; color:#166534; font-size:12px; font-weight:bold;">
-                            Hay existencia. Antes de vender debes decidir si la tomaras de inventario y de que ubicacion saldra.
-                        </div>
                         ${colorSelectorHtml}
                         ${ubicacionSelectorHtml}
                     </div>
@@ -1682,24 +1852,24 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
 
     const modalHTML = `
         <div class="modal" data-modal="dialogo-inventario" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:7000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
-            <div style="background:white; padding:30px; border-radius:15px; width:100%; max-width:700px; margin:0 auto;">
+            <div style="background:white; padding:26px; border-radius:16px; width:100%; max-width:700px; margin:0 auto;">
                 
-                <h2 style="margin-top:0; color:#2c3e50;">Gestión de Inventario</h2>
-                <p style="color:#718096; margin:0 0 20px 0;">Confirma cómo se entregarán los productos</p>
+                <h2 style="margin-top:0; color:#2c3e50;">📦 Gestión de Inventario</h2>
+                <p style="color:#718096; margin:0 0 20px 0;">Confirma de dónde sale cada producto antes de cobrar</p>
                 
                 ${htmlProductos}
                 
                 <div style="display:flex; gap:10px; margin-top:20px;">
                     <button id="btnProcesarVentaInventario" disabled onclick="confirmarDecisionesInventario('${metodoPago}', ${totalContado}, ${enganche}, ${saldoAFinanciar}, ${planSafeStr2})" 
-                            style="flex:1; padding:14px; background:#94a3b8; color:white; border:none; border-radius:6px; cursor:not-allowed; font-weight:bold; font-size:16px; opacity:.72;">
-                        Procesar Venta
+                            style="flex:1.4; padding:17px; background:#94a3b8; color:white; border:none; border-radius:12px; cursor:not-allowed; font-weight:900; font-size:16px; opacity:.72;">
+                        ✅ Procesar Venta
                     </button>
                     <button onclick="cancelarYVolverAlCarrito()" 
-                            style="flex:1; padding:14px; background:#e74c3c; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:16px;">
-                        S" Cancelar
+                            style="flex:1; padding:17px; background:#f1f5f9; color:#475569; border:none; border-radius:12px; cursor:pointer; font-weight:800; font-size:14px;">
+                        ✕ Cancelar
                     </button>
                 </div>
-                <div id="avisoDecisionesInventario" style="display:block;margin-top:10px;background:#fffbeb;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px;font-size:13px;font-weight:bold;">
+                <div id="avisoDecisionesInventario" style="display:block;margin-top:10px;background:#fffbeb;border:1px solid #f59e0b;color:#92400e;border-radius:10px;padding:10px;font-size:13px;font-weight:bold;">
                     Falta decidir la salida de inventario o confirmar sobre pedido para los productos con existencia.
                 </div>
             </div>
@@ -1712,7 +1882,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     // ubicacion de mayor prioridad (o la que el usuario ya tenia elegida si
     // reabrio este dialogo). "Mandar sobre pedido" sigue disponible para
     // que el usuario decida vender sobre pedido en su lugar.
-    productosConStock.forEach(x => {
+    productosAmbiguos.forEach(x => {
         const idProd = x.prod.id;
         const colorElegido = x.item.colorElegido || '';
         const opciones = _ubicacionesSalidaVentaDetalle(x.prod, colorElegido);
@@ -2111,6 +2281,7 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     clienteSeleccionado = null;
     plazoSeleccionado = null;
     window._vendedorSeleccionado = null;
+    window._ventaSesionPagoActiva = false;
     if (!StorageService.set("carrito", carrito)) console.error("Error limpiando carrito");
     actualizarContadorCarrito();
 
@@ -4472,12 +4643,6 @@ window._authInvToggleFila = function(rowId) {
 };
 
 window.revisarVentaPendiente = function(index) {
-    // 🛡️ Limpiar el contexto de la solicitud anterior ANTES de resolver esta.
-    // Sin esto, _authResolverVentaPendiente() le daba prioridad absoluta al
-    // idCuarentena de la última venta revisada (aunque ya se hubiera cerrado
-    // ese modal) e ignoraba el index que se acaba de pasar aquí, mostrando y
-    // autorizando la solicitud equivocada.
-    window._authVentaPendienteCtx = null;
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
@@ -4702,7 +4867,7 @@ window.revisarVentaPendiente = function(index) {
             <div style="display:flex; gap:10px;">
                 <button id="btnAutorizarVentaCuarentena" onclick="aprobarVentaCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Autorizar a DB</button>
                 <button id="btnRechazarVentaCuarentena" onclick="rechazarVentaCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">Anular Movimiento</button>
-                <button onclick="window._authVentaPendienteCtx=null; document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
+                <button onclick="document.querySelector('[data-modal=auth-venta]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer; font-size:13px;">Regresar</button>
             </div>
         </div>
     </div>`;
@@ -4761,7 +4926,6 @@ async function _aprobarVentaCuarentenaAsync(index) {
         if (resSyncBloqueo.subioANube === false) {
             alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
         }
-        window._authVentaPendienteCtx = null;
         document.querySelector('[data-modal=auth-venta]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         return;
@@ -4954,7 +5118,6 @@ async function _aprobarVentaCuarentenaAsync(index) {
             }
         });
     }
-    window._authVentaPendienteCtx = null;
     document.querySelector('[data-modal=auth-venta]').remove();
     
     alert("Venta corregida y autorizada de forma silenciosa.\n\nEl sistema financiero ha sido actualizado. El cajero podrá generar el ticket definitivo desde la opción 'Reimprimir Ticket' si el cliente lo requiere.");
@@ -5019,7 +5182,6 @@ async function _rechazarVentaCuarentenaAsync(index) {
             }
         });
     }
-    window._authVentaPendienteCtx = null;
     document.querySelector('[data-modal=auth-venta]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (typeof renderApartados === 'function') renderApartados();
@@ -6084,10 +6246,6 @@ function _authAbonoBloqueadoPorEstado(a) {
 }
 
 window.revisarAbonoPendiente = function(index) {
-    // 🛡️ Mismo fix que revisarVentaPendiente: limpiar el ctx de la sesión
-    // anterior antes de resolver, para que este open use el index recién
-    // clicado y no quede "pegado" al abono previamente revisado.
-    window._authAbonoPendienteCtx = null;
     const abonosP = StorageService.get("abonosPendientes", []);
     const a = abonosP[index];
     if (!a) return;
@@ -6138,7 +6296,7 @@ window.revisarAbonoPendiente = function(index) {
             <div style="display:flex; gap:10px; margin-top:20px;">
                 <button id="btnAprobarAbonoCuarentena" onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Ingresar a Caja</button>
                 <button id="btnRechazarAbonoCuarentena" onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Eliminar</button>
-                <button onclick="window._authAbonoPendienteCtx=null; document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
+                <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
             </div>
         </div>
     </div>`;
@@ -6166,7 +6324,6 @@ async function _aprobarAbonoCuarentenaAsync(index) {
         if (resSyncBloqueoAbono.subioANube === false) {
             alert("⚠️ Se marcó localmente, pero no se pudo confirmar en la nube (sin conexión). No cierres esta pantalla todavía — reintenta cuando tengas señal.");
         }
-        window._authAbonoPendienteCtx = null;
         document.querySelector('[data-modal=auth-abono]')?.remove();
         if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
         return;
@@ -6209,7 +6366,6 @@ async function _aprobarAbonoCuarentenaAsync(index) {
             }
         });
     }
-    window._authAbonoPendienteCtx = null;
     document.querySelector('[data-modal=auth-abono]').remove();
     alert("Abono aprobado y registrado en flujo de caja.");
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
@@ -6248,7 +6404,6 @@ async function _rechazarAbonoCuarentenaAsync(index) {
             }
         });
     }
-    window._authAbonoPendienteCtx = null;
     document.querySelector('[data-modal=auth-abono]').remove();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
 }
