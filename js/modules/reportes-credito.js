@@ -1904,6 +1904,20 @@ window.abrirDetalleVencimientoPlazo = function(idx) {
             </div>`).join('')
         : `<div style="font-size:12px;color:#94a3b8;padding:6px 0;">Sin comentarios de cobranza registrados.</div>`;
 
+    const articulos = Array.isArray(c.articulos) ? c.articulos : [];
+    const articulosHTML = articulos.length
+        ? articulos.map(a => {
+            const precioBase = Number(a.precioContado || a.precio || 0);
+            const cantidad = Number(a.cantidad || 1);
+            return `
+            <tr style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:6px 4px;font-size:12px;color:#0f172a;">${a.nombre || a.productoNombre || 'Producto'}</td>
+                <td style="padding:6px 4px;font-size:12px;text-align:center;color:#475569;">x${cantidad}</td>
+                <td style="padding:6px 4px;font-size:12px;text-align:right;font-weight:bold;color:#0f172a;">${_rc.fmt(precioBase)}</td>
+            </tr>`;
+        }).join('')
+        : `<tr><td colspan="3" style="padding:8px 4px;font-size:12px;color:#94a3b8;">Sin artículos registrados en esta cuenta.</td></tr>`;
+
     const existente = document.getElementById('modalDetalleVencimientoPlazo');
     if (existente) existente.remove();
 
@@ -1924,6 +1938,13 @@ window.abrirDetalleVencimientoPlazo = function(idx) {
         </div>
 
         <div style="padding:20px 22px;">
+            <div style="background:#f8fafc;padding:10px 12px;border-radius:8px;margin-bottom:16px;">
+                <div style="font-size:10px;color:#64748b;font-weight:bold;margin-bottom:4px;">PRODUCTO(S) LLEVADO(S) — PRECIO BASE (CONTADO)</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <tbody>${articulosHTML}</tbody>
+                </table>
+            </div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
                 <div style="background:#f8fafc;padding:10px;border-radius:8px;">
                     <div style="font-size:10px;color:#64748b;font-weight:bold;">FECHA DE COMPRA</div>
