@@ -343,7 +343,6 @@ window.renderARC_v3 = function() {
                     💡 Tiene ${s.pagaresVencidos.length} pagaré(s) sin aplicar pero <b>su saldo real está cubierto</b>. Solo requiere regularización documental.
                 </div>` : ''}
                 <div style="margin-top:8px;display:flex;gap:6px;">
-                    <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="flex:1;padding:7px;background:#16a34a;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">💰 Abonar</button>
                     <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="flex:1;padding:7px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">📋 Estado</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="flex:1;padding:7px;background:#25D366;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">💬 WA</button>
                     <button onclick="marcarIncobrable('${c.folio}')" style="flex:1;padding:7px;background:#475569;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">⚫ Incobrable</button>
@@ -924,8 +923,7 @@ window.abrirDetalleScorecardCliente = function(claveCodificada) {
             <td style="padding:10px;text-align:right;">${_rc.fmt(c.sne.excedente)}</td>
             <td style="padding:10px;">${_rc.badge(c.sne.emojiRiesgo + ' ' + c.sne.nivelRiesgo, c.sne.colorRiesgo + '18', c.sne.colorRiesgo)}</td>
             <td style="padding:10px;text-align:right;white-space:nowrap;">
-                <button onclick="abrirModalAbonoAvanzado('${String(c.folio || '').replace(/'/g, "\\'")}')" style="padding:6px 9px;background:#16a34a;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer;">Abonar</button>
-                <button onclick="enviarRecordatorioWhatsApp('${String(c.folio || '').replace(/'/g, "\\'")}')" style="padding:6px 9px;background:#25D366;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer;margin-left:4px;">WhatsApp</button>
+                <button onclick="enviarRecordatorioWhatsApp('${String(c.folio || '').replace(/'/g, "\\'")}')" style="padding:6px 9px;background:#25D366;color:white;border:0;border-radius:5px;font-weight:bold;cursor:pointer;">WhatsApp</button>
             </td>
         </tr>`).join('');
     document.body.insertAdjacentHTML('beforeend', `
@@ -1181,8 +1179,7 @@ window.renderComportamiento = function() {
             <td style="padding:10px 12px;">
                 ${c.agrupado
                     ? `<button onclick="abrirDetalleScorecardCliente('${encodeURIComponent(c.grupoClave).replace(/'/g, '%27')}')" style="padding:6px 10px;background:#4c1d95;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;white-space:nowrap;">Ver cuentas</button>`
-                    : `<button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:5px 9px;background:#16a34a;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;" title="Abonar">💰</button>
-                       <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:5px 9px;background:#25D366;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;margin-left:3px;" title="WhatsApp">💬</button>`}
+                    : `<button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:5px 9px;background:#25D366;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;" title="WhatsApp">💬</button>`}
             </td>
         </tr>`;
     }).join('');
@@ -1897,6 +1894,16 @@ window.abrirDetalleVencimientoPlazo = function(idx) {
         ? '⚠️ Esta cuenta no tiene pagarés cargados en el sistema — la fecha se estimó como venta + meses pactados.'
         : '✓ Calculada a partir del último pagaré registrado del contrato.';
 
+    const observacion = window.CxcNotas ? window.CxcNotas.obtenerObservacion(c.folio) : '';
+    const historial = window.CxcNotas ? window.CxcNotas.obtenerHistorial(c.folio) : [];
+    const historialHTML = historial.length
+        ? historial.slice(0, 5).map(h => `
+            <div style="padding:8px 0;border-bottom:1px solid #e2e8f0;">
+                <div style="font-size:11px;color:#94a3b8;">${new Date(h.fecha).toLocaleDateString('es-MX')} · ${h.usuario || 'Sistema'}</div>
+                <div style="font-size:12px;color:#0f172a;">${h.texto}</div>
+            </div>`).join('')
+        : `<div style="font-size:12px;color:#94a3b8;padding:6px 0;">Sin comentarios de cobranza registrados.</div>`;
+
     const existente = document.getElementById('modalDetalleVencimientoPlazo');
     if (existente) existente.remove();
 
@@ -1964,10 +1971,16 @@ window.abrirDetalleVencimientoPlazo = function(idx) {
                 <div><span style="color:#64748b;">Pagarés sin aplicar:</span><br><b>${s.pagaresVencidos.length}</b></div>
             </div>
 
+            <div style="background:#fefce8;padding:12px 14px;border-radius:8px;margin-bottom:18px;border-left:4px solid #eab308;">
+                <div style="font-size:10px;color:#713f12;font-weight:bold;margin-bottom:6px;">🗒️ OBSERVACIONES DE COBRANZA</div>
+                ${observacion ? `<div style="font-size:12px;color:#0f172a;margin-bottom:8px;font-style:italic;">"${observacion}"</div>` : `<div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Sin observación general registrada.</div>`}
+                <div style="font-size:10px;color:#92400e;font-weight:bold;margin-top:8px;margin-bottom:2px;">HISTORIAL RECIENTE</div>
+                ${historialHTML}
+            </div>
+
             <div style="display:flex;gap:8px;">
-                <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="flex:1;padding:10px;background:#16a34a;color:white;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">💰 Abonar</button>
                 <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="flex:1;padding:10px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">📋 Estado de Cuenta</button>
-                <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="flex:1;padding:10px;background:#25D366;color:white;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">💬 WhatsApp</button>
+                <button onclick="CxcNotas.abrirModal('${c.folio}', '${String(c.nombre || '').replace(/'/g, "\\'")}')" style="flex:1;padding:10px;background:#eab308;color:#422006;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">🗒️ Notas</button>
             </div>
         </div>
     </div>`;
