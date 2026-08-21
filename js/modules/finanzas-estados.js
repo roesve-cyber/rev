@@ -29,6 +29,13 @@ function _efEsc(v) {
     return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
 }
 
+// % de una cifra sobre las ventas netas (análisis vertical / common-size).
+// Estándar en el Estado de Resultados: cada renglón se lee como "% de ventas".
+function _efPct(valor, base) {
+    if (!base) return '—';
+    return (Number(valor) / base * 100).toFixed(1) + '%';
+}
+
 // Convierte cualquier formato de fecha usado en el sistema (epoch ms, ISO,
 // 'YYYY-MM-DD') a un objeto Date válido, o null si no se puede.
 function _efParseFecha(v) {
@@ -159,14 +166,44 @@ function _efTotalesCapital() {
 // ESTADO DE RESULTADOS
 // ---------------------------------------------------------------
 
+// Categorías de gasto que se tratan como GASTO FINANCIERO (RIF) en vez de
+// gasto operativo — según NIF B-3, intereses/comisiones bancarias no son
+// parte de la operación del negocio. Detecta por palabras clave en la
+// categoría del gasto (el usuario no tiene que hacer nada especial, solo
+// nombrar la categoría de forma reconocible, p.ej. "Intereses bancarios").
+const _EF_PALABRAS_GASTO_FINANCIERO = ['interes', 'interés', 'financiero', 'financiera', 'comision bancaria', 'comisión bancaria'];
+function _efEsGastoFinanciero(categoria) {
+    const c = String(categoria || '').toLowerCase();
+    return _EF_PALABRAS_GASTO_FINANCIERO.some(p => c.includes(p));
+}
+
 function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     const desde = _efParseFecha(desdeStr + 'T00:00:00');
     const hasta = _efParseFecha(hastaStr + 'T23:59:59');
 
+    // 🛡️ NIF B-3 / NIF C-19 / NIF C-20: el interés que paga un cliente por
+    // financiar su compra a crédito NO es venta de mercancía, es ingreso
+    // financiero (RIF) — no debe mezclarse con "Ingresos por ventas" ni con
+    // el Costo de Ventas (que se compara contra el precio de mercancía).
+    // Reutilizamos el motor de interés ya existente en el sistema
+    // (_rrcTotalesVenta/_rrcInteres de reportes-rentabilidad-cartera.js) en
+    // vez de recalcular la resta nosotros mismos, para no volver a duplicar
+    // esa fórmula por cuarta vez.
     const ventas = StorageService.get('ventasRegistradas', []);
-    const ingresosVentas = ventas
-        .filter(v => _efEnRango(v.fechaVenta || v.fecha, desde, hasta))
-        .reduce((s, v) => s + (Number(v.total) || 0), 0);
+    const ventasEnRango = ventas.filter(v => _efEnRango(v.fechaVenta || v.fecha, desde, hasta));
+    let ingresosVentas = 0;
+    let ingresosFinancieros = 0;
+    ventasEnRango.forEach(v => {
+        if (typeof window._rrcTotalesVenta === 'function' && typeof window._rrcInteres === 'function') {
+            const { totalMercancia, totalDocumento } = window._rrcTotalesVenta(v);
+            ingresosVentas += totalMercancia;
+            ingresosFinancieros += window._rrcInteres(totalDocumento, totalMercancia);
+        } else {
+            // Sin el motor compartido disponible: no hay forma segura de
+            // separar interés de mercancía, se cuenta todo como venta.
+            ingresosVentas += Number(v.totalMercancia || v.total) || 0;
+        }
+    });
 
     const devoluciones = StorageService.get('historialDevoluciones', []);
     const totalDevoluciones = devoluciones
@@ -185,10 +222,16 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     const gastos = StorageService.get('gastosOperativos', []);
     const gastosPorCategoria = {};
     let totalGastos = 0;
+    let gastosFinancieros = 0;
     gastos.filter(g => _efEnRango(g.fecha, desde, hasta)).forEach(g => {
+        const monto = Number(g.monto) || 0;
+        if (_efEsGastoFinanciero(g.categoria)) {
+            gastosFinancieros += monto;
+            return; // no entra al desglose de gastos operativos
+        }
         const cat = g.categoria || 'Sin categoría';
-        gastosPorCategoria[cat] = (gastosPorCategoria[cat] || 0) + (Number(g.monto) || 0);
-        totalGastos += Number(g.monto) || 0;
+        gastosPorCategoria[cat] = (gastosPorCategoria[cat] || 0) + monto;
+        totalGastos += monto;
     });
 
     const prestamos = StorageService.get('prestamosOtorgados', []);
@@ -198,15 +241,19 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
 
     const ingresosNetos = ingresosVentas - totalDevoluciones;
     const utilidadBruta = ingresosNetos - costoVentas;
-    const utilidadOperacion = utilidadBruta - totalGastos;
-    const utilidadNeta = utilidadOperacion - incobrables;
+    // Cuentas incobrables: NIF las clasifica como gasto de operación (venta/
+    // administración), NO como parte del RIF.
+    const utilidadOperacion = utilidadBruta - totalGastos - incobrables;
+    const rif = ingresosFinancieros - gastosFinancieros;
+    const utilidadNeta = utilidadOperacion + rif;
 
     return {
         desde: desdeStr, hasta: hastaStr,
         ingresosVentas, totalDevoluciones, ingresosNetos,
         costoVentas, utilidadBruta,
-        gastosPorCategoria, totalGastos, utilidadOperacion,
-        incobrables, utilidadNeta
+        gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
+        ingresosFinancieros, gastosFinancieros, rif,
+        utilidadNeta
     };
 }
 
@@ -318,21 +365,33 @@ function renderEstadosFinancieros() {
         <h3 style="margin:0;color:#0f172a;">📈 Estado de Resultados <span style="font-weight:normal;color:#6b7280;font-size:13px;">(${_efEsc(desde)} a ${_efEsc(hasta)})</span></h3>
     </div>
     <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Ingresos por ventas</td><td style="padding:8px;text-align:right;">${_efDinero(er.ingresosVentas)}</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Devoluciones</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalDevoluciones)}</td></tr>
-        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Ingresos netos</td><td style="padding:8px;text-align:right;">${_efDinero(er.ingresosNetos)}</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Costo de ventas</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.costoVentas)}</td></tr>
-        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Utilidad bruta</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadBruta)}</td></tr>
+        <thead><tr style="background:#f9fafb;font-size:11px;color:#6b7280;text-align:right;"><th style="text-align:left;padding:6px 8px;">Concepto</th><th style="padding:6px 8px;">Monto</th><th style="padding:6px 8px;width:70px;">% Ventas</th></tr></thead>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Ingresos por ventas (mercancía, sin intereses)</td><td style="padding:8px;text-align:right;">${_efDinero(er.ingresosVentas)}</td><td style="padding:8px;text-align:right;color:#6b7280;">${_efPct(er.ingresosVentas, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Devoluciones</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalDevoluciones)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.totalDevoluciones, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Ventas netas</td><td style="padding:8px;text-align:right;">${_efDinero(er.ingresosNetos)}</td><td style="padding:8px;text-align:right;">${_efPct(er.ingresosNetos, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Costo de ventas</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.costoVentas)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.costoVentas, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Utilidad bruta</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadBruta)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadBruta, er.ingresosVentas)}</td></tr>
     </table>
     <details style="margin-bottom:12px;">
         <summary style="cursor:pointer;color:#1e40af;font-weight:bold;font-size:13px;">Ver desglose de gastos operativos (${_efDinero(er.totalGastos)})</summary>
         <table style="width:100%;border-collapse:collapse;margin-top:6px;">${filasGastos}</table>
     </details>
     <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Gastos operativos</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalGastos)}</td></tr>
-        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Utilidad de operación</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadOperacion)}</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Préstamos incobrables</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.incobrables)}</td></tr>
-        <tr style="font-weight:bold;font-size:16px;background:${er.utilidadNeta >= 0 ? '#f0fdf4' : '#fef2f2'};"><td style="padding:10px 8px;">= UTILIDAD NETA</td><td style="padding:10px 8px;text-align:right;color:${er.utilidadNeta >= 0 ? '#059669' : '#dc2626'};">${_efDinero(er.utilidadNeta)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Gastos operativos</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalGastos)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalGastos, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Préstamos incobrables</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.incobrables)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.incobrables, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Utilidad de operación</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadOperacion)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadOperacion, er.ingresosVentas)}</td></tr>
+    </table>
+    <details style="margin-bottom:12px;">
+        <summary style="cursor:pointer;color:#1e40af;font-weight:bold;font-size:13px;">Ver Resultado Integral de Financiamiento — RIF (${_efDinero(er.rif)})</summary>
+        <p style="font-size:12px;color:#6b7280;margin:6px 0;">Intereses cobrados por vender a crédito, menos intereses/comisiones pagados (si categorizas un gasto con "interés", "financiero" o "comisión bancaria" en Gastos Operativos, se cuenta aquí en vez de en gastos operativos). Así lo separa la NIF B-3: no es parte de la operación del negocio.</p>
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;">+ Ingresos financieros (intereses cobrados)</td><td style="padding:6px 8px;text-align:right;">${_efDinero(er.ingresosFinancieros)}</td></tr>
+            <tr><td style="padding:6px 8px;color:#dc2626;">– Gastos financieros (intereses pagados)</td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.gastosFinancieros)}</td></tr>
+        </table>
+    </details>
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">± Resultado Integral de Financiamiento (RIF)</td><td style="padding:8px;text-align:right;color:${er.rif >= 0 ? '#059669' : '#dc2626'};">${_efDinero(er.rif)}</td><td style="padding:8px;text-align:right;color:#6b7280;width:70px;">${_efPct(er.rif, er.ingresosVentas)}</td></tr>
+        <tr style="font-weight:bold;font-size:16px;background:${er.utilidadNeta >= 0 ? '#f0fdf4' : '#fef2f2'};"><td style="padding:10px 8px;">= UTILIDAD NETA</td><td style="padding:10px 8px;text-align:right;color:${er.utilidadNeta >= 0 ? '#059669' : '#dc2626'};">${_efDinero(er.utilidadNeta)}</td><td style="padding:10px 8px;text-align:right;color:${er.utilidadNeta >= 0 ? '#059669' : '#dc2626'};">${_efPct(er.utilidadNeta, er.ingresosVentas)}</td></tr>
     </table>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 10px;">
