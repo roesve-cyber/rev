@@ -139,6 +139,86 @@ function _stpTotalConTasa(monto, tasa, meses) {
 }
 
 // ---------------------------------------------------------------
+// CONDONACIÓN (pagos semanales / dinero fijo) — alternativa al %
+// ---------------------------------------------------------------
+// El plan de crédito de rev ya vive en semanas (plan.semanas, plan.abono),
+// aunque se venda "a X meses" — 1 mes ≈ 4 semanas en tus planes reales.
+// En vez de un % que hay que aplicar a mano y que no deja ver el impacto en
+// pesos, esto calcula: cuántos pagos semanales completos le puedes condonar
+// a quien pague a tiempo SIN perder margen vs. lo que rendías hoy — y
+// cuánto colchón de margen extra te queda siempre protegido (nunca
+// negativo, porque se redondea hacia abajo).
+function _stpSemanasDePlazo(meses) {
+    return Math.round(meses * 4);
+}
+
+function _stpCondonacionParaPlazo(p, tasaNueva, monto) {
+    const totalActual = _stpTotalConTasa(monto, p.tasa, p.meses);
+    const totalNuevo = _stpTotalConTasa(monto, tasaNueva, p.meses);
+    const excedente = Math.max(0, totalNuevo - totalActual); // lo que ganaste extra al subir la tasa
+    const semanas = _stpSemanasDePlazo(p.meses);
+    const abonoSemanal = semanas > 0 ? totalNuevo / semanas : 0;
+
+    // Redondeado HACIA ABAJO en ambos casos: nunca condonas más de lo que
+    // ganaste con la subida de tasa, así el impacto en utilidad vs. hoy
+    // siempre es >= 0 (nulo o positivo), nunca negativo.
+    const pagosCondonables = abonoSemanal > 0 ? Math.floor(excedente / abonoSemanal) : 0;
+    const dineroPorPagos = pagosCondonables * abonoSemanal;
+    const colchonPorPagos = excedente - dineroPorPagos;
+
+    const dineroFijoRedondeado = Math.floor(excedente / 50) * 50; // a $50 hacia abajo
+    const colchonFijo = excedente - dineroFijoRedondeado;
+
+    return {
+        totalActual, totalNuevo, excedente, semanas, abonoSemanal,
+        pagosCondonables, dineroPorPagos, colchonPorPagos,
+        dineroFijoRedondeado, colchonFijo,
+        totalPuntualPagos: totalNuevo - dineroPorPagos,
+        totalPuntualFijo: totalNuevo - dineroFijoRedondeado
+    };
+}
+
+function _stpCondonacionHtml(plazosActuales) {
+    const monto = window._stpMontoEjemplo;
+    const filas = plazosActuales.map(p => {
+        const tasaNueva = window._stpTasasNuevas[p.meses] ?? p.tasa;
+        const c = _stpCondonacionParaPlazo(p, tasaNueva, monto);
+        return { p, c };
+    });
+
+    return `
+        <div style="background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:20px;">
+            <h3 style="margin:0 0 6px;">🎁 Cómo premiar al cliente puntual: en pagos semanales o en $ fijo</h3>
+            <p style="font-size:13px;color:#64748b;margin:0 0 16px;">Misma lógica que el % de arriba, pero expresada de forma concreta para el cliente y con el impacto en tu utilidad visible en cada fila. El "colchón" es lo que te queda de margen protegido — nunca es negativo, porque siempre se redondea hacia abajo.</p>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:#f3f4f6;">
+                        <th style="padding:9px;text-align:left;">Plazo</th>
+                        <th style="padding:9px;text-align:right;">Pagos semanales</th>
+                        <th style="padding:9px;text-align:right;">Pago semanal</th>
+                        <th style="padding:9px;text-align:right;">Le puedes condonar</th>
+                        <th style="padding:9px;text-align:right;">= en $</th>
+                        <th style="padding:9px;text-align:right;">o en $ fijo redondo</th>
+                        <th style="padding:9px;text-align:right;">Colchón protegido</th>
+                    </tr></thead>
+                    <tbody>
+                        ${filas.map(({ p, c }) => `<tr>
+                            <td style="padding:9px;font-weight:bold;">${p.meses} meses</td>
+                            <td style="padding:9px;text-align:right;color:#64748b;">${c.semanas} sem.</td>
+                            <td style="padding:9px;text-align:right;color:#64748b;">${dinero(c.abonoSemanal)}</td>
+                            <td style="padding:9px;text-align:right;font-weight:900;color:#16a34a;">${c.pagosCondonables} pago${c.pagosCondonables === 1 ? '' : 's'}</td>
+                            <td style="padding:9px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(c.dineroPorPagos)}</td>
+                            <td style="padding:9px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(c.dineroFijoRedondeado)}</td>
+                            <td style="padding:9px;text-align:right;color:#059669;">+${dinero(c.colchonPorPagos)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <p style="margin:12px 0 0;font-size:12px;color:#64748b;">Ejemplo con venta de ${dinero(monto)}: si un cliente elige 6 meses, en vez de decirle "10% de descuento" le dices <strong>"págame puntual y te perdono las últimas ${filas.find(f => f.p.meses === 6)?.c.pagosCondonables ?? '—'} semanas"</strong> — mismo efecto en dinero, mucho más claro para él, y tú ya sabes exactamente cuánto margen extra (el colchón) te queda de todos modos.</p>
+        </div>`;
+}
+
+// ---------------------------------------------------------------
 // RENDER
 // ---------------------------------------------------------------
 // ---------------------------------------------------------------
@@ -310,6 +390,8 @@ function renderSimuladorTasaProntoPago() {
             </div>
             <p style="margin:12px 0 0;font-size:12px;color:#64748b;">El "descuento pronto pago" es exacto: hace que el total puntual quede prácticamente igual al total actual de ese mismo plazo. Quien no pague a tiempo simplemente no lo recibe y paga la tasa nueva completa.</p>
         </div>
+
+        ${_stpCondonacionHtml(plazosActuales)}
 
         ${_stpProyeccionHtml(diag, plazosActuales)}
 
