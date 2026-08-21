@@ -1217,6 +1217,37 @@ function _bancosAgruparTransferenciasConciliacion(lista) {
     const grupos = {};
     const sueltos = [];
 
+    // 🔗 Agrupar las transferencias internas (Transferir entre Cuentas): cada
+    // una crea dos movimientos (egreso en origen + ingreso en destino) que
+    // comparten idOperacion. Sin agrupar se ven como dos filas sueltas sin
+    // forma clara de corregirlas juntas; agrupadas se muestran en una sola
+    // fila con botón de editar.
+    const gruposTransfInterna = {};
+    const restoLista = [];
+    lista.forEach(m => {
+        if (m.tipoMovimiento === 'transferencia_interna' && m.idOperacion) {
+            if (!gruposTransfInterna[m.idOperacion]) gruposTransfInterna[m.idOperacion] = [];
+            gruposTransfInterna[m.idOperacion].push(m);
+        } else {
+            restoLista.push(m);
+        }
+    });
+    const transferenciasInternasAgrupadas = Object.entries(gruposTransfInterna).map(([idOp, items]) => {
+        const egreso = items.find(x => String(x.tipo || '').toLowerCase() === 'egreso') || items[0];
+        const ingreso = items.find(x => String(x.tipo || '').toLowerCase() === 'ingreso') || items[0];
+        return {
+            ...egreso,
+            id: `transf-${idOp}`,
+            idOperacionTransferencia: idOp,
+            esTransferenciaInterna: true,
+            concepto: `🔁 Transferencia: ${ingreso.cuentaOrigenNombre || egreso.etiquetaCuenta} → ${ingreso.cuentaDestinoNombre || ingreso.etiquetaCuenta}`,
+            tipo: 'transferencia',
+            monto: egreso.monto,
+            fecha: egreso.fecha
+        };
+    });
+    lista = [...restoLista, ...transferenciasInternasAgrupadas];
+
     lista.forEach(m => {
         const grupo = String(m.grupoConciliacion || '').trim();
         const tipo = String(m.tipo || '').toLowerCase();
@@ -1419,8 +1450,9 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     } else {
         movimientosParaVista.forEach(m => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
-            const color = esIngreso ? "#16a34a" : "#dc2626";
-            const icon = esIngreso ? "⬆️" : "⬇️";
+            const esTransf = m.tipo === "transferencia";
+            const color = esTransf ? "#4f46e5" : (esIngreso ? "#16a34a" : "#dc2626");
+            const icon = esTransf ? "🔁" : (esIngreso ? "⬆️" : "⬇️");
             const cuentaLabel = m.etiquetaCuenta || m.cuenta || "efectivo";
             const detalleGrupo = Array.isArray(m.itemsGrupo) && m.itemsGrupo.length > 1
                 ? `<br><small style="display:block; color:#0f766e; font-weight:700; margin-top:4px;">${m.itemsGrupo.length} abonos: ${m.itemsGrupo.map(x => `${x.referencia || '-'} ${dinero(x.monto)}`).join(' | ')}</small>`
@@ -1440,7 +1472,10 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
                     <td style="padding:10px; white-space:nowrap;">${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
                     <td style="padding:10px;" title="${m.concepto}">${conceptoLimpio}${detalleGrupo}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
-                    <td style="padding:10px; text-align:right; font-weight:bold; color:${color}; white-space:nowrap;">${icon} ${dinero(m.monto)}</td>
+                    <td style="padding:10px; text-align:right; font-weight:bold; color:${color}; white-space:nowrap;">
+                        ${icon} ${dinero(m.monto)}
+                        ${m.esTransferenciaInterna ? `<br><button onclick="abrirEditarTransferencia('${m.idOperacionTransferencia}')" style="margin-top:4px; padding:2px 8px; background:none; border:1px solid #c7d2fe; color:#4f46e5; border-radius:5px; cursor:pointer; font-size:11px; font-weight:normal;">✏️ Corregir</button>` : ''}
+                    </td>
                 </tr>`;
         });
     }
@@ -2308,6 +2343,192 @@ window.ejecutarTransferenciaCuentas = function() {
     alert(`✅ Transferencia de $${monto.toFixed(2)} registrada con éxito.`);
     
     // Refrescar vistas
+    if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+    if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
+};
+
+// ── Corrección de una transferencia ya registrada ────────────────────────
+// Mismo patrón que gastos/MSI: nunca se reescriben los dos movimientos
+// originales (egreso en origen + ingreso en destino). Se revierten con sus
+// contrarios y se aplica de nuevo con los datos corregidos, dejando el
+// rastro completo en movimientosCaja y un evento nuevo en auditoría.
+window.abrirEditarTransferencia = function(idOperacion) {
+    if (typeof requireAdmin !== 'function') { _renderModalEditarTransferencia(idOperacion); return; }
+    requireAdmin(() => _renderModalEditarTransferencia(idOperacion));
+};
+
+function _renderModalEditarTransferencia(idOperacion) {
+    const movimientos = StorageService.get("movimientosCaja", []);
+    const legs = movimientos.filter(m => m.idOperacion === idOperacion && m.tipoMovimiento === 'transferencia_interna');
+    const egreso = legs.find(m => String(m.tipo || '').toLowerCase() === 'egreso');
+    const ingreso = legs.find(m => String(m.tipo || '').toLowerCase() === 'ingreso');
+    if (!egreso || !ingreso) return alert('⚠️ No se encontraron los dos movimientos de esta transferencia (quizá ya fue corregida antes). Revisa la lista de movimientos.');
+
+    const fechaActual = egreso.fecha ? String(egreso.fecha).split('T')[0] : (window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : '');
+    const motivoActual = (egreso.concepto || '').replace(/^Transferencia a:.*\(/, '').replace(/\)$/, '') || '';
+
+    document.querySelector('[data-modal="editar-transferencia"]')?.remove();
+    const html = `
+    <div data-modal="editar-transferencia" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:99999; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px); padding:20px;">
+        <div style="background:white; padding:28px; border-radius:12px; width:100%; max-width:480px; box-shadow:0 20px 25px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#4f46e5;">✏️ Corregir Transferencia</h3>
+            <p style="font-size:12px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; padding:8px 10px; border-radius:6px; margin-bottom:18px;">
+                Se revertirá la transferencia original (${dinero(egreso.monto)}: ${egreso.etiquetaCuenta} → ${ingreso.etiquetaCuenta}) y se aplicará de nuevo con los datos corregidos. Queda registrado en auditoría.
+            </p>
+            <div style="margin-bottom:15px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📅 Fecha:</label>
+                <input type="date" id="editTransfFecha" value="${fechaActual}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                <div>
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#dc2626; margin-bottom:5px;">📤 Origen:</label>
+                    ${window._buildSelectorCuentas('editTransfOrigen', false)}
+                </div>
+                <div>
+                    <label style="display:block; font-weight:bold; font-size:12px; color:#10b981; margin-bottom:5px;">📥 Destino:</label>
+                    ${window._buildSelectorCuentas('editTransfDestino', false)}
+                </div>
+            </div>
+            <div style="margin-bottom:15px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">💰 Monto ($):</label>
+                <input type="number" id="editTransfMonto" min="0.01" step="0.01" value="${egreso.monto}" style="width:100%; padding:12px; border:2px solid #6366f1; border-radius:6px; font-size:18px; font-weight:bold; box-sizing:border-box; color:#4f46e5; text-align:center;">
+            </div>
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-weight:bold; font-size:12px; color:#475569; margin-bottom:5px;">📝 Motivo / Referencia:</label>
+                <input type="text" id="editTransfMotivo" value="${motivoActual.replace(/"/g, '&quot;')}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button onclick="guardarEdicionTransferencia('${idOperacion}')" style="flex:2; padding:12px; background:#4f46e5; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">💾 Guardar Corrección</button>
+                <button onclick="document.querySelector('[data-modal=editar-transferencia]')?.remove()" style="flex:1; padding:12px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">✕ Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    setTimeout(() => {
+        const selO = document.getElementById('editTransfOrigen');
+        const selD = document.getElementById('editTransfDestino');
+        if (selO && [...selO.options].some(o => o.value === egreso.cuenta)) selO.value = egreso.cuenta;
+        if (selD && [...selD.options].some(o => o.value === ingreso.cuenta)) selD.value = ingreso.cuenta;
+    }, 0);
+}
+
+window.guardarEdicionTransferencia = function(idOperacion) {
+    const movimientos = StorageService.get("movimientosCaja", []);
+    const legs = movimientos.filter(m => m.idOperacion === idOperacion && m.tipoMovimiento === 'transferencia_interna');
+    const egresoAnterior = legs.find(m => String(m.tipo || '').toLowerCase() === 'egreso');
+    const ingresoAnterior = legs.find(m => String(m.tipo || '').toLowerCase() === 'ingreso');
+    if (!egresoAnterior || !ingresoAnterior) return alert('⚠️ No se encontraron los movimientos originales.');
+
+    const selO = document.getElementById('editTransfOrigen');
+    const selD = document.getElementById('editTransfDestino');
+    const nuevoOrigen = selO.value;
+    const nuevoDestino = selD.value;
+    const nombreOrigenFull = selO.options[selO.selectedIndex].text;
+    const nombreDestinoFull = selD.options[selD.selectedIndex].text;
+    const nuevoMonto = parseFloat(document.getElementById('editTransfMonto').value);
+    const fechaRaw = document.getElementById('editTransfFecha').value;
+    const motivo = document.getElementById('editTransfMotivo').value.trim() || "Transferencia interna";
+
+    if (!nuevoOrigen || !nuevoDestino) return alert("❌ Selecciona las cuentas de origen y destino.");
+    if (nuevoOrigen === nuevoDestino) return alert("❌ La cuenta de origen y destino no pueden ser la misma.");
+    if (isNaN(nuevoMonto) || nuevoMonto <= 0) return alert("❌ Ingresa un monto válido mayor a cero.");
+    if (!fechaRaw) return alert("❌ Selecciona una fecha válida.");
+
+    const sinCambios = nuevoOrigen === egresoAnterior.cuenta && nuevoDestino === ingresoAnterior.cuenta &&
+        nuevoMonto === Number(egresoAnterior.monto) && fechaRaw === String(egresoAnterior.fecha).split('T')[0];
+    if (sinCambios) return alert('No hay cambios que guardar.');
+
+    if (!confirm(`CONFIRMAR CORRECCIÓN\n\nANTES: ${dinero(egresoAnterior.monto)} de ${egresoAnterior.etiquetaCuenta} → ${ingresoAnterior.etiquetaCuenta}\nDESPUÉS: ${dinero(nuevoMonto)} de ${nombreOrigenFull} → ${nombreDestinoFull}\n\nSe revertirá la transferencia original y se aplicará la corregida. ¿Continuar?`)) return;
+
+    if (typeof window._egresarCuenta !== 'function' || typeof window._ingresarCuenta !== 'function') {
+        return alert("❌ No se pudo corregir: funciones de cuenta no disponibles.");
+    }
+
+    const fechaBase = new Date(fechaRaw + 'T12:00:00');
+    const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
+    const idBase = `${idOperacion}-CORR-${Date.now()}`;
+
+    // 1) Revertir la transferencia original: regresar el monto viejo al
+    // origen viejo, y sacar el monto viejo del destino viejo.
+    const rev1 = window._ingresarCuenta({
+        monto: egresoAnterior.monto, cuentaId: egresoAnterior.cuenta, etiqueta: egresoAnterior.etiquetaCuenta,
+        concepto: `Corrección de transferencia — reversión de origen`,
+        referencia: idOperacion, idOperacion: `${idBase}-REV-ORIGEN`
+    }) !== false;
+    if (!rev1) return alert(`❌ No se pudo revertir el egreso original en "${egresoAnterior.etiquetaCuenta}" (¿ya no existe esa cuenta?). Nada se guardó.`);
+
+    const rev2 = window._egresarCuenta({
+        monto: ingresoAnterior.monto, cuentaId: ingresoAnterior.cuenta, etiqueta: ingresoAnterior.etiquetaCuenta,
+        concepto: `Corrección de transferencia — reversión de destino`,
+        referencia: idOperacion, idOperacion: `${idBase}-REV-DESTINO`
+    }) !== false;
+    if (!rev2) {
+        // Deshacer la reversión de origen para no dejar dinero de más ahí.
+        window._egresarCuenta({
+            monto: egresoAnterior.monto, cuentaId: egresoAnterior.cuenta, etiqueta: egresoAnterior.etiquetaCuenta,
+            concepto: `Corrección de transferencia — no se pudo completar, revertida`,
+            referencia: idOperacion, idOperacion: `${idBase}-REV-ORIGEN-DESHECHA`
+        });
+        return alert(`❌ No se pudo revertir el ingreso original en "${ingresoAnterior.etiquetaCuenta}" (¿ya no existe esa cuenta?). Se deshizo todo, nada quedó a medias.`);
+    }
+
+    // 2) Aplicar la transferencia con los datos corregidos.
+    const ap1 = window._egresarCuenta({
+        monto: nuevoMonto, cuentaId: nuevoOrigen, etiqueta: nombreOrigenFull,
+        concepto: `Transferencia a: ${nombreDestinoFull} (${motivo}) [corregida]`,
+        referencia: idOperacion, fecha: fechaIso, idOperacion: `${idBase}-APL`
+    }) !== false;
+    if (!ap1) {
+        alert(`⚠️ Se revirtió la transferencia original, pero NO se pudo aplicar la corregida (¿"${nombreOrigenFull}" ya no existe?). El dinero quedó en las cuentas originales sin transferir — revisa manualmente y vuelve a intentar.`);
+        return;
+    }
+    const ap2 = window._ingresarCuenta({
+        monto: nuevoMonto, cuentaId: nuevoDestino, etiqueta: nombreDestinoFull,
+        concepto: `Transferencia de: ${nombreOrigenFull} (${motivo}) [corregida]`,
+        referencia: idOperacion, fecha: fechaIso, idOperacion: `${idBase}-APL`
+    }) !== false;
+    if (!ap2) {
+        window._ingresarCuenta({
+            monto: nuevoMonto, cuentaId: nuevoOrigen, etiqueta: nombreOrigenFull,
+            concepto: `Reversión — no se pudo completar la corrección (destino "${nombreDestinoFull}" no válido)`,
+            referencia: idOperacion, idOperacion: `${idBase}-APL-REV`
+        });
+        alert(`⚠️ No se pudo ingresar a "${nombreDestinoFull}". Se regresó el dinero a "${nombreOrigenFull}" — nada quedó a medias, pero la corrección no se aplicó. Intenta con otra cuenta destino.`);
+        return;
+    }
+
+    // Enriquecer los movimientos nuevos con los metadatos que usa el resto
+    // del sistema para reconocerlos como transferencia interna.
+    const movimientosActualizados = StorageService.get("movimientosCaja", []);
+    movimientosActualizados.forEach(m => {
+        if (m.idOperacion === `${idBase}-APL`) {
+            m.cuentaOrigen = nuevoOrigen;
+            m.cuentaDestino = nuevoDestino;
+            m.cuentaOrigenNombre = nombreOrigenFull;
+            m.cuentaDestinoNombre = nombreDestinoFull;
+            m.tipoMovimiento = "transferencia_interna";
+        }
+    });
+    StorageService.set("movimientosCaja", movimientosActualizados);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'TRANSFERENCIA_CORREGIDA',
+            modulo: 'Bancos',
+            entidad: 'transferencia',
+            entidadId: idOperacion,
+            detalle: `Transferencia corregida: ${dinero(egresoAnterior.monto)} (${egresoAnterior.etiquetaCuenta} → ${ingresoAnterior.etiquetaCuenta}) → ${dinero(nuevoMonto)} (${nombreOrigenFull} → ${nombreDestinoFull})`,
+            monto: nuevoMonto,
+            severidad: 'riesgo',
+            datos: {
+                anterior: { monto: egresoAnterior.monto, origen: egresoAnterior.etiquetaCuenta, destino: ingresoAnterior.etiquetaCuenta, fecha: egresoAnterior.fecha },
+                nuevo: { monto: nuevoMonto, origen: nombreOrigenFull, destino: nombreDestinoFull, fecha: fechaIso }
+            }
+        });
+    }
+
+    document.querySelector('[data-modal="editar-transferencia"]')?.remove();
+    alert('✅ Transferencia corregida.');
     if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
     if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 };
