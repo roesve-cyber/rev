@@ -1213,21 +1213,35 @@ function _bancosFechaKeyMovimiento(fecha) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Helpers compartidos para reconocer y aparear las dos patas de una
+// transferencia interna, incluyendo las viejas (de antes de que existiera
+// tipoMovimiento==='transferencia_interna') identificadas por el texto del
+// concepto.
+function _esLegTransferencia(m) {
+    return m.tipoMovimiento === 'transferencia_interna' ||
+        (typeof m.concepto === 'string' && (m.concepto.startsWith('Transferencia a:') || m.concepto.startsWith('Transferencia de:')));
+}
+function _claveTransferencia(m) {
+    return m.idOperacion || m.referencia;
+}
+
 function _bancosAgruparTransferenciasConciliacion(lista) {
     const grupos = {};
     const sueltos = [];
 
     // 🔗 Agrupar las transferencias internas (Transferir entre Cuentas): cada
     // una crea dos movimientos (egreso en origen + ingreso en destino) que
-    // comparten idOperacion. Sin agrupar se ven como dos filas sueltas sin
-    // forma clara de corregirlas juntas; agrupadas se muestran en una sola
-    // fila con botón de editar.
+    // comparten idOperacion (o, en transferencias viejas de antes de la
+    // reparación de esta función, "referencia"). Sin agrupar se ven como dos
+    // filas sueltas sin forma clara de corregirlas juntas; agrupadas se
+    // muestran en una sola fila con botón de editar.
     const gruposTransfInterna = {};
     const restoLista = [];
     lista.forEach(m => {
-        if (m.tipoMovimiento === 'transferencia_interna' && m.idOperacion) {
-            if (!gruposTransfInterna[m.idOperacion]) gruposTransfInterna[m.idOperacion] = [];
-            gruposTransfInterna[m.idOperacion].push(m);
+        const clave = _claveTransferencia(m);
+        if (_esLegTransferencia(m) && clave) {
+            if (!gruposTransfInterna[clave]) gruposTransfInterna[clave] = [];
+            gruposTransfInterna[clave].push(m);
         } else {
             restoLista.push(m);
         }
@@ -1235,12 +1249,17 @@ function _bancosAgruparTransferenciasConciliacion(lista) {
     const transferenciasInternasAgrupadas = Object.entries(gruposTransfInterna).map(([idOp, items]) => {
         const egreso = items.find(x => String(x.tipo || '').toLowerCase() === 'egreso') || items[0];
         const ingreso = items.find(x => String(x.tipo || '').toLowerCase() === 'ingreso') || items[0];
+        // Si el registro viejo no trae cuentaOrigenNombre/cuentaDestinoNombre
+        // (solo lo escribe la versión reparada), lo sacamos de la etiqueta
+        // de cada pata como respaldo.
+        const nombreOrigen = ingreso.cuentaOrigenNombre || egreso.etiquetaCuenta || egreso.cuenta;
+        const nombreDestino = ingreso.cuentaDestinoNombre || ingreso.etiquetaCuenta || ingreso.cuenta;
         return {
             ...egreso,
             id: `transf-${idOp}`,
             idOperacionTransferencia: idOp,
             esTransferenciaInterna: true,
-            concepto: `🔁 Transferencia: ${ingreso.cuentaOrigenNombre || egreso.etiquetaCuenta} → ${ingreso.cuentaDestinoNombre || ingreso.etiquetaCuenta}`,
+            concepto: `🔁 Transferencia: ${nombreOrigen} → ${nombreDestino}`,
             tipo: 'transferencia',
             monto: egreso.monto,
             fecha: egreso.fecha
@@ -2359,10 +2378,15 @@ window.abrirEditarTransferencia = function(idOperacion) {
 
 function _renderModalEditarTransferencia(idOperacion) {
     const movimientos = StorageService.get("movimientosCaja", []);
-    const legs = movimientos.filter(m => m.idOperacion === idOperacion && m.tipoMovimiento === 'transferencia_interna');
+    const legs = movimientos.filter(m => _claveTransferencia(m) === idOperacion && _esLegTransferencia(m));
     const egreso = legs.find(m => String(m.tipo || '').toLowerCase() === 'egreso');
     const ingreso = legs.find(m => String(m.tipo || '').toLowerCase() === 'ingreso');
     if (!egreso || !ingreso) return alert('⚠️ No se encontraron los dos movimientos de esta transferencia (quizá ya fue corregida antes). Revisa la lista de movimientos.');
+    // 🛡️ Transferencias viejas (de antes de la reparación) pueden no traer
+    // etiquetaCuenta guardada — usamos el id de cuenta crudo como respaldo
+    // para no mostrar "undefined" en el modal.
+    egreso.etiquetaCuenta = egreso.etiquetaCuenta || egreso.cuenta;
+    ingreso.etiquetaCuenta = ingreso.etiquetaCuenta || ingreso.cuenta;
 
     const fechaActual = egreso.fecha ? String(egreso.fecha).split('T')[0] : (window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : '');
     const motivoActual = (egreso.concepto || '').replace(/^Transferencia a:.*\(/, '').replace(/\)$/, '') || '';
@@ -2414,10 +2438,12 @@ function _renderModalEditarTransferencia(idOperacion) {
 
 window.guardarEdicionTransferencia = function(idOperacion) {
     const movimientos = StorageService.get("movimientosCaja", []);
-    const legs = movimientos.filter(m => m.idOperacion === idOperacion && m.tipoMovimiento === 'transferencia_interna');
+    const legs = movimientos.filter(m => _claveTransferencia(m) === idOperacion && _esLegTransferencia(m));
     const egresoAnterior = legs.find(m => String(m.tipo || '').toLowerCase() === 'egreso');
     const ingresoAnterior = legs.find(m => String(m.tipo || '').toLowerCase() === 'ingreso');
     if (!egresoAnterior || !ingresoAnterior) return alert('⚠️ No se encontraron los movimientos originales.');
+    egresoAnterior.etiquetaCuenta = egresoAnterior.etiquetaCuenta || egresoAnterior.cuenta;
+    ingresoAnterior.etiquetaCuenta = ingresoAnterior.etiquetaCuenta || ingresoAnterior.cuenta;
 
     const selO = document.getElementById('editTransfOrigen');
     const selD = document.getElementById('editTransfDestino');
