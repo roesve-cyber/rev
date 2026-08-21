@@ -1717,25 +1717,43 @@ window.renderVencimientoPlazo = function() {
     const DIAS_LIMITE = Number(window._vpDiasLimite) || 0; // umbral "en el límite" antes del vencimiento, configurable en UI
 
     const cxc = StorageService.get('cuentasPorCobrar', []);
+    const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
     const cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && !c.incobrable && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
+
+    // Fecha de vencimiento total = fecha del ÚLTIMO pagaré del contrato (fuente
+    // real de lo pactado). Si la cuenta no tiene pagarés cargados (caso raro,
+    // cuentas muy viejas), cae a _cxcFechaFinalCredito (venta + meses) como
+    // respaldo — mismo criterio que usa el sistema para moratorios.
+    const _vpFechaVencimientoTotal = (cuenta, pagaresCuenta, estadoCta) => {
+        const fechas = pagaresCuenta.map(p => _rc.parseFecha(p.fechaVencimiento)).filter(Boolean);
+        if (fechas.length) return { fecha: new Date(Math.max(...fechas.map(f => f.getTime()))), fuente: 'ultimoPagare' };
+        const fb = typeof window._cxcFechaFinalCredito === 'function' ? window._cxcFechaFinalCredito(cuenta, estadoCta) : null;
+        return fb && !isNaN(fb.getTime()) ? { fecha: fb, fuente: 'estimadoPorMeses' } : { fecha: null, fuente: null };
+    };
 
     const evaluadas = cuentasActivas.map(c => {
         const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(c.folio) : null;
         const saldo = Number(estado?.saldoTotal ?? c.saldoActual ?? 0);
         const mesesPlan = Number(c?.plan?.meses || c?.plazoMeses || c?.meses || 0);
-        const fechaFinal = typeof window._cxcFechaFinalCredito === 'function' ? window._cxcFechaFinalCredito(c, estado) : null;
-        if (!fechaFinal || isNaN(fechaFinal.getTime())) return null;
+        const pagaresCuenta = pagaresSistema.filter(p => p.folio === c.folio);
+        const { fecha: fechaFinal, fuente: fuenteFechaFinal } = _vpFechaVencimientoTotal(c, pagaresCuenta, estado);
+        if (!fechaFinal) return null;
+
+        const fechaCompra = _rc.parseFecha(c.fechaVenta || c.fecha || c.fechaIso);
+        const sne = _rc.calcularSNE(c, pagaresCuenta, hoy);
+        const pctCubierto = sne.totalVenta > 0 ? (sne.totalPagado / sne.totalVenta * 100) : 0;
 
         const diasVencidos = Math.floor((hoy - fechaFinal) / 86400000);
         const estatusPlazo = diasVencidos > 0 ? 'VENCIDO' : (diasVencidos >= -DIAS_LIMITE ? 'EN LIMITE' : 'VIGENTE');
 
-        return { ...c, saldo, mesesPlan, fechaFinal, diasVencidos, estatusPlazo };
+        return { ...c, saldo, mesesPlan, fechaCompra, fechaFinal, fuenteFechaFinal, diasVencidos, estatusPlazo, sne, pctCubierto, numPagares: pagaresCuenta.length };
     }).filter(Boolean);
 
     // Solo nos interesan VENCIDO y EN LIMITE
     const relevantes = evaluadas.filter(c => c.estatusPlazo !== 'VIGENTE');
+    window._vpFilas = relevantes; // para el modal de detalle
 
     if (!relevantes.length) {
         cont.innerHTML = `<div style="padding:50px;text-align:center;background:white;border-radius:16px;margin:20px 0;">
@@ -1775,18 +1793,25 @@ window.renderVencimientoPlazo = function() {
         const lista = gruposMap[key].sort((a, b) => b.diasVencidos - a.diasVencidos);
         const saldoBloque = lista.reduce((s, c) => s + c.saldo, 0);
 
-        const filas = lista.map(c => {
+        const filas = lista.map((c, idxLocal) => {
+            const idxGlobal = window._vpFilas.indexOf(c);
             const vencido = c.estatusPlazo === 'VENCIDO';
             const badge = vencido
                 ? _rc.badge(`🔴 VENCIDO +${c.diasVencidos}d`, '#fef2f2', '#dc2626')
                 : _rc.badge(`🟠 EN LÍMITE ${Math.abs(c.diasVencidos)}d restantes`, '#fffbeb', '#d97706');
+            const colorPct = c.pctCubierto >= 90 ? '#16a34a' : c.pctCubierto >= 60 ? '#d97706' : '#dc2626';
             return `
-            <tr style="border-bottom:1px solid #f1f5f9;">
+            <tr style="border-bottom:1px solid #f1f5f9;cursor:pointer;" onclick="abrirDetalleVencimientoPlazo(${idxGlobal})">
                 <td style="padding:9px 12px;font-weight:bold;color:#0f172a;">${c.nombre || 'Sin nombre'}<div style="font-size:10px;color:#94a3b8;font-weight:normal;">${c.folio}</div></td>
                 <td style="padding:9px 12px;text-align:right;font-weight:bold;color:#dc2626;">${_rc.fmt(c.saldo)}</td>
+                <td style="padding:9px 12px;text-align:center;min-width:90px;">
+                    <b style="color:${colorPct};">${_rc.pct(c.pctCubierto)}</b>
+                    ${_rc.miniBar(c.pctCubierto, colorPct)}
+                </td>
                 <td style="padding:9px 12px;text-align:center;color:#475569;">${c.fechaFinal.toLocaleDateString('es-MX')}</td>
                 <td style="padding:9px 12px;text-align:center;">${badge}</td>
-                <td style="padding:9px 12px;text-align:center;">
+                <td style="padding:9px 12px;text-align:center;" onclick="event.stopPropagation();">
+                    <button onclick="abrirDetalleVencimientoPlazo(${idxGlobal})" style="padding:6px 10px;background:#7c3aed;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">🔍 Detalles</button>
                     <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="padding:6px 10px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">📋 Estado</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 10px;background:#25D366;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">💬 WA</button>
                 </td>
@@ -1800,11 +1825,12 @@ window.renderVencimientoPlazo = function() {
                 <span>${lista.length} cuenta(s) · ${_rc.fmt(saldoBloque)}</span>
             </div>
             <div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;min-width:600px;">
+                <table style="width:100%;border-collapse:collapse;min-width:700px;">
                     <thead style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
                         <tr>
                             <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:left;">Cliente / Folio</th>
                             <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:right;">Saldo</th>
+                            <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">% Cubierto</th>
                             <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">Fecha límite plazo</th>
                             <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">Estatus</th>
                             <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">Acciones</th>
@@ -1858,6 +1884,96 @@ window.renderVencimientoPlazo = function() {
     </div>`;
 };
 
+// ── Modal de detalle: toda la información sin saturar la tabla ──
+window.abrirDetalleVencimientoPlazo = function(idx) {
+    const c = (window._vpFilas || [])[idx];
+    if (!c) return;
+    const s = c.sne;
+
+    const fmtFecha = (f) => f ? f.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Sin registrar';
+    const vencido = c.estatusPlazo === 'VENCIDO';
+    const colorPct = c.pctCubierto >= 90 ? '#16a34a' : c.pctCubierto >= 60 ? '#d97706' : '#dc2626';
+    const notaFuente = c.fuenteFechaFinal === 'estimadoPorMeses'
+        ? '⚠️ Esta cuenta no tiene pagarés cargados en el sistema — la fecha se estimó como venta + meses pactados.'
+        : '✓ Calculada a partir del último pagaré registrado del contrato.';
+
+    const existente = document.getElementById('modalDetalleVencimientoPlazo');
+    if (existente) existente.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'modalDetalleVencimientoPlazo';
+    modal.style = 'position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+    <div style="background:white;border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow-y:auto;font-family:system-ui,sans-serif;">
+        <div style="background:${vencido ? 'linear-gradient(135deg,#7f1d1d,#dc2626)' : 'linear-gradient(135deg,#78350f,#d97706)'};color:white;padding:18px 22px;border-radius:14px 14px 0 0;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                    <div style="font-size:16px;font-weight:900;">${c.nombre || 'Sin nombre'}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</div>
+                    <div style="font-size:12px;opacity:.85;">${c.folio}</div>
+                </div>
+                <button onclick="document.getElementById('modalDetalleVencimientoPlazo').remove()" style="background:rgba(255,255,255,0.2);border:none;color:white;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:15px;">✕</button>
+            </div>
+        </div>
+
+        <div style="padding:20px 22px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+                <div style="background:#f8fafc;padding:10px;border-radius:8px;">
+                    <div style="font-size:10px;color:#64748b;font-weight:bold;">FECHA DE COMPRA</div>
+                    <div style="font-size:14px;font-weight:900;color:#0f172a;">${fmtFecha(c.fechaCompra)}</div>
+                </div>
+                <div style="background:#f8fafc;padding:10px;border-radius:8px;">
+                    <div style="font-size:10px;color:#64748b;font-weight:bold;">PLAZO PACTADO</div>
+                    <div style="font-size:14px;font-weight:900;color:#0f172a;">${c.mesesPlan > 0 ? c.mesesPlan + ' meses' : 'No registrado'}</div>
+                </div>
+                <div style="background:#f8fafc;padding:10px;border-radius:8px;grid-column:1 / -1;">
+                    <div style="font-size:10px;color:#64748b;font-weight:bold;">FECHA VENCIMIENTO TOTAL (último pagaré)</div>
+                    <div style="font-size:15px;font-weight:900;color:${vencido ? '#dc2626' : '#d97706'};">${fmtFecha(c.fechaFinal)}</div>
+                    <div style="font-size:10px;color:#94a3b8;margin-top:3px;">${notaFuente}</div>
+                </div>
+            </div>
+
+            <div style="background:${vencido ? '#fef2f2' : '#fffbeb'};padding:12px 14px;border-radius:8px;margin-bottom:16px;border-left:4px solid ${vencido ? '#dc2626' : '#d97706'};">
+                <div style="font-size:13px;font-weight:900;color:${vencido ? '#991b1b' : '#92400e'};">
+                    ${vencido ? `🔴 Plazo vencido hace ${c.diasVencidos} día(s)` : `🟠 A ${Math.abs(c.diasVencidos)} día(s) de vencer el plazo`}
+                </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+                <div style="background:#f8fafc;padding:10px;border-radius:8px;">
+                    <div style="font-size:10px;color:#64748b;font-weight:bold;">TOTAL DE LA VENTA</div>
+                    <div style="font-size:15px;font-weight:900;color:#0f172a;">${_rc.fmt(s.totalVenta)}</div>
+                </div>
+                <div style="background:#f8fafc;padding:10px;border-radius:8px;">
+                    <div style="font-size:10px;color:#64748b;font-weight:bold;">SALDO ACTUAL</div>
+                    <div style="font-size:15px;font-weight:900;color:#dc2626;">${_rc.fmt(c.saldo)}</div>
+                </div>
+            </div>
+
+            <div style="background:#f1f5f9;padding:12px 14px;border-radius:8px;margin-bottom:16px;">
+                <div style="font-size:10px;color:#475569;font-weight:bold;margin-bottom:6px;">% CUBIERTO DE LA DEUDA</div>
+                <div style="font-size:20px;font-weight:900;color:${colorPct};margin-bottom:6px;">${_rc.pct(c.pctCubierto)}</div>
+                ${_rc.miniBar(c.pctCubierto, colorPct)}
+                <div style="font-size:11px;color:#64748b;margin-top:5px;">Pagado: <b>${_rc.fmt(s.totalPagado)}</b> de ${_rc.fmt(s.totalVenta)} (${s.numAbonos} abono(s))</div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;font-size:12px;">
+                <div><span style="color:#64748b;">Nivel de riesgo (SNE):</span><br><b style="color:${s.colorRiesgo};">${s.emojiRiesgo} ${s.nivelRiesgo}</b></div>
+                <div><span style="color:#64748b;">Último abono:</span><br><b>${s.diasSinPagar === 9999 ? 'Sin abonos registrados' : `hace ${s.diasSinPagar} día(s)`}</b></div>
+                <div><span style="color:#64748b;">Pagarés en el contrato:</span><br><b>${c.numPagares}</b></div>
+                <div><span style="color:#64748b;">Pagarés sin aplicar:</span><br><b>${s.pagaresVencidos.length}</b></div>
+            </div>
+
+            <div style="display:flex;gap:8px;">
+                <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="flex:1;padding:10px;background:#16a34a;color:white;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">💰 Abonar</button>
+                <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="flex:1;padding:10px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">📋 Estado de Cuenta</button>
+                <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="flex:1;padding:10px;background:#25D366;color:white;border:none;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;">💬 WhatsApp</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.appendChild(modal);
+};
+
 // ── Exponer al scope global ────────────────────────────────────
 window.renderARCTablaExcel = window.renderARCTablaExcel;
 window.renderConcentracion = window.renderConcentracion;
@@ -1865,5 +1981,6 @@ window.renderCobranzaMensual = window.renderCobranzaMensual;
 window.renderComportamiento = window.renderComportamiento;
 window.renderARC_v3 = window.renderARC_v3;
 window.renderVencimientoPlazo = window.renderVencimientoPlazo;
+window.abrirDetalleVencimientoPlazo = window.abrirDetalleVencimientoPlazo;
 
 console.log('✅ Módulo reportes-credito.js cargado — ARC v3, Matriz Excel, Comportamiento, Cobranza Mensual, Concentración, Vencimiento de Plazo.');
