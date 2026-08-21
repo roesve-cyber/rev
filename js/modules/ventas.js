@@ -4643,6 +4643,15 @@ window._authInvToggleFila = function(rowId) {
 };
 
 window.revisarVentaPendiente = function(index) {
+    // 🛡️ Cada clic en "Revisar" desde la lista de la Bóveda es una intención
+    // NUEVA y explícita del admin — debe abrir la venta que pidió, no la que
+    // quedó en el contexto de una revisión anterior sin cerrar. Si no se
+    // limpia aquí, _authResolverVentaPendiente prioriza el contexto viejo
+    // (idCuarentena/folio) sobre el índice recién solicitado, y siempre
+    // termina resolviendo a la primera venta revisada en la sesión, sin
+    // importar en cuál se haya dado clic después. (Bug reportado: al pasar
+    // de una venta a otra en la Bóveda, se quedaban los datos de la primera.)
+    window._authVentaPendienteCtx = null;
     const resPendiente = _authResolverVentaPendiente(index);
     const ventasP = resPendiente.ventasP;
     index = resPendiente.index;
