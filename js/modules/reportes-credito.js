@@ -373,6 +373,7 @@ window.renderARC_v3 = function() {
                     <button onclick="renderComportamiento()" style="padding:10px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🧬 Comportamiento de Pago</button>
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
                     <button onclick="renderConcentracion()" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🎯 Concentración</button>
+                    <button onclick="renderVencimientoPlazo()" style="padding:10px 16px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⏰ Vencimiento de Plazo</button>
                 </div>
             </div>
         </div>
@@ -1698,11 +1699,171 @@ window.generarListadoCobranza = function() {
     ventana.document.close();
 };
 
+// ================================================================
+// 6. VENCIMIENTO DE PLAZO TOTAL — Bloques por plazo pactado (4/5/6 meses)
+// Muestra únicamente cuentas cuyo PLAZO TOTAL de venta ya venció o está
+// a ≤15 días de vencer, agrupadas por el plazo con el que se pactó la
+// venta. Usa la fecha límite real del crédito (_cxcFechaFinalCredito en
+// cxc.js:113), NO el SNE — aquí importa el plazo contratado completo,
+// no el comportamiento de pago parcial.
+// ================================================================
+window.renderVencimientoPlazo = function() {
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
+                 document.getElementById('dashboardContenido');
+    if (!cont) return;
+
+    window._vpDiasLimite = (window._vpDiasLimite === undefined) ? 15 : window._vpDiasLimite;
+    const DIAS_LIMITE = Number(window._vpDiasLimite) || 0; // umbral "en el límite" antes del vencimiento, configurable en UI
+
+    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
+
+    const cuentasActivas = cxc.filter(c => !_rcCuentaCancelada(c) && !c.incobrable && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado');
+
+    const evaluadas = cuentasActivas.map(c => {
+        const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(c.folio) : null;
+        const saldo = Number(estado?.saldoTotal ?? c.saldoActual ?? 0);
+        const mesesPlan = Number(c?.plan?.meses || c?.plazoMeses || c?.meses || 0);
+        const fechaFinal = typeof window._cxcFechaFinalCredito === 'function' ? window._cxcFechaFinalCredito(c, estado) : null;
+        if (!fechaFinal || isNaN(fechaFinal.getTime())) return null;
+
+        const diasVencidos = Math.floor((hoy - fechaFinal) / 86400000);
+        const estatusPlazo = diasVencidos > 0 ? 'VENCIDO' : (diasVencidos >= -DIAS_LIMITE ? 'EN LIMITE' : 'VIGENTE');
+
+        return { ...c, saldo, mesesPlan, fechaFinal, diasVencidos, estatusPlazo };
+    }).filter(Boolean);
+
+    // Solo nos interesan VENCIDO y EN LIMITE
+    const relevantes = evaluadas.filter(c => c.estatusPlazo !== 'VIGENTE');
+
+    if (!relevantes.length) {
+        cont.innerHTML = `<div style="padding:50px;text-align:center;background:white;border-radius:16px;margin:20px 0;">
+            <div style="font-size:48px;">✅</div>
+            <h3 style="color:#16a34a;">Ninguna cuenta ha vencido ni está a ≤${DIAS_LIMITE} días de vencer su plazo total.</h3>
+            <div style="margin-top:14px;">
+                <label style="font-size:12px;color:#475569;font-weight:bold;">Umbral "en límite":
+                    <select onchange="window._vpDiasLimite=parseInt(this.value);renderVencimientoPlazo();" style="margin-left:6px;padding:7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+                        <option value="0" ${DIAS_LIMITE===0?'selected':''}>Solo ya vencidas (0d)</option>
+                        <option value="7" ${DIAS_LIMITE===7?'selected':''}>7 días antes</option>
+                        <option value="15" ${DIAS_LIMITE===15?'selected':''}>15 días antes</option>
+                        <option value="30" ${DIAS_LIMITE===30?'selected':''}>30 días antes</option>
+                    </select>
+                </label>
+            </div>
+            <button onclick="renderARC_v3()" style="margin-top:14px;padding:10px 16px;background:#0f172a;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">⬅️ Volver a ARC v3</button>
+        </div>`;
+        return;
+    }
+
+    // ── Agrupar por bloques de plazo pactado ────────────────────────
+    const bloqueDe = (m) => m === 4 ? '4 meses' : m === 5 ? '5 meses' : m === 6 ? '6 meses' : (m > 0 ? `${m} meses` : 'Sin plazo registrado');
+    const ordenBloque = { '4 meses': 1, '5 meses': 2, '6 meses': 3 };
+
+    const gruposMap = {};
+    relevantes.forEach(c => {
+        const key = bloqueDe(c.mesesPlan);
+        (gruposMap[key] = gruposMap[key] || []).push(c);
+    });
+    const bloques = Object.keys(gruposMap).sort((a, b) => (ordenBloque[a] || 99) - (ordenBloque[b] || 99) || a.localeCompare(b));
+
+    const totalVencido = relevantes.filter(c => c.estatusPlazo === 'VENCIDO').reduce((s, c) => s + c.saldo, 0);
+    const totalLimite = relevantes.filter(c => c.estatusPlazo === 'EN LIMITE').reduce((s, c) => s + c.saldo, 0);
+
+    let bloquesHTML = '';
+    bloques.forEach(key => {
+        const lista = gruposMap[key].sort((a, b) => b.diasVencidos - a.diasVencidos);
+        const saldoBloque = lista.reduce((s, c) => s + c.saldo, 0);
+
+        const filas = lista.map(c => {
+            const vencido = c.estatusPlazo === 'VENCIDO';
+            const badge = vencido
+                ? _rc.badge(`🔴 VENCIDO +${c.diasVencidos}d`, '#fef2f2', '#dc2626')
+                : _rc.badge(`🟠 EN LÍMITE ${Math.abs(c.diasVencidos)}d restantes`, '#fffbeb', '#d97706');
+            return `
+            <tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:9px 12px;font-weight:bold;color:#0f172a;">${c.nombre || 'Sin nombre'}<div style="font-size:10px;color:#94a3b8;font-weight:normal;">${c.folio}</div></td>
+                <td style="padding:9px 12px;text-align:right;font-weight:bold;color:#dc2626;">${_rc.fmt(c.saldo)}</td>
+                <td style="padding:9px 12px;text-align:center;color:#475569;">${c.fechaFinal.toLocaleDateString('es-MX')}</td>
+                <td style="padding:9px 12px;text-align:center;">${badge}</td>
+                <td style="padding:9px 12px;text-align:center;">
+                    <button onclick="abrirEstadoCuentaFolio('${c.folio}')" style="padding:6px 10px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">📋 Estado</button>
+                    <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 10px;background:#25D366;color:white;border:none;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">💬 WA</button>
+                </td>
+            </tr>`;
+        }).join('');
+
+        bloquesHTML += `
+        <div style="margin-bottom:22px;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+            <div style="background:#0f172a;color:white;padding:12px 16px;font-weight:900;font-size:13px;display:flex;justify-content:space-between;">
+                <span>📦 PLAZO: ${key}</span>
+                <span>${lista.length} cuenta(s) · ${_rc.fmt(saldoBloque)}</span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;min-width:600px;">
+                    <thead style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+                        <tr>
+                            <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:left;">Cliente / Folio</th>
+                            <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:right;">Saldo</th>
+                            <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">Fecha límite plazo</th>
+                            <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">Estatus</th>
+                            <th style="padding:10px 12px;font-size:11px;color:#475569;text-align:center;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>${filas}</tbody>
+                </table>
+            </div>
+        </div>`;
+    });
+
+    cont.innerHTML = `
+    <div style="font-family:system-ui,sans-serif;max-width:1400px;margin:0 auto;padding:0 4px;">
+        <div style="background:linear-gradient(135deg,#7f1d1d,#dc2626);color:white;padding:24px;border-radius:14px;margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:15px;">
+                <div>
+                    <h2 style="margin:0;font-size:22px;font-weight:900;">⏰ Vencimiento de Plazo Total</h2>
+                    <p style="margin:6px 0 0;color:#fecaca;font-size:13px;">
+                        Cuentas cuyo <b>plazo total pactado</b> (4, 5 o 6 meses desde la venta) ya se cumplió o está a ≤${DIAS_LIMITE} días de cumplirse.
+                        No mide abonos parciales — mide si ya se acabó el tiempo contratado.
+                    </p>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <label style="font-size:12px;color:#fecaca;font-weight:bold;">Umbral "en límite":
+                        <select onchange="window._vpDiasLimite=parseInt(this.value);renderVencimientoPlazo();" style="margin-left:6px;padding:7px;border:1px solid rgba(255,255,255,0.4);border-radius:6px;font-size:12px;background:rgba(255,255,255,0.15);color:white;">
+                            <option value="0" ${DIAS_LIMITE===0?'selected':''}>Solo ya vencidas (0d)</option>
+                            <option value="7" ${DIAS_LIMITE===7?'selected':''}>7 días antes</option>
+                            <option value="15" ${DIAS_LIMITE===15?'selected':''}>15 días antes</option>
+                            <option value="30" ${DIAS_LIMITE===30?'selected':''}>30 días antes</option>
+                        </select>
+                    </label>
+                    <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.4);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
+                </div>
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px;">
+            <div style="background:white;padding:18px;border-radius:10px;border-left:5px solid #dc2626;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+                <div style="font-size:11px;color:#64748b;font-weight:bold;text-transform:uppercase;">Plazo ya vencido</div>
+                <div style="font-size:24px;font-weight:900;color:#dc2626;">${_rc.fmt(totalVencido)}</div>
+                <div style="font-size:11px;color:#64748b;">${relevantes.filter(c => c.estatusPlazo === 'VENCIDO').length} cuenta(s)</div>
+            </div>
+            <div style="background:white;padding:18px;border-radius:10px;border-left:5px solid #f59e0b;box-shadow:0 2px 6px rgba(0,0,0,0.05);">
+                <div style="font-size:11px;color:#64748b;font-weight:bold;text-transform:uppercase;">En límite (≤${DIAS_LIMITE}d)</div>
+                <div style="font-size:24px;font-weight:900;color:#d97706;">${_rc.fmt(totalLimite)}</div>
+                <div style="font-size:11px;color:#64748b;">${relevantes.filter(c => c.estatusPlazo === 'EN LIMITE').length} cuenta(s)</div>
+            </div>
+        </div>
+
+        ${bloquesHTML}
+    </div>`;
+};
+
 // ── Exponer al scope global ────────────────────────────────────
 window.renderARCTablaExcel = window.renderARCTablaExcel;
 window.renderConcentracion = window.renderConcentracion;
 window.renderCobranzaMensual = window.renderCobranzaMensual;
 window.renderComportamiento = window.renderComportamiento;
 window.renderARC_v3 = window.renderARC_v3;
+window.renderVencimientoPlazo = window.renderVencimientoPlazo;
 
-console.log('✅ Módulo reportes-credito.js cargado — ARC v3, Matriz Excel, Comportamiento, Cobranza Mensual, Concentración.');
+console.log('✅ Módulo reportes-credito.js cargado — ARC v3, Matriz Excel, Comportamiento, Cobranza Mensual, Concentración, Vencimiento de Plazo.');
