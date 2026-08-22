@@ -107,7 +107,6 @@
                 <button onclick="navA('reporte-abonos-enganches'); renderReporteAbonEnganches();">💵 Reporte de Abonos y Enganches</button>
                 <div class="submenu-grupo">Postventa</div>
                 <button onclick="navA('reimprimir-venta'); if(typeof renderReimprimirVenta === 'function') renderReimprimirVenta();">🖨️ Reimpresiones</button>
-                <button onclick="navA('devoluciones')">↩️ Devoluciones</button>
                 <button onclick="navA('garantias')">🛡️ Garantías</button>
             </div>
         </div>
@@ -848,15 +847,6 @@
  <div id="contenidoMorosos"></div>
  </div>
 
-    <!-- DEVOLUCIONES -->
-    <div id="devoluciones" class="vista oculto">
- <div class="vista-header">
- <h2>Devoluciones</h2>
- <p>Registra devoluciones y reingresa productos al inventario.</p>
- </div>
- <div id="contenidoDevoluciones"></div>
- </div>
-
     <!-- CANCELACIONES -->
     <div id="cancelaciones" class="vista oculto">
  <div class="vista-header">
@@ -1002,6 +992,11 @@
             <div class="campo">
                 <label>Precio ($)</label>
                 <input type="number" id="pPrecio" placeholder="Precio contado">
+            </div>
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:14px;">
+                <label style="font-size:14px; font-weight:bold; color:#991b1b;">Precio de "segunda" ($)</label>
+                <input type="number" id="pPrecioSegunda" placeholder="Precio para mercancía devuelta/dañada" min="0" style="width:100%; margin-top:6px; padding:9px; border:1px solid #fca5a5; border-radius:6px; box-sizing:border-box;">
+                <small style="display:block; margin-top:6px; color:#b91c1c;">Se usa cuando entra stock de "segunda" (devoluciones dañadas o incompletas). Déjalo en blanco si no aplica.</small>
             </div>
             <div class="campo">
                 <label>Color</label>
@@ -1184,7 +1179,7 @@
 <script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js?v=3"></script>
 <script src="js/modules/prestamos.js"></script>
-<script src="js/modules/devoluciones.js"></script>
+<script src="js/modules/garantias.js"></script>
 <script src="js/modules/producto-picker.js?v=4"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=4"></script>
