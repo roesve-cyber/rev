@@ -5,7 +5,7 @@
 function _navGrupoVista(vistaId) {
     const operacion = new Set([
     'tienda', 'carrito', 'seleccionarcliente', 'apartados', 'entregas',
-    'cotizaciones', 'listaprecios', 'devoluciones', 'garantias',
+    'cotizaciones', 'listaprecios', 'garantias',
     'cuentasxcobrar', 'gestion-datos-cliente', 'estadoCuentaCliente', 'abonosdirectos'
 ]);
     if (operacion.has(vistaId)) return 'operacion';
@@ -21,7 +21,7 @@ const _NAV_VISTAS_PERMITIDAS_VENDEDOR = new Set([
     'cotizaciones', 'listaprecios',
     'apartados', 'entregas',
     'cuentasxcobrar', 'estadoCuentaCliente', 'gestion-datos-cliente', 'reporte-abonos-enganches',
-    'reimprimir-venta', 'devoluciones', 'garantias'
+    'reimprimir-venta', 'garantias'
 ]);
 
 function _navPermitidoParaVendedor(vistaId) {
@@ -115,7 +115,6 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'entregas' && typeof renderEntregas === 'function') renderEntregas();
         if (vistaId === 'apartados' && typeof renderApartados === 'function') renderApartados();
         if (vistaId === 'carrito' && typeof renderCarrito === 'function') renderCarrito();
-        if (vistaId === 'devoluciones' && typeof renderHistorialDevoluciones === 'function') renderHistorialDevoluciones();
         if (vistaId === 'garantias' && typeof renderControlGarantias === 'function') renderControlGarantias();
         if (vistaId === 'cuentas-bancarias' && typeof renderCuentasBancarias === 'function') renderCuentasBancarias();
         if (vistaId === 'bancos' && typeof renderBancosConfig === 'function') renderBancosConfig();
