@@ -701,6 +701,48 @@ function registrarComisionVenta(folio, datos, vendedorId) {
     StorageService.set('comisionesRegistradas', comisiones);
 }
 
+// 🛠️ Corrección puntual, de un solo uso: sube al piso del 10% de utilidad
+// las comisiones PENDIENTES que quedaron por debajo de ese piso porque se
+// registraron antes de que existiera esta regla en registrarComisionVenta().
+// Las comisiones ya Pagadas NO se tocan (son historia). Se corre a mano desde
+// la consola del navegador: corregirComisionesPendientesPisoUtilidad()
+// Deja rastro en cada registro ajustado: montoComisionAnteriorPisoUtilidad
+// (el monto que tenía antes), pisoUtilidadAplicado=true y
+// pisoUtilidadCorreccionManual con la fecha del ajuste.
+function corregirComisionesPendientesPisoUtilidad() {
+    const comisiones = StorageService.get('comisionesRegistradas', []);
+    const ajustados = [];
+    comisiones.forEach(c => {
+        if (c.estado !== 'Pendiente') return;
+        const utilidad = typeof c.utilidad === 'number' ? c.utilidad : _comisionUtilidad(c);
+        if (!utilidad || utilidad <= 0) return;
+        const pisoUtilidad = utilidad * 0.10;
+        if (Number(c.montoComision) >= pisoUtilidad) return; // ya cumple, no se toca
+        const topeUtilidad = utilidad * 0.12;
+        const pisoRedondeado = _redondearComisionSiguienteDiez(pisoUtilidad);
+        const montoNuevo = pisoRedondeado <= topeUtilidad ? pisoRedondeado : _redondearComisionAnteriorDiez(topeUtilidad);
+        if (montoNuevo <= Number(c.montoComision)) return; // por seguridad, nunca bajar
+        ajustados.push({ folio: c.folio, cliente: c.clienteNombre || '', vendedor: c.vendedorNombre, montoAnterior: c.montoComision, montoNuevo, utilidad });
+        c.utilidad = utilidad; // por si se obtuvo del fallback, ya queda guardado
+        c.montoComisionAnteriorPisoUtilidad = c.montoComision;
+        c.montoComision = montoNuevo;
+        c.pisoUtilidadAplicado = true;
+        c.pisoUtilidadCorreccionManual = new Date().toISOString();
+    });
+
+    if (ajustados.length === 0) {
+        console.log('No hay comisiones Pendientes por debajo del piso del 10% de utilidad.');
+        return ajustados;
+    }
+    StorageService.set('comisionesRegistradas', comisiones);
+    console.table(ajustados);
+    console.log(`${ajustados.length} comisión(es) Pendiente(s) ajustada(s) al piso del 10% de utilidad.`);
+    if (typeof renderGestionVendedores === 'function' && document.getElementById('contenidoVendedores')) {
+        renderGestionVendedores();
+    }
+    return ajustados;
+}
+
 function calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta) {
     const vendedores = StorageService.get('vendedores', []);
     const v = vendedores.find(x => String(x.id) === String(vendedorId));
@@ -1224,6 +1266,7 @@ window.editarVendedor = editarVendedor;
 window.eliminarVendedor = eliminarVendedor;
 window.calcularCostoMercanciaVenta = calcularCostoMercanciaVenta;
 window.registrarComisionVenta = registrarComisionVenta;
+window.corregirComisionesPendientesPisoUtilidad = corregirComisionesPendientesPisoUtilidad;
 window.calcularComisionesVendedor = calcularComisionesVendedor;
 window.calcularLiquidacionVendedor = calcularLiquidacionVendedor;
 window._cambiarTabComisiones = _cambiarTabComisiones;
