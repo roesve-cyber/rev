@@ -91,6 +91,7 @@ function renderGestionVendedores() {
             <button id="tabComision_pendientes" onclick="_cambiarTabComisiones('pendientes')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📌 Ventas no pagadas</button>
             <button id="tabComision_anticipos" onclick="_cambiarTabComisiones('anticipos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">💵 Anticipos</button>
             <button id="tabComision_historial" onclick="_cambiarTabComisiones('historial')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🕓 Historial</button>
+            ${(typeof _esAdmin === 'function' && _esAdmin()) ? `<button onclick="_ejecutarCorreccionPisoUtilidadUI()" title="Sube al piso del 10% de utilidad las comisiones PENDIENTES que quedaron por debajo (registradas antes de esta regla). Lo Pagado no se toca." style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;background:#fef3c7;color:#92400e;">🛠️ Corregir piso 10%</button>` : ''}
           </div>
         </div>
 
@@ -743,6 +744,20 @@ function corregirComisionesPendientesPisoUtilidad() {
     return ajustados;
 }
 
+// Wrapper con confirm()/alert() (en vez de consola) para poder correr la
+// corrección desde el botón "🛠️ Corregir piso 10%" — pensado para usarse
+// desde el celular, donde no hay consola de desarrollador a mano.
+function _ejecutarCorreccionPisoUtilidadUI() {
+    if (!confirm('Esto revisa las comisiones PENDIENTES (no toca las Pagadas) y sube al piso del 10% de utilidad las que quedaron por debajo. ¿Continuar?')) return;
+    const ajustados = corregirComisionesPendientesPisoUtilidad();
+    if (ajustados.length === 0) {
+        alert('✅ No había comisiones pendientes por debajo del piso del 10% de utilidad. Nada que corregir.');
+        return;
+    }
+    const detalle = ajustados.map(a => `• ${a.vendedor} — ${a.cliente || a.folio}: ${dinero(a.montoAnterior)} → ${dinero(a.montoNuevo)}`).join('\n');
+    alert(`✅ Se ajustaron ${ajustados.length} comisión(es):\n\n${detalle}`);
+}
+
 function calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta) {
     const vendedores = StorageService.get('vendedores', []);
     const v = vendedores.find(x => String(x.id) === String(vendedorId));
@@ -1267,6 +1282,7 @@ window.eliminarVendedor = eliminarVendedor;
 window.calcularCostoMercanciaVenta = calcularCostoMercanciaVenta;
 window.registrarComisionVenta = registrarComisionVenta;
 window.corregirComisionesPendientesPisoUtilidad = corregirComisionesPendientesPisoUtilidad;
+window._ejecutarCorreccionPisoUtilidadUI = _ejecutarCorreccionPisoUtilidadUI;
 window.calcularComisionesVendedor = calcularComisionesVendedor;
 window.calcularLiquidacionVendedor = calcularLiquidacionVendedor;
 window._cambiarTabComisiones = _cambiarTabComisiones;
