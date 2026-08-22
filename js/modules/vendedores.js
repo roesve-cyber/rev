@@ -273,6 +273,19 @@ function _comisionClienteYProductos(c) {
     return { cliente: '-', productos: [] };
 }
 
+// Compatibilidad con registros de comisión de antes de que se guardara la
+// utilidad directo en el registro: si falta, se recalcula con el costo
+// ACTUAL de los productos (no histórico, mismo criterio que ya usa el
+// cálculo en vivo al registrar la comisión) contra la venta original.
+function _comisionUtilidad(c) {
+    if (typeof c.utilidad === 'number') return c.utilidad;
+    const ventas = StorageService.get('ventasRegistradas', []);
+    const venta = ventas.find(v => String(v.folio) === String(c.folio));
+    if (!venta) return null;
+    const costo = calcularCostoMercanciaVenta(venta.articulos, null);
+    return Math.max(0, Number(venta.total || venta.totalMercancia || 0) - costo);
+}
+
 function renderHistorialComisiones() {
     const cont = document.getElementById('historialComisionesArea');
     if (!cont) return;
@@ -298,12 +311,18 @@ function renderHistorialComisiones() {
     const rows = filtradas.map(c => {
         const { cliente, productos } = _comisionClienteYProductos(c);
         const productosTexto = productos.length ? productos.join(', ') : '-';
+        const utilidad = _comisionUtilidad(c);
+        const pctUtilidad = (utilidad && utilidad > 0) ? (c.montoComision / utilidad * 100) : null;
+        const pctVenta = (c.totalVenta && c.totalVenta > 0) ? (c.montoComision / c.totalVenta * 100) : null;
         return `<tr>
       <td style="padding:8px;">${_vendEsc(c.vendedorNombre)}</td>
       <td style="padding:8px;" title="Folio ${_vendEsc(c.folio)}">${_vendEsc(cliente)}</td>
       <td style="padding:8px;max-width:220px;" title="${_vendEsc(productosTexto)}">${_vendEsc(productos.length > 2 ? productos.slice(0, 2).join(', ') + ` +${productos.length - 2}` : productosTexto)}</td>
       <td style="padding:8px;text-align:right;">${dinero(c.totalVenta)}</td>
+      <td style="padding:8px;text-align:right;">${utilidad === null ? '-' : dinero(utilidad)}</td>
       <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
+      <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${pctUtilidad === null ? '-' : pctUtilidad.toFixed(1) + '%'}</td>
+      <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${pctVenta === null ? '-' : pctVenta.toFixed(1) + '%'}</td>
       <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
       <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'recuperacion_cartera' ? '💡 Recuperación' : (c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre')}</td>
       <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
@@ -319,12 +338,15 @@ function renderHistorialComisiones() {
             <th style="padding:8px;text-align:left;">Cliente</th>
             <th style="padding:8px;text-align:left;">Productos</th>
             <th style="padding:8px;text-align:right;">Venta/Abono</th>
+            <th style="padding:8px;text-align:right;">Utilidad</th>
             <th style="padding:8px;text-align:right;">Comisión</th>
+            <th style="padding:8px;text-align:right;">% Utilidad</th>
+            <th style="padding:8px;text-align:right;">% Venta</th>
             <th style="padding:8px;text-align:left;">Fecha</th>
             <th style="padding:8px;text-align:center;">Tipo</th>
             <th style="padding:8px;text-align:center;">Estado</th>
           </tr></thead>
-          <tbody>${rows || '<tr><td colspan="8" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros con estos filtros.</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="11" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros con estos filtros.</td></tr>'}</tbody>
         </table>
       </div>`;
 }
@@ -622,6 +644,10 @@ function registrarComisionVenta(folio, datos, vendedorId) {
     // sin depender de que el folio siga existiendo/legible en ventasRegistradas.
     const clienteNombre = esObjeto ? (datos.clienteNombre || '') : '';
     const productos = esObjeto ? (datos.articulos || []).map(a => a.nombre).filter(Boolean) : [];
+    // Utilidad de la venta (precio sin intereses menos costo de mercancía),
+    // guardada aparte de montoBaseComision porque esta última solo coincide
+    // con la utilidad cuando baseComision === 'utilidad'.
+    const utilidad = esObjeto ? Math.max(0, totalContado - costoMercancia) : 0;
     const comisiones = StorageService.get('comisionesRegistradas', []);
     comisiones.push({
         id: Date.now(),
@@ -631,6 +657,8 @@ function registrarComisionVenta(folio, datos, vendedorId) {
         clienteNombre,
         productos,
         totalVenta: totalContado,
+        costoMercancia,
+        utilidad,
         baseComision: v.baseComision || 'precio_base',
         montoBaseComision: montoBase,
         montoComisionSinRedondeo: montoComisionCalculado,
