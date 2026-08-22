@@ -26,11 +26,63 @@ function _devolucionesRequireAdmin(accion) {
 // de esa migración. Sin este cambio, buscarVentaDevolucion() buscaba
 // exclusivamente en una colección que ya no se llena.
 function _devolucionesBuscarVenta(folioUpper) {
+    // 🚀 Índice de folio→venta cacheado (ver _devolucionesIndiceVentas) en
+    // vez de recorrer ambos arreglos completos en cada búsqueda exacta.
+    return _devolucionesIndiceVentas().get(folioUpper) || null;
+}
+
+// 🚀 REPARACIÓN DE LENTITUD: antes, cada tecleo del buscador (una vez que se
+// agregó búsqueda incremental) recorría `ventasRegistradas` + `registroTickets`
+// desde cero con .find()/.filter() y además regeneraba `new Date(...)` y
+// `.toLocaleDateString()` por cada fila, aunque el usuario no hubiera
+// terminado de escribir el folio. Con miles de ventas acumuladas (el negocio
+// lleva meses de operación diaria) eso se sentía "muy lento" al escribir.
+//
+// Ahora se construye UNA sola vez un índice (Map folioUpper -> venta) y una
+// lista plana ya normalizada (folio, cliente, fecha, total en minúsculas
+// para comparar), cacheados en memoria. El índice se invalida solo si
+// cambió la referencia o el largo de los arreglos fuente (se regeneran con
+// StorageService.set en cada venta/edición), así que en el caso normal
+// (abrir el modal varias veces sin recargar la página) NO se reconstruye.
+window._devolucionesCacheIndice = null; // { nuevasRef, legacyRef, nuevasLen, legacyLen, mapa, lista }
+
+function _devolucionesConstruirLista() {
     const nuevas = StorageService.get('ventasRegistradas', []);
     const legacy = StorageService.get('registroTickets', []);
-    return nuevas.find(v => (v.folio || '').toUpperCase() === folioUpper)
-        || legacy.find(v => (v.folio || '').toUpperCase() === folioUpper)
-        || null;
+    const c = window._devolucionesCacheIndice;
+    if (c && c.nuevasRef === nuevas && c.legacyRef === legacy &&
+        c.nuevasLen === nuevas.length && c.legacyLen === legacy.length) {
+        return c;
+    }
+    const mapa = new Map();
+    const lista = [];
+    const agregar = (v) => {
+        const folio = (v.folio || '').toUpperCase();
+        if (!folio || mapa.has(folio)) return; // nuevas tiene prioridad sobre legacy
+        mapa.set(folio, v);
+        const arts = (v.venta?.articulos || v.articulos || v.carrito || []);
+        lista.push({
+            venta: v,
+            folio,
+            _buscable: [
+                folio,
+                String(v.clienteNombre || v.nombre || ''),
+                ...arts.map(a => String(a.nombre || ''))
+            ].join(' | ').toLowerCase(),
+            _fechaOrden: new Date(v.fecha || v.fechaVenta || 0).getTime() || 0
+        });
+    };
+    nuevas.forEach(agregar);
+    legacy.forEach(agregar);
+    lista.sort((a, b) => b._fechaOrden - a._fechaOrden); // más recientes primero
+
+    const nuevoCache = { nuevasRef: nuevas, legacyRef: legacy, nuevasLen: nuevas.length, legacyLen: legacy.length, mapa, lista };
+    window._devolucionesCacheIndice = nuevoCache;
+    return nuevoCache;
+}
+
+function _devolucionesIndiceVentas() {
+    return _devolucionesConstruirLista().mapa;
 }
 
 function abrirModalDevolucion() {
@@ -39,34 +91,108 @@ function abrirModalDevolucion() {
       <div style="background:white;border-radius:12px;width:100%;max-width:640px;padding:28px;margin:auto;">
         <h2 style="margin:0 0 20px;color:#d97706;">↩️ Registrar Devolución</h2>
         <div style="display:grid;grid-template-columns:1fr auto;gap:12px;margin-bottom:16px;">
-          <input type="text" id="devFolio" placeholder="Folio de venta (Ej: VTA-001)" style="padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:15px;">
+          <input type="text" id="devFolio" placeholder="Folio, cliente o producto..." autocomplete="off" style="padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:15px;">
           <button onclick="buscarVentaDevolucion()" style="padding:10px 18px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🔍 Buscar</button>
         </div>
         <div id="devResultado"></div>
       </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    // 🔎 Búsqueda incremental con debounce: no hace falta ya escribir el
+    // folio exacto ni presionar "Buscar" — con 2+ caracteres ya sugiere
+    // coincidencias por folio, cliente o producto.
+    const input = document.getElementById('devFolio');
+    if (input) {
+        let temporizador = null;
+        input.addEventListener('input', function() {
+            clearTimeout(temporizador);
+            temporizador = setTimeout(buscarVentaDevolucion, 180);
+        });
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { clearTimeout(temporizador); buscarVentaDevolucion(); }
+        });
+    }
+}
+
+function _devolucionesEsc(s) {
+    return String(s ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function buscarVentaDevolucion() {
-    const folio = document.getElementById('devFolio')?.value.trim().toUpperCase();
+    const termino = (document.getElementById('devFolio')?.value || '').trim();
     const cont = document.getElementById('devResultado');
-    if (!folio || !cont) return;
-    const venta = _devolucionesBuscarVenta(folio);
-    if (!venta) {
-        cont.textContent = '';
-        const p = document.createElement('p');
-        p.style.cssText = 'color:#dc2626;text-align:center;padding:16px;';
-        p.textContent = `❌ No se encontró la venta ${folio}`;
-        cont.appendChild(p);
+    if (!cont) return;
+    if (!termino) { cont.innerHTML = ''; return; }
+
+    const terminoUpper = termino.toUpperCase();
+    const terminoLower = termino.toLowerCase();
+
+    // 1. Coincidencia exacta de folio → ir directo al detalle (comportamiento
+    // previo, preservado para no romper flujos ya conocidos por Roberto).
+    const ventaExacta = _devolucionesBuscarVenta(terminoUpper);
+    if (ventaExacta) {
+        _devolucionesMostrarDetalle(ventaExacta, ventaExacta.folio || termino);
         return;
     }
+
+    // 2. Si no hay match exacto, buscar por coincidencia parcial en folio,
+    // nombre de cliente o nombre de artículo (esto es lo que antes obligaba
+    // a Roberto a ir a otro módulo a buscar el folio exacto primero).
+    const { lista } = _devolucionesConstruirLista();
+    const MAX_RESULTADOS = 25;
+    const coincidencias = [];
+    for (let i = 0; i < lista.length && coincidencias.length < MAX_RESULTADOS; i++) {
+        if (lista[i]._buscable.includes(terminoLower)) coincidencias.push(lista[i]);
+    }
+
+    if (coincidencias.length === 0) {
+        cont.innerHTML = `<p style="color:#dc2626;text-align:center;padding:16px;">❌ No se encontró ninguna venta que coincida con "${_devolucionesEsc(termino)}"</p>`;
+        return;
+    }
+
+    if (coincidencias.length === 1) {
+        _devolucionesMostrarDetalle(coincidencias[0].venta, coincidencias[0].folio);
+        return;
+    }
+
+    const filas = coincidencias.map(({ venta: v, folio }) => {
+        const cliente = _devolucionesEsc(v.clienteNombre || v.nombre || 'Cliente');
+        const fechaObj = new Date(v.fecha || v.fechaVenta || 0);
+        const fechaStr = isNaN(fechaObj.getTime()) ? '' : fechaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' });
+        return `<button class="devResultadoItem" data-folio="${_devolucionesEsc(folio)}" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:10px 12px;background:white;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px;cursor:pointer;">
+            <span><strong>${_devolucionesEsc(folio)}</strong> — ${cliente}</span>
+            <small style="color:#6b7280;">${fechaStr} · ${dinero(v.total || v.totalVenta || 0)}</small>
+        </button>`;
+    }).join('');
+
+    cont.innerHTML = `
+      <div style="max-height:340px;overflow-y:auto;margin-bottom:8px;">
+        <p style="color:#6b7280;font-size:12px;margin:0 0 8px;">${coincidencias.length} coincidencia(s) — selecciona una venta:</p>
+        ${filas}
+      </div>`;
+    cont.querySelectorAll('.devResultadoItem').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const folio = this.getAttribute('data-folio');
+            const venta = _devolucionesBuscarVenta((folio || '').toUpperCase());
+            if (venta) {
+                const inputFolio = document.getElementById('devFolio');
+                if (inputFolio) inputFolio.value = folio;
+                _devolucionesMostrarDetalle(venta, folio);
+            }
+        });
+    });
+}
+
+function _devolucionesMostrarDetalle(venta, folio) {
+    const cont = document.getElementById('devResultado');
+    if (!cont) return;
     const arts = (venta.venta?.articulos || venta.articulos || venta.carrito || []);
     const opcionesArts = arts.map((a, i) =>
-        `<option value="${i}">${a.nombre.replace(/</g,'&lt;').replace(/>/g,'&gt;')} (x${a.cantidad || 1})</option>`).join('');
-    const clienteNombre = (venta.clienteNombre || venta.nombre || 'Cliente').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const folioSafe = (venta.folio || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const fechaStr = new Date(venta.fecha || venta.fechaVenta).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'});
+        `<option value="${i}">${_devolucionesEsc(a.nombre)} (x${a.cantidad || 1})</option>`).join('');
+    const clienteNombre = _devolucionesEsc(venta.clienteNombre || venta.nombre || 'Cliente');
+    const folioSafe = _devolucionesEsc(venta.folio || folio || '');
+    const fechaObj = new Date(venta.fecha || venta.fechaVenta);
+    const fechaStr = isNaN(fechaObj.getTime()) ? '' : fechaObj.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'});
     cont.innerHTML = `
       <div style="background:#f9fafb;padding:16px;border-radius:8px;margin-bottom:16px;">
         <strong>${folioSafe}</strong> — ${clienteNombre}<br>
@@ -110,8 +236,9 @@ function buscarVentaDevolucion() {
         <button onclick="document.querySelector('[data-modal=devolucion]')?.remove()" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
       </div>`;
     // Use addEventListener to avoid folio injection via onclick attribute
+    const folioReal = venta.folio || folio;
     const btn = document.getElementById('btnProcesarDev');
-    if (btn) btn.addEventListener('click', function() { procesarDevolucion(folio); });
+    if (btn) btn.addEventListener('click', function() { procesarDevolucion(folioReal); });
 }
 
 // 🛡️ Punto 12: para una venta a crédito, el precio contado de una pieza NO
