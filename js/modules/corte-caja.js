@@ -304,8 +304,31 @@
 
     const UBICACION_FIJA_CORTE_KEY = 'corteCajaUbicacionFija';
 
+    // 🌟 Caja de acceso rápido: siempre tiene su propia pestaña destacada,
+    // separada del resto de cajas/bancos (que quedan agrupados en el
+    // desplegable "Más cajas ▾"). Se resuelve por NOMBRE (no por id, que se
+    // genera al azar) para no depender de qué posición ocupe en la lista.
+    const NOMBRE_CAJA_PRINCIPAL = 'Efectivo One';
+    const _normalizarNombreCaja = (n) => String(n || '')
+        .replace(/[^\p{L}\p{N}\s]/gu, '') // quita emojis/símbolos, deja letras/números/espacios
+        .trim()
+        .toLowerCase();
+
+    function _cajaPrincipal(cuentas) {
+        const objetivo = _normalizarNombreCaja(NOMBRE_CAJA_PRINCIPAL);
+        return (cuentas || []).find(c => _normalizarNombreCaja(c.nombre) === objetivo) || null;
+    }
+
     function obtenerUbicacionFijaCorte() {
-        try { return localStorage.getItem(UBICACION_FIJA_CORTE_KEY) || 'todas'; } catch (e) { return 'todas'; }
+        try {
+            const guardada = localStorage.getItem(UBICACION_FIJA_CORTE_KEY);
+            if (guardada) return guardada;
+        } catch (e) { /* noop */ }
+        // Sin preferencia guardada en este aparato (p. ej. la primera vez que se
+        // abre en un dispositivo nuevo): arrancar en la caja principal en vez de
+        // "Todas", para no depender de que cada aparato la elija manualmente.
+        const principal = _cajaPrincipal(obtenerCuentasCorte());
+        return principal ? principal.id : 'todas';
     }
 
     function guardarUbicacionFijaCorte(cuentaId) {
@@ -387,6 +410,19 @@
         const saldoActualCuenta = Number(cuentaObj.saldoActual || 0);
         const netoHistoricoTotal = sumarNetoMovimientos(movimientosRaw, cuentaObj.aliases, null, null);
         const valorBootstrap = saldoActualCuenta - netoHistoricoTotal;
+
+        // 🛡️ Si Firebase todavía está bajando datos (recién entraste en un
+        // equipo nuevo/recién logueado), NO fijamos nada todavía: fijar aquí
+        // usaría movimientos/cortes locales incompletos, y ese número
+        // "de arranque" quedaría guardado y sincronizado a todos los demás
+        // equipos, pisando el saldo inicial real que quizás ya existía. En
+        // cuanto termine de sincronizar, la vista se refresca sola
+        // (_refrescarVistaActualPostSync) y este cálculo se repite ya con
+        // los datos completos.
+        if (window._syncInicialListo === false) {
+            return { valor: valorBootstrap, origen: 'sincronizando' };
+        }
+
         persistirSaldoInicialManual(cuentaObj.id, valorBootstrap);
         return { valor: valorBootstrap, origen: 'calculado' };
     }
@@ -446,13 +482,15 @@
         if (cuenta.id === 'todas') {
             let totalFijo = 0;
             let huboCalculoNuevo = false;
+            let huboSincronizando = false;
             cuentas.forEach(c => {
                 const r = saldoInicialFijoCuenta(c, movimientosParaSaldos);
                 totalFijo += r.valor;
                 if (r.origen === 'calculado') huboCalculoNuevo = true;
+                if (r.origen === 'sincronizando') huboSincronizando = true;
             });
             saldoInicial = totalFijo;
-            saldoInicialOrigen = huboCalculoNuevo ? 'calculado' : 'heredado';
+            saldoInicialOrigen = huboSincronizando ? 'sincronizando' : (huboCalculoNuevo ? 'calculado' : 'heredado');
         } else {
             const r = saldoInicialFijoCuenta(cuenta, movimientosParaSaldos);
             saldoInicial = r.valor;
@@ -565,23 +603,36 @@
         };
     }
 
-    // 🗂️ Una pestaña fija por ubicación (caja/banco) + "Todas". Cada pestaña guarda
-    // su propia selección/filtros porque cada cuenta tiene su propio saldo inicial
-    // fijo e independiente (ver saldoInicialFijoCuenta). El input oculto #corteCuenta
-    // se mantiene por compatibilidad: el resto del archivo lee su .value.
+    // 🗂️ La caja principal (NOMBRE_CAJA_PRINCIPAL) tiene su propia pestaña fija y
+    // destacada. El resto de cajas/bancos + "Todas" van agrupados en un
+    // desplegable aparte, para no saturar la barra con todas las cuentas.
+    // El input oculto #corteCuenta se mantiene por compatibilidad: el resto
+    // del archivo lee su .value.
     function renderTabsCuentas(cuentaId) {
         const cuentas = obtenerCuentasCorte();
-        const tabs = [
+        const principal = _cajaPrincipal(cuentas);
+        const resto = [
             { id: 'todas', nombre: '📊 Todas' },
-            ...cuentas.map(c => ({ id: c.id, nombre: `${c.tipo === 'banco' ? '🏦' : '💵'} ${c.nombre}` }))
+            ...cuentas.filter(c => !principal || String(c.id) !== String(principal.id))
+                .map(c => ({ id: c.id, nombre: `${c.tipo === 'banco' ? '🏦' : '💵'} ${c.nombre}` }))
         ];
+        const enResto = resto.some(t => String(t.id) === String(cuentaId));
+        const activaPrincipal = !!principal && !enResto && String(cuentaId) === String(principal.id);
+
+        const botonPrincipal = principal ? `
+            <button onclick="cambiarPestanaCorteCaja('${escJs(principal.id)}')" style="padding:10px 18px;border:0;border-radius:8px 8px 0 0;cursor:pointer;font-weight:800;font-size:13px;background:${activaPrincipal ? '#1e40af' : '#dbeafe'};color:${activaPrincipal ? 'white' : '#1e3a8a'};border-bottom:3px solid ${activaPrincipal ? '#1e40af' : 'transparent'};">💵 ${esc(principal.nombre)}</button>` : '';
+
+        const selectResto = `
+            <select onchange="cambiarPestanaCorteCaja(this.value)" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-weight:700;font-size:13px;background:${enResto ? '#1e40af' : '#f1f5f9'};color:${enResto ? 'white' : '#475569'};">
+                <option value="" disabled ${enResto ? '' : 'selected'}>Más cajas ▾</option>
+                ${resto.map(t => `<option value="${esc(t.id)}" ${String(cuentaId) === String(t.id) ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}
+            </select>`;
+
         return `
             <input type="hidden" id="corteCuenta" value="${esc(cuentaId)}">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid #e2e8f0;padding-bottom:0;margin-bottom:14px;">
-                ${tabs.map(t => {
-                    const activa = String(cuentaId) === String(t.id);
-                    return `<button onclick="cambiarPestanaCorteCaja('${escJs(t.id)}')" style="padding:10px 16px;border:0;border-radius:8px 8px 0 0;cursor:pointer;font-weight:800;font-size:13px;background:${activa ? '#1e40af' : '#f1f5f9'};color:${activa ? 'white' : '#475569'};border-bottom:3px solid ${activa ? '#1e40af' : 'transparent'};">${esc(t.nombre)}</button>`;
-                }).join('')}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;border-bottom:2px solid #e2e8f0;padding-bottom:0;margin-bottom:14px;">
+                ${botonPrincipal}
+                ${selectResto}
             </div>`;
     }
 
@@ -783,7 +834,7 @@
             </div>
 
             <div id="corteKpiFranja" style="position:sticky;top:72px;z-index:30;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;background:rgba(248,250,252,0.94);backdrop-filter:blur(8px);padding:10px 0;">
-                ${renderKpi('Saldo inicial', seleccion.saldoInicial, '#64748b', seleccion.saldoInicialManual !== null ? 'Manual' : (seleccion.saldoInicialOrigen === 'heredado' ? 'Heredado del corte anterior' : 'Calculado (primer corte de esta cuenta)'), 'corteKpiSaldoInicial', 'corteSubSaldoInicial')}
+                ${renderKpi('Saldo inicial', seleccion.saldoInicial, '#64748b', seleccion.saldoInicialManual !== null ? 'Manual' : (seleccion.saldoInicialOrigen === 'sincronizando' ? '⏳ Sincronizando con la nube...' : (seleccion.saldoInicialOrigen === 'heredado' ? 'Heredado del corte anterior' : 'Calculado (primer corte de esta cuenta)')), 'corteKpiSaldoInicial', 'corteSubSaldoInicial')}
                 ${renderKpi('Ingresos marcados', seleccion.ingresos, '#15803d', `${seleccion.movimientos.filter(m => m._tipo === 'ingreso').length} movimientos`, 'corteKpiIngresos', 'corteSubIngresos')}
                 ${renderKpi('Egresos marcados', seleccion.egresos, '#b91c1c', `${seleccion.movimientos.filter(m => m._tipo !== 'ingreso').length} movimientos`, 'corteKpiEgresos', 'corteSubEgresos')}
                 ${renderKpi('Saldo esperado marcado', seleccion.saldoFinalSistema, '#1e40af', `${seleccion.movimientos.length} de ${seleccion.totalMovimientos} movimientos`, 'corteKpiSaldoSistema', 'corteSubSaldoSistema')}
@@ -919,7 +970,7 @@
         const saldoInicialEl = document.getElementById('corteKpiSaldoInicial');
         const subSaldoInicialEl = document.getElementById('corteSubSaldoInicial');
         if (saldoInicialEl) saldoInicialEl.textContent = dinero(seleccion.saldoInicial);
-        if (subSaldoInicialEl) subSaldoInicialEl.textContent = seleccion.saldoInicialManual !== null ? 'Manual' : (seleccion.saldoInicialOrigen === 'heredado' ? 'Heredado del corte anterior' : 'Calculado (primer corte de esta cuenta)');
+        if (subSaldoInicialEl) subSaldoInicialEl.textContent = seleccion.saldoInicialManual !== null ? 'Manual' : (seleccion.saldoInicialOrigen === 'sincronizando' ? '⏳ Sincronizando con la nube...' : (seleccion.saldoInicialOrigen === 'heredado' ? 'Heredado del corte anterior' : 'Calculado (primer corte de esta cuenta)'));
 
         pintarKpisCorte({
             ingresos: seleccion.ingresos,

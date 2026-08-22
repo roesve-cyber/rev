@@ -249,33 +249,53 @@ function _hayDatosOperativosAuth() {
 
 let _syncFirebasePostLoginPromise = null;
 
+// 🚦 Bandera global: mientras esté en false, hay una descarga inicial de
+// Firebase en curso (justo después de mostrar la app, ANTES de que termine
+// de bajar). Módulos que "calculan y fijan" un valor por primera vez si no
+// encuentran nada guardado (ej. saldoInicialFijoCuenta en corte-caja.js)
+// deben checar esta bandera para NO persistir un valor calculado con datos
+// locales todavía incompletos — si lo hicieran, ese valor "de arranque" se
+// subiría a Firebase y podría chocar con el valor real que otro equipo ya
+// había fijado. Arranca en true (nada que esperar) y solo baja a false
+// justo antes de una sincronización real que sí hay que esperar.
+window._syncInicialListo = true;
+
 async function _sincronizarFirebaseDespuesDeLogin() {
     if (!window._firebaseActivo || !window._db || !window._auth?.currentUser || !window.StorageService?.syncAll) {
         return false;
     }
     if (_syncFirebasePostLoginPromise) return _syncFirebasePostLoginPromise;
 
+    window._syncInicialListo = false;
     _syncFirebasePostLoginPromise = (async () => {
-        if (!_hayDatosOperativosAuth()) {
-            console.warn('Almacen local vacio; descargando datos iniciales desde Firebase despues de login.');
-            await StorageService.syncAll({ forzarDescarga: true, source: 'server' });
-        } else {
-            console.warn('Verificando cambios remotos de Firebase despues de login.');
-            await StorageService.syncAll({ source: 'server', forzarDescarga: true });
-        }
+        try {
+            if (!_hayDatosOperativosAuth()) {
+                console.warn('Almacen local vacio; descargando datos iniciales desde Firebase despues de login.');
+                await StorageService.syncAll({ forzarDescarga: true, source: 'server' });
+            } else {
+                console.warn('Verificando cambios remotos de Firebase despues de login.');
+                await StorageService.syncAll({ source: 'server', forzarDescarga: true });
+            }
 
-        if (typeof StorageService.normalizarListasLocales === 'function') {
-            await StorageService.normalizarListasLocales();
-        }
+            if (typeof StorageService.normalizarListasLocales === 'function') {
+                await StorageService.normalizarListasLocales();
+            }
 
-        _recargarVariablesGlobales();
-        if (typeof StorageService._refrescarVistaActualPostSync === 'function') {
-            StorageService._refrescarVistaActualPostSync();
+            _recargarVariablesGlobales();
+            if (typeof StorageService._refrescarVistaActualPostSync === 'function') {
+                StorageService._refrescarVistaActualPostSync();
+            }
+            if (typeof StorageService.startRealtimeSync === 'function') {
+                StorageService.startRealtimeSync();
+            }
+            return true;
+        } finally {
+            // Se marca listo pase lo que pase (incluso si syncAll falla), para
+            // que la app no se quede bloqueada creyendo que sigue sincronizando
+            // para siempre; si de verdad falló, el usuario lo notará por otros
+            // medios (falta de datos, reintentos manuales, etc.).
+            window._syncInicialListo = true;
         }
-        if (typeof StorageService.startRealtimeSync === 'function') {
-            StorageService.startRealtimeSync();
-        }
-        return true;
     })();
 
     try {
