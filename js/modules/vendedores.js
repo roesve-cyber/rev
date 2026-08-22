@@ -584,15 +584,30 @@ function _redondearComisionSiguienteDiez(monto) {
     return Math.ceil(n / 10) * 10;
 }
 
+// Redondeo hacia abajo al múltiplo de 10 anterior — usado solo para no
+// rebasar el tope del 12% de utilidad cuando el redondeo normal (hacia
+// arriba) sí lo rebasaría.
+function _redondearComisionAnteriorDiez(monto) {
+    const n = Number(monto) || 0;
+    if (n <= 0) return 0;
+    return Math.floor(n / 10) * 10;
+}
+
 // Suma el costo de mercancía de una lista de artículos vendidos, buscando el
-// costo unitario en el catálogo de productos (costo | costoPromedio | precioCompra).
+// costo unitario en el catálogo de productos. Prioridad: producto.costo —
+// este campo solo sube nunca baja (ver compras.js: "if (costoNuevo <=
+// costoAnteriorNum) return"), así que en teoría siempre es el costo MÁS ALTO
+// con el que se ha comprado ese producto, no un promedio ni el costo de la
+// última compra. Se usa || en vez de ?? a propósito: si costo llegara a estar
+// en 0 (producto nunca comprado con costo capturado) se cae a los respaldos
+// en vez de tomar ese 0 como bueno.
 function calcularCostoMercanciaVenta(articulos, listaProductos) {
     if (!Array.isArray(articulos) || articulos.length === 0) return 0;
     const productos = Array.isArray(listaProductos) ? listaProductos : (window.productos || []);
     return articulos.reduce((sum, art) => {
         const prodId = art.productoId ?? art.id;
         const prod = productos.find(p => String(p.id) === String(prodId));
-        const costoUnit = Number(prod?.costo ?? prod?.costoPromedio ?? prod?.precioCompra ?? 0);
+        const costoUnit = Number(prod?.costo) || Number(prod?.costoPromedio) || Number(prod?.precioCompra) || 0;
         return sum + costoUnit * Number(art.cantidad || 1);
     }, 0);
 }
@@ -618,6 +633,7 @@ function registrarComisionVenta(folio, datos, vendedorId) {
     const totalContado = esObjeto ? Number(datos.totalContado || 0) : Number(datos || 0);
     const totalVenta = esObjeto ? Number(datos.totalVenta || datos.totalContado || 0) : Number(datos || 0);
     const costoMercancia = esObjeto ? calcularCostoMercanciaVenta(datos.articulos, datos.listaProductos) : 0;
+    const utilidad = esObjeto ? Math.max(0, totalContado - costoMercancia) : 0;
 
     // Detectar tipo de venta: contado, transferencia, credito, apartado
     let tipoVenta = 'contado';
@@ -637,17 +653,31 @@ function registrarComisionVenta(folio, datos, vendedorId) {
 
     const montoBase = _montoBaseComision(v, { totalVenta, totalContado, costoMercancia });
     const montoComisionCalculado = montoBase * (porcentaje / 100);
-    const montoComision = _redondearComisionSiguienteDiez(montoComisionCalculado);
+    let montoComision = _redondearComisionSiguienteDiez(montoComisionCalculado);
+
+    // Piso/tope ligados a la utilidad REAL de la venta, sin importar qué base
+    // de comisión tenga configurada el vendedor: si lo que le tocaría por su
+    // % normal cae por debajo del 10% de la utilidad, se sube forzosamente a
+    // ese piso (mismo redondeo al siguiente 10 de siempre); pero ese ajuste
+    // nunca debe rebasar el 12% de la utilidad — si redondear hacia arriba se
+    // pasa del tope, se redondea hacia abajo en su lugar para no excederlo.
+    let pisoUtilidadAplicado = false;
+    if (utilidad > 0) {
+        const pisoUtilidad = utilidad * 0.10;
+        const topeUtilidad = utilidad * 0.12;
+        if (montoComision < pisoUtilidad) {
+            const pisoRedondeado = _redondearComisionSiguienteDiez(pisoUtilidad);
+            montoComision = pisoRedondeado <= topeUtilidad ? pisoRedondeado : _redondearComisionAnteriorDiez(topeUtilidad);
+            pisoUtilidadAplicado = true;
+        }
+    }
+
     if (montoComision <= 0) return;
     // clienteNombre y productos se guardan directo en el registro para que el
     // historial de comisiones muestre algo útil (a quién y qué se le vendió)
     // sin depender de que el folio siga existiendo/legible en ventasRegistradas.
     const clienteNombre = esObjeto ? (datos.clienteNombre || '') : '';
     const productos = esObjeto ? (datos.articulos || []).map(a => a.nombre).filter(Boolean) : [];
-    // Utilidad de la venta (precio sin intereses menos costo de mercancía),
-    // guardada aparte de montoBaseComision porque esta última solo coincide
-    // con la utilidad cuando baseComision === 'utilidad'.
-    const utilidad = esObjeto ? Math.max(0, totalContado - costoMercancia) : 0;
     const comisiones = StorageService.get('comisionesRegistradas', []);
     comisiones.push({
         id: Date.now(),
@@ -663,6 +693,7 @@ function registrarComisionVenta(folio, datos, vendedorId) {
         montoBaseComision: montoBase,
         montoComisionSinRedondeo: montoComisionCalculado,
         montoComision,
+        pisoUtilidadAplicado,
         fecha: Date.now(),
         tipo: 'al_cierre',
         estado: 'Pendiente'
