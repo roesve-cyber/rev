@@ -4,16 +4,28 @@ function _vendEsc(v) {
     return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
 }
 
+// 🗂️ Estado de UI de la sección de Comisiones (qué pestaña está activa y
+// qué filtros tiene el historial). Vive en `window`, NO en el DOM, para que
+// sobreviva a los renderGestionVendedores() completos que se disparan tras
+// cada acción (registrar/editar/liquidar anticipo, liquidar comisiones,
+// alta/edición/baja de vendedor). Antes, cada una de esas acciones llamaba
+// renderGestionVendedores() y esto SÍ reconstruía todo el HTML del panel de
+// comisiones, pero el resumen por vendedor ("reporteComisionesArea") nunca
+// se volvía a llenar automáticamente — solo se llenaba al apretar el botón
+// "Calcular" a mano. Por eso, al editar el monto de un anticipo, la tabla
+// resumen por vendedor se quedaba en blanco/desactualizada aunque el dato
+// en `anticiposComisionVendedor` sí se había corregido correctamente.
+window._comisionesVendedoresState = window._comisionesVendedoresState || {
+    tabActiva: 'pendientes',
+    historialFiltros: {}
+};
+
 function renderGestionVendedores() {
     const cont = document.getElementById('contenidoVendedores');
     if (!cont) return;
     const vendedores = StorageService.get('vendedores', []);
     const comisiones = StorageService.get('comisionesRegistradas', []);
     const pendTotal = comisiones.filter(c => c.estado === 'Pendiente').reduce((s, c) => s + c.montoComision, 0);
-
-    const hoy = new Date();
-    const primerDiaMes = window.obtenerHoyInputMX().substring(0, 8) + '01';
-    const hoyStr = window.obtenerHoyInputMX();
 
     const rows = vendedores.map(v => {
         const comisVend = comisiones.filter(c => c.vendedorId === v.id);
@@ -73,28 +85,223 @@ function renderGestionVendedores() {
       </div>
       <div id="sugerenciasRecuperacionArea" style="margin-bottom:20px;"></div>
       <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3 style="margin:0;color:#0f172a;">💵 Anticipos de Comisión</h3>
-        </div>
-        <div id="anticiposComisionArea"></div>
-      </div>
-      <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:20px;">
-        <h3 style="margin:0 0 16px;color:#7c3aed;">📊 Reporte de Comisiones por Período</h3>
-        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
-          <div>
-            <label style="font-size:12px;font-weight:bold;color:#374151;">DESDE</label><br>
-            <input type="date" id="fechaDesdeComision" value="${primerDiaMes}" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <h3 style="margin:0;color:#0f172a;">💰 Comisiones</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="tabComision_pendientes" onclick="_cambiarTabComisiones('pendientes')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📌 Ventas no pagadas</button>
+            <button id="tabComision_anticipos" onclick="_cambiarTabComisiones('anticipos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">💵 Anticipos</button>
+            <button id="tabComision_historial" onclick="_cambiarTabComisiones('historial')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🕓 Historial</button>
           </div>
-          <div>
-            <label style="font-size:12px;font-weight:bold;color:#374151;">HASTA</label><br>
-            <input type="date" id="fechaHastaComision" value="${hoyStr}" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-          </div>
-          <button onclick="calcularComisionesFiltradas()" style="padding:10px 18px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📊 Calcular</button>
         </div>
-        <div id="reporteComisionesArea"></div>
+
+        <div id="panelComision_pendientes">
+          <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Comisiones de ventas ya cerradas que aún no se han pagado, menos anticipos de comisión sin liquidar (saldo vigente del vendedor, sin importar su fecha). Esto es "lo actual": no depende de un período fijo.</p>
+          <div id="comisionesPendientesArea"></div>
+        </div>
+
+        <div id="panelComision_anticipos" style="display:none;">
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:14px;flex-wrap:wrap;">
+            <select id="anticipoNuevoVendedor" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+              ${vendedores.filter(v => v.activo).map(v => `<option value="${v.id}">${_vendEsc(v.nombre)}</option>`).join('') || '<option value="">Sin vendedores activos</option>'}
+            </select>
+            <button onclick="_abrirAnticipoDesdeSelector()" style="padding:8px 14px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">➕ Nuevo Anticipo</button>
+          </div>
+          <div id="anticiposComisionArea"></div>
+        </div>
+
+        <div id="panelComision_historial" style="display:none;">
+          <div id="historialComisionesFiltros" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;"></div>
+          <div id="historialComisionesArea"></div>
+        </div>
       </div>`;
     renderSugerenciasRecuperacionCartera();
-    renderAnticiposComision();
+    _pintarFiltrosHistorialComisiones();
+    _renderTabComisionActiva();
+}
+
+// ===== PESTAÑAS DE LA SECCIÓN DE COMISIONES =====
+// "Ventas no pagadas" y "Anticipos" son las dos vistas de "lo actual"; el
+// "Historial" es una bitácora aparte con sus propios filtros de estado y
+// fecha. Antes todo vivía mezclado en un solo panel ("Reporte de Comisiones
+// por Período"): un resumen que dependía de un rango de fechas Y una lista
+// completa de todas las comisiones, lo cual confundía "cuánto debo pagar
+// hoy" con "qué ha pasado históricamente".
+function _cambiarTabComisiones(tab) {
+    window._comisionesVendedoresState.tabActiva = tab;
+    _renderTabComisionActiva();
+}
+
+function _renderTabComisionActiva() {
+    const tab = window._comisionesVendedoresState.tabActiva || 'pendientes';
+    ['pendientes', 'anticipos', 'historial'].forEach(t => {
+        const btn = document.getElementById('tabComision_' + t);
+        const panel = document.getElementById('panelComision_' + t);
+        const activo = t === tab;
+        if (btn) { btn.style.background = activo ? '#7c3aed' : '#e5e7eb'; btn.style.color = activo ? 'white' : '#374151'; }
+        if (panel) panel.style.display = activo ? 'block' : 'none';
+    });
+    if (tab === 'pendientes') renderComisionesPendientes();
+    else if (tab === 'anticipos') renderAnticiposComision();
+    else renderHistorialComisiones();
+}
+
+function _abrirAnticipoDesdeSelector() {
+    const sel = document.getElementById('anticipoNuevoVendedor');
+    const vendedorId = sel?.value;
+    if (!vendedorId) return alert('No hay vendedores activos para registrar un anticipo.');
+    abrirModalAnticipoComision(Number(vendedorId));
+}
+
+// 📌 "LO ACTUAL": ventas ya cerradas cuya comisión no se ha pagado, netas de
+// cualquier anticipo de comisión sin liquidar. A propósito NO se restringe
+// por un rango de fechas por defecto — el reporte viejo solo mostraba el mes
+// en curso de entrada, así que una comisión pendiente de un mes anterior
+// podía quedar fuera de la vista sin que nadie se diera cuenta. Aquí se ve
+// TODO lo pendiente hasta hoy; el "corte" es opcional, solo para acotar qué
+// se marca como pagado al liquidar.
+function renderComisionesPendientes() {
+    const cont = document.getElementById('comisionesPendientesArea');
+    if (!cont) return;
+    const vendedores = StorageService.get('vendedores', []);
+    const filtroHasta = document.getElementById('pendHastaFecha')?.value || '';
+
+    const filas = vendedores.map(v => {
+        const liq = calcularLiquidacionVendedor(v.id, null, filtroHasta || null);
+        if (liq.pendiente <= 0 && liq.anticipoPendiente <= 0) return '';
+        const numPendientes = liq.comisiones.filter(c => c.estado === 'Pendiente').length;
+        const fHastaEsc = _vendEsc(filtroHasta);
+        return `<tr>
+          <td style="padding:10px;">${_vendEsc(v.nombre)}</td>
+          <td style="padding:10px;text-align:center;">${numPendientes}</td>
+          <td style="padding:10px;text-align:right;color:#d97706;">${dinero(liq.pendiente)}</td>
+          <td style="padding:10px;text-align:right;color:#dc2626;">${liq.anticipoPendiente > 0 ? '- ' + dinero(liq.anticipoPendiente) : dinero(0)}</td>
+          <td style="padding:10px;text-align:right;font-weight:bold;color:${liq.porPagar > 0 ? '#7c3aed' : '#16a34a'};">${dinero(liq.porPagar)}</td>
+          <td style="padding:10px;text-align:center;">
+            <button onclick="abrirModalLiquidacionComisiones(${v.id}, '', '${fHastaEsc}')" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🧮 Liquidar</button>
+          </td>
+        </tr>`;
+    }).filter(r => r !== '').join('');
+
+    cont.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap;">
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#374151;">CORTE HASTA (opcional)</label><br>
+          <input type="date" id="pendHastaFecha" value="${_vendEsc(filtroHasta)}" onchange="renderComisionesPendientes()" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+        </div>
+        ${filtroHasta ? `<button onclick="document.getElementById('pendHastaFecha').value='';renderComisionesPendientes()" style="padding:8px 14px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;font-size:13px;">✕ Quitar corte</button>` : ''}
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead><tr style="background:#f3f4f6;">
+            <th style="padding:10px;text-align:left;">Vendedor</th>
+            <th style="padding:10px;text-align:center;">Ventas sin pagar</th>
+            <th style="padding:10px;text-align:right;">Comisión pendiente</th>
+            <th style="padding:10px;text-align:right;">Anticipo pendiente</th>
+            <th style="padding:10px;text-align:right;">Por pagar (neto)</th>
+            <th style="padding:10px;text-align:center;">Acción</th>
+          </tr></thead>
+          <tbody>${filas || '<tr><td colspan="6" style="padding:16px;text-align:center;color:#9ca3af;">Todos los vendedores están al día.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+}
+
+// ===== HISTORIAL DE COMISIONES (bitácora, con filtros de estado/vendedor/fecha) =====
+function _pintarFiltrosHistorialComisiones() {
+    const cont = document.getElementById('historialComisionesFiltros');
+    if (!cont) return;
+    const vendedores = StorageService.get('vendedores', []);
+    const f = window._comisionesVendedoresState.historialFiltros || {};
+    cont.innerHTML = `
+      <div>
+        <label style="font-size:12px;font-weight:bold;color:#374151;">VENDEDOR</label><br>
+        <select id="histComVendedor" onchange="_actualizarFiltroHistorialComisiones()" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          <option value="">Todos</option>
+          ${vendedores.map(v => `<option value="${v.id}" ${String(f.vendedorId || '') === String(v.id) ? 'selected' : ''}>${_vendEsc(v.nombre)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:bold;color:#374151;">ESTADO</label><br>
+        <select id="histComEstado" onchange="_actualizarFiltroHistorialComisiones()" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          <option value="" ${!f.estado ? 'selected' : ''}>Todas</option>
+          <option value="Pendiente" ${f.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+          <option value="Pagada" ${f.estado === 'Pagada' ? 'selected' : ''}>Pagada</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:bold;color:#374151;">DESDE</label><br>
+        <input type="date" id="histComDesde" value="${_vendEsc(f.desde || '')}" onchange="_actualizarFiltroHistorialComisiones()" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:bold;color:#374151;">HASTA</label><br>
+        <input type="date" id="histComHasta" value="${_vendEsc(f.hasta || '')}" onchange="_actualizarFiltroHistorialComisiones()" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+      </div>
+      ${(f.vendedorId || f.estado || f.desde || f.hasta) ? `<button onclick="_limpiarFiltroHistorialComisiones()" style="padding:8px 14px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;font-size:13px;">✕ Limpiar filtros</button>` : ''}`;
+}
+
+function _actualizarFiltroHistorialComisiones() {
+    window._comisionesVendedoresState.historialFiltros = {
+        vendedorId: document.getElementById('histComVendedor')?.value || '',
+        estado: document.getElementById('histComEstado')?.value || '',
+        desde: document.getElementById('histComDesde')?.value || '',
+        hasta: document.getElementById('histComHasta')?.value || ''
+    };
+    renderHistorialComisiones();
+}
+
+function _limpiarFiltroHistorialComisiones() {
+    window._comisionesVendedoresState.historialFiltros = {};
+    _pintarFiltrosHistorialComisiones();
+    renderHistorialComisiones();
+}
+
+function renderHistorialComisiones() {
+    const cont = document.getElementById('historialComisionesArea');
+    if (!cont) return;
+    const comisiones = StorageService.get('comisionesRegistradas', []);
+    if (comisiones.length === 0) {
+        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No hay comisiones registradas.</p>';
+        return;
+    }
+
+    const f = window._comisionesVendedoresState.historialFiltros || {};
+    const desde = f.desde ? new Date(f.desde + 'T00:00:00') : null;
+    const hasta = f.hasta ? new Date(f.hasta + 'T23:59:59') : null;
+
+    const filtradas = comisiones.filter(c => {
+        if (f.vendedorId && String(c.vendedorId) !== String(f.vendedorId)) return false;
+        if (f.estado && c.estado !== f.estado) return false;
+        const fc = new Date(c.fecha);
+        if (desde && fc < desde) return false;
+        if (hasta && fc > hasta) return false;
+        return true;
+    }).slice().reverse();
+
+    const rows = filtradas.map(c => `<tr>
+      <td style="padding:8px;">${_vendEsc(c.vendedorNombre)}</td>
+      <td style="padding:8px;">${_vendEsc(c.folio)}</td>
+      <td style="padding:8px;text-align:right;">${dinero(c.totalVenta)}</td>
+      <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
+      <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
+      <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'recuperacion_cartera' ? '💡 Recuperación' : (c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre')}</td>
+      <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
+    </tr>`).join('');
+
+    cont.innerHTML = `
+      <p style="margin:0 0 10px;font-size:12px;color:#6b7280;">${filtradas.length} registro(s)</p>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:#f3f4f6;">
+            <th style="padding:8px;text-align:left;">Vendedor</th>
+            <th style="padding:8px;text-align:left;">Folio</th>
+            <th style="padding:8px;text-align:right;">Venta/Abono</th>
+            <th style="padding:8px;text-align:right;">Comisión</th>
+            <th style="padding:8px;text-align:left;">Fecha</th>
+            <th style="padding:8px;text-align:center;">Tipo</th>
+            <th style="padding:8px;text-align:center;">Estado</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros con estos filtros.</td></tr>'}</tbody>
+        </table>
+      </div>`;
 }
 // ===== SUGERENCIAS: RECUPERACIÓN DE CARTERA EN ATRASO =====
 // El vendedor solo cobra comisión por venta (al cierre). Cuando una cuenta que
@@ -444,102 +651,6 @@ function calcularLiquidacionVendedor(vendedorId, fechaDesde, fechaHasta) {
     return { ...res, anticipoPendiente, anticipoAplicado, anticipoSobrante, porPagar };
 }
 
-function calcularComisionesFiltradas() {
-    const fechaDesde = document.getElementById('fechaDesdeComision')?.value;
-    const fechaHasta = document.getElementById('fechaHastaComision')?.value;
-    renderReporteComisiones(fechaDesde, fechaHasta);
-}
-
-function renderReporteComisiones(fechaDesde, fechaHasta) {
-    const cont = document.getElementById('reporteComisionesArea');
-    if (!cont) return;
-    const vendedores = StorageService.get('vendedores', []);
-    const comisiones = StorageService.get('comisionesRegistradas', []);
-
-    if (comisiones.length === 0) {
-        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No hay comisiones registradas.</p>';
-        return;
-    }
-
-    const _escHtml = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-
-    // Summary per vendor — incluye el neto por pagar tras restar anticipos
-    // sin liquidar (comisiones no pagadas - anticipos pendientes = por pagar).
-    const resumenRows = vendedores.map(v => {
-        const liq = calcularLiquidacionVendedor(v.id, fechaDesde, fechaHasta);
-        if (liq.numVentas === 0 && liq.anticipoPendiente <= 0) return '';
-        const fDesdeEsc = _escHtml(fechaDesde || '');
-        const fHastaEsc = _escHtml(fechaHasta || '');
-        const hayAlgoQueLiquidar = liq.pendiente > 0 || liq.anticipoPendiente > 0;
-        return `<tr>
-          <td style="padding:10px;">${_escHtml(v.nombre)}</td>
-          <td style="padding:10px;text-align:center;">${liq.numVentas}</td>
-          <td style="padding:10px;text-align:right;">${dinero(liq.totalVendido)}</td>
-          <td style="padding:10px;text-align:right;color:#d97706;">${dinero(liq.pendiente)}</td>
-          <td style="padding:10px;text-align:right;color:#dc2626;">${liq.anticipoPendiente > 0 ? '- ' + dinero(liq.anticipoPendiente) : dinero(0)}</td>
-          <td style="padding:10px;text-align:right;font-weight:bold;color:${liq.porPagar > 0 ? '#7c3aed' : '#16a34a'};">${dinero(liq.porPagar)}</td>
-          <td style="padding:10px;text-align:right;color:#16a34a;">${dinero(liq.pagada)}</td>
-          <td style="padding:10px;text-align:center;">
-            ${hayAlgoQueLiquidar ? `<button onclick="abrirModalLiquidacionComisiones(${v.id}, '${fDesdeEsc}', '${fHastaEsc}')" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🧮 Liquidar</button>` : '<span style="color:#16a34a;">✅ Al día</span>'}
-          </td>
-        </tr>`;
-    }).filter(r => r !== '').join('');
-
-    // Detail rows (most recent first)
-    const desde = fechaDesde ? new Date(fechaDesde + 'T00:00:00') : null;
-    const hasta = fechaHasta ? new Date(fechaHasta + 'T23:59:59') : null;
-    const filtradas = comisiones.filter(c => {
-        const f = new Date(c.fecha);
-        if (desde && f < desde) return false;
-        if (hasta && f > hasta) return false;
-        return true;
-    }).slice().reverse();
-
-    const detalleRows = filtradas.map(c => `<tr>
-      <td style="padding:8px;">${_escHtml(c.vendedorNombre)}</td>
-      <td style="padding:8px;">${_escHtml(c.folio)}</td>
-      <td style="padding:8px;text-align:right;">${dinero(c.totalVenta)}</td>
-      <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
-      <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
-      <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'recuperacion_cartera' ? '💡 Recuperación' : (c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre')}</td>
-      <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
-    </tr>`).join('');
-
-    cont.innerHTML = `
-      <div style="overflow-x:auto;margin-bottom:20px;">
-        <h4 style="color:#7c3aed;margin:0 0 10px;">Resumen por Vendedor</h4>
-        <p style="margin:0 0 10px;font-size:12px;color:#6b7280;">Por pagar = comisiones no pagadas del período menos anticipos de comisión sin liquidar (saldo vigente del vendedor, sin importar su fecha).</p>
-        <table style="width:100%;border-collapse:collapse;font-size:14px;">
-          <thead><tr style="background:#f3f4f6;">
-            <th style="padding:10px;text-align:left;">Vendedor</th>
-            <th style="padding:10px;text-align:center;">Registros</th>
-            <th style="padding:10px;text-align:right;">Total Vendido</th>
-            <th style="padding:10px;text-align:right;">Comisiones no pagadas</th>
-            <th style="padding:10px;text-align:right;">Anticipos pendientes</th>
-            <th style="padding:10px;text-align:right;">Por pagar</th>
-            <th style="padding:10px;text-align:right;">Pagada</th>
-            <th style="padding:10px;text-align:center;">Acción</th>
-          </tr></thead>
-          <tbody>${resumenRows || '<tr><td colspan="8" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros en este período</td></tr>'}</tbody>
-        </table>
-      </div>
-      <div style="overflow-x:auto;">
-        <h4 style="color:#7c3aed;margin:0 0 10px;">Detalle de Comisiones</h4>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-          <thead><tr style="background:#f3f4f6;">
-            <th style="padding:8px;text-align:left;">Vendedor</th>
-            <th style="padding:8px;text-align:left;">Folio</th>
-            <th style="padding:8px;text-align:right;">Venta/Abono</th>
-            <th style="padding:8px;text-align:right;">Comisión</th>
-            <th style="padding:8px;text-align:left;">Fecha</th>
-            <th style="padding:8px;text-align:center;">Tipo</th>
-            <th style="padding:8px;text-align:center;">Estado</th>
-          </tr></thead>
-          <tbody>${detalleRows || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros en este período</td></tr>'}</tbody>
-        </table>
-      </div>`;
-}
-
 // ===== LIQUIDACIÓN DE COMISIONES (comisiones no pagadas - anticipos = por pagar) =====
 // Sustituye al viejo "pagar comisión" registro por registro: aquí se liquida
 // TODO el pendiente del vendedor en el período de una sola vez, aplicando
@@ -683,7 +794,6 @@ function ejecutarLiquidacionComisiones(vendedorId, fechaDesde, fechaHasta) {
     alert(`✅ Liquidación completada para ${v.nombre}.\n\nComisiones no pagadas: ${dinero(liq.pendiente)}\nAnticipos aplicados: ${dinero(liq.anticipoAplicado)}\nNeto desembolsado: ${dinero(montoNeto)}`);
 
     renderGestionVendedores();
-    if (desde || hasta) renderReporteComisiones(desde, hasta);
 }
 
 // ===== ANTICIPOS DE COMISIÓN PARA VENDEDORES =====
@@ -1025,8 +1135,12 @@ window.calcularCostoMercanciaVenta = calcularCostoMercanciaVenta;
 window.registrarComisionVenta = registrarComisionVenta;
 window.calcularComisionesVendedor = calcularComisionesVendedor;
 window.calcularLiquidacionVendedor = calcularLiquidacionVendedor;
-window.calcularComisionesFiltradas = calcularComisionesFiltradas;
-window.renderReporteComisiones = renderReporteComisiones;
+window._cambiarTabComisiones = _cambiarTabComisiones;
+window._abrirAnticipoDesdeSelector = _abrirAnticipoDesdeSelector;
+window.renderComisionesPendientes = renderComisionesPendientes;
+window._actualizarFiltroHistorialComisiones = _actualizarFiltroHistorialComisiones;
+window._limpiarFiltroHistorialComisiones = _limpiarFiltroHistorialComisiones;
+window.renderHistorialComisiones = renderHistorialComisiones;
 window.abrirModalLiquidacionComisiones = abrirModalLiquidacionComisiones;
 window.ejecutarLiquidacionComisiones = ejecutarLiquidacionComisiones;
 window.obtenerSugerenciasRecuperacionCartera = obtenerSugerenciasRecuperacionCartera;
