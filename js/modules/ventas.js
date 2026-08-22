@@ -2708,7 +2708,8 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
             totalContado,
             totalVenta: totalVentaReal,
             articulos: datosVentaP.articulos,
-            listaProductos: productosActuales
+            listaProductos: productosActuales,
+            clienteNombre: datosVentaP.cliente?.nombre || ''
         }, window._vendedorSeleccionado.id);
     }
 
