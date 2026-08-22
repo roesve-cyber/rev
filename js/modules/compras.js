@@ -6912,7 +6912,8 @@ function abrirModalDevolucionCompra() {
         const resumenArt = articulos.slice(0, 3).map(a => a.nombre).join(', ') + (articulos.length > 3 ? '…' : '');
         const folioTxt = compra.folio || 'Sin folio';
         const provTxt = compra.proveedor || '-';
-        return `<div class="filaCompraDevolucion" data-folio="${_comprasEscHTML(folioTxt).toLowerCase()}" data-prov="${_comprasEscHTML(provTxt).toLowerCase()}"
+        const productosTxt = articulos.map(a => a.nombre).join(' | ');
+        return `<div class="filaCompraDevolucion" data-folio="${_comprasEscHTML(folioTxt).toLowerCase()}" data-prov="${_comprasEscHTML(provTxt).toLowerCase()}" data-prod="${_comprasEscHTML(productosTxt).toLowerCase()}"
              onclick="buscarCompraDevolucion('${String(compra.id)}')"
              style="padding:12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;cursor:pointer;transition:background .15s;"
              onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
@@ -6933,7 +6934,7 @@ function abrirModalDevolucionCompra() {
         <div style="background:white;padding:24px;border-radius:12px;width:100%;max-width:560px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 25px rgba(0,0,0,0.15);">
             <h2 style="margin-top:0;color:#b91c1c;">↩️ Devolución de Compra</h2>
             <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Elige la compra a la que quieres devolver mercancía. Solo se muestran compras con artículos aún disponibles (no incluye consignación — esa se devuelve desde el Gestor de Consignaciones).</p>
-            <input type="text" id="filtroDevolucionCompra" placeholder="🔎 Filtrar por folio o proveedor..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;margin-bottom:12px;" oninput="_filtrarListaDevolucionCompra(this.value)">
+            <input type="text" id="filtroDevolucionCompra" placeholder="🔎 Filtrar por folio, proveedor o producto..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;margin-bottom:12px;" oninput="_filtrarListaDevolucionCompra(this.value)">
             <div id="listaDevolucionCompra" style="overflow-y:auto;flex:1;">
                 ${filas || '<div style="text-align:center;color:#94a3b8;padding:30px 0;">No hay compras con inventario disponible para devolver.</div>'}
             </div>
@@ -6948,11 +6949,16 @@ function abrirModalDevolucionCompra() {
 }
 
 function _filtrarListaDevolucionCompra(texto) {
-    const q = (texto || '').trim().toLowerCase();
+    // Acepta múltiples palabras separadas por espacio; cada una debe matchear
+    // en folio, proveedor o producto (no necesariamente en el mismo campo).
+    const palabras = (texto || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
     document.querySelectorAll('.filaCompraDevolucion').forEach(fila => {
         const folio = fila.getAttribute('data-folio') || '';
         const prov = fila.getAttribute('data-prov') || '';
-        fila.style.display = (!q || folio.includes(q) || prov.includes(q)) ? '' : 'none';
+        const prod = fila.getAttribute('data-prod') || '';
+        const combinado = `${folio} ${prov} ${prod}`;
+        const coincide = palabras.length === 0 || palabras.every(p => combinado.includes(p));
+        fila.style.display = coincide ? '' : 'none';
     });
 }
 

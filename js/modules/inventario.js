@@ -1888,7 +1888,7 @@ function reportarDescuadreInventario(producto, contexto = {}) {
 window.reportarDescuadreInventario = reportarDescuadreInventario;
 
 function ajustarStockVariante(productosArr, productoId, cantidad, opciones = {}) {
-    const { color = 'General', ubicacion = 'General', modo = 'entrada', concepto = '' } = opciones;
+    const { color = 'General', ubicacion = 'General', modo = 'entrada', concepto = '', condicion = 'nuevo' } = opciones;
     const cant = Number(cantidad) || 0;
     if (!Array.isArray(productosArr) || !productoId || cant <= 0) {
         return { ok: false, motivo: 'parametros_invalidos' };
@@ -1898,17 +1898,26 @@ function ajustarStockVariante(productosArr, productoId, cantidad, opciones = {})
 
     const prod = productosArr[idx];
     const delta = modo === 'salida' ? -cant : cant;
+    const esSegunda = condicion === 'segunda';
 
-    const stockAntes = Number(prod.stock) || 0;
+    // 🏷️ Mercancía "segunda" (devuelta por cliente, dañada o incompleta) se
+    // contabiliza en un bucket totalmente aparte (prod.stockSegunda / la
+    // variante.stockSegunda) para que NUNCA se mezcle con el stock nuevo
+    // vendible ni infle las cifras de inventario normal. Se vende con
+    // prod.precioSegunda desde el punto de venta.
+    const campoStockProd = esSegunda ? 'stockSegunda' : 'stock';
+    const campoStockVar = esSegunda ? 'stockSegunda' : 'stock';
+
+    const stockAntes = Number(prod[campoStockProd]) || 0;
     const stockCrudo = stockAntes + delta;
     let stockNegativoDetectado = false;
     let faltante = 0;
     if (stockCrudo < 0) {
         stockNegativoDetectado = true;
         faltante = Math.abs(stockCrudo);
-        reportarDescuadreInventario(prod, { campo: 'stock general', valorCrudo: stockCrudo, productoId, origen: concepto });
+        reportarDescuadreInventario(prod, { campo: esSegunda ? 'stock segunda' : 'stock general', valorCrudo: stockCrudo, productoId, origen: concepto });
     }
-    prod.stock = Math.max(0, stockCrudo);
+    prod[campoStockProd] = Math.max(0, stockCrudo);
 
     const colFinal = String(color || 'General');
     const ubiFinal = String(ubicacion || 'General');
@@ -1929,14 +1938,14 @@ function ajustarStockVariante(productosArr, productoId, cantidad, opciones = {})
     }
 
     if (variante) {
-        const vAntes = Number(variante.stock) || 0;
+        const vAntes = Number(variante[campoStockVar]) || 0;
         const vCrudo = vAntes + delta;
         if (vCrudo < 0) {
             stockNegativoDetectado = true;
             faltante = Math.max(faltante, Math.abs(vCrudo));
-            reportarDescuadreInventario(prod, { campo: `variante ${colFinal}/${ubiFinal}`, valorCrudo: vCrudo, productoId, origen: concepto });
+            reportarDescuadreInventario(prod, { campo: `variante ${colFinal}/${ubiFinal}${esSegunda ? ' (segunda)' : ''}`, valorCrudo: vCrudo, productoId, origen: concepto });
         }
-        variante.stock = Math.max(0, vCrudo);
+        variante[campoStockVar] = Math.max(0, vCrudo);
     }
 
     return { ok: true, varianteEncontrada, stockNegativoDetectado, faltante, producto: prod };
@@ -2100,6 +2109,7 @@ function abrirProductoForm(id = null) {
  const inputNombre = document.getElementById("pNombre");
  const inputCosto = document.getElementById("pCosto");
  const inputPrecio = document.getElementById("pPrecio");
+ const inputPrecioSegunda = document.getElementById("pPrecioSegunda");
  const inputColor = document.getElementById("pColor");
  const inputMarca = document.getElementById("pMarca");
  const inputModelo = document.getElementById("pModelo");
@@ -2121,6 +2131,7 @@ function abrirProductoForm(id = null) {
  inputNombre.value = p.nombre;
  inputCosto.value = p.costo || 0;
  if (inputPrecio) inputPrecio.value = p.precio != null ? p.precio : "";
+ if (inputPrecioSegunda) inputPrecioSegunda.value = p.precioSegunda != null ? p.precioSegunda : "";
  inputColor.value = p.color || '';
  inputMarca.value = p.marca || '';
  inputModelo.value = p.modelo || '';
@@ -2137,6 +2148,7 @@ function abrirProductoForm(id = null) {
  inputNombre.value = "";
  inputCosto.value = "";
  if (inputPrecio) inputPrecio.value = "";
+ if (inputPrecioSegunda) inputPrecioSegunda.value = "";
  inputColor.value = "";
  inputMarca.value = "";
  inputModelo.value = "";
@@ -2174,6 +2186,8 @@ function guardarProductoDB() {
  const nombre = document.getElementById("pNombre").value.trim();
  const costo = parseFloat(document.getElementById("pCosto").value);
  const precioManual = parseFloat(document.getElementById("pPrecio").value);
+ const precioSegundaRaw = parseFloat(document.getElementById("pPrecioSegunda")?.value);
+ const precioSegunda = Number.isFinite(precioSegundaRaw) && precioSegundaRaw > 0 ? precioSegundaRaw : null;
  const marca = document.getElementById("pMarca").value.trim();
  const modelo = document.getElementById("pModelo").value.trim();
  const imagen = document.getElementById("pImagen").value.trim();
@@ -2207,7 +2221,7 @@ function guardarProductoDB() {
 
  // Estructura de producto actualizada
  const datosProducto = {
- nombre, costo, precio: precioManual,
+ nombre, costo, precio: precioManual, precioSegunda,
  marca, modelo, imagen,
  categoria: categoriaPadre,
  subcategoria: subcatNombre,
@@ -2226,7 +2240,8 @@ function guardarProductoDB() {
  if (index !== -1) {
  // Calculamos el stock total sumando todas las variantes para mantener compatibilidad
  const totalStock = datosProducto.variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
- window.productos[index] = { ...window.productos[index], ...datosProducto, stock: totalStock };
+ const totalStockSegunda = datosProducto.variantes.reduce((sum, v) => sum + (Number(v.stockSegunda) || 0), 0);
+ window.productos[index] = { ...window.productos[index], ...datosProducto, stock: totalStock, stockSegunda: totalStockSegunda };
  }
  } else {
  // Generar ID único que no colisione con productos existentes

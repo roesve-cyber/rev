@@ -1083,7 +1083,6 @@ function _clientesSincronizarDatosRelacionados(cliente) {
         { key: 'ventasPendientes', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: false } },
         { key: 'documentosEntrega', matchFolio: true, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
         { key: 'cotizaciones', matchFolio: false, opciones: { clienteNombre: true, clienteId: true, datosContacto: true } },
-        { key: 'devoluciones', matchFolio: true, opciones: { clienteNombre: true, clienteId: true } },
         { key: 'garantias', matchFolio: false, opciones: { clienteId: true } }
     ];
 

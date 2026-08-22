@@ -306,6 +306,23 @@ function _esAdmin() {
     }
 }
 
+// 🔒 Igual patrón que _comprasRequireAdmin: bloquea la acción y deja rastro
+// en auditoría si quien la intenta no es administrador.
+function _ventasRequireAdmin(accion) {
+    if (_esAdmin()) return true;
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'ACCESO_DENEGADO',
+            modulo: 'Ventas',
+            entidad: accion,
+            detalle: `Intento sin permisos: ${accion}`,
+            severidad: 'alerta'
+        });
+    }
+    alert('Operación restringida. Solo un administrador puede continuar.');
+    return false;
+}
+
 function _ventaSesionActual() {
     try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; }
 }
@@ -5154,6 +5171,17 @@ async function _rechazarVentaCuarentenaAsync(index) {
         : "¿Deseas eliminar permanentemente esta venta provisional sin afectar inventario ni caja?";
     if (!confirm(mensaje)) return;
 
+    // 📋 Si hay mercancía entregada, un admin debe capturar la condición de
+    // cada pieza antes de reingresarla (nuevo vs segunda). El resto del
+    // flujo continúa dentro del callback una vez capturada (o de inmediato
+    // si no había nada entregado / no hay permisos, el callback simplemente
+    // no se llama).
+    _cancelCapturarCondicionYContinuar(folio, (condicionesArticulos) => {
+        _continuarRechazoVentaCuarentena({ v, folio, tieneSalidaOperativa, condicionesArticulos });
+    });
+}
+
+async function _continuarRechazoVentaCuarentena({ v, folio, tieneSalidaOperativa, condicionesArticulos }) {
     if (v && (v.tipo === "conversion_apartado_credito" || v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio)) {
         const folioApartado = v.origenApartadoFolio || v.datosVenta?.origenApartadoFolio || v.args?.[5];
         const apartados = StorageService.get("apartados", []);
@@ -5164,7 +5192,7 @@ async function _rechazarVentaCuarentenaAsync(index) {
         }
     }
     if (tieneSalidaOperativa && folio) {
-        _cancelReingresarInventarioPorVenta(folio, 'Rechazo de venta provisional en Boveda');
+        _cancelReingresarInventarioPorVenta(folio, 'Rechazo de venta provisional en Boveda', condicionesArticulos || null);
     }
     const resSyncRechazo = await StorageService.actualizarAtomo("ventasPendientes", v.idCuarentena, {
         estado: 'Rechazado', status: 'Rechazado', estatus: 'Rechazado',
@@ -5464,7 +5492,128 @@ function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, refere
     return movimientoOk;
 }
 
-function _cancelReingresarInventarioPorVenta(folio, motivo) {
+// =====================================================================
+// 📋 CONDICIÓN DE MERCANCÍA DEVUELTA (cancelación de venta con entrega)
+// ---------------------------------------------------------------------
+// Cuando el cliente ya tenía la mercancía en su poder (hubo documento de
+// entrega activo), NO se reingresa como stock nuevo automáticamente.
+// Un admin debe capturar, artículo por artículo, el estado en que
+// regresa y a dónde se destina: Nuevo (solo si está en perfecto estado,
+// ej. cliente se arrepintió sin abrir) o Segunda (dañado/incompleto,
+// siempre forzado a segunda). Requiere nota obligatoria.
+// =====================================================================
+
+function _cancelArticulosEntregadosPorFolio(folioOFolios) {
+    // Acepta un folio suelto o un arreglo de folios relacionados (ej. un
+    // apartado migrado a crédito tiene su folio original + el folio de la
+    // venta de crédito nueva — las entregas quedan documentadas bajo ESE
+    // folio nuevo, no el del apartado, así que hay que revisar ambos).
+    const folios = new Set((Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios]).filter(Boolean).map(String));
+    const docs = StorageService.get("documentosEntrega", [])
+        .filter(d => folios.has(String(d.folioVenta)) && d.estado !== 'Cancelado');
+    const articulos = [];
+    docs.forEach(d => {
+        (d.articulos || []).forEach((a, i) => {
+            articulos.push({
+                docId: d.id, idx: i,
+                productoId: a.productoId || a.id,
+                nombre: a.nombre || 'Artículo',
+                cantidad: Number(a.cantidad || 1),
+                color: a.colorElegido || a.color || 'General',
+                ubicacion: a.ubicacionElegida || a.ubicacion || 'General'
+            });
+        });
+    });
+    return articulos;
+}
+
+// Punto de entrada: decide si hace falta capturar condición (hubo entrega
+// física) o si puede continuar directo (nada que capturar). `callback`
+// recibe `condicionesArticulos` (array o null) cuando puede seguir, o no
+// se llama nunca si el admin cancela o no tiene permisos.
+function _cancelCapturarCondicionYContinuar(folioOFolios, callback) {
+    const articulos = _cancelArticulosEntregadosPorFolio(folioOFolios);
+    if (articulos.length === 0) { callback(null); return; }
+    if (!_ventasRequireAdmin('Registrar condición de mercancía devuelta')) return;
+    _cancelAbrirModalCondicion(folioOFolios, articulos, callback);
+}
+
+function _cancelAbrirModalCondicion(folioOFolios, articulos, callback) {
+    document.querySelector('[data-modal="cancel-condicion"]')?.remove();
+    window._cancelCondicionCallback = callback;
+    window._cancelCondicionArticulos = articulos;
+
+    const filas = articulos.map((a, i) => `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:10px;">
+            <div style="font-weight:bold;color:#0f172a;">${_cancelEsc(a.nombre)} <span style="color:#64748b;font-weight:normal;font-size:12px;">(${a.cantidad} pza · ${_cancelEsc(a.color)}/${_cancelEsc(a.ubicacion)})</span></div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                <select id="condEstado_${i}" onchange="_cancelActualizarDestinoVisible(${i})" style="flex:1;min-width:150px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;">
+                    <option value="">-- Estado --</option>
+                    <option value="Bueno">✅ Bueno</option>
+                    <option value="Dañado">🔧 Dañado</option>
+                    <option value="Incompleto">⚠️ Incompleto</option>
+                </select>
+                <select id="condDestino_${i}" disabled style="flex:1;min-width:150px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;">
+                    <option value="nuevo">↩️ Reingresa como Nuevo</option>
+                    <option value="segunda">🏷️ Reingresa como Segunda</option>
+                </select>
+            </div>
+            <input type="text" id="condNota_${i}" placeholder="Nota obligatoria (ej. caja abierta, golpe en esquina, sin control...)" style="width:100%;margin-top:8px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
+        </div>`).join('');
+
+    const html = `
+    <div data-modal="cancel-condicion" style="position:fixed;inset:0;background:rgba(15,23,42,0.82);z-index:10001;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+        <div style="background:white;border-radius:14px;width:100%;max-width:560px;padding:24px;box-shadow:0 25px 60px rgba(0,0,0,0.35);">
+            <h2 style="margin:0 0 8px;color:#b91c1c;">📋 Condición de la mercancía devuelta</h2>
+            <p style="color:#64748b;font-size:13px;margin-bottom:14px;">Esta venta ya tenía mercancía entregada al cliente. Registra el estado real de cada pieza antes de reingresarla al inventario. Solo se puede reingresar como <b>Nuevo</b> si está en perfecto estado (ej. cliente se arrepintió sin abrir el producto).</p>
+            <div>${filas}</div>
+            <div style="display:flex;gap:10px;margin-top:8px;">
+                <button onclick="_cancelConfirmarCondicion()" style="flex:2;padding:13px;background:#b91c1c;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Continuar con la cancelación</button>
+                <button onclick="document.querySelector('[data-modal=&quot;cancel-condicion&quot;]')?.remove()" style="flex:1;padding:13px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cerrar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+window._cancelActualizarDestinoVisible = function(i) {
+    const estado = document.getElementById(`condEstado_${i}`)?.value;
+    const destino = document.getElementById(`condDestino_${i}`);
+    if (!destino) return;
+    if (estado === 'Bueno') {
+        destino.disabled = false;
+        destino.value = 'nuevo';
+    } else if (estado === 'Dañado' || estado === 'Incompleto') {
+        destino.disabled = true;
+        destino.value = 'segunda';
+    } else {
+        destino.disabled = true;
+        destino.value = 'nuevo';
+    }
+};
+
+window._cancelConfirmarCondicion = function() {
+    const articulos = window._cancelCondicionArticulos || [];
+    const resultado = [];
+    for (let i = 0; i < articulos.length; i++) {
+        const estado = document.getElementById(`condEstado_${i}`)?.value || '';
+        const nota = document.getElementById(`condNota_${i}`)?.value.trim() || '';
+        const destinoSel = document.getElementById(`condDestino_${i}`)?.value || 'nuevo';
+        if (!estado) return alert(`Falta indicar el estado de "${articulos[i].nombre}".`);
+        if (!nota) return alert(`Falta la nota obligatoria de "${articulos[i].nombre}".`);
+        const destino = estado === 'Bueno' ? destinoSel : 'segunda';
+        resultado.push({ ...articulos[i], estado, destino, nota });
+    }
+    const callback = window._cancelCondicionCallback;
+    document.querySelector('[data-modal="cancel-condicion"]')?.remove();
+    window._cancelCondicionCallback = null;
+    window._cancelCondicionArticulos = null;
+    if (typeof callback === 'function') callback(resultado);
+};
+
+function _cancelReingresarInventarioPorVenta(folioOFolios, motivo, condicionesArticulos = null) {
+    const folios = new Set((Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios]).filter(Boolean).map(String));
+    const folioPrincipal = Array.isArray(folioOFolios) ? folioOFolios[0] : folioOFolios;
     const productosActuales = StorageService.get("productos", []);
     // Sincronizar el global YA — registrarMovimiento() busca el costo del
     // producto en window.productos, y queremos que use estos mismos objetos
@@ -5472,37 +5621,50 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
     window.productos = productosActuales;
     const movimientosInv = StorageService.get("movimientosInventario", []);
     const docs = StorageService.get("documentosEntrega", []);
-    const docsActivos = docs.filter(d => d.folioVenta === folio && d.estado !== 'Cancelado');
+    const docsActivos = docs.filter(d => folios.has(String(d.folioVenta)) && d.estado !== 'Cancelado');
     let articulos = [];
 
     docsActivos.forEach(d => {
-        (d.articulos || []).forEach(a => articulos.push({
-            productoId: a.productoId || a.id,
-            nombre: a.nombre,
-            cantidad: Number(a.cantidad || 1),
-            color: a.colorElegido || a.color || 'General',
-            ubicacion: a.ubicacionElegida || a.ubicacion || 'General'
-        }));
+        (d.articulos || []).forEach((a, i) => {
+            const cond = Array.isArray(condicionesArticulos)
+                ? condicionesArticulos.find(c => c.docId === d.id && c.idx === i)
+                : null;
+            articulos.push({
+                productoId: a.productoId || a.id,
+                nombre: a.nombre,
+                cantidad: Number(a.cantidad || 1),
+                color: a.colorElegido || a.color || 'General',
+                ubicacion: a.ubicacionElegida || a.ubicacion || 'General',
+                estadoDevolucion: cond?.estado || null,
+                destino: cond?.destino || 'nuevo',
+                notaDevolucion: cond?.nota || ''
+            });
+        });
         d.estado = 'Cancelado';
         d.fechaCancelacion = _cancelIsoAhora();
         d.motivoCancelacion = motivo || 'Cancelación de venta';
     });
 
     if (articulos.length === 0) {
-        const folioNorm = String(folio || '').trim().toUpperCase();
         // Preferimos el campo estructurado folioVenta (ver registrarMovimiento).
         // Solo para movimientos viejos que no lo tengan (de antes de esta
-        // reparación) caemos a un match por texto, pero acotado con límites
-        // de palabra para no confundir "VTA-100" con "VTA-1005".
-        const folioEscapado = folioNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const folioComoPalabra = new RegExp(`(^|[^A-Z0-9])${folioEscapado}([^A-Z0-9]|$)`);
+        // reparación) caemos a un match por texto, acotado con límites de
+        // palabra para no confundir "VTA-100" con "VTA-1005". Se revisa
+        // contra CADA folio relacionado (folio original + folio de crédito
+        // si el apartado fue migrado), no solo el principal.
+        const foliosNorm = [...folios].map(f => String(f).trim().toUpperCase());
+        const patronesPalabra = foliosNorm.map(f => {
+            const escapado = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`(^|[^A-Z0-9])${escapado}([^A-Z0-9]|$)`);
+        });
         movimientosInv
             .filter(m => {
                 if (m.tipo !== 'salida' || m.reversadoCancelacion) return false;
                 if (m.folioVenta !== undefined && m.folioVenta !== null && m.folioVenta !== '') {
-                    return String(m.folioVenta).trim().toUpperCase() === folioNorm;
+                    return foliosNorm.includes(String(m.folioVenta).trim().toUpperCase());
                 }
-                return folioComoPalabra.test(String(m.concepto || '').toUpperCase());
+                const texto = String(m.concepto || '').toUpperCase();
+                return patronesPalabra.some(p => p.test(texto));
             })
             .forEach(m => {
                 const prod = productosActuales.find(p => String(p.id) === String(m.productoId));
@@ -5525,21 +5687,30 @@ function _cancelReingresarInventarioPorVenta(folio, motivo) {
 
     articulos.forEach(a => {
         if (!a.productoId || !a.cantidad) return;
+        const esSegunda = a.destino === 'segunda';
+        const etiquetaCond = a.estadoDevolucion ? ` [${a.estadoDevolucion}${a.notaDevolucion ? ': ' + a.notaDevolucion : ''}]` : '';
+
         // Fuente única: suma stock general + variante (color/ubicación).
+        // Si la devolución quedó marcada como "segunda", va a un bucket de
+        // stock totalmente separado del nuevo (ver ajustarStockVariante).
         const resultado = ajustarStockVariante(productosActuales, a.productoId, a.cantidad, {
             color: a.color || 'General',
             ubicacion: a.ubicacion || 'General',
             modo: 'entrada',
-            concepto: `Reingreso por cancelación - Folio ${folio}`
+            condicion: esSegunda ? 'segunda' : 'nuevo',
+            concepto: `Reingreso por cancelación - Folio ${folioPrincipal}${esSegunda ? ' (SEGUNDA)' : ''}`
         });
         if (!resultado.ok) return;
 
         // Misma función que usa el resto del sistema para el kardex: así
         // el movimiento trae costoUnitario/costo/precioCompra/valor igual
         // que cualquier otra entrada, en vez de quedar con huecos.
-        registrarMovimiento(a.productoId, `Reingreso por cancelación - Folio ${folio}`, a.cantidad, "entrada", {
-            folioVenta: folio,
-            referencia: `CANCEL-${folio}`
+        registrarMovimiento(a.productoId, `Reingreso por cancelación - Folio ${folioPrincipal}${etiquetaCond}${esSegunda ? ' → SEGUNDA' : ''}`, a.cantidad, "entrada", {
+            folioVenta: folioPrincipal,
+            referencia: `CANCEL-${folioPrincipal}`,
+            condicionDevolucion: a.estadoDevolucion || null,
+            destinoStock: esSegunda ? 'segunda' : 'nuevo',
+            notaDevolucion: a.notaDevolucion || ''
         });
     });
 
@@ -5869,19 +6040,23 @@ function _modalCancelacion({ titulo, resumen, monto, onConfirm }) {
 }
 
 window.abrirModalCancelarVenta = function(folio, origen, pendienteIndex = -1) {
-    const ventas = StorageService.get("ventasRegistradas", []);
-    const pendientes = StorageService.get("ventasPendientes", []);
-    const venta = origen === 'cuarentena' ? null : ventas.find(v => v.folio === folio);
-    const pendiente = origen === 'cuarentena' ? pendientes[pendienteIndex] : null;
-    const cliente = venta?.clienteNombre || venta?.cliente?.nombre || pendiente?.clienteNombre || pendiente?.datosVenta?.cliente?.nombre || 'Público General';
-    const monto = _cancelTotalPagadoVenta(folio, venta, pendiente);
-    const docsEntrega = StorageService.get("documentosEntrega", []).filter(d => d.folioVenta === folio && d.estado !== 'Cancelado').length;
-    window._cancelacionActual = { tipo: 'venta', folio, origen, pendienteIndex, monto, cliente };
-    _modalCancelacion({
-        titulo: `Cancelar venta ${_cancelEsc(folio)}`,
-        monto,
-        resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'Bóveda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirá cartera, pagarés, caja y mercancía entregada.</div>`,
-        onConfirm: "ejecutarCancelacionVenta()"
+    // 📋 Si hay mercancía entregada, primero se captura su condición
+    // (admin-only) y solo entonces se abre el modal de motivo/reembolso.
+    _cancelCapturarCondicionYContinuar(folio, (condicionesArticulos) => {
+        const ventas = StorageService.get("ventasRegistradas", []);
+        const pendientes = StorageService.get("ventasPendientes", []);
+        const venta = origen === 'cuarentena' ? null : ventas.find(v => v.folio === folio);
+        const pendiente = origen === 'cuarentena' ? pendientes[pendienteIndex] : null;
+        const cliente = venta?.clienteNombre || venta?.cliente?.nombre || pendiente?.clienteNombre || pendiente?.datosVenta?.cliente?.nombre || 'Público General';
+        const monto = _cancelTotalPagadoVenta(folio, venta, pendiente);
+        const docsEntrega = StorageService.get("documentosEntrega", []).filter(d => d.folioVenta === folio && d.estado !== 'Cancelado').length;
+        window._cancelacionActual = { tipo: 'venta', folio, origen, pendienteIndex, monto, cliente, condicionesArticulos };
+        _modalCancelacion({
+            titulo: `Cancelar venta ${_cancelEsc(folio)}`,
+            monto,
+            resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'Bóveda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirá cartera, pagarés, caja y mercancía entregada.</div>`,
+            onConfirm: "ejecutarCancelacionVenta()"
+        });
     });
 };
 
@@ -5945,7 +6120,7 @@ window.ejecutarCancelacionVenta = function() {
     const reqs = StorageService.get("requisicionesCompra", []).map(r => r.folioVenta === ctx.folio ? { ...r, estatus: 'Cancelada', motivoCancelacion: motivo } : r);
     StorageService.set("requisicionesCompra", reqs);
 
-    const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo);
+    const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo, ctx.condicionesArticulos || null);
     const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
     const registrarMovimientoReembolso = ctx.origen !== 'cuarentena' || _cancelTieneIngresoCaja(ctx.folio);
     const movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
@@ -6076,37 +6251,28 @@ window.ejecutarCancelacionAbono = function() {
 };
 
 window.abrirModalCancelarApartado = function(folio) {
-    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
-    if (!ap) return alert("No se encontró el apartado.");
-    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio || c.origenApartadoFolio === folio);
-    const abonosApartadoVigentes = (ap.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
-    const abonosCreditoVigentes = (cxc?.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
-    const pagadoApartado = Number(ap.enganche || 0) + abonosApartadoVigentes.reduce((s, a) => s + Number(a.monto || 0), 0);
-    const abonosCreditoPosteriores = abonosCreditoVigentes.reduce((s, a) => s + Number(a.monto || 0), 0);
-    const monto = pagadoApartado + abonosCreditoPosteriores;
-    const resumenApartadoCancelacion = `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Anticipos del apartado:</b> ${_cancelDinero(pagadoApartado)}<br><b>Abonos posteriores al credito:</b> ${_cancelDinero(abonosCreditoPosteriores)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelara el apartado y cualquier credito generado desde el.`;
-    window._cancelacionActual = { tipo: 'apartado', folio, monto, cliente: ap.clienteNombre || 'Cliente' };
-    _modalCancelacion({
-        titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
-        monto,
-        resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelará el apartado y cualquier crédito generado desde él.`,
-        onConfirm: "ejecutarCancelacionApartado()"
-    });
-};
-
-window.abrirModalCancelarApartado = function(folio) {
-    const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
-    if (!ap) return alert("No se encontro el apartado.");
-    const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
-    const pagadoApartado = Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
-    const abonosCreditoPosteriores = (cxc?.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
-    const monto = pagadoApartado + abonosCreditoPosteriores;
-    window._cancelacionActual = { tipo: 'apartado', folio, monto, cliente: ap.clienteNombre || 'Cliente' };
-    _modalCancelacion({
-        titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
-        monto,
-        resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Anticipos del apartado:</b> ${_cancelDinero(pagadoApartado)}<br><b>Abonos posteriores al credito:</b> ${_cancelDinero(abonosCreditoPosteriores)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelara el apartado y cualquier credito generado desde el.`,
-        onConfirm: "ejecutarCancelacionApartado()"
+    const apPrevio = StorageService.get("apartados", []).find(a => a.folio === folio);
+    if (!apPrevio) return alert("No se encontró el apartado.");
+    // 📋 Revisamos AMBOS folios: si el apartado fue migrado a crédito
+    // (ap.folioCredito), la entrega física quedó documentada bajo el folio
+    // de esa venta de crédito nueva, NO bajo el folio original del
+    // apartado — si solo revisáramos el folio del apartado, la mercancía
+    // entregada nunca aparecería para capturar su condición ni reingresar.
+    const foliosRelacionados = [folio, apPrevio.folioCredito].filter(Boolean);
+    _cancelCapturarCondicionYContinuar(foliosRelacionados, (condicionesArticulos) => {
+        const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
+        if (!ap) return alert("No se encontro el apartado.");
+        const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+        const pagadoApartado = Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
+        const abonosCreditoPosteriores = (cxc?.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0);
+        const monto = pagadoApartado + abonosCreditoPosteriores;
+        window._cancelacionActual = { tipo: 'apartado', folio, foliosRelacionados, monto, cliente: ap.clienteNombre || 'Cliente', condicionesArticulos };
+        _modalCancelacion({
+            titulo: `Cancelar apartado ${_cancelEsc(folio)}`,
+            monto,
+            resumen: `<b>Cliente:</b> ${_cancelEsc(ap.clienteNombre)}<br><b>Total apartado:</b> ${_cancelDinero(ap.importeApartado || ap.total || 0)}<br><b>Anticipos del apartado:</b> ${_cancelDinero(pagadoApartado)}<br><b>Abonos posteriores al credito:</b> ${_cancelDinero(abonosCreditoPosteriores)}<br><b>Pagado a devolver:</b> ${_cancelDinero(monto)}<br>Se cancelara el apartado y cualquier credito generado desde el.`,
+            onConfirm: "ejecutarCancelacionApartado()"
+        });
     });
 };
 
@@ -6140,7 +6306,7 @@ window.ejecutarCancelacionApartado = function() {
     StorageService.set("salidasPendientesVenta", salidas);
     const reqs = StorageService.get("requisicionesCompra", []).map(r => esFolioRelacionado(r.folioVenta) ? { ...r, estatus: 'Cancelada', motivoCancelacion: motivo } : r);
     StorageService.set("requisicionesCompra", reqs);
-    const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo);
+    const articulosReingresados = _cancelReingresarInventarioPorVenta([...foliosRelacionados], motivo, ctx.condicionesArticulos || null);
     const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
 
     // 🔒 Liberar la reserva de stock del apartado (y de un posible folio de
@@ -6153,18 +6319,24 @@ window.ejecutarCancelacionApartado = function() {
         });
     }
 
-    let movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
-        folio: ctx.folio,
-        referenciaBase: `VENTA-${ctx.folio}`,
-        motivo,
-        tipoCancelacion: 'apartado'
-    }) + _cancelMarcarMovimientosOrigen({
-        folio: ctx.folio,
-        referenciaBase: `ABN-APT-${ctx.folio}`,
-        motivo,
-        tipoCancelacion: 'apartado'
-    });
+    // 🛡️ Igual que con inventario: si el apartado fue migrado a crédito, el
+    // ingreso de caja original quedó con referencia VENTA-{folioCredito},
+    // no VENTA-{folio del apartado} — hay que revisar todos los folios
+    // relacionados, no solo el de origen.
+    let movimientosOrigenMarcados = 0;
     foliosRelacionados.forEach(folioRel => {
+        movimientosOrigenMarcados += _cancelMarcarMovimientosOrigen({
+            folio: folioRel,
+            referenciaBase: `VENTA-${folioRel}`,
+            motivo,
+            tipoCancelacion: 'apartado'
+        });
+        movimientosOrigenMarcados += _cancelMarcarMovimientosOrigen({
+            folio: folioRel,
+            referenciaBase: `ABN-APT-${folioRel}`,
+            motivo,
+            tipoCancelacion: 'apartado'
+        });
         movimientosOrigenMarcados += _cancelMarcarMovimientosOrigen({
             folio: folioRel,
             referenciaBase: `ABONO-${folioRel}`,
