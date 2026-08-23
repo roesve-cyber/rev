@@ -779,7 +779,16 @@
         const filtros = {
             fechaInicio: document.getElementById('corteFechaInicio')?.value || hoyInput(),
             fechaFin: document.getElementById('corteFechaFin')?.value || hoyInput(),
-            cuentaId: document.getElementById('corteCuenta')?.value || obtenerUbicacionFijaCorte()
+            // 🐛→✅ ANTES leía primero el <input id="corteCuenta"> ya pintado en
+            // pantalla — pero ese input es del render ANTERIOR, todavía no se ha
+            // reemplazado en este punto de la función. Cuando cambiarPestanaCorteCaja()
+            // guardaba la cuenta nueva en localStorage y llamaba a renderCorteCaja(),
+            // esta línea ignoraba esa cuenta nueva y releía la vieja del DOM —
+            // por eso tocar una pestaña no cambiaba nada (siempre "ganaba" la
+            // cuenta anterior). obtenerUbicacionFijaCorte() ya lee exactamente ese
+            // mismo localStorage que cambiarPestanaCorteCaja() acaba de actualizar,
+            // así que es la única fuente que hace falta aquí.
+            cuentaId: obtenerUbicacionFijaCorte()
         };
         guardarUbicacionFijaCorte(filtros.cuentaId);
         const resumen = calcularResumen(filtros);
@@ -1485,6 +1494,9 @@
                 <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(c.ingresos)}</td>
                 <td style="padding:5px;text-align:right;border-bottom:1px solid #ddd;">${dinero(c.egresos)}</td>
             </tr>`).join('');
+        const hayConteo = Number(corte.totalDenominaciones || 0) > 0 || Number(corte.totalReal || 0) > 0;
+        const diferencia = Number(corte.diferencia || 0);
+        const colorDiferencia = Math.abs(diferencia) < 0.005 ? '#15803d' : '#b91c1c';
         return `
             <div id="ticket-contenido" style="font-family:Arial,sans-serif;max-width:780px;margin:0 auto;color:#111827;">
                 <h2 style="text-align:center;margin:0 0 4px;">Muebleria Mi Pueblito</h2>
@@ -1499,13 +1511,32 @@
                     <div><b>Movimientos marcados:</b> ${Number(corte.movimientosMarcados ?? corte.movimientos?.length ?? 0)} de ${Number(corte.movimientosDisponibles ?? corte.movimientos?.length ?? 0)}</div>
                     <div><b>Excluidos:</b> ${Number(corte.movimientosExcluidos || 0)}</div>
                 </div>
-                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;">
+
+                <!-- 🎯 Razón de ser del corte de caja: Saldo Inicial + Ingresos - Egresos
+                     = Saldo Actual en Caja. Esta tabla es esa cuenta explícita, y el
+                     resultado va resaltado como el dato más importante del documento. -->
+                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:6px;">
                     <tbody>
-                        <tr><td style="padding:6px;border:1px solid #ddd;">Ingresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#15803d;">${dinero(corte.ingresos)}</td></tr>
-                        <tr><td style="padding:6px;border:1px solid #ddd;">Egresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#b91c1c;">${dinero(corte.egresos)}</td></tr>
-                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Monto identificado</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b>${dinero(corte.saldoFinalSistema)}</b></td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">Saldo Inicial</td><td style="padding:6px;border:1px solid #ddd;text-align:right;">${dinero(corte.saldoInicial)}${corte.saldoInicialManual !== null ? ' <span style="color:#6b7280;font-size:11px;">(manual)</span>' : ''}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">(+) Ingresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#15803d;">${dinero(corte.ingresos)}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">(−) Egresos</td><td style="padding:6px;border:1px solid #ddd;text-align:right;color:#b91c1c;">${dinero(corte.egresos)}</td></tr>
                     </tbody>
                 </table>
+                <div style="background:#1e3a8a;color:white;border-radius:8px;padding:14px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+                    <div style="font-size:14px;font-weight:800;letter-spacing:0.3px;">= SALDO ACTUAL EN CAJA</div>
+                    <div style="font-size:24px;font-weight:900;">${dinero(corte.saldoFinalSistema)}</div>
+                </div>
+
+                ${hayConteo ? `
+                <h4 style="margin:10px 0 6px;">Verificación contra conteo físico</h4>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;">
+                    <tbody>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">Saldo actual en caja (sistema)</td><td style="padding:6px;border:1px solid #ddd;text-align:right;">${dinero(corte.saldoFinalSistema)}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;">Contado físicamente</td><td style="padding:6px;border:1px solid #ddd;text-align:right;">${dinero(corte.totalReal)}</td></tr>
+                        <tr><td style="padding:6px;border:1px solid #ddd;"><b>Diferencia</b></td><td style="padding:6px;border:1px solid #ddd;text-align:right;"><b style="color:${colorDiferencia};">${dinero(diferencia)}</b></td></tr>
+                    </tbody>
+                </table>` : ''}
+
                 <h4 style="margin:10px 0 6px;">Resumen por origen</h4>
                 <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px;">
                     <thead><tr><th style="text-align:left;padding:5px;border-bottom:1px solid #ddd;">Origen</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Ingresos</th><th style="text-align:right;padding:5px;border-bottom:1px solid #ddd;">Egresos</th></tr></thead>
