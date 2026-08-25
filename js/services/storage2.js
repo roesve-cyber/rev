@@ -82,7 +82,16 @@ const StorageService = {
         'cuentasPorCobrar',
         'pagaresSistema',
         'ventasRegistradas',
-        'movimientosCaja'
+        'movimientosCaja',
+        // 🛡️ REPARACIÓN: el kardex (movimientosInventario) no tenía esta
+        // protección, así que una lectura vacía de Firestore (glitch de red,
+        // falla transitoria, etc.) podía vaciar el historial local completo
+        // sin ningún candado que lo detuviera — eso fue lo que dejó el kardex
+        // con una sola fila (la salida más reciente) en vez de su historial
+        // real, y provocó que el Estado de Resultados mostrara Costo de
+        // Ventas $0.00. Se agrega aquí igual que las demás tablas que no
+        // deben poder "vaciarse solas".
+        'movimientosInventario'
     ]),
 
     // Tablas que, por su tamaño y crecimiento continuo, se sincronizan como UN DOCUMENTO POR
