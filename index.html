@@ -118,7 +118,6 @@
         <button onclick="navA('reporte-rentabilidad-cartera'); if(typeof renderReporteRentabilidadCartera === 'function') renderReporteRentabilidadCartera();">💹 Rentabilidad de Cartera</button>
         <button onclick="navA('simulador-tasa-pronto-pago'); if(typeof renderSimuladorTasaProntoPago === 'function') renderSimuladorTasaProntoPago();">🧮 Simulador de Tasa y Pronto Pago</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
-        <button onclick="navA('reestructura-plazo'); if(typeof renderReestructuraPlazo === 'function') renderReestructuraPlazo();">🗓️ Reestructurar Plazo</button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
     </div>
@@ -175,9 +174,6 @@
         </button>
         <button onclick="abrirAuditoriaSaldos()" style="color: #3aedde; font-weight: bold;">
             ⚖️ Ajuste de Saldos
-        </button>
-        <button onclick="abrirModalCondonarDeuda()" style="color: #ef4444; font-weight: bold;">
-            💸 Condonar Deuda
         </button>
         <button onclick="abrirMigracionMSITarjeta()" style="color: #08f5e183; font-weight: bold;">
             💳 Migrar MSI (Tarjetas)
@@ -372,19 +368,6 @@
  <button onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  <div id="tablaAbonosDirectos"></div>
- </div>
-
-    <div id="reestructura-plazo" class="vista oculto">
- <div class="vista-header">
- <h2>🗓️ Reestructurar Plazo</h2>
- <p>Modifica el plazo pactado de una cuenta de crédito activa, reamortizando desde el capital original. Solo administradores.</p>
- </div>
- <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
- <input type="text" id="filtroClienteReestructura" placeholder="Buscar cliente o folio..."
- onkeyup="renderReestructuraPlazo()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <button onclick="renderReestructuraPlazo()" style="padding:10px 20px; background:#7c3aed; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
- </div>
- <div id="tablaReestructuraPlazo"></div>
  </div>
 
  <div id="arc-v3" class="vista oculto" style="padding-top: 20px;">
@@ -1174,15 +1157,13 @@
 <script src="js/services/cxc-notas.js?v=1"></script>
 <script src="js/core/data.js?v=3"></script>
 
-<script src="js/modules/auth.js?v=3.0"></script>
-<script src="js/modules/inventario.js?v=25"></script>
+<script src="js/modules/auth.js?v=2.9"></script>
+<script src="js/modules/inventario.js?v=24"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=6"></script>
-<script src="js/modules/ventas.js?v=3.2"></script>
-<script src="js/modules/clientes.js?v=6"></script>
+<script src="js/modules/ventas.js?v=3.1"></script>
+<script src="js/modules/clientes.js?v=5"></script>
 <script src="js/modules/cxc.js?v=37"></script>
-<script src="js/modules/reestructura-plazo.js?v=1"></script>
-<script src="js/modules/condonar-deuda.js?v=1"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=54"></script>
 <script src="js/modules/bancos.js?v=21"></script>
@@ -1195,10 +1176,10 @@
 <script src="js/modules/puntos.js"></script>
 <script src="js/modules/descuentos.js"></script>
 <script src="js/modules/vendedores.js"></script>
-<script src="js/modules/corte-caja.js?v=10"></script>
+<script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js?v=3"></script>
 <script src="js/modules/prestamos.js"></script>
-<script src="js/modules/garantias.js?v=1"></script>
+<script src="js/modules/garantias.js"></script>
 <script src="js/modules/producto-picker.js?v=4"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=4"></script>
@@ -1212,7 +1193,8 @@
 <script src="js/modules/configuracion.js"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/modules/reportes-abonos-enganches.js"></script>
-<script src="js/core/navigation.js?v=11"></script>
+<script src="js/services/calculadora-rapida.js?v=1"></script>
+<script src="js/core/navigation.js?v=10"></script>
 <script src="js/init.js?v=8"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
