@@ -220,13 +220,88 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         .reduce((s, d) => s + (Number(d.monto) || 0), 0);
 
     const kardex = StorageService.get('movimientosInventario', []);
-    const salidasVenta = kardex
-        .filter(m => m.tipo === 'salida' && m.folioVenta && _efEnRango(m.fecha, desde, hasta))
-        .reduce((s, m) => s + (Number(m.valor) || 0), 0);
-    const reingresosVenta = kardex
-        .filter(m => m.tipo === 'entrada' && m.folioVenta && _efEnRango(m.fecha, desde, hasta))
-        .reduce((s, m) => s + (Number(m.valor) || 0), 0);
-    const costoVentas = Math.max(0, salidasVenta - reingresosVenta);
+    const salidasVentaMovs = kardex.filter(m => m.tipo === 'salida' && m.folioVenta && _efEnRango(m.fecha, desde, hasta));
+    const reingresosVentaMovs = kardex.filter(m => m.tipo === 'entrada' && m.folioVenta && _efEnRango(m.fecha, desde, hasta));
+    const salidasVenta = salidasVentaMovs.reduce((s, m) => s + (Number(m.valor) || 0), 0);
+    const reingresosVenta = reingresosVentaMovs.reduce((s, m) => s + (Number(m.valor) || 0), 0);
+    const costoVentasReal = Math.max(0, salidasVenta - reingresosVenta);
+
+    // 🛡️ REPARACIÓN: si el kardex no tiene NINGUNA salida para el folio de una
+    // venta del periodo (p.ej. porque se perdió historial, como pasó con el
+    // vaciado accidental de movimientosInventario), el costo de esa venta se
+    // estimaba en $0 — inflando la Utilidad Bruta sin ningún aviso. Para esos
+    // folios (solo esos: si el kardex ya trae AL MENOS una salida real para el
+    // folio, se confía en el kardex y no se toca nada, para no duplicar costo)
+    // se estima el costo con el costo ACTUAL del producto × cantidad vendida.
+    // Es una aproximación (el costo pudo cambiar desde la venta), así que se
+    // reporta aparte y el reporte lo marca explícitamente en vez de mezclarlo
+    // en silencio con el costo real del kardex.
+    const foliosConKardexSalida = new Set(salidasVentaMovs.map(m => String(m.folioVenta)));
+    const productosMap = new Map(StorageService.get('productos', []).map(p => [String(p.id), p]));
+    let costoVentasEstimado = 0;
+    const foliosCostoEstimado = [];
+    ventasEnRango.forEach(v => {
+        const folio = String(v.folio || '');
+        if (!folio || foliosConKardexSalida.has(folio)) return;
+        const arts = Array.isArray(v.articulos) ? v.articulos : [];
+        let costoEstimVenta = 0;
+        arts.forEach(a => {
+            const prod = productosMap.get(String(a.productoId ?? a.id ?? ''));
+            const costoUnit = Number(prod?.costo || prod?.precioCompra) || 0;
+            costoEstimVenta += costoUnit * (Number(a.cantidad) || 1);
+        });
+        if (costoEstimVenta > 0) {
+            costoVentasEstimado += costoEstimVenta;
+            foliosCostoEstimado.push(folio);
+        }
+    });
+    const costoVentas = costoVentasReal + costoVentasEstimado;
+
+    // 🛡️ REPARACIÓN (misma causa, lado inverso): una venta CANCELADA debe
+    // regresar su costo vía kardex 'entrada' con folioVenta — eso es justo lo
+    // que resta reingresosVenta arriba. Pero si esa 'entrada' tampoco quedó
+    // en el kardex (mismo vaciado), el crédito se pierde. Se estima igual que
+    // arriba: costo actual del producto × cantidad de
+    // historialCancelaciones.articulosReingresados — pero SOLO cuando de
+    // verdad se contó algún costo para esa venta en este periodo (ver guard
+    // abajo: si la venta es de este mismo periodo y ni siquiera tiene salida
+    // real en kardex, ventasEnRango ya la excluyó por completo y no hay nada
+    // que reversar; estimarlo ahí duplicaría el crédito).
+    const historialCancelaciones = StorageService.get('historialCancelaciones', []);
+    const cancelacionesEnRango = historialCancelaciones.filter(c => _efEnRango(c.fecha, desde, hasta));
+    const foliosConKardexEntrada = new Set(reingresosVentaMovs.map(m => String(m.folioVenta)));
+    let reingresosEstimado = 0;
+    const foliosReingresoEstimado = [];
+    cancelacionesEnRango.forEach(c => {
+        const folio = String(c.folio || '');
+        if (!folio || foliosConKardexEntrada.has(folio)) return;
+        const ventaOriginal = ventas.find(v => String(v.folio) === folio);
+        const ventaEnEstePeriodo = !!ventaOriginal && _efEnRango(ventaOriginal.fechaVenta || ventaOriginal.fecha, desde, hasta);
+        // Si la venta es de este mismo periodo Y tampoco tiene salida real en
+        // kardex, de verdad no se contó ningún costo para ella en este
+        // periodo (quedó fuera de ventasEnRango por estar cancelada, así que
+        // ni siquiera entró a la estimación de arriba) — ahí sí no hay nada
+        // que reversar. Pero si SÍ tiene una salida real en kardex (el bug
+        // solo se comió la 'entrada' de reversa, no la 'salida' original),
+        // ese costo real ya está adentro de salidasVenta pese a que la venta
+        // esté cancelada — kardex no filtra por estado de venta — y si no se
+        // credita aquí, se queda inflando el Costo de Ventas de una venta que
+        // no debería aportar nada. Por eso el guard es sobre si el folio
+        // tiene salida real, no sobre si la venta cayó en este periodo.
+        if (ventaEnEstePeriodo && !foliosConKardexSalida.has(folio)) return;
+        const arts = Array.isArray(c.articulosReingresados) ? c.articulosReingresados : [];
+        let creditoCancelacion = 0;
+        arts.forEach(a => {
+            const prod = productosMap.get(String(a.productoId ?? a.id ?? ''));
+            const costoUnit = Number(prod?.costo || prod?.precioCompra) || 0;
+            creditoCancelacion += costoUnit * (Number(a.cantidad) || 1);
+        });
+        if (creditoCancelacion > 0) {
+            reingresosEstimado += creditoCancelacion;
+            foliosReingresoEstimado.push(folio);
+        }
+    });
+    const costoVentasFinal = Math.max(0, costoVentas - reingresosEstimado);
 
     const gastos = StorageService.get('gastosOperativos', []);
     const gastosPorCategoria = {};
@@ -249,7 +324,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         .reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
 
     const ingresosNetos = ingresosVentas - totalDevoluciones;
-    const utilidadBruta = ingresosNetos - costoVentas;
+    const utilidadBruta = ingresosNetos - costoVentasFinal;
     // Cuentas incobrables: NIF las clasifica como gasto de operación (venta/
     // administración), NO como parte del RIF.
     const utilidadOperacion = utilidadBruta - totalGastos - incobrables;
@@ -259,7 +334,10 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     return {
         desde: desdeStr, hasta: hastaStr,
         ingresosVentas, totalDevoluciones, ingresosNetos,
-        costoVentas, utilidadBruta,
+        costoVentas: costoVentasFinal, costoVentasReal,
+        costoVentasEstimado, foliosCostoEstimado,
+        reingresosEstimado, foliosReingresoEstimado,
+        utilidadBruta,
         gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
         ingresosFinancieros, gastosFinancieros, rif,
         utilidadNeta
@@ -426,9 +504,10 @@ function renderEstadosFinancieros() {
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Ingresos por ventas (mercancía, sin intereses)</td><td style="padding:8px;text-align:right;">${_efDinero(er.ingresosVentas)}</td><td style="padding:8px;text-align:right;color:#6b7280;">${_efPct(er.ingresosVentas, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Devoluciones</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalDevoluciones)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.totalDevoluciones, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Ventas netas</td><td style="padding:8px;text-align:right;">${_efDinero(er.ingresosNetos)}</td><td style="padding:8px;text-align:right;">${_efPct(er.ingresosNetos, er.ingresosVentas)}</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Costo de ventas</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.costoVentas)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.costoVentas, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Costo de ventas${(er.costoVentasEstimado > 0 || er.reingresosEstimado > 0) ? ' <span title="Incluye ajustes estimados — ver aviso abajo" style="cursor:help;">⚠️</span>' : ''}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.costoVentas)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.costoVentas, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Utilidad bruta</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadBruta)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadBruta, er.ingresosVentas)}</td></tr>
     </table>
+    ${(er.costoVentasEstimado > 0 || er.reingresosEstimado > 0) ? `<p style="background:#fffbeb;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;">⚠️ El costo de ventas de este periodo incluye ajustes <strong>estimados</strong> (costo actual del producto × cantidad), no tomados del kardex:${er.costoVentasEstimado > 0 ? ` +${_efDinero(er.costoVentasEstimado)} por ${er.foliosCostoEstimado.length === 1 ? 'la venta' : 'las ventas'} sin salida en movimientosInventario (${_efEsc(er.foliosCostoEstimado.join(', '))})` : ''}${er.reingresosEstimado > 0 ? `${er.costoVentasEstimado > 0 ? ';' : ''} −${_efDinero(er.reingresosEstimado)} por ${er.foliosReingresoEstimado.length === 1 ? 'la cancelación' : 'las cancelaciones'} sin reingreso en movimientosInventario (${_efEsc(er.foliosReingresoEstimado.join(', '))})` : ''}. Costo real de kardex neto: ${_efDinero(er.costoVentasReal)}.</p>` : ''}
     <details style="margin-bottom:12px;">
         <summary style="cursor:pointer;color:#1e40af;font-weight:bold;font-size:13px;">Ver desglose de gastos operativos (${_efDinero(er.totalGastos)})</summary>
         <table style="width:100%;border-collapse:collapse;margin-top:6px;">${filasGastos}</table>
