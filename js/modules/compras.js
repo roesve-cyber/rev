@@ -2278,56 +2278,15 @@ function guardarOrdenCompra() {
     // ------------------------------------------
     StorageService.set('ordenesCompra', lista);
     document.querySelector('[data-modal="nueva-oc"]')?.remove();
-    if (oc.estado === 'Borrador') {
-        alert(`📝 Orden de compra ${oc.folio} guardada como Borrador.\n\nNo se puede imprimir todavía — confírmala primero desde la lista de Órdenes de Compra.`);
-    } else {
-        alert(`✅ Orden de compra ${oc.folio} guardada y confirmada.`);
-    }
+    alert(`✅ Orden de compra ${oc.folio} guardada.`);
     if (document.getElementById('contenidoOrdenesCompra')) renderListaOrdenesCompra();
-    if (oc.estado !== 'Borrador') imprimirOrdenCompra(oc.id);
+    imprimirOrdenCompra(oc.id);
 }
-
-// ── Confirmar una OC en Borrador: punto de no retorno antes de poder
-// imprimirla. Requiere permiso de administrador porque de aquí en
-// adelante modificarla exige confirmación de seguridad adicional.
-window.confirmarOrdenCompra = function(id) {
-    if (!_comprasRequireAdmin('Confirmar orden de compra')) return;
-    const lista = _getOrdenesCompra();
-    const idx = lista.findIndex(x => x.id === id);
-    if (idx === -1) return alert('OC no encontrada.');
-    const oc = lista[idx];
-    if (oc.estado !== 'Borrador') return alert('Esta orden ya está confirmada.');
-
-    if (!confirm(`¿Confirmar la Orden de Compra ${oc.folio} por ${dinero(oc.total)} a ${oc.proveedorNombre}?\n\nUna vez confirmada podrás imprimirla, pero cualquier modificación posterior pedirá confirmación de seguridad.`)) return;
-
-    lista[idx] = {
-        ...oc,
-        estado: 'Enviada',
-        fechaConfirmacion: typeof window.localISO === 'function' ? window.localISO(new Date()) : new Date().toISOString()
-    };
-    StorageService.set('ordenesCompra', lista);
-    if (window.AuditService?.log) {
-        window.AuditService.log({
-            accion: 'OC_CONFIRMADA',
-            modulo: 'Compras',
-            entidad: oc.folio,
-            detalle: `Orden de compra ${oc.folio} confirmada (Borrador → Enviada)`,
-            severidad: 'info'
-        });
-    }
-    alert(`✅ Orden de compra ${oc.folio} confirmada. Ya puedes imprimirla.`);
-    if (document.getElementById('contenidoOrdenesCompra')) renderListaOrdenesCompra();
-    imprimirOrdenCompra(id);
-};
 
 function imprimirOrdenCompra(id) {
     const lista = _getOrdenesCompra();
     const oc = lista.find(x => x.id === id);
     if (!oc) return;
-    if (oc.estado === 'Borrador') {
-        alert(`⚠️ La Orden de Compra ${oc.folio} está en Borrador y no se puede imprimir.\n\nConfírmala primero desde la lista de Órdenes de Compra.`);
-        return;
-    }
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     const esConsignacionOC = oc.condicionesComerciales?.metodoPago === 'consignacion' || oc.esConsignacion === true;
@@ -2440,6 +2399,9 @@ function imprimirOrdenCompra(id) {
         <div style="margin-top:26px;padding-top:12px;border-top:1px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:10.5px;">
             ${empresa} · Documento generado el ${window.formatearFechaCortaMX(new Date())}
         </div>
+    </div>
+    <div style="text-align:center;margin-top:16px;">
+      <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
     if (window.TicketService?.elegirFormato) {
@@ -3382,10 +3344,7 @@ function renderListaOrdenesCompra() {
                     </td>
                     <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
-                            ${oc.estado === 'Borrador'
-                                ? `<button onclick="confirmarOrdenCompra(${oc.id})" title="Confirmar OC (habilita impresión)" style="background:none;border:none;cursor:pointer;font-size:17px;">✅</button>
-                                   <span title="No se puede imprimir: OC en Borrador" style="font-size:17px;opacity:0.3;cursor:not-allowed;">🖨️</span>`
-                                : `<button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>`}
+                            <button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>
                             <button onclick="abrirModalAbonoOC(${oc.id})" title="Abonar a OC" style="background:none;border:none;cursor:pointer;font-size:17px; opacity:${saldoPendiente <= 0 ? '0.3' : '1'};" ${saldoPendiente <= 0 ? 'disabled' : ''}>💰</button>
                             ${esActiva ? `<button onclick="recibirOrdenCompra(${oc.id})" title="Recibir mercancía" style="background:none;border:none;cursor:pointer;font-size:17px;">📦</button>` : ''}
                             ${(oc.estado === 'Borrador' || oc.estado === 'Enviada') ? `<button onclick="editarOrdenCompra(${oc.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:17px;">✏️</button>` : ''}
@@ -3425,14 +3384,6 @@ function editarOrdenCompra(id) {
     if (oc.estado === 'Recibida')  return alert('No se puede editar una OC ya recibida.');
     if (oc.estado === 'Cancelada') return alert('No se puede editar una OC cancelada.');
 
-    // Confirmación de seguridad: si la OC ya fue confirmada (no está en
-    // Borrador), modificarla puede desalinearla de lo que ya se le envió
-    // al proveedor o de lo que ya se imprimió/firmó.
-    if (oc.estado !== 'Borrador') {
-        if (!_comprasRequireAdmin('Editar orden de compra confirmada')) return;
-        if (!confirm(`⚠️ CONFIRMACIÓN DE SEGURIDAD\n\nLa Orden de Compra ${oc.folio} ya está confirmada (${oc.estado}) y puede que ya se haya impreso o enviado al proveedor.\n\n¿Estás seguro de que quieres modificarla?`)) return;
-    }
-
     const provs    = StorageService.get('proveedores', []);
     const prods    = StorageService.get('productos',   []);
     const selProvs = provs.map(p =>
@@ -3459,6 +3410,23 @@ function editarOrdenCompra(id) {
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA ENTREGA ESTIMADA</label>
             <input type="date" id="editOcFechaEntrega" value="${oc.fechaEntregaEstimada?.substring(0,10) || ''}"
+                   style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">FORMA DE PAGO</label>
+            <select id="editOcMetodoPago" onchange="document.getElementById('divEditOcMsi').style.display=(this.value==='msi'?'block':'none');"
+                    style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+                <option value="contado" ${(oc.condicionesComerciales?.metodoPago || 'contado') === 'contado' ? 'selected' : ''}>Contado</option>
+                <option value="credito" ${oc.condicionesComerciales?.metodoPago === 'credito' ? 'selected' : ''}>Crédito Proveedor</option>
+                <option value="msi" ${oc.condicionesComerciales?.metodoPago === 'msi' ? 'selected' : ''}>Meses sin Intereses (MSI)</option>
+                <option value="consignacion" style="color:#10b981;font-weight:bold;" ${oc.condicionesComerciales?.metodoPago === 'consignacion' ? 'selected' : ''}>A Consignación</option>
+            </select>
+          </div>
+          <div id="divEditOcMsi" style="display:${oc.condicionesComerciales?.metodoPago === 'msi' ? 'block' : 'none'};">
+            <label style="font-size:12px;font-weight:bold;color:#374151;">NÚMERO DE MESES</label>
+            <input type="number" id="editOcMeses" min="1" value="${oc.condicionesComerciales?.meses || 12}"
                    style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
         </div>
@@ -3563,6 +3531,8 @@ function guardarEdicionOC(id) {
     const provId       = document.getElementById('editOcProveedor')?.value;
     const fechaEntrega = document.getElementById('editOcFechaEntrega')?.value;
     const notas        = document.getElementById('editOcNotas')?.value.trim() || '';
+    const metodoPago   = document.getElementById('editOcMetodoPago')?.value || 'contado';
+    const meses        = document.getElementById('editOcMeses')?.value || '';
     
     const provs = StorageService.get('proveedores', []);
     const prov  = provs.find(p => String(p.id) === String(provId));
@@ -3597,6 +3567,12 @@ function guardarEdicionOC(id) {
         saldoPendiente:        saldoVerdadero, // <- Ahora el saldo camina de la mano del total
         fechaEntregaEstimada:  fechaEntrega || null,
         notas:                 notas || "",
+        condicionesComerciales: {
+            ...(lista[idx].condicionesComerciales || {}),
+            metodoPago: metodoPago || "contado",
+            meses: metodoPago === 'msi' ? (meses || 0) : (lista[idx].condicionesComerciales?.meses || 0)
+        },
+        esConsignacion:        metodoPago === 'consignacion',
         fechaModificacion:     typeof window.localISO === 'function' ? window.localISO(new Date()) : new Date().toISOString()
     };
 
