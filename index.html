@@ -179,6 +179,12 @@
         <button onclick="abrirMigracionMSITarjeta()" style="color: #08f5e183; font-weight: bold;">
             💳 Migrar MSI (Tarjetas)
         </button>
+        <button onclick="abrirModalCondonarDeuda()" style="color: #dc2626; font-weight: bold;">
+            💸 Condonar Deuda
+        </button>
+        <button onclick="navA('reestructura-plazo'); if(typeof renderReestructuraPlazo === 'function') renderReestructuraPlazo();" style="color: #7c3aed; font-weight: bold;">
+            🗓️ Reestructurar Plazo
+        </button>
     </div>
 </div>
 
@@ -866,6 +872,19 @@
  <div id="contenidoCancelaciones"></div>
  </div>
 
+    <!-- REESTRUCTURA DE PLAZO (CxC) -->
+    <div id="reestructura-plazo" class="vista oculto">
+ <div class="vista-header">
+ <h2>🗓️ Reestructurar Plazo</h2>
+ <p>Modifica el plazo/periodicidad de una cuenta de crédito activa, reamortizando desde el capital original. Solo Admin.</p>
+ </div>
+ <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px;">
+ <input type="text" id="filtroClienteReestructura" placeholder="Buscar cliente o folio..."
+ onkeyup="renderReestructuraPlazo()" style="width:100%; max-width:400px; padding:10px; border:1px solid #ddd; border-radius:5px; box-sizing:border-box;">
+ </div>
+ <div id="tablaReestructuraPlazo"></div>
+ </div>
+
     <!-- GARANTÍAS -->
     <div id="garantias" class="vista oculto">
  <div class="vista-header">
@@ -1189,6 +1208,8 @@
 <script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js?v=3"></script>
 <script src="js/modules/finanzas-estados.js?v=1"></script>
+<script src="js/modules/condonar-deuda.js?v=1"></script>
+<script src="js/modules/reestructura-plazo.js?v=1"></script>
 <script src="js/modules/prestamos.js"></script>
 <script src="js/modules/garantias.js"></script>
 <script src="js/modules/producto-picker.js?v=4"></script>
