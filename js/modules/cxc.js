@@ -601,7 +601,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
             <td>
                 <div style="display:flex; gap:5px; flex-wrap:wrap;">
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
-                    ${(typeof _esAdmin === 'function' && _esAdmin() && c.metodo !== 'apartado') ? `<button onclick="abrirModalReestructurarPlazo('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#7c3aed; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Modificar el plazo pactado">🗓️ Plazo</button>` : ''}
                     ${accionesMoratorio}
                     <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
                     <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>

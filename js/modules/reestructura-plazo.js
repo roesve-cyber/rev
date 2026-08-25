@@ -118,6 +118,65 @@ function _reestructuraSimular(plan, totalPagado) {
     };
 }
 
+// ==== Vista dedicada: Cobranza > Reestructurar Plazo ====
+function renderReestructuraPlazo(filtroCliente = "") {
+    const contenedor = document.getElementById("tablaReestructuraPlazo");
+    if (!contenedor) return;
+
+    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
+        contenedor.innerHTML = `<div style="background:#fee2e2; color:#991b1b; padding:20px; border-radius:10px; text-align:center; font-weight:bold;">Solo un administrador puede modificar el plazo pactado de una cuenta.</div>`;
+        return;
+    }
+
+    filtroCliente = (filtroCliente || document.getElementById("filtroClienteReestructura")?.value || "").trim().toLowerCase();
+    const cuentas = StorageService.get("cuentasPorCobrar", [])
+        .filter(c => !(typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(c)))
+        .filter(c => String(c.estado || '').toLowerCase() !== 'saldado')
+        .filter(c => c.metodo !== 'apartado');
+
+    const filas = cuentas
+        .filter(c => {
+            const texto = `${_cxcNombreClienteVigente(c)} ${c.folio || ''}`.toLowerCase();
+            return !filtroCliente || texto.includes(filtroCliente);
+        })
+        .sort((a, b) => _cxcNombreClienteVigente(a).localeCompare(_cxcNombreClienteVigente(b), 'es'));
+
+    if (!filas.length) {
+        contenedor.innerHTML = `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b;">Sin cuentas de crédito activas para reestructurar.</div>`;
+        return;
+    }
+
+    contenedor.innerHTML = `
+        <div style="overflow-x:auto; background:white; border:1px solid #e5e7eb; border-radius:10px;">
+            <table class="tabla-admin" style="margin:0;">
+                <thead>
+                    <tr>
+                        <th>Cliente / Folio</th>
+                        <th>Plazo actual</th>
+                        <th>Saldo</th>
+                        <th style="text-align:right;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filas.map(cuenta => {
+                        const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(cuenta.folio) : null;
+                        const saldo = estado?.saldoTotal ?? cuenta.saldoActual ?? 0;
+                        return `
+                        <tr>
+                            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
+                            <td>${Number(cuenta.plan?.meses || 0) || '—'} meses (${_cxcEscHTML(cuenta.periodicidad || 'semanal')})</td>
+                            <td style="font-weight:800; color:#dc2626;">${_cxcDinero(saldo)}</td>
+                            <td style="text-align:right;">
+                                <button onclick="abrirModalReestructurarPlazo('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#7c3aed; color:white; font-weight:bold; cursor:pointer;">🗓️ Modificar plazo</button>
+                            </td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>`;
+}
+window.renderReestructuraPlazo = renderReestructuraPlazo;
+
 window.abrirModalReestructurarPlazo = function (folio) {
     if (!(typeof _esAdmin === 'function' && _esAdmin())) {
         return alert("Solo un administrador puede modificar el plazo pactado de una cuenta.");
@@ -405,6 +464,7 @@ window.confirmarReestructurarPlazo = async function (folio) {
 
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderReestructuraPlazo === 'function') renderReestructuraPlazo();
 };
 
 console.log('✅ Módulo reestructura-plazo.js cargado — modificación de plazo pactado en CxC (reamortización desde capital original).');
