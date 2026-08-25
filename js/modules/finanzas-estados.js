@@ -189,8 +189,17 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     // (_rrcTotalesVenta/_rrcInteres de reportes-rentabilidad-cartera.js) en
     // vez de recalcular la resta nosotros mismos, para no volver a duplicar
     // esa fórmula por cuarta vez.
+    // 🛡️ Ventas canceladas (Centro de Cancelaciones en ventas.js) se marcan
+    // con estado/estatus 'Cancelada' pero NO generan un registro en
+    // historialDevoluciones (van a historialCancelaciones, un array aparte).
+    // Si no se excluyen aquí, su ingreso completo se queda contado como
+    // venta real sin nada que lo reste — el costo de ventas sí se reversa
+    // bien vía kardex (ver reingresosVenta abajo), pero el ingreso no.
     const ventas = StorageService.get('ventasRegistradas', []);
-    const ventasEnRango = ventas.filter(v => _efEnRango(v.fechaVenta || v.fecha, desde, hasta));
+    const ventasEnRango = ventas.filter(v =>
+        _efEnRango(v.fechaVenta || v.fecha, desde, hasta) &&
+        v.estado !== 'Cancelada' && v.estatus !== 'Cancelada'
+    );
     let ingresosVentas = 0;
     let ingresosFinancieros = 0;
     ventasEnRango.forEach(v => {
@@ -285,19 +294,65 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const totalEfectivoBancos = [...efectivo, ...bancos].reduce((s, c) => s + (Number(c.saldoAFecha) || 0), 0);
 
     const cxc = StorageService.get('cuentasPorCobrar', []);
-    const totalCxC = cxc.reduce((s, c) => s + (Number(c.saldoPendiente ?? c.saldo) || 0), 0);
+    const totalCxCCredito = cxc.reduce((s, c) => s + (Number(c.saldoPendiente ?? c.saldo) || 0), 0);
+
+    // 🛡️ Apartados (layaway) son una cuenta por cobrar aparte de
+    // cuentasPorCobrar: el cliente debe el saldoPendiente pero la mercancía
+    // sigue en tienda (no se entrega hasta liquidar, ver ventas.js). Sin
+    // esto, ese saldo por cobrar no existía en ningún lado del Balance.
+    // Solo 'Pendiente' tiene saldo real: 'Liquidado'/'Entregado' ya están en
+    // 0, 'Cancelado' se revierte aparte, 'Migrado a Crédito' ya vive en
+    // cuentasPorCobrar.
+    const apartados = StorageService.get('apartados', []).filter(a => a.estado === 'Pendiente');
+    const totalApartadosPorCobrar = apartados.reduce((s, a) => s + (Number(a.saldoPendiente) || 0), 0);
+    const totalCxC = totalCxCCredito + totalApartadosPorCobrar;
 
     const prestamos = StorageService.get('prestamosOtorgados', []).filter(p => p.estado !== 'Incobrable');
     const totalPrestamosPorCobrar = prestamos.reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
 
+    // 🛡️ Inventario: stock nuevo + stockSegunda (mercancía devuelta/dañada,
+    // vive en un campo aparte — ver inventario.js línea ~1908 — y antes no
+    // se sumaba, así que ese valor desaparecía del Balance). Se resta la
+    // mercancía en consignación activa (consignacionesActivas.cantidadPendiente):
+    // esa mercancía SÍ está físicamente en tienda y cuenta en p.stock, pero
+    // todavía es propiedad del proveedor (se recibió "sin CxP" a propósito,
+    // ver compras.js), así que no debe contarse como activo propio hasta que
+    // se venda o se marque "Ya es mía" (liquidarConsignacionComoPropia).
     const productos = StorageService.get('productos', []);
-    const totalInventario = productos.reduce((s, p) => s + (Number(p.stock) || 0) * (Number(p.costo || p.precioCompra) || 0), 0);
+    const totalInventarioBruto = productos.reduce((s, p) => {
+        const costo = Number(p.costo || p.precioCompra) || 0;
+        const stockNuevo = Number(p.stock) || 0;
+        const stockSegunda = Number(p.stockSegunda) || 0;
+        return s + (stockNuevo + stockSegunda) * costo;
+    }, 0);
+    const consignaciones = StorageService.get('consignacionesActivas', []);
+    const totalConsignacionNoPropia = consignaciones.reduce((s, c) => s + (Number(c.cantidadPendiente) || 0) * (Number(c.costoUnitario) || 0), 0);
+    const totalInventario = Math.max(0, totalInventarioBruto - totalConsignacionNoPropia);
 
     const cxp = StorageService.get('cuentasPorPagar', []);
     const totalCxP = cxp.reduce((s, c) => s + (Number(c.saldoPendiente ?? c.saldo) || 0), 0);
 
-    const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario;
-    const totalPasivo = totalCxP;
+    // Deuda con el banco por compras a Tarjeta de Crédito a Meses Sin
+    // Intereses (bancos.js / cuentasMSI). Mismo cálculo que usa
+    // renderDashboardMSI: total de la compra menos lo ya pagado, por cada
+    // cuenta MSI. Sin esto el pasivo queda incompleto y las "Utilidades
+    // acumuladas" (que se calculan como residual) se inflan de más.
+    const cuentasMSI = StorageService.get('cuentasMSI', []);
+    const totalDeudaMSI = cuentasMSI.reduce((s, d) => {
+        const total = parseFloat(String(d.total || 0).replace(/[$,]/g, '')) || 0;
+        const pagado = Number(d.montoPagado || 0);
+        return s + Math.max(0, total - pagado);
+    }, 0);
+
+    // 🛡️ Saldo a favor de proveedores (compras.js / saldosFavorProveedores):
+    // crédito real que un proveedor nos debe (p. ej. por "Devolución sin
+    // compra"), aplicable a compras futuras. Es un activo — antes no se
+    // mostraba en ningún lado del Balance.
+    const saldosFavorProveedores = StorageService.get('saldosFavorProveedores', []);
+    const totalSaldoFavorProveedores = saldosFavorProveedores.reduce((s, x) => s + Math.max(0, Number(x.montoDisponible) || 0), 0);
+
+    const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario + totalSaldoFavorProveedores;
+    const totalPasivo = totalCxP + totalDeudaMSI;
 
     const { neto: capitalAportadoNeto, aportado, retirado } = _efTotalesCapital();
     const utilidadesAcumuladas = totalActivo - totalPasivo - capitalAportadoNeto;
@@ -306,9 +361,11 @@ function _efCalcularBalanceGeneral(hastaStr) {
     return {
         hasta: hastaStr, esHistorico,
         efectivo, bancos, totalEfectivoBancos,
-        totalCxC, totalPrestamosPorCobrar, totalInventario,
+        totalCxC, totalCxCCredito, totalApartadosPorCobrar,
+        totalPrestamosPorCobrar, totalInventario,
+        totalSaldoFavorProveedores,
         totalActivo,
-        totalCxP, totalPasivo,
+        totalCxP, totalDeudaMSI, totalPasivo,
         capitalAportado: aportado, capitalRetirado: retirado, capitalAportadoNeto,
         utilidadesAcumuladas, totalCapital
     };
@@ -403,16 +460,19 @@ function renderEstadosFinancieros() {
             <h4 style="color:#1e40af;margin-bottom:6px;">ACTIVO</h4>
             <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Efectivo y bancos</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalEfectivoBancos)}</td></tr>
-                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por cobrar (clientes)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxC)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por cobrar (crédito)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxCCredito)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por cobrar (apartados)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalApartadosPorCobrar)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Préstamos por cobrar</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPrestamosPorCobrar)}</td></tr>
-                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Inventario</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalInventario)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Inventario (incl. segunda, sin consignación)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalInventario)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Saldo a favor de proveedores</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalSaldoFavorProveedores)}</td></tr>
                 <tr style="font-weight:bold;background:#eff6ff;"><td style="padding:8px;">TOTAL ACTIVO</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalActivo)}</td></tr>
             </table>
         </div>
         <div>
             <h4 style="color:#b45309;margin-bottom:6px;">PASIVO + CAPITAL</h4>
             <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por pagar (proveedores)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPasivo)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por pagar (proveedores)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxP)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Deuda TDC a MSI</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalDeudaMSI)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Capital aportado (neto)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.capitalAportadoNeto)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Utilidades acumuladas</td><td style="padding:8px;text-align:right;">${_efDinero(bg.utilidadesAcumuladas)}</td></tr>
                 <tr style="font-weight:bold;background:#fffbeb;"><td style="padding:8px;">TOTAL PASIVO + CAPITAL</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPasivo + bg.totalCapital)}</td></tr>
