@@ -60,8 +60,8 @@ function _reestructuraCapitalCuenta(cuenta) {
 
 function _reestructuraPlanesDisponibles(capital, periodicidad) {
     const config = StorageService.get('configCreditoGlobal', null);
-    if (!window.CalculatorService?.calcularCreditoConPeriodicidad) return [];
-    return window.CalculatorService.calcularCreditoConPeriodicidad(capital, periodicidad, config);
+    if (typeof CalculatorService === 'undefined' || !CalculatorService.calcularCreditoConPeriodicidad) return [];
+    return CalculatorService.calcularCreditoConPeriodicidad(capital, periodicidad, config);
 }
 
 // Genera los MONTOS teóricos (sin fechas ni ids) de las N cuotas de un
