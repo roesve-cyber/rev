@@ -2709,7 +2709,8 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
             totalVenta: totalVentaReal,
             articulos: datosVentaP.articulos,
             listaProductos: productosActuales,
-            clienteNombre: datosVentaP.cliente?.nombre || ''
+            clienteNombre: datosVentaP.cliente?.nombre || null,
+            clienteId: datosVentaP.cliente?.id || null
         }, window._vendedorSeleccionado.id);
     }
 
@@ -5928,9 +5929,23 @@ function renderCancelaciones(tipo = window._cancelacionTipo || 'venta') {
                 ${btn('abono', 'Cancelar abono', '#b45309')}
                 ${btn('apartado', 'Cancelar apartado', '#7c3aed')}
             </div>
-            <input id="cancelFiltro" value="${_cancelEsc(filtro)}" oninput="renderCancelaciones('${tipo}')" placeholder="Buscar por folio o cliente..." style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;margin-bottom:16px;">
+            <input id="cancelFiltro" value="${_cancelEsc(filtro)}" oninput="_cancelActualizarResultados()" placeholder="Buscar por folio o cliente..." style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;margin-bottom:16px;">
             <div id="cancelResultados">${_renderCancelacionesResultados(tipo, filtro)}</div>
         </div>`;
+}
+
+// 🔎 REPARACIÓN: el buscador llamaba renderCancelaciones() en cada tecla,
+// lo que reconstruye TODO el contenedor (incluido el propio <input>) con
+// innerHTML — eso destruye y vuelve a crear el campo de texto en cada
+// pulsación, y el campo recreado pierde el foco/cursor. Por eso había que
+// teclear letra por letra y volver a dar clic en el campo cada vez.
+// Ahora solo se refresca la tabla de resultados (#cancelResultados); el
+// input nunca se toca mientras se escribe, así que conserva el foco.
+function _cancelActualizarResultados() {
+    const tipo = window._cancelacionTipo || 'venta';
+    const filtro = (document.getElementById('cancelFiltro')?.value || '').trim().toLowerCase();
+    const cont = document.getElementById('cancelResultados');
+    if (cont) cont.innerHTML = _renderCancelacionesResultados(tipo, filtro);
 }
 
 function _renderCancelacionesResultados(tipo, filtro) {
@@ -6820,6 +6835,7 @@ window.abrirDetalleEntrega = abrirDetalleEntrega;
 window.renderEntregas = renderEntregas;
 window.generarValeEntrega = generarValeEntrega;
 window.renderCancelaciones = renderCancelaciones;
+window._cancelActualizarResultados = _cancelActualizarResultados;
 window.renderReimprimirVenta = window.renderReimprimirVenta || renderReimprimirVenta;
 window.reimprimirTicketVenta = reimprimirTicketVenta;
 window.limpiarFiltrosReimpresion = window.limpiarFiltrosReimpresion || limpiarFiltrosReimpresion;
