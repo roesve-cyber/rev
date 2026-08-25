@@ -2278,15 +2278,56 @@ function guardarOrdenCompra() {
     // ------------------------------------------
     StorageService.set('ordenesCompra', lista);
     document.querySelector('[data-modal="nueva-oc"]')?.remove();
-    alert(`✅ Orden de compra ${oc.folio} guardada.`);
+    if (oc.estado === 'Borrador') {
+        alert(`📝 Orden de compra ${oc.folio} guardada como Borrador.\n\nNo se puede imprimir todavía — confírmala primero desde la lista de Órdenes de Compra.`);
+    } else {
+        alert(`✅ Orden de compra ${oc.folio} guardada y confirmada.`);
+    }
     if (document.getElementById('contenidoOrdenesCompra')) renderListaOrdenesCompra();
-    imprimirOrdenCompra(oc.id);
+    if (oc.estado !== 'Borrador') imprimirOrdenCompra(oc.id);
 }
+
+// ── Confirmar una OC en Borrador: punto de no retorno antes de poder
+// imprimirla. Requiere permiso de administrador porque de aquí en
+// adelante modificarla exige confirmación de seguridad adicional.
+window.confirmarOrdenCompra = function(id) {
+    if (!_comprasRequireAdmin('Confirmar orden de compra')) return;
+    const lista = _getOrdenesCompra();
+    const idx = lista.findIndex(x => x.id === id);
+    if (idx === -1) return alert('OC no encontrada.');
+    const oc = lista[idx];
+    if (oc.estado !== 'Borrador') return alert('Esta orden ya está confirmada.');
+
+    if (!confirm(`¿Confirmar la Orden de Compra ${oc.folio} por ${dinero(oc.total)} a ${oc.proveedorNombre}?\n\nUna vez confirmada podrás imprimirla, pero cualquier modificación posterior pedirá confirmación de seguridad.`)) return;
+
+    lista[idx] = {
+        ...oc,
+        estado: 'Enviada',
+        fechaConfirmacion: typeof window.localISO === 'function' ? window.localISO(new Date()) : new Date().toISOString()
+    };
+    StorageService.set('ordenesCompra', lista);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'OC_CONFIRMADA',
+            modulo: 'Compras',
+            entidad: oc.folio,
+            detalle: `Orden de compra ${oc.folio} confirmada (Borrador → Enviada)`,
+            severidad: 'info'
+        });
+    }
+    alert(`✅ Orden de compra ${oc.folio} confirmada. Ya puedes imprimirla.`);
+    if (document.getElementById('contenidoOrdenesCompra')) renderListaOrdenesCompra();
+    imprimirOrdenCompra(id);
+};
 
 function imprimirOrdenCompra(id) {
     const lista = _getOrdenesCompra();
     const oc = lista.find(x => x.id === id);
     if (!oc) return;
+    if (oc.estado === 'Borrador') {
+        alert(`⚠️ La Orden de Compra ${oc.folio} está en Borrador y no se puede imprimir.\n\nConfírmala primero desde la lista de Órdenes de Compra.`);
+        return;
+    }
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     const esConsignacionOC = oc.condicionesComerciales?.metodoPago === 'consignacion' || oc.esConsignacion === true;
@@ -2399,9 +2440,6 @@ function imprimirOrdenCompra(id) {
         <div style="margin-top:26px;padding-top:12px;border-top:1px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:10.5px;">
             ${empresa} · Documento generado el ${window.formatearFechaCortaMX(new Date())}
         </div>
-    </div>
-    <div style="text-align:center;margin-top:16px;">
-      <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
     if (window.TicketService?.elegirFormato) {
@@ -3344,7 +3382,10 @@ function renderListaOrdenesCompra() {
                     </td>
                     <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
-                            <button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>
+                            ${oc.estado === 'Borrador'
+                                ? `<button onclick="confirmarOrdenCompra(${oc.id})" title="Confirmar OC (habilita impresión)" style="background:none;border:none;cursor:pointer;font-size:17px;">✅</button>
+                                   <span title="No se puede imprimir: OC en Borrador" style="font-size:17px;opacity:0.3;cursor:not-allowed;">🖨️</span>`
+                                : `<button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>`}
                             <button onclick="abrirModalAbonoOC(${oc.id})" title="Abonar a OC" style="background:none;border:none;cursor:pointer;font-size:17px; opacity:${saldoPendiente <= 0 ? '0.3' : '1'};" ${saldoPendiente <= 0 ? 'disabled' : ''}>💰</button>
                             ${esActiva ? `<button onclick="recibirOrdenCompra(${oc.id})" title="Recibir mercancía" style="background:none;border:none;cursor:pointer;font-size:17px;">📦</button>` : ''}
                             ${(oc.estado === 'Borrador' || oc.estado === 'Enviada') ? `<button onclick="editarOrdenCompra(${oc.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:17px;">✏️</button>` : ''}
@@ -3383,6 +3424,14 @@ function editarOrdenCompra(id) {
     if (!oc) return alert('OC no encontrada.');
     if (oc.estado === 'Recibida')  return alert('No se puede editar una OC ya recibida.');
     if (oc.estado === 'Cancelada') return alert('No se puede editar una OC cancelada.');
+
+    // Confirmación de seguridad: si la OC ya fue confirmada (no está en
+    // Borrador), modificarla puede desalinearla de lo que ya se le envió
+    // al proveedor o de lo que ya se imprimió/firmó.
+    if (oc.estado !== 'Borrador') {
+        if (!_comprasRequireAdmin('Editar orden de compra confirmada')) return;
+        if (!confirm(`⚠️ CONFIRMACIÓN DE SEGURIDAD\n\nLa Orden de Compra ${oc.folio} ya está confirmada (${oc.estado}) y puede que ya se haya impreso o enviado al proveedor.\n\n¿Estás seguro de que quieres modificarla?`)) return;
+    }
 
     const provs    = StorageService.get('proveedores', []);
     const prods    = StorageService.get('productos',   []);
