@@ -118,6 +118,7 @@
         <button onclick="navA('reporte-rentabilidad-cartera'); if(typeof renderReporteRentabilidadCartera === 'function') renderReporteRentabilidadCartera();">💹 Rentabilidad de Cartera</button>
         <button onclick="navA('simulador-tasa-pronto-pago'); if(typeof renderSimuladorTasaProntoPago === 'function') renderSimuladorTasaProntoPago();">🧮 Simulador de Tasa y Pronto Pago</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
+        <button onclick="navA('reestructura-plazo'); if(typeof renderReestructuraPlazo === 'function') renderReestructuraPlazo();">🗓️ Reestructurar Plazo</button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
     </div>
@@ -368,6 +369,19 @@
  <button onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  <div id="tablaAbonosDirectos"></div>
+ </div>
+
+    <div id="reestructura-plazo" class="vista oculto">
+ <div class="vista-header">
+ <h2>🗓️ Reestructurar Plazo</h2>
+ <p>Modifica el plazo pactado de una cuenta de crédito activa, reamortizando desde el capital original. Solo administradores.</p>
+ </div>
+ <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="text" id="filtroClienteReestructura" placeholder="Buscar cliente o folio..."
+ onkeyup="renderReestructuraPlazo()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <button onclick="renderReestructuraPlazo()" style="padding:10px 20px; background:#7c3aed; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ </div>
+ <div id="tablaReestructuraPlazo"></div>
  </div>
 
  <div id="arc-v3" class="vista oculto" style="padding-top: 20px;">
