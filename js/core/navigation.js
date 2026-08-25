@@ -137,6 +137,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'reimprimir-venta' && typeof renderReimprimirVenta === 'function') renderReimprimirVenta();
         if (vistaId === 'gastos' && typeof renderGestionGastos === 'function') renderGestionGastos();
         if (vistaId === 'estados-financieros' && typeof renderEstadosFinancieros === 'function') renderEstadosFinancieros();
+        if (vistaId === 'reestructura-plazo' && typeof renderReestructuraPlazo === 'function') renderReestructuraPlazo();
         if (vistaId === 'vendedores' && typeof renderGestionVendedores === 'function') renderGestionVendedores();
         if (vistaId === 'descuentos' && typeof renderGestionDescuentos === 'function') renderGestionDescuentos();
         if (vistaId === 'ubicaciones' && typeof renderUbicaciones === 'function') renderUbicaciones();
