@@ -11,27 +11,26 @@
 // teclear ahí. Interceptar eso campo por campo habría significado tocar
 // decenas de inputs en todos los módulos.
 //
-// En vez de eso: un botón flotante (🧮, siempre visible, por encima de
-// cualquier modal) abre una calculadora aparte donde SÍ se puede escribir
-// la operación completa. El resultado se inserta con un botón en el
-// último campo numérico donde Roberto haya estado escribiendo — sin
-// tener que salir de la app ni cambiar de ventana.
+// Por qué NO es un botón flotante siempre visible: a Roberto le pareció
+// invasivo tener un botón fijo en pantalla todo el tiempo. En vez de eso,
+// un icono (🧮) aparece PEGADO al campo justo cuando lo seleccionas —
+// ahí mismo, sin ocupar espacio el resto del tiempo — y desaparece al
+// salir de ese campo (a menos que estés usando la calculadora).
 //
 // Autocontenido: no depende de StorageService ni de ningún otro módulo,
 // así que puede cargarse en cualquier punto del <body>.
 (function () {
 
-    // ===== Rastreo del último campo numérico enfocado =====
-    let campoDestino = null;
+    let campoDestino = null;   // <input> actualmente enfocado y elegible
+    let padOriginal = '';      // padding-right original del campo, para restaurarlo
 
-    document.addEventListener('focusin', function (e) {
-        const el = e.target;
-        if (!el || !el.closest) return;
-        if (el.closest('#calcRapidaPanel') || el.id === 'calcRapidaFab') return;
-        if (el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'text' || el.type === 'tel')) {
-            campoDestino = el;
-        }
-    });
+    function esCampoElegible(el) {
+        return el && el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'text' || el.type === 'tel');
+    }
+
+    function esParteDeLaCalculadora(el) {
+        return !!(el && el.closest && (el.closest('#calcRapidaIcono') || el.closest('#calcRapidaPanel')));
+    }
 
     // ===== Evaluador seguro de expresiones (sin eval/Function) =====
     // Soporta + - * / % y paréntesis, con precedencia normal. Cualquier
@@ -118,22 +117,27 @@
         }
     }
 
-    // ===== Interfaz =====
+    // ===== Construcción de la interfaz (una sola vez) =====
+    let icono, panel, expr, resDiv, btnInsertar, resultadoActual = null;
+
     function crearUI() {
-        if (document.getElementById('calcRapidaFab')) return;
+        if (document.getElementById('calcRapidaIcono')) return;
 
-        const fab = document.createElement('button');
-        fab.id = 'calcRapidaFab';
-        fab.type = 'button';
-        fab.title = 'Calculadora rápida';
-        fab.textContent = '🧮';
-        fab.style.cssText = 'position:fixed;bottom:20px;right:20px;width:52px;height:52px;border-radius:50%;background:#1e40af;color:white;border:none;font-size:24px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.28);z-index:999999;display:flex;align-items:center;justify-content:center;';
-        fab.addEventListener('click', abrirPanel);
-        document.body.appendChild(fab);
+        icono = document.createElement('button');
+        icono.id = 'calcRapidaIcono';
+        icono.type = 'button';
+        icono.title = 'Calculadora rápida';
+        icono.textContent = '🧮';
+        icono.style.cssText = 'position:fixed;display:none;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#1e40af;color:white;border:none;font-size:15px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);z-index:999999;padding:0;';
+        // Evita que el input pierda el foco al tocar el icono (si no, el
+        // campo hace blur antes del click y el icono se ocultaría solo).
+        icono.addEventListener('mousedown', e => e.preventDefault());
+        icono.addEventListener('click', togglePanel);
+        document.body.appendChild(icono);
 
-        const panel = document.createElement('div');
+        panel = document.createElement('div');
         panel.id = 'calcRapidaPanel';
-        panel.style.cssText = 'position:fixed;bottom:82px;right:20px;width:260px;max-width:calc(100vw - 24px);background:white;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.32);z-index:999999;display:none;overflow:hidden;';
+        panel.style.cssText = 'position:fixed;display:none;width:260px;max-width:calc(100vw - 24px);background:white;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.32);z-index:999999;overflow:hidden;';
         panel.innerHTML = `
           <div style="background:#1e40af;color:white;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">
             <strong style="font-size:14px;">🧮 Calculadora rápida</strong>
@@ -150,95 +154,170 @@
               <button type="button" id="calcRapidaIgual" style="grid-column:span 3;padding:10px 0;border:none;border-radius:6px;background:#7c3aed;color:white;cursor:pointer;font-size:15px;font-weight:bold;">=</button>
             </div>
             <button type="button" id="calcRapidaInsertar" disabled style="width:100%;margin-top:10px;padding:11px;border:none;border-radius:8px;background:#16a34a;color:white;font-weight:bold;cursor:pointer;font-size:14px;opacity:0.5;">📥 Insertar en el campo</button>
-            <div id="calcRapidaHint" style="font-size:11px;color:#9ca3af;margin-top:6px;text-align:center;min-height:14px;"></div>
           </div>`;
         document.body.appendChild(panel);
+        // Igual que el icono: no se debe robar el foco del campo destino
+        // al interactuar con la calculadora (salvo el input de expresión,
+        // que sí necesita foco propio para escribir con el teclado).
+        panel.addEventListener('mousedown', function (e) {
+            if (e.target.id !== 'calcRapidaExpr') e.preventDefault();
+        });
 
-        const expr = panel.querySelector('#calcRapidaExpr');
-        const resDiv = panel.querySelector('#calcRapidaResultado');
-        const btnInsertar = panel.querySelector('#calcRapidaInsertar');
-        let resultadoActual = null;
-
-        function actualizar() {
-            resultadoActual = evaluarExpresion(expr.value);
-            if (resultadoActual === null) {
-                resDiv.innerHTML = expr.value.trim() ? '⚠️ Operación no válida' : '&nbsp;';
-                resDiv.style.color = '#dc2626';
-                btnInsertar.disabled = true;
-                btnInsertar.style.opacity = '0.5';
-            } else {
-                resDiv.textContent = '= ' + resultadoActual.toLocaleString('es-MX', { maximumFractionDigits: 2 });
-                resDiv.style.color = '#16a34a';
-                btnInsertar.disabled = false;
-                btnInsertar.style.opacity = '1';
-            }
-        }
+        expr = panel.querySelector('#calcRapidaExpr');
+        resDiv = panel.querySelector('#calcRapidaResultado');
+        btnInsertar = panel.querySelector('#calcRapidaInsertar');
 
         panel.querySelectorAll('.calcRapidaTecla').forEach(btn => {
             btn.addEventListener('click', function () {
                 const val = this.getAttribute('data-val');
                 expr.value = (val === 'C') ? '' : expr.value + val;
-                actualizar();
-                expr.focus();
+                actualizarResultado();
             });
         });
 
         panel.querySelector('#calcRapidaBorrar').addEventListener('click', function () {
             expr.value = expr.value.slice(0, -1);
-            actualizar();
-            expr.focus();
+            actualizarResultado();
         });
 
         panel.querySelector('#calcRapidaIgual').addEventListener('click', function () {
-            if (resultadoActual !== null) { expr.value = String(resultadoActual); actualizar(); }
+            if (resultadoActual !== null) { expr.value = String(resultadoActual); actualizarResultado(); }
         });
 
-        expr.addEventListener('input', actualizar);
+        expr.addEventListener('input', actualizarResultado);
         expr.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (resultadoActual !== null) { expr.value = String(resultadoActual); actualizar(); }
+                if (resultadoActual !== null) { expr.value = String(resultadoActual); actualizarResultado(); }
             }
         });
 
         btnInsertar.addEventListener('click', function () {
-            if (resultadoActual === null) return;
-            if (!campoDestino || !document.body.contains(campoDestino)) {
-                alert('Primero toca el campo donde quieres poner el resultado, y luego abre la calculadora de nuevo.');
-                return;
-            }
+            if (resultadoActual === null || !campoDestino) return;
             const redondeado = Math.round(resultadoActual * 100) / 100;
             campoDestino.value = (redondeado % 1 === 0) ? String(redondeado) : redondeado.toFixed(2);
             campoDestino.dispatchEvent(new Event('input', { bubbles: true }));
             campoDestino.dispatchEvent(new Event('change', { bubbles: true }));
-            cerrarPanel();
             expr.value = '';
             resDiv.innerHTML = '&nbsp;';
+            ocultarTodo();
         });
 
         panel.querySelector('#calcRapidaCerrar').addEventListener('click', cerrarPanel);
     }
 
-    function abrirPanel() {
-        crearUI();
-        const panel = document.getElementById('calcRapidaPanel');
-        const hint = document.getElementById('calcRapidaHint');
-        if (hint) hint.textContent = campoDestino ? '' : 'Toca un campo, luego abre la calculadora para poder insertar el resultado ahí.';
+    function actualizarResultado() {
+        resultadoActual = evaluarExpresion(expr.value);
+        if (resultadoActual === null) {
+            resDiv.innerHTML = expr.value.trim() ? '⚠️ Operación no válida' : '&nbsp;';
+            resDiv.style.color = '#dc2626';
+            btnInsertar.disabled = true;
+            btnInsertar.style.opacity = '0.5';
+        } else {
+            resDiv.textContent = '= ' + resultadoActual.toLocaleString('es-MX', { maximumFractionDigits: 2 });
+            resDiv.style.color = '#16a34a';
+            btnInsertar.disabled = false;
+            btnInsertar.style.opacity = '1';
+        }
+    }
+
+    // ===== Posicionamiento (junto al campo, sin salirse de la pantalla) =====
+    function posicionarIcono() {
+        if (!campoDestino) return;
+        const r = campoDestino.getBoundingClientRect();
+        const tam = 28, margen = 3;
+        let left = r.right - tam - margen;
+        let top = r.top + (r.height - tam) / 2;
+        left = Math.min(Math.max(left, margen), window.innerWidth - tam - margen);
+        top = Math.min(Math.max(top, margen), window.innerHeight - tam - margen);
+        icono.style.left = left + 'px';
+        icono.style.top = top + 'px';
+    }
+
+    function posicionarPanel() {
+        const r = icono.getBoundingClientRect();
+        const margen = 8;
+        const anchoPanel = Math.min(260, window.innerWidth - margen * 2);
+        panel.style.width = anchoPanel + 'px';
+        let left = r.right - anchoPanel;
+        left = Math.min(Math.max(left, margen), window.innerWidth - anchoPanel - margen);
+        const altoEstimado = 330;
+        let top;
+        const espacioAbajo = window.innerHeight - r.bottom;
+        if (espacioAbajo >= altoEstimado + margen || espacioAbajo >= r.top) {
+            top = r.bottom + margen;
+        } else {
+            top = Math.max(margen, r.top - altoEstimado - margen);
+        }
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+    }
+
+    function mostrarIcono(input) {
+        campoDestino = input;
+        icono.style.display = 'flex';
+        posicionarIcono();
+        // Un poco de espacio para que el icono no tape lo que se escribe.
+        padOriginal = input.style.paddingRight || '';
+        input.style.paddingRight = '30px';
+    }
+
+    function ocultarIcono() {
+        if (campoDestino) campoDestino.style.paddingRight = padOriginal;
+        icono.style.display = 'none';
+        campoDestino = null;
+    }
+
+    function ocultarTodo() {
+        cerrarPanel();
+        ocultarIcono();
+    }
+
+    function togglePanel() {
+        if (panel.style.display === 'block') { cerrarPanel(); return; }
+        posicionarPanel();
         panel.style.display = 'block';
-        document.getElementById('calcRapidaExpr')?.focus();
+        expr.focus();
     }
 
     function cerrarPanel() {
-        const panel = document.getElementById('calcRapidaPanel');
-        if (panel) panel.style.display = 'none';
+        panel.style.display = 'none';
     }
 
-    // Cerrar al tocar fuera del panel/botón.
-    document.addEventListener('click', function (e) {
-        const panel = document.getElementById('calcRapidaPanel');
-        if (!panel || panel.style.display === 'none') return;
-        if (e.target.closest && (e.target.closest('#calcRapidaPanel') || e.target.closest('#calcRapidaFab'))) return;
-        cerrarPanel();
+    // ===== Enganche a los campos de la app =====
+    document.addEventListener('focusin', function (e) {
+        const el = e.target;
+        if (esParteDeLaCalculadora(el)) return;
+        if (esCampoElegible(el)) mostrarIcono(el);
+        else if (campoDestino) ocultarTodo();
+    });
+
+    document.addEventListener('focusout', function (e) {
+        if (e.target !== campoDestino) return;
+        // Si el foco se va hacia el icono o el panel, no ocultar — ahí es
+        // donde Roberto va a seguir interactuando.
+        setTimeout(function () {
+            const activo = document.activeElement;
+            if (esParteDeLaCalculadora(activo)) return;
+            ocultarTodo();
+        }, 0);
+    });
+
+    // Reposicionar si la página hace scroll (incluye scroll dentro de
+    // modales) o si cambia el tamaño de la ventana/teclado virtual.
+    window.addEventListener('scroll', function () {
+        if (campoDestino) { posicionarIcono(); if (panel.style.display === 'block') posicionarPanel(); }
+    }, true);
+    window.addEventListener('resize', function () {
+        if (campoDestino) { posicionarIcono(); if (panel.style.display === 'block') posicionarPanel(); }
+    });
+
+    // Tocar fuera del campo/icono/panel cierra todo.
+    document.addEventListener('mousedown', function (e) {
+        if (!campoDestino) return;
+        const el = e.target;
+        if (el === campoDestino || esParteDeLaCalculadora(el)) return;
+        ocultarTodo();
     });
 
     if (document.readyState === 'loading') {
