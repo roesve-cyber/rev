@@ -6659,6 +6659,10 @@ window.abrirModalPagoConsignacionGrupo = function(consignacionId) {
 
     const piezas = _consigPiezasCxps(cxpsPendientes);
     const selectorCuentasHtml = window._buildSelectorCuentas('cuentaPagoConsig', false);
+    const proveedorGrupo = consignacion?.proveedor || cxpsPendientes[0]?.proveedor || '';
+    const proveedorIdGrupo = consignacion?.proveedorId ?? cxpsPendientes[0]?.proveedorId ?? null;
+    const anticipoDisponible = _consigAnticipoDisponibleProveedor(proveedorGrupo, proveedorIdGrupo);
+    const anticipoDefault = Math.min(anticipoDisponible, saldo);
     const filasCxP = cxpsPendientes.map(cxp => `
         <tr style="border-bottom:1px solid #e2e8f0;">
             <td style="padding:8px;">${_comprasEscHTML(cxp.folioVentaAsociada || cxp.folioOrigen || cxp.id || '-')}</td>
@@ -6682,9 +6686,22 @@ window.abrirModalPagoConsignacionGrupo = function(consignacionId) {
                     <tbody>${filasCxP}</tbody>
                 </table>
             </div>
+            ${anticipoDisponible > 0.01 ? `
+            <div style="background:#ecfdf5; border:1px solid #10b981; border-radius:10px; padding:14px; margin-bottom:18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:#065f46;">💰 Anticipo con ${_comprasEscHTML(proveedorGrupo || 'este proveedor')}</div>
+                        <div style="font-size:12px; color:#047857;">Disponible: ${dinero(anticipoDisponible)} — se descuenta del pago, sin mover dinero de caja.</div>
+                    </div>
+                    <div>
+                        <label style="font-size:11px; font-weight:bold; color:#065f46; display:block; margin-bottom:4px;">APLICAR AHORA</label>
+                        <input type="number" id="montoAnticipoConsig" min="0" max="${anticipoDefault}" value="${anticipoDefault.toFixed(2)}" step="0.01" oninput="window._consigRecalcularPagoAnticipo(${saldo})" style="width:130px; padding:8px; border:1px solid #10b981; border-radius:6px; text-align:right;">
+                    </div>
+                </div>
+            </div>` : ''}
             <div style="margin-bottom:20px;">
-                <label style="font-weight:bold; display:block; margin-bottom:8px;">Monto del pago ($):</label>
-                <input type="number" id="montoPagoConsig" value="${saldo}" max="${saldo}" step="0.01" style="width:100%; padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; box-sizing:border-box;">
+                <label style="font-weight:bold; display:block; margin-bottom:8px;">Monto del pago en efectivo/banco ($):</label>
+                <input type="number" id="montoPagoConsig" value="${(saldo - anticipoDefault).toFixed(2)}" max="${saldo}" step="0.01" style="width:100%; padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; box-sizing:border-box;">
             </div>
             <div style="margin-bottom:24px;">
                 <label style="font-weight:bold; display:block; margin-bottom:8px;">De donde sale el dinero</label>
@@ -6701,9 +6718,12 @@ window.abrirModalPagoConsignacionGrupo = function(consignacionId) {
 
 window.ejecutarPagoConsigGrupo = function(consignacionId, btn = null) {
     const reactivarBoton = () => { if (!btn) return; btn.disabled = false; btn.textContent = 'Registrar pago total'; };
-    const monto = parseFloat(document.getElementById('montoPagoConsig')?.value);
+    const monto = parseFloat(document.getElementById('montoPagoConsig')?.value) || 0;
+    const inputAnticipo = document.getElementById('montoAnticipoConsig');
+    const montoAnticipoPedido = inputAnticipo ? Math.max(0, parseFloat(inputAnticipo.value) || 0) : 0;
     const selector = document.getElementById('cuentaPagoConsig');
-    if (!selector || !selector.value) { reactivarBoton(); return alert("Selecciona la cuenta de pago."); }
+    const requiereCuenta = monto > 0.01;
+    if (requiereCuenta && (!selector || !selector.value)) { reactivarBoton(); return alert("Selecciona la cuenta de pago."); }
 
     let cxps = StorageService.get("cuentasPorPagar", []) || [];
     const pendientes = cxps.filter(cx => cx?.origenConsignacion && String(cx.consignacionId || '') === String(consignacionId) && !_consigCxpLiquidada(cx)).sort((a, b) => String(a.fechaIso || a.fecha || '').localeCompare(String(b.fechaIso || b.fecha || '')));
@@ -6714,30 +6734,51 @@ window.ejecutarPagoConsigGrupo = function(consignacionId, btn = null) {
         if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
         return alert("Estas ventas ya fueron pagadas. No se duplico el egreso.");
     }
-    if (isNaN(monto) || monto <= 0 || monto > saldoTotal + 0.01) { reactivarBoton(); return alert("Monto invalido o excede el total pendiente."); }
 
-    const cuentaId = selector.value;
-    const cuentaNombreCompleto = selector.options[selector.selectedIndex]?.text || cuentaId;
+    const proveedorGrupo = pendientes[0]?.proveedor || '';
+    const proveedorIdGrupo = pendientes[0]?.proveedorId ?? null;
+    const anticipoDisponible = _consigAnticipoDisponibleProveedor(proveedorGrupo, proveedorIdGrupo);
+    const montoAnticipoAplicar = Math.min(montoAnticipoPedido, anticipoDisponible, saldoTotal);
+    const totalCubierto = monto + montoAnticipoAplicar;
+
+    if (totalCubierto <= 0.01 || totalCubierto > saldoTotal + 0.01) { reactivarBoton(); return alert("Monto invalido o excede el total pendiente."); }
+
+    const cuentaId = selector ? selector.value : null;
+    const cuentaNombreCompleto = selector ? (selector.options[selector.selectedIndex]?.text || cuentaId) : '';
     const cuentaNombreLimpio = cuentaNombreCompleto.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').trim();
     const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     const referenciaPago = `PCON-GRUPO-${consignacionId}`;
     const idOperacionPago = `PAGO-CONSIG-GRUPO-${consignacionId}-${Date.now()}`;
     const productoNombre = _consigProductoCxp(pendientes[0]) || 'Consignacion';
 
-    const egresoOk = window._egresarCuenta({ monto, cuentaId, etiqueta: cuentaNombreLimpio, concepto: `[Pago Consig] - ${productoNombre} (${pendientes.length} venta(s))`, referencia: referenciaPago, idOperacion: idOperacionPago, fecha: fechaIso });
-    if (egresoOk === false) { reactivarBoton(); return; }
+    if (monto > 0.01) {
+        const egresoOk = window._egresarCuenta({ monto, cuentaId, etiqueta: cuentaNombreLimpio, concepto: `[Pago Consig] - ${productoNombre} (${pendientes.length} venta(s))`, referencia: referenciaPago, idOperacion: idOperacionPago, fecha: fechaIso });
+        if (egresoOk === false) { reactivarBoton(); return; }
+    }
 
-    let restante = monto;
+    let restanteEfectivo = monto;
+    let restanteAnticipo = montoAnticipoAplicar;
     let aplicadoTotal = 0;
     cxps = cxps.map(cxp => {
-        if (restante <= 0.01 || !cxp?.origenConsignacion || String(cxp.consignacionId || '') !== String(consignacionId) || _consigCxpLiquidada(cxp)) return cxp;
+        if ((restanteEfectivo <= 0.01 && restanteAnticipo <= 0.01) || !cxp?.origenConsignacion || String(cxp.consignacionId || '') !== String(consignacionId) || _consigCxpLiquidada(cxp)) return cxp;
         const saldoCxp = Number(cxp.saldoPendiente ?? cxp.saldo ?? 0) || 0;
-        const aplicado = Math.min(restante, saldoCxp);
-        if (aplicado <= 0.01) return cxp;
-        restante -= aplicado; aplicadoTotal += aplicado;
+        if (saldoCxp <= 0.01) return cxp;
         cxp.abonos = _comprasAsegurarArray(cxp.abonos || []);
-        cxp.abonos.push({ id: Date.now() + Math.random(), idOperacion: idOperacionPago, referencia: referenciaPago, fecha: fechaIso, monto: aplicado, cuenta: cuentaNombreLimpio, cuentaId, nota: "Liquidacion agrupada de consignacion" });
-        cxp.saldoPendiente = Math.max(0, saldoCxp - aplicado);
+        let saldoRestanteCxp = saldoCxp;
+
+        const aplicadoAnticipo = Math.min(restanteAnticipo, saldoRestanteCxp);
+        if (aplicadoAnticipo > 0.01) {
+            restanteAnticipo -= aplicadoAnticipo; saldoRestanteCxp -= aplicadoAnticipo; aplicadoTotal += aplicadoAnticipo;
+            cxp.abonos.push({ id: Date.now() + Math.random(), idOperacion: `${idOperacionPago}-ANT`, referencia: referenciaPago, fecha: fechaIso, monto: aplicadoAnticipo, cuenta: 'Anticipo consignacion', nota: `Anticipo aplicado a liquidacion agrupada (${consignacionId})` });
+        }
+
+        const aplicadoEfectivo = Math.min(restanteEfectivo, saldoRestanteCxp);
+        if (aplicadoEfectivo > 0.01) {
+            restanteEfectivo -= aplicadoEfectivo; saldoRestanteCxp -= aplicadoEfectivo; aplicadoTotal += aplicadoEfectivo;
+            cxp.abonos.push({ id: Date.now() + Math.random(), idOperacion: idOperacionPago, referencia: referenciaPago, fecha: fechaIso, monto: aplicadoEfectivo, cuenta: cuentaNombreLimpio, cuentaId, nota: "Liquidacion agrupada de consignacion" });
+        }
+
+        cxp.saldoPendiente = Math.max(0, saldoRestanteCxp);
         cxp.saldo = cxp.saldoPendiente;
         if (cxp.saldoPendiente <= 0.01) { cxp.estatus = "Liquidado"; cxp.estado = "Liquidado"; cxp.liquidado = true; cxp.pagado = true; }
         return cxp;
@@ -6750,9 +6791,13 @@ window.ejecutarPagoConsigGrupo = function(consignacionId, btn = null) {
         consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - aplicadoTotal);
         StorageService.set("consignacionesActivas", consigArr);
     }
+    if (montoAnticipoAplicar > 0.01) _consigRegistrarAnticipoAplicado(consignacionId, montoAnticipoAplicar);
 
     document.getElementById('modalPagoConsig')?.remove();
-    alert(`Pago aplicado por ${dinero(aplicadoTotal)} desde ${cuentaNombreLimpio}.`);
+    const mensajePartes = [];
+    if (monto > 0.01) mensajePartes.push(`${dinero(monto)} desde ${cuentaNombreLimpio}`);
+    if (montoAnticipoAplicar > 0.01) mensajePartes.push(`${dinero(montoAnticipoAplicar)} de anticipo`);
+    alert(`Pago aplicado por ${mensajePartes.join(' + ')}.`);
     if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
     if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
 };
@@ -6766,6 +6811,8 @@ window.abrirModalPagoConsignacion = function(cxpId) {
     if (_consigCxpLiquidada(cxpItem)) return alert("Esta liquidación ya fue completada.");
 
     const selectorCuentasHtml = window._buildSelectorCuentas('cuentaPagoConsig', false);
+    const anticipoDisponible = _consigAnticipoDisponibleProveedor(cxpItem.proveedor, cxpItem.proveedorId);
+    const anticipoDefault = Math.min(anticipoDisponible, saldo);
 
     const modalHtml = `
     <div id="modalPagoConsig" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); backdrop-filter:blur(3px); display:flex; justify-content:center; align-items:center; z-index:100000;">
@@ -6777,9 +6824,22 @@ window.abrirModalPagoConsignacion = function(cxpId) {
                     <div><small style="color:#718096;">Saldo Exigible</small><br><strong style="color:#e74c3c; font-size:20px;">${dinero(saldo)}</strong></div>
                 </div>
             </div>
+            ${anticipoDisponible > 0.01 ? `
+            <div style="background:#ecfdf5; border:1px solid #10b981; border-radius:10px; padding:14px; margin-bottom:18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <div style="font-size:13px; font-weight:bold; color:#065f46;">💰 Anticipo con ${_comprasEscHTML(cxpItem.proveedor || 'este proveedor')}</div>
+                        <div style="font-size:12px; color:#047857;">Disponible: ${dinero(anticipoDisponible)} — se descuenta del pago, sin mover dinero de caja.</div>
+                    </div>
+                    <div>
+                        <label style="font-size:11px; font-weight:bold; color:#065f46; display:block; margin-bottom:4px;">APLICAR AHORA</label>
+                        <input type="number" id="montoAnticipoConsig" min="0" max="${anticipoDefault}" value="${anticipoDefault.toFixed(2)}" step="0.01" oninput="window._consigRecalcularPagoAnticipo(${saldo})" style="width:130px; padding:8px; border:1px solid #10b981; border-radius:6px; text-align:right;">
+                    </div>
+                </div>
+            </div>` : ''}
             <div style="margin-bottom:20px;">
-                <label style="font-weight:bold; display:block; margin-bottom:8px;">Monto del pago ($):</label>
-                <input type="number" id="montoPagoConsig" value="${saldo}" max="${saldo}" step="0.01" style="width:100%; padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; box-sizing:border-box;">
+                <label style="font-weight:bold; display:block; margin-bottom:8px;">Monto del pago en efectivo/banco ($):</label>
+                <input type="number" id="montoPagoConsig" value="${(saldo - anticipoDefault).toFixed(2)}" max="${saldo}" step="0.01" style="width:100%; padding:12px; font-size:16px; border:2px solid #3498db; border-radius:6px; box-sizing:border-box;">
             </div>
             <div style="margin-bottom:24px;">
                 <label style="font-weight:bold; display:block; margin-bottom:8px;">💳 ¿De dónde sale el dinero?</label>
@@ -6794,13 +6854,29 @@ window.abrirModalPagoConsignacion = function(cxpId) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
+// Recalcula el "Monto del pago en efectivo/banco" cuando cambia cuanto
+// anticipo se quiere aplicar, para que anticipo + efectivo nunca superen el saldo.
+window._consigRecalcularPagoAnticipo = function(saldo) {
+    const inputAnticipo = document.getElementById('montoAnticipoConsig');
+    const inputPago = document.getElementById('montoPagoConsig');
+    if (!inputAnticipo || !inputPago) return;
+    const maxAnticipo = parseFloat(inputAnticipo.max) || 0;
+    let anticipo = Math.min(Math.max(0, parseFloat(inputAnticipo.value) || 0), maxAnticipo, saldo);
+    if (Math.abs((parseFloat(inputAnticipo.value) || 0) - anticipo) > 0.01) inputAnticipo.value = anticipo.toFixed(2);
+    inputPago.value = Math.max(0, saldo - anticipo).toFixed(2);
+    inputPago.max = Math.max(0, saldo - anticipo).toFixed(2);
+};
+
 window.ejecutarPagoConsig = function(cxpId, btn = null) {
     const reactivarBoton = () => { if (!btn) return; btn.disabled = false; btn.textContent = 'Registrar Pago'; };
-    const monto = parseFloat(document.getElementById('montoPagoConsig')?.value);
+    const monto = parseFloat(document.getElementById('montoPagoConsig')?.value) || 0;
+    const inputAnticipo = document.getElementById('montoAnticipoConsig');
+    const montoAnticipo = inputAnticipo ? Math.max(0, parseFloat(inputAnticipo.value) || 0) : 0;
+    const requiereCuenta = monto > 0.01;
     const selector = document.getElementById('cuentaPagoConsig');
-    if (!selector || !selector.value) { reactivarBoton(); return alert("Selecciona la cuenta de pago."); }
-    const cuentaId = selector.value;
-    const cuentaNombreCompleto = selector.options[selector.selectedIndex]?.text || cuentaId;
+    if (requiereCuenta && (!selector || !selector.value)) { reactivarBoton(); return alert("Selecciona la cuenta de pago."); }
+    const cuentaId = selector ? selector.value : null;
+    const cuentaNombreCompleto = selector ? (selector.options[selector.selectedIndex]?.text || cuentaId) : '';
     const cuentaNombreLimpio = cuentaNombreCompleto.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]\s?/g, '').trim();
 
     let cxps = StorageService.get("cuentasPorPagar", []) || [];
@@ -6817,19 +6893,30 @@ window.ejecutarPagoConsig = function(cxpId, btn = null) {
         return alert("Esta liquidacion ya fue pagada. No se duplico el egreso.");
     }
 
-    if (isNaN(monto) || monto <= 0 || monto > saldoPendiente + 0.01) { reactivarBoton(); return alert("❌ Monto inválido o excede la deuda."); }
+    const anticipoDisponible = _consigAnticipoDisponibleProveedor(cxpItem.proveedor, cxpItem.proveedorId);
+    const montoAnticipoAplicar = Math.min(montoAnticipo, anticipoDisponible, saldoPendiente);
+    const totalCubierto = monto + montoAnticipoAplicar;
+
+    if (totalCubierto <= 0.01 || totalCubierto > saldoPendiente + 0.01) { reactivarBoton(); return alert("❌ Monto inválido o excede la deuda."); }
 
     const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     const referenciaPago = cxpItem.folioOrigen || `PCON-${cxpId}`;
     const idOperacionPago = `PAGO-CONSIG-${cxpId}-${Date.now()}`;
 
-    const egresoOk = window._egresarCuenta({ monto: monto, cuentaId: cuentaId, etiqueta: cuentaNombreLimpio, concepto: `[Pago Consig] - ${_consigProductoCxp(cxpItem)}`, referencia: referenciaPago, idOperacion: idOperacionPago, fecha: fechaIso });
-    if (egresoOk === false) { reactivarBoton(); return; }
+    if (monto > 0.01) {
+        const egresoOk = window._egresarCuenta({ monto: monto, cuentaId: cuentaId, etiqueta: cuentaNombreLimpio, concepto: `[Pago Consig] - ${_consigProductoCxp(cxpItem)}`, referencia: referenciaPago, idOperacion: idOperacionPago, fecha: fechaIso });
+        if (egresoOk === false) { reactivarBoton(); return; }
+    }
 
     if (!cxpItem.abonos) cxpItem.abonos = [];
-    cxpItem.abonos.push({ id: Date.now(), idOperacion: idOperacionPago, referencia: referenciaPago, fecha: fechaIso, monto: monto, cuenta: cuentaNombreLimpio, cuentaId: cuentaId, nota: "Liquidación ejecutada desde CxP" });
+    if (monto > 0.01) {
+        cxpItem.abonos.push({ id: Date.now(), idOperacion: idOperacionPago, referencia: referenciaPago, fecha: fechaIso, monto: monto, cuenta: cuentaNombreLimpio, cuentaId: cuentaId, nota: "Liquidación ejecutada desde CxP" });
+    }
+    if (montoAnticipoAplicar > 0.01) {
+        cxpItem.abonos.push({ id: Date.now() + Math.random(), idOperacion: `${idOperacionPago}-ANT`, referencia: referenciaPago, fecha: fechaIso, monto: montoAnticipoAplicar, cuenta: 'Anticipo consignacion', nota: `Anticipo aplicado a liquidacion existente (${cxpItem.folioOrigen || cxpId})` });
+    }
 
-    cxpItem.saldoPendiente = Math.max(0, saldoPendiente - monto);
+    cxpItem.saldoPendiente = Math.max(0, saldoPendiente - totalCubierto);
     cxpItem.saldo = cxpItem.saldoPendiente;
 
     if (cxpItem.saldoPendiente <= 0.01) {
@@ -6840,12 +6927,16 @@ window.ejecutarPagoConsig = function(cxpId, btn = null) {
     let consigArr = StorageService.get("consignacionesActivas", []) || [];
     const cIdx = consigArr.findIndex(x => String(x.id) === String(cxpItem.consignacionId));
     if (cIdx !== -1) {
-        consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - monto);
+        consigArr[cIdx].montoTransferido = Math.max(0, Number(consigArr[cIdx].montoTransferido || 0) - totalCubierto);
         StorageService.set("consignacionesActivas", consigArr);
     }
+    if (montoAnticipoAplicar > 0.01) _consigRegistrarAnticipoAplicado(cxpItem.consignacionId, montoAnticipoAplicar);
 
     document.getElementById('modalPagoConsig').remove();
-    alert(`✅ Pago aplicado exitosamente por ${dinero(monto)} desde ${cuentaNombreLimpio}.`);
+    const mensajePartes = [];
+    if (monto > 0.01) mensajePartes.push(`${dinero(monto)} desde ${cuentaNombreLimpio}`);
+    if (montoAnticipoAplicar > 0.01) mensajePartes.push(`${dinero(montoAnticipoAplicar)} de anticipo`);
+    alert(`✅ Pago aplicado exitosamente: ${mensajePartes.join(' + ')}.`);
 
     if (typeof renderCuentasPorPagar === 'function') renderCuentasPorPagar();
     if (typeof abrirGestorConsignaciones === 'function') {
@@ -7548,6 +7639,30 @@ function aplicarSaldoFavorACxp(idCuenta) {
 
     alert(`✅ Se aplicaron ${dinero(aplicar)} de saldo a favor a la cuenta de ${cuenta.proveedor}.`);
     renderCuentasPorPagar();
+}
+
+// Anticipo de consignacion disponible para un proveedor (mismo pool global
+// que se ofrece al reportar una venta en marcarConsignacionVendida), para
+// poder aplicarlo tambien a una CxP de consignacion YA generada, desde los
+// modales de pago (abrirModalPagoConsignacion / abrirModalPagoConsignacionGrupo).
+function _consigAnticipoDisponibleProveedor(proveedor, proveedorId) {
+    const resumenGlobal = typeof _consigResumenGlobal === 'function' ? _consigResumenGlobal() : { grupos: [] };
+    const provKey = typeof _consigProveedorKey === 'function' ? _consigProveedorKey({ proveedor, proveedorId }) : (proveedorId ? `id:${proveedorId}` : `nom:${String(proveedor || '').toUpperCase()}`);
+    const grupo = resumenGlobal.grupos.find(g => g.key === provKey);
+    if (!grupo) return 0;
+    return Math.max(0, Number(grupo.anticiposTotal || 0) - Number(grupo.anticiposAplicados || 0));
+}
+
+// Registra, a nivel de la consignacion origen, que se aplico este monto de
+// anticipo (mismo campo montoAbonosAplicados que usa el flujo de reporte de
+// venta) para que el pool global disponible del proveedor baje correctamente.
+function _consigRegistrarAnticipoAplicado(consignacionId, monto) {
+    if (!(Number(monto) > 0.01)) return;
+    let consigArr = StorageService.get("consignacionesActivas", []) || [];
+    const idx = consigArr.findIndex(x => String(x.id || x.consignacionId || '') === String(consignacionId));
+    if (idx === -1) return;
+    consigArr[idx].montoAbonosAplicados = Number(consigArr[idx].montoAbonosAplicados || 0) + Number(monto);
+    StorageService.set("consignacionesActivas", consigArr);
 }
 
 // ============================================================
