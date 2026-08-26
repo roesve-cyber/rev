@@ -124,7 +124,8 @@ function _ventaArticuloPlano(item = {}) {
         precioContado: Number(item.precioContado || item.precio || 0),
         colorElegido: item.colorElegido || "",
         ubicacionElegida: item.ubicacionElegida || "",
-        salidaOperativaAplicada: item.salidaOperativaAplicada === true
+        salidaOperativaAplicada: item.salidaOperativaAplicada === true,
+        esSegunda: item.esSegunda === true
     };
 }
 
@@ -248,6 +249,32 @@ function _aplicarSalidaInventarioOperativa(folioVenta, productosConStock) {
         const cant = Number(item.cantidad || 1);
         const colorElegido = item.colorElegido || '';
         const ubicacionElegida = item.ubicacionElegida || '';
+        const esSegunda = item.esSegunda === true;
+
+        // 🏷️ Segunda: se descuenta con ajustarStockVariante (misma función
+        // que usa el reingreso por cancelación) contra stockSegunda — nunca
+        // toca prod.stock/variante.stock de producto nuevo. Es un camino
+        // aparte y más simple que el de abajo (que resuelve variantes de
+        // stock nuevo), porque segunda no tiene esa complejidad.
+        if (esSegunda) {
+            if ((Number(prod.stockSegunda) || 0) < cant) return;
+            const resultado = ajustarStockVariante(productosActuales, prod.id, cant, {
+                color: colorElegido || 'General',
+                ubicacion: ubicacionElegida || 'General',
+                modo: 'salida',
+                condicion: 'segunda',
+                concepto: `Venta (segunda) - Folio ${folioVenta}`
+            });
+            if (!resultado.ok) return;
+            if (typeof window.registrarMovimiento === 'function') {
+                window.registrarMovimiento(prod.id, `Venta (SEGUNDA) - Folio ${folioVenta}`, cant, "salida", { folioVenta, destinoStock: 'segunda' });
+            }
+            x.salidaOperativaAplicada = true;
+            if (x.item) x.item.salidaOperativaAplicada = true;
+            entregados.push({ productoId: prod.id, nombre: prod.nombre, colorElegido, ubicacionElegida, cantidad: cant, esSegunda: true });
+            return;
+        }
+
         const validacionOrigen = _validarOrigenEntregaVenta(prod, item, { color: colorElegido, ubicacion: ubicacionElegida });
         if (!validacionOrigen.ok || (Number(prod.stock) || 0) < cant) return;
 
@@ -361,10 +388,21 @@ function agregarAlCarritoDesdeModal() {
         return;
     }
 
-    const indiceExistente = carrito.findIndex(item => String(item.id) === String(productoActualId));
+    // 🏷️ Bandera transitoria puesta por agregarAlCarrito(id, esSegunda) — se
+    // consume y limpia de inmediato para que nunca "se quede pegada" en la
+    // siguiente llamada (ej. si el usuario cancela el diálogo de duplicado).
+    const esSegunda = !!window._ventaAgregarComoSegunda;
+    window._ventaAgregarComoSegunda = false;
+
+    if (esSegunda && Number(p.stockSegunda || 0) <= 0) {
+        alert(`"${p.nombre}" no tiene existencia de segunda registrada.`);
+        return;
+    }
+
+    const indiceExistente = carrito.findIndex(item => String(item.id) === String(productoActualId) && !!item.esSegunda === esSegunda);
     
     if (indiceExistente !== -1) {
-        const mensaje = `"${p.nombre}" ya está en el carrito.\n\n¿Aumentar la cantidad en 1?`;
+        const mensaje = `"${p.nombre}"${esSegunda ? ' (segunda)' : ''} ya está en el carrito.\n\n¿Aumentar la cantidad en 1?`;
         
         if (confirm(mensaje)) {
             carrito[indiceExistente].cantidad = (carrito[indiceExistente].cantidad || 1) + 1;
@@ -376,18 +414,23 @@ function agregarAlCarritoDesdeModal() {
             alert(`Cantidad aumentada a ${carrito[indiceExistente].cantidad}`);
         }
     } else {
-        const planes = CalculatorService.calcularCredito(p.precio);
+        // 🏷️ De segunda: precio de segunda (con respaldo al normal si no se
+        // capturó) y planes de crédito calculados sobre ESE precio, no el de
+        // producto nuevo.
+        const precioBase = esSegunda ? Number(p.precioSegunda ?? p.precio ?? 0) : (parseFloat(p.precio) || 0);
+        const planes = CalculatorService.calcularCredito(precioBase);
         const plan = planes[5] || planes[0];
 
         carrito.push({
             id: p.id,
             nombre: p.nombre,
-            precioContado: parseFloat(p.precio) || 0,
+            precioContado: precioBase,
             plazo: plan.meses,
             totalCredito: plan.total,
             abonoSemanal: plan.abono,
             imagen: p.imagen,
-            cantidad: 1
+            cantidad: 1,
+            esSegunda
         });
 
         if (!StorageService.set("carrito", carrito)) {
@@ -396,16 +439,17 @@ function agregarAlCarritoDesdeModal() {
         }
         actualizarContadorCarrito();
         
-        alert(`"${p.nombre}" agregado al carrito`);
+        alert(`"${p.nombre}"${esSegunda ? ' (SEGUNDA)' : ''} agregado al carrito`);
     }
     
     cerrarProducto();
 }
 
-function agregarAlCarrito(id) {
+function agregarAlCarrito(id, esSegunda = false) {
     const p = productos.find(x => String(x.id) === String(id) && _ventaProductoActivo(x));
     if (!p) return;
     productoActualId = id;
+    window._ventaAgregarComoSegunda = !!esSegunda;
     agregarAlCarritoDesdeModal();
 }
 
@@ -429,8 +473,9 @@ function agregarProductoDesdeCarrito() {
     }
     window.abrirSelectorProducto({
         titulo: '🔍 Agregar producto al carrito',
-        onSeleccion: function (p) {
-            agregarAlCarrito(p.id);
+        incluirSegunda: true,
+        onSeleccion: function (p, opcion) {
+            agregarAlCarrito(p.id, !!(opcion && opcion.esSegunda));
             _carritoTrasCambio();
         }
     });
@@ -528,9 +573,12 @@ function _renderListaProductosCarrito() {
     return carrito.map((p, index) => {
         const cantidad = p.cantidad || 1;
         const prod = productos.find(prod => prod.id === p.id);
-        const stock = prod ? (prod.stock || 0) : 0;
+        const esSegunda = p.esSegunda === true;
+        const stock = prod ? Number(esSegunda ? (prod.stockSegunda || 0) : (prod.stock || 0)) : 0;
         const colorStock = stock > 0 ? "#16a34a" : "#dc2626";
-        const textoStock = stock > 0 ? `${stock} en stock` : "Sin stock";
+        const textoStock = esSegunda
+            ? (stock > 0 ? `${stock} de segunda disponibles` : "Sin existencia de segunda")
+            : (stock > 0 ? `${stock} en stock` : "Sin stock");
 
         const coloresDisp = obtenerColoresDisponibles(p.id);
         const colorSeleccionado = p.colorElegido || '';
@@ -539,10 +587,10 @@ function _renderListaProductosCarrito() {
         const subtotal = (p.precioContado || 0) * cantidad;
 
         return `
-        <div style="background:white;border:1px solid #e2e8f0;border-radius:14px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 4px rgba(15,23,42,.05);">
+        <div style="background:white;border:1px solid ${esSegunda ? '#f59e0b' : '#e2e8f0'};border-radius:14px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 4px rgba(15,23,42,.05);">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
                 <div style="min-width:0;">
-                    <strong style="font-size:15px;color:#0f172a;display:block;word-break:break-word;">${_escapeHtml(p.nombre)}</strong>
+                    <strong style="font-size:15px;color:#0f172a;display:block;word-break:break-word;">${_escapeHtml(p.nombre)}${esSegunda ? ' <span style="background:#fef3c7;color:#92400e;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800;vertical-align:middle;">🏷️ SEGUNDA</span>' : ''}</strong>
                     <span style="font-size:12px;font-weight:bold;color:${colorStock};">${textoStock}</span>
                 </div>
                 <button onclick="_carritoEliminarItem(${index})" title="Quitar"
@@ -976,6 +1024,11 @@ function _resolverOrigenEntregaVenta(prod, item, decision) {
 
 function _stockDisponibleParaSolicitudVenta(prod, item) {
     if (!prod) return 0;
+    // 🏷️ Segunda vive en su propio bucket, totalmente aparte de stock/
+    // variantes/reservas de apartado (esas reservas solo aplican a producto
+    // nuevo). No tiene sentido restar "reservado" aquí: una pieza de
+    // segunda nunca se aparta a futuro, se vende de contado/crédito directo.
+    if (item?.esSegunda) return Number(prod.stockSegunda || 0);
     const cantidadTotal = Number(prod.stock || 0);
     const colorNorm = _normalizarClaveInventario(item?.colorElegido || '');
     const reservadoTotal = _stockReservadoSeguro(prod, item?.colorElegido || '', '');
@@ -992,6 +1045,17 @@ function _stockDisponibleParaSolicitudVenta(prod, item) {
 }
 
 function _validarOrigenEntregaVenta(prod, item, decision) {
+    // 🏷️ Segunda no pasa por la resolución de ubicación/color de producto
+    // nuevo (esa lógica asume variantes de stock nuevo). Siempre sale de
+    // "General" y se valida contra stockSegunda directamente.
+    if (item?.esSegunda) {
+        const cantidad = Number(item?.cantidad || 1);
+        const disponible = Number(prod?.stockSegunda || 0);
+        if (disponible < cantidad) {
+            return { ok: false, disponible, mensaje: `"${prod?.nombre || item?.nombre || 'Producto'}" no tiene suficiente existencia de segunda.\n\nSolicitado: ${cantidad}\nDisponible: ${disponible}` };
+        }
+        return { ok: true, disponible, requiereAjusteColor: false };
+    }
     return _resolverOrigenEntregaVenta(prod, item, decision);
 }
 
@@ -1132,6 +1196,15 @@ function _renderOpcionesOrigenVenta(prod, item) {
         </div>`;
 }
 
+// 🏷️ Clave para decisionesInventario: normalmente el id de producto basta,
+// pero si el carrito tiene DOS líneas del mismo producto (una nueva y una
+// de segunda — ej. cliente compra una pieza nueva y otra de segunda del
+// mismo modelo), usar solo el id las haría compartir la misma decisión y
+// una pisaría a la otra. Se distingue con un sufijo.
+function _decisionInvKey(item) {
+    return item?.esSegunda ? `${item.id}::segunda` : String(item?.id);
+}
+
 function _ventaDecisionesStockCompletas() {
     if (!Array.isArray(carrito) || !Array.isArray(productos)) return true;
     return carrito.every(item => {
@@ -1139,7 +1212,7 @@ function _ventaDecisionesStockCompletas() {
         if (!prod) return true;
         const tieneStock = _stockDisponibleParaSolicitudVenta(prod, item) >= Number(item?.cantidad || 1);
         if (!tieneStock) return true;
-        const decision = decisionesInventario[item.id];
+        const decision = decisionesInventario[_decisionInvKey(item)];
         if (!decision || typeof decision.entregar !== 'boolean') return false;
         if (decision.entregar === true) return !!(decision.ubicacion || item.ubicacionElegida);
         return decision.confirmadoSobrePedido === true;
@@ -1158,9 +1231,25 @@ function _actualizarBotonProcesarInventario() {
     if (aviso) aviso.style.display = completas ? 'none' : 'block';
 }
 
-function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '', ubicacionElegida = '') {
+function _descontarInventarioDesdeOrigenVenta(prod, cantidad, colorElegido = '', ubicacionElegida = '', esSegunda = false) {
     const cant = Number(cantidad || 0);
     if (!prod || cant <= 0) return false;
+
+    // 🏷️ Segunda: mismo camino simple que en _aplicarSalidaInventarioOperativa
+    // — ajustarStockVariante contra stockSegunda, sin la resolución de
+    // variantes de stock nuevo (que no aplica aquí).
+    if (esSegunda) {
+        if ((Number(prod.stockSegunda) || 0) < cant) return false;
+        const resultado = ajustarStockVariante([prod], prod.id, cant, {
+            color: colorElegido || 'General',
+            ubicacion: ubicacionElegida || 'General',
+            modo: 'salida',
+            condicion: 'segunda',
+            concepto: `Venta (segunda) — entrega diferida (${colorElegido || 'General'}/${ubicacionElegida || 'General'})`
+        });
+        window._ultimaSalidaInventarioVenta = { requiereAjusteColor: false, colorVendido: colorElegido || '', ubicacion: ubicacionElegida || '', coloresFisicos: [] };
+        return !!resultado.ok;
+    }
 
     const validacion = _validarOrigenEntregaVenta(prod, { cantidad: cant, nombre: prod.nombre }, { color: colorElegido, ubicacion: ubicacionElegida });
     if (!validacion.ok) return false;
@@ -1681,6 +1770,14 @@ function cancelarYVolverAlCarrito() {
  * Dialogo interactivo de gestión de inventario
  */
 function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegidoRecibido) {
+    // 🏷️ Segunda es mercancía que ya está físicamente en la tienda — se
+    // vende de contado o a crédito directo, nunca se aparta para entrega
+    // futura (no tiene sentido reservar algo que ya se tiene en mano).
+    if (metodoPago === "apartado" && carrito.some(item => item.esSegunda)) {
+        alert('No se puede apartar mercancía de SEGUNDA — es producto que ya está en tienda. Véndela de contado o a crédito directo.');
+        return;
+    }
+
     let planElegido = planElegidoRecibido || _planElegidoPendiente;
     let productosConStock = [];
     let productosSinStock = [];
@@ -1701,7 +1798,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     // Sin stock: siempre pasa a requisición/entrega pendiente, nunca hay
     // nada que decidir aquí — se deja resuelto de una vez.
     productosSinStock.forEach(x => {
-        decisionesInventario[x.prod.id] = { entregar: false, sinStock: true, confirmadoSobrePedido: true };
+        decisionesInventario[_decisionInvKey(x.item)] = { entregar: false, sinStock: true, confirmadoSobrePedido: true };
     });
 
     // Resolución automática: si un producto con existencia SOLO puede
@@ -1712,6 +1809,15 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     let productosAmbiguos = [];
     if (metodoPago !== "apartado") {
         productosConStock.forEach(x => {
+            // 🏷️ Segunda siempre sale de "General" — no tiene el concepto de
+            // múltiples ubicaciones de stock nuevo, así que nunca entra a la
+            // pregunta de ambigüedad.
+            if (x.item.esSegunda) {
+                decisionesInventario[_decisionInvKey(x.item)] = { entregar: true, ubicacion: 'General', confirmadoSobrePedido: false };
+                const idxCarritoSeg = carrito.findIndex(i => String(i.id) === String(x.prod.id) && i.esSegunda);
+                if (idxCarritoSeg !== -1) carrito[idxCarritoSeg].ubicacionElegida = 'General';
+                return;
+            }
             const colorElegido = x.item.colorElegido || '';
             const opciones = _ubicacionesSalidaVentaDetalle(x.prod, colorElegido);
             // Ojo: solo se autoasigna cuando hay EXACTAMENTE una ubicación
@@ -1720,8 +1826,8 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             // asume nada solo.
             if (opciones.length === 1) {
                 const ubicacion = opciones[0].ubicacion;
-                decisionesInventario[x.prod.id] = { entregar: true, ubicacion, confirmadoSobrePedido: false };
-                const idxCarrito = carrito.findIndex(i => String(i.id) === String(x.prod.id));
+                decisionesInventario[_decisionInvKey(x.item)] = { entregar: true, ubicacion, confirmadoSobrePedido: false };
+                const idxCarrito = carrito.findIndex(i => String(i.id) === String(x.prod.id) && !i.esSegunda);
                 if (idxCarrito !== -1) {
                     carrito[idxCarrito].ubicacionElegida = ubicacion;
                 }
@@ -2082,7 +2188,7 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
     carrito.forEach(item => {
         const prod = productos.find(prod => String(prod.id) === String(item.id)); 
         if (!prod || errorInventario) return;
-        const decision = decisionesInventario[item.id];
+        const decision = decisionesInventario[_decisionInvKey(item)];
         const tieneStock = _stockDisponibleParaSolicitudVenta(prod, item) >= (item.cantidad || 1);
 
         if (metodoPago !== "apartado" && tieneStock && (!decision || typeof decision.entregar !== "boolean")) {
@@ -2805,10 +2911,11 @@ function generarTicketMediaHoja(datosVenta) {
         listaProductos += `
             <div style="margin-bottom: 4px; font-size: 11px;">
                 <div style="display:flex; justify-content:space-between;">
-                    <span><b>${art.cantidad || 1}x</b> ${art.nombre}</span>
+                    <span><b>${art.cantidad || 1}x</b> ${art.nombre}${art.esSegunda ? ' <b style="color:#92400e;">(SEGUNDA)</b>' : ''}</span>
                     <b>${dinero(subtotal)}</b>
                 </div>
                 ${art.colorElegido ? `<small style="display:block; color:#555;">}Color: ${art.colorElegido}</small>` : ''}
+                ${art.esSegunda ? `<small style="display:block; color:#92400e;">Producto de segunda — sin garantía de fábrica</small>` : ''}
             </div>`;
     });
 
@@ -3239,9 +3346,12 @@ function aplicarSalidaPendienteVentas(idSalida) {
                     advertenciasColor.push(validacionOrigen.mensaje);
                 }
             }
-            if (validacionPasada && (prod.stock || 0) < cantAEntregar) {
-                validacionPasada = false;
-                mensajeError = `STOCK INSUFICIENTE para: ${item.nombre}\n\n- Cantidad solicitada: ${cantAEntregar}\n- Piezas disponibles: ${prod.stock || 0}\n\nPor favor ajusta la cantidad a entregar.`;
+            if (validacionPasada) {
+                const stockDisponibleCampo = item.esSegunda ? Number(prod.stockSegunda || 0) : Number(prod.stock || 0);
+                if (stockDisponibleCampo < cantAEntregar) {
+                    validacionPasada = false;
+                    mensajeError = `STOCK INSUFICIENTE para: ${item.nombre}${item.esSegunda ? ' (segunda)' : ''}\n\n- Cantidad solicitada: ${cantAEntregar}\n- Piezas disponibles: ${stockDisponibleCampo}\n\nPor favor ajusta la cantidad a entregar.`;
+                }
             }
         }
     });
@@ -3266,7 +3376,7 @@ function aplicarSalidaPendienteVentas(idSalida) {
             const prod = productosActuales.find(p => String(p.id) === String(item.productoId));
             const ubicacionSeleccionada = document.getElementById(`entregaUbi-${s.id}-${index}`)?.value || '';
             if (prod) {
-                const salidaOk = _descontarInventarioDesdeOrigenVenta(prod, cantAEntregar, item.colorElegido || '', ubicacionSeleccionada);
+                const salidaOk = _descontarInventarioDesdeOrigenVenta(prod, cantAEntregar, item.colorElegido || '', ubicacionSeleccionada, item.esSegunda === true);
                 if (!salidaOk) return;
                 const metaSalida = window._ultimaSalidaInventarioVenta || {};
                 const coloresFisicos = (metaSalida.coloresFisicos || [])
@@ -4759,7 +4869,7 @@ window.revisarVentaPendiente = function(index) {
     articulos.forEach(art => {
         tablaProductosHTML += `
             <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding:6px 0;">⬢ ${art.nombre} ${art.colorElegido ? `(${art.colorElegido})` : ''}</td>
+                <td style="padding:6px 0;">⬢ ${art.nombre} ${art.colorElegido ? `(${art.colorElegido})` : ''}${art.esSegunda ? ' <b style="color:#92400e;">(SEGUNDA)</b>' : ''}</td>
                 <td style="padding:6px 0; text-align:center;">${art.cantidad || 1}</td>
                 <td style="padding:6px 0; text-align:right;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(art.precioContado || art.precio || 0)}</td>
             </tr>`;
@@ -5511,124 +5621,273 @@ function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, refere
 // siempre forzado a segunda). Requiere nota obligatoria.
 // =====================================================================
 
+// Junta los artículos candidatos a devolución física para uno o varios
+// folios relacionados. Antes esta función decidía "califica o no" por su
+// cuenta (documentosEntrega, o salidaOperativaAplicada === true) y si nada
+// calificaba, la pregunta ni aparecía — que fue exactamente el problema
+// reportado: una venta cuya bandera interna no quedó bien puesta se
+// canceló sin preguntar nunca. Ahora la función solo JUNTA información
+// (qué se sabe de la venta), no decide nada: se listan TODOS los artículos
+// de la venta, y es el operador quien marca/desmarca cuáles regresan
+// realmente. Fuentes:
+// 1) documentosEntrega activos del folio (si existen, se usan como fuente
+//    primaria por artículo — ya traen su propio color/ubicación de entrega).
+// 2) Los articulos de la venta en ventasRegistradas — TODOS, sin filtrar
+//    por salidaOperativaAplicada. Esa bandera se conserva solo como pista
+//    visual ("el sistema registró que esto salió de tienda"), nunca como
+//    filtro que oculte un artículo de la lista.
 function _cancelArticulosEntregadosPorFolio(folioOFolios) {
-    // Acepta un folio suelto o un arreglo de folios relacionados (ej. un
-    // apartado migrado a crédito tiene su folio original + el folio de la
-    // venta de crédito nueva — las entregas quedan documentadas bajo ESE
-    // folio nuevo, no el del apartado, así que hay que revisar ambos).
     const folios = new Set((Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios]).filter(Boolean).map(String));
-    const docs = StorageService.get("documentosEntrega", [])
-        .filter(d => folios.has(String(d.folioVenta)) && d.estado !== 'Cancelado');
-    const articulos = [];
-    docs.forEach(d => {
-        (d.articulos || []).forEach((a, i) => {
-            articulos.push({
-                docId: d.id, idx: i,
-                productoId: a.productoId || a.id,
-                nombre: a.nombre || 'Artículo',
-                cantidad: Number(a.cantidad || 1),
-                color: a.colorElegido || a.color || 'General',
-                ubicacion: a.ubicacionElegida || a.ubicacion || 'General'
+    const vistos = new Set(); // dedup por productoId+color+ubicacion, evita listar 2 veces lo mismo si ya vino de documentosEntrega
+    const candidatos = [];
+
+    StorageService.get("documentosEntrega", [])
+        .filter(d => folios.has(String(d.folioVenta)) && d.estado !== 'Cancelado')
+        .forEach(d => {
+            (d.articulos || []).forEach(a => {
+                const productoId = a.productoId || a.id;
+                if (!productoId) return;
+                const color = a.colorElegido || a.color || 'General';
+                const ubicacion = a.ubicacionElegida || a.ubicacion || 'General';
+                vistos.add(`${productoId}|${color}|${ubicacion}`);
+                candidatos.push({
+                    productoId,
+                    nombre: a.nombre || 'Artículo',
+                    cantidad: Number(a.cantidad || 1),
+                    color, ubicacion,
+                    salidaConfirmadaPorSistema: true
+                });
             });
         });
-    });
-    return articulos;
+
+    StorageService.get("ventasRegistradas", [])
+        .filter(v => folios.has(String(v.folio)))
+        .forEach(v => {
+            (v.articulos || []).forEach(a => {
+                const productoId = a.productoId || a.id;
+                const cantidad = Number(a.cantidad || 0);
+                if (!productoId || cantidad <= 0) return;
+                const color = a.colorElegido || a.color || 'General';
+                const ubicacion = a.ubicacionElegida || a.ubicacion || 'General';
+                const clave = `${productoId}|${color}|${ubicacion}`;
+                if (vistos.has(clave)) return; // ya vino de documentosEntrega, no duplicar
+                vistos.add(clave);
+                candidatos.push({
+                    productoId,
+                    nombre: a.nombre || 'Artículo',
+                    cantidad,
+                    color, ubicacion,
+                    salidaConfirmadaPorSistema: a.salidaOperativaAplicada === true
+                });
+            });
+        });
+
+    return candidatos;
 }
 
-// Punto de entrada: decide si hace falta capturar condición (hubo entrega
-// física) o si puede continuar directo (nada que capturar). `callback`
-// recibe `condicionesArticulos` (array o null) cuando puede seguir, o no
-// se llama nunca si el admin cancela o no tiene permisos.
+// Punto de entrada: SIEMPRE pregunta SÍ/NO ("¿el cliente te va a entregar
+// el producto?") en cuanto la venta tenga al menos un artículo — ya no
+// depende de que el sistema haya "calificado" algo como candidato. Si es
+// sí, muestra el detalle (con todos los artículos de la venta) para que el
+// operador marque cuáles y cuántos regresan de verdad. `callback` recibe:
+//   - null                    → la venta no tiene artículos que capturar
+//                                (caso degenerado) o sin permisos/cancelado.
+//   - { tipo: 'sin-devolucion' } → confirmado explícitamente: el cliente NO
+//                                regresa el producto.
+//   - [ {...} , ... ]          → artículos confirmados que sí regresan,
+//                                todos con destino:'segunda' o 'nuevo' según
+//                                lo que haya elegido el operador.
 function _cancelCapturarCondicionYContinuar(folioOFolios, callback) {
-    const articulos = _cancelArticulosEntregadosPorFolio(folioOFolios);
-    if (articulos.length === 0) { callback(null); return; }
-    if (!_ventasRequireAdmin('Registrar condición de mercancía devuelta')) return;
-    _cancelAbrirModalCondicion(folioOFolios, articulos, callback);
+    const candidatos = _cancelArticulosEntregadosPorFolio(folioOFolios);
+    if (candidatos.length === 0) { callback(null); return; }
+    if (!_ventasRequireAdmin('Registrar devolución de mercancía')) return;
+    _cancelAbrirModalDevolucion(folioOFolios, candidatos, callback);
 }
 
-function _cancelAbrirModalCondicion(folioOFolios, articulos, callback) {
-    document.querySelector('[data-modal="cancel-condicion"]')?.remove();
-    window._cancelCondicionCallback = callback;
-    window._cancelCondicionArticulos = articulos;
+function _cancelAbrirModalDevolucion(folioOFolios, candidatos, callback) {
+    document.querySelector('[data-modal="cancel-devolucion"]')?.remove();
+    window._cancelDevolucionCallback = callback;
+    window._cancelDevolucionCandidatos = candidatos;
+    window._cancelDevolucionFolios = folioOFolios;
 
-    const filas = articulos.map((a, i) => `
-        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:10px;">
-            <div style="font-weight:bold;color:#0f172a;">${_cancelEsc(a.nombre)} <span style="color:#64748b;font-weight:normal;font-size:12px;">(${a.cantidad} pza · ${_cancelEsc(a.color)}/${_cancelEsc(a.ubicacion)})</span></div>
-            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-                <select id="condEstado_${i}" onchange="_cancelActualizarDestinoVisible(${i})" style="flex:1;min-width:150px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;">
-                    <option value="">-- Estado --</option>
-                    <option value="Bueno">✅ Bueno</option>
-                    <option value="Dañado">🔧 Dañado</option>
-                    <option value="Incompleto">⚠️ Incompleto</option>
-                </select>
-                <select id="condDestino_${i}" disabled style="flex:1;min-width:150px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;">
-                    <option value="nuevo">↩️ Reingresa como Nuevo</option>
-                    <option value="segunda">🏷️ Reingresa como Segunda</option>
+    const filas = candidatos.map((a, i) => `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <input type="checkbox" id="devChk_${i}" ${a.salidaConfirmadaPorSistema ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:bold;color:#0f172a;">${_cancelEsc(a.nombre)}</div>
+                    <div style="color:#64748b;font-size:12px;">${_cancelEsc(a.color)} / ${_cancelEsc(a.ubicacion)}${a.salidaConfirmadaPorSistema ? ' · <span style="color:#16a34a;">✓ el sistema registró que esto salió de tienda</span>' : ' · <span style="color:#b45309;">el sistema no tiene registro de salida — revisa tú si de verdad se entregó</span>'}</div>
+                </div>
+                <label style="font-size:11px;color:#475569;">Cant.
+                    <input type="number" id="devCant_${i}" value="${a.cantidad}" min="1" max="${a.cantidad}" step="1" style="width:60px;padding:6px;border:1px solid #cbd5e1;border-radius:6px;margin-left:4px;">
+                </label>
+            </div>
+            <div style="margin-top:8px;">
+                <select id="devDestino_${i}" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;">
+                    <option value="segunda" selected>🏷️ Reingresa como Segunda</option>
+                    <option value="nuevo">✨ Reingresa como Nuevo (perfecto estado, sin abrir/usar)</option>
                 </select>
             </div>
-            <input type="text" id="condNota_${i}" placeholder="Nota obligatoria (ej. caja abierta, golpe en esquina, sin control...)" style="width:100%;margin-top:8px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;">
         </div>`).join('');
 
+
     const html = `
-    <div data-modal="cancel-condicion" style="position:fixed;inset:0;background:rgba(15,23,42,0.82);z-index:10001;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
+    <div data-modal="cancel-devolucion" style="position:fixed;inset:0;background:rgba(15,23,42,0.82);z-index:10001;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px;">
         <div style="background:white;border-radius:14px;width:100%;max-width:560px;padding:24px;box-shadow:0 25px 60px rgba(0,0,0,0.35);">
-            <h2 style="margin:0 0 8px;color:#b91c1c;">📋 Condición de la mercancía devuelta</h2>
-            <p style="color:#64748b;font-size:13px;margin-bottom:14px;">Esta venta ya tenía mercancía entregada al cliente. Registra el estado real de cada pieza antes de reingresarla al inventario. Solo se puede reingresar como <b>Nuevo</b> si está en perfecto estado (ej. cliente se arrepintió sin abrir el producto).</p>
-            <div>${filas}</div>
-            <div style="display:flex;gap:10px;margin-top:8px;">
-                <button onclick="_cancelConfirmarCondicion()" style="flex:2;padding:13px;background:#b91c1c;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Continuar con la cancelación</button>
-                <button onclick="document.querySelector('[data-modal=&quot;cancel-condicion&quot;]')?.remove()" style="flex:1;padding:13px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cerrar</button>
+
+            <div id="devPasoPregunta">
+                <h2 style="margin:0 0 8px;color:#b91c1c;">📦 ¿El cliente te va a entregar de vuelta el producto?</h2>
+                <p style="color:#64748b;font-size:13px;margin-bottom:18px;">Esta venta tiene mercancía que ya salió de la tienda. Antes de cancelar, indica si el cliente la va a regresar.</p>
+                <div style="display:flex;gap:10px;">
+                    <button onclick="_cancelDevolucionResponder(true)" style="flex:1;padding:16px;background:#059669;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">✅ Sí, me la entrega</button>
+                    <button onclick="_cancelDevolucionResponder(false)" style="flex:1;padding:16px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">🚫 No, se la queda</button>
+                </div>
+                <button onclick="document.querySelector('[data-modal=&quot;cancel-devolucion&quot;]')?.remove()" style="width:100%;margin-top:12px;padding:11px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Cerrar</button>
             </div>
+
+            <div id="devPasoArticulos" style="display:none;">
+                <h2 style="margin:0 0 8px;color:#059669;">📋 ¿Qué está regresando?</h2>
+                <p style="color:#64748b;font-size:13px;margin-bottom:14px;">Desmarca lo que el cliente NO regresa. Para cada pieza, indica si reingresa como <b>Segunda</b> (ya se usó, se abrió o tiene algún detalle) o como <b>Nuevo</b> (perfecto estado, ej. el cliente se arrepintió sin abrirlo).</p>
+                <div>${filas}</div>
+                <label style="display:block;font-size:11px;font-weight:bold;color:#475569;margin-top:10px;">Observaciones (opcional)</label>
+                <input type="text" id="devNota" placeholder="Ej. caja abierta, golpe en una esquina, sin control remoto..." style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;margin-top:4px;">
+                <div style="display:flex;gap:10px;margin-top:16px;">
+                    <button onclick="_cancelDevolucionEmitirActa()" style="flex:1;padding:12px;background:#1e40af;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">🖨️ Emitir acta para firma</button>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:10px;">
+                    <button onclick="document.getElementById('devPasoPregunta').style.display='block';document.getElementById('devPasoArticulos').style.display='none';" style="flex:1;padding:12px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">← Regresar</button>
+                    <button onclick="_cancelDevolucionConfirmarArticulos()" style="flex:2;padding:12px;background:#059669;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Continuar con la cancelación</button>
+                </div>
+            </div>
+
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
-// 💵 Antes, si la venta ya tenía dinero recibido, el modal daba por hecho
-// que había que devolverlo — no existía forma de decir "este cliente no
-// se lleva el dinero de regreso" (igual que con el producto: puede o no
-// haber devolución física, aquí puede o no haber devolución de efectivo,
-// de forma independiente). Ahora es una casilla; si se destilda, no se
-// pide cuenta ni se registra ningún egreso de caja al confirmar.
-window._cancelToggleReembolso = function() {
-    const chk = document.getElementById('cancelDevolverDinero');
-    const detalle = document.getElementById('cancelReembolsoDetalle');
-    if (detalle) detalle.style.display = (chk && !chk.checked) ? 'none' : 'block';
-};
-
-window._cancelActualizarDestinoVisible = function(i) {
-    const estado = document.getElementById(`condEstado_${i}`)?.value;
-    const destino = document.getElementById(`condDestino_${i}`);
-    if (!destino) return;
-    if (estado === 'Bueno') {
-        destino.disabled = false;
-        destino.value = 'nuevo';
-    } else if (estado === 'Dañado' || estado === 'Incompleto') {
-        destino.disabled = true;
-        destino.value = 'segunda';
-    } else {
-        destino.disabled = true;
-        destino.value = 'nuevo';
+window._cancelDevolucionResponder = function(seRegresa) {
+    if (!seRegresa) {
+        const callback = window._cancelDevolucionCallback;
+        document.querySelector('[data-modal="cancel-devolucion"]')?.remove();
+        window._cancelDevolucionCallback = null;
+        window._cancelDevolucionCandidatos = null;
+        if (typeof callback === 'function') callback({ tipo: 'sin-devolucion' });
+        return;
     }
+    document.getElementById('devPasoPregunta').style.display = 'none';
+    document.getElementById('devPasoArticulos').style.display = 'block';
 };
 
-window._cancelConfirmarCondicion = function() {
-    const articulos = window._cancelCondicionArticulos || [];
+function _cancelDevolucionArticulosMarcados() {
+    const candidatos = window._cancelDevolucionCandidatos || [];
+    const nota = document.getElementById('devNota')?.value.trim() || '';
     const resultado = [];
-    for (let i = 0; i < articulos.length; i++) {
-        const estado = document.getElementById(`condEstado_${i}`)?.value || '';
-        const nota = document.getElementById(`condNota_${i}`)?.value.trim() || '';
-        const destinoSel = document.getElementById(`condDestino_${i}`)?.value || 'nuevo';
-        if (!estado) return alert(`Falta indicar el estado de "${articulos[i].nombre}".`);
-        if (!nota) return alert(`Falta la nota obligatoria de "${articulos[i].nombre}".`);
-        const destino = estado === 'Bueno' ? destinoSel : 'segunda';
-        resultado.push({ ...articulos[i], estado, destino, nota });
+    for (let i = 0; i < candidatos.length; i++) {
+        const chk = document.getElementById(`devChk_${i}`);
+        if (!chk || !chk.checked) continue;
+        const cantidad = Math.max(1, Math.min(Number(document.getElementById(`devCant_${i}`)?.value) || candidatos[i].cantidad, candidatos[i].cantidad));
+        const destino = document.getElementById(`devDestino_${i}`)?.value === 'nuevo' ? 'nuevo' : 'segunda';
+        const estadoDevolucion = destino === 'nuevo' ? 'Nuevo (cancelación)' : 'Segunda (cancelación)';
+        resultado.push({ ...candidatos[i], cantidad, destino, estadoDevolucion, notaDevolucion: nota });
     }
-    const callback = window._cancelCondicionCallback;
-    document.querySelector('[data-modal="cancel-condicion"]')?.remove();
-    window._cancelCondicionCallback = null;
-    window._cancelCondicionArticulos = null;
+    return resultado;
+}
+
+window._cancelDevolucionConfirmarArticulos = function() {
+    const resultado = _cancelDevolucionArticulosMarcados();
+    const callback = window._cancelDevolucionCallback;
+    document.querySelector('[data-modal="cancel-devolucion"]')?.remove();
+    window._cancelDevolucionCallback = null;
+    window._cancelDevolucionCandidatos = null;
     if (typeof callback === 'function') callback(resultado);
+};
+
+// 📄 Acta de entrega que el cliente firma al devolver la mercancía de una
+// venta cancelada — mismo patrón que usan las "actas de devolución" de
+// compras.js (window.TicketService.elegirFormato/openDocument), con línea
+// de firma para el cliente y para la tienda.
+window._cancelDevolucionEmitirActa = function() {
+    const resultado = _cancelDevolucionArticulosMarcados();
+    if (resultado.length === 0) return alert('Marca al menos un artículo para emitir el acta.');
+
+    const folioOFolios = window._cancelDevolucionFolios;
+    const folios = Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios];
+    const ventas = StorageService.get('ventasRegistradas', []);
+    const venta = ventas.find(v => folios.map(String).includes(String(v.folio)));
+    const cliente = venta?.clienteNombre || venta?.cliente?.nombre || 'Cliente';
+    const folioTexto = folios.filter(Boolean).join(' / ');
+    const nota = document.getElementById('devNota')?.value.trim() || '';
+
+    const cfgEmpresa = StorageService.get('configEmpresa', {}) || {};
+    const nombreEmpresa = cfgEmpresa.nombre || 'Mueblería Mi Pueblito';
+    const fechaTexto = (typeof formatearFechaCortaMX === 'function') ? formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX');
+
+    const filasArticulos = resultado.map(a => `
+        <tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${_cancelEsc(a.nombre)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${_cancelEsc(a.color)} / ${_cancelEsc(a.ubicacion)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;">${a.cantidad}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${a.destino === 'nuevo' ? 'Nuevo' : 'Segunda'}</td>
+        </tr>`).join('');
+    const hayNuevo = resultado.some(a => a.destino === 'nuevo');
+    const haySegunda = resultado.some(a => a.destino !== 'nuevo');
+    const textoDestino = hayNuevo && haySegunda
+        ? 'según se indica en la tabla, cada artículo ingresa a inventario como <strong>Nuevo</strong> o <strong>Segunda</strong>'
+        : hayNuevo
+            ? 'la mercancía ingresa a inventario como <strong>Nuevo</strong>'
+            : 'la mercancía ingresa a inventario como <strong>producto de Segunda</strong>';
+
+    const html = `
+    <div style="font-family:Arial,sans-serif;color:#0f172a;padding:10px;">
+        <div style="text-align:center;margin-bottom:18px;">
+            <h1 style="margin:0;font-size:18px;">${_cancelEsc(nombreEmpresa)}</h1>
+            <h2 style="margin:6px 0 0;font-size:15px;color:#334155;">ACTA DE ENTREGA DE MERCANCÍA POR CANCELACIÓN DE VENTA</h2>
+        </div>
+        <div style="font-size:13px;margin-bottom:14px;">
+            <div><strong>Folio de venta:</strong> ${_cancelEsc(folioTexto)}</div>
+            <div><strong>Cliente:</strong> ${_cancelEsc(cliente)}</div>
+            <div><strong>Fecha:</strong> ${_cancelEsc(fechaTexto)}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;">
+            <thead>
+                <tr style="background:#f1f5f9;">
+                    <th style="padding:6px 8px;text-align:left;">Artículo</th>
+                    <th style="padding:6px 8px;text-align:left;">Color / Ubicación</th>
+                    <th style="padding:6px 8px;text-align:right;">Cantidad</th>
+                    <th style="padding:6px 8px;text-align:left;">Reingresa como</th>
+                </tr>
+            </thead>
+            <tbody>${filasArticulos}</tbody>
+        </table>
+        <div style="font-size:12px;color:#334155;margin-bottom:10px;">
+            <strong>Observaciones:</strong> ${nota ? _cancelEsc(nota) : 'Ninguna. La mercancía se entregó sin observaciones.'}
+        </div>
+        <p style="font-size:12px;color:#475569;">Con esta firma, el cliente hace constar que entrega físicamente a ${_cancelEsc(nombreEmpresa)} la mercancía arriba descrita, como consecuencia de la cancelación de la venta con folio ${_cancelEsc(folioTexto)}; ${textoDestino}.</p>
+        <div style="display:flex;justify-content:space-between;gap:24px;margin-top:44px;">
+            <div style="flex:1;text-align:center;">
+                <div style="border-top:1px solid #334155;margin:0 10px 6px;"></div>
+                <div style="font-size:12px;font-weight:bold;">Entrega — ${_cancelEsc(cliente)}</div>
+                <div style="font-size:11px;color:#64748b;">Nombre y firma del cliente</div>
+            </div>
+            <div style="flex:1;text-align:center;">
+                <div style="border-top:1px solid #334155;margin:0 10px 6px;"></div>
+                <div style="font-size:12px;font-weight:bold;">Recibe — ${_cancelEsc(nombreEmpresa)}</div>
+                <div style="font-size:11px;color:#64748b;">Nombre y firma</div>
+            </div>
+        </div>
+    </div>`;
+
+    if (window.TicketService?.elegirFormato) {
+        window.TicketService.elegirFormato({ html, title: 'Acta de entrega por cancelación', filename: `acta_cancelacion_${folioTexto}`, pageSize: 'letter' });
+        return;
+    }
+    if (window.TicketService?.openDocument) {
+        window.TicketService.openDocument(html, { title: 'Acta de entrega por cancelación', filename: `acta_cancelacion_${folioTexto}`, pageSize: 'letter', autoPrint: true });
+        return;
+    }
+    const w = window.open('', '_blank', 'width=900,height=1000');
+    if (!w) return alert('Habilita las ventanas emergentes para imprimir el acta.');
+    w.document.write(`<!DOCTYPE html><html><head><title>Acta de entrega</title></head><body>${html}</body></html>`);
 };
 
 function _cancelReingresarInventarioPorVenta(folioOFolios, motivo, condicionesArticulos = null) {
@@ -5642,67 +5901,88 @@ function _cancelReingresarInventarioPorVenta(folioOFolios, motivo, condicionesAr
     const movimientosInv = StorageService.get("movimientosInventario", []);
     const docs = StorageService.get("documentosEntrega", []);
     const docsActivos = docs.filter(d => folios.has(String(d.folioVenta)) && d.estado !== 'Cancelado');
-    let articulos = [];
 
+    // Los documentos de entrega activos SIEMPRE se marcan Cancelado al
+    // cancelarse la venta, haya o no devolución física — es solo el
+    // registro de que ese vale de entrega ya no es válido.
     docsActivos.forEach(d => {
-        (d.articulos || []).forEach((a, i) => {
-            const cond = Array.isArray(condicionesArticulos)
-                ? condicionesArticulos.find(c => c.docId === d.id && c.idx === i)
-                : null;
-            articulos.push({
-                productoId: a.productoId || a.id,
-                nombre: a.nombre,
-                cantidad: Number(a.cantidad || 1),
-                color: a.colorElegido || a.color || 'General',
-                ubicacion: a.ubicacionElegida || a.ubicacion || 'General',
-                estadoDevolucion: cond?.estado || null,
-                destino: cond?.destino || 'nuevo',
-                notaDevolucion: cond?.nota || ''
-            });
-        });
         d.estado = 'Cancelado';
         d.fechaCancelacion = _cancelIsoAhora();
         d.motivoCancelacion = motivo || 'Cancelación de venta';
     });
 
-    if (articulos.length === 0) {
-        // Preferimos el campo estructurado folioVenta (ver registrarMovimiento).
-        // Solo para movimientos viejos que no lo tengan (de antes de esta
-        // reparación) caemos a un match por texto, acotado con límites de
-        // palabra para no confundir "VTA-100" con "VTA-1005". Se revisa
-        // contra CADA folio relacionado (folio original + folio de crédito
-        // si el apartado fue migrado), no solo el principal.
-        const foliosNorm = [...folios].map(f => String(f).trim().toUpperCase());
-        const patronesPalabra = foliosNorm.map(f => {
-            const escapado = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            return new RegExp(`(^|[^A-Z0-9])${escapado}([^A-Z0-9]|$)`);
-        });
-        movimientosInv
-            .filter(m => {
-                if (m.tipo !== 'salida' || m.reversadoCancelacion) return false;
-                if (m.folioVenta !== undefined && m.folioVenta !== null && m.folioVenta !== '') {
-                    return foliosNorm.includes(String(m.folioVenta).trim().toUpperCase());
-                }
-                const texto = String(m.concepto || '').toUpperCase();
-                return patronesPalabra.some(p => p.test(texto));
-            })
-            .forEach(m => {
-                const prod = productosActuales.find(p => String(p.id) === String(m.productoId));
+    let articulos = [];
+
+    if (Array.isArray(condicionesArticulos)) {
+        // 🛡️ Flujo nuevo (_cancelAbrirModalDevolucion): el operador ya
+        // confirmó explícitamente qué piezas regresan y cuántas — vienen
+        // completas (productoId/cantidad/color/ubicacion/destino='segunda'),
+        // así que se usan tal cual, sin adivinar nada de documentosEntrega
+        // ni de kardex.
+        articulos = condicionesArticulos;
+    } else if (condicionesArticulos && condicionesArticulos.tipo === 'sin-devolucion') {
+        // 🛡️ Confirmado explícitamente: el cliente NO regresa el producto.
+        // No se reingresa nada — la mercancía se queda con el cliente.
+        articulos = [];
+    } else {
+        // condicionesArticulos === null: comportamiento heredado, para
+        // llamadas que no pasaron por el modal nuevo. Se intenta reconstruir
+        // desde documentosEntrega y, si no hay, desde kardex (mejor
+        // esfuerzo — no hubo forma de preguntarle al operador).
+        docsActivos.forEach(d => {
+            (d.articulos || []).forEach(a => {
                 articulos.push({
-                    productoId: m.productoId,
-                    nombre: prod?.nombre || m.productoId,
-                    cantidad: Number(m.cantidad || 0),
-                    color: 'General',
-                    ubicacion: 'General'
+                    productoId: a.productoId || a.id,
+                    nombre: a.nombre,
+                    cantidad: Number(a.cantidad || 1),
+                    color: a.colorElegido || a.color || 'General',
+                    ubicacion: a.ubicacionElegida || a.ubicacion || 'General',
+                    estadoDevolucion: null,
+                    destino: 'nuevo',
+                    notaDevolucion: ''
                 });
-                m.reversadoCancelacion = true;
             });
-        // Persistimos las banderas reversadoCancelacion AHORA, antes de que el
-        // ciclo de abajo empiece a llamar a registrarMovimiento() — esa
-        // función hace su propio get/push/set de movimientosInventario en
-        // cada llamada, así que si no guardamos primero, sus escrituras
-        // pisarían estas banderas con una copia vieja leída de storage.
-        StorageService.set("movimientosInventario", movimientosInv);
+        });
+
+        if (articulos.length === 0) {
+            // Preferimos el campo estructurado folioVenta (ver registrarMovimiento).
+            // Solo para movimientos viejos que no lo tengan (de antes de esta
+            // reparación) caemos a un match por texto, acotado con límites de
+            // palabra para no confundir "VTA-100" con "VTA-1005". Se revisa
+            // contra CADA folio relacionado (folio original + folio de crédito
+            // si el apartado fue migrado), no solo el principal.
+            const foliosNorm = [...folios].map(f => String(f).trim().toUpperCase());
+            const patronesPalabra = foliosNorm.map(f => {
+                const escapado = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                return new RegExp(`(^|[^A-Z0-9])${escapado}([^A-Z0-9]|$)`);
+            });
+            movimientosInv
+                .filter(m => {
+                    if (m.tipo !== 'salida' || m.reversadoCancelacion) return false;
+                    if (m.folioVenta !== undefined && m.folioVenta !== null && m.folioVenta !== '') {
+                        return foliosNorm.includes(String(m.folioVenta).trim().toUpperCase());
+                    }
+                    const texto = String(m.concepto || '').toUpperCase();
+                    return patronesPalabra.some(p => p.test(texto));
+                })
+                .forEach(m => {
+                    const prod = productosActuales.find(p => String(p.id) === String(m.productoId));
+                    articulos.push({
+                        productoId: m.productoId,
+                        nombre: prod?.nombre || m.productoId,
+                        cantidad: Number(m.cantidad || 0),
+                        color: 'General',
+                        ubicacion: 'General'
+                    });
+                    m.reversadoCancelacion = true;
+                });
+            // Persistimos las banderas reversadoCancelacion AHORA, antes de que el
+            // ciclo de abajo empiece a llamar a registrarMovimiento() — esa
+            // función hace su propio get/push/set de movimientosInventario en
+            // cada llamada, así que si no guardamos primero, sus escrituras
+            // pisarían estas banderas con una copia vieja leída de storage.
+            StorageService.set("movimientosInventario", movimientosInv);
+        }
     }
 
     articulos.forEach(a => {
@@ -5737,9 +6017,21 @@ function _cancelReingresarInventarioPorVenta(folioOFolios, motivo, condicionesAr
     StorageService.set("productos", productosActuales);
     productos = productosActuales;
     window.productos = productosActuales;
-    StorageService.set("documentosEntrega", docs);
+    if (docsActivos.length) StorageService.set("documentosEntrega", docs);
     return articulos;
 }
+
+// 💵 Antes, si la venta ya tenía dinero recibido, el modal daba por hecho
+// que había que devolverlo — no existía forma de decir "este cliente no
+// se lleva el dinero de regreso" (igual que con el producto: puede o no
+// haber devolución física, aquí puede o no haber devolución de efectivo,
+// de forma independiente). Ahora es una casilla; si se destilda, no se
+// pide cuenta ni se registra ningún egreso de caja al confirmar.
+window._cancelToggleReembolso = function() {
+    const chk = document.getElementById('cancelDevolverDinero');
+    const detalle = document.getElementById('cancelReembolsoDetalle');
+    if (detalle) detalle.style.display = (chk && !chk.checked) ? 'none' : 'block';
+};
 
 function _cancelEsAbonoAnticipoConsignacion(abono) {
     const txt = `${abono?.cuenta || ''} ${abono?.nota || ''} ${abono?.concepto || ''}`.toUpperCase();
