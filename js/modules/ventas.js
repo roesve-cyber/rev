@@ -5578,6 +5578,18 @@ function _cancelAbrirModalCondicion(folioOFolios, articulos, callback) {
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
+// 💵 Antes, si la venta ya tenía dinero recibido, el modal daba por hecho
+// que había que devolverlo — no existía forma de decir "este cliente no
+// se lleva el dinero de regreso" (igual que con el producto: puede o no
+// haber devolución física, aquí puede o no haber devolución de efectivo,
+// de forma independiente). Ahora es una casilla; si se destilda, no se
+// pide cuenta ni se registra ningún egreso de caja al confirmar.
+window._cancelToggleReembolso = function() {
+    const chk = document.getElementById('cancelDevolverDinero');
+    const detalle = document.getElementById('cancelReembolsoDetalle');
+    if (detalle) detalle.style.display = (chk && !chk.checked) ? 'none' : 'block';
+};
+
 window._cancelActualizarDestinoVisible = function(i) {
     const estado = document.getElementById(`condEstado_${i}`)?.value;
     const destino = document.getElementById(`condDestino_${i}`);
@@ -6036,13 +6048,18 @@ function _modalCancelacion({ titulo, resumen, monto, onConfirm }) {
             <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin:14px 0;font-size:13px;">${resumen}</div>
             ${monto > 0 ? `
                 <div style="background:#fff1f2;border:1px solid #fecaca;border-radius:10px;padding:14px;margin-bottom:14px;">
-                    <b style="color:#991b1b;">Dinero a devolver: ${_cancelDinero(monto)}</b>
-                    <label style="display:block;font-size:11px;font-weight:bold;color:#7f1d1d;margin-top:12px;">Cuenta de donde saldrá la devolución</label>
-                    ${_cancelSelectorCuenta('cancelCuentaReembolso')}
-                    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:#7f1d1d;">
-                        <input type="checkbox" id="cancelEmitirComprobante" checked>
-                        Emitir comprobante de devolución
+                    <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:#7f1d1d;font-weight:bold;">
+                        <input type="checkbox" id="cancelDevolverDinero" checked onchange="_cancelToggleReembolso()">
+                        Devolver dinero al cliente (${_cancelDinero(monto)})
                     </label>
+                    <div id="cancelReembolsoDetalle" style="margin-top:12px;">
+                        <label style="display:block;font-size:11px;font-weight:bold;color:#7f1d1d;">Cuenta de donde saldrá la devolución</label>
+                        ${_cancelSelectorCuenta('cancelCuentaReembolso')}
+                        <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:#7f1d1d;">
+                            <input type="checkbox" id="cancelEmitirComprobante" checked>
+                            Emitir comprobante de devolución
+                        </label>
+                    </div>
                 </div>` : ''}
             <label style="font-size:12px;font-weight:bold;color:#475569;">Motivo de cancelación</label>
             <textarea id="cancelMotivo" style="width:100%;min-height:74px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;margin-top:5px;"></textarea>
@@ -6080,6 +6097,7 @@ window.ejecutarCancelacionVenta = function() {
     const ctx = window._cancelacionActual;
     if (!ctx || ctx.tipo !== 'venta') return;
     const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de venta';
+    const devolverDinero = document.getElementById('cancelDevolverDinero')?.checked !== false;
     const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
     const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
 
@@ -6138,7 +6156,7 @@ window.ejecutarCancelacionVenta = function() {
 
     const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo, ctx.condicionesArticulos || null);
     const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
-    const registrarMovimientoReembolso = ctx.origen !== 'cuarentena' || _cancelTieneIngresoCaja(ctx.folio);
+    const registrarMovimientoReembolso = devolverDinero && (ctx.origen !== 'cuarentena' || _cancelTieneIngresoCaja(ctx.folio));
     const movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
         folio: ctx.folio,
         referenciaBase: `VENTA-${ctx.folio}`,
@@ -6157,7 +6175,7 @@ window.ejecutarCancelacionVenta = function() {
         emitirComprobante: emitir,
         registrarMovimiento: registrarMovimientoReembolso
     });
-    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: registrarMovimientoReembolso && reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
+    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: devolverDinero ? ctx.monto : 0, movimientoCajaRegistrado: registrarMovimientoReembolso && reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'VENTA_CANCELADA',
@@ -6210,6 +6228,7 @@ window.ejecutarCancelacionAbono = function() {
     const ctx = window._cancelacionActual;
     if (!ctx || ctx.tipo !== 'abono') return;
     const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de abono';
+    const devolverDinero = document.getElementById('cancelDevolverDinero')?.checked !== false;
     const cuentaReembolso = _cancelCuentaSeleccionada('cancelCuentaReembolso');
     const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
 
@@ -6258,9 +6277,10 @@ window.ejecutarCancelacionAbono = function() {
         clienteNombre: ctx.cliente,
         tipo: 'Cancelación de abono',
         motivo,
-        emitirComprobante: emitir
+        emitirComprobante: emitir,
+        registrarMovimiento: devolverDinero
     });
-    _cancelRegistrarHistorial({ tipo: 'abono', origen: ctx.origen, folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, abono: ctx.abonoSnapshot });
+    _cancelRegistrarHistorial({ tipo: 'abono', origen: ctx.origen, folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: devolverDinero ? ctx.monto : 0, movimientoCajaRegistrado: devolverDinero && reembolsoOk, movimientosOrigenMarcados, motivo, abono: ctx.abonoSnapshot });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
     alert("Abono cancelado y saldos recalculados.");
     renderCancelaciones('abono');
@@ -6296,6 +6316,7 @@ window.ejecutarCancelacionApartado = function() {
     const ctx = window._cancelacionActual;
     if (!ctx || ctx.tipo !== 'apartado') return;
     const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de apartado';
+    const devolverDinero = document.getElementById('cancelDevolverDinero')?.checked !== false;
     const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
     const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
 
@@ -6369,9 +6390,10 @@ window.ejecutarCancelacionApartado = function() {
         clienteNombre: ctx.cliente,
         tipo: 'Cancelación de apartado',
         motivo,
-        emitirComprobante: emitir
+        emitirComprobante: emitir,
+        registrarMovimiento: devolverDinero
     });
-    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: ctx.monto, movimientoCajaRegistrado: reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion, reservasLiberadas });
+    _cancelRegistrarHistorial({ tipo: 'apartado', folio: ctx.folio, clienteNombre: ctx.cliente, montoDevuelto: devolverDinero ? ctx.monto : 0, movimientoCajaRegistrado: devolverDinero && reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion, reservasLiberadas });
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
     alert("Apartado cancelado y reversado.");
     if (reversaConsignacion.reversadas || reversaConsignacion.revision) {
