@@ -5487,7 +5487,13 @@ function _cancelRegistrarReembolso({ monto, cuentaId, etiqueta, concepto, refere
         }
     }
 
-    if (emitirComprobante && movimientoOk) {
+    // 🐛 CORREGIDO: `movimientoOk` arrancaba en `true` y solo se reescribía
+    // dentro del `if (registrarMovimiento)` — si no había devolución de
+    // dinero, ese bloque se saltaba y `movimientoOk` se quedaba en `true`
+    // "por default", así que el comprobante se emitía igual aunque no
+    // hubiera pasado ningún movimiento de caja real. Ahora también se exige
+    // `registrarMovimiento` explícitamente.
+    if (registrarMovimiento && emitirComprobante && movimientoOk) {
         generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta: etiqueta, motivo });
     }
 
@@ -6099,7 +6105,7 @@ window.ejecutarCancelacionVenta = function() {
     const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de venta';
     const devolverDinero = document.getElementById('cancelDevolverDinero')?.checked !== false;
     const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
-    const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
+    const emitir = devolverDinero && (document.getElementById('cancelEmitirComprobante')?.checked || false);
 
     const ventas = StorageService.get("ventasRegistradas", []);
     const vIdx = ventas.findIndex(v => v.folio === ctx.folio);
@@ -6230,7 +6236,7 @@ window.ejecutarCancelacionAbono = function() {
     const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de abono';
     const devolverDinero = document.getElementById('cancelDevolverDinero')?.checked !== false;
     const cuentaReembolso = _cancelCuentaSeleccionada('cancelCuentaReembolso');
-    const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
+    const emitir = devolverDinero && (document.getElementById('cancelEmitirComprobante')?.checked || false);
 
     if (ctx.origen === 'credito') {
         const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -6318,7 +6324,7 @@ window.ejecutarCancelacionApartado = function() {
     const motivo = document.getElementById('cancelMotivo')?.value || 'Cancelación de apartado';
     const devolverDinero = document.getElementById('cancelDevolverDinero')?.checked !== false;
     const cuenta = _cancelCuentaSeleccionada('cancelCuentaReembolso');
-    const emitir = document.getElementById('cancelEmitirComprobante')?.checked || false;
+    const emitir = devolverDinero && (document.getElementById('cancelEmitirComprobante')?.checked || false);
 
     const apartados = StorageService.get("apartados", []);
     const idx = apartados.findIndex(a => a.folio === ctx.folio);
