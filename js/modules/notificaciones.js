@@ -63,26 +63,6 @@ function recopilarNotificaciones() {
     }
     const vistas = getNotificacionesVistas();
 
-    // Pagarés vencidos o por vencer en ≤3 días
-    const pagares = StorageService.get('pagaresSistema', []);
-    const foliosIncobrables = new Set(
-        StorageService.get('cuentasPorCobrar', [])
-            .filter(c => c.incobrable === true)
-            .map(c => c.folio)
-    );
-    pagares.filter(p => (p.estado === 'Pendiente' || p.estado === 'Parcial') && !foliosIncobrables.has(p.folio)).forEach(p => {
-        const fv = new Date(p.fechaVencimiento);
-        if (fv <= hoy) {
-            const dias = Math.floor((hoy - fv) / (1000 * 60 * 60 * 24));
-            const id = `pagare_${p.folio}_vencido`;
-            if (!vistas.includes(id)) notifs.push({ tipo: 'pagare', icono: '🔴', color: '#dc2626', msg: `Pagaré ${p.folio} VENCIDO hace ${dias} día(s)`, folio: p.folio, id });
-        } else if (fv <= en3dias) {
-            const dias = Math.ceil((fv - hoy) / (1000 * 60 * 60 * 24));
-            const id = `pagare_${p.folio}_proximo`;
-            if (!vistas.includes(id)) notifs.push({ tipo: 'pagare', icono: '⏳', color: '#d97706', msg: `Pagaré ${p.folio} vence en ${dias} día(s)`, folio: p.folio, id });
-        }
-    });
-
     // Stock bajo
     const productosBase = StorageService.get('productos', []);
     const productos = typeof window.filtrarProductosActivos === 'function' ? window.filtrarProductosActivos(productosBase) : productosBase;
@@ -98,15 +78,18 @@ function recopilarNotificaciones() {
         }
     });
 
-    // Cuentas por pagar próximas
-    const cxp = StorageService.get('cuentasPorPagar', []);
-    cxp.filter(c => (c.saldoPendiente || 0) > 0 && c.fechaVencimiento).forEach(c => {
-        const fv = new Date(c.fechaVencimiento);
-        if (fv <= en3dias) {
-            const id = `cxp_${c.id}_vence`;
-            if (!vistas.includes(id)) notifs.push({ tipo: 'cxp', icono: '💳', color: '#dc2626', msg: `Pago a ${c.proveedor || 'proveedor'}: ${dinero(c.saldoPendiente)} vence el ${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}`, id });
-        }
-    });
+    // Cuentas por pagar próximas (no aplica a vendedor: deuda con proveedores)
+    const esVendedor = (typeof getSesion === 'function') && getSesion()?.rol === 'vendedor';
+    if (!esVendedor) {
+        const cxp = StorageService.get('cuentasPorPagar', []);
+        cxp.filter(c => (c.saldoPendiente || 0) > 0 && c.fechaVencimiento).forEach(c => {
+            const fv = new Date(c.fechaVencimiento);
+            if (fv <= en3dias) {
+                const id = `cxp_${c.id}_vence`;
+                if (!vistas.includes(id)) notifs.push({ tipo: 'cxp', icono: '💳', color: '#dc2626', msg: `Pago a ${c.proveedor || 'proveedor'}: ${dinero(c.saldoPendiente)} vence el ${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}`, id });
+            }
+        });
+    }
 
     return notifs;
 }
