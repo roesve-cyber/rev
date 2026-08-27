@@ -106,7 +106,7 @@ function mmpCargarHtml2Canvas(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-html2canvas-loader';
-    s.src = VENDOR_HTML2CANVAS;
+    s.src = ${JSON.stringify(VENDOR_HTML2CANVAS)};
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.'); };
     document.head.appendChild(s);
@@ -136,7 +136,7 @@ function mmpCargarJsPdf(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-jspdf-loader';
-    s.src = VENDOR_JSPDF;
+    s.src = ${JSON.stringify(VENDOR_JSPDF)};
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
     document.head.appendChild(s);
@@ -257,7 +257,7 @@ function mmpCargarHtml2CanvasDocumento(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-html2canvas-loader';
-    s.src = VENDOR_HTML2CANVAS;
+    s.src = ${JSON.stringify(VENDOR_HTML2CANVAS)};
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.'); };
     document.head.appendChild(s);
@@ -287,7 +287,7 @@ function mmpCargarJsPdfDocumento(cb){
     if (existente) { existente.addEventListener('load', cb, { once: true }); return; }
     var s = document.createElement('script');
     s.id = 'mmp-jspdf-loader';
-    s.src = VENDOR_JSPDF;
+    s.src = ${JSON.stringify(VENDOR_JSPDF)};
     s.onload = cb;
     s.onerror = function(){ alert('No se pudo cargar el motor PDF. Revisa tu conexion.'); };
     document.head.appendChild(s);
