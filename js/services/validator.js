@@ -401,73 +401,13 @@ window.rechazarVentaCuarentena = function(index) {
     });
 };
 
-window.revisarAbonoPendiente = function(index) {
-    const abonosP = StorageService.get("abonosPendientes", []);
-    const a = abonosP[index];
-    if (!a) return;
-
-    const fechaCorta = a.fechaAbonoIso.split('T')[0];
-
-    const html = `
-    <div data-modal="auth-abono" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center;">
-        <div style="background:white; padding:25px; border-radius:12px; width:400px;">
-            <h3 style="color:#059669; margin-top:0;">💵 Autorizar Abono Provisional</h3>
-            <p><strong>Folio Crédito:</strong> ${a.folioCXC}</p>
-            <p><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
-            <p><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
-            
-            <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px;">Fecha de Ingreso Oficial (Auditoría):</label>
-            <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; margin-top:5px;">
-
-            <div style="display:flex; gap:10px; margin-top:20px;">
-                <button onclick="aprobarAbonoCuarentena(${index})" style="flex:1; background:#22c55e; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Aprobar</button>
-                <button onclick="rechazarAbonoCuarentena(${index})" style="flex:1; background:#ef4444; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; cursor:pointer;">Rechazar</button>
-                <button onclick="document.querySelector('[data-modal=auth-abono]').remove()" style="padding:12px; background:#e2e8f0; border:none; border-radius:6px; cursor:pointer;">Cancelar</button>
-            </div>
-        </div>
-    </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-};
-
-window.aprobarAbonoCuarentena = function(index) {
-    const abonosP = StorageService.get("abonosPendientes", []);
-    const a = abonosP[index];
-    const nuevaFechaCorta = document.getElementById('authFechaAbono').value;
-    const nuevaFechaIso = window.localISO ? window.localISO(nuevaFechaCorta + 'T12:00:00') : new Date(nuevaFechaCorta + 'T12:00:00').toISOString();
-    
-    a.fechaAbonoIso = nuevaFechaIso;
-    a.fechaAbonoStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(nuevaFechaIso)) : nuevaFechaCorta;
-
-    window.ejecutarAbonoAutorizadoReal(a);
-    
-    // 🛡️ CAMBIO CRÍTICO: Usar removeAtomo() para transacción atómica inmediata
-    const abonoIdCuarentena = a.idCuarentena || a.id;
-    StorageService.removeAtomo("abonosPendientes", abonoIdCuarentena).then(() => {
-        document.querySelector('[data-modal=auth-abono]').remove();
-        alert("✅ Abono aprobado y registrado en flujo de caja.");
-        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
-    }).catch(e => {
-        console.error("Error al eliminar abono de cuarentena:", e);
-        alert("⚠️ El abono se aprobó pero hubo un error al actualizar la lista. Recarga la página.");
-    });
-};
-
-window.rechazarAbonoCuarentena = function(index) {
-    if (!confirm("¿Deseas eliminar permanentemente este abono sin ingresarlo a caja?")) return;
-    
-    // 🛡️ CAMBIO CRÍTICO: Usar removeAtomo() para transacción atómica inmediata
-    const abonosP = StorageService.get("abonosPendientes", []);
-    const a = abonosP[index];
-    const abonoIdCuarentena = a.idCuarentena || a.id;
-    
-    StorageService.removeAtomo("abonosPendientes", abonoIdCuarentena).then(() => {
-        document.querySelector('[data-modal=auth-abono]').remove();
-        if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
-    }).catch(e => {
-        console.error("Error al rechazar abono:", e);
-        alert("⚠️ No se pudo procesar el rechazo. Intenta nuevamente.");
-    });
-};
+// 🧹 revisarAbonoPendiente / aprobarAbonoCuarentena / rechazarAbonoCuarentena:
+// las versiones reales y vigentes viven en modules/ventas.js (se cargan
+// después y sobrescriben estas en window). Las de aquí eran copias muertas:
+// nunca se ejecutaban, y de haberse ejecutado les faltaban las protecciones
+// que sí tiene la versión de ventas.js (await + candado de estado +
+// actualizarAtomo + log de auditoría). Se retiraron para no depender de este
+// orden de carga como deuda técnica.
 
 // 🛡️ Alias global para módulos que usen la versión corta
 window.dinero = window.formatearDineroMX;
