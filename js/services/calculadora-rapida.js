@@ -22,10 +22,17 @@
 (function () {
 
     let campoDestino = null;   // <input> actualmente enfocado y elegible
-    let padOriginal = '';      // padding-right original del campo, para restaurarlo
 
     function esCampoElegible(el) {
-        return el && el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'text' || el.type === 'tel');
+        // 🛡️ Solo type="number": es el único caso real que motivó esta
+        // calculadora (el navegador bloquea +-*/ ahí, ver comentario arriba).
+        // Antes también enganchaba type="text" y type="tel", así que el
+        // icono aparecía en CUALQUIER campo de texto de la app -incluido
+        // el usuario del login (#loginEmail es type="text")- y estorbaba
+        // al escribir nombre, dirección, notas, teléfono, etc. Ningún campo
+        // de dinero/cantidad en la app usa type="text", así que restringir
+        // aquí no deja ningún campo de importe sin calculadora.
+        return el && el.tagName === 'INPUT' && el.type === 'number';
     }
 
     function esParteDeLaCalculadora(el) {
@@ -222,12 +229,20 @@
     }
 
     // ===== Posicionamiento (junto al campo, sin salirse de la pantalla) =====
+    // 🛡️ El icono NO se pone encima del área de texto del campo (antes se
+    // superponía al borde derecho por dentro, y aunque se le sumaba padding
+    // al input para compensar, en tablet terminaba tapando los últimos
+    // dígitos capturados). Ahora flota como una insignia FUERA del
+    // recuadro, pegada arriba del borde superior derecho; si no hay
+    // espacio arriba (el campo está pegado al tope de la pantalla), se
+    // pone abajo del borde inferior derecho en su lugar. Nunca cubre el
+    // contenido del campo.
     function posicionarIcono() {
         if (!campoDestino) return;
         const r = campoDestino.getBoundingClientRect();
         const tam = 28, margen = 3;
-        let left = r.right - tam - margen;
-        let top = r.top + (r.height - tam) / 2;
+        let left = r.right - tam;
+        let top = (r.top - tam - margen >= margen) ? (r.top - tam - margen) : (r.bottom + margen);
         left = Math.min(Math.max(left, margen), window.innerWidth - tam - margen);
         top = Math.min(Math.max(top, margen), window.innerHeight - tam - margen);
         icono.style.left = left + 'px';
@@ -257,13 +272,9 @@
         campoDestino = input;
         icono.style.display = 'flex';
         posicionarIcono();
-        // Un poco de espacio para que el icono no tape lo que se escribe.
-        padOriginal = input.style.paddingRight || '';
-        input.style.paddingRight = '30px';
     }
 
     function ocultarIcono() {
-        if (campoDestino) campoDestino.style.paddingRight = padOriginal;
         icono.style.display = 'none';
         campoDestino = null;
     }
