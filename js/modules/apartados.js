@@ -157,8 +157,22 @@ async function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efec
         resultadoTx = await StorageService.transaccionRegistros(
             [{ tabla: 'apartados', clave: folio }],
             (frescos) => {
-                const apFresco = frescos[`apartados:${folio}`];
-                if (!apFresco) return null; // el apartado desapareció entre el pre-check y ahora (rarísimo)
+                // 🛡️ Si el documento individual de este apartado nunca se creó
+                // en Firestore (apartados capturados sin conexión, o cualquier
+                // otro hueco de sincronización — NO es un caso "rarísimo" de
+                // carrera, ya se observó en producción), frescos[...] viene
+                // null aunque el apartado sí exista de verdad. Antes esto
+                // abortaba con `return null`, y como el dinero YA había
+                // entrado a caja unas líneas arriba, el resultado era: el
+                // abono nunca se aplicaba al saldo, la función tronaba más
+                // abajo con "Cannot read properties of null" sin avisar a
+                // nadie, el botón se reactivaba solo, y el siguiente clic
+                // repetía el ingreso a caja con el mismo idOperacion — la
+                // causa real de un abono duplicado que ya se dio (folio
+                // V-20260714-131827-UT0G-0001-EWS2C, Celia Herrera). Usamos
+                // el apartado local ya validado arriba (ya confirmamos que
+                // existe y no está cancelado) como base en vez de abortar.
+                const apFresco = frescos[`apartados:${folio}`] || ap;
 
                 // Idempotencia final, con el dato más fresco posible: si este
                 // idOperacion ya está aplicado en el servidor (otro
@@ -197,7 +211,22 @@ async function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efec
         return false;
     }
 
-    if (resultadoTx?.yaAplicado) {
+    if (!resultadoTx) {
+        // 🛡️ Red de seguridad adicional: con el fallback de arriba esto ya
+        // no debería pasar, pero si por cualquier otra razón no prevista
+        // transaccionRegistros no devolviera resultado, antes esto tronaba
+        // silenciosamente en la siguiente línea (resultadoTx.apAct sobre
+        // null) sin ningún try/catch en toda la cadena de llamadas — el
+        // botón se reactivaba vía el finally() de bloquearBotonDurante sin
+        // que el usuario viera ningún error, invitando a un reintento que
+        // duplicaba el ingreso a caja. Ahora se avisa explícitamente en vez
+        // de fallar en silencio.
+        console.error('transaccionRegistros no devolvió resultado al aplicar abono de apartado, folio:', folio);
+        if (!opciones.silencioso) alert(`⚠️ El dinero SÍ se registró en caja, pero no se pudo confirmar la actualización del apartado "${folio}". Revisa manualmente antes de reintentar — no vuelvas a dar clic en "Ingresar a Caja" para este mismo abono.`);
+        return false;
+    }
+
+    if (resultadoTx.yaAplicado) {
         // Otro dispositivo ya había aplicado este mismo abono al apartado.
         // El dinero de ESTE intento ya entró a caja arriba: se avisa para
         // que se concilie manualmente.

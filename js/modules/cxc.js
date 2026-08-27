@@ -1634,11 +1634,17 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
         .filter(p => p.folio === a.folioCXC)
         .map(p => p.id);
 
-    const cuentaLocalExiste = StorageService.get("cuentasPorCobrar", []).some(c => c.folio === a.folioCXC);
-    if (!cuentaLocalExiste) {
+    const cuentaLocalFallback = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === a.folioCXC);
+    if (!cuentaLocalFallback) {
         alert("No se encontro la cuenta por cobrar para aplicar el abono.");
         return false;
     }
+    // 🛡️ Respaldo local por si el documento individual de algún pagaré nunca
+    // se creó en Firestore (mismo hueco de sincronización que en la cuenta,
+    // ver más abajo) — así ese pagaré no se cae silenciosamente de la lista
+    // que procesa el abono.
+    const _pagaresLocalesPorId = {};
+    StorageService.get("pagaresSistema", []).forEach(p => { if (p && p.id !== undefined) _pagaresLocalesPorId[String(p.id)] = p; });
 
     // 🛡️ Confirmamos el ingreso a caja ANTES de dar por aplicado el abono.
     // Si _ingresarCuenta falla (p. ej. cuentaId inexistente), el abono NUNCA
@@ -1662,8 +1668,21 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
     let resultadoTx;
     try {
         resultadoTx = await StorageService.transaccionRegistros(lecturas, (frescos) => {
-            const cuentaFresca = frescos[`cuentasPorCobrar:${a.folioCXC}`];
-            if (!cuentaFresca) return null; // la cuenta desapareció entre el pre-check y ahora (rarísimo)
+            // 🛡️ Si el documento individual de esta cuenta nunca se creó en
+            // Firestore (cuentas capturadas sin conexión, o cualquier otro
+            // hueco de sincronización — NO es un caso "rarísimo" de carrera,
+            // ya se confirmó en producción para el equivalente de apartados),
+            // frescos[...] viene null aunque la cuenta sí exista de verdad.
+            // Antes esto abortaba con `return null`, y como esta función NO
+            // vuelve a leer resultadoTx.cuentaAct más abajo (solo revisa
+            // resultadoTx?.yaAplicado, que con null da undefined/falsy), el
+            // resultado era el peor de los dos: sin ningún error visible, la
+            // función seguía de largo, marcaba el abono como aprobado y
+            // devolvía true — el dinero entraba a caja pero el saldo del
+            // cliente JAMÁS se actualizaba, sin ninguna alerta que lo
+            // delatara. Usamos la cuenta local ya validada arriba como base
+            // en vez de abortar.
+            const cuentaFresca = frescos[`cuentasPorCobrar:${a.folioCXC}`] || cuentaLocalFallback;
 
             // Idempotencia final, con el dato más fresco posible: si este
             // idOperacion ya está aplicado en el servidor (otro dispositivo
@@ -1674,7 +1693,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
             if (yaAplicadoFresco) return { escrituras: [], resultado: { yaAplicado: true } };
 
             const pagaresDelFolioFrescos = _idsPagaresCandidatos
-                .map(id => frescos[`pagaresSistema:${id}`])
+                .map(id => frescos[`pagaresSistema:${id}`] || _pagaresLocalesPorId[String(id)])
                 .filter(p => p && p.folio === a.folioCXC);
 
             const pendientesOrdenados = pagaresDelFolioFrescos
@@ -1737,7 +1756,20 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
         return false;
     }
 
-    if (resultadoTx?.yaAplicado) {
+    if (!resultadoTx) {
+        // 🛡️ Red de seguridad adicional: con el fallback de arriba esto ya
+        // no debería pasar, pero si por cualquier otra razón no prevista
+        // transaccionRegistros no devolviera resultado, antes esto pasaba
+        // COMPLETAMENTE INADVERTIDO (ver comentario arriba: sin este chequeo,
+        // la función seguía de largo y devolvía true sin haber actualizado
+        // el saldo del cliente). Ahora se avisa explícitamente en vez de
+        // fallar en silencio.
+        console.error('transaccionRegistros no devolvió resultado al aplicar abono de cuenta por cobrar, folio:', a.folioCXC);
+        alert(`⚠️ El dinero SÍ se registró en caja, pero no se pudo confirmar la actualización de la cuenta "${a.folioCXC}". Revisa manualmente antes de reintentar — no vuelvas a autorizar este mismo abono.`);
+        return false;
+    }
+
+    if (resultadoTx.yaAplicado) {
         // Otro dispositivo ya había aplicado este mismo abono a la cuenta.
         // El dinero de ESTE intento ya entró a caja arriba: se avisa para
         // que se concilie manualmente (no se descontará dos veces del saldo
