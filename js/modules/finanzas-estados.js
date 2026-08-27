@@ -238,7 +238,38 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     // en silencio con el costo real del kardex.
     const foliosConKardexSalida = new Set(salidasVentaMovs.map(m => String(m.folioVenta)));
     const productosMap = new Map(StorageService.get('productos', []).map(p => [String(p.id), p]));
+
+    // 🛡️ REPARACIÓN: cuando ni el kardex NI el producto traen un costo
+    // utilizable (costo=0 o vacío, precioCompra=0 o vacío — típicamente un
+    // hueco de captura, no una compra gratis), la estimación de arriba
+    // aportaba $0 SIN avisar, inflando el margen en silencio. Como último
+    // recurso — y SOLO cuando de verdad no hay ningún dato de costo del que
+    // partir — se asume un margen bruto del 25% sobre el precio de venta
+    // registrado en la propia venta (costo = precio × 0.75). Es una
+    // suposición, no un dato real, así que cada producto que cae en este
+    // caso se registra en productosSinCostoDetectados para que Roberto lo
+    // corrija de forma permanente en el catálogo (ver script de consola).
+    const MARGEN_ASUMIDO_SIN_COSTO = 0.25;
+    const productosSinCostoDetectados = new Map(); // productoId -> {productoId, nombre, ocurrencias, montoConMargenAsumido}
+    function _efCostoUnitConFallback(a, prod) {
+        const costoReal = Number(prod?.costo || prod?.precioCompra) || 0;
+        if (costoReal > 0) return { costoUnit: costoReal, fueFallback: false };
+        const precioUnit = Number(a.precio || a.precioContado) || 0;
+        const costoUnit = precioUnit * (1 - MARGEN_ASUMIDO_SIN_COSTO);
+        if (costoUnit > 0) {
+            const pid = String(a.productoId ?? a.id ?? '');
+            const nombre = a.nombre || prod?.nombre || '(sin nombre)';
+            const cant = Number(a.cantidad) || 1;
+            const entry = productosSinCostoDetectados.get(pid) || { productoId: pid, nombre, ocurrencias: 0, montoConMargenAsumido: 0 };
+            entry.ocurrencias += 1;
+            entry.montoConMargenAsumido += costoUnit * cant;
+            productosSinCostoDetectados.set(pid, entry);
+        }
+        return { costoUnit, fueFallback: true };
+    }
+
     let costoVentasEstimado = 0;
+    let costoVentasPorMargenAsumido = 0;
     const foliosCostoEstimado = [];
     ventasEnRango.forEach(v => {
         const folio = String(v.folio || '');
@@ -247,8 +278,10 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         let costoEstimVenta = 0;
         arts.forEach(a => {
             const prod = productosMap.get(String(a.productoId ?? a.id ?? ''));
-            const costoUnit = Number(prod?.costo || prod?.precioCompra) || 0;
-            costoEstimVenta += costoUnit * (Number(a.cantidad) || 1);
+            const { costoUnit, fueFallback } = _efCostoUnitConFallback(a, prod);
+            const cant = Number(a.cantidad) || 1;
+            costoEstimVenta += costoUnit * cant;
+            if (fueFallback) costoVentasPorMargenAsumido += costoUnit * cant;
         });
         if (costoEstimVenta > 0) {
             costoVentasEstimado += costoEstimVenta;
@@ -289,12 +322,24 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         // no debería aportar nada. Por eso el guard es sobre si el folio
         // tiene salida real, no sobre si la venta cayó en este periodo.
         if (ventaEnEstePeriodo && !foliosConKardexSalida.has(folio)) return;
+        // articulosReingresados no siempre trae "precio" (algunos vienen del
+        // modal de condiciones, solo con productoId/cantidad/color/destino),
+        // así que para el fallback de margen se busca el precio en los
+        // artículos de la venta original por productoId.
+        const preciosVentaOriginal = new Map(
+            (Array.isArray(ventaOriginal?.articulos) ? ventaOriginal.articulos : [])
+                .map(a => [String(a.productoId ?? a.id ?? ''), Number(a.precio || a.precioContado) || 0])
+        );
         const arts = Array.isArray(c.articulosReingresados) ? c.articulosReingresados : [];
         let creditoCancelacion = 0;
         arts.forEach(a => {
-            const prod = productosMap.get(String(a.productoId ?? a.id ?? ''));
-            const costoUnit = Number(prod?.costo || prod?.precioCompra) || 0;
-            creditoCancelacion += costoUnit * (Number(a.cantidad) || 1);
+            const pid = String(a.productoId ?? a.id ?? '');
+            const prod = productosMap.get(pid);
+            const aConPrecio = { ...a, precio: a.precio ?? preciosVentaOriginal.get(pid) ?? 0 };
+            const { costoUnit, fueFallback } = _efCostoUnitConFallback(aConPrecio, prod);
+            const cant = Number(a.cantidad) || 1;
+            creditoCancelacion += costoUnit * cant;
+            if (fueFallback) costoVentasPorMargenAsumido -= costoUnit * cant; // es crédito: reduce lo ya marcado, no duplica el aviso
         });
         if (creditoCancelacion > 0) {
             reingresosEstimado += creditoCancelacion;
@@ -336,6 +381,10 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         ingresosVentas, totalDevoluciones, ingresosNetos,
         costoVentas: costoVentasFinal, costoVentasReal,
         costoVentasEstimado, foliosCostoEstimado,
+        costoVentasPorMargenAsumido: Math.max(0, costoVentasPorMargenAsumido),
+        margenAsumidoSinCostoPct: MARGEN_ASUMIDO_SIN_COSTO * 100,
+        productosSinCostoDetectados: Array.from(productosSinCostoDetectados.values())
+            .sort((a, b) => b.montoConMargenAsumido - a.montoConMargenAsumido),
         reingresosEstimado, foliosReingresoEstimado,
         utilidadBruta,
         gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
@@ -507,7 +556,17 @@ function renderEstadosFinancieros() {
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Costo de ventas${(er.costoVentasEstimado > 0 || er.reingresosEstimado > 0) ? ' <span title="Incluye ajustes estimados — ver aviso abajo" style="cursor:help;">⚠️</span>' : ''}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.costoVentas)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.costoVentas, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Utilidad bruta</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadBruta)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadBruta, er.ingresosVentas)}</td></tr>
     </table>
-    ${(er.costoVentasEstimado > 0 || er.reingresosEstimado > 0) ? `<p style="background:#fffbeb;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;">⚠️ El costo de ventas de este periodo incluye ajustes <strong>estimados</strong> (costo actual del producto × cantidad), no tomados del kardex:${er.costoVentasEstimado > 0 ? ` +${_efDinero(er.costoVentasEstimado)} por ${er.foliosCostoEstimado.length === 1 ? 'la venta' : 'las ventas'} sin salida en movimientosInventario (${_efEsc(er.foliosCostoEstimado.join(', '))})` : ''}${er.reingresosEstimado > 0 ? `${er.costoVentasEstimado > 0 ? ';' : ''} −${_efDinero(er.reingresosEstimado)} por ${er.foliosReingresoEstimado.length === 1 ? 'la cancelación' : 'las cancelaciones'} sin reingreso en movimientosInventario (${_efEsc(er.foliosReingresoEstimado.join(', '))})` : ''}. Costo real de kardex neto: ${_efDinero(er.costoVentasReal)}.</p>` : ''}
+    ${(er.costoVentasEstimado > 0 || er.reingresosEstimado > 0 || er.productosSinCostoDetectados.length > 0) ? `<details style="margin-bottom:12px;">
+        <summary style="cursor:pointer;color:#92400e;font-weight:bold;font-size:12px;">⚠️ Ver ${er.productosSinCostoDetectados.length > 0 ? er.productosSinCostoDetectados.length + ' incidencia(s) en' : ''} el costo de ventas de este periodo</summary>
+        <p style="background:#fffbeb;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;margin:8px 0 0;">El costo de ventas de este periodo incluye ajustes <strong>estimados</strong> (costo actual del producto × cantidad), no tomados del kardex:${er.costoVentasEstimado > 0 ? ` +${_efDinero(er.costoVentasEstimado)} por ${er.foliosCostoEstimado.length === 1 ? 'la venta' : 'las ventas'} sin salida en movimientosInventario (${_efEsc(er.foliosCostoEstimado.join(', '))})` : ''}${er.reingresosEstimado > 0 ? `${er.costoVentasEstimado > 0 ? ';' : ''} −${_efDinero(er.reingresosEstimado)} por ${er.foliosReingresoEstimado.length === 1 ? 'la cancelación' : 'las cancelaciones'} sin reingreso en movimientosInventario (${_efEsc(er.foliosReingresoEstimado.join(', '))})` : ''}. Costo real de kardex neto: ${_efDinero(er.costoVentasReal)}.</p>
+        ${er.productosSinCostoDetectados.length > 0 ? `<div style="background:#fef2f2;color:#991b1b;padding:10px 12px;border-radius:6px;font-size:12px;margin-top:8px;">
+            <strong>🚨 ${er.productosSinCostoDetectados.length} producto(s) SIN costo capturado</strong> (ni "costo" ni "precioCompra") — de los ${_efDinero(er.costoVentasEstimado)} estimados arriba, ${_efDinero(er.costoVentasPorMargenAsumido)} NO vienen del costo real del producto sino de asumir un margen del ${er.margenAsumidoSinCostoPct}% sobre su precio de venta. Corrige el campo "Costo" de estos productos en el catálogo para que deje de ser una suposición:
+            <table style="width:100%;border-collapse:collapse;margin-top:6px;background:white;border-radius:4px;overflow:hidden;">
+                <thead><tr style="background:#fee2e2;text-align:left;"><th style="padding:4px 8px;">Producto (ID)</th><th style="padding:4px 8px;text-align:right;">Veces vendido en el periodo</th><th style="padding:4px 8px;text-align:right;">Monto estimado con margen asumido</th></tr></thead>
+                <tbody>${er.productosSinCostoDetectados.map(p => `<tr><td style="padding:4px 8px;">${_efEsc(p.nombre)} <span style="color:#9ca3af;">(${_efEsc(p.productoId)})</span></td><td style="padding:4px 8px;text-align:right;">${p.ocurrencias}</td><td style="padding:4px 8px;text-align:right;">${_efDinero(p.montoConMargenAsumido)}</td></tr>`).join('')}</tbody>
+            </table>
+        </div>` : ''}
+    </details>` : ''}
     <details style="margin-bottom:12px;">
         <summary style="cursor:pointer;color:#1e40af;font-weight:bold;font-size:13px;">Ver desglose de gastos operativos (${_efDinero(er.totalGastos)})</summary>
         <table style="width:100%;border-collapse:collapse;margin-top:6px;">${filasGastos}</table>
