@@ -52,6 +52,51 @@ function _abonosCuenta(cuenta = {}) {
     return Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
 }
 
+// Plazo pactado en texto, con la misma jerarquia de campos que usa el
+// estado de cuenta por folio en cxc.js (_cxcEstadoCuentaModelo): pagos,
+// luego plazo, luego semanas.
+function _eccPlazoCuenta(cuenta = {}) {
+    const plan = cuenta.plan || cuenta.planCredito || {};
+    const periodicidad = cuenta.periodicidad || plan.periodicidad || 'semanal';
+    const pagos = Number(plan.pagos || plan.plazo || plan.semanas || 0);
+    if (!pagos) return 'Sin plazo registrado';
+    return `${pagos} pago(s) ${periodicidad}${plan.meses ? ` (${plan.meses} mes(es))` : ''}`;
+}
+
+// Historial de abonos con saldo corrido, para dejar impreso TODO el
+// historial de la venta (no solo el conteo) en los documentos que se
+// entregan/exportan al cliente.
+function _eccAbonosDetalleCuenta(cuenta = {}, totalCredito = 0) {
+    const abonos = _abonosCuenta(cuenta)
+        .filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado)
+        .slice()
+        .sort((a, b) => {
+            const fa = new Date(_fechaAbonoCuenta(a) || 0).getTime() || 0;
+            const fb = new Date(_fechaAbonoCuenta(b) || 0).getTime() || 0;
+            return fa - fb;
+        });
+    let saldo = Number(totalCredito || 0);
+    return abonos.map((a, idx) => {
+        const monto = _montoAbonoCuenta(a);
+        saldo = Math.max(0, saldo - monto);
+        return {
+            numero: idx + 1,
+            fecha: _fechaCortaCuenta(_fechaAbonoCuenta(a)),
+            medio: a.etiquetaCuenta || a.medioPago || a.cuentaId || 'Efectivo',
+            monto,
+            saldoDespues: saldo
+        };
+    });
+}
+
+function _eccArticulosDetalleCuenta(cuenta = {}) {
+    return (Array.isArray(cuenta.articulos) ? cuenta.articulos : []).map(a => ({
+        nombre: a.nombre || a.productoNombre || 'Producto',
+        cantidad: Number(a.cantidad || 1),
+        precio: Number(a.precioContado || a.precio || 0)
+    }));
+}
+
 function _saldoCuenta(cuenta = {}) {
     const tieneSaldoDirecto = cuenta.saldoActual !== undefined || cuenta.saldoPendiente !== undefined || cuenta.saldo !== undefined;
     const directo = Number(cuenta.saldoActual ?? cuenta.saldoPendiente ?? cuenta.saldo ?? 0);
@@ -227,7 +272,14 @@ window.obtenerEstadoClienteConsolidado = function(clienteId, clienteNombre = '')
             abonos: abonos.length,
             ultimoAbono: abonos.length > 0 ? _fechaCortaCuenta(_fechaAbonoCuenta(abonos[abonos.length - 1])) : '-',
             estado: estadoEstatus.estado,
-            incluidoEnTotales: true
+            incluidoEnTotales: true,
+            // Detalle completo -- para que el estado de cuenta impreso/
+            // exportado traiga TODO el historial de la venta, no solo el
+            // resumen por folio.
+            plazoTexto: _eccPlazoCuenta(cuenta),
+            enganche,
+            articulosDetalle: _eccArticulosDetalleCuenta(cuenta),
+            abonosDetalle: _eccAbonosDetalleCuenta(cuenta, totalCredito)
         };
     });
     
@@ -401,6 +453,7 @@ function _eccFilaFolio(c, clienteNombre = '') {
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.fechaVentaCorta}</td>
             <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dinéroCuenta(c.totalVenta)}</td>
             <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:${c.saldo > 0 ? '#7f1d1d' : '#065f46'};"><span style="background:${c.saldo <= 0.01 ? '#d1fae5' : '#fee2e2'}; padding:4px 8px; border-radius:4px; display:inline-block;">${_dinéroCuenta(c.saldo)}</span></td>
+            <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${_escCuenta(c.plazoTexto)}</td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.diasAntiguo}</td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><strong>${c.abonos}</strong></td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${c.ultimoAbono}</td>
@@ -417,11 +470,11 @@ function _eccConstruirBloqueTabla(estado, filtro) {
     const etiquetaFiltro = filtro === 'pendiente' ? 'con saldo pendiente' : filtro === 'saldada' ? 'saldadas' : 'totales';
     const filasHtml = cuentasFiltradas.length > 0
         ? cuentasFiltradas.map(c => _eccFilaFolio(c, estado.clienteNombre)).join('')
-        : `<tr><td colspan="9" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
+        : `<tr><td colspan="10" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
 
     return `
         <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio de Venta</h3>
-        <p style="margin:0 0 12px 0; color:#64748b; font-size:12px;">Mostrando ${cuentasFiltradas.length} de ${estado.cuentas.length} folios (${etiquetaFiltro})</p>
+        <p style="margin:0 0 12px 0; color:#64748b; font-size:12px;">Mostrando ${cuentasFiltradas.length} de ${estado.cuentas.length} folios (${etiquetaFiltro}). Da clic en un folio para ver su historial completo de abonos.</p>
         <div style="overflow-x:auto;">
             <table style="width:100%; border-collapse:collapse; font-size:13px;">
                 <thead>
@@ -430,6 +483,7 @@ function _eccConstruirBloqueTabla(estado, filtro) {
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha Venta</th>
                         <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Total Venta</th>
                         <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Saldo</th>
+                        <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Plazo</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Días</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Abonos</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Último Abono</th>
@@ -662,6 +716,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                         <th style="text-align:center;">Fecha</th>
                         <th style="text-align:right;">Total</th>
                         <th style="text-align:right;">Saldo</th>
+                        <th style="text-align:center;">Plazo</th>
                         <th style="text-align:center;">Días</th>
                         <th style="text-align:center;">Estatus</th>
                     </tr>
@@ -673,12 +728,38 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                             <td style="text-align:center;">${c.fechaVentaCorta}</td>
                             <td style="text-align:right;">${_dinéroCuenta(c.totalVenta)}</td>
                             <td style="text-align:right; font-weight:bold; color:${c.saldo > 0 ? '#dc2626' : '#059669'};">${_dinéroCuenta(c.saldo)}</td>
+                            <td style="text-align:center; font-size:11px;">${_escCuenta(c.plazoTexto)}</td>
                             <td style="text-align:center;">${c.diasAntiguo}</td>
                             <td style="text-align:center;">${c.estado}</td>
                         </tr>
                     `).join('')}
                 </tbody>
             </table>
+
+            <h1 style="margin-top:40px; border-top:3px solid #1e40af; padding-top:20px;">📜 Historial Completo por Folio</h1>
+            ${cuentasImprimir.map(c => `
+                <div style="margin-top:22px; border:1px solid #cbd5e1; border-radius:8px; padding:16px; page-break-inside:avoid;">
+                    <p style="margin:0 0 6px 0; font-size:14px;"><strong>Folio ${_escCuenta(c.folio)}</strong> &nbsp;|&nbsp; Venta: ${c.fechaVentaCorta} &nbsp;|&nbsp; Plazo: ${_escCuenta(c.plazoTexto)} &nbsp;|&nbsp; Estatus: ${_escCuenta(c.estado)}</p>
+                    <p style="margin:0 0 10px 0; font-size:12px; color:#475569;">Total venta: <strong>${_dinéroCuenta(c.totalVenta)}</strong> &nbsp;|&nbsp; Enganche: ${_dinéroCuenta(c.enganche)} &nbsp;|&nbsp; Saldo actual: <strong style="color:${c.saldo > 0 ? '#dc2626' : '#059669'};">${_dinéroCuenta(c.saldo)}</strong></p>
+
+                    ${c.articulosDetalle.length ? `
+                    <p style="margin:10px 0 4px 0; font-size:12px; font-weight:bold; color:#1e293b;">Productos</p>
+                    <table style="margin:0 0 10px 0;">
+                        <thead><tr><th>Producto</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Precio contado</th></tr></thead>
+                        <tbody>
+                            ${c.articulosDetalle.map(a => `<tr><td>${_escCuenta(a.nombre)}</td><td style="text-align:center;">${a.cantidad}</td><td style="text-align:right;">${_dinéroCuenta(a.precio)}</td></tr>`).join('')}
+                        </tbody>
+                    </table>` : ''}
+
+                    <p style="margin:10px 0 4px 0; font-size:12px; font-weight:bold; color:#1e293b;">Historial de abonos</p>
+                    <table style="margin:0;">
+                        <thead><tr><th>#</th><th style="text-align:center;">Fecha</th><th>Medio</th><th style="text-align:right;">Importe</th><th style="text-align:right;">Saldo después</th></tr></thead>
+                        <tbody>
+                            ${c.abonosDetalle.length ? c.abonosDetalle.map(a => `<tr><td>${a.numero}</td><td style="text-align:center;">${a.fecha}</td><td>${_escCuenta(a.medio)}</td><td style="text-align:right;">${_dinéroCuenta(a.monto)}</td><td style="text-align:right;">${_dinéroCuenta(a.saldoDespues)}</td></tr>`).join('') : `<tr><td colspan="5" style="text-align:center; color:#64748b;">Sin abonos registrados.</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+            `).join('')}
             
             <p style="text-align:center; margin-top:40px; font-size:11px; color:#64748b;">
                 Mueblería Mi Pueblito | Documento Informativo de Saldo
@@ -705,9 +786,15 @@ window.imprimirTicketEstadoCuentaCliente = function() {
     
     const lineasCuentas = cuentasImprimir.map(c => `
         <div><b>FOLIO: ${c.folio}</b></div>
+        <div style="display:flex; justify-content:space-between;"><span>Fecha venta:</span><span>${c.fechaVentaCorta}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span>Plazo:</span><span>${_escCuenta(c.plazoTexto)}</span></div>
         <div style="display:flex; justify-content:space-between;"><span>Total:</span><span>${_dinéroCuenta(c.totalVenta)}</span></div>
+        <div style="display:flex; justify-content:space-between;"><span>Enganche:</span><span>${_dinéroCuenta(c.enganche)}</span></div>
         <div style="display:flex; justify-content:space-between;"><span>Saldo:</span><span style="font-weight:bold;">${_dinéroCuenta(c.saldo)}</span></div>
         <div style="display:flex; justify-content:space-between;"><span>Estatus:</span><span>${c.estado}</span></div>
+        ${c.articulosDetalle.length ? `<div style="margin-top:3px;"><u>Productos:</u></div>${c.articulosDetalle.map(a => `<div style="display:flex; justify-content:space-between;"><span>${_escCuenta(a.nombre)} x${a.cantidad}</span><span>${_dinéroCuenta(a.precio)}</span></div>`).join('')}` : ''}
+        <div style="margin-top:3px;"><u>Historial de abonos:</u></div>
+        ${c.abonosDetalle.length ? c.abonosDetalle.map(a => `<div style="display:flex; justify-content:space-between;"><span>${a.numero}. ${a.fecha} (${_escCuenta(a.medio)})</span><span>${_dinéroCuenta(a.monto)}</span></div>`).join('') : `<div>Sin abonos registrados.</div>`}
         <hr style="border-top:1px dashed #ccc; margin:4px 0;">
     `).join('');
 
