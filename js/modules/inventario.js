@@ -1136,6 +1136,69 @@ window.depurarInventarioHeredado = function(opciones = {}) {
  return { ok: true, cantidad: depurados.length, registroId: registro.id, depurados };
 };
 
+// ===== HELPERS COMPARTIDOS: ESTADO DE PEDIDO Y CONSIGNACION POR PRODUCTO =====
+// Usados por Consulta de Inventario y por el Reporte de Gestion de Productos
+// para no duplicar la logica de cruce con Ordenes de Compra / Consignaciones.
+function _invEstadoPedidoPorProducto() {
+ const estadoPedidoPorProd = {};
+ (window.ordenesCompra || []).forEach(oc => {
+ if (!oc.articulos) return;
+ oc.articulos.forEach(a => {
+ if (!a.productoId) return;
+ if (['Borrador', 'Pendiente', 'Pendiente de recibir'].includes(oc.estado)) {
+ estadoPedidoPorProd[a.productoId] = 'pendiente';
+ } else if (oc.estado === 'Pendiente de baja') {
+ estadoPedidoPorProd[a.productoId] = 'baja';
+ }
+ });
+ });
+ return estadoPedidoPorProd;
+}
+
+function _invConsignacionPendientePorProducto() {
+ const consignacionesActivasInv = typeof StorageService !== 'undefined' ? StorageService.get("consignacionesActivas", []) : [];
+ const consignacionPendientePorProd = {};
+ (consignacionesActivasInv || []).forEach(c => {
+ if (!c || !c.productoId) return;
+ const pend = Number(c.cantidadPendiente || 0);
+ if (pend <= 0) return;
+ consignacionPendientePorProd[c.productoId] = (consignacionPendientePorProd[c.productoId] || 0) + pend;
+ });
+ return consignacionPendientePorProd;
+}
+
+// Costo promedio de un producto en base a sus entradas de Kardex, con fallback
+// al costo declarado en la ficha / costo historico de compras.
+function _invCostoPromedioProducto(p, kardex) {
+ const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipoBase === 'entrada');
+ let totalCosto = 0, totalCantidadEntrada = 0;
+ entradas.forEach(mov => {
+ const cantidadEntrada = Number(mov.cantidad || 0);
+ totalCosto += Number(mov.costoUnitario || 0) * cantidadEntrada;
+ totalCantidadEntrada += cantidadEntrada;
+ });
+ const costoBase = Number(p.costo || p.precioCompra || _invCostoHistoricoProducto(p.id) || 0);
+ return totalCantidadEntrada > 0 && totalCosto > 0 ? (totalCosto / totalCantidadEntrada) : costoBase;
+}
+
+// Desglose compacto de ubicaciones (suma por ubicacion, sin desglosar color) para
+// pintar pastillas cortas en tablas donde no cabe el detalle completo por color.
+function _invUbicacionesResumenProducto(p) {
+ const porUbicacion = {};
+ (p.variantes || []).forEach(v => {
+ const stock = Number(v.stock) || 0;
+ if (stock <= 0) return;
+ const ubi = v.ubicacion || 'General';
+ porUbicacion[ubi] = (porUbicacion[ubi] || 0) + stock;
+ });
+ const stockGeneralProd = Number(p.stock) || 0;
+ const totalAsignado = Object.values(porUbicacion).reduce((s, v) => s + v, 0);
+ const sinAsignar = stockGeneralProd - totalAsignado;
+ const filas = Object.entries(porUbicacion).map(([ubicacion, stock]) => ({ ubicacion, stock }));
+ if (sinAsignar > 0) filas.push({ ubicacion: 'Sin ubicacion', stock: sinAsignar, sinAsignar: true });
+ return filas.sort((a, b) => b.stock - a.stock);
+}
+
 // ===== REPORTE UNIFICADO: CONSULTA DE INVENTARIO MAESTRA (PRO + VARIANTES) =====
 window.renderConsultaInventario = function() {
  const cont = document.getElementById('tablaConsultaInventario');
@@ -1607,12 +1670,39 @@ window.detectarYCorregirIdsDuplicados = function() {
  }
 }
 // FILTROS DE INVENTARIO
+// ===== FILTROS RAPIDOS (CHIPS) DEL REPORTE DE GESTION DE PRODUCTOS =====
+window.GP_STOCK_BAJO_UMBRAL = 3; // piezas o menos = "stock bajo"
+window._gpQuickFilter = window._gpQuickFilter || 'todos';
+window._gpOrden = window._gpOrden || { campo: null, dir: 1 };
+
+window._gpSetQuickFilter = function(valor) {
+ window._gpQuickFilter = valor;
+ aplicarFiltros();
+};
+
+window._gpOrdenarPor = function(campo) {
+ const actual = window._gpOrden;
+ window._gpOrden = (actual && actual.campo === campo) ? { campo, dir: -actual.dir } : { campo, dir: 1 };
+ aplicarFiltros();
+};
+
+function _gpAplicaFiltroRapido(p, estadoPedidoPorProd) {
+ const filtro = window._gpQuickFilter || 'todos';
+ if (filtro === 'todos') return true;
+ const stock = Number(p.stock) || 0;
+ if (filtro === 'sin_stock') return stock <= 0;
+ if (filtro === 'stock_bajo') return stock > 0 && stock <= window.GP_STOCK_BAJO_UMBRAL;
+ if (filtro === 'pedido_pendiente') return (estadoPedidoPorProd[p.id] || 'ninguno') === 'pendiente';
+ return true;
+}
+
 function aplicarFiltros() {
  const catFiltro = document.getElementById("filtroCategoria").value;
  const subFiltro = document.getElementById("filtroSubcategoria").value;
  const provFiltro = document.getElementById("filtroProveedorInventario")?.value || "todos";
  const estadoFiltro = document.getElementById("filtroEstadoProducto")?.value || "todos";
  const busqueda = document.getElementById("busquedaProducto").value.toLowerCase();
+ const estadoPedidoPorProd = _invEstadoPedidoPorProducto();
 
  let filtrados = window.productos.filter(p => {
  const activo = _invProductoActivo(p);
@@ -1625,7 +1715,8 @@ function aplicarFiltros() {
  : (provFiltro === "sin_proveedor" ? !_invTextoNormalizado(proveedorProducto) : _invTextoNormalizado(proveedorProducto) === _invTextoNormalizado(provFiltro));
  const texto = `${p.nombre || ''} ${p.categoria || ''} ${p.subcategoria || ''} ${p.marca || ''} ${p.modelo || ''} ${proveedorProducto}`.toLowerCase();
  const coincideNombre = !busqueda || texto.includes(busqueda);
- return coincideEstado && coincideCat && coincideSub && coincideProveedor && coincideNombre;
+ const coincideRapido = _gpAplicaFiltroRapido(p, estadoPedidoPorProd);
+ return coincideEstado && coincideCat && coincideSub && coincideProveedor && coincideNombre && coincideRapido;
  });
 
  // PASAR POR EL MOTOR ANTES DE RENDERIZAR
@@ -1659,6 +1750,8 @@ function limpiarFiltros() {
  if (filtroProveedor) filtroProveedor.value = "todos";
  const filtroEstado = document.getElementById("filtroEstadoProducto");
  if (filtroEstado) filtroEstado.value = "todos";
+ window._gpQuickFilter = 'todos';
+ window._gpOrden = { campo: null, dir: 1 };
  renderInventario(window.productos || []);
 }
 
@@ -1716,6 +1809,71 @@ function actualizarCombosFiltros() {
 }
 
 // ===== INVENTARIO =====
+function _gpBadgeUbicaciones(p) {
+ const filas = _invUbicacionesResumenProducto(p);
+ if (filas.length === 0) return '<span style="color:#94a3b8; font-style:italic; font-size:11px;">Sin ubicacion</span>';
+ const MAX_VISIBLES = 2;
+ const visibles = filas.slice(0, MAX_VISIBLES);
+ const resto = filas.slice(MAX_VISIBLES);
+ const pill = (f) => `<span style="display:inline-block; background:${f.sinAsignar ? '#fffbeb' : '#f0f9ff'}; border:1px solid ${f.sinAsignar ? '#fde68a' : '#bae6fd'}; color:${f.sinAsignar ? '#b45309' : '#0369a1'}; padding:2px 7px; border-radius:7px; margin:1px 3px 1px 0; font-size:11px; white-space:nowrap;">${_kardexEsc(f.ubicacion)} <b>${f.stock}</b></span>`;
+ let html = visibles.map(pill).join('');
+ if (resto.length > 0) {
+ const tooltip = resto.map(f => `${f.ubicacion}: ${f.stock}`).join(' | ');
+ html += `<span title="${_kardexEsc(tooltip)}" style="display:inline-block; background:#f1f5f9; color:#475569; padding:2px 7px; border-radius:7px; font-size:11px; font-weight:bold; cursor:default;">+${resto.length} mas</span>`;
+ }
+ return html;
+}
+
+function _gpOrdenarFilas(filas) {
+ const { campo, dir } = window._gpOrden || {};
+ if (!campo) return filas;
+ const copia = [...filas];
+ copia.sort((a, b) => {
+ let va, vb;
+ if (campo === 'nombre') { va = (a.p.nombre || '').toLowerCase(); vb = (b.p.nombre || '').toLowerCase(); return va.localeCompare(vb, 'es') * dir; }
+ if (campo === 'stock') { va = Number(a.p.stock) || 0; vb = Number(b.p.stock) || 0; }
+ else if (campo === 'valor') { va = a.valorTotal; vb = b.valorTotal; }
+ else if (campo === 'precio') { va = Number(a.p.precio) || 0; vb = Number(b.p.precio) || 0; }
+ else return 0;
+ return (va - vb) * dir;
+ });
+ return copia;
+}
+
+function _gpFlechaOrden(campo) {
+ const o = window._gpOrden || {};
+ if (o.campo !== campo) return '<span style="opacity:.25;">↕</span>';
+ return o.dir === 1 ? '<span>↑</span>' : '<span>↓</span>';
+}
+
+window.exportarGestionProductosCSV = function() {
+ const filas = window._gpUltimasFilas || [];
+ const headers = ['nombre', 'categoria', 'subcategoria', 'proveedor', 'stock', 'ubicaciones', 'costoPromedio', 'valorTotal', 'precio', 'estado', 'pedido', 'antiguedad'];
+ const rows = filas.map(f => ({
+ nombre: f.p.nombre || '',
+ categoria: f.p.categoria || '',
+ subcategoria: f.p.subcategoria || '',
+ proveedor: _invProveedorProducto(f.p) || '',
+ stock: Number(f.p.stock) || 0,
+ ubicaciones: _invUbicacionesResumenProducto(f.p).map(u => `${u.ubicacion}:${u.stock}`).join(' | '),
+ costoPromedio: f.costoPromedio.toFixed(2),
+ valorTotal: f.valorTotal.toFixed(2),
+ precio: Number(f.p.precio) || 0,
+ estado: f.activo ? 'Activo' : 'Inactivo',
+ pedido: f.estadoPedido === 'pendiente' ? 'Pedido pendiente' : (f.estadoPedido === 'baja' ? 'Pendiente baja' : ''),
+ antiguedad: f.antiguedad
+ }));
+ const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','))).join('\n');
+ const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+ const url = URL.createObjectURL(blob);
+ const a = document.createElement('a');
+ a.href = url;
+ const hoyArchivo = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+ a.download = `inventario_${hoyArchivo}.csv`;
+ a.click();
+ URL.revokeObjectURL(url);
+};
+
 function renderInventario(listaAMostrar = (window.productos || [])) {
  const cont = document.getElementById("listaInventario");
  if (!cont) return;
@@ -1736,36 +1894,125 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  { key: 'subcategoria', id: 'filtroSubcategoria', label: 'Subcategoria', defaultValue: 'todos' }
  ], 'aplicarFiltros');
 
+ // ---- 1) Enriquecer cada producto: costo promedio, valorizacion, pedido, antiguedad ----
+ const productosBase = (window.productos || []).filter(_invProductoActivo);
+ const productosMap = new Map(productosBase.map(p => [String(p.id), p]));
+ const kardex = (window.movimientosInventario || [])
+ .map(m => _normalizarMovimientoKardex(m, productosMap))
+ .filter(m => !m.anulado);
+ const estadoPedidoPorProd = _invEstadoPedidoPorProducto();
+ const consignacionPendientePorProd = _invConsignacionPendientePorProducto();
+
+ let filas = listaAMostrar.map(p => {
+ const costoPromedio = _invCostoPromedioProducto(p, kardex);
+ const stockGeneralProd = Number(p.stock) || 0;
+ const stockConsignacionProd = Math.min(stockGeneralProd, Number(consignacionPendientePorProd[p.id] || 0));
+ const valorTotal = stockGeneralProd * costoPromedio;
+ return {
+ p,
+ costoPromedio,
+ valorTotal,
+ stockConsignacion: stockConsignacionProd,
+ activo: _invProductoActivo(p),
+ estadoPedido: estadoPedidoPorProd[p.id] || 'ninguno',
+ antiguedad: typeof calcularAntiguedadProducto === 'function' ? calcularAntiguedadProducto(p) : '-'
+ };
+ });
+
+ // ---- 2) Orden manual por columna (si el usuario hizo clic en un encabezado) ----
+ filas = _gpOrdenarFilas(filas);
+ window._gpUltimasFilas = filas; // usado por exportarGestionProductosCSV
+
+ // ---- 3) KPIs del listado actualmente filtrado ----
+ const totalSkus = filas.length;
+ const totalUnidades = filas.reduce((s, f) => s + (Number(f.p.stock) || 0), 0);
+ const valorInventarioCosto = filas.reduce((s, f) => s + f.valorTotal, 0);
+ const valorVentaPotencial = filas.reduce((s, f) => s + ((Number(f.p.stock) || 0) * (Number(f.p.precio) || 0)), 0);
+ const sinStockCount = filas.filter(f => (Number(f.p.stock) || 0) <= 0).length;
+ const stockBajoCount = filas.filter(f => { const s = Number(f.p.stock) || 0; return s > 0 && s <= window.GP_STOCK_BAJO_UMBRAL; }).length;
+ const pedidoPendienteCount = filas.filter(f => f.estadoPedido === 'pendiente').length;
+
+ const kpi = (label, valor, color, sub = '') => `
+ <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; min-width:150px; flex:1;">
+ <div style="font-size:10px; font-weight:900; letter-spacing:.03em; color:#64748b; text-transform:uppercase;">${label}</div>
+ <div style="font-size:20px; font-weight:900; color:${color}; margin-top:2px;">${valor}</div>
+ ${sub ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">${sub}</div>` : ''}
+ </div>`;
+
+ const kpisHtml = `
+ <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+ ${kpi('SKUs listados', totalSkus, '#0f172a')}
+ ${kpi('Unidades totales', totalUnidades, '#1e40af')}
+ ${kpi('Valor inventario (costo)', typeof dinero === 'function' ? dinero(valorInventarioCosto) : valorInventarioCosto.toFixed(2), '#16a34a')}
+ ${kpi('Valor venta potencial', typeof dinero === 'function' ? dinero(valorVentaPotencial) : valorVentaPotencial.toFixed(2), '#7c3aed')}
+ ${kpi('Sin stock', sinStockCount, sinStockCount > 0 ? '#dc2626' : '#16a34a')}
+ ${kpi('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCount, stockBajoCount > 0 ? '#d97706' : '#16a34a')}
+ ${kpi('Con pedido pendiente', pedidoPendienteCount, pedidoPendienteCount > 0 ? '#0284c7' : '#94a3b8')}
+ </div>`;
+
+ // ---- 4) Chips de filtro rapido (independientes de los filtros de arriba) ----
+ const qf = window._gpQuickFilter || 'todos';
+ const chipRapido = (valor, label) => `<button onclick="_gpSetQuickFilter('${valor}')" style="padding:6px 12px; border-radius:999px; border:1px solid ${qf === valor ? '#1e40af' : '#e2e8f0'}; background:${qf === valor ? '#1e40af' : 'white'}; color:${qf === valor ? 'white' : '#334155'}; font-size:12px; font-weight:bold; cursor:pointer;">${label}</button>`;
+ const chipsRapidosHtml = `
+ <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+ ${chipRapido('todos', 'Todos')}
+ ${chipRapido('sin_stock', `Sin stock (${sinStockCount})`)}
+ ${chipRapido('stock_bajo', `Stock bajo (${stockBajoCount})`)}
+ ${chipRapido('pedido_pendiente', `Pedido pendiente (${pedidoPendienteCount})`)}
+ <button onclick="exportarGestionProductosCSV()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; font-size:12px; font-weight:bold; cursor:pointer;">⬇ Exportar CSV</button>
+ </div>`;
+
  let html = `
+ ${kpisHtml}
  ${chipsControl}
- <table class="tabla-admin">
+ ${chipsRapidosHtml}
+ <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.08); border-radius:12px;">
+ <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white;">
  <thead>
- <tr>
- <th>Producto</th>
- <th style="text-align:center;">Stock</th>
- <th style="text-align:right;">Precio</th>
- <th style="text-align:center;">Acciones</th>
+ <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
+ <th style="padding:13px; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('nombre')">Producto ${_gpFlechaOrden('nombre')}</th>
+ <th style="padding:13px; text-align:center; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('stock')">Stock ${_gpFlechaOrden('stock')}</th>
+ <th style="padding:13px;">Ubicaciones</th>
+ <th style="padding:13px; text-align:right; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('valor')">Valorizacion ${_gpFlechaOrden('valor')}</th>
+ <th style="padding:13px; text-align:right; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('precio')">Precio ${_gpFlechaOrden('precio')}</th>
+ <th style="padding:13px; text-align:center;">Estado</th>
+ <th style="padding:13px; text-align:center;">Acciones</th>
  </tr>
  </thead>
  <tbody>`;
 
- if (listaAMostrar.length === 0) {
- html += `<tr><td colspan="4" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
+ if (filas.length === 0) {
+ html += `<tr><td colspan="7" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
  } else {
- listaAMostrar.forEach(p => {
- const stock = p.stock || 0;
- const colorStock = stock > 0 ? "#27ae60" : "#e74c3c";
- const activo = _invProductoActivo(p);
+ filas.forEach(f => {
+ const p = f.p;
+ const stock = Number(p.stock) || 0;
+ const colorStock = stock <= 0 ? '#dc2626' : (stock <= window.GP_STOCK_BAJO_UMBRAL ? '#d97706' : '#16a34a');
+ const labelPedido = f.estadoPedido === 'pendiente' ? '<span style="display:block;color:#0284c7;font-size:11px;font-weight:bold;">Pedido pendiente</span>' :
+ f.estadoPedido === 'baja' ? '<span style="display:block;color:#e11d48;font-size:11px;font-weight:bold;">Pendiente baja</span>' : '';
  html += `
- <tr>
- <td>
- <b>${p.nombre}</b><br>
- ${activo ? '' : '<span style="display:inline-block;margin:3px 0;padding:2px 7px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:10px;font-weight:900;text-transform:uppercase;">Inactivo</span><br>'}
- <small style="color:#666;">${p.categoria || ''} > ${p.subcategoria || ''}</small>
+ <tr style="border-bottom:1px solid #f1f5f9;">
+ <td style="padding:12px;">
+ <div style="font-weight:bold; color:#0f172a;">${p.nombre}</div>
+ ${f.activo ? '' : '<span style="display:inline-block;margin:3px 0;padding:2px 7px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:10px;font-weight:900;text-transform:uppercase;">Inactivo</span>'}
+ <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
+ <div style="font-size:11px; color:#94a3b8;">${_kardexEsc(_invProveedorProducto(p) || 'Sin proveedor')}</div>
  </td>
- <td style="text-align:center; font-weight:bold; color:${colorStock};">${stock}</td>
- <td style="text-align:right;">${dinero(p.precio)}</td>
- <td style="text-align:center;">
+ <td style="padding:12px; text-align:center;">
+ <span style="font-size:18px; font-weight:900; color:${colorStock};">${stock}</span>
+ ${f.stockConsignacion > 0 ? `<div style="margin-top:4px;"><span style="font-size:9px;font-weight:bold;color:#854d0e;background:#fef3c7;padding:2px 6px;border-radius:10px;">${f.stockConsignacion} consig.</span></div>` : ''}
+ </td>
+ <td style="padding:12px;">${_gpBadgeUbicaciones(p)}</td>
+ <td style="padding:12px; text-align:right;">
+ <div style="font-weight:bold; color:#1e40af;">${typeof dinero === 'function' ? dinero(f.valorTotal) : f.valorTotal.toFixed(2)}</div>
+ <div style="font-size:10px; color:#94a3b8;">Costo: ${typeof dinero === 'function' ? dinero(f.costoPromedio) : f.costoPromedio.toFixed(2)}</div>
+ </td>
+ <td style="padding:12px; text-align:right; font-weight:bold;">${typeof dinero === 'function' ? dinero(p.precio) : p.precio}</td>
+ <td style="padding:12px; text-align:center; line-height:1.3;">
+ ${labelPedido || '<span style="color:#94a3b8;font-size:11px;">—</span>'}
+ <div style="font-size:10px; color:#64748b; margin-top:3px;">${f.antiguedad}</div>
+ </td>
+ <td style="padding:12px; text-align:center;">
  <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
  <button onclick="abrirProductoForm('${String(p.id)}')" 
  style="padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;">
@@ -1785,7 +2032,21 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  });
  }
 
- html += `</tbody></table>`;
+ html += `
+ </tbody>
+ <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
+ <tr>
+ <td style="padding:12px 15px;">TOTAL (${filas.length} producto${filas.length === 1 ? '' : 's'}):</td>
+ <td style="padding:12px 15px; text-align:center; color:#1e40af;">${totalUnidades}</td>
+ <td></td>
+ <td style="padding:12px 15px; text-align:right; color:#16a34a;">${typeof dinero === 'function' ? dinero(valorInventarioCosto) : valorInventarioCosto.toFixed(2)}</td>
+ <td></td>
+ <td></td>
+ <td></td>
+ </tr>
+ </tfoot>
+ </table>
+ </div>`;
  cont.innerHTML = html;
 }
 
@@ -3009,9 +3270,12 @@ window.abrirTransferenciaProductoDesdeVisor = function(prodId) {
  const p = (window.productos || []).find(prod => String(prod.id) === String(prodId));
  if (!p) return alert('Producto no encontrado.');
  if (typeof window.abrirModalTransferenciaInv === 'function') window.abrirModalTransferenciaInv();
+ // No se asume la ubicacion origen del producto: se precarga solo la busqueda
+ // para que, al elegir el origen, el listado de existencia real lo muestre.
  setTimeout(() => {
- window._transfInvItems = [{ id: p.id, nombre: p.nombre, cantidad: 1 }];
- if (typeof window._transfInvRenderItems === 'function') window._transfInvRenderItems();
+ const buscador = document.getElementById('transfBusquedaOrigen');
+ if (buscador) buscador.value = p.nombre || '';
+ if (typeof window._transfInvRenderListado === 'function') window._transfInvRenderListado();
  }, 50);
 };
 
@@ -3137,18 +3401,75 @@ window.ejecutarAjusteInv = function() {
 };
 
 // --- TRANSFERENCIAS ENTRE BODEGAS (MASIVA) ---
-window._transfInvItems = [];
+// La fuente real de existencia por ubicacion es p.variantes ({ubicacion, color,
+// stock}) -- es lo que usan Ventas, Compras y Toma Fisica. p.stockPorUbicacion
+// es solo un cache agregado (se recalcula aqui a partir de variantes) para no
+// romper compatibilidad con lo que ya lo lee.
+window._transfInvItems = []; // [{id, nombre, color, cantidad}]
+window._transfInvOrigenCarrito = null;
+
+function _transfInvNormClave(valor) {
+ return (typeof window._normalizarClaveInventario === 'function')
+ ? window._normalizarClaveInventario(valor)
+ : String(valor || '').trim().toUpperCase();
+}
+
+function _transfInvClave(id, color) {
+ return `${id}|${_transfInvNormClave(color || 'General')}`;
+}
+
+// Escapa un valor para usarlo como argumento de string dentro de un
+// onclick="...('valor')" que a su vez vive en un atributo HTML entrecomillado
+// con comillas dobles. Es distinto de _kardexEsc: aqui NO se debe convertir el
+// apostrofe a entidad (&#039;), porque el navegador decodifica las entidades
+// del atributo ANTES de interpretar el JS, y eso rompe la cadena de comillas
+// simples otra vez. Se escapa como JS-string real y solo la comilla doble se
+// vuelve entidad (para no cortar el atributo).
+function _transfInvAttr(value) {
+ return String(value ?? '')
+ .replace(/\\/g, '\\\\')
+ .replace(/'/g, "\\'")
+ .replace(/"/g, '&quot;');
+}
+
+// Existencia real (por variante) de todos los productos activos en una ubicacion.
+function _transfInvExistenciasOrigen(origen) {
+ if (!origen) return [];
+ const origenNorm = _transfInvNormClave(origen);
+ const productos = (window.productos || []).filter(_invProductoActivo);
+ const filas = [];
+ productos.forEach(p => {
+ (p.variantes || []).forEach(v => {
+ if (_transfInvNormClave(v.ubicacion || 'General') !== origenNorm) return;
+ const stock = Number(v.stock) || 0;
+ if (stock <= 0) return;
+ filas.push({
+ productoId: p.id,
+ nombre: p.nombre,
+ categoria: p.categoria || '',
+ subcategoria: p.subcategoria || '',
+ color: v.color || 'General',
+ disponible: stock
+ });
+ });
+ });
+ return filas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es') || a.color.localeCompare(b.color, 'es'));
+}
 
 window.abrirModalTransferenciaInv = function() {
  if (!_invRequireAdmin('Abrir transferencia de inventario')) return;
  const ubs = StorageService.get('ubicacionesConfig', [{id:'General', nombre:'Piso de Ventas (General)'}]);
- let opts = '';
+ let opts = '<option value="">-- Selecciona --</option>';
  ubs.forEach(u => opts += `<option value="${u.nombre}">${u.nombre}</option>`);
  
  document.getElementById('transfOrigen').innerHTML = opts;
  document.getElementById('transfDestino').innerHTML = opts;
 
  window._transfInvItems = [];
+ window._transfInvOrigenCarrito = null;
+ const buscador = document.getElementById('transfBusquedaOrigen');
+ if (buscador) buscador.value = '';
+ window._transfInvRenderListado();
  window._transfInvRenderItems();
  
  // Y MAGIA DEL CSS AQUI TAMBIAN
@@ -3157,58 +3478,141 @@ window.abrirModalTransferenciaInv = function() {
  modal.style.display = 'flex';
 };
 
-// Abre el buscador universal acotado solo a productos con existencia en sistema
-// (soloConStock). Si el usuario tiene la mercancia fisicamente pero no aparece
-// aqui, es un caso para las herramientas de Ajuste de Inventario, no de transferencia.
+// Cuando cambia el origen, el carrito armado con la existencia de la bodega
+// anterior deja de ser valido -- se limpia para evitar mover piezas que no
+// estan fisicamente ahi.
+window._transfInvRefrescarUI = function() {
+ const origen = document.getElementById('transfOrigen')?.value || '';
+ if (window._transfInvItems.length > 0 && origen !== window._transfInvOrigenCarrito) {
+ window._transfInvItems = [];
+ }
+ window._transfInvRenderListado();
+ window._transfInvRenderItems();
+};
+
+// Listado de existencia real del origen elegido: aqui es donde se eligen
+// modelo(s) y piezas a mover, sin tener que buscar producto por producto.
+window._transfInvRenderListado = function() {
+ const cont = document.getElementById('transfListadoOrigen');
+ if (!cont) return;
+ const origen = document.getElementById('transfOrigen')?.value || '';
+ const q = String(document.getElementById('transfBusquedaOrigen')?.value || '').trim().toLowerCase();
+
+ if (!origen) {
+ cont.innerHTML = `<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px;">Elige primero la ubicacion de origen para ver su existencia.</div>`;
+ return;
+ }
+
+ let filas = _transfInvExistenciasOrigen(origen);
+ if (q) filas = filas.filter(f => `${f.nombre} ${f.categoria} ${f.subcategoria} ${f.color}`.toLowerCase().includes(q));
+
+ if (filas.length === 0) {
+ cont.innerHTML = `<div style="text-align:center;padding:20px;color:#94a3b8;font-size:13px;">${q ? 'Sin resultados para esa busqueda.' : `"${origen}" no tiene existencia asignada. Usa "Buscar otro" o revisa Ajuste/Asignacion rapida.`}</div>`;
+ return;
+ }
+
+ cont.innerHTML = filas.map(f => {
+ const clave = _transfInvClave(f.productoId, f.color);
+ const enCarrito = (window._transfInvItems.find(it => _transfInvClave(it.id, it.color) === clave)?.cantidad) || 0;
+ const restante = Math.max(0, f.disponible - enCarrito);
+ const inputId = `transfQty_${clave.replace(/[^a-zA-Z0-9]/g, '_')}`;
+ return `
+ <div style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #e2e8f0; border-radius:6px; background:white;">
+ <div style="flex:1; min-width:0;">
+ <div style="font-weight:bold; font-size:13px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${_kardexEsc(f.nombre)}</div>
+ <div style="font-size:11px; color:#64748b;">${_kardexEsc(f.categoria)} ${f.subcategoria ? '> ' + _kardexEsc(f.subcategoria) : ''} · <b>${_kardexEsc(f.color)}</b></div>
+ <div style="font-size:11px; margin-top:2px;">Disponible: <strong style="color:${restante > 0 ? '#16a34a' : '#94a3b8'}">${restante}</strong>${enCarrito > 0 ? ` <span style="color:#2563eb;">(${enCarrito} ya en carrito)</span>` : ''}</div>
+ </div>
+ <input id="${inputId}" type="number" min="1" max="${restante}" value="${restante > 0 ? 1 : 0}" ${restante <= 0 ? 'disabled' : ''} style="width:60px; text-align:center; padding:6px; border:1px solid #d1d5db; border-radius:5px;">
+ <button ${restante <= 0 ? 'disabled' : ''} onclick="_transfInvAgregarDesdeListado('${f.productoId}', '${_transfInvAttr(f.color)}', '${inputId}')" style="padding:7px 11px; background:${restante > 0 ? '#1e40af' : '#cbd5e1'}; color:white; border:none; border-radius:5px; cursor:${restante > 0 ? 'pointer' : 'not-allowed'}; font-weight:bold; font-size:12px;">+ Agregar</button>
+ </div>`;
+ }).join('');
+};
+
+window._transfInvAgregarDesdeListado = function(productoId, color, inputId) {
+ const origen = document.getElementById('transfOrigen')?.value || '';
+ if (!origen) return;
+ const input = document.getElementById(inputId);
+ const cant = parseInt(input?.value, 10);
+ if (isNaN(cant) || cant <= 0) return alert('Ingresa una cantidad valida.');
+
+ const filas = _transfInvExistenciasOrigen(origen);
+ const fila = filas.find(f => String(f.productoId) === String(productoId) && _transfInvNormClave(f.color) === _transfInvNormClave(color));
+ if (!fila) return alert('Esa existencia ya no esta disponible en el origen (puede que se haya movido). Actualiza el listado.');
+
+ const clave = _transfInvClave(productoId, color);
+ const item = window._transfInvItems.find(it => _transfInvClave(it.id, it.color) === clave);
+ const yaEnCarrito = item ? Number(item.cantidad) || 0 : 0;
+
+ if (yaEnCarrito + cant > fila.disponible) {
+ return alert(`Solo hay ${fila.disponible} pieza(s) de "${fila.nombre}" (${fila.color}) en ${origen}. Ya tienes ${yaEnCarrito} en el carrito.`);
+ }
+
+ if (item) {
+ item.cantidad = yaEnCarrito + cant;
+ } else {
+ window._transfInvItems.push({ id: productoId, nombre: fila.nombre, color: fila.color, cantidad: cant });
+ }
+ window._transfInvOrigenCarrito = origen;
+
+ window._transfInvRenderListado();
+ window._transfInvRenderItems();
+};
+
+// Buscador universal de respaldo: por si el producto tiene existencia fisica
+// en el origen pero, por lo que sea, no quedo registrada en variantes (caso
+// para Ajuste de Inventario, no para transferencia normal).
 window._transfInvAbrirPicker = function() {
  abrirSelectorProducto({
  titulo: '🔍 Agregar Producto (solo con existencia)',
  soloConStock: true,
  onSeleccion: p => {
- if (window._transfInvItems.some(it => String(it.id) === String(p.id))) {
- alert(`"${p.nombre}" ya esta en la lista.`);
- return;
- }
- window._transfInvItems.push({ id: p.id, nombre: p.nombre, cantidad: 1 });
- window._transfInvRenderItems();
+ const buscador = document.getElementById('transfBusquedaOrigen');
+ if (buscador) buscador.value = p.nombre || '';
+ window._transfInvRenderListado();
  }
  });
 };
 
-window._transfInvQuitarItem = function(idProd) {
- window._transfInvItems = window._transfInvItems.filter(it => String(it.id) !== String(idProd));
+window._transfInvQuitarItem = function(idProd, color) {
+ const clave = _transfInvClave(idProd, color);
+ window._transfInvItems = window._transfInvItems.filter(it => _transfInvClave(it.id, it.color) !== clave);
+ window._transfInvRenderListado();
  window._transfInvRenderItems();
 };
 
-window._transfInvActualizarCantidad = function(idProd, valor) {
- const item = window._transfInvItems.find(it => String(it.id) === String(idProd));
- if (item) item.cantidad = valor;
+window._transfInvActualizarCantidad = function(idProd, color, valor) {
+ const origen = document.getElementById('transfOrigen')?.value || '';
+ const clave = _transfInvClave(idProd, color);
+ const item = window._transfInvItems.find(it => _transfInvClave(it.id, it.color) === clave);
+ if (!item) return;
+ const cant = parseInt(valor, 10);
+ const filas = _transfInvExistenciasOrigen(origen);
+ const fila = filas.find(f => String(f.productoId) === String(idProd) && _transfInvNormClave(f.color) === _transfInvNormClave(color));
+ const tope = fila ? fila.disponible : item.cantidad;
+ item.cantidad = isNaN(cant) || cant <= 0 ? 1 : Math.min(cant, tope);
+ window._transfInvRenderListado();
 };
 
 window._transfInvRenderItems = function() {
  const cont = document.getElementById('transfItemsLista');
  if (!cont) return;
  const origen = document.getElementById('transfOrigen')?.value || '';
- const productos = StorageService.get("productos", []);
 
  if (window._transfInvItems.length === 0) {
- cont.innerHTML = `<div style="text-align:center;padding:15px;color:#94a3b8;font-size:13px;">Sin productos agregados.</div>`;
+ cont.innerHTML = `<div style="text-align:center;padding:15px;color:#94a3b8;font-size:13px;">Sin productos agregados. Elige piezas del listado de la izquierda.</div>`;
  return;
  }
 
- cont.innerHTML = window._transfInvItems.map(item => {
- const p = productos.find(prod => String(prod.id) === String(item.id));
- const stockOrigen = p ? (parseFloat((p.stockPorUbicacion || {})[origen]) || 0) : 0;
- return `
+ cont.innerHTML = window._transfInvItems.map(item => `
  <div style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc;">
  <div style="flex:1; min-width:0;">
- <div style="font-weight:bold; font-size:13px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.nombre}</div>
- <div style="font-size:11px; color:#64748b;">Disponible en ${origen || '—'}: <strong style="color:${stockOrigen > 0 ? '#16a34a' : '#dc2626'}">${stockOrigen}</strong></div>
+ <div style="font-weight:bold; font-size:13px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${_kardexEsc(item.nombre)}</div>
+ <div style="font-size:11px; color:#64748b;">${_kardexEsc(item.color)} · desde ${_kardexEsc(origen || '—')}</div>
  </div>
- <input type="number" min="1" value="${item.cantidad}" oninput="_transfInvActualizarCantidad('${item.id}', this.value)" style="width:70px; text-align:center; padding:6px; border:1px solid #d1d5db; border-radius:5px;">
- <button onclick="_transfInvQuitarItem('${item.id}')" style="padding:6px 10px; background:#fee2e2; color:#dc2626; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">✕</button>
- </div>`;
- }).join('');
+ <input type="number" min="1" value="${item.cantidad}" oninput="_transfInvActualizarCantidad('${item.id}', '${_transfInvAttr(item.color)}', this.value)" style="width:60px; text-align:center; padding:6px; border:1px solid #d1d5db; border-radius:5px;">
+ <button onclick="_transfInvQuitarItem('${item.id}', '${_transfInvAttr(item.color)}')" style="padding:6px 10px; background:#fee2e2; color:#dc2626; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">✕</button>
+ </div>`).join('');
 };
 
 window.ejecutarTransferenciaInv = function() {
@@ -3217,7 +3621,8 @@ window.ejecutarTransferenciaInv = function() {
  const destino = document.getElementById('transfDestino').value;
  const items = window._transfInvItems || [];
 
- if (items.length === 0) return alert("Agrega al menos un producto a la transferencia.");
+ if (!origen || !destino) return alert("Selecciona el origen y el destino.");
+ if (items.length === 0) return alert("Agrega al menos una pieza a la transferencia.");
  if (origen === destino) return alert("El origen y el destino no pueden ser el mismo.");
 
  const productos = StorageService.get("productos", []);
@@ -3228,31 +3633,29 @@ window.ejecutarTransferenciaInv = function() {
  if (isNaN(cant) || cant <= 0) return alert(`Ingresa una cantidad valida para "${item.nombre}".`);
  const idx = productos.findIndex(p => String(p.id) === String(item.id));
  if (idx === -1) return alert(`Producto "${item.nombre}" no encontrado.`);
- detalles.push({ idx, cant });
+ detalles.push({ idx, cant, color: item.color });
+ }
+
+ // Validacion de stock insuficiente contra la existencia REAL por variante
+ // (agrupada en una sola alerta, no una por producto).
+ const insuficientes = [];
+ detalles.forEach(d => {
+ const p = productos[d.idx];
+ const variante = (p.variantes || []).find(v => _transfInvNormClave(v.ubicacion || 'General') === _transfInvNormClave(origen) && _transfInvNormClave(v.color || 'General') === _transfInvNormClave(d.color));
+ const disponible = variante ? Number(variante.stock) || 0 : 0;
+ d.disponible = disponible;
+ if (disponible < d.cant) insuficientes.push(d);
+ });
+ if (insuficientes.length > 0) {
+ const lineas = insuficientes.map(d => `• ${productos[d.idx].nombre} (${d.color}): solo hay ${d.disponible} en [${origen}]`).join('\n');
+ return alert(`No se puede completar la transferencia -- el inventario cambio desde que abriste el listado:\n\n${lineas}\n\nCierra y vuelve a abrir la transferencia para ver la existencia actualizada.`);
  }
 
  // --- RESUMEN Y CONFIRMACION ---
- const resumenLineas = detalles.map(d => `• ${productos[d.idx].nombre}: ${d.cant} pieza(s)`).join('\n');
+ const resumenLineas = detalles.map(d => `• ${productos[d.idx].nombre} (${d.color}): ${d.cant} pieza(s)`).join('\n');
  const msjConf = `RESUMEN DE OPERACION - TRANSFERIR INVENTARIO?\n\n${resumenLineas}\n\nOrigen: ${origen}\nDestino: ${destino}\n\nDeseas ejecutar esta transferencia de mercancia?`;
  if (!confirm(msjConf)) return;
  // --- FIN DE CONFIRMACION ---
-
- // Validacion de stock insuficiente agrupada (una sola alerta, no una por producto)
- const insuficientes = detalles.filter(d => {
- const p = productos[d.idx];
- const stockOrigen = parseFloat((p.stockPorUbicacion || {})[origen]) || 0;
- return stockOrigen < d.cant;
- });
- if (insuficientes.length > 0) {
- const lineas = insuficientes.map(d => {
- const p = productos[d.idx];
- const stockOrigen = parseFloat((p.stockPorUbicacion || {})[origen]) || 0;
- return `• ${p.nombre}: solo hay ${stockOrigen} en [${origen}]`;
- }).join('\n');
- if (!confirm(`ATENCION: Stock insuficiente en algunos productos:\n\n${lineas}\n\nDeseas forzar el movimiento de todos modos y dejar esas bodegas en negativo?`)) {
- return;
- }
- }
 
  const sesion = _invSesionActiva() || {};
  const movs = StorageService.get("movimientosInventario", []);
@@ -3260,10 +3663,30 @@ window.ejecutarTransferenciaInv = function() {
 
  detalles.forEach((d, i) => {
  const p = productos[d.idx];
+ p.variantes = p.variantes || [];
+
+ // 1. Descontar de la variante origen (y limpiarla si llega a cero).
+ const idxOrigen = p.variantes.findIndex(v => _transfInvNormClave(v.ubicacion || 'General') === _transfInvNormClave(origen) && _transfInvNormClave(v.color || 'General') === _transfInvNormClave(d.color));
+ if (idxOrigen !== -1) {
+ p.variantes[idxOrigen].stock = (Number(p.variantes[idxOrigen].stock) || 0) - d.cant;
+ if (p.variantes[idxOrigen].stock <= 0) p.variantes.splice(idxOrigen, 1);
+ }
+
+ // 2. Sumar (o crear) la variante destino con el mismo color.
+ const idxDestino = p.variantes.findIndex(v => _transfInvNormClave(v.ubicacion || 'General') === _transfInvNormClave(destino) && _transfInvNormClave(v.color || 'General') === _transfInvNormClave(d.color));
+ if (idxDestino !== -1) {
+ p.variantes[idxDestino].stock = (Number(p.variantes[idxDestino].stock) || 0) + d.cant;
+ } else {
+ p.variantes.push({ ubicacion: destino, color: d.color, stock: d.cant });
+ }
+
+ // 3. Recalcular el cache stockPorUbicacion a partir de variantes (self-heal,
+ // igual que hace el cierre de Toma Fisica) para que nada quede desincronizado.
  p.stockPorUbicacion = p.stockPorUbicacion || {};
- const stockOrigen = parseFloat(p.stockPorUbicacion[origen]) || 0;
- p.stockPorUbicacion[origen] = stockOrigen - d.cant;
- p.stockPorUbicacion[destino] = (parseFloat(p.stockPorUbicacion[destino]) || 0) + d.cant;
+ p.stockPorUbicacion[origen] = p.variantes.filter(v => _transfInvNormClave(v.ubicacion || 'General') === _transfInvNormClave(origen)).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ p.stockPorUbicacion[destino] = p.variantes.filter(v => _transfInvNormClave(v.ubicacion || 'General') === _transfInvNormClave(destino)).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ // p.stock (total de la empresa) no cambia: la pieza sigue siendo propiedad
+ // del negocio, solo cambia de bodega fisica.
 
  movs.push({
  id: Date.now() + i,
@@ -3274,6 +3697,7 @@ window.ejecutarTransferenciaInv = function() {
  cantidad: d.cant,
  origen: origen,
  destino: destino,
+ color: d.color,
  motivo: `Mover mercancia de ${origen} a ${destino}`,
  referencia: referenciaTransf,
  usuario: sesion.nombre || sesion.usuario || 'Admin',
@@ -3285,8 +3709,8 @@ window.ejecutarTransferenciaInv = function() {
  modulo: 'Inventario',
  entidad: p.nombre,
  entidadId: p.id,
- detalle: `${d.cant} pieza(s) de ${origen} a ${destino}`,
- datos: { productoId: p.id, cantidad: d.cant, origen, destino, referencia: referenciaTransf }
+ detalle: `${d.cant} pieza(s) (${d.color}) de ${origen} a ${destino}`,
+ datos: { productoId: p.id, cantidad: d.cant, color: d.color, origen, destino, referencia: referenciaTransf }
  });
  });
 
@@ -3295,15 +3719,17 @@ window.ejecutarTransferenciaInv = function() {
  window.productos = productos;
  window.movimientosInventario = movs;
 
- alert(`Transferencia completada: ${detalles.length} producto(s) enviados a ${destino}.`);
+ alert(`Transferencia completada: ${detalles.length} pieza(s)/linea(s) enviadas a ${destino}.`);
 
  window._transfInvItems = [];
+ window._transfInvOrigenCarrito = null;
 
  // Cerrar y volver a poner candado
  const modal = document.getElementById('modalTransferenciaInv');
  modal.classList.add('oculto');
  modal.style.display = 'none';
  
- if(typeof renderInventario === 'function') renderInventario();
+ if (typeof renderInventario === 'function') renderInventario();
+ if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
 };
 
