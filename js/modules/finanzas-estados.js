@@ -270,8 +270,30 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     // fallback de margen 25% (no hay precio de venta del que partir en una
     // merma) — simplemente se marca en productosMermaSinCosto para que se
     // vea, en vez de inventar un número.
-    const ajustesMovs = kardex.filter(m => m.origen === 'ajusteInventario' && _efEnRango(m.fecha, desde, hasta));
+    // 🛡️ REPARACIÓN: además del "⚖️ Ajuste" (ejecutarAjusteInv,
+    // origen:'ajusteInventario'), la Toma de Inventario física
+    // (toma-inventario.js) también da de baja/alta stock por diferencias de
+    // conteo, y ese movimiento NO trae origen:'ajusteInventario' (usa
+    // motivo:"Ajuste por toma fisica..." y tomaInventarioId) — con el filtro
+    // anterior por origen, esas mermas por conteo físico quedaban fuera del
+    // aviso sin que nadie se diera cuenta. En vez de listar cada origen a
+    // mano (y volver a quedarme corto si aparece un cuarto mecanismo), se usa
+    // el clasificador canónico que ya existe en inventario.js —
+    // _kardexTipoBase/_kardexCantidadFirmada, el mismo que usa el propio
+    // Kardex para saber qué es entrada/salida/ajuste/transferencia/
+    // cancelación por patrón de texto — así cualquier movimiento nuevo que
+    // clasifique como "ajuste" aquí también.
+    const ajustesMovs = kardex.filter(m =>
+        typeof window._kardexTipoBase === 'function' && window._kardexTipoBase(m) === 'ajuste' &&
+        _efEnRango(m.fecha, desde, hasta)
+    );
     const productosMermaSinCosto = new Map(); // productoId -> {productoId, nombre, ocurrencias}
+    function _efEsAjusteEgreso(m) {
+        if (typeof window._kardexCantidadFirmada === 'function') {
+            return window._kardexCantidadFirmada(m, 'ajuste') < 0;
+        }
+        return /egreso|merma|salida/i.test(`${m.tipo || ''} ${m.concepto || ''} ${m.motivo || ''}`);
+    }
     function _efValorAjuste(m) {
         const prod = productosMap.get(String(m.productoId ?? ''));
         const costo = Number(prod?.costo || prod?.precioCompra) || 0;
@@ -286,10 +308,10 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         return costo * cant;
     }
     const totalMermasBruto = ajustesMovs
-        .filter(m => m.tipo === 'Egreso (Merma/Ajuste)')
+        .filter(m => _efEsAjusteEgreso(m))
         .reduce((s, m) => s + _efValorAjuste(m), 0);
     const totalSobrantesAjuste = ajustesMovs
-        .filter(m => m.tipo === 'Ingreso (Sobrante/Ajuste)')
+        .filter(m => !_efEsAjusteEgreso(m))
         .reduce((s, m) => s + _efValorAjuste(m), 0);
     const totalMermasNetas = Math.max(0, totalMermasBruto - totalSobrantesAjuste);
 
