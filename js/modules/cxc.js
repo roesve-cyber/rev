@@ -625,8 +625,11 @@ function _cxcDiagnosticoPlazoMigrado(folio, montoObjetivo = null, periodicidad =
         ...resultado,
         folio: cuenta.folio,
         cliente: cuenta.nombre || cuenta.clienteNombre || '',
+        productos: (cuenta.articulos || []).map(a => `${a.nombre} x${a.cantidad || 1}`).join(', ') || 'sin detalle de productos',
+        totalVentaOriginal: Number(cuenta.totalContadoOriginal || 0),
         precioContado: Number(cuenta.totalContadoOriginal || 0),
         engancheRecibido: Number(cuenta.engancheRecibido || 0),
+        capitalFinanciado: Math.max(0, Number(cuenta.totalContadoOriginal || 0) - Number(cuenta.engancheRecibido || 0)),
         totalRegistradoEnSistema: Number(cuenta.saldoActual || 0) + Number(cuenta.engancheRecibido || 0) +
             (cuenta.abonos || []).reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0),
         avisoMigracion: 'El total registrado en sistema para esta cuenta coincide con el precio de contado (sin interés capturado en la migración); no sirve como objetivo automático salvo que pases el total real conocido.',
@@ -825,24 +828,38 @@ async function _cxcRevisarPlazosMigradosLote(periodicidad = 'semanal', toleranci
         // sugerencia -- decisión 100% manual, como ya se venía haciendo.
         const sugerencia = _cxcSugerirPlazoPorHistorico(cuenta);
 
+        const enganche = Number(cuenta.engancheRecibido || 0);
+        const totalVentaOriginal = Number(cuenta.totalContadoOriginal || 0);
+        const capitalFinanciado = Math.max(0, totalVentaOriginal - enganche);
+        const productosTxt = (cuenta.articulos || []).map(a => `${a.nombre} x${a.cantidad || 1}`).join(', ') || 'sin detalle de productos';
+
         console.log(`\n===== ${folio} — ${cuenta.nombre || cuenta.clienteNombre || ''} =====`);
-        console.log(`Precio de contado: ${_cxcDinero(cuenta.totalContadoOriginal)}  |  Plazo guardado actualmente: ${mesesGuardados || 'ninguno'}`);
+        console.log(`Productos: ${productosTxt}`);
+        console.log(`Total de la venta original (mercancía, sin intereses): ${_cxcDinero(totalVentaOriginal)}`);
+        console.log(`Enganche recibido: ${_cxcDinero(enganche)}`);
+        console.log(`Capital financiado a crédito (= venta - enganche; es la BASE de la escalera de abajo): ${_cxcDinero(capitalFinanciado)}`);
+        console.log(`Plazo guardado actualmente: ${mesesGuardados || 'ninguno'}`);
         console.table(escalera.map(p => ({ meses: p.meses, total: p.total, abono: p.abono })));
 
         let mensajePrompt;
         let valorPorDefecto = '';
+        const encabezado = `${folio} — ${cuenta.nombre || cuenta.clienteNombre || 'cliente'}\n` +
+            `Venta original: ${_cxcDinero(totalVentaOriginal)}  |  Enganche: ${_cxcDinero(enganche)}  |  Capital financiado: ${_cxcDinero(capitalFinanciado)}\n` +
+            `Productos: ${productosTxt}\n` +
+            `(tabla completa de la escalera de plazos en la consola)\n\n`;
         if (sugerencia) {
             console.log(`💡 Sugerencia: ${sugerencia.meses} meses, con base en ${sugerencia.coincidencias} venta(s) comparable(s) ` +
                 `por ${sugerencia.nivel === 'producto' ? 'mismo producto' : 'misma categoría'} y monto de contado parecido:`);
             console.table(sugerencia.detalle);
-            mensajePrompt = `${folio} (${cuenta.nombre || cuenta.clienteNombre || 'cliente'}): sugerencia = ${sugerencia.meses} meses ` +
-                `(${sugerencia.coincidencias} venta(s) comparable(s), ver tabla en consola). Confírmala, escribe otro "meses" de la escalera, ` +
-                `o deja vacío/cancela para saltarla.`;
+            mensajePrompt = encabezado +
+                `Sugerencia = ${sugerencia.meses} meses (${sugerencia.coincidencias} venta(s) comparable(s), ver tabla en consola). ` +
+                `Confírmala, escribe otro "meses" de la escalera, o deja vacío/cancela para saltarla.`;
             valorPorDefecto = String(sugerencia.meses);
         } else {
             console.log(`◻️  Sin ventas comparables (mismo producto/categoría y monto parecido) con plazo conocido -- no hay parámetros para sugerir.`);
-            mensajePrompt = `${folio} (${cuenta.nombre || cuenta.clienteNombre || 'cliente'}): sin sugerencia disponible. Escribe el "meses" que ` +
-                `corresponde al total real de esta venta (según la tabla que se imprimió en la consola), o deja vacío/cancela para saltarla.`;
+            mensajePrompt = encabezado +
+                `Sin sugerencia disponible. Escribe el "meses" que corresponde al total real de esta venta ` +
+                `(según la tabla de la consola), o deja vacío/cancela para saltarla.`;
         }
 
         const entrada = window.prompt(mensajePrompt, valorPorDefecto);
