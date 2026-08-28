@@ -486,6 +486,99 @@ function _cxcInferirPlazoPorMonto(cuenta, montoObjetivo = null) {
 }
 
 // ================================================================
+// 🧭 SUGERENCIA de plazo para una cuenta migrada, basada en OTRAS
+// cuentas cuyo plazo YA es conocido con certeza (ventas de crédito
+// normales, o cuentas MIG- ya reconciliadas a mano antes -- ambas
+// traen plan.meses real, no adivinado). Busca, entre esas, las que se
+// parecen a esta venta:
+//   Nivel 1: mismo producto (nombre exacto normalizado) y precio de
+//            contado dentro de la tolerancia (±15% por default).
+//   Nivel 2 (si el nivel 1 no encuentra nada): misma categoría de
+//            producto (catálogo de productos) y precio de contado
+//            dentro de la tolerancia.
+// Si ninguno de los dos niveles encuentra algo comparable, regresa
+// null -- no hay parámetros con qué sugerir, y la decisión queda
+// 100% manual (igual que antes).
+//
+// Entre las coincidencias, sugiere el plazo (meses) MÁS FRECUENTE;
+// empate se rompe por el total más parecido al de esta cuenta.
+// Es SOLO una sugerencia para agilizar -- nunca se aplica sola.
+// Nota: conforme vayas reconciliando cuentas MIG- en la misma sesión,
+// esas quedan disponibles como comparables para las siguientes (el
+// plazo que tú confirmes también cuenta como dato conocido).
+// ================================================================
+function _cxcSugerirPlazoPorHistorico(cuenta, toleranciaPct = 0.15) {
+    const totalObjetivo = Number(cuenta.totalContadoOriginal || 0);
+    if (!(totalObjetivo > 0)) return null;
+
+    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+    const productosCat = StorageService.get('productos', []);
+
+    const articuloRef = (cuenta.articulos || [])[0] || null;
+    const nombreRef = (articuloRef?.nombre || '').trim().toLowerCase();
+    const productoRef = articuloRef
+        ? productosCat.find(p => p.id === (articuloRef.productoId ?? articuloRef.id))
+        : null;
+    const categoriaRef = productoRef?.categoria || '';
+
+    const candidatas = cuentasCxC.filter(c =>
+        String(c.folio) !== String(cuenta.folio) &&
+        Number(c.plan?.meses || 0) > 0 &&
+        Number(c.totalContadoOriginal || 0) > 0
+    );
+
+    const dentroDeTolerancia = c => {
+        const t = Number(c.totalContadoOriginal || 0);
+        return Math.abs(t - totalObjetivo) / totalObjetivo <= toleranciaPct;
+    };
+
+    let nivel = 'producto';
+    let coincidencias = nombreRef
+        ? candidatas.filter(c => {
+            const nom = ((c.articulos || [])[0]?.nombre || '').trim().toLowerCase();
+            return nom === nombreRef && dentroDeTolerancia(c);
+        })
+        : [];
+
+    if (coincidencias.length === 0 && categoriaRef) {
+        nivel = 'categoria';
+        coincidencias = candidatas.filter(c => {
+            const art = (c.articulos || [])[0];
+            const prod = art ? productosCat.find(p => p.id === (art.productoId ?? art.id)) : null;
+            return (prod?.categoria || '') === categoriaRef && dentroDeTolerancia(c);
+        });
+    }
+
+    if (coincidencias.length === 0) return null;
+
+    const conteo = new Map();
+    coincidencias.forEach(c => {
+        const m = Number(c.plan.meses);
+        conteo.set(m, (conteo.get(m) || 0) + 1);
+    });
+    const maxFrecuencia = Math.max(...conteo.values());
+    const candidatosMeses = [...conteo.entries()].filter(([, n]) => n === maxFrecuencia).map(([m]) => m);
+
+    let mesesSugeridos = candidatosMeses[0];
+    if (candidatosMeses.length > 1) {
+        let mejorDiff = Infinity;
+        candidatosMeses.forEach(m => {
+            coincidencias.filter(c => Number(c.plan.meses) === m).forEach(c => {
+                const diff = Math.abs(Number(c.totalContadoOriginal) - totalObjetivo);
+                if (diff < mejorDiff) { mejorDiff = diff; mesesSugeridos = m; }
+            });
+        });
+    }
+
+    return {
+        meses: mesesSugeridos,
+        nivel, // 'producto' | 'categoria'
+        coincidencias: coincidencias.length,
+        detalle: coincidencias.map(c => ({ folio: c.folio, meses: Number(c.plan.meses), totalContadoOriginal: Number(c.totalContadoOriginal) }))
+    };
+}
+
+// ================================================================
 // 🩹 DIAGNÓSTICO DE PLAZO PARA CUENTAS MIGRADAS (folio "MIG-...")
 //
 // Las cuentas migradas NO traen plan/periodicidad/saldosPorMes -- y en
@@ -526,6 +619,8 @@ function _cxcDiagnosticoPlazoMigrado(folio, montoObjetivo = null, periodicidad =
     // escalera de totales daría un "plazo" sin sentido.
     const resultado = _cxcInferirPlazoPorMonto(cuentaConPeriodicidad, montoObjetivo != null ? montoObjetivo : 0);
 
+    const sugerenciaHistorica = _cxcSugerirPlazoPorHistorico(cuenta);
+
     return {
         ...resultado,
         folio: cuenta.folio,
@@ -534,7 +629,10 @@ function _cxcDiagnosticoPlazoMigrado(folio, montoObjetivo = null, periodicidad =
         engancheRecibido: Number(cuenta.engancheRecibido || 0),
         totalRegistradoEnSistema: Number(cuenta.saldoActual || 0) + Number(cuenta.engancheRecibido || 0) +
             (cuenta.abonos || []).reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0),
-        avisoMigracion: 'El total registrado en sistema para esta cuenta coincide con el precio de contado (sin interés capturado en la migración); no sirve como objetivo automático salvo que pases el total real conocido.'
+        avisoMigracion: 'El total registrado en sistema para esta cuenta coincide con el precio de contado (sin interés capturado en la migración); no sirve como objetivo automático salvo que pases el total real conocido.',
+        sugerenciaHistorica: sugerenciaHistorica
+            ? { ...sugerenciaHistorica, mensaje: `Sugerencia: ${sugerenciaHistorica.meses} meses, basada en ${sugerenciaHistorica.coincidencias} venta(s) comparable(s) por ${sugerenciaHistorica.nivel === 'producto' ? 'mismo producto' : 'misma categoría'} y monto parecido. Confírmalo o cámbialo, no se aplica solo.` }
+            : { meses: null, mensaje: 'Sin ventas comparables (mismo producto/categoría y monto parecido) con plazo conocido -- no hay parámetros para sugerir; decide manual contra tu nota/contrato real.' }
     };
 }
 
@@ -661,29 +759,41 @@ async function _cxcAplicarPlazoMigrado(folio, meses, periodicidad = 'semanal') {
 //      tampoco se omite; se marca como inconsistente y también entra a
 //      decisión manual.
 //   Para las que entran a decisión: se imprime la escalera completa
-//   (console.table) y se pide por prompt() el "meses" correcto; vacío o
-//   Cancelar = se salta esa cuenta sin tocar nada. Nunca inventa ni
-//   aplica un plazo fuera de la escalera calculada.
+//   (console.table) y, si hay ventas comparables con plazo conocido
+//   (mismo producto o categoría + monto de contado parecido), se
+//   muestra una SUGERENCIA de "meses" precargada en el prompt -- tú
+//   la confirmas con Enter, la cambias, o la rechazas dejando vacío/
+//   cancelando (se salta esa cuenta sin tocar nada). Si no hay con
+//   qué comparar (sin parámetros), el prompt sale vacío y la decisión
+//   es 100% manual, igual que antes. Nunca inventa ni aplica un plazo
+//   fuera de la escalera calculada.
 //
 // Uso desde consola:
 //   await _cxcRevisarPlazosMigradosLote()
 //   await _cxcRevisarPlazosMigradosLote('quincenal')   // si aplica
 // ================================================================
 async function _cxcRevisarPlazosMigradosLote(periodicidad = 'semanal', toleranciaConsistencia = 0.5) {
-    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
-    const migradas = cuentasCxC.filter(c => String(c.folio || '').startsWith('MIG-'));
+    const folios = StorageService.get('cuentasPorCobrar', [])
+        .filter(c => String(c.folio || '').startsWith('MIG-'))
+        .map(c => c.folio);
 
     const resumen = {
         omitidasYaConsistentes: [],
-        aplicadas: [],
+        aplicadasConSugerencia: [],
+        aplicadasManual: [],
         saltadasPorUsuario: [],
         conError: []
     };
 
-    console.log(`🔎 Revisando ${migradas.length} cuenta(s) MIG- ...`);
+    console.log(`🔎 Revisando ${folios.length} cuenta(s) MIG- ...`);
 
-    for (const cuenta of migradas) {
-        const folio = cuenta.folio;
+    for (const folio of folios) {
+        // Se relee fresco en cada vuelta: si ya aplicaste plazo a cuentas
+        // anteriores en esta misma corrida, esas quedan disponibles como
+        // comparables para sugerir el plazo de las siguientes.
+        const cuenta = StorageService.get('cuentasPorCobrar', []).find(c => String(c.folio) === String(folio));
+        if (!cuenta) continue;
+
         const mesesGuardados = Number(cuenta.plan?.meses || 0);
 
         // Escalera recalculada HOY para esta cuenta (mismas tasas/config vigentes).
@@ -709,14 +819,33 @@ async function _cxcRevisarPlazosMigradosLote(periodicidad = 'semanal', toleranci
             console.log(`◻️  ${folio}: sin plazo guardado (0/ausente) -- pasa a decisión manual.`);
         }
 
+        // Sugerencia con base en otras ventas parecidas (mismo producto o
+        // categoría + monto de contado similar) que ya tienen plazo
+        // conocido con certeza. Si no hay con qué comparar, no hay
+        // sugerencia -- decisión 100% manual, como ya se venía haciendo.
+        const sugerencia = _cxcSugerirPlazoPorHistorico(cuenta);
+
         console.log(`\n===== ${folio} — ${cuenta.nombre || cuenta.clienteNombre || ''} =====`);
         console.log(`Precio de contado: ${_cxcDinero(cuenta.totalContadoOriginal)}  |  Plazo guardado actualmente: ${mesesGuardados || 'ninguno'}`);
         console.table(escalera.map(p => ({ meses: p.meses, total: p.total, abono: p.abono })));
 
-        const entrada = window.prompt(
-            `${folio} (${cuenta.nombre || cuenta.clienteNombre || 'cliente'}): escribe el "meses" que corresponde al total real de esta venta ` +
-            `(según la tabla que se imprimió en la consola). Deja vacío o cancela para saltarla sin tocar nada.`
-        );
+        let mensajePrompt;
+        let valorPorDefecto = '';
+        if (sugerencia) {
+            console.log(`💡 Sugerencia: ${sugerencia.meses} meses, con base en ${sugerencia.coincidencias} venta(s) comparable(s) ` +
+                `por ${sugerencia.nivel === 'producto' ? 'mismo producto' : 'misma categoría'} y monto de contado parecido:`);
+            console.table(sugerencia.detalle);
+            mensajePrompt = `${folio} (${cuenta.nombre || cuenta.clienteNombre || 'cliente'}): sugerencia = ${sugerencia.meses} meses ` +
+                `(${sugerencia.coincidencias} venta(s) comparable(s), ver tabla en consola). Confírmala, escribe otro "meses" de la escalera, ` +
+                `o deja vacío/cancela para saltarla.`;
+            valorPorDefecto = String(sugerencia.meses);
+        } else {
+            console.log(`◻️  Sin ventas comparables (mismo producto/categoría y monto parecido) con plazo conocido -- no hay parámetros para sugerir.`);
+            mensajePrompt = `${folio} (${cuenta.nombre || cuenta.clienteNombre || 'cliente'}): sin sugerencia disponible. Escribe el "meses" que ` +
+                `corresponde al total real de esta venta (según la tabla que se imprimió en la consola), o deja vacío/cancela para saltarla.`;
+        }
+
+        const entrada = window.prompt(mensajePrompt, valorPorDefecto);
 
         if (entrada === null || String(entrada).trim() === '') {
             resumen.saltadasPorUsuario.push(folio);
@@ -734,8 +863,9 @@ async function _cxcRevisarPlazosMigradosLote(periodicidad = 'semanal', toleranci
 
         const resultado = await _cxcAplicarPlazoMigrado(folio, mesesElegidos, periodicidad);
         if (resultado.ok) {
-            resumen.aplicadas.push({ folio, meses: mesesElegidos });
-            console.log(`✅ ${folio}: plazo de ${mesesElegidos} meses aplicado.`);
+            const usoSugerencia = sugerencia && sugerencia.meses === mesesElegidos;
+            (usoSugerencia ? resumen.aplicadasConSugerencia : resumen.aplicadasManual).push({ folio, meses: mesesElegidos });
+            console.log(`✅ ${folio}: plazo de ${mesesElegidos} meses aplicado${usoSugerencia ? ' (con la sugerencia)' : ' (elegido a mano)'}.`);
         } else {
             resumen.conError.push({ folio, motivo: resultado.mensaje });
             console.log(`❌ ${folio}: ${resultado.mensaje}`);
@@ -745,8 +875,10 @@ async function _cxcRevisarPlazosMigradosLote(periodicidad = 'semanal', toleranci
     console.log('\n===== RESUMEN _cxcRevisarPlazosMigradosLote =====');
     console.log(`Omitidas (ya consistentes, no se tocaron): ${resumen.omitidasYaConsistentes.length}`);
     console.table(resumen.omitidasYaConsistentes);
-    console.log(`Aplicadas en esta corrida: ${resumen.aplicadas.length}`);
-    console.table(resumen.aplicadas);
+    console.log(`Aplicadas con sugerencia confirmada: ${resumen.aplicadasConSugerencia.length}`);
+    console.table(resumen.aplicadasConSugerencia);
+    console.log(`Aplicadas a mano (sin sugerencia o distinto de la sugerencia): ${resumen.aplicadasManual.length}`);
+    console.table(resumen.aplicadasManual);
     console.log(`Saltadas por decisión del usuario: ${resumen.saltadasPorUsuario.length}`, resumen.saltadasPorUsuario);
     console.log(`Con error / sin coincidencia en escalera: ${resumen.conError.length}`, resumen.conError);
 
