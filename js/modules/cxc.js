@@ -641,6 +641,118 @@ async function _cxcAplicarPlazoMigrado(folio, meses, periodicidad = 'semanal') {
     return { ok: true, folio, plan: resultado.plan, mensaje: `Plazo de ${meses} meses guardado en ${folio}.` };
 }
 
+// ================================================================
+// 🩹 REVISIÓN EN LOTE (una sola ejecución) DE PLAZOS DE CUENTAS
+// MIGRADAS -- sigue siendo folio-por-folio en cuanto a QUÉ se escribe
+// (nunca toca dos cuentas en una sola escritura), pero deja correr las
+// 98 cuentas en una sola corrida sin tener que invocar diagnóstico +
+// aplicar a mano para cada una.
+//
+// Por cada cuenta MIG-:
+//   1) Si YA tiene un plazo guardado (plan.meses > 0) y ese plazo sigue
+//      siendo consistente con la escalera recalculada hoy (incluye:
+//      no cambió el precio de contado ni las tasas desde que se
+//      reconcilió) -- se OMITE automáticamente, no se pregunta nada.
+//   2) Si el plazo está en 0 / ausente -- NUNCA se omite por default;
+//      siempre entra a la decisión manual (no hay forma de adivinar el
+//      total real de la venta).
+//   3) Si tiene plazo guardado pero YA NO coincide con la escalera de
+//      hoy (p.ej. cambiaron las tasas, o se editó el registro a mano) --
+//      tampoco se omite; se marca como inconsistente y también entra a
+//      decisión manual.
+//   Para las que entran a decisión: se imprime la escalera completa
+//   (console.table) y se pide por prompt() el "meses" correcto; vacío o
+//   Cancelar = se salta esa cuenta sin tocar nada. Nunca inventa ni
+//   aplica un plazo fuera de la escalera calculada.
+//
+// Uso desde consola:
+//   await _cxcRevisarPlazosMigradosLote()
+//   await _cxcRevisarPlazosMigradosLote('quincenal')   // si aplica
+// ================================================================
+async function _cxcRevisarPlazosMigradosLote(periodicidad = 'semanal', toleranciaConsistencia = 0.5) {
+    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+    const migradas = cuentasCxC.filter(c => String(c.folio || '').startsWith('MIG-'));
+
+    const resumen = {
+        omitidasYaConsistentes: [],
+        aplicadas: [],
+        saltadasPorUsuario: [],
+        conError: []
+    };
+
+    console.log(`🔎 Revisando ${migradas.length} cuenta(s) MIG- ...`);
+
+    for (const cuenta of migradas) {
+        const folio = cuenta.folio;
+        const mesesGuardados = Number(cuenta.plan?.meses || 0);
+
+        // Escalera recalculada HOY para esta cuenta (mismas tasas/config vigentes).
+        const cuentaConPeriodicidad = { ...cuenta, periodicidad: cuenta.periodicidad || periodicidad };
+        const diag = _cxcInferirPlazoPorMonto(cuentaConPeriodicidad, 0);
+        const escalera = diag.planesEvaluados || [];
+
+        if (mesesGuardados > 0) {
+            const planEnEscaleraHoy = escalera.find(p => Number(p.meses) === mesesGuardados);
+            const totalGuardado = Number(cuenta.plan?.totalTeorico || 0);
+            const esConsistente = planEnEscaleraHoy && totalGuardado > 0 &&
+                Math.abs(Number(planEnEscaleraHoy.total || 0) - totalGuardado) <= toleranciaConsistencia;
+
+            if (esConsistente) {
+                resumen.omitidasYaConsistentes.push({ folio, meses: mesesGuardados });
+                console.log(`⏭️  ${folio}: ya tiene ${mesesGuardados} meses guardados y coincide con la escalera de hoy -- se omite.`);
+                continue;
+            }
+
+            console.log(`⚠️  ${folio}: tiene ${mesesGuardados} meses guardados pero YA NO coincide con la escalera recalculada ` +
+                `(guardado: ${_cxcDinero(totalGuardado)}, escalera hoy a ${mesesGuardados} meses: ${planEnEscaleraHoy ? _cxcDinero(planEnEscaleraHoy.total) : 'ese plazo ya no existe en la escalera'}). Pasa a decisión manual.`);
+        } else {
+            console.log(`◻️  ${folio}: sin plazo guardado (0/ausente) -- pasa a decisión manual.`);
+        }
+
+        console.log(`\n===== ${folio} — ${cuenta.nombre || cuenta.clienteNombre || ''} =====`);
+        console.log(`Precio de contado: ${_cxcDinero(cuenta.totalContadoOriginal)}  |  Plazo guardado actualmente: ${mesesGuardados || 'ninguno'}`);
+        console.table(escalera.map(p => ({ meses: p.meses, total: p.total, abono: p.abono })));
+
+        const entrada = window.prompt(
+            `${folio} (${cuenta.nombre || cuenta.clienteNombre || 'cliente'}): escribe el "meses" que corresponde al total real de esta venta ` +
+            `(según la tabla que se imprimió en la consola). Deja vacío o cancela para saltarla sin tocar nada.`
+        );
+
+        if (entrada === null || String(entrada).trim() === '') {
+            resumen.saltadasPorUsuario.push(folio);
+            console.log(`⏭️  ${folio}: saltada -- no se modificó nada.`);
+            continue;
+        }
+
+        const mesesElegidos = Number(entrada);
+        const planElegido = escalera.find(p => Number(p.meses) === mesesElegidos);
+        if (!Number.isFinite(mesesElegidos) || !planElegido) {
+            resumen.conError.push({ folio, motivo: `"${entrada}" no está en la escalera calculada` });
+            console.log(`❌ ${folio}: "${entrada}" no está en la escalera. No se aplicó nada; corrígela después con _cxcDiagnosticoPlazoMigrado('${folio}').`);
+            continue;
+        }
+
+        const resultado = await _cxcAplicarPlazoMigrado(folio, mesesElegidos, periodicidad);
+        if (resultado.ok) {
+            resumen.aplicadas.push({ folio, meses: mesesElegidos });
+            console.log(`✅ ${folio}: plazo de ${mesesElegidos} meses aplicado.`);
+        } else {
+            resumen.conError.push({ folio, motivo: resultado.mensaje });
+            console.log(`❌ ${folio}: ${resultado.mensaje}`);
+        }
+    }
+
+    console.log('\n===== RESUMEN _cxcRevisarPlazosMigradosLote =====');
+    console.log(`Omitidas (ya consistentes, no se tocaron): ${resumen.omitidasYaConsistentes.length}`);
+    console.table(resumen.omitidasYaConsistentes);
+    console.log(`Aplicadas en esta corrida: ${resumen.aplicadas.length}`);
+    console.table(resumen.aplicadas);
+    console.log(`Saltadas por decisión del usuario: ${resumen.saltadasPorUsuario.length}`, resumen.saltadasPorUsuario);
+    console.log(`Con error / sin coincidencia en escalera: ${resumen.conError.length}`, resumen.conError);
+
+    return resumen;
+}
+
 function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     if (!politica) {
         return {
