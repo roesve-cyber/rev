@@ -557,6 +557,90 @@ function _cxcDiagnosticoPlazosMigradosLote(periodicidad = 'semanal') {
     });
 }
 
+// ================================================================
+// ✍️ APLICA (guarda) el plazo ya confirmado a mano por Roberto a una
+// cuenta MIG-. Correr SOLO después de revisar la escalera con
+// _cxcDiagnosticoPlazoMigrado y confirmar cuál "meses" es el correcto
+// contra el total real conocido de esa venta.
+//
+// A propósito NO toca: saldoActual, totalContadoOriginal, abonos,
+// engancheRecibido -- esos valores ya están conciliados y correctos
+// (saldoActual + abonos + enganche = totalContadoOriginal). Solo
+// agrega la METADATA de plazo que faltaba, para que el sistema pueda
+// mostrarlo y usarlo (fecha final de crédito / moratorios en
+// _cxcFechaFinalCredito, "Plazo" en el estado de cuenta, etc).
+//
+// Importante: el total teórico con interés de la escalera (plan
+// nuevo.totalTeorico) se guarda solo como referencia informativa, NUNCA
+// como plan.total -- si se guardara como plan.total, _totalCuenta() en
+// estadoCuentaCliente.js lo tomaría como el total real de la venta
+// (siempre toma el mayor candidato) y desalinearía el total ya
+// conciliado con lo que el cliente realmente pagó/debe.
+//
+// Uso desde consola:
+//   await _cxcAplicarPlazoMigrado('MIG-013', 4)              // semanal (default)
+//   await _cxcAplicarPlazoMigrado('MIG-013', 4, 'quincenal') // si aplica
+// ================================================================
+async function _cxcAplicarPlazoMigrado(folio, meses, periodicidad = 'semanal') {
+    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+    const cuentaActual = cuentasCxC.find(c => String(c.folio) === String(folio));
+    if (!cuentaActual) return { ok: false, mensaje: `No se encontró la cuenta con folio ${folio}.` };
+    if (!String(cuentaActual.folio || '').startsWith('MIG-')) {
+        return { ok: false, mensaje: `El folio ${folio} no es una cuenta migrada (MIG-); esta función es solo para esas.` };
+    }
+
+    const diag = _cxcInferirPlazoPorMonto({ ...cuentaActual, periodicidad }, 0);
+    const planElegido = (diag.planesEvaluados || []).find(p => Number(p.meses) === Number(meses));
+    if (!planElegido) {
+        return { ok: false, mensaje: `${meses} meses no está en la escalera calculada para esta cuenta. Revisa con _cxcDiagnosticoPlazoMigrado('${folio}') primero.` };
+    }
+
+    const resultado = await StorageService.transaccionRegistros(
+        [{ tabla: 'cuentasPorCobrar', clave: folio }],
+        (frescos) => {
+            const cuenta = frescos[`cuentasPorCobrar:${folio}`];
+            if (!cuenta) return null;
+
+            const cuentaActualizada = {
+                ...cuenta,
+                periodicidad,
+                plan: {
+                    meses: Number(planElegido.meses),
+                    semanas: planElegido.semanas != null ? Number(planElegido.semanas) : null,
+                    pagos: planElegido.pagos != null ? Number(planElegido.pagos) : null,
+                    plazo: planElegido.pagos != null ? Number(planElegido.pagos) : Number(planElegido.meses),
+                    abono: planElegido.abono != null ? Number(planElegido.abono) : null,
+                    // Referencia informativa unicamente -- NO usar como total real.
+                    totalTeorico: Number(planElegido.total || 0),
+                    origen: 'reconciliacion_manual_migracion',
+                    fechaReconciliacion: new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Mexico_City' }).format(new Date())
+                }
+            };
+
+            return {
+                escrituras: [{ tabla: 'cuentasPorCobrar', clave: folio, data: cuentaActualizada }],
+                resultado: cuentaActualizada
+            };
+        }
+    );
+
+    if (!resultado) return { ok: false, mensaje: 'La transacción no devolvió resultado (revisa consola por errores de sync).' };
+
+    if (typeof AuditService !== 'undefined' && AuditService.log) {
+        AuditService.log({
+            accion: 'Plazo reconciliado en cuenta migrada',
+            modulo: 'CXC',
+            entidad: 'CuentaPorCobrar',
+            entidadId: folio,
+            detalle: `Se asignó plazo de ${meses} meses (${periodicidad}) a la cuenta migrada ${folio}, reconciliado a mano contra el total real de la venta. No se modificó saldoActual/abonos/totalContadoOriginal.`,
+            datos: { folio, meses, periodicidad, abono: planElegido.abono, totalTeorico: planElegido.total },
+            severidad: 'info'
+        });
+    }
+
+    return { ok: true, folio, plan: resultado.plan, mensaje: `Plazo de ${meses} meses guardado en ${folio}.` };
+}
+
 function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     if (!politica) {
         return {
