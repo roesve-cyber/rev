@@ -383,6 +383,180 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     };
 }
 
+// ================================================================
+// 🔍 Infiere el plazo (meses) de una cuenta de crédito a partir de su
+// valor final, para cuentas donde plan.meses/plan.plazo no quedó
+// registrado (o quedó inconsistente) al momento de la venta.
+//
+// Misma jerarquía de fuentes que _cxcEvaluarPoliticaPagoAnticipado:
+//   1) Tabla CONGELADA en la propia venta (cuenta.saldosPorMes), si es
+//      sana (monótonamente creciente) -- nunca se recalcula con tasas
+//      de HOY si éstas cambiaron después de la venta.
+//   2) Si no existe o no es sana: recalcula EN VIVO con
+//      CalculatorService.calcularCreditoConPeriodicidad sobre el
+//      capital financiado (totalContadoOriginal - engancheRecibido).
+//
+// montoObjetivo: el valor final contra el que se busca el plazo
+// (normalmente cuenta.saldoActual o cuenta.plan.total). Si se omite,
+// usa cuenta.saldoActual.
+//
+// No escribe nada por sí sola -- solo diagnostica/reconstruye el plan
+// candidato; quien la llame decide si lo aplica a la cuenta.
+// ================================================================
+function _cxcInferirPlazoPorMonto(cuenta, montoObjetivo = null) {
+    const objetivo = Number(montoObjetivo != null ? montoObjetivo : cuenta?.saldoActual || 0);
+    const periodicidad = cuenta?.periodicidad || 'semanal';
+    const capitalContado = Math.max(0, Number(cuenta?.totalContadoOriginal || cuenta?.totalMercancia || 0) - Number(cuenta?.engancheRecibido || 0));
+
+    const tablaCongelada = Array.isArray(cuenta?.saldosPorMes) ? cuenta.saldosPorMes.slice() : [];
+    const tablaCongeladaEsSana = tablaCongelada.length > 0 && tablaCongelada
+        .slice().sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))
+        .every((p, i, arr) => i === 0 || Number(p.total || 0) >= Number(arr[i - 1].total || 0) - 0.01);
+
+    let planes, fuente;
+    if (tablaCongeladaEsSana) {
+        // La tabla congelada solo trae {meses, total}; se completa
+        // semanas/pagos/abono con el motor vigente para poder
+        // reconstruir un plan.plazo/pagos utilizable (el total SIEMPRE
+        // se toma de la tabla congelada, nunca del motor vivo).
+        const planesVivos = (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad)
+            : [];
+        planes = tablaCongelada.map(p => {
+            const vivo = planesVivos.find(v => Number(v.meses) === Number(p.meses));
+            return vivo ? { ...vivo, total: Number(p.total) } : { meses: Number(p.meses), total: Number(p.total) };
+        });
+        fuente = 'tabla_congelada';
+    } else {
+        planes = (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad)
+            : [];
+        fuente = 'calculadora_viva';
+    }
+
+    if (!planes.length) {
+        return { encontrado: false, fuente, mensaje: 'Sin capital financiado calculable para esta cuenta (revisa totalContadoOriginal/engancheRecibido).' };
+    }
+
+    // Sin monto objetivo (o <= 0): no hay con qué comparar -- se regresa
+    // la escalera completa para que quien llame la revise a mano (caso
+    // tipico de cuentas MIG- migradas, donde saldoActual/total NO trae
+    // interes capturado y por lo tanto NO sirve como objetivo por
+    // default; hay que pasar el total real conocido explicitamente).
+    if (!(objetivo > 0)) {
+        return {
+            encontrado: true,
+            exacto: false,
+            fuente,
+            meses: null,
+            planesEvaluados: planes,
+            mensaje: 'Sin monto objetivo para comparar; revisa planesEvaluados y elige el plazo a mano (o vuelve a llamar pasando el total real como montoObjetivo).'
+        };
+    }
+
+    // Coincidencia exacta (tolerancia por redondeo; el abono semanal se
+    // redondea al múltiplo de 10 superior en CalculatorService).
+    const TOLERANCIA = 0.5;
+    let coincidencia = planes.find(p => Math.abs(Number(p.total || 0) - objetivo) <= TOLERANCIA);
+    const exacto = !!coincidencia;
+
+    // Sin coincidencia exacta: el plazo más cercano por diferencia
+    // absoluta -- nunca inventa un plazo fuera de la escalera.
+    if (!coincidencia) {
+        coincidencia = planes.slice().sort((a, b) =>
+            Math.abs(Number(a.total || 0) - objetivo) - Math.abs(Number(b.total || 0) - objetivo)
+        )[0];
+    }
+
+    return {
+        encontrado: true,
+        exacto,
+        fuente,
+        meses: Number(coincidencia.meses || 0),
+        semanas: coincidencia.semanas != null ? Number(coincidencia.semanas) : null,
+        pagos: coincidencia.pagos != null ? Number(coincidencia.pagos) : null,
+        abono: coincidencia.abono != null ? Number(coincidencia.abono) : null,
+        total: Number(coincidencia.total || 0),
+        diferencia: Number((Number(coincidencia.total || 0) - objetivo).toFixed(2)),
+        planesEvaluados: planes,
+        mensaje: exacto
+            ? `Coincidencia exacta: ${coincidencia.meses} meses.`
+            : `Sin coincidencia exacta; plazo más cercano: ${coincidencia.meses} meses (diferencia de ${(Number(coincidencia.total || 0) - objetivo).toFixed(2)}).`
+    };
+}
+
+// ================================================================
+// 🩹 DIAGNÓSTICO DE PLAZO PARA CUENTAS MIGRADAS (folio "MIG-...")
+//
+// Las cuentas migradas NO traen plan/periodicidad/saldosPorMes -- y en
+// la práctica su saldoActual + abonos + enganche siempre reconstruye
+// EXACTAMENTE totalContadoOriginal (verificado: ~88% calzan al 100%,
+// el resto por redondeos menores). Es decir: al migrar se guardó el
+// precio de CONTADO como si fuera el total, sin capturar el interes
+// del plazo a credito real -- por eso el plazo no puede mostrarse
+// correctamente para estas cuentas: el dato de interes simplemente no
+// esta en el sistema.
+//
+// Esta funcion NO puede adivinar el interes que no quedo registrado.
+// Lo que SI hace es generar, a partir del precio de contado y las
+// tasas vigentes (configCreditoGlobal / CalculatorService), la
+// escalera completa de totales posibles por plazo -- para que la
+// compares a mano contra el total real que tengas en tus notas/
+// contrato en papel de esa venta, y así identifiques a que plazo
+// corresponde (el total calculado debe salir "practicamente similar"
+// al total real que tu ya conoces de esa venta).
+//
+// Si le pasas montoObjetivo (el total real que tu ya conoces para esa
+// cuenta), regresa además la coincidencia automatica (usa
+// _cxcInferirPlazoPorMonto internamente).
+// ================================================================
+function _cxcDiagnosticoPlazoMigrado(folio, montoObjetivo = null, periodicidad = 'semanal') {
+    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+    const cuenta = cuentasCxC.find(c => String(c.folio) === String(folio));
+    if (!cuenta) return { encontrado: false, mensaje: `No se encontró la cuenta con folio ${folio}.` };
+    if (!String(cuenta.folio || '').startsWith('MIG-')) {
+        return { encontrado: false, mensaje: `El folio ${folio} no es una cuenta migrada (MIG-); usa _cxcInferirPlazoPorMonto directamente.` };
+    }
+
+    const cuentaConPeriodicidad = { ...cuenta, periodicidad: cuenta.periodicidad || periodicidad };
+    // Ojo: NO se deja caer al default de _cxcInferirPlazoPorMonto
+    // (cuenta.saldoActual) cuando no se pasa montoObjetivo -- en una
+    // cuenta MIG- ese saldo es saldo RESTANTE bajo un total sin
+    // interés, no el total de la venta, y compararlo contra la
+    // escalera de totales daría un "plazo" sin sentido.
+    const resultado = _cxcInferirPlazoPorMonto(cuentaConPeriodicidad, montoObjetivo != null ? montoObjetivo : 0);
+
+    return {
+        ...resultado,
+        folio: cuenta.folio,
+        cliente: cuenta.nombre || cuenta.clienteNombre || '',
+        precioContado: Number(cuenta.totalContadoOriginal || 0),
+        engancheRecibido: Number(cuenta.engancheRecibido || 0),
+        totalRegistradoEnSistema: Number(cuenta.saldoActual || 0) + Number(cuenta.engancheRecibido || 0) +
+            (cuenta.abonos || []).reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0),
+        avisoMigracion: 'El total registrado en sistema para esta cuenta coincide con el precio de contado (sin interés capturado en la migración); no sirve como objetivo automático salvo que pases el total real conocido.'
+    };
+}
+
+// Barre TODAS las cuentas MIG- y regresa, para cada una, el precio de
+// contado y la escalera de plazos posibles (sin intentar adivinar
+// cual es el correcto) -- para revisión manual en lote.
+function _cxcDiagnosticoPlazosMigradosLote(periodicidad = 'semanal') {
+    const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
+    const migradas = cuentasCxC.filter(c => String(c.folio || '').startsWith('MIG-'));
+    return migradas.map(cuenta => {
+        const cuentaConPeriodicidad = { ...cuenta, periodicidad: cuenta.periodicidad || periodicidad };
+        const diag = _cxcInferirPlazoPorMonto(cuentaConPeriodicidad, null);
+        return {
+            folio: cuenta.folio,
+            cliente: cuenta.nombre || cuenta.clienteNombre || '',
+            precioContado: Number(cuenta.totalContadoOriginal || 0),
+            saldoActual: Number(cuenta.saldoActual || 0),
+            escaleraPlazos: (diag.planesEvaluados || []).map(p => ({ meses: p.meses, total: p.total, abono: p.abono }))
+        };
+    });
+}
+
 function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     if (!politica) {
         return {
