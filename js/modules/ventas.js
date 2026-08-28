@@ -1423,7 +1423,11 @@ function actualizarInterfazPago() {
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, periodicidad);
         
         if (plazoSeleccionado === null || plazoSeleccionado < 0 || plazoSeleccionado >= planes.length) {
-            plazoSeleccionado = 0;
+            // Plazo normal de venta: 6 meses por default al elegir crédito
+            // (si esa opción existe en la escalera calculada; si no,
+            // cae al primer plazo disponible como antes).
+            const idxSeisMeses = planes.findIndex(p => Number(p.meses) === 6);
+            plazoSeleccionado = idxSeisMeses >= 0 ? idxSeisMeses : 0;
         }
 
         html = `
