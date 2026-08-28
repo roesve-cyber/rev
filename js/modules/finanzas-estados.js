@@ -7,6 +7,22 @@
 // - Costo de ventas: movimientosInventario (kardex), tipo 'salida' con
 //   folioVenta (venta real, no ajustes/mermas) menos tipo 'entrada' con
 //   folioVenta (reingresos por cancelación/devolución) dentro del rango.
+//   Si un folio no tiene salida real en el kardex, se estima con el costo
+//   actual del producto; si el producto tampoco tiene costo capturado, se
+//   asume un margen del 25% sobre el precio de venta como último recurso
+//   (ver productosSinCostoDetectados, siempre marcado explícito, nunca
+//   mezclado en silencio).
+// - Comisiones a vendedores: comisionesRegistradas (vendedores.js), por la
+//   fecha en que se generó la comisión (misma venta que genera el ingreso),
+//   excluyendo comisiones de ventas canceladas. Antes NO se leía en ningún
+//   lado de este archivo — el pago (_egresarCuenta) solo mueve caja, nunca
+//   gastosOperativos, así que las comisiones eran invisibles en este reporte
+//   aunque sí bajaban el efectivo real.
+// - Mermas y ajustes de inventario: movimientosInventario con
+//   origen:'ajusteInventario' (botón "⚖️ Ajuste" en inventario.js), por
+//   fecha. Valuadas al costo actual del producto (el movimiento no guarda
+//   costo histórico). Antes bajaban el stock/Inventario del Balance en
+//   silencio sin aparecer nunca como gasto aquí.
 // - Gastos operativos: gastosOperativos, por fecha.
 // - Préstamos incobrables: prestamosOtorgados con estado 'Incobrable',
 //   por fecha de marcado.
@@ -239,6 +255,44 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     const foliosConKardexSalida = new Set(salidasVentaMovs.map(m => String(m.folioVenta)));
     const productosMap = new Map(StorageService.get('productos', []).map(p => [String(p.id), p]));
 
+    // 🛡️ NUEVO: mermas/ajustes de inventario (botón "⚖️ Ajuste" en
+    // inventario.js:2992-3057, ejecutarAjusteInv) escriben en
+    // movimientosInventario con origen:'ajusteInventario' y
+    // tipo:'Egreso (Merma/Ajuste)' o 'Ingreso (Sobrante/Ajuste)' — SIN
+    // folioVenta, así que ya quedaban correctamente fuera de "Costo de
+    // ventas" (no son una venta). Pero el registro tampoco guarda ningún
+    // valor monetario (solo cantidad), y hasta ahora NINGÚN gasto operativo
+    // los leía: la merma bajaba el stock (y por lo tanto el Inventario del
+    // Balance, en silencio) pero nunca aparecía como pérdida en el Estado de
+    // Resultados — mismo patrón que las comisiones. Se valúan aquí al costo
+    // ACTUAL del producto (el movimiento no guarda el costo histórico de esa
+    // fecha) y, si el producto no tiene costo capturado, NO se usa el
+    // fallback de margen 25% (no hay precio de venta del que partir en una
+    // merma) — simplemente se marca en productosMermaSinCosto para que se
+    // vea, en vez de inventar un número.
+    const ajustesMovs = kardex.filter(m => m.origen === 'ajusteInventario' && _efEnRango(m.fecha, desde, hasta));
+    const productosMermaSinCosto = new Map(); // productoId -> {productoId, nombre, ocurrencias}
+    function _efValorAjuste(m) {
+        const prod = productosMap.get(String(m.productoId ?? ''));
+        const costo = Number(prod?.costo || prod?.precioCompra) || 0;
+        const cant = Number(m.cantidad) || 0;
+        if (costo <= 0 && cant > 0) {
+            const pid = String(m.productoId ?? '');
+            const nombre = m.productoNombre || prod?.nombre || '(sin nombre)';
+            const entry = productosMermaSinCosto.get(pid) || { productoId: pid, nombre, ocurrencias: 0 };
+            entry.ocurrencias += 1;
+            productosMermaSinCosto.set(pid, entry);
+        }
+        return costo * cant;
+    }
+    const totalMermasBruto = ajustesMovs
+        .filter(m => m.tipo === 'Egreso (Merma/Ajuste)')
+        .reduce((s, m) => s + _efValorAjuste(m), 0);
+    const totalSobrantesAjuste = ajustesMovs
+        .filter(m => m.tipo === 'Ingreso (Sobrante/Ajuste)')
+        .reduce((s, m) => s + _efValorAjuste(m), 0);
+    const totalMermasNetas = Math.max(0, totalMermasBruto - totalSobrantesAjuste);
+
     // 🛡️ REPARACIÓN: cuando ni el kardex NI el producto traen un costo
     // utilizable (costo=0 o vacío, precioCompra=0 o vacío — típicamente un
     // hueco de captura, no una compra gratis), la estimación de arriba
@@ -368,11 +422,30 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         .filter(p => p.estado === 'Incobrable' && _efEnRango(p.fechaIncobrable || p.fecha, desde, hasta))
         .reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
 
+    // 🛡️ REPARACIÓN: las comisiones de vendedores se acumulan en
+    // comisionesRegistradas (vendedores.js) al cerrar la venta, y su pago se
+    // hace vía _egresarCuenta (mueve caja, ver bancos/vendedores) — pero
+    // NINGUNO de los dos toca gastosOperativos, así que nunca aparecían como
+    // gasto en el Estado de Resultados aunque sí bajan el efectivo real.
+    // Se reconocen aquí en base acumulada (fecha de la venta que las generó,
+    // no fecha de pago) para que casen con el ingreso de esa misma venta —
+    // igual que ya se hace para el resto del Estado de Resultados. Se
+    // excluyen las comisiones de ventas que terminaron canceladas (mismo
+    // criterio que ventasEnRango arriba) porque esa venta ya no aporta
+    // ingreso en este reporte y no debería aportar su comisión tampoco.
+    const foliosCancelados = new Set(
+        ventas.filter(v => v.estado === 'Cancelada' || v.estatus === 'Cancelada').map(v => String(v.folio))
+    );
+    const comisionesRegistradas = StorageService.get('comisionesRegistradas', []);
+    const totalComisiones = comisionesRegistradas
+        .filter(c => _efEnRango(c.fecha, desde, hasta) && !foliosCancelados.has(String(c.folio)))
+        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+
     const ingresosNetos = ingresosVentas - totalDevoluciones;
     const utilidadBruta = ingresosNetos - costoVentasFinal;
     // Cuentas incobrables: NIF las clasifica como gasto de operación (venta/
     // administración), NO como parte del RIF.
-    const utilidadOperacion = utilidadBruta - totalGastos - incobrables;
+    const utilidadOperacion = utilidadBruta - totalComisiones - totalMermasNetas - totalGastos - incobrables;
     const rif = ingresosFinancieros - gastosFinancieros;
     const utilidadNeta = utilidadOperacion + rif;
 
@@ -387,6 +460,10 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
             .sort((a, b) => b.montoConMargenAsumido - a.montoConMargenAsumido),
         reingresosEstimado, foliosReingresoEstimado,
         utilidadBruta,
+        totalComisiones,
+        totalMermasNetas, totalMermasBruto, totalSobrantesAjuste,
+        productosMermaSinCosto: Array.from(productosMermaSinCosto.values())
+            .sort((a, b) => b.ocurrencias - a.ocurrencias),
         gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
         ingresosFinancieros, gastosFinancieros, rif,
         utilidadNeta
@@ -420,8 +497,19 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const bancos = _efSaldoCuentasAFecha(StorageService.get('cuentas-bancarias', []), 'banco', hasta, movimientosCaja);
     const totalEfectivoBancos = [...efectivo, ...bancos].reduce((s, c) => s + (Number(c.saldoAFecha) || 0), 0);
 
-    const cxc = StorageService.get('cuentasPorCobrar', []);
-    const totalCxCCredito = cxc.reduce((s, c) => s + (Number(c.saldoPendiente ?? c.saldo) || 0), 0);
+    // 🛡️ REPARACIÓN: leía c.saldoPendiente ?? c.saldo, campos que NO existen
+    // en cuentasPorCobrar (ese registro solo se crea en ventas.js con
+    // saldoActual/saldoOriginal, y cxc.js mantiene el saldo vivo únicamente
+    // en saldoActual — ver abonos/liquidaciones). Leer el campo equivocado
+    // subestimaba (o volvía $0) este activo. Se excluyen cuentas Canceladas
+    // por si acaso (ya deberían traer saldoActual=0, ver ventas.js) y se
+    // separa la porción marcada incobrable como reserva explícita en vez de
+    // dejarla mezclada silenciosamente en el activo (ver reservaIncobrables
+    // más abajo) — antes ni se filtraba ni se mostraba aparte.
+    const cxc = StorageService.get('cuentasPorCobrar', []).filter(c => c.estado !== 'Cancelado');
+    const totalCxCCreditoBruto = cxc.reduce((s, c) => s + (Number(c.saldoActual) || 0), 0);
+    const reservaCxCIncobrable = cxc.filter(c => c.incobrable === true).reduce((s, c) => s + (Number(c.saldoActual) || 0), 0);
+    const totalCxCCredito = Math.max(0, totalCxCCreditoBruto - reservaCxCIncobrable);
 
     // 🛡️ Apartados (layaway) son una cuenta por cobrar aparte de
     // cuentasPorCobrar: el cliente debe el saldoPendiente pero la mercancía
@@ -434,8 +522,17 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const totalApartadosPorCobrar = apartados.reduce((s, a) => s + (Number(a.saldoPendiente) || 0), 0);
     const totalCxC = totalCxCCredito + totalApartadosPorCobrar;
 
-    const prestamos = StorageService.get('prestamosOtorgados', []).filter(p => p.estado !== 'Incobrable');
-    const totalPrestamosPorCobrar = prestamos.reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
+    // 🛡️ REPARACIÓN: antes se excluían los préstamos incobrables en silencio
+    // (filter previo a sumar) — el activo bajaba pero no había ningún
+    // renglón que mostrara esa reserva, igual que pedías. Ahora se calcula
+    // bruto y la reserva aparte, para juntarla con la de CxC en un solo
+    // renglón explícito "Reserva para cuentas incobrables".
+    const prestamosTodos = StorageService.get('prestamosOtorgados', []);
+    const totalPrestamosBruto = prestamosTodos.reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
+    const reservaPrestamosIncobrable = prestamosTodos.filter(p => p.estado === 'Incobrable').reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
+    const totalPrestamosPorCobrar = Math.max(0, totalPrestamosBruto - reservaPrestamosIncobrable);
+
+    const totalReservaIncobrables = reservaCxCIncobrable + reservaPrestamosIncobrable;
 
     // 🛡️ Inventario: stock nuevo + stockSegunda (mercancía devuelta/dañada,
     // vive en un campo aparte — ver inventario.js línea ~1908 — y antes no
@@ -488,8 +585,10 @@ function _efCalcularBalanceGeneral(hastaStr) {
     return {
         hasta: hastaStr, esHistorico,
         efectivo, bancos, totalEfectivoBancos,
-        totalCxC, totalCxCCredito, totalApartadosPorCobrar,
-        totalPrestamosPorCobrar, totalInventario,
+        totalCxC, totalCxCCreditoBruto, totalCxCCredito, totalApartadosPorCobrar,
+        totalPrestamosBruto, totalPrestamosPorCobrar,
+        reservaCxCIncobrable, reservaPrestamosIncobrable, totalReservaIncobrables,
+        totalInventario,
         totalSaldoFavorProveedores,
         totalActivo,
         totalCxP, totalDeudaMSI, totalPasivo,
@@ -572,6 +671,8 @@ function renderEstadosFinancieros() {
         <table style="width:100%;border-collapse:collapse;margin-top:6px;">${filasGastos}</table>
     </details>
     <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Comisiones a vendedores</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalComisiones)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalComisiones, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Mermas y ajustes de inventario${er.productosMermaSinCosto.length > 0 ? ` <span title="${er.productosMermaSinCosto.length} producto(s) con merma en el periodo sin costo capturado — no incluidos en este monto: ${_efEsc(er.productosMermaSinCosto.map(p => p.nombre + ' (' + p.ocurrencias + ')').join(', '))}" style="cursor:help;">⚠️</span>` : ''}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalMermasNetas)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalMermasNetas, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Gastos operativos</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalGastos)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalGastos, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Préstamos incobrables</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.incobrables)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.incobrables, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Utilidad de operación</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadOperacion)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadOperacion, er.ingresosVentas)}</td></tr>
@@ -598,9 +699,10 @@ function renderEstadosFinancieros() {
             <h4 style="color:#1e40af;margin-bottom:6px;">ACTIVO</h4>
             <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Efectivo y bancos</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalEfectivoBancos)}</td></tr>
-                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por cobrar (crédito)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxCCredito)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por cobrar (crédito, bruto)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxCCreditoBruto)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por cobrar (apartados)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalApartadosPorCobrar)}</td></tr>
-                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Préstamos por cobrar</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPrestamosPorCobrar)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Préstamos por cobrar (bruto)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPrestamosBruto)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Reserva para cuentas incobrables<span title="Cuentas marcadas 'incobrable' en CxC y Préstamos otorgados — antes se excluían en silencio (Préstamos) o ni siquiera se filtraban (CxC); ahora se restan aquí de forma explícita." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(bg.totalReservaIncobrables)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Inventario (incl. segunda, sin consignación)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalInventario)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Saldo a favor de proveedores</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalSaldoFavorProveedores)}</td></tr>
                 <tr style="font-weight:bold;background:#eff6ff;"><td style="padding:8px;">TOTAL ACTIVO</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalActivo)}</td></tr>
