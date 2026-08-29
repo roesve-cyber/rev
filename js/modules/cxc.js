@@ -383,6 +383,220 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     };
 }
 
+// ===================================================================
+// SALTO DE PLAZO POR ANTIGUEDAD (pieza opuesta a la politica de pago
+// anticipado): un cliente que compro a "mesesPlanOriginal" meses y ya paso
+// esa fecha limite sin liquidar debe recotizarse al SIGUIENTE escalon de la
+// MISMA escalera (cuenta.saldosPorMes / CalculatorService), tomando el total
+// de esa casilla sobre el capital ORIGINAL de la venta -- no un prestamo
+// nuevo sobre el saldo restante. Nunca automatico: se detecta, se manda
+// aviso push (misma tuberia de la Boveda), y Roberto confirma o rechaza
+// cada caso desde saltosPlazoPendientes antes de que se toque un peso.
+// Tope: nunca sube mas alla de 6 meses (arriba de eso son "otras
+// herramientas" fuera de este mecanismo).
+// ===================================================================
+function _cxcDetectarSaltoPlazo(cuenta) {
+    if (!cuenta || cuenta.estado === 'Cancelado' || cuenta.incobrable) return null;
+    const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(cuenta.folio) : null;
+    const moratoriosPendientesMonto = Number(estado?.saldoMoratorios || 0);
+    const saldoActual = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0) - moratoriosPendientesMonto;
+    if (saldoActual <= 0.01) return null; // ya liquidada
+
+    const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    if (mesesPlanOriginal <= 0 || mesesPlanOriginal >= 6) return null; // sin plan definido o ya en el tope
+
+    const fechaVentaDate = _cxcFechaVentaDate(cuenta);
+    const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVentaDate) / 86400000));
+    const diasPlazoOriginal = mesesPlanOriginal * 30.44;
+    if (diasDesdeVenta < diasPlazoOriginal) return null; // aun dentro de su plazo pactado, no dispara
+
+    const mesesNuevo = mesesPlanOriginal + 1;
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const totalContado = _cxcImporteContadoCuenta(cuenta);
+    const capitalContado = Math.max(0, totalContado - enganche);
+    const periodicidad = cuenta.periodicidad || "semanal";
+
+    // Misma logica de "tabla congelada primero, en vivo solo si no es sana"
+    // que ya usa _cxcEvaluarPoliticaPagoAnticipado, para no inventar un
+    // segundo criterio de que escalera usar.
+    const tablaCongelada = Array.isArray(cuenta?.saldosPorMes) ? cuenta.saldosPorMes.slice() : [];
+    const tablaCongeladaEsSana = tablaCongelada.length > 0 && tablaCongelada
+        .slice().sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))
+        .every((p, i, arr) => i === 0 || Number(p.total || 0) >= Number(arr[i - 1].total || 0) - 0.01);
+    const planes = tablaCongeladaEsSana
+        ? tablaCongelada
+        : ((typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad)
+            : []);
+    const planNuevo = planes.find(p => Number(p.meses || 0) === mesesNuevo);
+    if (!planNuevo) return null;
+
+    const totalActualPlan = Number(cuenta?.plan?.total || 0);
+    const totalNuevo = Number(planNuevo.total || 0);
+    const diferencia = totalNuevo - totalActualPlan;
+    if (diferencia <= 0.01) return null; // por seguridad, jamas reduce el total
+
+    return {
+        folio: cuenta.folio,
+        clienteNombre: _cxcNombreClienteVigente(cuenta),
+        mesesActual: mesesPlanOriginal,
+        mesesNuevo,
+        totalActual: totalActualPlan,
+        totalNuevo,
+        diferencia,
+        saldoActual,
+        diasDesdeVenta
+    };
+}
+
+// Recorre toda la cartera activa y encola (sin duplicar) los saltos de
+// plazo nuevos que detecte, avisando por push. Se puede llamar manualmente
+// desde consola (_cxcEscanearSaltosPlazoPendientes()) o desde un boton.
+function _cxcEscanearSaltosPlazoPendientes() {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const pendientes = StorageService.get("saltosPlazoPendientes", []);
+    let nuevos = 0;
+    cuentas.forEach(cuenta => {
+        const deteccion = _cxcDetectarSaltoPlazo(cuenta);
+        if (!deteccion) return;
+        const yaExiste = pendientes.some(p =>
+            p.folio === deteccion.folio && p.mesesNuevo === deteccion.mesesNuevo && p.estado === 'Pendiente'
+        );
+        if (yaExiste) return;
+        const registro = {
+            id: `salto_${deteccion.folio}_${deteccion.mesesNuevo}_${Date.now()}`,
+            ...deteccion,
+            estado: 'Pendiente',
+            fechaDeteccion: new Date().toISOString()
+        };
+        pendientes.push(registro);
+        nuevos++;
+        if (typeof notificarBovedaAutorizacion === 'function') {
+            notificarBovedaAutorizacion({
+                tipo: 'saltoPlazoPendiente',
+                titulo: '📆 Cliente pasó su plazo pactado',
+                cuerpo: `Folio ${deteccion.folio} (${deteccion.clienteNombre}): pasó de ${deteccion.mesesActual} a ${deteccion.mesesNuevo} meses. Total actual ${_cxcDinero(deteccion.totalActual)} → propuesto ${_cxcDinero(deteccion.totalNuevo)} (+${_cxcDinero(deteccion.diferencia)}). Requiere tu confirmación.`
+            }).catch(() => {});
+        }
+    });
+    StorageService.set("saltosPlazoPendientes", pendientes);
+    return { revisadas: cuentas.length, nuevosEncontrados: nuevos };
+}
+
+// Aplica un salto de plazo ya confirmado por Roberto: sube cuenta.plan a la
+// casilla nueva y agrega UN pagare extra al final por la diferencia -- los
+// pagares pendientes existentes NO se tocan (decision explicita de Roberto).
+window._cxcAplicarSaltoPlazo = function(idPendiente) {
+    if (window.AuditService?.requireAdmin) {
+        if (!window.AuditService.requireAdmin('aplicar salto de plazo CxC')) return;
+    }
+    const pendientes = StorageService.get("saltosPlazoPendientes", []);
+    const pendiente = pendientes.find(p => p.id === idPendiente);
+    if (!pendiente) return alert("No se encontro ese salto de plazo pendiente.");
+    if (pendiente.estado !== 'Pendiente') return alert(`Este salto ya fue ${pendiente.estado.toLowerCase()}.`);
+
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === pendiente.folio);
+    if (!cuenta) return alert("No se encontro la cuenta de ese folio.");
+
+    if (!confirm(`Confirmas subir el folio ${pendiente.folio} (${pendiente.clienteNombre}) de ${pendiente.mesesActual} a ${pendiente.mesesNuevo} meses?\n\nTotal actual: ${_cxcDinero(pendiente.totalActual)}\nTotal nuevo: ${_cxcDinero(pendiente.totalNuevo)}\nSe agregara un pagare nuevo por: ${_cxcDinero(pendiente.diferencia)}\n\nLos pagares ya pendientes NO se modifican.`)) return;
+
+    const planAnteriorSnapshot = cuenta.plan ? { ...cuenta.plan } : null;
+    cuenta.plan = { ...(cuenta.plan || {}), meses: pendiente.mesesNuevo, total: pendiente.totalNuevo };
+
+    const pagaresSistema = StorageService.get("pagaresSistema", []);
+    const numeroExtra = pagaresSistema.filter(p => p.folio === cuenta.folio).length + 1;
+    const fechaVencimientoExtra = new Date();
+    fechaVencimientoExtra.setDate(fechaVencimientoExtra.getDate() + 30); // un periodo mas, igual que el resto de la escalera
+
+    pagaresSistema.push({
+        id: Date.now(),
+        folio: cuenta.folio,
+        numeroPagere: `${cuenta.folio}-EXT${pendiente.mesesNuevo}`,
+        clienteNombre: pendiente.clienteNombre,
+        clienteId: cuenta.clienteId || cuenta.cliente?.id || null,
+        fechaEmision: new Date().toISOString(),
+        fechaVencimiento: fechaVencimientoExtra.getTime(),
+        monto: pendiente.diferencia,
+        estado: "Pendiente",
+        diasAtrasoActual: 0,
+        origenSaltoPlazo: true
+    });
+    StorageService.set("pagaresSistema", pagaresSistema);
+
+    // 🛡️ Decisión de Roberto: el salto de plazo REEMPLAZA los moratorios de
+    // esa cuenta -- el interés del plazo nuevo ya cubre el atraso, así que
+    // no debe quedar recargo por atraso encima. Solo se cancela la parte
+    // PENDIENTE de cada moratorio vigente (lo ya cobrado se queda como
+    // historial, no se revierte dinero ya recibido).
+    let moratoriosCancelados = 0;
+    let montoMoratoriosCancelados = 0;
+    (cuenta.cargosMoratorios || []).forEach(m => {
+        if (m.cancelado || m.anulado) return;
+        const pendienteMoratorio = Math.max(0, Number(m.monto || 0) - Number(m.montoAbonado || 0));
+        if (pendienteMoratorio <= 0.01) return;
+        m.cancelado = true;
+        m.fechaCancelacion = new Date().toISOString();
+        m.motivoCancelacion = `Absorbido por salto de plazo a ${pendiente.mesesNuevo} meses`;
+        moratoriosCancelados++;
+        montoMoratoriosCancelados += pendienteMoratorio;
+    });
+
+    cuenta.saldoActual = Number(cuenta.saldoActual || 0) + pendiente.diferencia;
+    StorageService.set("cuentasPorCobrar", cuentas);
+
+    pendiente.estado = 'Aplicado';
+    pendiente.fechaResolucion = new Date().toISOString();
+    StorageService.set("saltosPlazoPendientes", pendientes);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'SALTO_PLAZO_CXC',
+            modulo: 'CxC',
+            entidad: 'Cuenta',
+            entidadId: cuenta.folio,
+            detalle: `Salto de plazo de ${pendiente.mesesActual} a ${pendiente.mesesNuevo} meses. Diferencia agregada como pagare: ${_cxcDinero(pendiente.diferencia)}.${moratoriosCancelados > 0 ? ` Se cancelaron ${moratoriosCancelados} moratorio(s) pendiente(s) por ${_cxcDinero(montoMoratoriosCancelados)} (absorbidos por el nuevo plazo).` : ''}`,
+            monto: pendiente.diferencia,
+            severidad: 'riesgo',
+            datos: { planAnterior: planAnteriorSnapshot, planNuevo: cuenta.plan, pendiente, moratoriosCancelados, montoMoratoriosCancelados }
+        });
+    }
+
+    alert(`Listo. Folio ${cuenta.folio} ahora a ${pendiente.mesesNuevo} meses. Se agrego un pagare por ${_cxcDinero(pendiente.diferencia)}.${moratoriosCancelados > 0 ? `\n\nSe cancelaron ${moratoriosCancelados} moratorio(s) pendiente(s) por ${_cxcDinero(montoMoratoriosCancelados)} (absorbidos por el nuevo plazo).` : ''}`);
+    if (typeof _cxcRefrescarVistaArcActiva === 'function') _cxcRefrescarVistaArcActiva();
+};
+
+window._cxcRechazarSaltoPlazo = function(idPendiente, motivo = '') {
+    const pendientes = StorageService.get("saltosPlazoPendientes", []);
+    const pendiente = pendientes.find(p => p.id === idPendiente);
+    if (!pendiente) return alert("No se encontro ese salto de plazo pendiente.");
+    pendiente.estado = 'Rechazado';
+    pendiente.fechaResolucion = new Date().toISOString();
+    pendiente.motivoRechazo = motivo || '';
+    StorageService.set("saltosPlazoPendientes", pendientes);
+    alert(`Salto de plazo del folio ${pendiente.folio} marcado como rechazado.`);
+};
+
+function renderSaltosPlazoPendientes() {
+    const pendientes = StorageService.get("saltosPlazoPendientes", []).filter(p => p.estado === 'Pendiente');
+    const cont = document.getElementById('vistaPrincipal') || document.body;
+    cont.innerHTML = `
+        <div style="padding:20px;max-width:900px;margin:0 auto;">
+            <h2 style="margin:0 0 16px;">📆 Saltos de plazo pendientes</h2>
+            <button onclick="_cxcEscanearSaltosPlazoPendientes(); renderSaltosPlazoPendientes();" style="margin-bottom:16px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;">🔍 Buscar nuevos</button>
+            ${pendientes.length === 0 ? '<p style="color:#64748b;">No hay saltos de plazo pendientes de revisión.</p>' : pendientes.map(p => `
+                <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:12px;">
+                    <div style="font-weight:bold;margin-bottom:6px;">Folio ${p.folio} — ${p.clienteNombre}</div>
+                    <div style="font-size:13px;color:#64748b;margin-bottom:10px;">De ${p.mesesActual} a ${p.mesesNuevo} meses · Total actual ${_cxcDinero(p.totalActual)} → propuesto ${_cxcDinero(p.totalNuevo)} (+${_cxcDinero(p.diferencia)})</div>
+                    <button onclick="_cxcAplicarSaltoPlazo('${p.id}')" style="padding:8px 14px;border-radius:8px;border:none;background:#166534;color:white;font-weight:bold;cursor:pointer;margin-right:8px;">✅ Confirmar</button>
+                    <button onclick="_cxcRechazarSaltoPlazo('${p.id}')" style="padding:8px 14px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;">✖️ Rechazar</button>
+                </div>
+            `).join('')}
+        </div>`;
+}
+window.renderSaltosPlazoPendientes = renderSaltosPlazoPendientes;
+window._cxcEscanearSaltosPlazoPendientes = _cxcEscanearSaltosPlazoPendientes;
+
 function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     if (!politica) {
         return {
@@ -1272,6 +1486,17 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         Number(politicaValidacion?.montoLiquidacion || 0)
     );
     if (montoAbonoInput > (maximoPermitido + 0.01)) {
+        // 🔔 AVISO PUSH: el cajero/cliente intentó abonar más de lo que
+        // corresponde por política de pago anticipado. Si el dinero ya
+        // cambió de manos físicamente, Roberto necesita saberlo aunque él
+        // no sea quien esté frente a la pantalla en este momento.
+        if (typeof notificarBovedaAutorizacion === 'function') {
+            notificarBovedaAutorizacion({
+                tipo: 'prontoPagoSobrepago',
+                titulo: '💸 Posible cambio a favor del cliente',
+                cuerpo: `Folio ${folio}${politicaValidacion?.cuenta ? ` (${_cxcNombreClienteVigente(politicaValidacion.cuenta)})` : ''}: se intentó abonar ${_cxcDinero(montoAbonoInput)}, pero el máximo por política de pronto pago es ${_cxcDinero(maximoPermitido)}. Si ya se recibió el dinero de más, hay que regresar ${_cxcDinero(montoAbonoInput - maximoPermitido)}.`
+            }).catch(() => {});
+        }
         return alert(`El abono no puede ser mayor al saldo o al monto correcto por politica.\n\nSaldo visible: ${_cxcDinero(saldoActual)}\nMonto por politica: ${_cxcDinero(politicaValidacion?.montoLiquidacion || saldoActual)}`);
     }
 
@@ -1313,6 +1538,17 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         montoAbonoInput >= Number(saldoActual || 0) - 0.01 &&
         montoAbonoInput < Number(politicaAbono.montoLiquidacion || 0) - 0.01
     ) {
+        // 🔔 AVISO PUSH: el cliente va llegando a su último pago, pero
+        // capturaron el saldo nominal (viejo) en vez del monto correcto por
+        // política. Roberto necesita saber el monto real ANTES de que se
+        // vuelva a intentar cobrar mal.
+        if (typeof notificarBovedaAutorizacion === 'function') {
+            notificarBovedaAutorizacion({
+                tipo: 'prontoPagoMontoCorrecto',
+                titulo: '🏁 Último pago — usar el monto con descuento',
+                cuerpo: `Folio ${folio} (${_cxcNombreClienteVigente(cuenta)}): el saldo nominal es ${_cxcDinero(saldoActual)}, pero por política de pronto pago debe cobrarse ${_cxcDinero(politicaAbono.montoLiquidacion)}.`
+            }).catch(() => {});
+        }
         alert(`POLITICA DE PAGO ANTICIPADO\n\nEste abono cerraria el saldo visible de la cuenta (${_cxcDinero(saldoActual)}), pero ya vencio el periodo de contado: la politica exige ${_cxcDinero(politicaAbono.montoLiquidacion)} para liquidar anticipadamente.\n\nCaptura ${_cxcDinero(politicaAbono.montoLiquidacion)} para liquidar la cuenta, o un monto menor que NO la liquide (quedara como abono parcial).`);
         return;
     }
@@ -1330,6 +1566,15 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         if (confirm(`POLITICA DE PAGO ANTICIPADO\n\nAplica: ${tipoPolitica}\nMonto a aplicar: ${_cxcDinero(politicaAbono.montoLiquidacion)}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta con esta politica?`)) {
             montoFinal = politicaAbono.montoLiquidacion;
             liquidacionPorPolitica = true;
+            // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
+            // el descuento de pronto pago aplicado.
+            if (typeof notificarBovedaAutorizacion === 'function') {
+                notificarBovedaAutorizacion({
+                    tipo: 'prontoPagoLiquidado',
+                    titulo: '✅ Cuenta liquidada con descuento por pronto pago',
+                    cuerpo: `Folio ${folio} (${_cxcNombreClienteVigente(cuenta)}): ${tipoPolitica}. Se aplicó ${_cxcDinero(politicaAbono.montoLiquidacion)}.${politicaAbono.beneficio > 0.01 ? ` Beneficio para el cliente: ${_cxcDinero(politicaAbono.beneficio)}.` : ''}`
+                }).catch(() => {});
+            }
         }
     }
 

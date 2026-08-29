@@ -373,6 +373,7 @@ window.renderARC_v3 = function() {
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
                     <button onclick="renderConcentracion()" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🎯 Concentración</button>
                     <button onclick="renderVencimientoPlazo()" style="padding:10px 16px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⏰ Vencimiento de Plazo</button>
+                    <button onclick="renderSaltosPlazoPendientes()" style="padding:10px 16px;background:#9333ea;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📆 Saltos de Plazo</button>
                 </div>
             </div>
         </div>
