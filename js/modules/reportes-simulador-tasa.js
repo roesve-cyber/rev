@@ -286,6 +286,66 @@ function _stpDescuentoUnicoHtml(diag, plazosActuales) {
         </div>`;
 }
 
+// ---------------------------------------------------------------
+// ESCENARIOS POR PLAZO CON EL DESCUENTO GLOBAL (único)
+// ---------------------------------------------------------------
+// La tabla de arriba (_stpDescuentoUnicoHtml) da UN número para decirle
+// al vendedor. Esta tabla responde la pregunta complementaria: si de
+// verdad usas ESE número (no el neutralizante exacto de cada plazo),
+// ¿cómo le queda a cada plazo en específico comparado con lo que el
+// cliente paga hoy? En plazos cortos el % único casi siempre le da de
+// más al cliente (le sale más barato que hoy) y en plazos largos casi
+// siempre le da de menos (le sale más caro que hoy) — esta tabla hace
+// visible exactamente cuánto, en pesos y en %, para cada plazo.
+function _stpEscenariosDescuentoGlobalHtml(plazosActuales) {
+    const monto = window._stpMontoEjemplo;
+    const descuentoGlobal = window._stpDescuentoRedondeado ?? 0;
+
+    const filas = plazosActuales.map(p => {
+        const tasaNueva = window._stpTasasNuevas[p.meses] ?? p.tasa;
+        const totalActual = _stpTotalConTasa(monto, p.tasa, p.meses);
+        const totalNuevoSinDescuento = _stpTotalConTasa(monto, tasaNueva, p.meses);
+        const totalPuntual = totalNuevoSinDescuento * (1 - descuentoGlobal / 100);
+        const diferenciaPesos = totalPuntual - totalActual;
+        const diferenciaPct = totalActual > 0 ? (diferenciaPesos / totalActual) * 100 : 0;
+        return { p, totalActual, totalNuevoSinDescuento, totalPuntual, diferenciaPesos, diferenciaPct };
+    });
+
+    return `
+        <div style="background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:20px;">
+            <h3 style="margin:0 0 6px;">📐 Con el ${descuentoGlobal}% único: cómo queda cada plazo vs. hoy</h3>
+            <p style="font-size:13px;color:#64748b;margin:0 0 16px;">Aplicando el mismo ${descuentoGlobal}% de descuento a TODOS los plazos (no el neutralizante exacto de cada uno) — así se ve, plazo por plazo, si al cliente puntual le sale más barato o más caro que lo que paga hoy con la tasa actual.</p>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead><tr style="background:#f3f4f6;">
+                        <th style="padding:9px;text-align:left;">Plazo</th>
+                        <th style="padding:9px;text-align:right;">Total actual (hoy)</th>
+                        <th style="padding:9px;text-align:right;">Total tasa nueva (sin descuento)</th>
+                        <th style="padding:9px;text-align:right;">Total puntual (con ${descuentoGlobal}% único)</th>
+                        <th style="padding:9px;text-align:right;">Diferencia vs. hoy</th>
+                    </tr></thead>
+                    <tbody>
+                        ${filas.map(f => {
+                            const neutral = Math.abs(f.diferenciaPct) < 0.3;
+                            const favorable = f.diferenciaPesos < 0; // le sale más barato que hoy
+                            const color = neutral ? '#64748b' : (favorable ? '#166534' : '#991b1b');
+                            const signo = f.diferenciaPesos > 0 ? '+' : '';
+                            const etiqueta = neutral ? '≈ igual que hoy' : (favorable ? 'más barato que hoy (le regalas)' : 'más caro que hoy (le falta compensación)');
+                            return `<tr>
+                                <td style="padding:9px;font-weight:bold;">${f.p.meses} meses</td>
+                                <td style="padding:9px;text-align:right;color:#64748b;">${dinero(f.totalActual)}</td>
+                                <td style="padding:9px;text-align:right;color:#64748b;">${dinero(f.totalNuevoSinDescuento)}</td>
+                                <td style="padding:9px;text-align:right;font-weight:bold;">${dinero(f.totalPuntual)}</td>
+                                <td style="padding:9px;text-align:right;font-weight:900;color:${color};">${signo}${dinero(f.diferenciaPesos)} (${signo}${f.diferenciaPct.toFixed(1)}%)<div style="font-size:10px;font-weight:normal;color:${color};">${etiqueta}</div></td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <p style="margin:12px 0 0;font-size:12px;color:#64748b;">Ejemplo con venta de ${dinero(monto)}. Si el rango de "diferencia vs. hoy" te parece muy amplio entre plazo corto y largo, ajusta el % único arriba, o usa la tabla neutralizante exacta (más abajo) si prefieres precisión por plazo en vez de un solo número fácil de decir.</p>
+        </div>`;
+}
+
 function renderSimuladorTasaProntoPago() {
     const vista = document.getElementById('simulador-tasa-pronto-pago');
     if (!vista) return;
@@ -354,7 +414,12 @@ function renderSimuladorTasaProntoPago() {
             </div>
 
             ${_stpDescuentoUnicoHtml(diag, plazosActuales)}
+        </div>
 
+        ${_stpEscenariosDescuentoGlobalHtml(plazosActuales)}
+
+        <div style="background:white;padding:20px;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:20px;">
+            <h3 style="margin:0 0 14px;">Nueva tasa por plazo y descuento neutralizante (exacto, no el único)</h3>
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead><tr style="background:#f3f4f6;">
