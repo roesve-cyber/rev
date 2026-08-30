@@ -1211,6 +1211,9 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
           <input id="inputEnganche" type="number" min="0" step="10" onchange="actualizarPlazos()">
         </div>
         <div id="plazosLista" class="plans"></div>
+        <div style="margin-top:10px;padding:10px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:10px;font-size:12px;color:#6b21a8;text-align:center;">
+          🎟️ Si liquidas antes del plazo elegido, la diferencia se te entrega como <strong>cupón de saldo a favor</strong> (vigente 3 meses, aplicable en tu próxima compra).
+        </div>
       </div>
 
       <div class="modal-actions">
@@ -1706,6 +1709,7 @@ function tarjetaProducto(p, index) {
           </div>
           <div class="weekly">${plan ? `${fmt(plan.abono)}<br><span>semanal</span>` : "Pregunta<br><span>plan</span>"}</div>
         </div>
+        <div class="coupon-teaser" style="font-size:10.5px;color:#7e22ce;font-weight:600;margin-top:2px;">🎟️ Paga antes, gana cupón</div>
         <div class="card-actions">
           <button class="detail-btn" type="button" onclick="abrirModal('${escapeHtml(p.id)}')">Ver detalle</button>
           <a class="mini-wa" href="https://wa.me/${WHATSAPP}?text=${msg}" target="_blank" rel="noopener" aria-label="Consultar por WhatsApp">WA</a>
