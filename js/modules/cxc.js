@@ -242,6 +242,135 @@ function _cxcTotalPagadoPolitica(folio, cuenta = null) {
     return Math.max(desdePagares, desdeAbonos);
 }
 
+// ===================================================================
+// CUPONES DE BENEFICIO POR PRONTO PAGO
+// ===================================================================
+// Decisión de Roberto: el "beneficio" de la política de pago anticipado ya
+// NO se condona sin más -- se convierte en saldo a favor (cupón) que el
+// cliente puede aplicar en OTRA compra futura (contado, crédito o
+// apartado), incluso como parte de un enganche mixto (ej. enganche $1000 =
+// $450 cupón + $550 efectivo). Nunca se devuelve en efectivo salvo
+// autorización expresa de admin -- ESO se implementa después, aquí solo se
+// deja la estructura (estado 'Cancelado' queda libre para ese flujo).
+function _cxcGenerarCodigoCupon() {
+    return 'CUP-' + Math.random().toString(36).slice(2, 6).toUpperCase() + Date.now().toString().slice(-4);
+}
+
+function _cxcEmitirCuponBeneficio(cuenta, folio, montoBeneficio, motivo) {
+    if (!cuenta || Number(montoBeneficio || 0) <= 0.01) return null;
+    const cupones = StorageService.get("cuponesCliente", []);
+    const fechaVencimiento = new Date();
+    fechaVencimiento.setMonth(fechaVencimiento.getMonth() + 3); // 🛡️ vigencia: 3 meses, decisión de Roberto
+    const cupon = {
+        id: `cupon_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        codigo: _cxcGenerarCodigoCupon(),
+        clienteId: cuenta.clienteId || cuenta.cliente?.id || null,
+        clienteNombre: _cxcNombreClienteVigente(cuenta),
+        folioOrigen: folio,
+        montoOriginal: Number(montoBeneficio),
+        montoDisponible: Number(montoBeneficio),
+        estado: 'Activo', // Activo | Agotado | Cancelado | Vencido
+        motivoOrigen: motivo || 'Beneficio por pago anticipado',
+        fechaEmision: new Date().toISOString(),
+        fechaVencimiento: fechaVencimiento.toISOString(),
+        historialUso: []
+    };
+    cupones.push(cupon);
+    StorageService.set("cuponesCliente", cupones);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'EMISION_CUPON_BENEFICIO',
+            modulo: 'CxC',
+            entidad: 'Cupon',
+            entidadId: cupon.id,
+            detalle: `Cupón ${cupon.codigo} emitido a ${cupon.clienteNombre} por ${_cxcDinero(montoBeneficio)}. Origen: folio ${folio} (${cupon.motivoOrigen}). Vigente hasta ${fechaVencimiento.toLocaleDateString('es-MX')}.`,
+            monto: Number(montoBeneficio),
+            severidad: 'normal',
+            datos: { cupon }
+        });
+    }
+    if (typeof notificarBovedaAutorizacion === 'function') {
+        notificarBovedaAutorizacion({
+            tipo: 'cuponEmitido',
+            titulo: '🎟️ Cupón de beneficio emitido',
+            cuerpo: `${cupon.clienteNombre}: cupón ${cupon.codigo} por ${_cxcDinero(montoBeneficio)} (saldo a favor, no reembolsable en efectivo salvo autorización de admin). Vigente hasta ${fechaVencimiento.toLocaleDateString('es-MX')}. Folio origen: ${folio}.`
+        }).catch(() => {});
+    }
+    return cupon;
+}
+
+// API de consulta/aplicación -- pensada para que el flujo de venta
+// (contado/crédito/apartado) la use al capturar enganche o pago. La
+// aplicación de un cupón NUNCA mueve movimientosCaja ni cuentasEfectivo/
+// cuentas-bancarias -- es saldo a favor, no efectivo, así que jamás debe
+// contarse como ingreso de caja real.
+function _cxcCuponVencido(cupon) {
+    return !!cupon.fechaVencimiento && new Date(cupon.fechaVencimiento) < new Date();
+}
+
+// Recorre los cupones y marca 'Vencido' los que ya pasaron su fecha -- se
+// llama de forma perezosa (al consultar disponibles) en vez de con un timer,
+// para no depender de que la app esté abierta en el momento exacto en que
+// vence.
+function _cxcMarcarCuponesVencidos() {
+    const cupones = StorageService.get("cuponesCliente", []);
+    let cambios = false;
+    cupones.forEach(c => {
+        if (c.estado === 'Activo' && _cxcCuponVencido(c)) {
+            c.estado = 'Vencido';
+            c.fechaMarcadoVencido = new Date().toISOString();
+            cambios = true;
+        }
+    });
+    if (cambios) StorageService.set("cuponesCliente", cupones);
+    return cupones;
+}
+
+window._cxcCuponesDisponiblesCliente = function(clienteId) {
+    if (!clienteId) return [];
+    return _cxcMarcarCuponesVencidos()
+        .filter(c => String(c.clienteId) === String(clienteId) && c.estado === 'Activo' && Number(c.montoDisponible || 0) > 0.01);
+};
+
+window._cxcAplicarCupon = function(cuponId, montoAAplicar, contexto = {}) {
+    const cupones = _cxcMarcarCuponesVencidos();
+    const cupon = cupones.find(c => c.id === cuponId);
+    if (!cupon) return { ok: false, motivo: 'Cupón no encontrado.' };
+    if (cupon.estado !== 'Activo') return { ok: false, motivo: cupon.estado === 'Vencido' ? `Este cupón venció el ${new Date(cupon.fechaVencimiento).toLocaleDateString('es-MX')}.` : `El cupón ya está ${cupon.estado.toLowerCase()}.` };
+    const monto = Math.min(Number(montoAAplicar || 0), Number(cupon.montoDisponible || 0));
+    if (monto <= 0.01) return { ok: false, motivo: 'El cupón no tiene saldo disponible.' };
+
+    cupon.montoDisponible = Number((Number(cupon.montoDisponible) - monto).toFixed(2));
+    cupon.historialUso = cupon.historialUso || [];
+    cupon.historialUso.push({
+        fecha: new Date().toISOString(),
+        monto,
+        folioDestino: contexto.folioDestino || null,
+        tipoVentaDestino: contexto.tipoVentaDestino || null, // 'contado' | 'credito' | 'apartado'
+        nota: contexto.nota || ''
+    });
+    if (cupon.montoDisponible <= 0.01) {
+        cupon.estado = 'Agotado';
+        cupon.montoDisponible = 0;
+    }
+    StorageService.set("cuponesCliente", cupones);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'APLICACION_CUPON',
+            modulo: 'Ventas',
+            entidad: 'Cupon',
+            entidadId: cupon.id,
+            detalle: `Se aplicaron ${_cxcDinero(monto)} del cupón ${cupon.codigo} (${cupon.clienteNombre}) a ${contexto.tipoVentaDestino || 'una venta'} folio ${contexto.folioDestino || '(pendiente)'}.`,
+            monto,
+            severidad: 'normal',
+            datos: { cupon, contexto }
+        });
+    }
+    return { ok: true, montoAplicado: monto, cuponRestante: cupon.montoDisponible, codigo: cupon.codigo };
+};
+
 function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     const cuenta = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
     if (!cuenta) return null;
@@ -1504,6 +1633,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
     const cuenta = cuentas.find(c => c.folio === folio) || {};
     let montoFinal = montoAbonoInput;
     let liquidacionPorPolitica = false;
+    let cuponEmitido = null; // 🎟️ se llena si el beneficio de esta liquidación se convierte en cupón
 
     const fechaClaveAbono = _cxcFechaClave(fechaAbonoRaw || fechaObj);
     const abonosRegistradosDia = (cuenta.abonos || []).filter(ab =>
@@ -1557,8 +1687,10 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         const tipoPolitica = politicaAbono.tipo === "contado_30"
             ? "PRECIO DE CONTADO (30 DIAS)"
             : `PLAN ANTICIPADO${politicaAbono.plan?.meses ? ` ${politicaAbono.plan.meses} MESES` : ""}`;
+        // 🛡️ Decisión de Roberto: el beneficio YA NO se condona sin más -- se
+        // convierte en cupón de saldo a favor (_cxcEmitirCuponBeneficio).
         const beneficioTxt = politicaAbono.beneficio > 0.01
-            ? `\nBeneficio para el cliente: ${_cxcDinero(politicaAbono.beneficio)}`
+            ? `\nBeneficio para el cliente (se emitira como CUPON, no se condona): ${_cxcDinero(politicaAbono.beneficio)}`
             : "";
         const excesoTxt = montoAbonoInput > politicaAbono.montoLiquidacion + 0.01
             ? `\n\nCapturaste ${_cxcDinero(montoAbonoInput)}, pero se aplicara el monto correcto por politica.`
@@ -1566,14 +1698,22 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         if (confirm(`POLITICA DE PAGO ANTICIPADO\n\nAplica: ${tipoPolitica}\nMonto a aplicar: ${_cxcDinero(politicaAbono.montoLiquidacion)}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta con esta politica?`)) {
             montoFinal = politicaAbono.montoLiquidacion;
             liquidacionPorPolitica = true;
+            // 🎟️ El beneficio se emite como cupón de saldo a favor -- nunca
+            // se condona/desaparece sin dejar rastro aplicable.
+            cuponEmitido = politicaAbono.beneficio > 0.01
+                ? _cxcEmitirCuponBeneficio(cuenta, folio, politicaAbono.beneficio, `Pago anticipado (${tipoPolitica})`)
+                : null;
             // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
             // el descuento de pronto pago aplicado.
             if (typeof notificarBovedaAutorizacion === 'function') {
                 notificarBovedaAutorizacion({
                     tipo: 'prontoPagoLiquidado',
                     titulo: '✅ Cuenta liquidada con descuento por pronto pago',
-                    cuerpo: `Folio ${folio} (${_cxcNombreClienteVigente(cuenta)}): ${tipoPolitica}. Se aplicó ${_cxcDinero(politicaAbono.montoLiquidacion)}.${politicaAbono.beneficio > 0.01 ? ` Beneficio para el cliente: ${_cxcDinero(politicaAbono.beneficio)}.` : ''}`
+                    cuerpo: `Folio ${folio} (${_cxcNombreClienteVigente(cuenta)}): ${tipoPolitica}. Se aplicó ${_cxcDinero(politicaAbono.montoLiquidacion)}.${cuponEmitido ? ` Cupón ${cuponEmitido.codigo} emitido por ${_cxcDinero(cuponEmitido.montoOriginal)}.` : ''}`
                 }).catch(() => {});
+            }
+            if (cuponEmitido) {
+                alert(`Cuenta liquidada. Se emitió el cupón ${cuponEmitido.codigo} por ${_cxcDinero(cuponEmitido.montoOriginal)} a favor de ${cuponEmitido.clienteNombre}. Es saldo a favor aplicable en su próxima compra (contado, crédito o apartado) -- no es reembolsable en efectivo salvo autorización de admin. Vigente hasta el ${new Date(cuponEmitido.fechaVencimiento).toLocaleDateString('es-MX')}.`);
             }
         }
     }
@@ -1708,7 +1848,8 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         enganche: Number(cuenta.engancheRecibido || cuenta.enganche || 0),
         deudaInicial: deudaInicialReal,
         abonoAnterior: _abonoAnterior ? { monto: Number(_abonoAnterior.monto || 0), fecha: _abonoAnterior.fecha || '' } : null,
-        numeroDePago: _numeroDePago
+        numeroDePago: _numeroDePago,
+        cuponEmitido
         });
     } catch (err) {
         procesoOk = false;
@@ -2043,7 +2184,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 function generarTicketAbonoTermico(datosAbono) {
     const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
         pagaresRestantes, etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro,
-        abonoAnterior, numeroDePago, deudaInicial } = datosAbono;
+        abonoAnterior, numeroDePago, deudaInicial, cuponEmitido } = datosAbono;
 
     // Fallback (totalVenta - enganche) solo para llamadas viejas que no pasen
     // deudaInicial explícito: es incorrecto si la cuenta tiene intereses,
@@ -2070,6 +2211,15 @@ function generarTicketAbonoTermico(datosAbono) {
         mensajeEstado = `¡Gracias por su pago puntual! Está al corriente con sus pagos. ✅`;
         mensajeClase = 'mensaje-ok';
     }
+
+    const cuponHTML = cuponEmitido ? `
+        <div class="seccion-titulo">🎟️ CUPÓN DE SALDO A FAVOR</div>
+        <div style="border:1px dashed #000;padding:6px;font-size:10px;text-align:center;margin:6px 0;">
+            <div style="font-size:14px;font-weight:bold;">${esc(cuponEmitido.codigo)} — ${dineroFmt(cuponEmitido.montoOriginal)}</div>
+            <div>Por su pago anticipado. Aplíquelo en su próxima compra (contado, crédito o apartado).</div>
+            <div style="font-weight:bold;">Vigente hasta el ${new Date(cuponEmitido.fechaVencimiento).toLocaleDateString('es-MX')}</div>
+            <div>No es reembolsable en efectivo.</div>
+        </div>` : '';
 
     const articulosHTML = (articulos || []).length > 0 ? `
         <div class="seccion-titulo">ARTÍCULOS DE LA VENTA</div>
@@ -2214,6 +2364,7 @@ function generarTicketAbonoTermico(datosAbono) {
     ${numeroDePago ? `<div style="font-size:10px; color:#444; margin-top:4px;">Pago n.º ${esc(String(numeroDePago))}${abonoAnterior ? ` &nbsp;·&nbsp; Abono anterior: ${dineroFmt(abonoAnterior.monto)}${abonoAnterior.fecha ? ' (' + esc(abonoAnterior.fecha) + ')' : ''}` : ''}</div>` : ''}
     <hr>
     <div class="${mensajeClase}">${mensajeEstado}</div>
+    ${cuponHTML}
     <hr>
     <div style="text-align:center; margin-top:10px;">
         <div style="border-top:1px solid #333; width:70%; margin:0 auto 4px auto;"></div>

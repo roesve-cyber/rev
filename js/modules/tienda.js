@@ -129,6 +129,7 @@ window.renderProductosCatalogo = function(listaProductos) {
                         <div style="font-size: 10px; color: #2563eb; font-weight: 700; margin-top: 2px;">
                             💳 Semanal: ${dinero(plan6.abono)}
                         </div>
+                        <div style="font-size: 8.5px; color: #7e22ce; font-weight: 600; margin-top: 3px;">🎟️ Paga antes, gana cupón</div>
                     </div>
                     <button onclick="window.verProductoAgrupado('${grupo.idPrincipal}')" 
                             style="width: 100%; padding: 8px; margin-top: 10px; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase;">
@@ -326,6 +327,9 @@ window.actualizarTablaPlanesSimulada = function(saldo) {
         </tr>`;
     });
     html += '</tbody></table>';
+    html += `<div style="margin-top:8px;padding:8px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;font-size:10.5px;color:#6b21a8;text-align:center;">
+        🎟️ Si liquidas antes del plazo elegido, la diferencia se te entrega como <strong>cupón de saldo a favor</strong> (vigente 3 meses, aplicable en tu próxima compra).
+    </div>`;
     cont.innerHTML = html;
 };
 

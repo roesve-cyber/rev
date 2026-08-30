@@ -638,6 +638,104 @@ function _renderListaProductosCarrito() {
 // tal cual desde clientes.js (_actualizarPanelClienteCarrito) cada vez que
 // se elige o crea un cliente, así que #infoCliente y mostrarInfoCliente()
 // deben seguir funcionando exactamente igual que antes.
+// 🎟️ CUPONES DE SALDO A FAVOR (beneficio por pago anticipado, convertido en
+// cupón en vez de condonarse -- ver cxc.js:_cxcEmitirCuponBeneficio). Se
+// puede aplicar como parte de contado, crédito (enganche) o apartado
+// (enganche). El monto aplicado NUNCA se cuenta como efectivo real -- se
+// resta del ingreso a caja en ejecutarVentaAutorizadaReal, no aquí.
+function _cuponVentaHtml() {
+    const c = window.clienteSeleccionado;
+    if (!c || typeof window._cxcCuponesDisponiblesCliente !== 'function') return '';
+    const disponibles = window._cxcCuponesDisponiblesCliente(c.id);
+    const aplicado = window._estadoPago?.cuponAplicado;
+
+    if (aplicado) {
+        return `
+            <div style="margin-bottom:16px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-size:11px;font-weight:800;color:#166534;text-transform:uppercase;">🎟️ Cupón aplicado</div>
+                        <div style="font-size:14px;color:#14532d;font-weight:bold;">${aplicado.codigo} — ${dinero(aplicado.monto)}</div>
+                    </div>
+                    <button onclick="quitarCuponVenta()" style="padding:6px 12px;background:white;color:#166534;border:1px solid #bbf7d0;border-radius:8px;font-size:12px;cursor:pointer;">Quitar</button>
+                </div>
+            </div>`;
+    }
+
+    if (disponibles.length === 0) return '';
+
+    return `
+        <div style="margin-bottom:16px; padding:12px; background:#faf5ff; border:1px solid #e9d5ff; border-radius:12px;">
+            <div style="font-size:11px;font-weight:800;color:#7e22ce;text-transform:uppercase;margin-bottom:8px;">🎟️ ${c.nombre} tiene ${disponibles.length} cupón(es) disponible(s)</div>
+            <select id="selCuponVenta" onchange="_actualizarMontoCuponVenta()" style="width:100%;padding:9px;border:1px solid #e9d5ff;border-radius:8px;font-size:13px;margin-bottom:8px;">
+                <option value="">-- Elegir cupón --</option>
+                ${disponibles.map(cup => `<option value="${cup.id}">${cup.codigo} — disponible ${dinero(cup.montoDisponible)}${cup.fechaVencimiento ? ` (vence ${new Date(cup.fechaVencimiento).toLocaleDateString('es-MX')})` : ''}</option>`).join('')}
+            </select>
+            <div id="divMontoCuponVenta" class="oculto" style="display:flex;gap:8px;">
+                <input type="number" id="numMontoCuponVenta" min="0" step="10" placeholder="Monto a aplicar" style="flex:1;padding:9px;border:1px solid #e9d5ff;border-radius:8px;font-size:13px;">
+                <button onclick="aplicarCuponSeleccionadoVenta()" style="padding:9px 14px;background:#7e22ce;color:white;border:none;border-radius:8px;font-weight:bold;font-size:13px;cursor:pointer;">Aplicar</button>
+            </div>
+        </div>`;
+}
+
+function _actualizarMontoCuponVenta() {
+    const sel = document.getElementById('selCuponVenta');
+    const div = document.getElementById('divMontoCuponVenta');
+    const input = document.getElementById('numMontoCuponVenta');
+    if (!sel || !div || !input) return;
+    if (!sel.value) { div.classList.add('oculto'); return; }
+    div.classList.remove('oculto');
+    const c = window.clienteSeleccionado;
+    const disponibles = window._cxcCuponesDisponiblesCliente(c.id);
+    const cup = disponibles.find(x => x.id === sel.value);
+    const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    const engancheActual = parseFloat(document.getElementById('numEnganche')?.value) || 0;
+    const metodo = document.getElementById('selMetodoPago')?.value;
+    const montoAPagarHoy = (metodo === 'credito' || metodo === 'apartado') ? engancheActual : totalContado;
+    input.value = Math.min(Number(cup?.montoDisponible || 0), montoAPagarHoy).toFixed(2);
+}
+
+window.aplicarCuponSeleccionadoVenta = function() {
+    const sel = document.getElementById('selCuponVenta');
+    const input = document.getElementById('numMontoCuponVenta');
+    if (!sel?.value) return alert('Elige un cupón primero.');
+    const c = window.clienteSeleccionado;
+    const disponibles = window._cxcCuponesDisponiblesCliente(c.id);
+    const cup = disponibles.find(x => x.id === sel.value);
+    if (!cup) return alert('Ese cupón ya no está disponible.');
+    const monto = parseFloat(input.value) || 0;
+    if (monto <= 0) return alert('Ingresa un monto válido.');
+    if (monto > cup.montoDisponible + 0.01) return alert(`Ese cupón solo tiene ${dinero(cup.montoDisponible)} disponibles.`);
+
+    // 🛡️ Si el cupón vale más que lo que se debe cobrar hoy, la diferencia
+    // se PIERDE (no se guarda para después) -- por eso se avisa ANTES de
+    // aplicar, para que el vendedor pueda cancelar y agregar productos por
+    // esa diferencia en vez de desperdiciarla.
+    const totalContado = carrito.reduce((sum, p) => sum + (p.precioContado || 0) * (p.cantidad || 1), 0);
+    const engancheActual = parseFloat(document.getElementById('numEnganche')?.value) || 0;
+    const metodo = document.getElementById('selMetodoPago')?.value;
+    const montoAPagarHoy = (metodo === 'credito' || metodo === 'apartado') ? engancheActual : totalContado;
+    if (monto > montoAPagarHoy + 0.01) {
+        const excedente = monto - montoAPagarHoy;
+        const continuar = confirm(`⚠️ Este cupón vale ${dinero(monto)}, pero esta venta solo es de ${dinero(montoAPagarHoy)}.\n\nSi continúas, se PIERDEN ${dinero(excedente)} del cupón -- no se guardan para otra compra.\n\nDile al cliente que agregue productos por esa diferencia antes de cobrar, o cancela y ajusta el carrito.\n\n¿Aplicar de todos modos y perder el excedente?`);
+        if (!continuar) return;
+    }
+
+    window._estadoPago = window._estadoPago || {};
+    // 🛡️ Solo se guarda la INTENCIÓN aquí -- el cupón se consume de verdad
+    // hasta que la venta se ejecuta (ejecutarVentaAutorizadaReal), para no
+    // gastarlo en una venta que se cancele antes de confirmarse.
+    window._estadoPago.cuponAplicado = { id: cup.id, codigo: cup.codigo, monto };
+    document.getElementById('panelCuponVenta').innerHTML = _cuponVentaHtml();
+    if (typeof actualizarInterfazPago === 'function') actualizarInterfazPago();
+};
+
+window.quitarCuponVenta = function() {
+    if (window._estadoPago) window._estadoPago.cuponAplicado = null;
+    document.getElementById('panelCuponVenta').innerHTML = _cuponVentaHtml();
+    if (typeof actualizarInterfazPago === 'function') actualizarInterfazPago();
+};
+
 function _clienteCardHtml() {
     const c = window.clienteSeleccionado || null;
     return `
@@ -676,6 +774,11 @@ function _actualizarBotonCobrar() {
 function _actualizarPanelClienteCarrito() {
     const cont = document.getElementById('panelClienteCarrito');
     if (cont) cont.innerHTML = _clienteCardHtml();
+    // 🎟️ Cliente nuevo = cupones distintos; limpiar cualquier cupón que
+    // hubiera quedado aplicado del cliente anterior.
+    if (window._estadoPago) window._estadoPago.cuponAplicado = null;
+    const cuponCont = document.getElementById('panelCuponVenta');
+    if (cuponCont) cuponCont.innerHTML = _cuponVentaHtml();
     if (window.clienteSeleccionado && typeof mostrarInfoCliente === 'function') mostrarInfoCliente();
     _actualizarBotonCobrar();
 }
@@ -798,6 +901,8 @@ function renderCarrito() {
                     <div id="panelClienteCarrito" style="margin-bottom:16px; padding:14px; background:#f8fafc; border-radius:12px; border:1px solid #e2e8f0;">
                         ${_clienteCardHtml()}
                     </div>
+
+                    <div id="panelCuponVenta">${_cuponVentaHtml()}</div>
 
                     ${vendedorControlHtml}
 
@@ -1401,19 +1506,34 @@ function actualizarInterfazPago() {
     }
 
     let html = "";
+    // 🎟️ Desglose del cupón aplicado -- muestra "de los $1000: $450 con
+    // cupón, $550 en efectivo/tarjeta" en vez de solo el total.
+    const cuponMonto = Number(window._estadoPago?.cuponAplicado?.monto || 0);
+    function _cuponBreakdownHtml(montoHoy) {
+        if (cuponMonto <= 0.01) return '';
+        const efectivoNecesario = Math.max(0, montoHoy - cuponMonto);
+        return `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed currentColor;font-size:12px;display:flex;justify-content:space-around;">
+            <span>🎟️ Cupón: <strong>${dinero(Math.min(cuponMonto, montoHoy))}</strong></span>
+            <span>💵 Efectivo/otro: <strong>${dinero(efectivoNecesario)}</strong></span>
+        </div>`;
+    }
 
     if (metodo === "contado" || metodo === "transferencia") {
         html = `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px;text-align:center;">
             <div style="font-size:11px;color:#166534;font-weight:800;text-transform:uppercase;">Total a pagar</div>
             <strong style="font-size:22px;color:#14532d;">${dinero(totalContado)}</strong>
+            ${_cuponBreakdownHtml(totalContado)}
         </div>`;
     }
 
     if (metodo === "apartado") {
         html = `
-            <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:14px;display:flex;justify-content:space-around;text-align:center;">
-                <div><div style="font-size:11px;color:#92400e;font-weight:800;">ENGANCHE</div><strong style="font-size:17px;color:#78350f;">${dinero(enganche)}</strong></div>
-                <div><div style="font-size:11px;color:#92400e;font-weight:800;">SALDO PENDIENTE</div><strong style="font-size:17px;color:#78350f;">${dinero(saldo)}</strong></div>
+            <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:14px;text-align:center;">
+                <div style="display:flex;justify-content:space-around;">
+                    <div><div style="font-size:11px;color:#92400e;font-weight:800;">ENGANCHE</div><strong style="font-size:17px;color:#78350f;">${dinero(enganche)}</strong></div>
+                    <div><div style="font-size:11px;color:#92400e;font-weight:800;">SALDO PENDIENTE</div><strong style="font-size:17px;color:#78350f;">${dinero(saldo)}</strong></div>
+                </div>
+                ${_cuponBreakdownHtml(enganche)}
             </div>
         `;
     }
@@ -1423,17 +1543,16 @@ function actualizarInterfazPago() {
         const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, periodicidad);
         
         if (plazoSeleccionado === null || plazoSeleccionado < 0 || plazoSeleccionado >= planes.length) {
-            // Plazo normal de venta: 6 meses por default al elegir crédito
-            // (si esa opción existe en la escalera calculada; si no,
-            // cae al primer plazo disponible como antes).
-            const idxSeisMeses = planes.findIndex(p => Number(p.meses) === 6);
-            plazoSeleccionado = idxSeisMeses >= 0 ? idxSeisMeses : 0;
+            plazoSeleccionado = 0;
         }
 
         html = `
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px;display:flex;justify-content:space-around;text-align:center;margin-bottom:12px;">
-            <div><div style="font-size:11px;color:#1e40af;font-weight:800;">ENGANCHE</div><strong style="font-size:16px;color:#1e3a8a;">${dinero(enganche)}</strong></div>
-            <div><div style="font-size:11px;color:#1e40af;font-weight:800;">A FINANCIAR</div><strong style="font-size:16px;color:#1e3a8a;">${dinero(saldo)}</strong></div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px;text-align:center;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-around;">
+                <div><div style="font-size:11px;color:#1e40af;font-weight:800;">ENGANCHE</div><strong style="font-size:16px;color:#1e3a8a;">${dinero(enganche)}</strong></div>
+                <div><div style="font-size:11px;color:#1e40af;font-weight:800;">A FINANCIAR</div><strong style="font-size:16px;color:#1e3a8a;">${dinero(saldo)}</strong></div>
+            </div>
+            ${_cuponBreakdownHtml(enganche)}
         </div>
         <label style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px;">Elige un plazo</label>
     `;
@@ -1481,6 +1600,57 @@ function actualizarInterfazPago() {
     window._estadoPago.apartadoCondiciones = document.getElementById("condicionesApartado")?.value || window._estadoPago.apartadoCondiciones || "";
 }
 
+// 🎟️ Ventana emergente al elegir plazo: muestra cuánto se ahorra el
+// cliente (en forma de cupón) si liquida antes del plazo elegido. Usa la
+// MISMA escalera que ya arma el plan (planes[0..index]) y el mismo criterio
+// de "contado a 30 días = sin interés" que _cxcEvaluarPoliticaPagoAnticipado
+// en cxc.js, para que lo que el vendedor le diga al cliente aquí coincida
+// exactamente con lo que el sistema aplicará después al cobrar.
+function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
+    const planElegido = planes[index];
+    if (!planElegido || index <= 0) return; // a 1 mes (o contado) no hay tier previo que ahorrar
+
+    const filas = [];
+    filas.push({ etiqueta: 'Contado (primeros 30 días)', total: capitalContado });
+    for (let i = 0; i < index; i++) {
+        if (i === 0) continue; // el tier "1 mes" de la escalera ya casi no ahorra vs contado, se prioriza la fila de contado de arriba
+        filas.push({ etiqueta: `${planes[i].meses} meses`, total: planes[i].total });
+    }
+
+    const filasHtml = filas.map(f => {
+        const ahorro = planElegido.total - f.total;
+        if (ahorro <= 0.01) return '';
+        return `<tr>
+            <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${f.etiqueta}</td>
+            <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;">${dinero(f.total)}</td>
+            <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;color:#166534;font-weight:bold;">${dinero(ahorro)}</td>
+        </tr>`;
+    }).join('');
+
+    if (!filasHtml) return; // el plan elegido ya es el de menor tier, nada que mostrar
+
+    document.getElementById('popupBeneficioPlan')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'popupBeneficioPlan';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.innerHTML = `
+        <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
+            <h3 style="margin:0 0 4px;font-size:16px;">🎟️ Beneficio por pago anticipado</h3>
+            <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Plan elegido: ${planElegido.meses} meses (${dinero(planElegido.total)} total). Si el cliente liquida antes, esto es lo que se ahorra — comunícaselo ahora:</p>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead><tr style="background:#f8fafc;">
+                    <th style="padding:8px;text-align:left;">Si liquida en</th>
+                    <th style="padding:8px;text-align:right;">Pagaría</th>
+                    <th style="padding:8px;text-align:right;">Se ahorra</th>
+                </tr></thead>
+                <tbody>${filasHtml}</tbody>
+            </table>
+            <p style="margin:12px 0 0;font-size:11px;color:#7e22ce;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;padding:8px;">El ahorro NO se entrega en efectivo -- se emite como cupón de saldo a favor, vigente 3 meses, aplicable en su próxima compra.</p>
+            <button onclick="document.getElementById('popupBeneficioPlan')?.remove()" style="width:100%;margin-top:14px;padding:10px;background:#0f172a;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">Entendido</button>
+        </div>`;
+    document.body.appendChild(overlay);
+}
+
 function seleccionarPlan(index) {
     plazoSeleccionado = index;
     window._estadoPago.planIndex = index;
@@ -1495,6 +1665,7 @@ function seleccionarPlan(index) {
         if (planes && planes[index]) {
             window._estadoPago.plan = planes[index];
             console.log("Plan guardado con éxito:", window._estadoPago.plan);
+            _mostrarPopupBeneficioPlan(planes, index, saldo > 0 ? saldo : totalCarrito);
         }
     } catch(e) {
         console.error("Error al guardar el plan:", e);
@@ -2306,7 +2477,11 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
         // use la cuenta real de esta venta y no la variable global _estadoPago,
         // que para ese momento puede reflejar la venta de otra persona.
         cuentaReceptora: window._estadoPago?.cuentaReceptora || null,
-        etiquetaCuenta: window._estadoPago?.etiquetaCuenta || null
+        etiquetaCuenta: window._estadoPago?.etiquetaCuenta || null,
+        // 🎟️ Cupón de saldo a favor aplicado en la captura (si lo hay). Se
+        // CONSUME hasta que la venta se ejecuta de verdad (ejecutarVentaAutorizadaReal),
+        // no aquí, para no gastar el cupón de una venta que termine cancelada.
+        cuponAplicado: window._estadoPago?.cuponAplicado || null
     };
 
     // 2. Empaquetar todo en la Bóveda de Cuarentena
@@ -2595,6 +2770,45 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
     if (datosVentaP.engancheYaRegistrado) montoIngresoHoy = 0;
     let tituloConcepto = (metodoPago === "contado" || metodoPago === "transferencia") ? "Venta" : "Enganche";
 
+    // 🎟️ Cupón de saldo a favor: reduce lo que realmente entra en
+    // efectivo/banco, PERO el enganche/total pactado con el cliente (lo que
+    // ve en su ticket, lo que financia el crédito o queda pendiente en el
+    // apartado) NO cambia -- solo cambia de dónde sale el dinero.
+    // 🛡️ Si el monto SELECCIONADO del cupón excede lo que se debe cobrar hoy
+    // (el vendedor ya fue advertido y confirmó en la pantalla de captura),
+    // se descuenta el cupón COMPLETO de todos modos -- el excedente se
+    // pierde, no se preserva para otra compra.
+    let montoCuponAplicadoVenta = 0;
+    let etiquetaCuponVenta = '';
+    let montoCuponExcedentePerdido = 0;
+    if (datosVentaP.cuponAplicado && datosVentaP.cuponAplicado.id && Number(datosVentaP.cuponAplicado.monto) > 0.01) {
+        const montoSeleccionado = Number(datosVentaP.cuponAplicado.monto);
+        const montoUsadoEnVenta = Math.min(montoSeleccionado, montoIngresoHoy);
+        const excedente = Math.max(0, montoSeleccionado - montoIngresoHoy);
+        if (typeof window._cxcAplicarCupon === 'function') {
+            const resultadoCupon = window._cxcAplicarCupon(datosVentaP.cuponAplicado.id, montoSeleccionado, {
+                folioDestino: folioVenta,
+                tipoVentaDestino: metodoPago,
+                nota: `Aplicado a la venta ${folioVenta}${excedente > 0.01 ? ` -- incluye ${dinero(excedente)} de excedente PERDIDO por superar el valor de la venta` : ''}`
+            });
+            if (resultadoCupon?.ok) {
+                montoCuponAplicadoVenta = montoUsadoEnVenta;
+                montoCuponExcedentePerdido = excedente;
+                etiquetaCuponVenta = resultadoCupon.codigo || '';
+                montoIngresoHoy = Math.max(0, montoIngresoHoy - montoCuponAplicadoVenta);
+                if (montoCuponExcedentePerdido > 0.01 && typeof notificarBovedaAutorizacion === 'function') {
+                    notificarBovedaAutorizacion({
+                        tipo: 'cuponExcedentePerdido',
+                        titulo: '🎟️ Excedente de cupón perdido',
+                        cuerpo: `Folio ${folioVenta} (${datosVentaP.cliente?.nombre || ''}): el cupón ${etiquetaCuponVenta} valía más que la venta. Se perdieron ${dinero(montoCuponExcedentePerdido)}.`
+                    }).catch(() => {});
+                }
+            } else {
+                alert(`⚠️ No se pudo aplicar el cupón (${resultadoCupon?.motivo || 'motivo desconocido'}). La venta continúa cobrando el monto completo.`);
+            }
+        }
+    }
+
     if (montoIngresoHoy > 0) {
         const cuentaDefaultIngreso = _ventaCuentaEfectivoDefault();
         // 🛡️ Prioridad: cuenta guardada en ESTA venta (elegida al capturar, o
@@ -2611,7 +2825,7 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
             // que en compras.js con las compras de contado: si el ingreso a caja
             // falla, la venta se registra de todas formas y se avisa con claridad
             // para que se corrija el ingreso manualmente en Finanzas.
-            const _ventaIngresoOk = window._ingresarCuenta({ monto: montoIngresoHoy, cuentaId: cuentaId, etiqueta: etiqueta, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre} (Folio: ${folioVenta})`, referencia: `VENTA-${folioVenta}`, fecha: fechaVentaIso });
+            const _ventaIngresoOk = window._ingresarCuenta({ monto: montoIngresoHoy, cuentaId: cuentaId, etiqueta: etiqueta, concepto: `${tituloConcepto} ${metodoPago} - ${datosVentaP.cliente.nombre} (Folio: ${folioVenta})${montoCuponAplicadoVenta > 0 ? ` [cupón ${etiquetaCuponVenta} aplicó ${dinero(montoCuponAplicadoVenta)}]` : ''}`, referencia: `VENTA-${folioVenta}`, fecha: fechaVentaIso });
             if (!_ventaIngresoOk) {
                 alert(`⚠️ La venta ${folioVenta} SÍ se registrará (mercancía y entregas ya se aplicaron), pero NO se pudo ingresar ${dinero(montoIngresoHoy)} a "${etiqueta || cuentaId}" porque esa cuenta no existe.\n\nRegistra el ingreso manualmente en Finanzas para que caja cuadre.`);
             }
