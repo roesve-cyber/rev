@@ -465,7 +465,7 @@ function renderHistorialDevoluciones() {
       <td style="padding:10px;">${d.motivo}</td>
       <td style="padding:10px;text-align:right;">${dinero(d.monto)}</td>
       <td style="padding:10px;text-align:center;">${d.reingresarStock ? '✅' : '❌'}</td>
-      <td style="padding:10px;text-align:center;">${new Date(d.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
+      <td style="padding:10px;text-align:center;">${(window.parseFechaMX ? window.parseFechaMX(d.fecha) : new Date(d.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
     </tr>`).join('');
     cont.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">

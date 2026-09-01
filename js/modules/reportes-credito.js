@@ -1900,7 +1900,7 @@ window.abrirDetalleVencimientoPlazo = function(idx) {
     const historialHTML = historial.length
         ? historial.slice(0, 5).map(h => `
             <div style="padding:8px 0;border-bottom:1px solid #e2e8f0;">
-                <div style="font-size:11px;color:#94a3b8;">${new Date(h.fecha).toLocaleDateString('es-MX')} · ${h.usuario || 'Sistema'}</div>
+                <div style="font-size:11px;color:#94a3b8;">${(window.parseFechaMX ? window.parseFechaMX(h.fecha) : new Date(h.fecha)).toLocaleDateString('es-MX')} · ${h.usuario || 'Sistema'}</div>
                 <div style="font-size:12px;color:#0f172a;">${h.texto}</div>
             </div>`).join('')
         : `<div style="font-size:12px;color:#94a3b8;padding:6px 0;">Sin comentarios de cobranza registrados.</div>`;

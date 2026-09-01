@@ -2474,16 +2474,12 @@ function renderCobranzaEsperada() {
     cuentas.forEach(cuenta => {
         if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
             cuenta.abonos.forEach(abono => {
-                // 🛡️ REPARACIÓN: Parseo seguro para esquivar el bug de DD/MM/YYYY
-                let fAbono;
-                if (typeof abono.fecha === 'string' && abono.fecha.includes('/')) {
-                    const p = abono.fecha.split('/');
-                    fAbono = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
-                } else {
-                    fAbono = new Date(abono.fecha);
-                }
+                // 🛡️ Parseo seguro con el parser global (ya distingue ISO de
+                // "DD-MM-YYYY"/"DD/MM/YYYY" en vez de dejarlo en manos de
+                // new Date(texto), que en formato con guiones lo invierte).
+                const fAbono = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(abono.fecha) : new Date(abono.fecha);
 
-                if (isNaN(fAbono.getTime())) return; // Protege contra strings vacíos o corruptos
+                if (!fAbono || isNaN(fAbono.getTime())) return; // Protege contra strings vacíos o corruptos
 
                 const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fAbono).substring(3) : fAbono.toLocaleDateString('es-MX').substring(3);
 
@@ -2662,7 +2658,7 @@ function reimprimirTicketAbono(folio, indexAbono) {
         // Volver a pasarlo por formatearFechaCortaMX() lo re-parsea con
         // new Date(), que interpreta ese formato como MES-DÍA-AÑO y invierte
         // día/mes (10-08-2026 → "08-10-2026"). Hay que partir del ISO.
-        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fechaAbonoIso || abono.fecha) : new Date(abono.fechaAbonoIso || abono.fecha).toLocaleDateString(),
+        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fechaAbonoIso || abono.fecha) : (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(abono.fechaAbonoIso || abono.fecha)?.toLocaleDateString() : new Date(abono.fechaAbonoIso || abono.fecha).toLocaleDateString()),
         metodoCobro: abono.etiquetaCuenta || abono.medioPago || 'Efectivo',
         cuentaDestino: abono.cuentaId || abono.etiquetaCuenta || '',
         pagaresCubiertos: pagaresDelFolio.filter(p => p.estado === "Pagado"),
@@ -2734,7 +2730,7 @@ window.renderAuditoriaAbonos = function() {
         htmlCuerpo = cuentasFiltradas.map(c => {
             let filas = c.abonos.map((ab, idx) => `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:10px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ab.fecha) : new Date(ab.fecha).toLocaleDateString()}</td>
+                    <td style="padding:10px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ab.fecha) : (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(ab.fecha)?.toLocaleDateString() : new Date(ab.fecha).toLocaleDateString())}</td>
                     <td style="padding:10px; font-weight:bold; color:#16a34a;">${_cxcDinero(ab.monto)}</td>
                     <td style="padding:10px; font-size:11px; color:#64748b;">${ab.etiquetaCuenta || ab.medioPago || 'Efectivo'}</td>
                     <td style="padding:10px; text-align:right;">
@@ -2778,7 +2774,7 @@ window.renderAuditoriaAbonos = function() {
         
         let filasPlanos = todos.map(a => `
             <tr style="border-bottom:1px solid #f1f5f9;">
-                <td style="padding:12px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : new Date(a.fecha).toLocaleDateString()}</td>
+                <td style="padding:12px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(a.fecha)?.toLocaleDateString() : new Date(a.fecha).toLocaleDateString())}</td>
                 <td style="padding:12px;"><b>${a.cliente}</b> <small>(Folio: ${a.folio})</small></td>
                 <td style="padding:12px; font-weight:bold; color:#16a34a;">${_cxcDinero(a.monto)}</td>
                 <td style="padding:12px; font-size:11px;">${a.cuenta}</td>
@@ -2953,7 +2949,7 @@ function _cxcAbonoVigente(a) {
 function _cxcAbonoAnteriorYNumero(vigentesSinReferencia, fechaReferenciaIso) {
     const fechaRef = new Date(fechaReferenciaIso).getTime();
     const ordenados = (vigentesSinReferencia || [])
-        .map(a => ({ abono: a, t: new Date(_cxcFechaAbonoBase(a)).getTime() }))
+        .map(a => ({ abono: a, t: (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_cxcFechaAbonoBase(a)) : new Date(_cxcFechaAbonoBase(a)))?.getTime() || 0 }))
         .filter(x => !isNaN(x.t))
         .sort((a, b) => a.t - b.t);
     const anteriores = !isNaN(fechaRef) ? ordenados.filter(x => x.t <= fechaRef) : ordenados;
@@ -3604,8 +3600,8 @@ function _cxcEstadoCuentaAbonos(cuenta) {
         .filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado)
         .slice()
         .sort((a, b) => {
-            const fa = new Date(_cxcFechaClave(_cxcFechaAbonoBase(a)) || _cxcFechaAbonoBase(a) || 0).getTime() || 0;
-            const fb = new Date(_cxcFechaClave(_cxcFechaAbonoBase(b)) || _cxcFechaAbonoBase(b) || 0).getTime() || 0;
+            const fa = (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_cxcFechaAbonoBase(a)) : new Date(_cxcFechaAbonoBase(a) || 0))?.getTime() || 0;
+            const fb = (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_cxcFechaAbonoBase(b)) : new Date(_cxcFechaAbonoBase(b) || 0))?.getTime() || 0;
             return fa - fb;
         });
 }

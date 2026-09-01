@@ -156,7 +156,7 @@ function _consigAnticiposDesdePagosOC(consignaciones, anticiposBase = []) {
             resultado.push({
                 id: `OC-PAGO-${oc.id || folio}-${index}`,
                 fecha: p.fecha || oc.fechaEmision || '',
-                fechaStr: p.fechaStr || (p.fecha && window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(p.fecha)) : ''),
+                fechaStr: p.fechaStr || (p.fecha && window.formatearFechaCortaMX ? window.formatearFechaCortaMX(p.fecha) : ''),
                 monto,
                 cuenta,
                 proveedor: oc.proveedorNombre || base.proveedor,
@@ -185,7 +185,7 @@ function _consigAnticiposDesdePagosOC(consignaciones, anticiposBase = []) {
         resultado.push({
             id: `MOV-OC-${m.id || index}`,
             fecha: m.fecha || '',
-            fechaStr: m.fecha && window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date(m.fecha)) : '',
+            fechaStr: m.fecha && window.formatearFechaCortaMX ? window.formatearFechaCortaMX(m.fecha) : '',
             monto,
             cuenta,
             proveedor: base.proveedor,

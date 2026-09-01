@@ -931,7 +931,7 @@ function abrirListaCotizaciones() {
           <td style="padding:10px;text-align:center;"><input type="checkbox" class="cotChk" data-id="${c.id}" onchange="_cotToggleSeleccion(${c.id}, this.checked)" ${checked} style="width:16px;height:16px;cursor:pointer;"></td>
           <td style="padding:10px;">${c.folio}${c.modalidad === 'mayoreo' ? ' <span style="font-size:10px;background:#cffafe;color:#0e7490;padding:2px 7px;border-radius:10px;font-weight:bold;">MAYOREO</span>' : ''}</td>
           <td style="padding:10px;">${c.clienteNombre}</td>
-          <td style="padding:10px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
+          <td style="padding:10px;">${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
           <td style="padding:10px;">${new Date(c.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
           <td style="padding:10px;text-align:right;">${dinero(c.total)}</td>
           <td style="padding:10px;text-align:center;"><span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${c.estado}</span></td>
@@ -1226,7 +1226,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
                                  <div class="cot-badge">COTIZACIÓN MAYOREO</div>
                                  <table class="cot-meta">
                                      <tr><td>Folio</td><td>${c.folio}</td></tr>
-                                     <tr><td>Fecha</td><td>${new Date(c.fecha).toLocaleDateString('es-MX')}</td></tr>
+                                     <tr><td>Fecha</td><td>${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX')}</td></tr>
                                      <tr><td>Vigencia</td><td>${c.vigenciaDias} días</td></tr>
                                  </table>
                              </div>
@@ -1368,7 +1368,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
               <span>FOLIO: ${c.folio}</span>
             </div>
             <div style="font-size: 9px;">
-              FECHA: ${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}<br>
+              FECHA: ${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}<br>
               CLIENTE: ${c.clienteNombre.toUpperCase()}
             </div>
             <div class="separator"></div>

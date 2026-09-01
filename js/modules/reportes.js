@@ -792,10 +792,12 @@ window.renderReporteCompromisos = function() {
 
         const abonos = (cuenta.abonos || []).filter(a => !a.cancelado).map(a => ({
             monto: Number(a.monto || a.montoAbonado || 0),
-            fecha: new Date(a.fechaIso || a.fechaAbonoIso || a.fecha)
+            // 🛡️ parseFechaMX interpreta bien "DD-MM-YYYY" (antes new Date()
+            // los invertía, corrompiendo el cálculo de días sin pago/cartera vencida).
+            fecha: window.parseFechaMX ? window.parseFechaMX(a.fechaIso || a.fechaAbonoIso || a.fecha) : new Date(a.fechaIso || a.fechaAbonoIso || a.fecha)
         })).filter(a => !isNaN(a.fecha.getTime())).sort((a, b) => b.fecha - a.fecha);
 
-        const fechaVenta = new Date(cuenta.fechaVenta || cuenta.fecha || hoy);
+        const fechaVenta = window.parseFechaMX ? window.parseFechaMX(cuenta.fechaVenta || cuenta.fecha || hoy) : new Date(cuenta.fechaVenta || cuenta.fecha || hoy);
         const ultimoMovimiento = abonos.length > 0 ? abonos[0].fecha : fechaVenta;
         const diasSinPago = Math.max(0, Math.floor((hoy - ultimoMovimiento) / 86400000));
 

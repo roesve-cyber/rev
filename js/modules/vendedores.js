@@ -303,7 +303,7 @@ function renderHistorialComisiones() {
     const filtradas = comisiones.filter(c => {
         if (f.vendedorId && String(c.vendedorId) !== String(f.vendedorId)) return false;
         if (f.estado && c.estado !== f.estado) return false;
-        const fc = new Date(c.fecha);
+        const fc = window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha);
         if (desde && fc < desde) return false;
         if (hasta && fc > hasta) return false;
         return true;
@@ -324,7 +324,7 @@ function renderHistorialComisiones() {
       <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
       <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${pctUtilidad === null ? '-' : pctUtilidad.toFixed(1) + '%'}</td>
       <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${pctVenta === null ? '-' : pctVenta.toFixed(1) + '%'}</td>
-      <td style="padding:8px;">${new Date(c.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
+      <td style="padding:8px;">${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
       <td style="padding:8px;text-align:center;font-size:12px;color:#6b7280;">${c.tipo === 'recuperacion_cartera' ? '💡 Recuperación' : (c.tipo === 'por_abono' ? 'Por abono' : 'Al cierre')}</td>
       <td style="padding:8px;text-align:center;"><span style="color:${c.estado === 'Pendiente' ? '#d97706' : '#16a34a'};font-weight:bold;">${c.estado === 'Pendiente' ? 'Pendiente' : 'Pagada'}</span></td>
     </tr>`;
@@ -769,7 +769,7 @@ function calcularComisionesVendedor(vendedorId, fechaDesde, fechaHasta) {
     const comisiones = StorageService.get('comisionesRegistradas', []);
     const filtradas = comisiones.filter(c => {
         if (String(c.vendedorId) !== String(vendedorId)) return false;
-        const fechaC = new Date(c.fecha);
+        const fechaC = window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha);
         if (desde && fechaC < desde) return false;
         if (hasta && fechaC > hasta) return false;
         return true;
@@ -891,7 +891,7 @@ function ejecutarLiquidacionComisiones(vendedorId, fechaDesde, fechaHasta) {
     const hastaD = hasta ? new Date(hasta + 'T23:59:59') : null;
     comisiones.forEach((c, idx) => {
         if (String(c.vendedorId) === String(vendedorId) && c.estado === 'Pendiente') {
-            const f = new Date(c.fecha);
+            const f = window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha);
             let entra = true;
             if (desdeD && f < desdeD) entra = false;
             if (hastaD && f > hastaD) entra = false;
@@ -908,7 +908,7 @@ function ejecutarLiquidacionComisiones(vendedorId, fechaDesde, fechaHasta) {
         const ordenados = anticipos
             .map((a, idx) => ({ a, idx }))
             .filter(x => String(x.a.vendedorId) === String(vendedorId) && _anticipoSaldoPendiente(x.a) > 0)
-            .sort((x, y) => new Date(x.a.fecha) - new Date(y.a.fecha));
+            .sort((x, y) => (window.parseFechaMX ? window.parseFechaMX(x.a.fecha) : new Date(x.a.fecha)) - (window.parseFechaMX ? window.parseFechaMX(y.a.fecha) : new Date(y.a.fecha)));
         for (const { a, idx } of ordenados) {
             if (restante <= 0.005) break;
             const saldo = _anticipoSaldoPendiente(a);
@@ -1235,13 +1235,13 @@ function renderAnticiposComision() {
         return;
     }
     const totalPendiente = anticipos.reduce((s, a) => s + _anticipoSaldoPendiente(a), 0);
-    const rows = anticipos.slice().sort((x, y) => new Date(y.fecha) - new Date(x.fecha)).map(a => {
+    const rows = anticipos.slice().sort((x, y) => (window.parseFechaMX ? window.parseFechaMX(y.fecha) : new Date(y.fecha)) - (window.parseFechaMX ? window.parseFechaMX(x.fecha) : new Date(x.fecha))).map(a => {
         const saldo = _anticipoSaldoPendiente(a);
         return `<tr>
           <td style="padding:8px;">${_vendEsc(a.vendedorNombre)}</td>
           <td style="padding:8px;text-align:right;">${dinero(a.monto)}</td>
           <td style="padding:8px;text-align:right;font-weight:bold;color:${saldo > 0 ? '#dc2626' : '#16a34a'};">${dinero(saldo)}</td>
-          <td style="padding:8px;">${a.fecha ? new Date(a.fecha).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' }) : '-'}</td>
+          <td style="padding:8px;">${a.fecha ? (window.parseFechaMX ? window.parseFechaMX(a.fecha) : new Date(a.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' }) : '-'}</td>
           <td style="padding:8px;color:#6b7280;">${_vendEsc(a.cuentaEtiqueta || '-')}</td>
           <td style="padding:8px;text-align:center;"><span style="color:${saldo > 0 ? '#d97706' : '#16a34a'};font-weight:bold;">${saldo > 0 ? 'Pendiente' : 'Liquidado'}</span></td>
           <td style="padding:8px;text-align:center;">

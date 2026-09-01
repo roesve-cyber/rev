@@ -485,7 +485,7 @@ window.abrirHistorialMSI = function(id) {
     const abonosDeEsteBanco = movimientos.filter(m => 
         m.referencia === `PAGO-TC-${deuda.banco}` || 
         (m.concepto && m.concepto.includes('Tarjeta de Crédito') && m.concepto.includes(deuda.banco))
-    ).sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
+    ).sort((a,b) => (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(a.fecha) : new Date(a.fecha)) - (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(b.fecha) : new Date(b.fecha)));
 
     let htmlAbonos = '';
     if(abonosDeEsteBanco.length > 0) {
@@ -1300,6 +1300,13 @@ function _bancosAgruparTransferenciasConciliacion(lista) {
     return [...sueltos, ...agrupados].sort((a, b) => {
         const obtenerTimestamp = (m) => {
             if (!m || !m.fecha) return 0;
+            // 🛡️ parseFechaMXOrNull ya distingue ISO de "DD-MM-YYYY"/"DD/MM/YYYY"
+            // y los interpreta bien (antes, el texto con guiones caía directo en
+            // new Date(texto), que lo invierte a MES-DÍA-AÑO sin avisar).
+            if (window.parseFechaMXOrNull) {
+                const d = window.parseFechaMXOrNull(m.fecha);
+                return d ? d.getTime() : 0;
+            }
             if (typeof m.fecha === 'string' && m.fecha.includes('/')) {
                 const partes = m.fecha.split(' ')[0].split('/');
                 if (partes.length === 3) return new Date(`${partes[2]}-${partes[1].padStart(2,'0')}-${partes[0].padStart(2,'0')}`).getTime();
@@ -1927,7 +1934,11 @@ function renderDashboardMSI(bancoSelect = null, mesSelect = null) {
         
         htmlNivel3 += `<div style="background:#f8fafc; padding:8px 15px; font-size:12px; font-weight:bold; color:#475569; border-bottom:1px solid #e2e8f0;">📅 ${mesesNombre[parseInt(mes)-1]} ${anio}</div>`;
         
-        cronogramaGlobal[clave].detalles.sort((a,b) => new Date(a.pago.fecha) - new Date(b.pago.fecha)).forEach((det) => {
+        cronogramaGlobal[clave].detalles.sort((a,b) => {
+            const fa = window.parseFechaMX ? window.parseFechaMX(a.pago.fecha) : new Date(a.pago.fecha);
+            const fb = window.parseFechaMX ? window.parseFechaMX(b.pago.fecha) : new Date(b.pago.fecha);
+            return fa - fb;
+        }).forEach((det) => {
             const fechaPago = new Date(det.pago.fecha + 'T00:00:00');
             const fechaStr = window.formatearFechaCortaMX(fechaPago);
             const estaVencida = fechaPago < hoy;

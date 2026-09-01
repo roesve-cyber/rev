@@ -34,7 +34,7 @@ function renderGestionPrestamos() {
     const filtroEstado = document.getElementById('prestamoFiltroEstado')?.value || 'con_saldo';
     const filtroTexto = (document.getElementById('prestamoFiltroTexto')?.value || '').trim().toLowerCase();
 
-    let lista = prestamos.slice().sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    let lista = prestamos.slice().sort((a, b) => (window.parseFechaMX ? window.parseFechaMX(b.fecha) : new Date(b.fecha)) - (window.parseFechaMX ? window.parseFechaMX(a.fecha) : new Date(a.fecha)));
     if (filtroEstado === 'con_saldo') lista = lista.filter(p => _prestamoSaldoPendiente(p) > 0 && p.estado !== 'Incobrable');
     else if (filtroEstado === 'liquidado') lista = lista.filter(p => _prestamoSaldoPendiente(p) <= 0 && p.estado !== 'Incobrable');
     else if (filtroEstado === 'incobrable') lista = lista.filter(p => p.estado === 'Incobrable');
@@ -364,7 +364,7 @@ function registrarAbonoPrestamo(prestamoId) {
 function abrirModalHistorialPrestamo(prestamoId) {
     const p = StorageService.get('prestamosOtorgados', []).find(x => x.id === prestamoId);
     if (!p) return alert('Préstamo no encontrado.');
-    const abonos = (Array.isArray(p.abonos) ? p.abonos : []).slice().sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    const abonos = (Array.isArray(p.abonos) ? p.abonos : []).slice().sort((a, b) => (window.parseFechaMX ? window.parseFechaMX(b.fecha) : new Date(b.fecha)) - (window.parseFechaMX ? window.parseFechaMX(a.fecha) : new Date(a.fecha)));
     const saldo = _prestamoSaldoPendiente(p);
 
     const filas = abonos.map(a => `<tr>
