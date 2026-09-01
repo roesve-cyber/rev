@@ -16,6 +16,7 @@ function renderConfiguracion() {
     }
     
     _dibujarPlazosGlobales(config.plazos);
+    renderConfigCupon();
     if (typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig();
 }
 
@@ -71,6 +72,58 @@ function eliminarPlazoGlobal(index) {
     config.plazos.splice(index, 1);
     StorageService.set('configCreditoGlobal', config);
     renderConfiguracion();
+}
+
+// 🎟️ % del TOTAL FINANCIADO que se emite como cupón cuando un cliente
+// liquida dentro de su plazo pactado (regla flat, decisión de Roberto tras
+// su análisis de margen con el simulador de tasas -- reemplazó la escalera
+// mes-a-mes anterior). Vive en configCreditoGlobal (mismo lugar que tasas/
+// plazos) para no crear una tabla nueva solo para un número. Lo lee cxc.js
+// dentro de _cxcEvaluarPoliticaPagoAnticipado (config key:
+// porcentajeCuponProntoPago, default 3 si nunca se ha tocado).
+// El redondeo (redondeoCuponMultiplo/redondeoCuponDireccion) lo aplica
+// _cxcRedondearMontoCupon en cxc.js justo después de calcular el %.
+function renderConfigCupon() {
+    const config = StorageService.get('configCreditoGlobal', {});
+    const porcentaje = config.porcentajeCuponProntoPago ?? 3;
+    const input = document.getElementById('cfgPorcentajeCupon');
+    if (input) input.value = porcentaje;
+    const actual = document.getElementById('cfgPorcentajeCuponActual');
+    if (actual) actual.textContent = `Valor actual: ${porcentaje}% del total financiado se emite como cupón al liquidar dentro del plazo pactado.`;
+
+    const multiplo = config.redondeoCuponMultiplo || '';
+    const direccion = config.redondeoCuponDireccion || 'abajo';
+    const inputMultiplo = document.getElementById('cfgRedondeoCuponMultiplo');
+    if (inputMultiplo) inputMultiplo.value = multiplo;
+    const selectDireccion = document.getElementById('cfgRedondeoCuponDireccion');
+    if (selectDireccion) selectDireccion.value = direccion;
+    const actualRedondeo = document.getElementById('cfgRedondeoCuponActual');
+    if (actualRedondeo) {
+        actualRedondeo.textContent = (Number(multiplo) > 1)
+            ? `Valor actual: redondea a cifras de ${multiplo}, hacia ${direccion === 'arriba' ? 'arriba' : 'abajo'}.`
+            : `Valor actual: sin redondeo -- se emite el monto exacto calculado.`;
+    }
+}
+
+function guardarConfigCupon() {
+    const porcentaje = parseFloat(document.getElementById('cfgPorcentajeCupon').value);
+    if (isNaN(porcentaje) || porcentaje < 0 || porcentaje > 100) {
+        return alert("⚠️ Ingresa un porcentaje entre 0 y 100.");
+    }
+    const multiploInput = document.getElementById('cfgRedondeoCuponMultiplo').value;
+    const multiplo = multiploInput === '' ? 0 : parseFloat(multiploInput);
+    if (isNaN(multiplo) || multiplo < 0) {
+        return alert("⚠️ El redondeo debe ser un número de 0 en adelante (0 o vacío = sin redondeo).");
+    }
+    const direccion = document.getElementById('cfgRedondeoCuponDireccion').value;
+
+    let config = StorageService.get('configCreditoGlobal', { plazos: [] });
+    config.porcentajeCuponProntoPago = porcentaje;
+    config.redondeoCuponMultiplo = multiplo;
+    config.redondeoCuponDireccion = direccion;
+    StorageService.set('configCreditoGlobal', config);
+    renderConfigCupon();
+    alert(`✅ Se guardó ${porcentaje}%${multiplo > 1 ? `, redondeando a cifras de ${multiplo} hacia ${direccion}` : ' sin redondeo'}. Aplica a partir de la próxima liquidación dentro de plazo -- no afecta cupones ya emitidos.`);
 }
 
 
@@ -134,3 +187,5 @@ window.eliminarPlazoGlobal = eliminarPlazoGlobal;
 window.toggleConfigCreditoProd = toggleConfigCreditoProd;
 window.agregarPlazoProd = agregarPlazoProd;
 window.eliminarPlazoProd = eliminarPlazoProd;
+window.renderConfigCupon = renderConfigCupon;
+window.guardarConfigCupon = guardarConfigCupon;

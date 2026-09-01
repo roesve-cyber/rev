@@ -1600,34 +1600,29 @@ function actualizarInterfazPago() {
     window._estadoPago.apartadoCondiciones = document.getElementById("condicionesApartado")?.value || window._estadoPago.apartadoCondiciones || "";
 }
 
-// 🎟️ Ventana emergente al elegir plazo: muestra cuánto se ahorra el
-// cliente (en forma de cupón) si liquida antes del plazo elegido. Usa la
-// MISMA escalera que ya arma el plan (planes[0..index]) y el mismo criterio
-// de "contado a 30 días = sin interés" que _cxcEvaluarPoliticaPagoAnticipado
-// en cxc.js, para que lo que el vendedor le diga al cliente aquí coincida
-// exactamente con lo que el sistema aplicará después al cobrar.
+// 🎟️ Ventana emergente al elegir plazo: le recuerda al vendedor la regla
+// vigente de cupón por pago anticipado. Regla FLAT (reemplazó la escalera
+// mes-a-mes en agosto 2026, decisión de Roberto tras su análisis de margen
+// con el simulador de tasas): si el cliente liquida DENTRO de su plazo
+// pactado, paga el saldo nominal completo (sin descuento) y recibe un cupón
+// de saldo a favor por un % fijo del total financiado -- ya no importa en
+// qué mes exacto liquide. El % se lee de configCreditoGlobal
+// (porcentajeCuponProntoPago, editable en Configuración > Cupones de Saldo
+// a Favor), para que este aviso siempre coincida con lo que cxc.js aplicará
+// de verdad al cobrar.
 function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
     const planElegido = planes[index];
-    if (!planElegido || index <= 0) return; // a 1 mes (o contado) no hay tier previo que ahorrar
+    if (!planElegido) return;
 
-    const filas = [];
-    filas.push({ etiqueta: 'Contado (primeros 30 días)', total: capitalContado });
-    for (let i = 0; i < index; i++) {
-        if (i === 0) continue; // el tier "1 mes" de la escalera ya casi no ahorra vs contado, se prioriza la fila de contado de arriba
-        filas.push({ etiqueta: `${planes[i].meses} meses`, total: planes[i].total });
+    const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    let montoCupon = planElegido.total * Math.max(0, porcentajeCupon) / 100;
+    const _configRedondeo = StorageService.get('configCreditoGlobal', {});
+    const _multiploRedondeo = Number(_configRedondeo?.redondeoCuponMultiplo || 0);
+    if (_multiploRedondeo > 1) {
+        const _factor = (_configRedondeo?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
+        montoCupon = _factor(montoCupon / _multiploRedondeo) * _multiploRedondeo;
     }
-
-    const filasHtml = filas.map(f => {
-        const ahorro = planElegido.total - f.total;
-        if (ahorro <= 0.01) return '';
-        return `<tr>
-            <td style="padding:8px;border-bottom:1px solid #f1f5f9;">${f.etiqueta}</td>
-            <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;">${dinero(f.total)}</td>
-            <td style="padding:8px;border-bottom:1px solid #f1f5f9;text-align:right;color:#166534;font-weight:bold;">${dinero(ahorro)}</td>
-        </tr>`;
-    }).join('');
-
-    if (!filasHtml) return; // el plan elegido ya es el de menor tier, nada que mostrar
+    if (montoCupon <= 0.01) return;
 
     document.getElementById('popupBeneficioPlan')?.remove();
     const overlay = document.createElement('div');
@@ -1635,17 +1630,14 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
     overlay.innerHTML = `
         <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
-            <h3 style="margin:0 0 4px;font-size:16px;">🎟️ Beneficio por pago anticipado</h3>
-            <p style="margin:0 0 12px;font-size:12px;color:#64748b;">Plan elegido: ${planElegido.meses} meses (${dinero(planElegido.total)} total). Si el cliente liquida antes, esto es lo que se ahorra — comunícaselo ahora:</p>
-            <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                <thead><tr style="background:#f8fafc;">
-                    <th style="padding:8px;text-align:left;">Si liquida en</th>
-                    <th style="padding:8px;text-align:right;">Pagaría</th>
-                    <th style="padding:8px;text-align:right;">Se ahorra</th>
-                </tr></thead>
-                <tbody>${filasHtml}</tbody>
-            </table>
-            <p style="margin:12px 0 0;font-size:11px;color:#7e22ce;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;padding:8px;">El ahorro NO se entrega en efectivo -- se emite como cupón de saldo a favor, vigente 3 meses, aplicable en su próxima compra.</p>
+            <h3 style="margin:0 0 4px;font-size:16px;">🎟️ Cupón por pago anticipado</h3>
+            <p style="margin:0 0 14px;font-size:12px;color:#64748b;">Plan elegido: ${planElegido.meses} meses (${dinero(planElegido.total)} total financiado).</p>
+            <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;padding:16px;text-align:center;">
+                <div style="font-size:11px;font-weight:800;color:#7e22ce;text-transform:uppercase;">Si liquida dentro de su plazo pactado</div>
+                <div style="font-size:24px;font-weight:900;color:#581c87;margin:6px 0;">${dinero(montoCupon)}</div>
+                <div style="font-size:11px;color:#7e22ce;">${porcentajeCupon}% del total financiado, como cupón</div>
+            </div>
+            <p style="margin:12px 0 0;font-size:11px;color:#64748b;">Paga el saldo completo (sin descuento en el monto) y recibe este cupón de saldo a favor, vigente 3 meses, aplicable en su próxima compra (contado, crédito o apartado). No es reembolsable en efectivo.</p>
             <button onclick="document.getElementById('popupBeneficioPlan')?.remove()" style="width:100%;margin-top:14px;padding:10px;background:#0f172a;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">Entendido</button>
         </div>`;
     document.body.appendChild(overlay);
@@ -2786,7 +2778,7 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
         const montoUsadoEnVenta = Math.min(montoSeleccionado, montoIngresoHoy);
         const excedente = Math.max(0, montoSeleccionado - montoIngresoHoy);
         if (typeof window._cxcAplicarCupon === 'function') {
-            const resultadoCupon = window._cxcAplicarCupon(datosVentaP.cuponAplicado.id, montoSeleccionado, {
+            const resultadoCupon = await window._cxcAplicarCupon(datosVentaP.cuponAplicado.id, montoSeleccionado, {
                 folioDestino: folioVenta,
                 tipoVentaDestino: metodoPago,
                 nota: `Aplicado a la venta ${folioVenta}${excedente > 0.01 ? ` -- incluye ${dinero(excedente)} de excedente PERDIDO por superar el valor de la venta` : ''}`
@@ -4975,6 +4967,31 @@ function _authVentaBloqueadaPorEstado(v) {
     const cancelada = StorageService.get("historialCancelaciones", [])
         .some(h => h.tipo === 'venta' && String(h.folio || '').trim() === folio);
     if (cancelada) return { bloqueada: true, motivo: `La venta ${folio} ya fue cancelada.` };
+
+    // 🎟️ Si la venta trae un cupón seleccionado, hay que revalidarlo AQUÍ --
+    // igual que ya se hace del lado de abonos (_authAbonoBloqueadoPorEstado)
+    // -- porque pudo haber pasado tiempo entre que se encoló a Bóveda y que
+    // se aprueba: el cupón pudo vencer, o gastarse en otra venta que sí pasó
+    // directo mientras esta esperaba. Si eso pasó, mejor bloquear la
+    // aprobación con un mensaje claro que dejar que se cobre el monto
+    // completo sin que nadie se dé cuenta de que el cliente ya entregó menos
+    // efectivo del que ahora se necesitaría.
+    const cuponAplicado = v?.datosVenta?.cuponAplicado;
+    if (cuponAplicado?.id) {
+        const cupon = StorageService.get("cuponesCliente", []).find(c => c.id === cuponAplicado.id);
+        if (!cupon) {
+            return { bloqueada: true, motivo: `El cupón ${cuponAplicado.codigo || cuponAplicado.id} de la venta ${folio} ya no existe.` };
+        }
+        const vencido = cupon.estado === 'Activo' && cupon.fechaVencimiento && new Date(cupon.fechaVencimiento) < new Date();
+        const estadoReal = vencido ? 'Vencido' : cupon.estado;
+        if (estadoReal !== 'Activo') {
+            return { bloqueada: true, motivo: `El cupón ${cupon.codigo} de la venta ${folio} ya está ${estadoReal.toLowerCase()} -- no se puede aprobar así. Revisa con el cliente antes de continuar (el monto en efectivo que ya entregó puede no alcanzar).` };
+        }
+        if (Number(cupon.montoDisponible || 0) < Number(cuponAplicado.monto || 0) - 0.01) {
+            return { bloqueada: true, motivo: `El cupón ${cupon.codigo} de la venta ${folio} ya solo tiene ${_cancelDinero(cupon.montoDisponible)} disponibles (se necesitaban ${_cancelDinero(cuponAplicado.monto)}). Alguien ya lo usó en otra compra mientras esta esperaba aprobación.` };
+        }
+    }
+
     return { bloqueada: false, motivo: "" };
 }
 
@@ -5585,20 +5602,37 @@ function _cancelCuentaSeleccionada(id) {
     };
 }
 
+// 🎟️ Suma cuánto de un folio se cubrió con cupón (no efectivo real) --
+// se usa para que la cancelación NUNCA reembolse la parte de cupón como si
+// fuera dinero recibido. Solo cuenta usos que no hayan sido ya anulados por
+// una cancelación anterior (evita restar dos veces si algo se reintenta).
+function _cancelMontoCuponEnFolio(folio) {
+    if (!folio) return 0;
+    const cupones = StorageService.get("cuponesCliente", []);
+    let total = 0;
+    cupones.forEach(c => {
+        (c.historialUso || []).forEach(u => {
+            if (u.folioDestino === folio && !u.anuladoPorCancelacion) total += Number(u.monto || 0);
+        });
+    });
+    return total;
+}
+
 function _cancelTotalPagadoVenta(folio, venta = null, pendiente = null) {
+    const montoCupon = _cancelMontoCuponEnFolio(folio);
     const cxc = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
     const ap = StorageService.get("apartados", []).find(a => a.folio === folio);
-    if (cxc) return (Number(cxc.engancheRecibido || cxc.enganche || 0) + (cxc.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0));
-    if (ap) return (Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0));
+    if (cxc) return Math.max(0, (Number(cxc.engancheRecibido || cxc.enganche || 0) + (cxc.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0)) - montoCupon);
+    if (ap) return Math.max(0, (Number(ap.enganche || 0) + (ap.abonos || []).reduce((s, a) => s + Number(a.monto || 0), 0)) - montoCupon);
     if (pendiente) {
         const metodo = pendiente.args?.[0] || pendiente.datosVenta?.metodo;
         const total = Number(pendiente.args?.[1] || pendiente.totalVenta || pendiente.datosVenta?.total || 0);
         const enganche = Number(pendiente.args?.[2] || pendiente.datosVenta?.enganche || 0);
-        return (metodo === 'contado' || metodo === 'transferencia') ? total : enganche;
+        return Math.max(0, ((metodo === 'contado' || metodo === 'transferencia') ? total : enganche) - montoCupon);
     }
     const metodo = venta?.metodoPago || venta?.metodo;
-    if (metodo === 'contado' || metodo === 'transferencia') return Number(venta?.total || 0);
-    return Number(venta?.enganche || 0);
+    const base = (metodo === 'contado' || metodo === 'transferencia') ? Number(venta?.total || 0) : Number(venta?.enganche || 0);
+    return Math.max(0, base - montoCupon);
 }
 
 function _cancelInfoDineroVenta(folio, venta = null, pendiente = null) {
@@ -6598,16 +6632,46 @@ window.abrirModalCancelarVenta = function(folio, origen, pendienteIndex = -1) {
         const pendiente = origen === 'cuarentena' ? pendientes[pendienteIndex] : null;
         const cliente = venta?.clienteNombre || venta?.cliente?.nombre || pendiente?.clienteNombre || pendiente?.datosVenta?.cliente?.nombre || 'Público General';
         const monto = _cancelTotalPagadoVenta(folio, venta, pendiente);
+        const montoCuponEnEsteFolio = _cancelMontoCuponEnFolio(folio);
         const docsEntrega = StorageService.get("documentosEntrega", []).filter(d => d.folioVenta === folio && d.estado !== 'Cancelado').length;
         window._cancelacionActual = { tipo: 'venta', folio, origen, pendienteIndex, monto, cliente, condicionesArticulos };
         _modalCancelacion({
             titulo: `Cancelar venta ${_cancelEsc(folio)}`,
             monto,
-            resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'Bóveda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirá cartera, pagarés, caja y mercancía entregada.</div>`,
+            resumen: `<b>Cliente:</b> ${_cancelEsc(cliente)}<br><b>Origen:</b> ${origen === 'cuarentena' ? 'Bóveda de autorizaciones' : 'Venta registrada'}<br><b>Documentos de entrega activos:</b> ${docsEntrega}<hr style="border:none;border-top:1px solid #e2e8f0;margin:10px 0;">${_cancelContextoVentaHTML(folio, venta, pendiente)}${montoCuponEnEsteFolio > 0.01 ? `<div style="margin-top:10px;padding:8px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;color:#6b21a8;">🎟️ Esta venta usó ${dinero(montoCuponEnEsteFolio)} de cupón. El monto a reembolsar de arriba ya lo excluye (solo es efectivo real). El cupón se anulará -- no se restaura ni se devuelve en dinero.</div>` : ''}<div style="margin-top:10px;color:#991b1b;font-weight:bold;">Se revertirá cartera, pagarés, caja y mercancía entregada.</div>`,
             onConfirm: "ejecutarCancelacionVenta()"
         });
     });
 };
+
+// 🎟️ Al cancelar una venta, el cupón que se haya usado en ella se ANULA --
+// no se restaura su montoDisponible (no vuelve a estar disponible para
+// otra compra) y tampoco se convierte en efectivo. Deja el historial de uso
+// marcado para que quede claro por qué ese monto ya no cuenta como
+// "aplicado a una venta viva".
+function _cancelAnularCuponesEnFolio(folio, motivo) {
+    if (!folio) return { cuponesAfectados: 0, montoAnulado: 0, codigos: [] };
+    const cupones = StorageService.get("cuponesCliente", []);
+    let cambios = false;
+    let cuponesAfectados = 0;
+    let montoAnulado = 0;
+    const codigos = [];
+    cupones.forEach(c => {
+        (c.historialUso || []).forEach(u => {
+            if (u.folioDestino === folio && !u.anuladoPorCancelacion) {
+                u.anuladoPorCancelacion = true;
+                u.fechaAnulacionCancelacion = new Date().toISOString();
+                u.motivoAnulacionCancelacion = motivo || 'Cancelación de venta';
+                montoAnulado += Number(u.monto || 0);
+                cuponesAfectados++;
+                codigos.push(c.codigo);
+                cambios = true;
+            }
+        });
+    });
+    if (cambios) StorageService.set("cuponesCliente", cupones);
+    return { cuponesAfectados, montoAnulado, codigos };
+}
 
 window.ejecutarCancelacionVenta = function() {
     const ctx = window._cancelacionActual;
@@ -6672,6 +6736,14 @@ window.ejecutarCancelacionVenta = function() {
 
     const articulosReingresados = _cancelReingresarInventarioPorVenta(ctx.folio, motivo, ctx.condicionesArticulos || null);
     const reversaConsignacion = _cancelReversarConsignacionPorVenta(ctx.folio, motivo);
+    const cuponesAnulados = _cancelAnularCuponesEnFolio(ctx.folio, motivo);
+    if (cuponesAnulados.cuponesAfectados > 0 && typeof notificarBovedaAutorizacion === 'function') {
+        notificarBovedaAutorizacion({
+            tipo: 'cuponAnuladoPorCancelacion',
+            titulo: '🎟️ Cupón anulado por cancelación de venta',
+            cuerpo: `Folio ${ctx.folio} (${ctx.cliente}): se anuló ${dinero(cuponesAnulados.montoAnulado)} de cupón (${cuponesAnulados.codigos.join(', ')}) al cancelar la venta. No se restauró ni se devolvió en efectivo.`
+        }).catch(() => {});
+    }
     const registrarMovimientoReembolso = devolverDinero && (ctx.origen !== 'cuarentena' || _cancelTieneIngresoCaja(ctx.folio));
     const movimientosOrigenMarcados = _cancelMarcarMovimientosOrigen({
         folio: ctx.folio,
@@ -6691,14 +6763,14 @@ window.ejecutarCancelacionVenta = function() {
         emitirComprobante: emitir,
         registrarMovimiento: registrarMovimientoReembolso
     });
-    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: devolverDinero ? ctx.monto : 0, movimientoCajaRegistrado: registrarMovimientoReembolso && reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion });
+    _cancelRegistrarHistorial({ tipo: 'venta', folio: ctx.folio, origen: ctx.origen, clienteNombre: ctx.cliente, montoDevuelto: devolverDinero ? ctx.monto : 0, movimientoCajaRegistrado: registrarMovimientoReembolso && reembolsoOk, movimientosOrigenMarcados, motivo, articulosReingresados, reversaConsignacion, cuponesAnulados });
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'VENTA_CANCELADA',
             modulo: 'Ventas',
             entidad: 'venta',
             entidadId: ctx.folio,
-            detalle: motivo,
+            detalle: `${motivo}${cuponesAnulados.cuponesAfectados > 0 ? ` -- se anuló ${dinero(cuponesAnulados.montoAnulado)} de cupón (${cuponesAnulados.codigos.join(', ')}), no se devolvió en efectivo ni se restauró.` : ''}`,
             monto: ctx.monto,
             severidad: 'alerta',
             datos: {
@@ -6707,13 +6779,14 @@ window.ejecutarCancelacionVenta = function() {
                 reembolsoRegistrado: registrarMovimientoReembolso && reembolsoOk,
                 movimientosOrigenMarcados,
                 articulosReingresados,
-                reversaConsignacion
+                reversaConsignacion,
+                cuponesAnulados
             }
         });
     }
 
     document.querySelector('[data-modal="cancelacion-modal"]')?.remove();
-    alert("Venta cancelada. Se aplicaron reversas de caja, cartera, pagarés e inventario entregado.");
+    alert(`Venta cancelada. Se aplicaron reversas de caja, cartera, pagarés e inventario entregado.${cuponesAnulados.cuponesAfectados > 0 ? `\n\n🎟️ Se anuló ${dinero(cuponesAnulados.montoAnulado)} de cupón (${cuponesAnulados.codigos.join(', ')}) -- no se restauró ni se devolvió en efectivo.` : ''}`);
     if (reversaConsignacion.reversadas || reversaConsignacion.revision) {
         alert(`Consignacion: ${reversaConsignacion.reversadas} reversa(s) aplicada(s). ${reversaConsignacion.revision ? reversaConsignacion.revision + ' queda(n) para revision porque ya hubo pago real al proveedor.' : ''}`);
     }

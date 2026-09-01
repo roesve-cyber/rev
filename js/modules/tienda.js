@@ -328,7 +328,7 @@ window.actualizarTablaPlanesSimulada = function(saldo) {
     });
     html += '</tbody></table>';
     html += `<div style="margin-top:8px;padding:8px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;font-size:10.5px;color:#6b21a8;text-align:center;">
-        🎟️ Si liquidas antes del plazo elegido, la diferencia se te entrega como <strong>cupón de saldo a favor</strong> (vigente 3 meses, aplicable en tu próxima compra).
+        🎟️ Si liquidas dentro del plazo pactado, recibes un <strong>cupón de saldo a favor</strong> (vigente 3 meses, aplicable en tu próxima compra).
     </div>`;
     cont.innerHTML = html;
 };

@@ -3,6 +3,32 @@
 // Consolidado: Motor de saldos, abonos avanzados, promesas y WhatsApp.
 // ================================================================
 
+// 🎟️ Decisión de Roberto: los cupones de saldo a favor SOLO se emiten para
+// ventas hechas a partir de esta fecha en adelante. Las cuentas vigentes
+// (vendidas antes) ya traen una tasa más baja pactada -- si además se les
+// emitiera cupón por liquidar a tiempo, el margen de esas ventas viejas se
+// vería doblemente afectado. Las cuentas viejas SIGUEN recibiendo el
+// descuento de pago anticipado en el monto a cobrar (eso es la tasa/política
+// de precio, no cambia) -- lo único que se detiene es la conversión de ese
+// beneficio en cupón; para ellas, simplemente no se emite nada.
+// 🛡️ Fecha FIJA (no "new Date()") -- si se recalculara en cada carga de
+// página, el corte se movería solo y nunca habría ventas "nuevas" que
+// califiquen.
+const CUPONES_FECHA_INICIO = "2026-08-31T00:00:00.000Z";
+
+// 🎯 Redondeo del monto del cupón -- configurable en Configuración > Cupones
+// de Saldo a Favor. multiplo: a qué cifra redondear (5, 10, 50, 100...);
+// direccion: 'arriba' (nunca le des menos de lo calculado) o 'abajo' (nunca
+// le des más). multiplo <= 1 desactiva el redondeo (se deja el monto exacto).
+function _cxcRedondearMontoCupon(monto) {
+    const config = StorageService.get('configCreditoGlobal', {});
+    const multiplo = Number(config?.redondeoCuponMultiplo || 0);
+    const direccion = config?.redondeoCuponDireccion || 'abajo';
+    if (!multiplo || multiplo <= 1) return monto;
+    const factor = direccion === 'arriba' ? Math.ceil : Math.floor;
+    return factor(monto / multiplo) * multiplo;
+}
+
 // Helper local de formato de moneda
 function _cxcDinero(v) {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
@@ -333,7 +359,78 @@ window._cxcCuponesDisponiblesCliente = function(clienteId) {
         .filter(c => String(c.clienteId) === String(clienteId) && c.estado === 'Activo' && Number(c.montoDisponible || 0) > 0.01);
 };
 
-window._cxcAplicarCupon = function(cuponId, montoAAplicar, contexto = {}) {
+window._cxcAplicarCupon = async function(cuponId, montoAAplicar, contexto = {}) {
+    // 🛡️ Antes esto era lectura -> resta -> StorageService.set() sobre el
+    // arreglo completo -- si el mismo cupón se aplicaba casi al mismo tiempo
+    // desde dos dispositivos, el que guardaba al final pisaba el descuento
+    // del otro (doble gasto del mismo cupón). Ahora usa transaccionRegistros,
+    // que lee el dato FRESCO del servidor dentro de la transacción y
+    // reintenta solo si alguien más lo tocó de por medio -- mismo mecanismo
+    // que ya protege abonos/pagarés contra condiciones de carrera.
+    if (typeof StorageService.transaccionRegistros !== 'function') {
+        return _cxcAplicarCuponNoAtomico(cuponId, montoAAplicar, contexto);
+    }
+
+    const salida = await StorageService.transaccionRegistros(
+        [{ tabla: 'cuponesCliente', clave: cuponId }],
+        (frescos) => {
+            const cupon = frescos[`cuponesCliente:${cuponId}`];
+            if (!cupon) return { escrituras: [], resultado: { ok: false, motivo: 'Cupón no encontrado.' } };
+            if (cupon.estado === 'Activo' && _cxcCuponVencido(cupon)) cupon.estado = 'Vencido';
+            if (cupon.estado !== 'Activo') {
+                return {
+                    escrituras: [], resultado: {
+                        ok: false,
+                        motivo: cupon.estado === 'Vencido'
+                            ? `Este cupón venció el ${new Date(cupon.fechaVencimiento).toLocaleDateString('es-MX')}.`
+                            : `El cupón ya está ${cupon.estado.toLowerCase()}.`
+                    }
+                };
+            }
+            const monto = Math.min(Number(montoAAplicar || 0), Number(cupon.montoDisponible || 0));
+            if (monto <= 0.01) return { escrituras: [], resultado: { ok: false, motivo: 'El cupón no tiene saldo disponible.' } };
+
+            cupon.montoDisponible = Number((Number(cupon.montoDisponible) - monto).toFixed(2));
+            cupon.historialUso = cupon.historialUso || [];
+            cupon.historialUso.push({
+                fecha: new Date().toISOString(),
+                monto,
+                folioDestino: contexto.folioDestino || null,
+                tipoVentaDestino: contexto.tipoVentaDestino || null, // 'contado' | 'credito' | 'apartado'
+                nota: contexto.nota || ''
+            });
+            if (cupon.montoDisponible <= 0.01) {
+                cupon.estado = 'Agotado';
+                cupon.montoDisponible = 0;
+            }
+            return {
+                escrituras: [{ tabla: 'cuponesCliente', clave: cuponId, data: cupon }],
+                resultado: { ok: true, montoAplicado: monto, cuponRestante: cupon.montoDisponible, codigo: cupon.codigo, cuponAuditoria: cupon }
+            };
+        }
+    );
+
+    const resultado = salida || { ok: false, motivo: 'No se pudo procesar el cupón (sin conexión con datos frescos).' };
+    if (resultado.ok && window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'APLICACION_CUPON',
+            modulo: 'Ventas',
+            entidad: 'Cupon',
+            entidadId: cuponId,
+            detalle: `Se aplicaron ${_cxcDinero(resultado.montoAplicado)} del cupón ${resultado.codigo} a ${contexto.tipoVentaDestino || 'una venta'} folio ${contexto.folioDestino || '(pendiente)'}.`,
+            monto: resultado.montoAplicado,
+            severidad: 'normal',
+            datos: { cupon: resultado.cuponAuditoria, contexto }
+        });
+    }
+    return resultado;
+};
+
+// Respaldo NO atómico -- solo se usa si el build de storage2.js en el
+// dispositivo todavía no trae transaccionRegistros (versión vieja en caché).
+// Mismo riesgo de doble gasto que existía antes; se deja documentado a
+// propósito y no como el camino normal.
+function _cxcAplicarCuponNoAtomico(cuponId, montoAAplicar, contexto = {}) {
     const cupones = _cxcMarcarCuponesVencidos();
     const cupon = cupones.find(c => c.id === cuponId);
     if (!cupon) return { ok: false, motivo: 'Cupón no encontrado.' };
@@ -347,7 +444,7 @@ window._cxcAplicarCupon = function(cuponId, montoAAplicar, contexto = {}) {
         fecha: new Date().toISOString(),
         monto,
         folioDestino: contexto.folioDestino || null,
-        tipoVentaDestino: contexto.tipoVentaDestino || null, // 'contado' | 'credito' | 'apartado'
+        tipoVentaDestino: contexto.tipoVentaDestino || null,
         nota: contexto.nota || ''
     });
     if (cupon.montoDisponible <= 0.01) {
@@ -362,14 +459,14 @@ window._cxcAplicarCupon = function(cuponId, montoAAplicar, contexto = {}) {
             modulo: 'Ventas',
             entidad: 'Cupon',
             entidadId: cupon.id,
-            detalle: `Se aplicaron ${_cxcDinero(monto)} del cupón ${cupon.codigo} (${cupon.clienteNombre}) a ${contexto.tipoVentaDestino || 'una venta'} folio ${contexto.folioDestino || '(pendiente)'}.`,
+            detalle: `Se aplicaron ${_cxcDinero(monto)} del cupón ${cupon.codigo} (${cupon.clienteNombre}) a ${contexto.tipoVentaDestino || 'una venta'} folio ${contexto.folioDestino || '(pendiente)'}. [modo no atómico]`,
             monto,
             severidad: 'normal',
             datos: { cupon, contexto }
         });
     }
     return { ok: true, montoAplicado: monto, cuponRestante: cupon.montoDisponible, codigo: cupon.codigo };
-};
+}
 
 function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     const cuenta = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
@@ -422,93 +519,44 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
 
     if (saldoActual <= 0.01) return { ...base, liquidaria: true, faltante: 0, mensaje: 'La cuenta ya esta liquidada.' };
 
-    if (diasDesdeVenta <= 30) {
-        const montoLiquidacion = Math.max(0, capitalContado - totalPagado);
-        const beneficio = Math.max(0, saldoActual - montoLiquidacion);
-        const liquidaria = base.montoAbono >= montoLiquidacion - 0.01;
-        return {
-            ...base,
-            aplica: montoLiquidacion > 0,
-            liquidaria,
-            beneficio,
-            montoLiquidacion,
-            faltante: Math.max(0, montoLiquidacion - base.montoAbono),
-            tipo: 'contado_30',
-            mensaje: 'Periodo de gracia: puede liquidar al precio de contado sin intereses.'
-        };
-    }
-
-    // Plazo (en meses) que el cliente realmente pacto al comprar. La politica
-    // de pago anticipado NUNCA debe recotizar por ENCIMA de esto: si el cliente
-    // ya esta al nivel de su propio plazo o lo paso, no hay "plan mas caro" que
-    // cobrarle por antiguedad -- eso ya no es un pago anticipado de nada, es
-    // simplemente su saldo nominal (los moratorios, si aplican, se calculan
-    // aparte con base en el plazo total, no aqui).
+    // 🛡️ REGLA NUEVA (reemplaza por completo la escalera mes-a-mes anterior
+    // -- decisión de Roberto, basada en su análisis de margen con el
+    // simulador de tasas): si el cliente liquida DENTRO de su plazo pactado,
+    // paga el saldo nominal completo -- SIN descuento en el monto a cobrar
+    // hoy -- y recibe un cupón fijo (% configurable en Configuración >
+    // Cupones de Saldo a Favor, default 3%) sobre el TOTAL FINANCIADO del
+    // plan (cuenta.plan.total, con intereses). Ya no importa en que mes
+    // exacto liquide dentro de su plazo -- siempre el mismo %. Si ya pasó su
+    // plazo pactado, no hay cupón (ver _cxcDetectarSaltoPlazo, mecanismo
+    // aparte para migrar el plazo por atraso).
     const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    const diasPlazoOriginal = mesesPlanOriginal > 0 ? mesesPlanOriginal * 30.44 : Infinity;
+    const aunEnPlazo = diasDesdeVenta < diasPlazoOriginal;
+    const liquidaria = base.montoAbono >= saldoActual - 0.01;
 
-    if (mesesPlanOriginal > 0 && mesPostContado >= mesesPlanOriginal) {
-        const liquidaria = base.montoAbono >= saldoActual - 0.01;
+    if (!aunEnPlazo) {
         return {
             ...base,
             liquidaria,
             faltante: Math.max(0, saldoActual - base.montoAbono),
-            mensaje: 'Ya alcanzo o paso su plazo pactado; se liquida con el saldo nominal vigente (sin recotizar a un plan mayor).'
+            mensaje: 'Ya paso su plazo pactado; se liquida con el saldo nominal vigente, sin cupon (ver salto de plazo si aplica).'
         };
     }
 
-    // 🛡️ Las tasas (configCreditoGlobal) son un valor GLOBAL y EDITABLE: si se
-    // ajustaron despues de esta venta, recalcular "que costaria un plan mas
-    // corto" con la calculadora EN VIVO usa las tasas de HOY, no las que
-    // estaban vigentes cuando se vendio -- y puede salir un absurdo (un plan
-    // mas corto mas caro que el plan original completo). Por eso se prefiere
-    // la tabla que quedo CONGELADA en la propia venta (cuenta.saldosPorMes),
-    // y solo se recalcula en vivo si esa tabla no existe o no es coherente.
-    const tablaCongelada = Array.isArray(cuenta?.saldosPorMes) ? cuenta.saldosPorMes.slice() : [];
-    const tablaCongeladaEsSana = tablaCongelada.length > 0 && tablaCongelada
-        .slice().sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))
-        .every((p, i, arr) => i === 0 || Number(p.total || 0) >= Number(arr[i - 1].total || 0) - 0.01);
+    const totalFinanciado = Number(cuenta?.plan?.total || 0);
+    const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    const beneficio = _cxcRedondearMontoCupon(totalFinanciado * Math.max(0, porcentajeCupon) / 100);
 
-    const planes = tablaCongeladaEsSana
-        ? tablaCongelada
-        : ((typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
-            ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad)
-            : []);
-    const planAplicable = [...planes]
-        .filter(p => Number(p.meses || 0) >= mesPostContado)
-        .filter(p => mesesPlanOriginal <= 0 || Number(p.meses || 0) <= mesesPlanOriginal)
-        .filter(p => Number(p.total || 0) > totalPagado)
-        .sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))[0] || null;
-
-    if (!planAplicable) {
-        const liquidaria = base.montoAbono >= saldoActual - 0.01;
-        return {
-            ...base,
-            liquidaria,
-            faltante: Math.max(0, saldoActual - base.montoAbono),
-            mensaje: 'Sin plan anticipado disponible para la antiguedad actual; se liquida con saldo vigente.'
-        };
-    }
-
-    // 🛡️ Limite de seguridad: pagar anticipado (dentro de su propio plazo)
-    // jamas debe salir MAS CARO que simplemente deber el saldo nominal vigente.
-    // Si por inconsistencia de tasas/datos el calculo da un numero mayor, se
-    // usa el saldo nominal en su lugar (nunca un recargo por encima de el).
-    const montoLiquidacion = Math.min(
-        Math.max(0, Number(planAplicable.total || 0) - totalPagado),
-        saldoActual
-    );
-    const beneficio = Math.max(0, saldoActual - montoLiquidacion);
-    const liquidaria = base.montoAbono >= montoLiquidacion - 0.01;
     return {
         ...base,
-        aplica: montoLiquidacion > 0,
+        aplica: liquidaria && beneficio > 0.01,
         liquidaria,
         beneficio,
-        montoLiquidacion,
-        faltante: Math.max(0, montoLiquidacion - base.montoAbono),
-        tipo: 'plan_anticipado',
-        plan: planAplicable,
-        mensaje: `Periodo de contado vencido. Plan anticipado aplicable: ${planAplicable.meses} meses.`
+        montoLiquidacion: saldoActual,
+        faltante: Math.max(0, saldoActual - base.montoAbono),
+        tipo: 'pronto_pago_flat',
+        porcentajeCupon,
+        mensaje: `Dentro del plazo pactado: al liquidar recibe ${porcentajeCupon}% del total financiado (${_cxcDinero(totalFinanciado)}) como cupon.`
     };
 }
 
@@ -749,19 +797,10 @@ function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
         ? ` Ademas tiene ${_cxcDinero(politica.moratoriosPendientesMonto)} de moratorios pendientes (se cobran aparte, no estan incluidos en este monto). Total real a liquidar: ${_cxcDinero(politica.montoLiquidacion + politica.moratoriosPendientesMonto)}.`
         : "";
 
-    if (politica.tipo === "contado_30") {
+    if (politica.tipo === "pronto_pago_flat") {
         return {
-            titulo: "Politica de pago anticipado: precio de contado",
-            detalle: `Esta cuenta esta dentro de los primeros 30 dias. Puede liquidarse descontando intereses y cobrando solo el pendiente a precio de contado: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${moratorioTxt}`,
-            nota: modoTxt
-        };
-    }
-
-    if (politica.tipo === "plan_anticipado") {
-        const meses = politica.plan?.meses || politica.mesActualVenta || "-";
-        return {
-            titulo: `Politica de pago anticipado: plan ${meses} meses`,
-            detalle: `Ya vencio el periodo de contado. Si el cliente liquida anticipadamente, el sistema cobra el plan aplicable a la antiguedad de la venta: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${moratorioTxt}`,
+            titulo: `Politica de pago anticipado: liquidacion dentro de plazo`,
+            detalle: `Aun dentro de su plazo pactado. Se cobra el saldo nominal completo: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${politica.beneficio > 0.01 ? ` (${politica.porcentajeCupon}% del total financiado, como cupon.)` : ''}${moratorioTxt}`,
             nota: modoTxt
         };
     }
@@ -1510,9 +1549,7 @@ function actualizarAvisoPoliticaAbono(folio) {
     const reglaHTML = `<br><span style="font-weight:700;">Esta regla se aplicara igual si el abono es directo o si se envia a Boveda.</span>`;
 
     if (politica.aplica && politica.liquidaria) {
-        const titulo = politica.tipo === "contado_30"
-            ? "LIQUIDACION A PRECIO DE CONTADO"
-            : `LIQUIDACION ANTICIPADA${politica.plan?.meses ? ` - PLAN ${politica.plan.meses} MESES` : ""}`;
+        const titulo = "LIQUIDACION DENTRO DE PLAZO";
         const excesoHTML = montoAbono > politica.montoLiquidacion + 0.01
             ? `<br>Capturaste <b>${_cxcDinero(montoAbono)}</b>; se aplicara el monto de politica.`
             : "";
@@ -1521,9 +1558,7 @@ function actualizarAvisoPoliticaAbono(folio) {
     }
 
     if (politica.aplica && politica.faltante > 0.01) {
-        const titulo = politica.tipo === "contado_30"
-            ? "Politica 30 dias"
-            : `Liquidacion anticipada${politica.plan?.meses ? ` al plan de ${politica.plan.meses} meses` : ""}`;
+        const titulo = "Liquidacion dentro de plazo";
         avisoDiv.innerHTML = `<div style="background:#fef3c7; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #d97706;"><b>${titulo}:</b> agrega <b>${_cxcDinero(politica.faltante)}</b> para liquidar con esta politica.<br>${montoPoliticaHTML}${beneficioHTML}${reglaHTML}</div>`;
         return;
     }
@@ -1684,24 +1719,27 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
     }
 
     if (politicaAbono?.aplica && politicaAbono.liquidaria) {
-        const tipoPolitica = politicaAbono.tipo === "contado_30"
-            ? "PRECIO DE CONTADO (30 DIAS)"
-            : `PLAN ANTICIPADO${politicaAbono.plan?.meses ? ` ${politicaAbono.plan.meses} MESES` : ""}`;
-        // 🛡️ Decisión de Roberto: el beneficio YA NO se condona sin más -- se
-        // convierte en cupón de saldo a favor (_cxcEmitirCuponBeneficio).
+        // 🎟️ El beneficio se convierte en cupón SOLO para ventas nuevas (ver
+        // CUPONES_FECHA_INICIO) -- las cuentas vigentes (vendidas antes) ya
+        // traen una tasa más baja pactada; emitirles cupón encima afectaría
+        // el margen de esas ventas viejas. Para esas, no hay cupón.
+        // El % ya viene calculado DENTRO de politicaAbono.beneficio (ver
+        // _cxcEvaluarPoliticaPagoAnticipado, regla flat) -- no se vuelve a
+        // multiplicar aquí para no aplicar el porcentaje dos veces.
+        const ventaEsNueva = cuenta.fechaVenta && new Date(cuenta.fechaVenta) >= new Date(CUPONES_FECHA_INICIO);
         const beneficioTxt = politicaAbono.beneficio > 0.01
-            ? `\nBeneficio para el cliente (se emitira como CUPON, no se condona): ${_cxcDinero(politicaAbono.beneficio)}`
+            ? (ventaEsNueva
+                ? `\nCupón por pago anticipado (${politicaAbono.porcentajeCupon}% del total financiado): ${_cxcDinero(politicaAbono.beneficio)}`
+                : `\nCuenta vigente (vendida antes del cambio a cupones) -- no genera cupón.`)
             : "";
         const excesoTxt = montoAbonoInput > politicaAbono.montoLiquidacion + 0.01
             ? `\n\nCapturaste ${_cxcDinero(montoAbonoInput)}, pero se aplicara el monto correcto por politica.`
             : "";
-        if (confirm(`POLITICA DE PAGO ANTICIPADO\n\nAplica: ${tipoPolitica}\nMonto a aplicar: ${_cxcDinero(politicaAbono.montoLiquidacion)}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta con esta politica?`)) {
+        if (confirm(`LIQUIDACION DENTRO DEL PLAZO PACTADO\n\nMonto a cobrar (saldo nominal, sin descuento): ${_cxcDinero(politicaAbono.montoLiquidacion)}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta?`)) {
             montoFinal = politicaAbono.montoLiquidacion;
             liquidacionPorPolitica = true;
-            // 🎟️ El beneficio se emite como cupón de saldo a favor -- nunca
-            // se condona/desaparece sin dejar rastro aplicable.
-            cuponEmitido = politicaAbono.beneficio > 0.01
-                ? _cxcEmitirCuponBeneficio(cuenta, folio, politicaAbono.beneficio, `Pago anticipado (${tipoPolitica})`)
+            cuponEmitido = (politicaAbono.beneficio > 0.01 && ventaEsNueva)
+                ? _cxcEmitirCuponBeneficio(cuenta, folio, politicaAbono.beneficio, `Pago anticipado dentro de plazo (${politicaAbono.porcentajeCupon}% del total financiado)`)
                 : null;
             // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
             // el descuento de pronto pago aplicado.
@@ -1744,7 +1782,11 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         liquidacionPorPolitica: liquidacionPorPolitica,
         fechaAbonoIso: fechaAbonoIso,
         fechaAbonoStr: fechaAbonoStr,
-        vendedorId: cuenta.vendedorId || null
+        vendedorId: cuenta.vendedorId || null,
+        // 🎟️ Si este abono liquidó la cuenta y generó un cupón, se guarda su
+        // id aquí -- si el abono se corrige o se elimina después por
+        // auditoría, hay que poder encontrar y anular ese cupón también.
+        cuponEmitidoId: cuponEmitido?.id || null
     };
 
     if (!esDirecto) {
@@ -2107,7 +2149,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 
             // Copia mutable de la cuenta fresca para aplicar el abono y los moratorios.
             const cuentaAct = { ...cuentaFresca, abonos: [...(cuentaFresca.abonos || [])] };
-            cuentaAct.abonos.push({ idOperacion: _idOperacionAbono || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null });
+            cuentaAct.abonos.push({ idOperacion: _idOperacionAbono || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null, cuponEmitidoId: a.cuponEmitidoId || null });
             _cxcAplicarPagoAMoratorios(cuentaAct, montoRestante);
 
             // Saldo pendiente tras esta escritura: pagarés que sigan
@@ -3020,6 +3062,47 @@ function _cxcRecalcularCuentaPorAbonos(cuenta, pagares) {
     return pagaresActualizados;
 }
 
+// 🎟️ Si el abono que había emitido un cupón se corrige o se elimina por
+// auditoría, el cupón queda sin fundamento -- se anula (no se restaura
+// saldo, no se convierte en efectivo, igual que en cancelación de venta).
+// Es una acción rara y admin-gated (ver requireAdmin en los llamadores), así
+// que se deja como lectura/escritura simple en vez de transacción atómica --
+// esa protección es para el camino de alta frecuencia (aplicar en venta),
+// no para esta corrección ocasional.
+function _cxcAnularCuponPorAbono(cuponId, motivo) {
+    if (!cuponId) return null;
+    const cupones = StorageService.get("cuponesCliente", []);
+    const cupon = cupones.find(c => c.id === cuponId);
+    if (!cupon || cupon.estado === 'Cancelado') return cupon || null;
+    const montoDisponiblePrevio = Number(cupon.montoDisponible || 0);
+    cupon.estado = 'Cancelado';
+    cupon.montoDisponible = 0;
+    cupon.fechaCancelacion = new Date().toISOString();
+    cupon.motivoCancelacion = motivo || 'Abono de origen corregido/eliminado en auditoría';
+    StorageService.set("cuponesCliente", cupones);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'CUPON_ANULADO_POR_ABONO',
+            modulo: 'CxC',
+            entidad: 'Cupon',
+            entidadId: cupon.id,
+            detalle: `Cupón ${cupon.codigo} anulado: ${cupon.motivoCancelacion}. Tenía ${_cxcDinero(montoDisponiblePrevio)} disponibles al momento de anularse.`,
+            monto: montoDisponiblePrevio,
+            severidad: 'riesgo',
+            datos: { cupon }
+        });
+    }
+    if (typeof notificarBovedaAutorizacion === 'function') {
+        notificarBovedaAutorizacion({
+            tipo: 'cuponAnuladoPorCorreccionAbono',
+            titulo: '🎟️ Cupón anulado (abono de origen corregido/eliminado)',
+            cuerpo: `Cupón ${cupon.codigo} (${cupon.clienteNombre}) quedó anulado -- tenía ${_cxcDinero(montoDisponiblePrevio)} disponibles.`
+        }).catch(() => {});
+    }
+    return cupon;
+}
+
 window.eliminarAbonoAuditoriaCxC = function(folio, abonoIndex) {
     if (window.AuditService?.requireAdmin) {
         if (!window.AuditService.requireAdmin('eliminar abono CxC')) return;
@@ -3056,6 +3139,12 @@ window.eliminarAbonoAuditoriaCxC = function(folio, abonoIndex) {
         fechaEliminacion: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
         motivoEliminacion: String(motivo).trim()
     });
+
+    // 🎟️ Si este abono había liquidado la cuenta y emitido un cupón, ese
+    // cupón se anula -- ya no hay abono que lo sustente.
+    if (abonoEliminado.cuponEmitidoId) {
+        _cxcAnularCuponPorAbono(abonoEliminado.cuponEmitidoId, `Abono que lo generó fue eliminado en folio ${folio}: ${String(motivo).trim()}`);
+    }
 
     pagares = _cxcRecalcularCuentaPorAbonos(cuenta, pagares);
     cuentas[idxCuenta] = cuenta;
@@ -3144,6 +3233,14 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
     cuenta.abonos[abonoIndex].cuentaId = cuentaId;
     cuenta.abonos[abonoIndex].medioPago = medioPago;
     cuenta.abonos[abonoIndex].etiquetaCuenta = etiqueta;
+
+    // 🎟️ Si este abono había emitido un cupón, cualquier corrección a su
+    // fecha/monto invalida la base de ese cupón -- se anula. Si de verdad
+    // sigue aplicando el beneficio, hay que volver a liquidar la cuenta para
+    // que se emita uno nuevo con los datos correctos.
+    if (abonoAnterior.cuponEmitidoId) {
+        _cxcAnularCuponPorAbono(abonoAnterior.cuponEmitidoId, `Abono que lo generó fue corregido en folio ${folio} (monto ${_cxcDinero(abonoAnterior.monto || 0)} -> ${_cxcDinero(nuevoMonto)})`);
+    }
 
     pagares = _cxcRecalcularCuentaPorAbonos(cuenta, pagares);
 

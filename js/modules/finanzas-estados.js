@@ -597,8 +597,20 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const saldosFavorProveedores = StorageService.get('saldosFavorProveedores', []);
     const totalSaldoFavorProveedores = saldosFavorProveedores.reduce((s, x) => s + Math.max(0, Number(x.montoDisponible) || 0), 0);
 
+    // 🎟️ Cupones de saldo a favor emitidos a clientes (beneficio por pago
+    // anticipado, convertido en cupón en vez de condonarse): es dinero/valor
+    // que le debemos a los clientes hasta que lo canjeen o venza -- un
+    // pasivo real que hasta ahora no aparecía en ningún lado del Balance.
+    // Se excluyen los ya vencidos: aunque el barrido perezoso
+    // (_cxcMarcarCuponesVencidos, cxc.js) no haya corrido todavía sobre
+    // ellos, ya no representan una obligación real de canje.
+    const cuponesCliente = StorageService.get('cuponesCliente', []);
+    const totalCuponesPorCanjear = cuponesCliente
+        .filter(c => c.estado === 'Activo' && !(c.fechaVencimiento && new Date(c.fechaVencimiento) < new Date()))
+        .reduce((s, c) => s + Math.max(0, Number(c.montoDisponible) || 0), 0);
+
     const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario + totalSaldoFavorProveedores;
-    const totalPasivo = totalCxP + totalDeudaMSI;
+    const totalPasivo = totalCxP + totalDeudaMSI + totalCuponesPorCanjear;
 
     const { neto: capitalAportadoNeto, aportado, retirado } = _efTotalesCapital();
     const utilidadesAcumuladas = totalActivo - totalPasivo - capitalAportadoNeto;
@@ -612,6 +624,7 @@ function _efCalcularBalanceGeneral(hastaStr) {
         reservaCxCIncobrable, reservaPrestamosIncobrable, totalReservaIncobrables,
         totalInventario,
         totalSaldoFavorProveedores,
+        totalCuponesPorCanjear,
         totalActivo,
         totalCxP, totalDeudaMSI, totalPasivo,
         capitalAportado: aportado, capitalRetirado: retirado, capitalAportadoNeto,
@@ -735,6 +748,7 @@ function renderEstadosFinancieros() {
             <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por pagar (proveedores)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxP)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Deuda TDC a MSI</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalDeudaMSI)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cupones por canjear<span title="Cupones de saldo a favor activos y no vencidos (beneficio por pago anticipado). Es dinero/valor que se le debe a los clientes hasta que lo canjeen o venza." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCuponesPorCanjear)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Capital aportado (neto)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.capitalAportadoNeto)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Utilidades acumuladas</td><td style="padding:8px;text-align:right;">${_efDinero(bg.utilidadesAcumuladas)}</td></tr>
                 <tr style="font-weight:bold;background:#fffbeb;"><td style="padding:8px;">TOTAL PASIVO + CAPITAL</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPasivo + bg.totalCapital)}</td></tr>
