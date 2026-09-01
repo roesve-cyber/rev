@@ -136,7 +136,13 @@ const StorageService = {
         requisicionesCompra: 'id',
         historialCancelaciones: 'id',
         historialCostos: 'id',
-        historialSolicitudesClientes: 'id'
+        historialSolicitudesClientes: 'id',
+        // 🎟️ Cupones de saldo a favor: cada uno es su propio documento para
+        // poder usar transaccionRegistros() al aplicar uno (lectura fresca +
+        // resta + escritura en una sola transacción), evitando doble gasto
+        // si el mismo cupón se intenta usar casi al mismo tiempo desde dos
+        // dispositivos.
+        cuponesCliente: 'id'
     },
 
     _claveRegistro(tabla, item) {
