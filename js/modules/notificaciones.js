@@ -40,56 +40,76 @@ function marcarTodasComoLeidas() {
 }
 
 // ===== NOTIFICACIONES =====
+// 🛡️ Decisión de Roberto: la campanita solo debe mostrar herramientas que
+// el vendedor tiene que tener MUY presentes -- se quitaron cobranza,
+// stock e inventario, cxp (eran ruido para el día a día del vendedor). Solo
+// quedan dos categorías:
+//   1. Saltos de plazo pendientes de confirmar (saltosPlazoPendientes).
+//   2. Cuentas a punto de perder su ventana para el cupón de pronto pago
+//      (recordatorio proactivo, antes de que se les acabe el tiempo).
 function recopilarNotificaciones() {
     const hoy = new Date();
-    const en3dias = new Date(hoy.getTime() + 3 * 24 * 3600 * 1000);
-    const notifs = [];
-    if (window.CobranzaRiskService) {
-        const vistasCobranza = getNotificacionesVistas();
-        const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
-        const pagaresCxC = StorageService.get('pagaresSistema', []);
-        const cartera = window.CobranzaRiskService.analizarCartera(cuentasCxC, pagaresCxC, { hoy });
-        cartera.alertas.forEach(r => {
-            const folio = r.cuenta?.folio || '-';
-            const cliente = r.cuenta?.nombre || r.cuenta?.clienteNombre || 'Cliente';
-            const id = `cxc_${folio}_${r.key}${r.promesa.vencida ? '_promesa' : ''}`;
-            if (vistasCobranza.includes(id)) return;
-            const msgBase = r.sinPrimerPago
-                ? `${cliente}: sin primer pago, ${r.diasSinPago} dia(s), saldo ${dinero(r.saldo)}`
-                : `${cliente}: ${r.diasSinPago} dia(s) desde ultimo pago, saldo ${dinero(r.saldo)}`;
-            const msg = r.promesa.vencida ? `${msgBase}. Promesa vencida.` : `${msgBase}. ${r.nivelRiesgo}.`;
-            notifs.push({ tipo: 'cobranza', icono: '!', color: r.borde || r.color, msg, folio, id });
-        });
-    }
     const vistas = getNotificacionesVistas();
+    const notifs = [];
 
-    // Stock bajo
-    const productosBase = StorageService.get('productos', []);
-    const productos = typeof window.filtrarProductosActivos === 'function' ? window.filtrarProductosActivos(productosBase) : productosBase;
-    productos.forEach(p => {
-        const stock = p.stock || p.cantidad || 0;
-        const minimo = p.stockMinimo || 3;
-        if (stock > 0 && stock <= minimo) {
-            const id = `stock_${p.id}_bajo`;
-            if (!vistas.includes(id)) notifs.push({ tipo: 'stock', icono: '📦', color: '#d97706', msg: `Stock bajo: ${p.nombre} (quedan ${stock} pzs)`, id });
-        } else if (stock <= 0) {
-            const id = `stock_${p.id}_sin`;
-            if (!vistas.includes(id)) notifs.push({ tipo: 'stock', icono: '🚫', color: '#dc2626', msg: `Sin stock: ${p.nombre}`, id });
-        }
+    // 1) Saltos de plazo pendientes de confirmar
+    const saltosPendientes = StorageService.get('saltosPlazoPendientes', []).filter(s => s.estado === 'Pendiente');
+    saltosPendientes.forEach(s => {
+        const id = `salto_${s.id}`;
+        if (vistas.includes(id)) return;
+        notifs.push({
+            tipo: 'salto',
+            icono: '📆',
+            color: '#dc2626',
+            msg: `${s.clienteNombre}: pasó de ${s.mesesActual} a ${s.mesesNuevo} meses (folio ${s.folio}). Total actual ${dinero(s.totalActual)} → propuesto ${dinero(s.totalNuevo)}. Requiere tu confirmación.`,
+            folio: s.folio,
+            id
+        });
     });
 
-    // Cuentas por pagar próximas (no aplica a vendedor: deuda con proveedores)
-    const esVendedor = (typeof getSesion === 'function') && getSesion()?.rol === 'vendedor';
-    if (!esVendedor) {
-        const cxp = StorageService.get('cuentasPorPagar', []);
-        cxp.filter(c => (c.saldoPendiente || 0) > 0 && c.fechaVencimiento).forEach(c => {
-            const fv = new Date(c.fechaVencimiento);
-            if (fv <= en3dias) {
-                const id = `cxp_${c.id}_vence`;
-                if (!vistas.includes(id)) notifs.push({ tipo: 'cxp', icono: '💳', color: '#dc2626', msg: `Pago a ${c.proveedor || 'proveedor'}: ${dinero(c.saldoPendiente)} vence el ${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}`, id });
-            }
-        });
-    }
+    // 2) Cuentas próximas a su fecha límite de plazo -- mismo momento exacto
+    // dispara DOS consecuencias si el cliente no paga: pierde el cupón de
+    // pronto pago Y la cuenta brinca al siguiente plazo (_cxcDetectarSaltoPlazo,
+    // cxc.js). Se avisan juntas en una sola notificación (ventana de 7 días),
+    // usando el mismo criterio "aún en plazo" que usa
+    // _cxcEvaluarPoliticaPagoAnticipado/_cxcDetectarSaltoPlazo, para que este
+    // aviso nunca contradiga lo que el sistema aplicará al cobrar.
+    const cuentasCredito = StorageService.get('cuentasPorCobrar', []);
+    const DIAS_AVISO_CUPON = 7;
+    cuentasCredito.forEach(cuenta => {
+        if (cuenta.estado === 'Cancelado' || cuenta.incobrable) return;
+        const estadoCta = (typeof window._calcularEstadoCuenta === 'function') ? window._calcularEstadoCuenta(cuenta.folio) : null;
+        const saldoActual = Number(estadoCta?.saldoTotal ?? cuenta.saldoActual ?? 0) - Number(estadoCta?.saldoMoratorios || 0);
+        if (saldoActual <= 0.01) return; // ya liquidada
+
+        const mesesPlan = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+        if (mesesPlan <= 0) return; // sin plan definido
+
+        const fechaVenta = (typeof _cxcFechaVentaDate === 'function') ? _cxcFechaVentaDate(cuenta) : new Date(cuenta.fechaVenta);
+        const diasDesdeVenta = Math.max(0, Math.floor((hoy - fechaVenta) / 86400000));
+        const diasPlazo = mesesPlan * 30.44;
+        const diasRestantes = Math.ceil(diasPlazo - diasDesdeVenta);
+
+        if (diasRestantes > 0 && diasRestantes <= DIAS_AVISO_CUPON) {
+            const id = `cupon_prox_${cuenta.folio}`;
+            if (vistas.includes(id)) return;
+            const nombre = (typeof _cxcNombreClienteVigente === 'function') ? _cxcNombreClienteVigente(cuenta) : (cuenta.nombreCliente || cuenta.cliente?.nombre || 'Cliente');
+            // El salto de plazo tiene tope de 6 meses (_cxcDetectarSaltoPlazo)
+            // -- si ya está en el plan de 6, no hay "siguiente" al que brincar,
+            // así que ese aviso solo aplica por debajo del tope.
+            const avisoSalto = mesesPlan < 6
+                ? ` Si no liquida, su cuenta brincará de ${mesesPlan} a ${mesesPlan + 1} meses.`
+                : '';
+            notifs.push({
+                tipo: 'cupon',
+                icono: '🎟️',
+                color: '#7e22ce',
+                msg: `${nombre}: le quedan ${diasRestantes} dia(s) para liquidar y ganar su cupón (folio ${cuenta.folio}, saldo ${dinero(saldoActual)}).${avisoSalto}`,
+                folio: cuenta.folio,
+                id
+            });
+        }
+    });
 
     return notifs;
 }
@@ -111,10 +131,9 @@ function renderBadgeNotificaciones() {
 
 function abrirPanelNotificaciones() {
     const notifs = recopilarNotificaciones();
-    const tipos = ['cobranza', 'pagare', 'stock', 'cxp'];
-    const titulos = { pagare: '📋 Cobranza', stock: '📦 Inventario', cxp: '💳 Cuentas por Pagar' };
+    const tipos = ['salto', 'cupon'];
+    const titulos = { salto: '📆 Saltos de Plazo Pendientes', cupon: '🎟️ Plazo por vencer (cupón / salto de plazo)' };
 
-    titulos.cobranza = 'Cobranza por ultimo pago';
     let contenido = '';
     
     if (notifs.length === 0) {
