@@ -27,8 +27,10 @@ function _stpEsc(v) {
 }
 
 function _stpMesesEntre(fechaIni, fechaFin) {
-    const a = new Date(fechaIni);
-    const b = new Date(fechaFin);
+    // 🛡️ parseFechaMX interpreta correctamente "DD-MM-YYYY"/"DD/MM/YYYY" (antes
+    // new Date() los invertía a MES-DÍA-AÑO, dañando el cálculo de meses reales).
+    const a = window.parseFechaMX ? window.parseFechaMX(fechaIni) : new Date(fechaIni);
+    const b = window.parseFechaMX ? window.parseFechaMX(fechaFin) : new Date(fechaFin);
     if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
     return (b - a) / (1000 * 60 * 60 * 24 * 30.44);
 }
@@ -62,7 +64,11 @@ function _stpDiagnosticoCartera() {
         const estaSaldada = String(c.estado || '').toLowerCase() === 'saldado' || (saldoActual <= 0.01 && abonos.length > 0);
 
         if (estaSaldada && abonos.length) {
-            const ultimoAbono = abonos.reduce((max, a) => new Date(a.fecha) > new Date(max.fecha) ? a : max, abonos[0]);
+            const ultimoAbono = abonos.reduce((max, a) => {
+                const fa = window.parseFechaMX ? window.parseFechaMX(a.fecha) : new Date(a.fecha);
+                const fmax = window.parseFechaMX ? window.parseFechaMX(max.fecha) : new Date(max.fecha);
+                return fa > fmax ? a : max;
+            }, abonos[0]);
             const mesesReales = _stpMesesEntre(fechaVenta, ultimoAbono.fecha);
             if (mesesReales !== null && mesesReales >= -0.5) {
                 const { totalMercancia, totalDocumento } = typeof window._rrcTotalesVenta === 'function'
