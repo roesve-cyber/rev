@@ -38,8 +38,13 @@ window.obtenerHoyInputMX = function() {
  * Fecha YYYY-MM-DD de cualquier fecha — safe para comparar sin saltos de día
  */
 window.getFechaLocalMX = function(input = null) {
-    const d = input ? new Date(input) : new Date();
-    if (isNaN(d.getTime())) return window.localISO(new Date()).split('T')[0];
+    if (!input) return window.localISO(new Date()).split('T')[0];
+    // 🛡️ Antes hacía new Date(input) directo: con fechas guardadas como texto
+    // "DD-MM-YYYY" (no ISO), el navegador las interpreta como MM-DD-YYYY y
+    // devuelve un día distinto sin avisar. parseFechaMXOrNull ya sabe
+    // distinguir ISO de "DD-MM-YYYY"/"DD/MM/YYYY" y los interpreta bien.
+    const d = window.parseFechaMXOrNull(input);
+    if (!d) return window.localISO(new Date()).split('T')[0];
     return window.localISO(d).split('T')[0];
 };
 
@@ -55,8 +60,13 @@ window.fechaParaInput = function(fecha) {
  */
 window.formatearFechaMX = function(fecha) {
     if (!fecha) return '—';
-    const d = new Date(fecha);
-    if (isNaN(d.getTime())) return fecha;
+    // 🛡️ Antes: new Date(fecha) directo. Con "DD-MM-YYYY" en texto (no ISO),
+    // el navegador la lee como MM-DD-YYYY y muestra una fecha equivocada sin
+    // que nadie lo note (bug real encontrado en datos: "11-05-2026" se veía
+    // como 5 de noviembre en vez de 11 de mayo). parseFechaMXOrNull ya
+    // distingue ISO de "DD-MM-YYYY"/"DD/MM/YYYY" y los interpreta bien.
+    const d = window.parseFechaMXOrNull(fecha);
+    if (!d) return fecha;
     return new Intl.DateTimeFormat('es-MX', {
         timeZone: 'America/Mexico_City',
         day: '2-digit', month: '2-digit', year: 'numeric',
@@ -70,8 +80,9 @@ window.formatearFechaMX = function(fecha) {
  */
 window.formatearFechaCortaMX = function(fecha) {
     if (!fecha) return '—';
-    const d = new Date(fecha);
-    if (isNaN(d.getTime())) return fecha;
+    // 🛡️ Mismo fix que formatearFechaMX -- ver comentario ahí arriba.
+    const d = window.parseFechaMXOrNull(fecha);
+    if (!d) return fecha;
     return new Intl.DateTimeFormat('es-MX', {
         timeZone: 'America/Mexico_City',
         day: '2-digit', month: '2-digit', year: 'numeric'
