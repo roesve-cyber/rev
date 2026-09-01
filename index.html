@@ -633,6 +633,43 @@
  <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Agregar Plazo</button>
  </div>
  </div>
+
+ <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.05); max-width:800px; margin-top:20px;">
+ <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:2px solid #f1f5f9; padding-bottom:10px;">
+ <h3 style="color:#7e22ce; margin:0;">🎟️ Cupones de Saldo a Favor (Pronto Pago)</h3>
+ <button onclick="renderConfigCupon()" style="background:none; border:none; cursor:pointer; font-size:18px;">Actualizar</button>
+ </div>
+ <p style="font-size:13px; color:#6b7280; margin-bottom:20px;">Si un cliente liquida su crédito DENTRO de su plazo pactado, paga el saldo nominal completo (sin descuento) y recibe este % del total financiado como cupón. Definido con base en el análisis de margen del simulador de tasas.</p>
+
+ <div style="display:grid; grid-template-columns:1fr auto; gap:15px; align-items:end; background:#faf5ff; padding:20px; border-radius:8px; border:1px solid #e9d5ff;">
+ <div class="campo">
+ <label style="color:#7e22ce;">% DEL TOTAL FINANCIADO QUE SE EMITE COMO CUPÓN</label>
+ <input type="number" id="cfgPorcentajeCupon" min="0" max="100" step="0.1" placeholder="Ej: 3" style="border-color:#d8b4fe;">
+ </div>
+ <button onclick="guardarConfigCupon()" style="padding:10px 20px; background:#7e22ce; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Guardar</button>
+ </div>
+ <p id="cfgPorcentajeCuponActual" style="font-size:12px; color:#6b7280; margin-top:10px;"></p>
+
+ <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:15px; align-items:end; background:#faf5ff; padding:20px; border-radius:8px; border:1px solid #e9d5ff; margin-top:16px;">
+ <div class="campo">
+ <label style="color:#7e22ce;">REDONDEAR A CIFRAS DE</label>
+ <input type="number" id="cfgRedondeoCuponMultiplo" min="1" step="1" placeholder="Ej: 10 (deja vacío o en 1 para no redondear)" style="border-color:#d8b4fe;">
+ </div>
+ <div class="campo">
+ <label style="color:#7e22ce;">DIRECCIÓN</label>
+ <select id="cfgRedondeoCuponDireccion" style="border-color:#d8b4fe; padding:10px; border-radius:6px; border-width:1px; border-style:solid; width:100%;">
+ <option value="abajo">Hacia abajo (nunca le des de más)</option>
+ <option value="arriba">Hacia arriba (nunca le des de menos)</option>
+ </select>
+ </div>
+ <button onclick="guardarConfigCupon()" style="padding:10px 20px; background:#7e22ce; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Guardar</button>
+ </div>
+ <p id="cfgRedondeoCuponActual" style="font-size:12px; color:#6b7280; margin-top:10px;"></p>
+
+ <div style="margin-top:14px; padding:10px; background:#f8fafc; border-radius:8px; border:1px dashed #cbd5e1; font-size:11.5px; color:#64748b;">
+ ℹ️ Otros dos parámetros de cupones están fijos directamente en el código (no en esta pantalla): la <b>vigencia</b> (3 meses desde que se emite) y la <b>fecha a partir de la cual se emiten cupones</b> (solo ventas nuevas, las cuentas vigentes de antes se siguen condonando sin cupón). Si algún día quieres que también sean editables aquí, es un ajuste aparte.
+ </div>
+ </div>
  </div>
 
     <!-- NOTIFICACIONES PUSH (vista propia, independiente de Reglas de Credito) -->
@@ -1187,10 +1224,10 @@
 <script src="js/modules/auth.js?v=2.9"></script>
 <script src="js/modules/inventario.js?v=24"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
-<script src="js/modules/tienda.js?v=7"></script>
-<script src="js/modules/ventas.js?v=3.4"></script>
+<script src="js/modules/tienda.js?v=8"></script>
+<script src="js/modules/ventas.js?v=3.8"></script>
 <script src="js/modules/clientes.js?v=5"></script>
-<script src="js/modules/cxc.js?v=43"></script>
+<script src="js/modules/cxc.js?v=48"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=54"></script>
 <script src="js/modules/bancos.js?v=21"></script>
@@ -1205,7 +1242,7 @@
 <script src="js/modules/vendedores.js"></script>
 <script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js?v=3"></script>
-<script src="js/modules/finanzas-estados.js?v=6"></script>
+<script src="js/modules/finanzas-estados.js?v=7"></script>
 <script src="js/modules/condonar-deuda.js?v=1"></script>
 <script src="js/modules/reestructura-plazo.js?v=1"></script>
 <script src="js/modules/prestamos.js"></script>
@@ -1220,7 +1257,7 @@
 <script src="js/modules/reportes-simulador-tasa.js?v=2"></script>
 <script src="js/modules/reportes-cubo-ventas.js?v=1"></script>
 <script src="js/modules/estadoCuentaBancaria.js?v=1"></script>
-<script src="js/modules/configuracion.js"></script>
+<script src="js/modules/configuracion.js?v=4"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/modules/reportes-abonos-enganches.js"></script>
 <script src="js/services/calculadora-rapida.js?v=1"></script>
