@@ -1312,6 +1312,154 @@ function _bancosAgruparTransferenciasConciliacion(lista) {
     });
 }
 
+// ================================================================
+// 🔍 DETALLE COMPLETO DE UN MOVIMIENTO (clic en cualquier fila de la
+// tabla de "Movimientos" en Bancos). Muestra TODOS los campos del
+// registro tal como está guardado en movimientosCaja -- no solo los
+// 4 que se ven en la tabla -- más una vista JSON cruda por si hace
+// falta algo que no quedó etiquetado con nombre bonito.
+//
+// Contempla los 3 casos que puede traer una fila de la tabla:
+//   1) Movimiento suelto normal -> se muestra tal cual, campo por campo.
+//   2) Transferencia interna agrupada (2 patas: egreso+ingreso) -> se
+//      buscan ambas patas frescas en movimientosCaja por idOperacion
+//      y se muestran una junto a la otra.
+//   3) Grupo de conciliación (varios abonos con el mismo
+//      grupoConciliacion, mostrados como una sola fila) -> se muestra
+//      cada abono del grupo por separado, más el total.
+// ================================================================
+const _BANCOS_ETIQUETAS_CAMPO = {
+    id: 'ID interno',
+    idOperacion: 'ID de operación',
+    idOperacionTransferencia: 'ID de transferencia',
+    folio: 'Folio',
+    fecha: 'Fecha',
+    fechaISO: 'Fecha (ISO)',
+    createdAt: 'Creado el',
+    tipo: 'Tipo',
+    tipoMovimiento: 'Tipo de movimiento',
+    monto: 'Monto',
+    concepto: 'Concepto',
+    referencia: 'Referencia',
+    referenciaBancaria: 'Referencia bancaria',
+    cuenta: 'Cuenta (id)',
+    cuentaId: 'Cuenta (id)',
+    etiquetaCuenta: 'Cuenta',
+    cuentaOrigenNombre: 'Cuenta origen',
+    cuentaDestinoNombre: 'Cuenta destino',
+    medioPago: 'Medio de pago',
+    grupoConciliacion: 'Grupo de conciliación',
+    usuario: 'Usuario',
+    notas: 'Notas',
+    observaciones: 'Observaciones'
+};
+
+function _bancosEtiquetaCampo(key) {
+    return _BANCOS_ETIQUETAS_CAMPO[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase());
+}
+
+function _bancosFormatearValorCampo(key, value) {
+    if (value === null || value === undefined || value === '') return '<span style="color:#cbd5e1;">—</span>';
+    if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+    if (Array.isArray(value) || typeof value === 'object') {
+        return `<pre style="margin:4px 0 0; padding:8px; background:#f8fafc; border-radius:6px; font-size:11px; overflow:auto; max-height:160px;">${JSON.stringify(value, null, 2).replace(/</g, '&lt;')}</pre>`;
+    }
+    const k = key.toLowerCase();
+    if (k === 'monto' || k.includes('total') || k === 'abono' || k === 'enganche' || k === 'saldo') {
+        const n = Number(value);
+        if (!isNaN(n) && value !== '') return dinero(n);
+    }
+    if ((k.includes('fecha') || k === 'createdat') && typeof value === 'string' && window.formatearFechaCortaMX) {
+        const f = window.formatearFechaCortaMX(value);
+        return f && f !== 'Invalid Date' ? `${f} <span style="color:#94a3b8; font-size:11px;">(${String(value).replace(/</g, '&lt;')})</span>` : String(value).replace(/</g, '&lt;');
+    }
+    return String(value).replace(/</g, '&lt;');
+}
+
+function _bancosRenderCamposDetalle(registro) {
+    const claves = Object.keys(registro).filter(k => registro[k] !== undefined && k !== 'itemsGrupo');
+    // Campos "principales" primero, en un orden fijo legible; cualquier
+    // otro campo que traiga ese movimiento (venga de donde venga: venta,
+    // apartado, compra, préstamo, etc.) se muestra después -- nunca se
+    // queda nada fuera.
+    const ordenPreferido = ['fecha', 'tipo', 'monto', 'concepto', 'etiquetaCuenta', 'cuenta', 'medioPago',
+        'referencia', 'folio', 'idOperacion', 'grupoConciliacion', 'cuentaOrigenNombre', 'cuentaDestinoNombre'];
+    const principales = ordenPreferido.filter(k => claves.includes(k));
+    const restantes = claves.filter(k => !ordenPreferido.includes(k)).sort();
+
+    const filas = [...principales, ...restantes].map(k => `
+        <tr>
+            <td style="padding:6px 10px; color:#64748b; font-weight:700; font-size:12px; white-space:nowrap; vertical-align:top;">${_bancosEtiquetaCampo(k)}</td>
+            <td style="padding:6px 10px; font-size:13px; color:#0f172a; word-break:break-word;">${_bancosFormatearValorCampo(k, registro[k])}</td>
+        </tr>`).join('');
+
+    return `<table style="width:100%; border-collapse:collapse;">${filas}</table>`;
+}
+
+function abrirDetalleMovimiento(idx) {
+    const m = (window._bancosMovimientosVistaActual || [])[idx];
+    if (!m) return;
+
+    document.querySelector('[data-modal="detalle-movimiento"]')?.remove();
+
+    let cuerpoHTML = '';
+    let tituloHTML = '';
+
+    if (m.esTransferenciaInterna) {
+        const movimientosCaja = StorageService.get('movimientosCaja', []);
+        const patas = movimientosCaja.filter(x => _claveTransferencia(x) === m.idOperacionTransferencia && _esLegTransferencia(x));
+        const egreso = patas.find(x => String(x.tipo || '').toLowerCase() === 'egreso');
+        const ingreso = patas.find(x => String(x.tipo || '').toLowerCase() === 'ingreso');
+
+        tituloHTML = `🔁 Transferencia entre cuentas`;
+        cuerpoHTML = `
+            <div style="margin-bottom:14px;">
+                <div style="font-size:12px; font-weight:800; color:#dc2626; text-transform:uppercase; margin-bottom:6px;">⬇️ Salida (origen)</div>
+                ${egreso ? _bancosRenderCamposDetalle(egreso) : '<div style="color:#94a3b8; font-size:12px;">No se encontró el registro de salida.</div>'}
+            </div>
+            <div>
+                <div style="font-size:12px; font-weight:800; color:#16a34a; text-transform:uppercase; margin-bottom:6px;">⬆️ Entrada (destino)</div>
+                ${ingreso ? _bancosRenderCamposDetalle(ingreso) : '<div style="color:#94a3b8; font-size:12px;">No se encontró el registro de entrada.</div>'}
+            </div>`;
+    } else if (Array.isArray(m.itemsGrupo) && m.itemsGrupo.length > 1) {
+        tituloHTML = `📦 Grupo de ${m.itemsGrupo.length} movimiento(s) conciliados`;
+        cuerpoHTML = `
+            <div style="background:#f0fdfa; border:1px solid #99f6e4; border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:13px; color:#0f766e;">
+                <strong>Total del grupo:</strong> ${dinero(m.monto)} &nbsp;|&nbsp; <strong>Referencia:</strong> ${m.referencia || '—'}
+            </div>` +
+            m.itemsGrupo.map((item, i) => `
+                <div style="margin-bottom:14px; ${i > 0 ? 'border-top:1px dashed #e2e8f0; padding-top:14px;' : ''}">
+                    <div style="font-size:12px; font-weight:800; color:#0f766e; text-transform:uppercase; margin-bottom:6px;">Movimiento ${i + 1} de ${m.itemsGrupo.length}</div>
+                    ${_bancosRenderCamposDetalle(item)}
+                </div>`).join('');
+    } else {
+        const esIngreso = m.tipo === 'ingreso' || m.tipo === 'Ingreso';
+        tituloHTML = `${esIngreso ? '⬆️' : '⬇️'} Detalle del movimiento`;
+        cuerpoHTML = _bancosRenderCamposDetalle(m);
+    }
+
+    const modalHTML = `
+        <div data-modal="detalle-movimiento" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:7000; display:flex; justify-content:center; align-items:center; padding:20px;">
+            <div style="background:white; border-radius:12px; width:100%; max-width:560px; max-height:85vh; display:flex; flex-direction:column; overflow:hidden;">
+                <div style="padding:18px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                    <h3 style="margin:0; color:#0f172a; font-size:16px;">${tituloHTML}</h3>
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-movimiento&quot;]')?.remove()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; line-height:1;">✕</button>
+                </div>
+                <div style="padding:18px 20px; overflow:auto;">
+                    ${cuerpoHTML}
+                    <details style="margin-top:16px;">
+                        <summary style="cursor:pointer; font-size:12px; font-weight:700; color:#7c3aed;">Ver JSON crudo completo</summary>
+                        <pre style="margin:8px 0 0; padding:10px; background:#0f172a; color:#e2e8f0; border-radius:8px; font-size:11px; overflow:auto; max-height:220px;">${JSON.stringify(m, null, 2).replace(/</g, '&lt;')}</pre>
+                    </details>
+                </div>
+                <div style="padding:14px 20px; border-top:1px solid #e2e8f0; text-align:right;">
+                    <button onclick="document.querySelector('[data-modal=&quot;detalle-movimiento&quot;]')?.remove()" style="padding:10px 18px; background:#f1f5f9; color:#475569; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Cerrar</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
 function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (cuentaSeleccionada !== null) { window._filtroCuentaLiquidez = cuentaSeleccionada; }
     
@@ -1431,6 +1579,10 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     }
 
     const movimientosParaVista = _bancosAgruparTransferenciasConciliacion(movimientosFiltrados);
+    // 🔎 Se guarda la lista tal como se está pintando para que el modal de
+    // detalle (abrirDetalleMovimiento) pueda ubicar, por índice, exactamente
+    // la fila en la que se dio clic -- sin volver a recalcular filtros/orden.
+    window._bancosMovimientosVistaActual = movimientosParaVista;
 
     let rightPanelHTML = `
         <div style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
@@ -1467,7 +1619,7 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     if (movimientosParaVista.length === 0) {
         rightPanelHTML += `<tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No hay movimientos en este periodo o cuenta.</td></tr>`;
     } else {
-        movimientosParaVista.forEach(m => {
+        movimientosParaVista.forEach((m, idx) => {
             const esIngreso = m.tipo === "ingreso" || m.tipo === "Ingreso";
             const esTransf = m.tipo === "transferencia";
             const color = esTransf ? "#4f46e5" : (esIngreso ? "#16a34a" : "#dc2626");
@@ -1487,13 +1639,13 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
             if (conceptoLimpio.length > 65) conceptoLimpio = conceptoLimpio.substring(0, 65) + '...';
 
             rightPanelHTML += `
-                <tr style="border-bottom:1px solid #f1f5f9;">
+                <tr onclick="abrirDetalleMovimiento(${idx})" style="border-bottom:1px solid #f1f5f9; cursor:pointer; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''" title="Ver todo el detalle de este movimiento">
                     <td style="padding:10px; white-space:nowrap;">${m.fecha ? window.formatearFechaCortaMX(m.fecha) : ""}</td>
                     <td style="padding:10px;" title="${m.concepto}">${conceptoLimpio}${detalleGrupo}</td>
                     <td style="padding:10px; color:#64748b;">${cuentaLabel}</td>
                     <td style="padding:10px; text-align:right; font-weight:bold; color:${color}; white-space:nowrap;">
                         ${icon} ${dinero(m.monto)}
-                        ${m.esTransferenciaInterna ? `<br><button onclick="abrirEditarTransferencia('${m.idOperacionTransferencia}')" style="margin-top:4px; padding:2px 8px; background:none; border:1px solid #c7d2fe; color:#4f46e5; border-radius:5px; cursor:pointer; font-size:11px; font-weight:normal;">✏️ Corregir</button>` : ''}
+                        ${m.esTransferenciaInterna ? `<br><button onclick="event.stopPropagation(); abrirEditarTransferencia('${m.idOperacionTransferencia}')" style="margin-top:4px; padding:2px 8px; background:none; border:1px solid #c7d2fe; color:#4f46e5; border-radius:5px; cursor:pointer; font-size:11px; font-weight:normal;">✏️ Corregir</button>` : ''}
                     </td>
                 </tr>`;
         });
