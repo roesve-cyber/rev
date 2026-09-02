@@ -271,7 +271,6 @@ table.planes td.abono { font-weight: 800; color: var(--brand); }
       <span id="appbarVendedor">—</span>
     </div>
     <div style="display:flex; gap:8px;">
-      <button id="btnModoAvanzado" class="btn-icono oculto" style="width:auto; padding:0 10px; font-size:12px; font-weight:800;" onclick="toggleModoAvanzado()" title="Modo Avanzado (planes personalizados)">⚙️</button>
       <button class="btn-icono" onclick="cerrarSesionApp()" title="Cerrar sesión">⎋</button>
     </div>
   </div>
@@ -279,11 +278,6 @@ table.planes td.abono { font-weight: 800; color: var(--brand); }
   <div id="app">
 
     <div id="estadoDatos" class="estado-datos espera">Cargando precios y tasas de crédito…</div>
-
-    <div id="bannerAvanzado" class="oculto" style="background:#fffbeb; border:1px solid #f59e0b; color:#92400e; border-radius:12px; padding:10px 12px; font-size:12.5px; font-weight:700; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-      ⚙️ Modo Avanzado activo — puedes agregar planes de crédito personalizados y capturar costo/margen en productos libres.
-      <button onclick="toggleModoAvanzado()" style="margin-left:auto; background:none; border:none; color:#92400e; text-decoration:underline; font-weight:800; font-size:12.5px;">Salir</button>
-    </div>
 
     <!-- Buscar / agregar productos -->
     <div class="tarjeta">
@@ -300,7 +294,7 @@ table.planes td.abono { font-weight: 800; color: var(--brand); }
           <label class="campo-label">NOMBRE</label>
           <input type="text" id="libreNombre" enterkeyhint="next" placeholder="Ej: Recámara a pedido">
         </div>
-        <div id="libreCostoMargenWrap" class="oculto" style="display:flex; gap:8px; margin-bottom:8px;">
+        <div id="libreCostoMargenWrap" style="display:flex; gap:8px; margin-bottom:8px;">
           <div class="campo" style="flex:1;">
             <label class="campo-label">COSTO DE ADQUISICIÓN ($)</label>
             <input type="number" id="libreCosto" inputmode="decimal" enterkeyhint="next" min="0" step="0.01" value="0" oninput="sugerirPrecioLibre()">
@@ -310,7 +304,7 @@ table.planes td.abono { font-weight: 800; color: var(--brand); }
             <input type="number" id="libreMargen" inputmode="decimal" enterkeyhint="next" min="0" max="99" value="30" oninput="sugerirPrecioLibre()">
           </div>
         </div>
-        <div id="libreImagenWrap" class="oculto" style="margin-bottom:8px;">
+        <div id="libreImagenWrap" style="margin-bottom:8px;">
           <label class="campo-label">FOTO DEL PRODUCTO (OPCIONAL)</label>
           <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
             <div id="libreImagenPreviewWrap" style="width:48px; height:48px; border:1.5px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:white; flex-shrink:0;">
@@ -324,7 +318,7 @@ table.planes td.abono { font-weight: 800; color: var(--brand); }
         </div>
         <div style="display:flex; gap:8px; align-items:end;">
           <div class="campo" style="flex:1;">
-            <label class="campo-label" id="librePrecioLabel">PRECIO ($)</label>
+            <label class="campo-label" id="librePrecioLabel">PRECIO FINAL (editable)</label>
             <input type="number" id="librePrecio" inputmode="decimal" enterkeyhint="done" min="0" step="0.01" placeholder="0.00">
           </div>
           <button class="btn-secundario" onclick="agregarLibreAlCarrito()" style="height:44px;">➕ Agregar</button>
@@ -374,7 +368,7 @@ table.planes td.abono { font-weight: 800; color: var(--brand); }
         <button data-per="mensual" onclick="setPeriodicidad('mensual')">Mensual</button>
       </div>
 
-      <div id="panelPlanesCustom" class="oculto" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:10px; padding:10px; margin-bottom:12px;">
+      <div id="panelPlanesCustom" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:10px; padding:10px; margin-bottom:12px;">
         <label class="campo-label" style="color:#92400e;">➕ AGREGAR PLAN PERSONALIZADO</label>
         <div style="display:flex; gap:8px; margin-top:6px; align-items:end;">
           <div class="campo" style="flex:1;">
@@ -448,7 +442,7 @@ let ultimaCarga = null;
 let carrito = [];                // [{ id|null, nombre, precio, cantidad, esLibre, costo?, margen? }]
 let periodicidadActual = 'semanal';
 let ultimaCotizacionGenerada = null;
-let modoAvanzado = false;        // Modo Avanzado: solo admin (igual que abrirCotizadorAuditoria en escritorio)
+const modoAvanzado = true;       // Esta app ya no tiene modo "normal": siempre opera en Avanzado (herramienta de uso exclusivo de Roberto).
 let planesCustom = [];           // [{ meses, tasa }] — planes de crédito personalizados del Modo Avanzado
 let libreImagenBase64 = null;    // foto del producto libre (Modo Avanzado), pendiente de agregar al carrito
 let engancheEditadoManual = false; // true en cuanto el vendedor toca a mano el campo de enganche
@@ -622,9 +616,6 @@ async function cargarPerfilYEntrar(user) {
   sesion = { uid: user.uid, nombre: perfil.nombre || user.email, rol: perfil.rol || 'vendedor' };
   document.getElementById('appbarVendedor').textContent = sesion.nombre + (sesion.rol ? ' · ' + sesion.rol : '');
   document.getElementById('appbarVendedor2').textContent = sesion.nombre;
-  // El Modo Avanzado (planes de crédito personalizados, costo/margen) es solo
-  // para admin -- mismo criterio que abrirCotizadorAuditoria() en escritorio.
-  if (sesion.rol === 'admin') document.getElementById('btnModoAvanzado').classList.remove('oculto');
   document.getElementById('pantallaLogin').classList.add('oculto');
   document.getElementById('pantallaApp').classList.remove('oculto');
   await cargarDatosVivos();
@@ -839,17 +830,6 @@ function quitarImagenLibre() {
 // fórmula/progresividad que calcularCredito(), y se combinan con la tabla
 // estándar (misma lógica que _actualizarPlanesCot() en escritorio).
 // ============================================================================
-function toggleModoAvanzado() {
-  modoAvanzado = !modoAvanzado;
-  document.getElementById('bannerAvanzado').classList.toggle('oculto', !modoAvanzado);
-  document.getElementById('panelPlanesCustom').classList.toggle('oculto', !modoAvanzado);
-  document.getElementById('libreCostoMargenWrap').classList.toggle('oculto', !modoAvanzado);
-  document.getElementById('libreImagenWrap').classList.toggle('oculto', !modoAvanzado);
-  document.getElementById('librePrecioLabel').textContent = modoAvanzado ? 'PRECIO FINAL (editable)' : 'PRECIO ($)';
-  document.getElementById('appbarTitulo').textContent = modoAvanzado ? '⚙️ Cotización (Avanzada)' : '📄 Nueva Cotización';
-  if (!modoAvanzado) { planesCustom = []; renderPlanesCustom(); quitarImagenLibre(); }
-  recalcularTodo();
-}
 function agregarPlanCustom() {
   const meses = parseInt(document.getElementById('customPlazoInput').value, 10);
   const tasa = parseFloat(document.getElementById('customTasaInput').value);
