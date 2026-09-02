@@ -1,5 +1,31 @@
 // ===== COTIZACIONES (DUAL: VENTAS Y AUDITORÍA MULTI-PLAZO) =====
 
+// 🎟️ Cupón de pronto pago mostrado en la cotización (motiva al cliente a
+// liquidar dentro de su plazo pactado). Reutiliza la MISMA fuente de verdad
+// que usa cxc.js al emitir el cupón de verdad (window._cxcPorcentajeCuponPorPlazo,
+// que a su vez lee la tasa base por plazo o el % fijo de Configuración >
+// Cupones de Saldo a Favor) -- así lo que se le promete al cliente en la
+// cotización SIEMPRE coincide con lo que recibirá si liquida a tiempo. El
+// plan de 1 mes no genera cupón (ya es el escalón más corto -- ver la misma
+// excepción en cxc.js y ventas.js).
+function _cotPorcentajeCuponPlan(mesesPlan) {
+    if (typeof window._cxcPorcentajeCuponPorPlazo === 'function') return window._cxcPorcentajeCuponPorPlazo(mesesPlan);
+    const config = StorageService.get('configCreditoGlobal', {});
+    return Number(config?.porcentajeCuponProntoPago ?? 3);
+}
+function _cotMontoCuponPlan(plan) {
+    if (!plan || Number(plan.meses) === 1) return 0;
+    const pct = _cotPorcentajeCuponPlan(plan.meses);
+    let monto = Number(plan.total || 0) * Math.max(0, pct) / 100;
+    const config = StorageService.get('configCreditoGlobal', {});
+    const multiplo = Number(config?.redondeoCuponMultiplo || 0);
+    if (multiplo > 1) {
+        const factor = (config?.redondeoCuponDireccion === 'arriba') ? Math.ceil : Math.floor;
+        monto = factor(monto / multiplo) * multiplo;
+    }
+    return Math.max(0, monto);
+}
+
 // Función principal que renderiza la vista de cotizaciones
 function renderCotizaciones() {
     const cont = document.getElementById('cotizaciones');
@@ -627,19 +653,33 @@ if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
         <th style="padding:8px;text-align:center;">Periodicidad</th>
         <th style="padding:8px;text-align:right;">Pago / Período</th>
         <th style="padding:8px;text-align:right;">Total a Pagar</th>
+        <th style="padding:8px;text-align:right;color:#7e22ce;">🎟️ Cupón si paga a tiempo</th>
       </tr></thead>
       <tbody>`;
       
     planes.forEach(plan => {
         const customBadge = plan.custom ? ' <br><span style="background:#f59e0b;color:white;padding:2px 6px;border-radius:10px;font-size:9px;">Personalizado</span>' : '';
+        const montoCupon = _cotMontoCuponPlan(plan);
+        const celdaCupon = montoCupon > 0
+            ? `<span style="font-weight:bold;color:#7e22ce;">+${dinero(montoCupon)}</span>`
+            : '<span style="color:#9ca3af;">--</span>';
         tablaHtml += `<tr style="${plan.custom ? 'background:#fffbeb;' : ''}">
           <td style="padding:7px;text-align:center;">${plan.meses} meses (${plan.pagos} pagos)${customBadge}</td>
           <td style="padding:7px;text-align:center;">${labelMap[periodicidadSel]}</td>
           <td style="padding:7px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(plan.abono)}</td>
           <td style="padding:7px;text-align:right;">${dinero(plan.total)}</td>
+          <td style="padding:7px;text-align:right;">${celdaCupon}</td>
         </tr>`;
     });
     tablaHtml += '</tbody></table>';
+
+    const mejorCupon = Math.max(0, ...planes.map(p => _cotMontoCuponPlan(p)));
+    if (mejorCupon > 0.01) {
+        tablaHtml += `<div style="margin-top:10px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;padding:10px 12px;text-align:center;color:#7e22ce;font-size:12.5px;">
+            🎟️ <b>Si liquida su crédito dentro del plazo pactado</b>, paga el total nominal y recibe hasta <b>${dinero(mejorCupon)}</b> en cupón de saldo a favor para su próxima compra.
+        </div>`;
+    }
+
     container.innerHTML = tablaHtml;
 
     const periodicidadCombo = document.getElementById('cotPeriodicidad');
@@ -1286,6 +1326,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
 
         let planeRows = '';
         let hasCustom = false;
+        let mejorCuponTicket = 0;
         
         if (c.saldoFinanciar > 0) {
           const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
@@ -1330,7 +1371,10 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
               <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
               <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
               <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${_cotMontoCuponPlan(plan) > 0 ? '+' + fmtMXN(_cotMontoCuponPlan(plan)) : '--'}</td>
             </tr>`).join('');
+
+          mejorCuponTicket = Math.max(0, ...planes.map(p => _cotMontoCuponPlan(p)));
         }
 
         cotizacionHTML = `
@@ -1355,6 +1399,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
             .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
             .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
             .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
+            .cupon-box { font-size: 9px; background: #faf5ff; border: 1px dashed #d8b4fe; border-radius: 6px; padding: 6px 8px; margin: 8px 0 2px; color: #7e22ce; text-align: center; font-weight: bold; line-height: 1.4; }
             @media print { .controles { display: none !important; } body { background: white; } #ticket-contenido { width: 100%; padding: 2mm; } }
           </style>
         </head>
@@ -1389,11 +1434,12 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
               <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
               <table>
                 <thead>
-                  <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th></tr>
+                  <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th><th style="text-align:right; font-size:8px; color:#7e22ce;">CUPÓN</th></tr>
                 </thead>
                 <tbody>${planeRows}</tbody>
               </table>
               ${hasCustom ? '<div style="font-size:8px; margin-top:4px;">* Plan personalizado</div>' : ''}
+              ${mejorCuponTicket > 0.01 ? `<div class="cupon-box">🎟️ ¡Si liquida dentro de su plazo, recibe hasta ${fmtMXN(mejorCuponTicket)} en cupón de saldo a favor!</div>` : ''}
             ` : ''}
 
             <div class="footer">
