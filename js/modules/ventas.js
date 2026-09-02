@@ -1601,15 +1601,16 @@ function actualizarInterfazPago() {
 }
 
 // 🎟️ Ventana emergente al elegir plazo: le recuerda al vendedor la regla
-// vigente de cupón por pago anticipado. Regla FLAT (reemplazó la escalera
-// mes-a-mes en agosto 2026, decisión de Roberto tras su análisis de margen
-// con el simulador de tasas): si el cliente liquida DENTRO de su plazo
-// pactado, paga el saldo nominal completo (sin descuento) y recibe un cupón
-// de saldo a favor por un % fijo del total financiado -- ya no importa en
-// qué mes exacto liquide. El % se lee de configCreditoGlobal
-// (porcentajeCuponProntoPago, editable en Configuración > Cupones de Saldo
-// a Favor), para que este aviso siempre coincida con lo que cxc.js aplicará
-// de verdad al cobrar.
+// vigente de cupón por pago anticipado. Reemplazó la escalera mes-a-mes en
+// agosto 2026 (decisión de Roberto tras su análisis de margen con el
+// simulador de tasas): si el cliente liquida DENTRO de su plazo pactado,
+// paga el saldo nominal completo (sin descuento) y recibe un cupón de saldo
+// a favor -- ya no importa en qué mes exacto liquide. Desde sep 2026 el % ya
+// no es necesariamente fijo: se calcula con _cxcPorcentajeCuponPorPlazo(cxc.js),
+// que usa tasa - tasa base del plazo si esa tasa base está configurada
+// (Configuración > Regla Global de Crédito), y si no cae al % fijo de
+// Configuración > Cupones de Saldo a Favor -- para que este aviso siempre
+// coincida con lo que cxc.js aplicará de verdad al cobrar.
 function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
     const planElegido = planes[index];
     if (!planElegido) return;
@@ -1642,7 +1643,9 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
         return;
     }
 
-    const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    const porcentajeCupon = (typeof window._cxcPorcentajeCuponPorPlazo === 'function')
+        ? window._cxcPorcentajeCuponPorPlazo(planElegido.meses)
+        : Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
     let montoCupon = planElegido.total * Math.max(0, porcentajeCupon) / 100;
     const _configRedondeo = StorageService.get('configCreditoGlobal', {});
     const _multiploRedondeo = Number(_configRedondeo?.redondeoCuponMultiplo || 0);

@@ -32,20 +32,32 @@ function _dibujarPlazosGlobales(plazos) {
     // Ordenamos de menor a mayor plazo
     plazos.sort((a,b) => a.meses - b.meses);
 
-    cont.innerHTML = plazos.map((p, i) => `
+    cont.innerHTML = plazos.map((p, i) => {
+        const tieneBase = p.tasaBaseCupon !== undefined && p.tasaBaseCupon !== null && p.tasaBaseCupon !== '';
+        const cuponDif = tieneBase ? Math.max(0, Number(p.tasa || 0) - Number(p.tasaBaseCupon || 0)) : null;
+        const etiquetaCupon = tieneBase
+            ? ` &middot; cupón: ${p.tasa}-${p.tasaBaseCupon}=${cuponDif}%`
+            : '';
+        return `
         <div style="background:#dbeafe; color:#1e40af; padding:8px 14px; border-radius:20px; font-size:13px; font-weight:bold; display:flex; align-items:center; gap:8px; border:1px solid #bfdbfe; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-            📅 ${p.meses} meses al ${p.tasa}%
+            📅 ${p.meses} meses al ${p.tasa}%${etiquetaCupon}
             <button type="button" onclick="eliminarPlazoGlobal(${i})" style="background:none; border:none; color:#dc2626; cursor:pointer; font-size:15px; margin-left:4px; padding:0;">✕</button>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function agregarPlazoGlobal() {
     const meses = parseInt(document.getElementById('cfgMesesGlobal').value);
     const tasa = parseFloat(document.getElementById('cfgTasaGlobal').value);
+    const tasaBaseInput = document.getElementById('cfgTasaBaseGlobal').value;
+    const tasaBaseCupon = tasaBaseInput === '' ? null : parseFloat(tasaBaseInput);
 
     if (isNaN(meses) || meses <= 0 || isNaN(tasa) || tasa < 0) {
         return alert("⚠️ Ingresa un plazo en meses y una tasa válida.");
+    }
+    if (tasaBaseCupon !== null && (isNaN(tasaBaseCupon) || tasaBaseCupon < 0)) {
+        return alert("⚠️ La tasa base para cupón debe ser un número válido (o déjala vacía).");
     }
 
     let config = StorageService.get('configCreditoGlobal', { plazos: [] });
@@ -54,16 +66,18 @@ function agregarPlazoGlobal() {
     const existe = config.plazos.findIndex(p => p.meses === meses);
     if (existe !== -1) {
         config.plazos[existe].tasa = tasa; // Actualiza la tasa si ya existía el mes
+        config.plazos[existe].tasaBaseCupon = tasaBaseCupon; // null = usa el % fijo de cupón
     } else {
-        config.plazos.push({ meses, tasa });
+        config.plazos.push({ meses, tasa, tasaBaseCupon });
     }
 
     StorageService.set('configCreditoGlobal', config);
     
     document.getElementById('cfgMesesGlobal').value = '';
     document.getElementById('cfgTasaGlobal').value = '';
+    document.getElementById('cfgTasaBaseGlobal').value = '';
     renderConfiguracion();
-    alert("✅ Regla global actualizada. Aplicará inmediatamente al carrito y catálogo.");
+    alert("✅ Regla global actualizada. Aplicará inmediatamente al carrito, catálogo y cupones de pronto pago.");
 }
 
 function eliminarPlazoGlobal(index) {
@@ -75,13 +89,17 @@ function eliminarPlazoGlobal(index) {
 }
 
 // 🎟️ % del TOTAL FINANCIADO que se emite como cupón cuando un cliente
-// liquida dentro de su plazo pactado (regla flat, decisión de Roberto tras
-// su análisis de margen con el simulador de tasas -- reemplazó la escalera
-// mes-a-mes anterior). Vive en configCreditoGlobal (mismo lugar que tasas/
-// plazos) para no crear una tabla nueva solo para un número. Lo lee cxc.js
-// dentro de _cxcEvaluarPoliticaPagoAnticipado (config key:
-// porcentajeCuponProntoPago, default 3 si nunca se ha tocado).
-// El redondeo (redondeoCuponMultiplo/redondeoCuponDireccion) lo aplica
+// liquida dentro de su plazo pactado. Desde sep 2026 (decisión de Roberto)
+// cada plazo puede tener su propia "tasa base para cupón" (campo
+// tasaBaseCupon en config.plazos, editado arriba en Regla Global de
+// Crédito); si la tiene, el % de cupón de ESE plazo es tasa - tasaBaseCupon
+// (así los plazos con tasa más alta pueden dar más cupón) y lo calcula
+// _cxcPorcentajeCuponPorPlazo(mesesPlan) en cxc.js. El % FIJO configurado
+// aquí (porcentajeCuponProntoPago) sigue existiendo como valor por defecto
+// para cualquier plazo que NO tenga tasaBaseCupon definida -- así nada se
+// rompe si se agrega un plazo nuevo sin configurar su tasa base. El mes 1
+// (contado) nunca genera cupón, eso no cambia. El redondeo
+// (redondeoCuponMultiplo/redondeoCuponDireccion) lo aplica
 // _cxcRedondearMontoCupon en cxc.js justo después de calcular el %.
 function renderConfigCupon() {
     const config = StorageService.get('configCreditoGlobal', {});
@@ -89,7 +107,7 @@ function renderConfigCupon() {
     const input = document.getElementById('cfgPorcentajeCupon');
     if (input) input.value = porcentaje;
     const actual = document.getElementById('cfgPorcentajeCuponActual');
-    if (actual) actual.textContent = `Valor actual: ${porcentaje}% del total financiado se emite como cupón al liquidar dentro del plazo pactado.`;
+    if (actual) actual.textContent = `Valor actual: ${porcentaje}% por defecto (solo para plazos SIN tasa base propia). Los plazos con tasa base definida arriba usan tasa - tasa base.`;
 
     const multiplo = config.redondeoCuponMultiplo || '';
     const direccion = config.redondeoCuponDireccion || 'abajo';

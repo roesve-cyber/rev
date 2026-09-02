@@ -16,6 +16,29 @@
 // califiquen.
 const CUPONES_FECHA_INICIO = "2026-08-31T00:00:00.000Z";
 
+// 🎟️ % de cupón de pronto pago para UN plazo específico (sep 2026, decisión
+// de Roberto). Antes el % era flat -- igual para cualquier plazo -- lo cual
+// dejaba dinero en la mesa en los plazos altos, que cobran una tasa mayor
+// (ahora 3%/3.5% vs el 2%/2.5% de antes). Ahora, si el plazo tiene
+// "tasaBaseCupon" configurada (Configuración > Regla Global de Crédito), el
+// cupón de ESE plazo es tasa - tasaBaseCupon (nunca negativo) -- así los
+// plazos con tasa más alta generan más cupón. Si el plazo no está en la
+// escalera (ej. plazo especial de producto) o no tiene tasaBaseCupon
+// definida, se cae al % fijo de siempre (porcentajeCuponProntoPago) para no
+// romper nada. Se lee EN VIVO de configCreditoGlobal, igual que el % fijo
+// siempre se leyó -- un cambio en Configuración aplica de inmediato a las
+// cuentas abiertas que aún no liquidan.
+function _cxcPorcentajeCuponPorPlazo(mesesPlan) {
+    const config = StorageService.get('configCreditoGlobal', {});
+    const plazo = (config.plazos || []).find(p => Number(p.meses) === Number(mesesPlan));
+    const tieneTasaBase = plazo && plazo.tasaBaseCupon !== undefined && plazo.tasaBaseCupon !== null && plazo.tasaBaseCupon !== '';
+    if (tieneTasaBase) {
+        return Math.max(0, Number(plazo.tasa || 0) - Number(plazo.tasaBaseCupon || 0));
+    }
+    return Number(config.porcentajeCuponProntoPago ?? 3);
+}
+window._cxcPorcentajeCuponPorPlazo = _cxcPorcentajeCuponPorPlazo;
+
 // 🚦 Estado de plazo/cupón de una cuenta -- calculo compartido para "Mi
 // cartera del día", el indicador en la ficha del cliente, y la campanita.
 // Un solo lugar para esta cuenta: días restantes, semáforo, y cuánto cupón
@@ -42,7 +65,7 @@ function _cxcEstadoPlazoCuenta(cuenta) {
     }
 
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
-    const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    const porcentajeCupon = _cxcPorcentajeCuponPorPlazo(mesesPlan);
     // 🛡️ Misma regla que aplica cxc.js al emitir de verdad (_procesarAbonoAvanzadoAsync):
     // solo ventas hechas a partir de CUPONES_FECHA_INICIO generan cupón. Sin
     // este candado, todas las herramientas que leen este helper (Mi Cartera
@@ -560,12 +583,15 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     // -- decisión de Roberto, basada en su análisis de margen con el
     // simulador de tasas): si el cliente liquida DENTRO de su plazo pactado,
     // paga el saldo nominal completo -- SIN descuento en el monto a cobrar
-    // hoy -- y recibe un cupón fijo (% configurable en Configuración >
-    // Cupones de Saldo a Favor, default 3%) sobre el TOTAL FINANCIADO del
-    // plan (cuenta.plan.total, con intereses). Ya no importa en que mes
-    // exacto liquide dentro de su plazo -- siempre el mismo %. Si ya pasó su
-    // plazo pactado, no hay cupón (ver _cxcDetectarSaltoPlazo, mecanismo
-    // aparte para migrar el plazo por atraso).
+    // hoy -- y recibe un cupón sobre el TOTAL FINANCIADO del plan
+    // (cuenta.plan.total, con intereses). Ya no importa en que mes exacto
+    // liquide dentro de su plazo -- siempre el mismo %. El % en sí lo calcula
+    // _cxcPorcentajeCuponPorPlazo(mesesPlanOriginal): si el plazo tiene tasa
+    // base para cupón definida (Configuración > Regla Global de Crédito) es
+    // tasa - tasa base; si no, cae al % fijo de Configuración > Cupones de
+    // Saldo a Favor (default 3%). Si ya pasó su plazo pactado, no hay cupón
+    // (ver _cxcDetectarSaltoPlazo, mecanismo aparte para migrar el plazo por
+    // atraso).
     const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
     const diasPlazoOriginal = mesesPlanOriginal > 0 ? mesesPlanOriginal * 30.44 : Infinity;
     const aunEnPlazo = diasDesdeVenta < diasPlazoOriginal;
@@ -604,7 +630,7 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     }
 
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
-    const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    const porcentajeCupon = _cxcPorcentajeCuponPorPlazo(mesesPlanOriginal);
     const beneficio = _cxcRedondearMontoCupon(totalFinanciado * Math.max(0, porcentajeCupon) / 100);
 
     return {
@@ -816,14 +842,16 @@ window._cxcRechazarSaltoPlazo = function(idPendiente, motivo = '') {
 
 function renderSaltosPlazoPendientes() {
     const pendientes = StorageService.get("saltosPlazoPendientes", []).filter(p => p.estado === 'Pendiente');
-    const cont = document.getElementById('vistaPrincipal') || document.body;
+    const cont = document.getElementById('contenidoReporte') || document.getElementById('reportes');
+    if (!cont) return;
     cont.innerHTML = `
         <div style="padding:20px;max-width:900px;margin:0 auto;">
+            <button onclick="renderARC_v3()" style="margin-bottom:12px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">⬅️ Volver</button>
             <h2 style="margin:0 0 16px;">📆 Saltos de plazo pendientes</h2>
             <button onclick="_cxcEscanearSaltosPlazoPendientes(); renderSaltosPlazoPendientes();" style="margin-bottom:16px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;">🔍 Buscar nuevos</button>
             ${pendientes.length === 0 ? '<p style="color:#64748b;">No hay saltos de plazo pendientes de revisión.</p>' : pendientes.map(p => `
                 <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:12px;">
-                    <div style="font-weight:bold;margin-bottom:6px;">Folio ${p.folio} — ${p.clienteNombre}</div>
+                    <div style="font-weight:bold;margin-bottom:6px;cursor:pointer;color:#1d4ed8;" onclick="_cxcVerHistorialVentaSalto('${p.folio}')">Folio ${p.folio} — ${p.clienteNombre} <span style="font-size:11px;font-weight:normal;">(ver historial de venta)</span></div>
                     <div style="font-size:13px;color:#64748b;margin-bottom:10px;">De ${p.mesesActual} a ${p.mesesNuevo} meses · Total actual ${_cxcDinero(p.totalActual)} → propuesto ${_cxcDinero(p.totalNuevo)} (+${_cxcDinero(p.diferencia)})</div>
                     <button onclick="_cxcAplicarSaltoPlazo('${p.id}')" style="padding:8px 14px;border-radius:8px;border:none;background:#166534;color:white;font-weight:bold;cursor:pointer;margin-right:8px;">✅ Confirmar</button>
                     <button onclick="_cxcRechazarSaltoPlazo('${p.id}')" style="padding:8px 14px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;">✖️ Rechazar</button>
@@ -833,6 +861,49 @@ function renderSaltosPlazoPendientes() {
 }
 window.renderSaltosPlazoPendientes = renderSaltosPlazoPendientes;
 window._cxcEscanearSaltosPlazoPendientes = _cxcEscanearSaltosPlazoPendientes;
+
+// 🔍 Historial de venta al hacer clic en el nombre del cliente -- para
+// tomar mejor decisión de migración (salto de plazo): qué compró, cuánto
+// fue la venta original, y cuánto lleva abonado hasta hoy.
+window._cxcVerHistorialVentaSalto = function(folio) {
+    const cuenta = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    if (!cuenta) return alert("No se encontró la cuenta de ese folio.");
+
+    const articulos = Array.isArray(cuenta.articulos) ? cuenta.articulos : [];
+    const articulosHTML = articulos.length
+        ? articulos.map(a => `<tr><td style="padding:6px 4px;font-size:12px;">${a.nombre || a.productoNombre || 'Producto'}</td><td style="padding:6px 4px;font-size:12px;text-align:center;">x${Number(a.cantidad || 1)}</td><td style="padding:6px 4px;font-size:12px;text-align:right;font-weight:bold;">${_cxcDinero(Number(a.precioContado || a.precio || 0))}</td></tr>`).join('')
+        : '<tr><td colspan="3" style="padding:8px 4px;font-size:12px;color:#94a3b8;">Sin artículos registrados.</td></tr>';
+
+    const totalAbonado = (cuenta.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado).reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const fechaVenta = (typeof _cxcFechaVentaDate === 'function') ? _cxcFechaVentaDate(cuenta) : new Date(cuenta.fechaVenta);
+
+    document.getElementById('modalHistorialVentaSalto')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'modalHistorialVentaSalto';
+    modal.style = 'position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div style="background:white;border-radius:14px;max-width:480px;width:100%;max-height:85vh;overflow-y:auto;">
+            <div style="background:#0f172a;color:white;padding:16px 20px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;align-items:start;">
+                <div>
+                    <div style="font-size:15px;font-weight:900;">${_cxcNombreClienteVigente(cuenta)}</div>
+                    <div style="font-size:11px;opacity:.85;">${folio} · Comprado el ${fechaVenta.toLocaleDateString('es-MX')}</div>
+                </div>
+                <button onclick="document.getElementById('modalHistorialVentaSalto').remove()" style="background:rgba(255,255,255,0.2);border:none;color:white;width:26px;height:26px;border-radius:50%;cursor:pointer;">✕</button>
+            </div>
+            <div style="padding:18px 20px;">
+                <div style="font-size:10px;color:#64748b;font-weight:bold;margin-bottom:6px;">ARTÍCULOS COMPRADOS</div>
+                <table style="width:100%;border-collapse:collapse;margin-bottom:14px;">${articulosHTML}</table>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div style="background:#f8fafc;padding:10px;border-radius:8px;"><div style="font-size:10px;color:#64748b;font-weight:bold;">ENGANCHE</div><div style="font-size:14px;font-weight:900;">${_cxcDinero(enganche)}</div></div>
+                    <div style="background:#f8fafc;padding:10px;border-radius:8px;"><div style="font-size:10px;color:#64748b;font-weight:bold;">TOTAL ABONADO</div><div style="font-size:14px;font-weight:900;">${_cxcDinero(totalAbonado)}</div></div>
+                    <div style="background:#f8fafc;padding:10px;border-radius:8px;grid-column:1/-1;"><div style="font-size:10px;color:#64748b;font-weight:bold;">PLAN ORIGINAL</div><div style="font-size:14px;font-weight:900;">${cuenta.plan?.meses || '-'} meses · ${_cxcDinero(cuenta.plan?.total || 0)}</div></div>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+};
 
 // 🚦 "Mi cartera del día" -- lista de cuentas activas ordenada por urgencia
 // (menos días primero), semaforizada. Para que el vendedor la revise al
@@ -847,16 +918,18 @@ function renderCarteraDelDia() {
     const coloresPorSemaforo = { rojo: '#dc2626', amarillo: '#d97706', verde: '#166534' };
     const fondosPorSemaforo = { rojo: '#fef2f2', amarillo: '#fffbeb', verde: '#f0fdf4' };
 
-    const cont = document.getElementById('vistaPrincipal') || document.body;
+    const cont = document.getElementById('mi-cartera-dia-contenido') || document.getElementById('mi-cartera-dia');
+    if (!cont) return;
     cont.innerHTML = `
         <div style="padding:20px;max-width:900px;margin:0 auto;">
+            <button onclick="navA('tienda'); mostrarProductos();" style="margin-bottom:12px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">⬅️ Volver</button>
             <h2 style="margin:0 0 4px;">🚦 Mi cartera del día</h2>
             <p style="font-size:13px;color:#64748b;margin:0 0 16px;">Cuentas activas ordenadas por urgencia -- 🔴 3 días o menos, 🟡 7 días o menos, 🟢 más tiempo. Solo se listan las que aún están dentro de su plazo pactado (elegibles para cupón).</p>
             ${filas.length === 0 ? '<p style="color:#64748b;">No hay cuentas activas dentro de su plazo en este momento.</p>' : filas.map(f => `
                 <div style="background:${fondosPorSemaforo[f.semaforo]};border:1px solid ${coloresPorSemaforo[f.semaforo]}33;border-left:4px solid ${coloresPorSemaforo[f.semaforo]};border-radius:10px;padding:14px;margin-bottom:10px;">
                     <div style="display:flex;justify-content:space-between;align-items:start;">
                         <div>
-                            <div style="font-weight:bold;">${f.semaforo === 'rojo' ? '🔴' : f.semaforo === 'amarillo' ? '🟡' : '🟢'} Folio ${f.folio} — ${f.clienteNombre}</div>
+                            <div style="font-weight:bold;cursor:pointer;" onclick="_cxcVerHistorialVentaSalto('${f.folio}')">${f.semaforo === 'rojo' ? '🔴' : f.semaforo === 'amarillo' ? '🟡' : '🟢'} Folio ${f.folio} — ${f.clienteNombre}</div>
                             <div style="font-size:12px;color:#64748b;margin-top:3px;">Plan ${f.mesesPlan} meses · Saldo ${_cxcDinero(f.saldoActual)}${f.mesesNuevoSiBrinca ? ` · Si no liquida, brinca a ${f.mesesNuevoSiBrinca} meses` : ''}</div>
                         </div>
                         <div style="text-align:right;">
@@ -869,6 +942,51 @@ function renderCarteraDelDia() {
         </div>`;
 }
 window.renderCarteraDelDia = renderCarteraDelDia;
+
+// 📋 Cupones Activos -- todos los cupones vigentes de toda la cartera, sin
+// necesidad de conocer al cliente/folio de antemano. Buscable por nombre.
+function renderCuponesActivos() {
+    const cupones = (typeof _cxcMarcarCuponesVencidos === 'function' ? _cxcMarcarCuponesVencidos() : StorageService.get('cuponesCliente', []))
+        .filter(c => c.estado === 'Activo' && Number(c.montoDisponible || 0) > 0.01)
+        .sort((a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento));
+
+    const cont = document.getElementById('cupones-activos-contenido') || document.getElementById('cupones-activos');
+    if (!cont) return;
+    cont.innerHTML = `
+        <div style="padding:20px;max-width:700px;margin:0 auto;">
+            <button onclick="navA('tienda'); mostrarProductos();" style="margin-bottom:12px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">⬅️ Volver</button>
+            <h2 style="margin:0 0 4px;">📋 Cupones Activos</h2>
+            <p style="font-size:13px;color:#64748b;margin:0 0 14px;">${cupones.length} cupón(es) vigente(s) sin canjear.</p>
+            <input type="text" id="buscarCuponInput" placeholder="Buscar por nombre de cliente..." oninput="_cxcFiltrarCuponesActivos()" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px;font-size:14px;box-sizing:border-box;">
+            <div id="listaCuponesActivos">${_cxcRenderListaCupones(cupones)}</div>
+        </div>`;
+    window._cxcTodosCuponesActivos = cupones;
+}
+
+function _cxcRenderListaCupones(cupones) {
+    if (!cupones.length) return '<p style="color:#64748b;">No hay cupones activos.</p>';
+    return cupones.map(c => `
+        <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:10px;padding:14px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:start;">
+                <div>
+                    <div style="font-weight:bold;">${c.clienteNombre}</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">${c.codigo} · Folio origen ${c.folioOrigen}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-weight:900;color:#7e22ce;">${_cxcDinero(c.montoDisponible)}</div>
+                    <div style="font-size:11px;color:#94a3b8;">vence ${new Date(c.fechaVencimiento).toLocaleDateString('es-MX')}</div>
+                </div>
+            </div>
+        </div>`).join('');
+}
+
+window._cxcFiltrarCuponesActivos = function() {
+    const q = (document.getElementById('buscarCuponInput')?.value || '').toLowerCase().trim();
+    const filtrados = (window._cxcTodosCuponesActivos || []).filter(c => (c.clienteNombre || '').toLowerCase().includes(q));
+    const cont = document.getElementById('listaCuponesActivos');
+    if (cont) cont.innerHTML = _cxcRenderListaCupones(filtrados);
+};
+window.renderCuponesActivos = renderCuponesActivos;
 
 function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     if (!politica) {

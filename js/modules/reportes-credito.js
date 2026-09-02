@@ -373,7 +373,7 @@ window.renderARC_v3 = function() {
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
                     <button onclick="renderConcentracion()" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🎯 Concentración</button>
                     <button onclick="renderVencimientoPlazo()" style="padding:10px 16px;background:#dc2626;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⏰ Vencimiento de Plazo</button>
-                    <button onclick="renderSaltosPlazoPendientes()" style="padding:10px 16px;background:#9333ea;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📆 Saltos de Plazo</button>
+                    <button onclick="navA('reportes'); renderSaltosPlazoPendientes();" style="padding:10px 16px;background:#9333ea;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📆 Saltos de Plazo</button>
                 </div>
             </div>
         </div>
@@ -1900,7 +1900,7 @@ window.abrirDetalleVencimientoPlazo = function(idx) {
     const historialHTML = historial.length
         ? historial.slice(0, 5).map(h => `
             <div style="padding:8px 0;border-bottom:1px solid #e2e8f0;">
-                <div style="font-size:11px;color:#94a3b8;">${(window.parseFechaMX ? window.parseFechaMX(h.fecha) : new Date(h.fecha)).toLocaleDateString('es-MX')} · ${h.usuario || 'Sistema'}</div>
+                <div style="font-size:11px;color:#94a3b8;">${new Date(h.fecha).toLocaleDateString('es-MX')} · ${h.usuario || 'Sistema'}</div>
                 <div style="font-size:12px;color:#0f172a;">${h.texto}</div>
             </div>`).join('')
         : `<div style="font-size:12px;color:#94a3b8;padding:6px 0;">Sin comentarios de cobranza registrados.</div>`;
