@@ -104,6 +104,8 @@
                 <button onclick="navA('estadoCuentaCliente')">📊 Estado de Cuenta Cliente</button>
                 <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
                 <button onclick="navA('reporte-abonos-enganches'); renderReporteAbonEnganches();">💵 Reporte de Abonos y Enganches</button>
+                <button onclick="navA('mi-cartera-dia'); if(typeof renderCarteraDelDia === 'function') renderCarteraDelDia();" style="color:#0f766e; font-weight:bold;">🚦 Mi Cartera del Día</button>
+                <button onclick="navA('cupones-activos'); if(typeof renderCuponesActivos === 'function') renderCuponesActivos();" style="color:#7e22ce; font-weight:bold;">📋 Cupones Activos</button>
                 <div class="submenu-grupo">Postventa</div>
                 <button onclick="navA('garantias')">🛡️ Garantías</button>
             </div>
@@ -409,6 +411,14 @@
     <div id="runway-liquidez-contenido"></div>
 </div>
 
+<div id="mi-cartera-dia" class="vista oculto">
+    <div id="mi-cartera-dia-contenido"></div>
+</div>
+
+<div id="cupones-activos" class="vista oculto">
+    <div id="cupones-activos-contenido"></div>
+</div>
+
     <!-- CATEGORÍAS -->
     <div id="configcategorias" class="vista oculto">
  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px;">
@@ -621,7 +631,7 @@
  <!-- Aqui se inyectan los plazos dinamicos -->
  </div>
  
- <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:15px; align-items:end; background:#eff6ff; padding:20px; border-radius:8px; border:1px solid #bfdbfe;">
+ <div style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:15px; align-items:end; background:#eff6ff; padding:20px; border-radius:8px; border:1px solid #bfdbfe;">
  <div class="campo">
  <label style="color:#1e40af;">AGREGAR PLAZO (MESES)</label>
  <input type="number" id="cfgMesesGlobal" min="1" placeholder="Ej: 12" style="border-color:#93c5fd;">
@@ -629,6 +639,10 @@
  <div class="campo">
  <label style="color:#1e40af;">TASA MENSUAL (%)</label>
  <input type="number" id="cfgTasaGlobal" min="0" step="0.1" placeholder="Ej: 3.5" style="border-color:#93c5fd;">
+ </div>
+ <div class="campo">
+ <label style="color:#7e22ce;" title="Si la defines, el cupón de pronto pago de este plazo será tasa - esta base, en vez del % fijo de abajo">TASA BASE PARA CUPÓN (%) -- opcional</label>
+ <input type="number" id="cfgTasaBaseGlobal" min="0" step="0.1" placeholder="Ej: 3 (vacío = usa el % fijo)" style="border-color:#d8b4fe;">
  </div>
  <button onclick="agregarPlazoGlobal()" style="padding:10px 20px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; height:40px;">Agregar Plazo</button>
  </div>
@@ -639,7 +653,7 @@
  <h3 style="color:#7e22ce; margin:0;">🎟️ Cupones de Saldo a Favor (Pronto Pago)</h3>
  <button onclick="renderConfigCupon()" style="background:none; border:none; cursor:pointer; font-size:18px;">Actualizar</button>
  </div>
- <p style="font-size:13px; color:#6b7280; margin-bottom:20px;">Si un cliente liquida su crédito DENTRO de su plazo pactado, paga el saldo nominal completo (sin descuento) y recibe este % del total financiado como cupón. Definido con base en el análisis de margen del simulador de tasas.</p>
+ <p style="font-size:13px; color:#6b7280; margin-bottom:20px;">Si un cliente liquida su crédito DENTRO de su plazo pactado, paga el saldo nominal completo (sin descuento) y recibe un % del total financiado como cupón. Si el plazo tiene "tasa base para cupón" (arriba, en Regla Global de Crédito), el % de cupón de ese plazo es tasa - tasa base. El % fijo de abajo solo aplica a los plazos que NO tengan tasa base definida. El mes 1 (contado) nunca genera cupón.</p>
 
  <div style="display:grid; grid-template-columns:1fr auto; gap:15px; align-items:end; background:#faf5ff; padding:20px; border-radius:8px; border:1px solid #e9d5ff;">
  <div class="campo">
@@ -1225,16 +1239,16 @@
 <script src="js/modules/inventario.js?v=24"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=8"></script>
-<script src="js/modules/ventas.js?v=3.9"></script>
+<script src="js/modules/ventas.js?v=4.0"></script>
 <script src="js/modules/clientes.js?v=5"></script>
-<script src="js/modules/cxc.js?v=51"></script>
+<script src="js/modules/cxc.js?v=54"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=54"></script>
 <script src="js/modules/bancos.js?v=21"></script>
 <script src="js/modules/reportes.js?v=22"></script>
 <script src="js/modules/reportes-plus.js?v=9"></script>
 <script src="js/modules/radar-compras.js?v=1"></script>
-<script src="js/modules/reportes-credito.js?v=10"></script>
+<script src="js/modules/reportes-credito.js?v=11"></script>
 <script src="js/modules/dashboard.js?v=6"></script>
 <script src="js/modules/cotizaciones.js?v=6"></script>
 <script src="js/modules/puntos.js"></script>
@@ -1257,11 +1271,11 @@
 <script src="js/modules/reportes-simulador-tasa.js?v=2"></script>
 <script src="js/modules/reportes-cubo-ventas.js?v=1"></script>
 <script src="js/modules/estadoCuentaBancaria.js?v=1"></script>
-<script src="js/modules/configuracion.js?v=4"></script>
+<script src="js/modules/configuracion.js?v=5"></script>
 <script src="js/modules/conciliacion.js"></script>
 <script src="js/modules/reportes-abonos-enganches.js"></script>
 <script src="js/services/calculadora-rapida.js?v=1"></script>
-<script src="js/core/navigation.js?v=10"></script>
+<script src="js/core/navigation.js?v=11"></script>
 <script src="js/init.js?v=8"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
