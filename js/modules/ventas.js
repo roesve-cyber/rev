@@ -1614,6 +1614,34 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
     const planElegido = planes[index];
     if (!planElegido) return;
 
+    document.getElementById('popupBeneficioPlan')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'popupBeneficioPlan';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+
+    // 🛡️ EXCEPCIÓN plan de 1 mes (decisión de Roberto): el plan de 1 mes ya
+    // es el escalón más corto -- no genera cupón. Si liquida a tiempo se le
+    // cobra el precio de contado real (capitalContado, sin el interés de ese
+    // plan) en vez de dar cupón. Mismo criterio que
+    // _cxcEvaluarPoliticaPagoAnticipado (tipo 'contado_1_mes') en cxc.js.
+    if (planElegido.meses === 1) {
+        if (capitalContado >= planElegido.total - 0.01) return; // sin diferencia real que mostrar
+        overlay.innerHTML = `
+            <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
+                <h3 style="margin:0 0 4px;font-size:16px;">💵 Precio de contado (plan de 1 mes)</h3>
+                <p style="margin:0 0 14px;font-size:12px;color:#64748b;">Plan elegido: 1 mes (${dinero(planElegido.total)} total con interés).</p>
+                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:16px;text-align:center;">
+                    <div style="font-size:11px;font-weight:800;color:#166534;text-transform:uppercase;">Si liquida dentro del mes</div>
+                    <div style="font-size:24px;font-weight:900;color:#14532d;margin:6px 0;">${dinero(capitalContado)}</div>
+                    <div style="font-size:11px;color:#166534;">Precio de contado real, sin el interés del plan -- no genera cupón</div>
+                </div>
+                <p style="margin:12px 0 0;font-size:11px;color:#64748b;">El plan de 1 mes ya es el más corto disponible, así que no da cupón -- en vez de eso, si liquida a tiempo se le respeta el precio de contado.</p>
+                <button onclick="document.getElementById('popupBeneficioPlan')?.remove()" style="width:100%;margin-top:14px;padding:10px;background:#0f172a;color:white;border:none;border-radius:10px;font-weight:bold;cursor:pointer;">Entendido</button>
+            </div>`;
+        document.body.appendChild(overlay);
+        return;
+    }
+
     const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
     let montoCupon = planElegido.total * Math.max(0, porcentajeCupon) / 100;
     const _configRedondeo = StorageService.get('configCreditoGlobal', {});
@@ -1624,10 +1652,6 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
     }
     if (montoCupon <= 0.01) return;
 
-    document.getElementById('popupBeneficioPlan')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'popupBeneficioPlan';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
     overlay.innerHTML = `
         <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
             <h3 style="margin:0 0 4px;font-size:16px;">🎟️ Cupón por pago anticipado</h3>

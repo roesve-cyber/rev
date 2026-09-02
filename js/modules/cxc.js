@@ -16,18 +16,55 @@
 // califiquen.
 const CUPONES_FECHA_INICIO = "2026-08-31T00:00:00.000Z";
 
-// 🎯 Redondeo del monto del cupón -- configurable en Configuración > Cupones
-// de Saldo a Favor. multiplo: a qué cifra redondear (5, 10, 50, 100...);
-// direccion: 'arriba' (nunca le des menos de lo calculado) o 'abajo' (nunca
-// le des más). multiplo <= 1 desactiva el redondeo (se deja el monto exacto).
-function _cxcRedondearMontoCupon(monto) {
-    const config = StorageService.get('configCreditoGlobal', {});
-    const multiplo = Number(config?.redondeoCuponMultiplo || 0);
-    const direccion = config?.redondeoCuponDireccion || 'abajo';
-    if (!multiplo || multiplo <= 1) return monto;
-    const factor = direccion === 'arriba' ? Math.ceil : Math.floor;
-    return factor(monto / multiplo) * multiplo;
+// 🚦 Estado de plazo/cupón de una cuenta -- calculo compartido para "Mi
+// cartera del día", el indicador en la ficha del cliente, y la campanita.
+// Un solo lugar para esta cuenta: días restantes, semáforo, y cuánto cupón
+// ganaría si liquida HOY (mismo % y redondeo que aplicará cxc al cobrar de
+// verdad, para que nunca se contradigan).
+function _cxcEstadoPlazoCuenta(cuenta) {
+    if (!cuenta) return null;
+    const estadoCta = (typeof window._calcularEstadoCuenta === 'function') ? window._calcularEstadoCuenta(cuenta.folio) : null;
+    const saldoActual = Number(estadoCta?.saldoTotal ?? cuenta.saldoActual ?? 0) - Number(estadoCta?.saldoMoratorios || 0);
+    const mesesPlan = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    if (saldoActual <= 0.01 || mesesPlan <= 0 || cuenta.estado === 'Cancelado' || cuenta.incobrable) return null;
+
+    const fechaVenta = (typeof _cxcFechaVentaDate === 'function') ? _cxcFechaVentaDate(cuenta) : new Date(cuenta.fechaVenta);
+    const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVenta) / 86400000));
+    const diasPlazo = mesesPlan * 30.44;
+    const diasRestantes = Math.ceil(diasPlazo - diasDesdeVenta);
+    const aunEnPlazo = diasRestantes > 0;
+
+    let semaforo = 'gris'; // ya paso su plazo (fuera de ventana de cupon)
+    if (aunEnPlazo) {
+        if (diasRestantes <= 3) semaforo = 'rojo';
+        else if (diasRestantes <= 7) semaforo = 'amarillo';
+        else semaforo = 'verde';
+    }
+
+    const totalFinanciado = Number(cuenta?.plan?.total || 0);
+    const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    // 🛡️ Misma regla que aplica cxc.js al emitir de verdad (_procesarAbonoAvanzadoAsync):
+    // solo ventas hechas a partir de CUPONES_FECHA_INICIO generan cupón. Sin
+    // este candado, todas las herramientas que leen este helper (Mi Cartera
+    // del Día, la ficha del cliente, la campanita) le seguían sugiriendo
+    // cupón al vendedor hasta en cuentas vigentes de antes del cambio --
+    // aunque nunca se fuera a emitir nada al cobrar de verdad.
+    const ventaEsNueva = !!(cuenta.fechaVenta && new Date(cuenta.fechaVenta) >= new Date(CUPONES_FECHA_INICIO));
+    // 🛡️ EXCEPCIÓN plan de 1 mes: no genera cupón (ver _cxcEvaluarPoliticaPagoAnticipado,
+    // tipo 'contado_1_mes') -- se le respeta precio de contado en su lugar.
+    const esPlan1Mes = mesesPlan === 1;
+    const cuponSiLiquidaHoy = (aunEnPlazo && ventaEsNueva && !esPlan1Mes) ? _cxcRedondearMontoCupon(totalFinanciado * Math.max(0, porcentajeCupon) / 100) : 0;
+
+    return {
+        folio: cuenta.folio,
+        clienteNombre: (typeof _cxcNombreClienteVigente === 'function') ? _cxcNombreClienteVigente(cuenta) : (cuenta.nombreCliente || cuenta.cliente?.nombre || 'Cliente'),
+        clienteId: cuenta.clienteId || cuenta.cliente?.id || null,
+        saldoActual, mesesPlan, diasDesdeVenta, diasRestantes, aunEnPlazo, semaforo, ventaEsNueva, esPlan1Mes,
+        totalFinanciado, porcentajeCupon, cuponSiLiquidaHoy,
+        mesesNuevoSiBrinca: mesesPlan < 6 ? mesesPlan + 1 : null
+    };
 }
+
 
 // Helper local de formato de moneda
 function _cxcDinero(v) {
@@ -543,6 +580,29 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
         };
     }
 
+    // 🛡️ EXCEPCIÓN plan de 1 mes (decisión de Roberto): el plan de 1 mes ya
+    // es el escalón más corto -- no tiene sentido darle cupón encima de eso
+    // (el cupón premia pagar antes de un plazo más largo al que se
+    // comprometió). En vez de cupón, se le cobra el precio de CONTADO REAL
+    // (capitalContado, SIN el interés del plan de 1 mes) -- un monto MENOR
+    // al total nominal de ese plan.
+    if (mesesPlanOriginal === 1) {
+        const montoContado = Math.max(0, capitalContado - totalPagado);
+        const montoLiquidacion = Math.min(montoContado, saldoActual); // nunca mas caro que el saldo nominal
+        const liquidariaContado = base.montoAbono >= montoLiquidacion - 0.01;
+        return {
+            ...base,
+            aplica: montoLiquidacion < saldoActual - 0.01,
+            liquidaria: liquidariaContado,
+            beneficio: 0,
+            montoLiquidacion,
+            faltante: Math.max(0, montoLiquidacion - base.montoAbono),
+            tipo: 'contado_1_mes',
+            porcentajeCupon: 0,
+            mensaje: `Plan de 1 mes: no genera cupón -- se cobra precio de contado real: ${_cxcDinero(montoLiquidacion)} (sin el interés del plan).`
+        };
+    }
+
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
     const porcentajeCupon = Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
     const beneficio = _cxcRedondearMontoCupon(totalFinanciado * Math.max(0, porcentajeCupon) / 100);
@@ -774,6 +834,42 @@ function renderSaltosPlazoPendientes() {
 window.renderSaltosPlazoPendientes = renderSaltosPlazoPendientes;
 window._cxcEscanearSaltosPlazoPendientes = _cxcEscanearSaltosPlazoPendientes;
 
+// 🚦 "Mi cartera del día" -- lista de cuentas activas ordenada por urgencia
+// (menos días primero), semaforizada. Para que el vendedor la revise al
+// empezar su turno en vez de depender de que le llegue un aviso.
+function renderCarteraDelDia() {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const filas = cuentas
+        .map(c => _cxcEstadoPlazoCuenta(c))
+        .filter(e => e && e.aunEnPlazo)
+        .sort((a, b) => a.diasRestantes - b.diasRestantes);
+
+    const coloresPorSemaforo = { rojo: '#dc2626', amarillo: '#d97706', verde: '#166534' };
+    const fondosPorSemaforo = { rojo: '#fef2f2', amarillo: '#fffbeb', verde: '#f0fdf4' };
+
+    const cont = document.getElementById('vistaPrincipal') || document.body;
+    cont.innerHTML = `
+        <div style="padding:20px;max-width:900px;margin:0 auto;">
+            <h2 style="margin:0 0 4px;">🚦 Mi cartera del día</h2>
+            <p style="font-size:13px;color:#64748b;margin:0 0 16px;">Cuentas activas ordenadas por urgencia -- 🔴 3 días o menos, 🟡 7 días o menos, 🟢 más tiempo. Solo se listan las que aún están dentro de su plazo pactado (elegibles para cupón).</p>
+            ${filas.length === 0 ? '<p style="color:#64748b;">No hay cuentas activas dentro de su plazo en este momento.</p>' : filas.map(f => `
+                <div style="background:${fondosPorSemaforo[f.semaforo]};border:1px solid ${coloresPorSemaforo[f.semaforo]}33;border-left:4px solid ${coloresPorSemaforo[f.semaforo]};border-radius:10px;padding:14px;margin-bottom:10px;">
+                    <div style="display:flex;justify-content:space-between;align-items:start;">
+                        <div>
+                            <div style="font-weight:bold;">${f.semaforo === 'rojo' ? '🔴' : f.semaforo === 'amarillo' ? '🟡' : '🟢'} Folio ${f.folio} — ${f.clienteNombre}</div>
+                            <div style="font-size:12px;color:#64748b;margin-top:3px;">Plan ${f.mesesPlan} meses · Saldo ${_cxcDinero(f.saldoActual)}${f.mesesNuevoSiBrinca ? ` · Si no liquida, brinca a ${f.mesesNuevoSiBrinca} meses` : ''}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-weight:900;color:${coloresPorSemaforo[f.semaforo]};">${f.diasRestantes} dia(s)</div>
+                            ${f.esPlan1Mes ? `<div style="font-size:10.5px;color:#166534;">💵 contado, sin cupón</div>` : (f.ventaEsNueva ? `<div style="font-size:11px;color:#7e22ce;">🎟️ ${_cxcDinero(f.cuponSiLiquidaHoy)}</div>` : `<div style="font-size:10.5px;color:#94a3b8;">venta vigente, sin cupón</div>`)}
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>`;
+}
+window.renderCarteraDelDia = renderCarteraDelDia;
+
 function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
     if (!politica) {
         return {
@@ -801,6 +897,14 @@ function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
         return {
             titulo: `Politica de pago anticipado: liquidacion dentro de plazo`,
             detalle: `Aun dentro de su plazo pactado. Se cobra el saldo nominal completo: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${politica.beneficio > 0.01 ? ` (${politica.porcentajeCupon}% del total financiado, como cupon.)` : ''}${moratorioTxt}`,
+            nota: modoTxt
+        };
+    }
+
+    if (politica.tipo === "contado_1_mes") {
+        return {
+            titulo: `Politica de pago anticipado: precio de contado (plan de 1 mes)`,
+            detalle: `Plan de 1 mes -- no genera cupon. Se cobra el precio de contado real, sin el interes del plan: ${_cxcDinero(politica.montoLiquidacion)}.${moratorioTxt}`,
             nota: modoTxt
         };
     }
@@ -1453,6 +1557,30 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     </div>
                 </div>
 
+                ${(() => {
+                    const estadoPlazo = _cxcEstadoPlazoCuenta(cuenta);
+                    if (!estadoPlazo) return '';
+                    const coloresPorSemaforo = { rojo: '#dc2626', amarillo: '#d97706', verde: '#166534', gris: '#64748b' };
+                    const fondosPorSemaforo = { rojo: '#fef2f2', amarillo: '#fffbeb', verde: '#f0fdf4', gris: '#f8fafc' };
+                    const emoji = { rojo: '🔴', amarillo: '🟡', verde: '🟢', gris: '⚪' };
+                    return `
+                    <div style="background:${fondosPorSemaforo[estadoPlazo.semaforo]};border:1px solid ${coloresPorSemaforo[estadoPlazo.semaforo]}33;border-left:4px solid ${coloresPorSemaforo[estadoPlazo.semaforo]};border-radius:8px;padding:12px 15px;margin-bottom:16px;">
+                        <div style="font-weight:bold;color:${coloresPorSemaforo[estadoPlazo.semaforo]};">${emoji[estadoPlazo.semaforo]} ${estadoPlazo.diasRestantes} dia(s) para liquidar dentro de plazo</div>
+                        <div style="font-size:13px;color:#374151;margin-top:4px;">${estadoPlazo.esPlan1Mes ? `💵 Plan de 1 mes: no genera cupón -- si liquida a tiempo se respeta el precio de contado.` : (estadoPlazo.ventaEsNueva ? `🎟️ Si liquida hoy: cupón de <b>${_cxcDinero(estadoPlazo.cuponSiLiquidaHoy)}</b> (${estadoPlazo.porcentajeCupon}% del total financiado).` : `Venta vigente (de antes del cambio a cupones) -- no genera cupón al liquidar.`)}${estadoPlazo.mesesNuevoSiBrinca ? ` Si no liquida, brinca a ${estadoPlazo.mesesNuevoSiBrinca} meses.` : ''}</div>
+                    </div>`;
+                })()}
+
+                ${(() => {
+                    const clienteId = cuenta.clienteId || cuenta.cliente?.id;
+                    const cupones = typeof window._cxcCuponesDisponiblesCliente === 'function' ? window._cxcCuponesDisponiblesCliente(clienteId) : [];
+                    if (!cupones.length) return '';
+                    return `
+                    <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px 15px;margin-bottom:16px;">
+                        <div style="font-weight:bold;color:#7e22ce;font-size:13px;">🎟️ Cupones disponibles de este cliente</div>
+                        ${cupones.map(c => `<div style="font-size:12.5px;color:#581c87;margin-top:4px;">${c.codigo} — ${_cxcDinero(c.montoDisponible)} (vence ${new Date(c.fechaVencimiento).toLocaleDateString('es-MX')})</div>`).join('')}
+                    </div>`;
+                })()}
+
                 ${resumenCobranzaHTML}
                 ${articulosHTML}
                 ${abonosRegistradosHTML}
@@ -1719,6 +1847,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
     }
 
     if (politicaAbono?.aplica && politicaAbono.liquidaria) {
+        const esContado1Mes = politicaAbono.tipo === 'contado_1_mes';
         // 🎟️ El beneficio se convierte en cupón SOLO para ventas nuevas (ver
         // CUPONES_FECHA_INICIO) -- las cuentas vigentes (vendidas antes) ya
         // traen una tasa más baja pactada; emitirles cupón encima afectaría
@@ -1727,15 +1856,20 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         // _cxcEvaluarPoliticaPagoAnticipado, regla flat) -- no se vuelve a
         // multiplicar aquí para no aplicar el porcentaje dos veces.
         const ventaEsNueva = cuenta.fechaVenta && new Date(cuenta.fechaVenta) >= new Date(CUPONES_FECHA_INICIO);
-        const beneficioTxt = politicaAbono.beneficio > 0.01
-            ? (ventaEsNueva
-                ? `\nCupón por pago anticipado (${politicaAbono.porcentajeCupon}% del total financiado): ${_cxcDinero(politicaAbono.beneficio)}`
-                : `\nCuenta vigente (vendida antes del cambio a cupones) -- no genera cupón.`)
-            : "";
+        const beneficioTxt = esContado1Mes
+            ? `\nPlan de 1 mes: no genera cupón -- se cobra precio de contado real (sin el interés del plan).`
+            : (politicaAbono.beneficio > 0.01
+                ? (ventaEsNueva
+                    ? `\nCupón por pago anticipado (${politicaAbono.porcentajeCupon}% del total financiado): ${_cxcDinero(politicaAbono.beneficio)}`
+                    : `\nCuenta vigente (vendida antes del cambio a cupones) -- no genera cupón.`)
+                : "");
         const excesoTxt = montoAbonoInput > politicaAbono.montoLiquidacion + 0.01
             ? `\n\nCapturaste ${_cxcDinero(montoAbonoInput)}, pero se aplicara el monto correcto por politica.`
             : "";
-        if (confirm(`LIQUIDACION DENTRO DEL PLAZO PACTADO\n\nMonto a cobrar (saldo nominal, sin descuento): ${_cxcDinero(politicaAbono.montoLiquidacion)}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta?`)) {
+        const encabezado = esContado1Mes
+            ? `LIQUIDACION A PRECIO DE CONTADO (PLAN 1 MES)\n\nMonto a cobrar: ${_cxcDinero(politicaAbono.montoLiquidacion)}`
+            : `LIQUIDACION DENTRO DEL PLAZO PACTADO\n\nMonto a cobrar (saldo nominal, sin descuento): ${_cxcDinero(politicaAbono.montoLiquidacion)}`;
+        if (confirm(`${encabezado}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta?`)) {
             montoFinal = politicaAbono.montoLiquidacion;
             liquidacionPorPolitica = true;
             cuponEmitido = (politicaAbono.beneficio > 0.01 && ventaEsNueva)
@@ -2474,12 +2608,16 @@ function renderCobranzaEsperada() {
     cuentas.forEach(cuenta => {
         if (cuenta.abonos && Array.isArray(cuenta.abonos)) {
             cuenta.abonos.forEach(abono => {
-                // 🛡️ Parseo seguro con el parser global (ya distingue ISO de
-                // "DD-MM-YYYY"/"DD/MM/YYYY" en vez de dejarlo en manos de
-                // new Date(texto), que en formato con guiones lo invierte).
-                const fAbono = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(abono.fecha) : new Date(abono.fecha);
+                // 🛡️ REPARACIÓN: Parseo seguro para esquivar el bug de DD/MM/YYYY
+                let fAbono;
+                if (typeof abono.fecha === 'string' && abono.fecha.includes('/')) {
+                    const p = abono.fecha.split('/');
+                    fAbono = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]), 12, 0, 0);
+                } else {
+                    fAbono = new Date(abono.fecha);
+                }
 
-                if (!fAbono || isNaN(fAbono.getTime())) return; // Protege contra strings vacíos o corruptos
+                if (isNaN(fAbono.getTime())) return; // Protege contra strings vacíos o corruptos
 
                 const clave = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fAbono).substring(3) : fAbono.toLocaleDateString('es-MX').substring(3);
 
@@ -2658,7 +2796,7 @@ function reimprimirTicketAbono(folio, indexAbono) {
         // Volver a pasarlo por formatearFechaCortaMX() lo re-parsea con
         // new Date(), que interpreta ese formato como MES-DÍA-AÑO y invierte
         // día/mes (10-08-2026 → "08-10-2026"). Hay que partir del ISO.
-        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fechaAbonoIso || abono.fecha) : (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(abono.fechaAbonoIso || abono.fecha)?.toLocaleDateString() : new Date(abono.fechaAbonoIso || abono.fecha).toLocaleDateString()),
+        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(abono.fechaAbonoIso || abono.fecha) : new Date(abono.fechaAbonoIso || abono.fecha).toLocaleDateString(),
         metodoCobro: abono.etiquetaCuenta || abono.medioPago || 'Efectivo',
         cuentaDestino: abono.cuentaId || abono.etiquetaCuenta || '',
         pagaresCubiertos: pagaresDelFolio.filter(p => p.estado === "Pagado"),
@@ -2730,7 +2868,7 @@ window.renderAuditoriaAbonos = function() {
         htmlCuerpo = cuentasFiltradas.map(c => {
             let filas = c.abonos.map((ab, idx) => `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                    <td style="padding:10px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ab.fecha) : (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(ab.fecha)?.toLocaleDateString() : new Date(ab.fecha).toLocaleDateString())}</td>
+                    <td style="padding:10px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(ab.fecha) : new Date(ab.fecha).toLocaleDateString()}</td>
                     <td style="padding:10px; font-weight:bold; color:#16a34a;">${_cxcDinero(ab.monto)}</td>
                     <td style="padding:10px; font-size:11px; color:#64748b;">${ab.etiquetaCuenta || ab.medioPago || 'Efectivo'}</td>
                     <td style="padding:10px; text-align:right;">
@@ -2774,7 +2912,7 @@ window.renderAuditoriaAbonos = function() {
         
         let filasPlanos = todos.map(a => `
             <tr style="border-bottom:1px solid #f1f5f9;">
-                <td style="padding:12px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(a.fecha)?.toLocaleDateString() : new Date(a.fecha).toLocaleDateString())}</td>
+                <td style="padding:12px; font-size:12px;">${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : new Date(a.fecha).toLocaleDateString()}</td>
                 <td style="padding:12px;"><b>${a.cliente}</b> <small>(Folio: ${a.folio})</small></td>
                 <td style="padding:12px; font-weight:bold; color:#16a34a;">${_cxcDinero(a.monto)}</td>
                 <td style="padding:12px; font-size:11px;">${a.cuenta}</td>
@@ -2949,7 +3087,7 @@ function _cxcAbonoVigente(a) {
 function _cxcAbonoAnteriorYNumero(vigentesSinReferencia, fechaReferenciaIso) {
     const fechaRef = new Date(fechaReferenciaIso).getTime();
     const ordenados = (vigentesSinReferencia || [])
-        .map(a => ({ abono: a, t: (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_cxcFechaAbonoBase(a)) : new Date(_cxcFechaAbonoBase(a)))?.getTime() || 0 }))
+        .map(a => ({ abono: a, t: new Date(_cxcFechaAbonoBase(a)).getTime() }))
         .filter(x => !isNaN(x.t))
         .sort((a, b) => a.t - b.t);
     const anteriores = !isNaN(fechaRef) ? ordenados.filter(x => x.t <= fechaRef) : ordenados;
@@ -3600,8 +3738,8 @@ function _cxcEstadoCuentaAbonos(cuenta) {
         .filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado)
         .slice()
         .sort((a, b) => {
-            const fa = (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_cxcFechaAbonoBase(a)) : new Date(_cxcFechaAbonoBase(a) || 0))?.getTime() || 0;
-            const fb = (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_cxcFechaAbonoBase(b)) : new Date(_cxcFechaAbonoBase(b) || 0))?.getTime() || 0;
+            const fa = new Date(_cxcFechaClave(_cxcFechaAbonoBase(a)) || _cxcFechaAbonoBase(a) || 0).getTime() || 0;
+            const fb = new Date(_cxcFechaClave(_cxcFechaAbonoBase(b)) || _cxcFechaAbonoBase(b) || 0).getTime() || 0;
             return fa - fb;
         });
 }

@@ -69,46 +69,39 @@ function recopilarNotificaciones() {
 
     // 2) Cuentas próximas a su fecha límite de plazo -- mismo momento exacto
     // dispara DOS consecuencias si el cliente no paga: pierde el cupón de
-    // pronto pago Y la cuenta brinca al siguiente plazo (_cxcDetectarSaltoPlazo,
-    // cxc.js). Se avisan juntas en una sola notificación (ventana de 7 días),
-    // usando el mismo criterio "aún en plazo" que usa
-    // _cxcEvaluarPoliticaPagoAnticipado/_cxcDetectarSaltoPlazo, para que este
-    // aviso nunca contradiga lo que el sistema aplicará al cobrar.
+    // pronto pago (SOLO si la venta es nueva, ver CUPONES_FECHA_INICIO en
+    // cxc.js) Y la cuenta brinca al siguiente plazo (eso sí aplica a
+    // cualquier venta, vieja o nueva). Se avisan juntas en una sola
+    // notificación (ventana de 7 días). Usa _cxcEstadoPlazoCuenta (cxc.js) en
+    // vez de recalcular aquí -- ese es el único lugar que sabe la regla
+    // completa (plazo, cupón, corte de fecha); duplicarla aquí fue lo que
+    // hizo que la campanita le sugiriera cupón hasta en cuentas vigentes
+    // viejas cuando nunca se les iba a emitir nada.
     const cuentasCredito = StorageService.get('cuentasPorCobrar', []);
     const DIAS_AVISO_CUPON = 7;
     cuentasCredito.forEach(cuenta => {
-        if (cuenta.estado === 'Cancelado' || cuenta.incobrable) return;
-        const estadoCta = (typeof window._calcularEstadoCuenta === 'function') ? window._calcularEstadoCuenta(cuenta.folio) : null;
-        const saldoActual = Number(estadoCta?.saldoTotal ?? cuenta.saldoActual ?? 0) - Number(estadoCta?.saldoMoratorios || 0);
-        if (saldoActual <= 0.01) return; // ya liquidada
+        const estado = (typeof window._cxcEstadoPlazoCuenta === 'function') ? window._cxcEstadoPlazoCuenta(cuenta) : null;
+        if (!estado || !estado.aunEnPlazo) return;
+        if (estado.diasRestantes > DIAS_AVISO_CUPON) return;
 
-        const mesesPlan = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
-        if (mesesPlan <= 0) return; // sin plan definido
-
-        const fechaVenta = (typeof _cxcFechaVentaDate === 'function') ? _cxcFechaVentaDate(cuenta) : new Date(cuenta.fechaVenta);
-        const diasDesdeVenta = Math.max(0, Math.floor((hoy - fechaVenta) / 86400000));
-        const diasPlazo = mesesPlan * 30.44;
-        const diasRestantes = Math.ceil(diasPlazo - diasDesdeVenta);
-
-        if (diasRestantes > 0 && diasRestantes <= DIAS_AVISO_CUPON) {
-            const id = `cupon_prox_${cuenta.folio}`;
-            if (vistas.includes(id)) return;
-            const nombre = (typeof _cxcNombreClienteVigente === 'function') ? _cxcNombreClienteVigente(cuenta) : (cuenta.nombreCliente || cuenta.cliente?.nombre || 'Cliente');
-            // El salto de plazo tiene tope de 6 meses (_cxcDetectarSaltoPlazo)
-            // -- si ya está en el plan de 6, no hay "siguiente" al que brincar,
-            // así que ese aviso solo aplica por debajo del tope.
-            const avisoSalto = mesesPlan < 6
-                ? ` Si no liquida, su cuenta brincará de ${mesesPlan} a ${mesesPlan + 1} meses.`
-                : '';
-            notifs.push({
-                tipo: 'cupon',
-                icono: '🎟️',
-                color: '#7e22ce',
-                msg: `${nombre}: le quedan ${diasRestantes} dia(s) para liquidar y ganar su cupón (folio ${cuenta.folio}, saldo ${dinero(saldoActual)}).${avisoSalto}`,
-                folio: cuenta.folio,
-                id
-            });
-        }
+        const id = `cupon_prox_${estado.folio}`;
+        if (vistas.includes(id)) return;
+        const avisoSalto = estado.mesesNuevoSiBrinca
+            ? ` Si no liquida, su cuenta brincará de ${estado.mesesPlan} a ${estado.mesesNuevoSiBrinca} meses.`
+            : '';
+        const fraseCupon = estado.esPlan1Mes
+            ? `le quedan ${estado.diasRestantes} dia(s) para liquidar a precio de contado (plan de 1 mes, sin cupón)`
+            : (estado.ventaEsNueva
+                ? `le quedan ${estado.diasRestantes} dia(s) para liquidar y ganar su cupón`
+                : `le quedan ${estado.diasRestantes} dia(s) para liquidar dentro de plazo`);
+        notifs.push({
+            tipo: 'cupon',
+            icono: '🎟️',
+            color: '#7e22ce',
+            msg: `${estado.clienteNombre}: ${fraseCupon} (folio ${estado.folio}, saldo ${dinero(estado.saldoActual)}).${avisoSalto}`,
+            folio: estado.folio,
+            id
+        });
     });
 
     return notifs;
