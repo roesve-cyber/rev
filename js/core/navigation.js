@@ -6,7 +6,8 @@ function _navGrupoVista(vistaId) {
     const operacion = new Set([
     'tienda', 'carrito', 'seleccionarcliente', 'apartados', 'entregas',
     'cotizaciones', 'listaprecios', 'garantias',
-    'cuentasxcobrar', 'gestion-datos-cliente', 'estadoCuentaCliente', 'abonosdirectos'
+    'cuentasxcobrar', 'gestion-datos-cliente', 'estadoCuentaCliente', 'abonosdirectos',
+    'mi-cartera-dia', 'cupones-activos'
 ]);
     if (operacion.has(vistaId)) return 'operacion';
     return 'otro';
@@ -21,7 +22,8 @@ const _NAV_VISTAS_PERMITIDAS_VENDEDOR = new Set([
     'cotizaciones', 'listaprecios',
     'apartados', 'entregas',
     'cuentasxcobrar', 'estadoCuentaCliente', 'gestion-datos-cliente', 'reporte-abonos-enganches',
-    'reimprimir-venta', 'garantias'
+    'reimprimir-venta', 'garantias',
+    'mi-cartera-dia', 'cupones-activos'
 ]);
 
 function _navPermitidoParaVendedor(vistaId) {
