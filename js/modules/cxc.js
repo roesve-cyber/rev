@@ -39,6 +39,25 @@ function _cxcPorcentajeCuponPorPlazo(mesesPlan) {
 }
 window._cxcPorcentajeCuponPorPlazo = _cxcPorcentajeCuponPorPlazo;
 
+// 🎟️ Redondeo del monto final de cupón (config: redondeoCuponMultiplo/
+// redondeoCuponDireccion en Configuración > Cupones de Saldo a Favor). Sin
+// múltiplo definido (0, vacío o 1) se regresa el monto exacto tal cual. Con
+// múltiplo > 1, redondea hacia arriba o abajo a cifras de ese múltiplo según
+// la dirección configurada (default 'abajo' si nunca se ha tocado) --
+// MISMO criterio que ya replican por su cuenta ventas.js
+// (_mostrarPopupBeneficioPlan), cotizaciones.js y cotizador-movil.html al
+// mostrarle el cupón al cliente en la cotización, para que ese número nunca
+// se desalinee del que de verdad se emite aquí al liquidar.
+function _cxcRedondearMontoCupon(monto) {
+    const m = Math.max(0, Number(monto) || 0);
+    const config = StorageService.get('configCreditoGlobal', {});
+    const multiplo = Number(config?.redondeoCuponMultiplo || 0);
+    if (!(multiplo > 1)) return m;
+    const factor = (config?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
+    return Math.max(0, factor(m / multiplo) * multiplo);
+}
+window._cxcRedondearMontoCupon = _cxcRedondearMontoCupon;
+
 // 🚦 Estado de plazo/cupón de una cuenta -- calculo compartido para "Mi
 // cartera del día", el indicador en la ficha del cliente, y la campanita.
 // Un solo lugar para esta cuenta: días restantes, semáforo, y cuánto cupón
