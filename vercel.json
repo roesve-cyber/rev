@@ -1,5 +1,6 @@
 {
   "routes": [
+    { "src": "/(manifest[^/]*\\.json|sw-cotizador\\.js)", "headers": { "Cache-Control": "no-cache, must-revalidate" }, "continue": true },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]

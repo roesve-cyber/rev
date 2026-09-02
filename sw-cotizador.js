@@ -4,7 +4,7 @@
 // SIEMPRE va a la red por los datos reales (precios, tasas, guardado de
 // cotizaciones). Nunca cachea ni intercepta nada de Firebase/Firestore/Google.
 
-const CACHE_NAME = 'cotizador-shell-v2';
+const CACHE_NAME = 'cotizador-shell-v3';
 
 const SHELL_URLS = [
   '/cotizador-movil.html',
