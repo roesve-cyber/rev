@@ -1584,9 +1584,10 @@ window.generarListadoCobranza = function() {
     if (checkboxes.length === 0) {
         return alert("⚠️ Selecciona al menos un cliente marcando su casilla para generar el listado.");
     }
-    
-    // 2. Extraer las filas exactas (agrupadas o individuales) desde la memoria de la vista actual
-    const cuentasCobrador = Array.from(checkboxes).map(chk => window._filasParaCobranza[parseInt(chk.value)]);
+
+    const seleccion = Array.from(checkboxes)
+        .map(chk => window._filasParaCobranza[parseInt(chk.value)])
+        .filter(Boolean);
     const hoy = new Date();
 
     const formatearFecha = (fecha) => {
@@ -1595,107 +1596,295 @@ window.generarListadoCobranza = function() {
         return isNaN(d.getTime()) ? 'S/F' : d.toLocaleDateString('es-MX');
     };
 
-    // 3. Construir la vista de impresión respetando agrupaciones
-    let htmlFilas = cuentasCobrador.map((c, i) => {
-        const s = c.sne || {};
-
-        // Identificar si la fila actual es un grupo de cuentas o una sola
-        const esAgrupado = c.agrupado || c.agrupadoPorCliente;
-        const folioVisible = esAgrupado && c.folios ? `Múltiples (${c.folios.join(', ')})` : (c.folio || '-');
-        
-        // Sumarizar artículos
-        let articulosText = '';
-        if (c.articulos && c.articulos.length > 0) {
-            articulosText = c.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || '-'}`).join(', ');
+    // 2. Deshacer cualquier agrupación previa de pantalla y volver a agrupar por
+    //    cliente real (mismo criterio que _arcExAgruparCliente), sin importar de
+    //    qué vista vino la selección — así "2 ventas del mismo cliente" siempre
+    //    se desglosan una por una con un gran total, venga de donde venga.
+    const normalizar = v => String(v || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let ventasFlat = [];
+    seleccion.forEach(c => {
+        if (c.agrupadoPorCliente && Array.isArray(c.cuentasGrupo) && c.cuentasGrupo.length) {
+            ventasFlat.push(...c.cuentasGrupo);
         } else {
-            articulosText = 'Sin detalle de artículos';
+            ventasFlat.push(c);
         }
+    });
+    const gruposMap = {};
+    ventasFlat.forEach(v => {
+        const clave = v.clienteId ? `id:${v.clienteId}` : `nombre:${normalizar(v.nombre || v.clienteNombre)}|tel:${normalizar(v.telefono)}`;
+        (gruposMap[clave] = gruposMap[clave] || []).push(v);
+    });
+    const clientesRaw = Object.values(gruposMap).map(ventas => {
+        const base = ventas.slice().sort((a, b) => {
+            const fa = _rc.parseFecha(a.fechaVenta || a.fechaIso || a.fecha)?.getTime() || 0;
+            const fb = _rc.parseFecha(b.fechaVenta || b.fechaIso || b.fecha)?.getTime() || 0;
+            return fb - fa;
+        })[0];
+        return { base, ventas };
+    });
 
-        const diasAtraso = s.diasSinPagar === 9999 ? 'Sin abonos' : `${s.diasSinPagar} días`;
-        const riesgo = s.nivelRiesgo || c.estado || 'N/D';
-        
-        // Fechas
-        const fechaVentaStr = formatearFecha(c.fechaVenta || c.fechaIso || c.fecha);
-        const fechaUltAbonoStr = s.ultimaFechaAbono ? formatearFecha(s.ultimaFechaAbono) : 'Sin abonos';
+    // 3. Plazo pactado y salto de plazo por antigüedad (NO moratorios — esa es
+    //    otra pieza aparte). _cxcDetectarSaltoPlazo(cuenta) en cxc.js es la MISMA
+    //    función que usa Bóveda: si ya pasó su plazo pactado, recotiza al
+    //    SIGUIENTE escalón de la escalera (mesesPlanOriginal+1) sobre el capital
+    //    ORIGINAL de la venta, y regresa la diferencia real que subiría el total.
+    //    Es de solo lectura aquí (no toca saltosPlazoPendientes ni Bóveda) — solo
+    //    se usa para mostrarle al cobrador/cliente la proyección. Tope: nunca
+    //    pasa de 6 meses, y devuelve null si ya está en ese tope o si aún no
+    //    encuentra un escalón siguiente válido.
+    const evaluarPlazo = (v) => {
+        const saldoNominal = Number(v.sne?.saldoActual ?? v.saldoActual ?? 0);
+        const fechaFinal = typeof window._cxcFechaFinalCredito === 'function'
+            ? window._cxcFechaFinalCredito(v, null) : null;
+        const mesesPlan = Number(v.plan?.meses || v.plazoMeses || v.meses || 0);
+        const diasVencidos = fechaFinal ? Math.floor((hoy - fechaFinal) / 86400000) : 0;
+        const vencido = diasVencidos > 0;
+        const salto = vencido && typeof window._cxcDetectarSaltoPlazo === 'function'
+            ? window._cxcDetectarSaltoPlazo(v)
+            : null;
+        const diferenciaSalto = salto ? Number(salto.diferencia || 0) : 0;
+        return {
+            saldoNominal, fechaFinal, mesesPlan, vencido, diasVencidos,
+            mesesNuevo: salto ? salto.mesesNuevo : null,
+            diferenciaSalto,
+            saldoSiSalta: saldoNominal + diferenciaSalto,
+            enTopePlazo: vencido && !salto && mesesPlan >= 6
+        };
+    };
 
-        return `
-            <tr style="border-bottom: 2px solid #cbd5e1;">
-                <td style="padding: 10px; font-weight: bold; font-size: 14px;">${i + 1}</td>
-                <td style="padding: 10px;">
-                    <div style="font-weight: 900; font-size: 14px;">${c.nombre || c.clienteNombre || 'Sin nombre'}</div>
-                    <div style="font-size: 11px; color: #475569;">📞 Tel: ${c.telefono || 'N/D'}</div>
-                    <div style="font-size: 11px; color: #475569;">📍 Dir: ${c.direccion || 'N/D'}</div>
-                    <div style="font-size: 11px; color: #475569; margin-top: 4px;">🛒 ${articulosText}</div>
-                </td>
-                <td style="padding: 10px; font-size: 12px;">
-                    <div>Folio: <b>${folioVisible}</b></div>
-                    <div>F. Venta: <b>${fechaVentaStr}</b></div>
-                    <div style="margin-top: 4px;">Saldo: <b style="color: #dc2626; font-size: 14px;">$${(s.saldoActual || c.saldoActual || 0).toLocaleString('en-US')}</b></div>
-                    <div>Abonado: <b style="color: #16a34a;">$${(s.totalPagado || 0).toLocaleString('en-US')}</b></div>
-                </td>
-                <td style="padding: 10px; font-size: 12px;">
-                    <div>Riesgo: <b>${riesgo}</b></div>
-                    <div style="margin-top: 4px;">Últ. Abono: <b>${fechaUltAbonoStr}</b></div>
-                    <div>Días sin pago: <b>${diasAtraso}</b></div>
-                </td>
-                <td style="padding: 10px; width: 150px;">
-                    <div style="border-bottom: 1px solid #94a3b8; height: 25px; margin-bottom: 10px;"></div>
-                    <div style="border-bottom: 1px solid #94a3b8; height: 25px;"></div>
-                    <div style="font-size: 9px; text-align: center; color: #64748b; margin-top: 4px;">Firma / Notas</div>
-                </td>
-            </tr>
-        `;
+    // 4. Último abono: fecha (ya existente en el SNE) + monto (nuevo, mismo filtro
+    //    de abonos cancelados que usa calcularSNE para que ambos coincidan).
+    const ultimoAbono = (v) => {
+        const abonos = (v.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
+        const conFecha = abonos
+            .map(a => ({ monto: Number(a.monto || 0), fecha: _rc.parseFecha(a.fecha || a.fechaAbono) }))
+            .filter(a => a.fecha);
+        if (!conFecha.length) return null;
+        conFecha.sort((a, b) => b.fecha - a.fecha);
+        return conFecha[0];
+    };
+
+    // 5. Armar la estructura de datos que alimenta AMBOS formatos (carta e imagen)
+    const clientes = clientesRaw.map(({ base, ventas }) => {
+        const filas = ventas.map(v => {
+            const s = v.sne || {};
+            const plazo = evaluarPlazo(v);
+            const ult = ultimoAbono(v);
+            let articulosText = 'Sin detalle de artículos';
+            if (v.articulos && v.articulos.length > 0) {
+                articulosText = v.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || '-'}`).join(', ');
+            }
+            return {
+                fechaVentaStr: formatearFecha(v.fechaVenta || v.fechaIso || v.fecha),
+                articulosText,
+                abonado: Number(s.totalPagado || 0),
+                saldo: plazo.saldoNominal,
+                mesesPlan: plazo.mesesPlan,
+                fechaFinalStr: plazo.fechaFinal ? formatearFecha(plazo.fechaFinal) : null,
+                vencido: plazo.vencido,
+                diasVencidos: plazo.diasVencidos,
+                mesesNuevo: plazo.mesesNuevo,
+                diferenciaSalto: plazo.diferenciaSalto,
+                saldoSiSalta: plazo.saldoSiSalta,
+                enTopePlazo: plazo.enTopePlazo,
+                ultAbonoFechaStr: s.ultimaFechaAbono ? formatearFecha(s.ultimaFechaAbono) : 'Sin abonos',
+                ultAbonoMontoStr: ult ? _rc.fmt(ult.monto) : '—',
+                diasSinPagoStr: s.diasSinPagar === 9999 ? 'Sin abonos' : `${s.diasSinPagar} días`
+            };
+        });
+
+        const totalAbonado = filas.reduce((s, f) => s + f.abonado, 0);
+        const totalSaldo = filas.reduce((s, f) => s + f.saldo, 0);
+        const totalSiSalta = filas.reduce((s, f) => s + f.saldoSiSalta, 0);
+        const tieneSalto = filas.some(f => f.diferenciaSalto > 0);
+
+        return {
+            nombre: base.nombre || base.clienteNombre || 'Sin nombre',
+            telefono: base.telefono || 'N/D',
+            direccion: base.direccion || 'N/D',
+            filas,
+            multiVenta: filas.length > 1,
+            totalAbonado, totalSaldo, totalSiSalta, tieneSalto
+        };
+    });
+
+    const totalGeneralSaldo = clientes.reduce((s, c) => s + c.totalSaldo, 0);
+    const totalGeneralSiSalta = clientes.reduce((s, c) => s + c.totalSiSalta, 0);
+    const haySaltosEnRuta = clientes.some(c => c.tieneSalto);
+
+    // ============================================================
+    // FORMATO A — Hoja tamaño carta (tabla, para llevar impresa)
+    // ============================================================
+    const filasCartaHtml = clientes.map((c, i) => {
+        const filasVenta = c.filas.map((f, idx) => {
+            const etiquetaVenta = c.multiVenta ? `<div style="color:#475569;font-size:9.5px;">↳ Venta ${idx + 1} · ${f.articulosText}</div>` : '';
+            const plazoHtml = f.fechaFinalStr
+                ? (f.vencido
+                    ? `<div style="color:#dc2626;font-weight:bold;">🔴 Venció hace ${f.diasVencidos}d (${f.fechaFinalStr})</div>${f.diferenciaSalto > 0 ? `<div style="color:#dc2626;font-size:9px;">Si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)} (+${_rc.fmt(f.diferenciaSalto)})</div>` : (f.enTopePlazo ? `<div style="color:#94a3b8;font-size:9px;">Ya en tope de plazo (6m)</div>` : '')}`
+                    : `<div style="color:#16a34a;">🟢 Vence ${f.fechaFinalStr} (${f.mesesPlan || '?'}m)</div>`)
+                : `<div style="color:#94a3b8;">Plazo N/D</div>`;
+            const filaHtml = `
+                <tr style="border-bottom:${idx === c.filas.length - 1 && !c.multiVenta ? '2px solid #cbd5e1' : '1px solid #e2e8f0'};">
+                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;font-weight:bold;font-size:13px;vertical-align:top;">${i + 1}</td>` : ''}
+                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;vertical-align:top;">
+                        <div style="font-weight:900;font-size:12.5px;">${c.nombre}</div>
+                        <div style="font-size:9.5px;color:#475569;">📞 ${c.telefono}</div>
+                        <div style="font-size:9.5px;color:#475569;">📍 ${c.direccion}</div>
+                        ${!c.multiVenta ? `<div style="font-size:9.5px;color:#475569;margin-top:2px;">🛒 ${c.filas[0].articulosText}</div>` : ''}
+                    </td>` : ''}
+                    <td style="padding:6px 4px;font-size:10px;vertical-align:top;">
+                        <div>F. Venta: <b>${f.fechaVentaStr}</b></div>
+                        ${etiquetaVenta}
+                        ${plazoHtml}
+                    </td>
+                    <td style="padding:6px 4px;font-size:10.5px;text-align:right;vertical-align:top;color:#16a34a;font-weight:bold;">${_rc.fmt(f.abonado)}</td>
+                    <td style="padding:6px 4px;font-size:11px;text-align:right;vertical-align:top;color:#dc2626;font-weight:bold;">${_rc.fmt(f.saldo)}</td>
+                    <td style="padding:6px 4px;font-size:10px;vertical-align:top;">
+                        <div>${f.ultAbonoFechaStr}</div>
+                        <div style="color:#475569;">${f.ultAbonoMontoStr}</div>
+                    </td>
+                    <td style="padding:6px 4px;font-size:10px;text-align:center;vertical-align:top;font-weight:bold;color:${f.diasSinPagoStr === 'Sin abonos' ? '#7f1d1d' : (parseInt(f.diasSinPagoStr) > 30 ? '#7f1d1d' : '#c2410c')};">${f.diasSinPagoStr}</td>
+                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:6px 4px;width:90px;vertical-align:top;">
+                        <div style="border-bottom:1px solid #94a3b8;height:20px;margin-bottom:8px;"></div>
+                        <div style="border-bottom:1px solid #94a3b8;height:20px;"></div>
+                    </td>` : ''}
+                </tr>`;
+            return filaHtml;
+        }).join('');
+
+        const filaTotal = c.multiVenta ? `
+                <tr style="border-bottom:2px solid #cbd5e1;background:#f1f5f9;">
+                    <td style="padding:5px 4px;font-weight:900;font-size:10px;" colspan="2">TOTAL CLIENTE (${c.filas.length} ventas)</td>
+                    <td style="padding:5px 4px;text-align:right;font-weight:900;color:#16a34a;font-size:10.5px;">${_rc.fmt(c.totalAbonado)}</td>
+                    <td style="padding:5px 4px;text-align:right;font-weight:900;color:#dc2626;font-size:11px;">${_rc.fmt(c.totalSaldo)}${c.tieneSalto ? `<div style="font-size:8.5px;font-weight:normal;">si sube de plazo: ${_rc.fmt(c.totalSiSalta)}</div>` : ''}</td>
+                    <td colspan="2"></td>
+                </tr>` : '';
+
+        return filasVenta + filaTotal;
     }).join('');
 
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-
-    const ventana = window.open('', '_blank');
-    ventana.document.write(`
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-            <meta charset="UTF-8">
-            <title>Ruta de Cobranza</title>
-            <base href="${baseUrl}">
-            <style>
-                body { font-family: Arial, sans-serif; padding: 20px; color: #0f172a; }
-                table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-                .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 10px; }
-                .logo-container { display: flex; align-items: center; gap: 15px; }
-                @media print { button { display: none !important; } body { padding: 0; } }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <div class="logo-container">
-                    <img src="img/Logo.svg" style="width: 60px; height: 60px; object-fit: contain;" onerror="this.outerHTML='<span style=\\'font-size:32px;\\'>🏛️</span>'">
-                    <div>
-                        <h2 style="margin: 0; color: #0f172a;">Ruta de Cobranza en Campo</h2>
-                        <div style="font-size: 14px; color: #64748b; font-weight: bold;">Mueblería Mi Pueblito</div>
-                    </div>
+    const htmlCarta = `
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <img src="img/Logo.svg" style="width:44px;height:44px;object-fit:contain;" onerror="this.outerHTML='<span style=\\'font-size:26px;\\'>🏛️</span>'">
+                <div>
+                    <h2 style="margin:0;color:#0f172a;font-size:16px;">Ruta de Cobranza en Campo</h2>
+                    <div style="font-size:11px;color:#64748b;font-weight:bold;">Mueblería Mi Pueblito</div>
                 </div>
-                <button onclick="window.print()" style="padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimir Ruta</button>
             </div>
-            
-            <p style="margin-top: 0; font-size: 14px;">Fecha de emisión: <b>${hoy.toLocaleDateString('es-MX')}</b> | Clientes asignados: <b>${cuentasCobrador.length}</b></p>
-            
-            <table>
-                <thead>
-                    <tr style="background: #f8fafc; text-align: left; border-bottom: 2px solid #cbd5e1;">
-                        <th style="padding: 10px;">#</th>
-                        <th style="padding: 10px;">Datos del Cliente</th>
-                        <th style="padding: 10px;">Estado de Cuenta</th>
-                        <th style="padding: 10px;">Métricas de Riesgo</th>
-                        <th style="padding: 10px;">Gestión</th>
-                    </tr>
-                </thead>
-                <tbody>${htmlFilas}</tbody>
-            </table>
-        </body>
-        </html>
-    `);
+            <div style="font-size:10px;color:#64748b;text-align:right;">
+                Fecha emisión: <b>${hoy.toLocaleDateString('es-MX')}</b><br>
+                Clientes: <b>${clientes.length}</b>
+            </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:10px;">
+            <thead>
+                <tr style="background:#f8fafc;text-align:left;border-bottom:2px solid #cbd5e1;">
+                    <th style="padding:6px 4px;width:16px;">#</th>
+                    <th style="padding:6px 4px;">Cliente</th>
+                    <th style="padding:6px 4px;">Venta / Plazo</th>
+                    <th style="padding:6px 4px;text-align:right;">Abonado</th>
+                    <th style="padding:6px 4px;text-align:right;">Saldo</th>
+                    <th style="padding:6px 4px;">Último abono</th>
+                    <th style="padding:6px 4px;text-align:center;">Días s/pago</th>
+                    <th style="padding:6px 4px;">Firma / notas</th>
+                </tr>
+            </thead>
+            <tbody>${filasCartaHtml}</tbody>
+            <tfoot>
+                <tr style="border-top:3px solid #0f172a;">
+                    <td colspan="3" style="padding:8px 4px;font-weight:900;font-size:12px;">GRAN TOTAL DE LA RUTA</td>
+                    <td></td>
+                    <td style="padding:8px 4px;text-align:right;font-weight:900;font-size:13px;color:#dc2626;">${_rc.fmt(totalGeneralSaldo)}${haySaltosEnRuta ? `<div style="font-size:9px;font-weight:normal;">si suben de plazo: ${_rc.fmt(totalGeneralSiSalta)}</div>` : ''}</td>
+                    <td colspan="3"></td>
+                </tr>
+            </tfoot>
+        </table>
+        ${haySaltosEnRuta ? `<p style="font-size:9px;color:#94a3b8;margin-top:8px;">* "Si sube de plazo" muestra a cuánto subiría el saldo si se aplica el salto de plazo al siguiente escalón (mismo cálculo que usa el sistema: recotiza sobre el capital original de la venta). No sube automáticamente — requiere que tú lo confirmes en Bóveda.</p>` : ''}
+    `;
+
+    // ============================================================
+    // FORMATO B — Imagen vertical optimizada para celular (tarjetas)
+    // ============================================================
+    const tarjetasHtml = clientes.map((c, i) => {
+        const ventasHtml = c.multiVenta ? c.filas.map((f, idx) => `
+            <div style="background:#f8fafc;border-radius:6px;padding:7px 9px;margin-top:${idx === 0 ? 8 : 6}px;font-size:10.5px;">
+                <div style="display:flex;justify-content:space-between;">
+                    <span>Venta ${idx + 1} · ${f.articulosText} (${f.fechaVentaStr})</span>
+                    <span style="color:#dc2626;font-weight:bold;">${_rc.fmt(f.saldo)}</span>
+                </div>
+                <div style="color:#64748b;font-size:9.5px;">Últ. abono ${f.ultAbonoFechaStr} · ${f.ultAbonoMontoStr} · ${f.diasSinPagoStr}</div>
+                ${f.fechaFinalStr ? `<div style="font-size:9.5px;margin-top:2px;color:${f.vencido ? '#dc2626' : '#16a34a'};font-weight:bold;">
+                    ${f.vencido ? `🔴 Venció hace ${f.diasVencidos}d` : `🟢 Vence ${f.fechaFinalStr}`}
+                    ${f.diferenciaSalto > 0 ? ` · si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)}` : ''}
+                </div>` : ''}
+            </div>`).join('') : '';
+
+        const unaVenta = !c.multiVenta ? c.filas[0] : null;
+
+        return `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:11px;margin-bottom:10px;">
+            <div style="font-weight:900;font-size:14px;">${i + 1}. ${c.nombre}</div>
+            <div style="font-size:10.5px;color:#475569;margin-top:2px;">📞 ${c.telefono} · 📍 ${c.direccion}</div>
+            ${unaVenta ? `
+            <div style="font-size:10.5px;color:#475569;">🛒 ${unaVenta.articulosText} · Venta: ${unaVenta.fechaVentaStr}</div>
+            <div style="display:flex;justify-content:space-between;margin-top:8px;">
+                <div><div style="font-size:9px;color:#64748b;">SALDO</div><div style="font-size:19px;font-weight:900;color:#dc2626;">${_rc.fmt(unaVenta.saldo)}</div></div>
+                <div style="text-align:right;"><div style="font-size:9px;color:#64748b;">ABONADO</div><div style="font-size:14px;font-weight:900;color:#16a34a;">${_rc.fmt(unaVenta.abonado)}</div></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;font-size:10px;">
+                <span>Últ. abono: <b>${unaVenta.ultAbonoFechaStr} · ${unaVenta.ultAbonoMontoStr}</b></span>
+                <span style="font-weight:bold;color:${unaVenta.diasSinPagoStr === 'Sin abonos' ? '#7f1d1d' : '#c2410c'};">${unaVenta.diasSinPagoStr}</span>
+            </div>
+            ${unaVenta.fechaFinalStr ? `<div style="margin-top:6px;font-size:10.5px;font-weight:bold;color:${unaVenta.vencido ? '#dc2626' : '#16a34a'};">
+                ${unaVenta.vencido ? `🔴 Plazo venció hace ${unaVenta.diasVencidos} días` : `🟢 Plazo vence ${unaVenta.fechaFinalStr}`}
+                ${unaVenta.diferenciaSalto > 0 ? `<div style="font-size:10px;">Si sube a ${unaVenta.mesesNuevo} meses: ${_rc.fmt(unaVenta.saldoSiSalta)} (+${_rc.fmt(unaVenta.diferenciaSalto)})</div>` : (unaVenta.enTopePlazo ? `<div style="font-size:10px;color:#94a3b8;">Ya en tope de plazo (6m)</div>` : '')}
+            </div>` : ''}
+            ` : `
+            ${ventasHtml}
+            <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #cbd5e1;">
+                <span style="font-weight:900;font-size:12px;">TOTAL CLIENTE</span>
+                <span style="font-weight:900;font-size:17px;color:#dc2626;">${_rc.fmt(c.totalSaldo)}</span>
+            </div>
+            ${c.tieneSalto ? `<div style="text-align:right;font-size:10px;color:#dc2626;">si suben de plazo: ${_rc.fmt(c.totalSiSalta)}</div>` : ''}
+            `}
+        </div>`;
+    }).join('');
+
+    const htmlCelular = `
+        <div style="max-width:380px;margin:0 auto;">
+            <div style="text-align:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:10px;">
+                <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
+                <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })} · ${clientes.length} cliente${clientes.length > 1 ? 's' : ''}</div>
+            </div>
+            ${tarjetasHtml}
+            <div style="text-align:center;margin-top:6px;padding-top:8px;border-top:2px solid #0f172a;">
+                <span style="font-size:11px;color:#64748b;">TOTAL DE RUTA: </span>
+                <span style="font-size:16px;font-weight:900;">${_rc.fmt(totalGeneralSaldo)}${haySaltosEnRuta ? ` <span style="font-size:11px;font-weight:normal;color:#dc2626;">(si suben de plazo: ${_rc.fmt(totalGeneralSiSalta)})</span>` : ''}</span>
+            </div>
+        </div>`;
+
+    // 6. Ofrecer ambos formatos — el usuario elige cuál generar
+    const eleccion = confirm("Aceptar = Hoja tamaño carta (imprimir/PDF)\nCancelar = Imagen optimizada para celular");
+    const fecha = hoy.toISOString().slice(0, 10);
+    if (window.TicketService && typeof window.TicketService.openDocument === 'function') {
+        if (eleccion) {
+            window.TicketService.openDocument(htmlCarta, { title: `Ruta de Cobranza ${fecha}`, filename: `ruta-cobranza-${fecha}`, pageSize: 'letter', thermal: false });
+        } else {
+            window.TicketService.openDocument(htmlCelular, { title: `Ruta de Cobranza ${fecha}`, filename: `ruta-cobranza-celular-${fecha}`, pageSize: 'half-letter', thermal: false });
+        }
+        return;
+    }
+
+    // Respaldo si TicketService no está disponible: abre la hoja carta como antes
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    const ventana = window.open('', '_blank');
+    ventana.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Ruta de Cobranza</title><base href="${baseUrl}">
+        <style>body{font-family:Arial,sans-serif;padding:20px;color:#0f172a;} @media print{button{display:none!important;}body{padding:0;}}</style>
+        </head><body>${htmlCarta}<button onclick="window.print()" style="margin-top:14px;padding:10px 20px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🖨️ Imprimir Ruta</button></body></html>`);
     ventana.document.close();
 };
+
 
 // ================================================================
 // 6. VENCIMIENTO DE PLAZO TOTAL — Bloques por plazo pactado (4/5/6 meses)
