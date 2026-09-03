@@ -50,7 +50,7 @@ function _dibujarPlazosGlobales(plazos) {
 function agregarPlazoGlobal() {
     const meses = parseInt(document.getElementById('cfgMesesGlobal').value);
     const tasa = parseFloat(document.getElementById('cfgTasaGlobal').value);
-    const tasaBaseInput = document.getElementById('cfgTasaBaseGlobal').value;
+    const tasaBaseInput = document.getElementById('cfgTasaBaseCuponPlazo').value;
     const tasaBaseCupon = tasaBaseInput === '' ? null : parseFloat(tasaBaseInput);
 
     if (isNaN(meses) || meses <= 0 || isNaN(tasa) || tasa < 0) {
@@ -75,7 +75,7 @@ function agregarPlazoGlobal() {
     
     document.getElementById('cfgMesesGlobal').value = '';
     document.getElementById('cfgTasaGlobal').value = '';
-    document.getElementById('cfgTasaBaseGlobal').value = '';
+    document.getElementById('cfgTasaBaseCuponPlazo').value = '';
     renderConfiguracion();
     alert("✅ Regla global actualizada. Aplicará inmediatamente al carrito, catálogo y cupones de pronto pago.");
 }
@@ -92,14 +92,15 @@ function eliminarPlazoGlobal(index) {
 // liquida dentro de su plazo pactado. Desde sep 2026 (decisión de Roberto)
 // cada plazo puede tener su propia "tasa base para cupón" (campo
 // tasaBaseCupon en config.plazos, editado arriba en Regla Global de
-// Crédito); si la tiene, el % de cupón de ESE plazo es tasa - tasaBaseCupon
-// (así los plazos con tasa más alta pueden dar más cupón) y lo calcula
-// _cxcPorcentajeCuponPorPlazo(mesesPlan) en cxc.js. El % FIJO configurado
-// aquí (porcentajeCuponProntoPago) sigue existiendo como valor por defecto
-// para cualquier plazo que NO tenga tasaBaseCupon definida -- así nada se
-// rompe si se agrega un plazo nuevo sin configurar su tasa base. El mes 1
-// (contado) nunca genera cupón, eso no cambia. El redondeo
-// (redondeoCuponMultiplo/redondeoCuponDireccion) lo aplica
+// Crédito); si la tiene, el cupón de ESE plazo se calcula corriendo la
+// fórmula de venta DOS VECES sobre el mismo capital y meses -- una con la
+// tasa normal, otra con la tasa base -- y el cupón es la diferencia en
+// pesos entre esos dos totales (ver _cxcCalcularCuponPronto en cxc.js). El %
+// FIJO configurado aquí (porcentajeCuponProntoPago) sigue existiendo como
+// valor por defecto para cualquier plazo que NO tenga tasaBaseCupon
+// definida -- así nada se rompe si se agrega un plazo nuevo sin configurar
+// su tasa base. El mes 1 (contado) nunca genera cupón, eso no cambia. El
+// redondeo (redondeoCuponMultiplo/redondeoCuponDireccion) lo aplica
 // _cxcRedondearMontoCupon en cxc.js justo después de calcular el %.
 function renderConfigCupon() {
     const config = StorageService.get('configCreditoGlobal', {});
