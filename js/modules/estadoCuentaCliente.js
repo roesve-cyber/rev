@@ -71,8 +71,13 @@ function _eccAbonosDetalleCuenta(cuenta = {}, totalCredito = 0) {
         .filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado)
         .slice()
         .sort((a, b) => {
-            const fa = new Date(_fechaAbonoCuenta(a) || 0).getTime() || 0;
-            const fb = new Date(_fechaAbonoCuenta(b) || 0).getTime() || 0;
+            // 🛡️ CORREGIDO: usaba new Date() crudo -- si la fecha del abono
+            // viene en formato "DD-MM-YYYY" (formato mexicano), new Date()
+            // la lee al revés (mes/día invertidos), desordenando el
+            // historial de abonos y corrompiendo el saldo corrido que se
+            // imprime en el estado de cuenta.
+            const fa = (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_fechaAbonoCuenta(a)) : new Date(_fechaAbonoCuenta(a) || 0))?.getTime() || 0;
+            const fb = (window.parseFechaMXOrNull ? window.parseFechaMXOrNull(_fechaAbonoCuenta(b)) : new Date(_fechaAbonoCuenta(b) || 0))?.getTime() || 0;
             return fa - fb;
         });
     let saldo = Number(totalCredito || 0);

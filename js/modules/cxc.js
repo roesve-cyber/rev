@@ -16,28 +16,50 @@
 // califiquen.
 const CUPONES_FECHA_INICIO = "2026-08-31T00:00:00.000Z";
 
-// 🎟️ % de cupón de pronto pago para UN plazo específico (sep 2026, decisión
-// de Roberto). Antes el % era flat -- igual para cualquier plazo -- lo cual
-// dejaba dinero en la mesa en los plazos altos, que cobran una tasa mayor
-// (ahora 3%/3.5% vs el 2%/2.5% de antes). Ahora, si el plazo tiene
-// "tasaBaseCupon" configurada (Configuración > Regla Global de Crédito), el
-// cupón de ESE plazo es tasa - tasaBaseCupon (nunca negativo) -- así los
-// plazos con tasa más alta generan más cupón. Si el plazo no está en la
-// escalera (ej. plazo especial de producto) o no tiene tasaBaseCupon
-// definida, se cae al % fijo de siempre (porcentajeCuponProntoPago) para no
-// romper nada. Se lee EN VIVO de configCreditoGlobal, igual que el % fijo
-// siempre se leyó -- un cambio en Configuración aplica de inmediato a las
-// cuentas abiertas que aún no liquidan.
-function _cxcPorcentajeCuponPorPlazo(mesesPlan) {
+// 🎟️ Monto EXACTO del cupón de pronto pago para UN plazo específico (sep
+// 2026, decisión de Roberto -- corrige un error mío anterior). NO es un %
+// de puntos restado y aplicado sobre el total (eso estaba mal: tasa=3% menos
+// tasaBase=2% = 1%, aplicado sobre $3500 = $35, un numero que no tiene
+// relacion real con el interes de verdad cobrado). La regla correcta,
+// explicada por Roberto: se corre la MISMA fórmula de venta
+// (CalculatorService.calcularCredito) DOS VECES sobre el mismo capital y los
+// mismos meses -- una con la tasa normal del plazo (lo que ya se cobró,
+// cuenta.plan.total) y otra con la "tasa base para cupón" -- y el cupón es
+// la DIFERENCIA entre esos dos totales. Ejemplo suyo: 4 meses al 3% da
+// $3500; los mismos 4 meses al 2% dan $3200; cupón = $300. Si el plazo no
+// tiene "tasaBaseCupon" configurada (Configuración > Regla Global de
+// Crédito), cae al % fijo de siempre (porcentajeCuponProntoPago,
+// Configuración > Cupones de Saldo a Favor) aplicado sobre el total
+// financiado -- para no romper cuentas ya usando ese default.
+// Devuelve {monto, porcentajeEfectivo} -- monto ya redondeado según
+// Configuración (_cxcRedondearMontoCupon); porcentajeEfectivo es solo
+// informativo, para los textos que ya dicen "X% del total financiado".
+function _cxcCalcularCuponPronto(mesesPlan, capitalContado, totalConTasaNormal) {
     const config = StorageService.get('configCreditoGlobal', {});
-    const plazo = (config.plazos || []).find(p => Number(p.meses) === Number(mesesPlan));
-    const tieneTasaBase = plazo && plazo.tasaBaseCupon !== undefined && plazo.tasaBaseCupon !== null && plazo.tasaBaseCupon !== '';
-    if (tieneTasaBase) {
-        return Math.max(0, Number(plazo.tasa || 0) - Number(plazo.tasaBaseCupon || 0));
+    const plazoConfig = (config.plazos || []).find(p => Number(p.meses) === Number(mesesPlan));
+    const tieneTasaBase = plazoConfig && plazoConfig.tasaBaseCupon !== undefined && plazoConfig.tasaBaseCupon !== null && plazoConfig.tasaBaseCupon !== '';
+
+    let monto;
+    if (tieneTasaBase && Number(capitalContado) > 0 && typeof CalculatorService !== 'undefined' && CalculatorService.calcularCredito) {
+        // Config "aislada" con un solo plazo -- para que calcularCredito no
+        // aplique su ajuste de progresividad entre varios escalones, y para
+        // que la tasa usada sea EXACTAMENTE la tasa base para cupón, no la
+        // tasa normal del plazo.
+        const resultado = CalculatorService.calcularCredito(capitalContado, {
+            plazos: [{ meses: Number(mesesPlan), tasa: Number(plazoConfig.tasaBaseCupon) }]
+        });
+        const totalConTasaBase = Number(resultado?.[0]?.total || 0);
+        monto = totalConTasaBase > 0 ? Math.max(0, Number(totalConTasaNormal || 0) - totalConTasaBase) : 0;
+    } else {
+        const porcentajeFijo = Number(config.porcentajeCuponProntoPago ?? 3);
+        monto = Math.max(0, Number(totalConTasaNormal || 0)) * Math.max(0, porcentajeFijo) / 100;
     }
-    return Number(config.porcentajeCuponProntoPago ?? 3);
+
+    monto = (typeof _cxcRedondearMontoCupon === 'function') ? _cxcRedondearMontoCupon(monto) : monto;
+    const porcentajeEfectivo = Number(totalConTasaNormal) > 0 ? Math.round((monto / Number(totalConTasaNormal)) * 1000) / 10 : 0;
+    return { monto, porcentajeEfectivo };
 }
-window._cxcPorcentajeCuponPorPlazo = _cxcPorcentajeCuponPorPlazo;
+window._cxcCalcularCuponPronto = _cxcCalcularCuponPronto;
 
 // 🎟️ Redondeo del monto final de cupón (config: redondeoCuponMultiplo/
 // redondeoCuponDireccion en Configuración > Cupones de Saldo a Favor). Sin
@@ -70,7 +92,7 @@ function _cxcEstadoPlazoCuenta(cuenta) {
     const mesesPlan = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
     if (saldoActual <= 0.01 || mesesPlan <= 0 || cuenta.estado === 'Cancelado' || cuenta.incobrable) return null;
 
-    const fechaVenta = (typeof _cxcFechaVentaDate === 'function') ? _cxcFechaVentaDate(cuenta) : new Date(cuenta.fechaVenta);
+    const fechaVenta = _cxcFechaVentaDate(cuenta);
     const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVenta) / 86400000));
     const diasPlazo = mesesPlan * 30.44;
     const diasRestantes = Math.ceil(diasPlazo - diasDesdeVenta);
@@ -84,18 +106,32 @@ function _cxcEstadoPlazoCuenta(cuenta) {
     }
 
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
-    const porcentajeCupon = _cxcPorcentajeCuponPorPlazo(mesesPlan);
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const totalContado = (typeof _cxcImporteContadoCuenta === 'function') ? _cxcImporteContadoCuenta(cuenta) : 0;
+    const capitalContado = Math.max(0, totalContado - enganche);
     // 🛡️ Misma regla que aplica cxc.js al emitir de verdad (_procesarAbonoAvanzadoAsync):
     // solo ventas hechas a partir de CUPONES_FECHA_INICIO generan cupón. Sin
     // este candado, todas las herramientas que leen este helper (Mi Cartera
     // del Día, la ficha del cliente, la campanita) le seguían sugiriendo
     // cupón al vendedor hasta en cuentas vigentes de antes del cambio --
     // aunque nunca se fuera a emitir nada al cobrar de verdad.
-    const ventaEsNueva = !!(cuenta.fechaVenta && new Date(cuenta.fechaVenta) >= new Date(CUPONES_FECHA_INICIO));
+    // 🛡️ CORREGIDO: usaba new Date(cuenta.fechaVenta) crudo -- si la fecha
+    // viene en formato "DD-MM-YYYY" (formato mexicano), new Date() la lee al
+    // revés (mes/día invertidos), pudiendo clasificar mal una venta vieja
+    // como nueva o viceversa. _cxcFechaVentaDate ya sabe parsear esto bien
+    // (usa parseFechaMX/parseFechaMXOrNull).
+    const ventaEsNueva = !!(cuenta.fechaVenta && _cxcFechaVentaDate(cuenta) >= new Date(CUPONES_FECHA_INICIO));
     // 🛡️ EXCEPCIÓN plan de 1 mes: no genera cupón (ver _cxcEvaluarPoliticaPagoAnticipado,
     // tipo 'contado_1_mes') -- se le respeta precio de contado en su lugar.
     const esPlan1Mes = mesesPlan === 1;
-    const cuponSiLiquidaHoy = (aunEnPlazo && ventaEsNueva && !esPlan1Mes) ? _cxcRedondearMontoCupon(totalFinanciado * Math.max(0, porcentajeCupon) / 100) : 0;
+    // 🛡️ Corregido: antes esto aplicaba un % (mal calculado) sobre
+    // totalFinanciado directo. Ahora usa _cxcCalcularCuponPronto, el MISMO
+    // motor que usa la emisión real -- corre la fórmula de venta dos veces
+    // (tasa normal vs tasa base para cupón) y saca la diferencia en pesos.
+    const { monto: montoCuponCalculado, porcentajeEfectivo: porcentajeCupon } = (aunEnPlazo && ventaEsNueva && !esPlan1Mes)
+        ? _cxcCalcularCuponPronto(mesesPlan, capitalContado, totalFinanciado)
+        : { monto: 0, porcentajeEfectivo: 0 };
+    const cuponSiLiquidaHoy = montoCuponCalculado;
 
     return {
         folio: cuenta.folio,
@@ -604,13 +640,15 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     // paga el saldo nominal completo -- SIN descuento en el monto a cobrar
     // hoy -- y recibe un cupón sobre el TOTAL FINANCIADO del plan
     // (cuenta.plan.total, con intereses). Ya no importa en que mes exacto
-    // liquide dentro de su plazo -- siempre el mismo %. El % en sí lo calcula
-    // _cxcPorcentajeCuponPorPlazo(mesesPlanOriginal): si el plazo tiene tasa
-    // base para cupón definida (Configuración > Regla Global de Crédito) es
-    // tasa - tasa base; si no, cae al % fijo de Configuración > Cupones de
-    // Saldo a Favor (default 3%). Si ya pasó su plazo pactado, no hay cupón
-    // (ver _cxcDetectarSaltoPlazo, mecanismo aparte para migrar el plazo por
-    // atraso).
+    // liquide dentro de su plazo. El monto en sí lo calcula
+    // _cxcCalcularCuponPronto(mesesPlanOriginal, capitalContado,
+    // totalFinanciado): si el plazo tiene "tasa base para cupón" definida
+    // (Configuración > Regla Global de Crédito), corre la fórmula de venta
+    // dos veces (tasa normal vs tasa base, mismo capital y meses) y el cupón
+    // es la diferencia entre esos dos totales -- si no, cae al % fijo de
+    // Configuración > Cupones de Saldo a Favor (default 3%). Si ya pasó su
+    // plazo pactado, no hay cupón (ver _cxcDetectarSaltoPlazo, mecanismo
+    // aparte para migrar el plazo por atraso).
     const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
     const diasPlazoOriginal = mesesPlanOriginal > 0 ? mesesPlanOriginal * 30.44 : Infinity;
     const aunEnPlazo = diasDesdeVenta < diasPlazoOriginal;
@@ -649,8 +687,7 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     }
 
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
-    const porcentajeCupon = _cxcPorcentajeCuponPorPlazo(mesesPlanOriginal);
-    const beneficio = _cxcRedondearMontoCupon(totalFinanciado * Math.max(0, porcentajeCupon) / 100);
+    const { monto: beneficio, porcentajeEfectivo: porcentajeCupon } = _cxcCalcularCuponPronto(mesesPlanOriginal, capitalContado, totalFinanciado);
 
     return {
         ...base,
@@ -895,7 +932,7 @@ window._cxcVerHistorialVentaSalto = function(folio) {
 
     const totalAbonado = (cuenta.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado).reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
     const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
-    const fechaVenta = (typeof _cxcFechaVentaDate === 'function') ? _cxcFechaVentaDate(cuenta) : new Date(cuenta.fechaVenta);
+    const fechaVenta = _cxcFechaVentaDate(cuenta);
 
     document.getElementById('modalHistorialVentaSalto')?.remove();
     const modal = document.createElement('div');
@@ -1992,7 +2029,13 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         // El % ya viene calculado DENTRO de politicaAbono.beneficio (ver
         // _cxcEvaluarPoliticaPagoAnticipado, regla flat) -- no se vuelve a
         // multiplicar aquí para no aplicar el porcentaje dos veces.
-        const ventaEsNueva = cuenta.fechaVenta && new Date(cuenta.fechaVenta) >= new Date(CUPONES_FECHA_INICIO);
+        // 🛡️ CORREGIDO: usaba new Date(cuenta.fechaVenta) crudo -- si la
+        // fecha viene en formato "DD-MM-YYYY" (formato mexicano), new Date()
+        // la lee al revés (mes/día invertidos). Este es el punto real donde
+        // se decide si se emite el cupón -- un error aquí podía emitir
+        // cupón a una cuenta vieja, o negarlo a una nueva, según cómo
+        // cayera la fecha mal interpretada.
+        const ventaEsNueva = cuenta.fechaVenta && _cxcFechaVentaDate(cuenta) >= new Date(CUPONES_FECHA_INICIO);
         const beneficioTxt = esContado1Mes
             ? `\nPlan de 1 mes: no genera cupón -- se cobra precio de contado real (sin el interés del plan).`
             : (politicaAbono.beneficio > 0.01
