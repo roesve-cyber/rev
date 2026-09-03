@@ -1699,6 +1699,7 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
                 diferenciaSalto: plazo.diferenciaSalto,
                 saldoSiSalta: plazo.saldoSiSalta,
                 enTopePlazo: plazo.enTopePlazo,
+                ultimaFechaAbono: s.ultimaFechaAbono || null,
                 ultAbonoFechaStr: s.ultimaFechaAbono ? formatearFecha(s.ultimaFechaAbono) : 'Sin abonos',
                 ultAbonoMontoStr: ult ? _rc.fmt(ult.monto) : '—',
                 diasSinPagoStr: s.diasSinPagar === 9999 ? 'Sin abonos' : `${s.diasSinPagar} días`
@@ -1710,11 +1711,21 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
         const totalSiSalta = filas.reduce((s, f) => s + f.saldoSiSalta, 0);
         const tieneSalto = filas.some(f => f.diferenciaSalto > 0);
 
+        // Último abono del CLIENTE = el más reciente entre TODAS sus ventas
+        // (si tiene 2+ cuentas, cada una pudo abonar en fechas distintas).
+        // Esto alimenta el bloque de mes (ver punto 5) y va aparte de
+        // ultAbonoFechaStr/Monto por venta, que sigue siendo por cuenta.
+        const fechasAbonoCliente = filas.map(f => f.ultimaFechaAbono).filter(Boolean);
+        const ultimaFechaAbonoCliente = fechasAbonoCliente.length
+            ? new Date(Math.max(...fechasAbonoCliente.map(f => f.getTime())))
+            : null;
+
         return {
             nombre: base.nombre || base.clienteNombre || 'Sin nombre',
             telefono: base.telefono || 'N/D',
             direccion: base.direccion || 'N/D',
             fechaVentaBase,
+            ultimaFechaAbonoCliente,
             filas,
             multiVenta: filas.length > 1,
             totalAbonado, totalSaldo, totalSiSalta, tieneSalto
@@ -1723,21 +1734,22 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
 
     const haySaltosEnRuta = clientes.some(c => c.tieneSalto);
 
-    // 5. Bloques por mes (de la venta más reciente de cada cliente) para no
-    //    perderse en listas largas — se ordenan cronológicamente y cada uno
-    //    trae su propio contador de clientes.
+    // 5. Bloques por mes DEL ÚLTIMO ABONO (no de la venta) — así el cobrador
+    //    agrupa por "cuándo pagó por última vez", que es lo que de verdad
+    //    ayuda a planear la ruta. Sin abonos registrados cae en su propio
+    //    bloque "SIN ABONOS" al final, en vez de mezclarse por fecha de venta.
     const bloqueClave = (fecha) => fecha && !isNaN(fecha.getTime())
         ? `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`
-        : 'sin-fecha';
+        : 'sin-abonos';
     const bloquesMap = {};
     clientes.forEach(c => {
-        const key = bloqueClave(c.fechaVentaBase);
+        const key = bloqueClave(c.ultimaFechaAbonoCliente);
         (bloquesMap[key] = bloquesMap[key] || []).push(c);
     });
-    const clavesOrdenadas = Object.keys(bloquesMap).sort((a, b) => a === 'sin-fecha' ? 1 : b === 'sin-fecha' ? -1 : a.localeCompare(b));
+    const clavesOrdenadas = Object.keys(bloquesMap).sort((a, b) => a === 'sin-abonos' ? 1 : b === 'sin-abonos' ? -1 : a.localeCompare(b));
     const bloques = clavesOrdenadas.map(key => ({
         key,
-        etiqueta: key === 'sin-fecha' ? 'SIN FECHA DE VENTA' : _rc.mesLabel(key),
+        etiqueta: key === 'sin-abonos' ? 'SIN ABONOS REGISTRADOS' : _rc.mesLabel(key),
         clientes: bloquesMap[key]
     }));
 
