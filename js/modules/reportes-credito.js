@@ -1834,13 +1834,14 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
 
     // ============================================================
     // FORMATO B — Imagen vertical optimizada para celular, por
-    // bloques de mes (cada bloque con su propio botón de imagen para
-    // no tener que guardar los 40 registros en una sola captura larga)
+    // bloques de mes (para no perderse en listas largas). Cada bloque se
+    // arma como un documento HTML AUTÓNOMO (no vive dentro de una ventana
+    // emergente) para poder descargarlo directo con TicketService.
     // ============================================================
-    let contadorCel = 0;
-    const bloquesCelularHtml = bloques.map((bloque, bi) => {
+    const construirBloqueCelular = (bloque) => {
+        let contador = 0;
         const tarjetasHtml = bloque.clientes.map(c => {
-            contadorCel++;
+            contador++;
             const ventasHtml = c.multiVenta ? c.filas.map((f, idx) => `
                 <div style="background:#f8fafc;border-radius:6px;padding:7px 9px;margin-top:${idx === 0 ? 8 : 6}px;font-size:10.5px;">
                     <div style="display:flex;justify-content:space-between;">
@@ -1858,7 +1859,7 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
 
             return `
             <div style="border:1px solid #e2e8f0;border-radius:8px;padding:11px;margin-bottom:10px;">
-                <div style="font-weight:900;font-size:14px;">${contadorCel}. ${c.nombre}</div>
+                <div style="font-weight:900;font-size:14px;">${contador}. ${c.nombre}</div>
                 <div style="font-size:10.5px;color:#475569;margin-top:2px;">📞 ${c.telefono} · 📍 ${c.direccion}</div>
                 ${unaVenta ? `
                 <div style="font-size:10.5px;color:#475569;">🛒 ${unaVenta.articulosText} · Venta: ${unaVenta.fechaVentaStr}</div>
@@ -1885,69 +1886,101 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
             </div>`;
         }).join('');
 
-        const bloqueId = `bloque-cob-${bi}`;
         return `
-        <div id="${bloqueId}" style="max-width:380px;margin:0 auto 6px;padding:10px 4px;">
+        <div style="max-width:380px;margin:0 auto;padding:10px 4px;">
             <div style="text-align:center;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:10px;">
-                <div style="font-weight:900;font-size:14px;color:#1e40af;">📅 ${bloque.etiqueta}</div>
+                <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
+                <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                <div style="font-weight:900;font-size:14px;color:#1e40af;margin-top:6px;">📅 ${bloque.etiqueta}</div>
                 <div style="font-size:10px;color:#64748b;">${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''}</div>
             </div>
             ${tarjetasHtml}
-        </div>
-        <div class="no-print" style="text-align:center;margin-bottom:22px;">
-            <button id="${bloqueId}-btn" onclick="_cobGuardarBloque('${bloqueId}', 'ruta-cobranza-${bloque.key}')" style="padding:9px 16px;border:none;border-radius:8px;background:#047857;color:#fff;font-weight:bold;cursor:pointer;font-size:12px;">📥 Guardar esta imagen (${bloque.etiqueta})</button>
         </div>`;
-    }).join('<hr style="border:none;border-top:2px dashed #cbd5e1;max-width:380px;margin:0 auto 18px;">');
+    };
 
-    const htmlCelular = `
-        <div style="text-align:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:14px;max-width:380px;margin-left:auto;margin-right:auto;">
-            <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
-            <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })} · ${clientes.length} cliente${clientes.length > 1 ? 's' : ''} en ${bloques.length} bloque${bloques.length > 1 ? 's' : ''} de mes</div>
-        </div>
-        ${bloquesCelularHtml}
-        <script>
-        function _cobGuardarBloque(id, filename){
-            function ir(){
-                var node = document.getElementById(id);
-                if (!node) { alert('No se encontró el bloque.'); return; }
-                var btn = document.getElementById(id + '-btn');
-                var old = btn ? btn.textContent : '';
-                if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
-                html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
-                    var a = document.createElement('a');
-                    a.download = filename + '.png';
-                    a.href = canvas.toDataURL('image/png');
-                    a.click();
-                }).catch(function(err){ console.error(err); alert('No se pudo generar la imagen de este bloque.'); })
-                .finally(function(){ if (btn) { btn.disabled = false; btn.textContent = old || '📥 Guardar esta imagen'; } });
-            }
-            if (typeof html2canvas !== 'undefined') return ir();
-            if (typeof mmpCargarHtml2CanvasDocumento === 'function') { mmpCargarHtml2CanvasDocumento(ir); return; }
-            alert('No se pudo cargar el motor de imagen. Recarga la página e intenta de nuevo.');
-        }
-        <\/script>`;
-
-    // 6. Ofrecer ambos formatos — el usuario elige cuál generar
-    const eleccion = confirm("Aceptar = Hoja tamaño carta (imprimir/PDF)\nCancelar = Imagen por bloques de mes (celular)");
     const fecha = hoy.toISOString().slice(0, 10);
-    if (window.TicketService && typeof window.TicketService.openDocument === 'function') {
-        if (eleccion) {
-            window.TicketService.openDocument(htmlCarta, { title: `Ruta de Cobranza ${fecha}`, filename: `ruta-cobranza-${fecha}`, pageSize: 'letter', thermal: false });
-        } else {
-            window.TicketService.openDocument(htmlCelular, { title: `Ruta de Cobranza ${fecha}`, filename: `ruta-cobranza-celular-${fecha}`, pageSize: 'half-letter', thermal: false });
-        }
-        return;
-    }
+    const bloquesConHtml = bloques.map(b => ({ ...b, htmlStandalone: construirBloqueCelular(b) }));
 
-    // Respaldo si TicketService no está disponible: abre la hoja carta como antes
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const ventana = window.open('', '_blank');
-    ventana.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Ruta de Cobranza</title><base href="${baseUrl}">
-        <style>body{font-family:Arial,sans-serif;padding:20px;color:#0f172a;} @media print{button{display:none!important;}body{padding:0;}}</style>
-        </head><body>${htmlCarta}<button onclick="window.print()" style="margin-top:14px;padding:10px 20px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🖨️ Imprimir Ruta</button></body></html>`);
-    ventana.document.close();
+    // 6. Selector de formato — SIEMPRE a través de TicketService.descargarPdf/
+    // descargarImagen (el MISMO motor que ya usan tickets, cortes de caja y
+    // estados de cuenta en toda la app). A propósito NO se abre un popup para
+    // guardar: esas descargas corren en la ventana emergente (about:blank),
+    // y en varios celulares/navegadores una descarga disparada desde ahí no
+    // se guarda de verdad aunque parezca generarse. descargarPdf/descargarImagen
+    // corren en ESTA misma ventana (con un iframe oculto por dentro), que es
+    // el camino que sí funciona para guardar en el teléfono.
+    _cobranzaMostrarSelectorFormato({ htmlCarta, bloques: bloquesConHtml, fecha, totalClientes: clientes.length });
 }
 
+// Modal de selección de formato para la Ruta de Cobranza (ver nota arriba de
+// por qué esto reemplazó abrir un popup con su propio botón "Guardar imagen").
+function _cobranzaMostrarSelectorFormato({ htmlCarta, bloques, fecha, totalClientes }) {
+    if (!window.TicketService) {
+        alert('No se encontró el motor de documentos (TicketService). Recarga la página e intenta de nuevo.');
+        return;
+    }
+    document.querySelector('[data-modal="cobranza-formato"]')?.remove();
+
+    window._cobBloquesPendientes = bloques;
+    window._cobFechaPendiente = fecha;
+
+    const filasBloques = bloques.map((b, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">
+            <div>
+                <div style="font-weight:900;font-size:12.5px;">📅 ${b.etiqueta}</div>
+                <div style="font-size:10.5px;color:#64748b;">${b.clientes.length} cliente${b.clientes.length > 1 ? 's' : ''}</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+                <button onclick="_cobDescargarBloque(${i},'pdf')" style="padding:8px 12px;border:0;border-radius:6px;background:#1e40af;color:white;font-weight:bold;cursor:pointer;font-size:11px;">📥 PDF</button>
+                <button onclick="_cobDescargarBloque(${i},'imagen')" style="padding:8px 12px;border:0;border-radius:6px;background:#047857;color:white;font-weight:bold;cursor:pointer;font-size:11px;">🖼️ Imagen</button>
+            </div>
+        </div>`).join('');
+
+    document.body.insertAdjacentHTML('beforeend', `
+        <div data-modal="cobranza-formato" style="position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:120000;display:flex;align-items:center;justify-content:center;padding:18px;">
+            <div style="width:100%;max-width:460px;max-height:85vh;overflow-y:auto;background:white;border-radius:10px;padding:22px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
+                <h3 style="margin:0;color:#0f172a;">Generar Ruta de Cobranza</h3>
+                <p style="margin:6px 0 16px;color:#64748b;font-size:12.5px;">${totalClientes} cliente(s) · ${fecha}</p>
+
+                <div style="font-size:11px;font-weight:900;color:#475569;margin-bottom:8px;">📄 HOJA CARTA</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:18px;">
+                    <button onclick="_cobDescargarCarta('pdf')" style="padding:12px 6px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:900;cursor:pointer;font-size:12px;">📥 PDF</button>
+                    <button onclick="_cobDescargarCarta('imagen')" style="padding:12px 6px;border:0;border-radius:7px;background:#047857;color:white;font-weight:900;cursor:pointer;font-size:12px;">🖼️ Imagen</button>
+                    <button onclick="_cobDescargarCarta('ver')" style="padding:12px 6px;border:0;border-radius:7px;background:#7c3aed;color:white;font-weight:900;cursor:pointer;font-size:12px;">👁️ Ver / Imprimir</button>
+                </div>
+
+                <div style="font-size:11px;font-weight:900;color:#475569;margin-bottom:8px;">📱 IMAGEN PARA CELULAR — por mes</div>
+                ${filasBloques}
+
+                <button onclick="document.querySelector('[data-modal=\\'cobranza-formato\\']')?.remove()" style="width:100%;margin-top:8px;padding:10px;border:0;border-radius:7px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
+                <p style="margin:10px 0 0;font-size:10px;color:#94a3b8;">PDF/Imagen se descargan directo a tu dispositivo. "Ver/Imprimir" abre una vista previa en otra pestaña.</p>
+            </div>
+        </div>`);
+
+    window._cobDescargarCarta = function(formato) {
+        const fname = `ruta-cobranza-${window._cobFechaPendiente}`;
+        const titulo = `Ruta de Cobranza ${window._cobFechaPendiente}`;
+        if (formato === 'pdf') {
+            window.TicketService.descargarPdf(htmlCarta, { title: titulo, filename: fname, pageSize: 'letter' });
+        } else if (formato === 'imagen') {
+            window.TicketService.descargarImagen(htmlCarta, { title: titulo, filename: fname });
+        } else {
+            window.TicketService.openDocument(htmlCarta, { title: titulo, filename: fname, pageSize: 'letter', thermal: false });
+        }
+    };
+
+    window._cobDescargarBloque = function(i, formato) {
+        const b = window._cobBloquesPendientes?.[i];
+        if (!b) return;
+        const fname = `ruta-cobranza-celular-${b.key}-${window._cobFechaPendiente}`;
+        const titulo = `Ruta de Cobranza ${b.etiqueta}`;
+        if (formato === 'pdf') {
+            window.TicketService.descargarPdf(b.htmlStandalone, { title: titulo, filename: fname, pageSize: 'half-letter' });
+        } else {
+            window.TicketService.descargarImagen(b.htmlStandalone, { title: titulo, filename: fname });
+        }
+    };
+}
 // ─── Entrada 1: generar desde los checkboxes marcados en pantalla ───────
 window.generarListadoCobranza = function() {
     const checkboxes = document.querySelectorAll('.chk-cobrador:checked');
