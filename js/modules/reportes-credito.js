@@ -368,6 +368,7 @@ window.renderARC_v3 = function() {
                 </div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;">
                     <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderRutasCobranzaGuardadas()" style="padding:10px 16px;background:#e2e8f0;color:#0f172a;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📂 Rutas Guardadas</button>
                     <button onclick="renderARCTablaExcel()" style="padding:10px 16px;background:#059669;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📊 Vista Matriz Excel</button>
                     <button onclick="renderComportamiento()" style="padding:10px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">🧬 Comportamiento de Pago</button>
                     <button onclick="renderCobranzaMensual()" style="padding:10px 16px;background:#0369a1;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📅 Cobranza Mensual</button>
@@ -800,6 +801,7 @@ window.renderARCTablaExcel = function() {
                 </div>
                 <div style="display:flex;gap:10px;">
                     <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderRutasCobranzaGuardadas()" style="padding:10px 16px;background:#e2e8f0;color:#0f172a;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📂 Rutas Guardadas</button>
                     <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a Tarjetas</button>
                 </div>
             </div>
@@ -1199,6 +1201,7 @@ window.renderComportamiento = function() {
                 </div>
                 <div style="display:flex; gap:10px;">
                     <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderRutasCobranzaGuardadas()" style="padding:10px 16px;background:#e2e8f0;color:#0f172a;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📂 Rutas Guardadas</button>
                     <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
                 </div>
             </div>
@@ -1382,6 +1385,7 @@ window.renderCobranzaMensual = function() {
                 </div>
                 <div style="display:flex; gap:10px;">
                     <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderRutasCobranzaGuardadas()" style="padding:10px 16px;background:#e2e8f0;color:#0f172a;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📂 Rutas Guardadas</button>
                     <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
                 </div>
             </div>
@@ -1523,6 +1527,7 @@ window.renderConcentracion = function() {
                 </div>
                 <div style="display:flex; gap:10px;">
                     <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
+                    <button onclick="renderRutasCobranzaGuardadas()" style="padding:10px 16px;background:#e2e8f0;color:#0f172a;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📂 Rutas Guardadas</button>
                     <button onclick="renderARC_v3()" style="padding:10px 16px;background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">⬅️ Volver a ARC v3</button>
                 </div>
             </div>
@@ -1578,16 +1583,34 @@ window.renderConcentracion = function() {
     </div>`;
 };
 
-window.generarListadoCobranza = function() {
-    // 1. Obtener los índices seleccionados en pantalla
-    const checkboxes = document.querySelectorAll('.chk-cobrador:checked');
-    if (checkboxes.length === 0) {
-        return alert("⚠️ Selecciona al menos un cliente marcando su casilla para generar el listado.");
-    }
+// ================================================================
+// RUTA DE COBRANZA — construcción central (carta + imagen por
+// bloques de mes) y guardado/reapertura de rutas ya generadas
+// ================================================================
 
-    const seleccion = Array.from(checkboxes)
-        .map(chk => window._filasParaCobranza[parseInt(chk.value)])
-        .filter(Boolean);
+// Reconstruye una lista de ventas "en vivo" (cuenta + SNE de HOY) a partir
+// de una lista de folios guardada — para poder reabrir una ruta días
+// después con los números actualizados, no una foto congelada del día
+// que se guardó.
+function _cobranzaVentasDesdeFolios(folios) {
+    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const pagaresSistema = StorageService.get('pagaresSistema', []);
+    const hoy = new Date();
+    const set = new Set(folios || []);
+    return cxc
+        .filter(c => set.has(c.folio) && !_rcCuentaCancelada(c) && !c.incobrable && (c.saldoActual || 0) > 0 && c.estado !== 'Saldado')
+        .map(c => {
+            const pCta = pagaresSistema.filter(p => p.folio === c.folio);
+            const sne = _rc.calcularSNE(c, pCta, hoy);
+            return { ...c, sne, pagares: pCta };
+        });
+}
+
+// Núcleo compartido: recibe una lista PLANA de ventas (cuenta+sne) y arma
+// y abre los dos formatos. Lo usan tanto "Generar Cobranza" (checkboxes en
+// pantalla) como "Rutas Guardadas" (al reabrir una ruta ya guardada) — así
+// nunca hay dos copias de esta lógica desincronizándose entre sí.
+function _cobranzaConstruirYAbrir(ventasFlat) {
     const hoy = new Date();
 
     const formatearFecha = (fecha) => {
@@ -1596,19 +1619,10 @@ window.generarListadoCobranza = function() {
         return isNaN(d.getTime()) ? 'S/F' : d.toLocaleDateString('es-MX');
     };
 
-    // 2. Deshacer cualquier agrupación previa de pantalla y volver a agrupar por
-    //    cliente real (mismo criterio que _arcExAgruparCliente), sin importar de
-    //    qué vista vino la selección — así "2 ventas del mismo cliente" siempre
-    //    se desglosan una por una con un gran total, venga de donde venga.
+    // 1. Agrupar por cliente real (mismo criterio que _arcExAgruparCliente),
+    //    para que "2 ventas del mismo cliente" siempre salgan una por una
+    //    con un total de cliente, sin importar de dónde vino la selección.
     const normalizar = v => String(v || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    let ventasFlat = [];
-    seleccion.forEach(c => {
-        if (c.agrupadoPorCliente && Array.isArray(c.cuentasGrupo) && c.cuentasGrupo.length) {
-            ventasFlat.push(...c.cuentasGrupo);
-        } else {
-            ventasFlat.push(c);
-        }
-    });
     const gruposMap = {};
     ventasFlat.forEach(v => {
         const clave = v.clienteId ? `id:${v.clienteId}` : `nombre:${normalizar(v.nombre || v.clienteNombre)}|tel:${normalizar(v.telefono)}`;
@@ -1623,15 +1637,12 @@ window.generarListadoCobranza = function() {
         return { base, ventas };
     });
 
-    // 3. Plazo pactado y salto de plazo por antigüedad (NO moratorios — esa es
-    //    otra pieza aparte). _cxcDetectarSaltoPlazo(cuenta) en cxc.js es la MISMA
-    //    función que usa Bóveda: si ya pasó su plazo pactado, recotiza al
-    //    SIGUIENTE escalón de la escalera (mesesPlanOriginal+1) sobre el capital
-    //    ORIGINAL de la venta, y regresa la diferencia real que subiría el total.
-    //    Es de solo lectura aquí (no toca saltosPlazoPendientes ni Bóveda) — solo
-    //    se usa para mostrarle al cobrador/cliente la proyección. Tope: nunca
-    //    pasa de 6 meses, y devuelve null si ya está en ese tope o si aún no
-    //    encuentra un escalón siguiente válido.
+    // 2. Plazo pactado y salto de plazo por antigüedad (NO moratorios — es
+    //    otra pieza aparte). _cxcDetectarSaltoPlazo(cuenta) en cxc.js es la
+    //    MISMA función que usa Bóveda: si ya pasó su plazo pactado, recotiza
+    //    al SIGUIENTE escalón de la escalera sobre el capital original de la
+    //    venta. Es de solo lectura aquí — no toca saltosPlazoPendientes ni
+    //    Bóveda, solo proyecta. Tope: nunca pasa de 6 meses.
     const evaluarPlazo = (v) => {
         const saldoNominal = Number(v.sne?.saldoActual ?? v.saldoActual ?? 0);
         const fechaFinal = typeof window._cxcFechaFinalCredito === 'function'
@@ -1652,8 +1663,8 @@ window.generarListadoCobranza = function() {
         };
     };
 
-    // 4. Último abono: fecha (ya existente en el SNE) + monto (nuevo, mismo filtro
-    //    de abonos cancelados que usa calcularSNE para que ambos coincidan).
+    // 3. Último abono: fecha (SNE) + monto (nuevo, mismo filtro de abonos
+    //    cancelados que usa calcularSNE, para que ambos coincidan).
     const ultimoAbono = (v) => {
         const abonos = (v.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
         const conFecha = abonos
@@ -1664,8 +1675,9 @@ window.generarListadoCobranza = function() {
         return conFecha[0];
     };
 
-    // 5. Armar la estructura de datos que alimenta AMBOS formatos (carta e imagen)
+    // 4. Estructura de datos que alimenta AMBOS formatos
     const clientes = clientesRaw.map(({ base, ventas }) => {
+        const fechaVentaBase = _rc.parseFecha(base.fechaVenta || base.fechaIso || base.fecha);
         const filas = ventas.map(v => {
             const s = v.sne || {};
             const plazo = evaluarPlazo(v);
@@ -1702,30 +1714,51 @@ window.generarListadoCobranza = function() {
             nombre: base.nombre || base.clienteNombre || 'Sin nombre',
             telefono: base.telefono || 'N/D',
             direccion: base.direccion || 'N/D',
+            fechaVentaBase,
             filas,
             multiVenta: filas.length > 1,
             totalAbonado, totalSaldo, totalSiSalta, tieneSalto
         };
     });
 
-    const totalGeneralSaldo = clientes.reduce((s, c) => s + c.totalSaldo, 0);
-    const totalGeneralSiSalta = clientes.reduce((s, c) => s + c.totalSiSalta, 0);
     const haySaltosEnRuta = clientes.some(c => c.tieneSalto);
+
+    // 5. Bloques por mes (de la venta más reciente de cada cliente) para no
+    //    perderse en listas largas — se ordenan cronológicamente y cada uno
+    //    trae su propio contador de clientes.
+    const bloqueClave = (fecha) => fecha && !isNaN(fecha.getTime())
+        ? `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`
+        : 'sin-fecha';
+    const bloquesMap = {};
+    clientes.forEach(c => {
+        const key = bloqueClave(c.fechaVentaBase);
+        (bloquesMap[key] = bloquesMap[key] || []).push(c);
+    });
+    const clavesOrdenadas = Object.keys(bloquesMap).sort((a, b) => a === 'sin-fecha' ? 1 : b === 'sin-fecha' ? -1 : a.localeCompare(b));
+    const bloques = clavesOrdenadas.map(key => ({
+        key,
+        etiqueta: key === 'sin-fecha' ? 'SIN FECHA DE VENTA' : _rc.mesLabel(key),
+        clientes: bloquesMap[key]
+    }));
 
     // ============================================================
     // FORMATO A — Hoja tamaño carta (tabla, para llevar impresa)
     // ============================================================
-    const filasCartaHtml = clientes.map((c, i) => {
-        const filasVenta = c.filas.map((f, idx) => {
-            const etiquetaVenta = c.multiVenta ? `<div style="color:#475569;font-size:9.5px;">↳ Venta ${idx + 1} · ${f.articulosText}</div>` : '';
-            const plazoHtml = f.fechaFinalStr
-                ? (f.vencido
-                    ? `<div style="color:#dc2626;font-weight:bold;">🔴 Venció hace ${f.diasVencidos}d (${f.fechaFinalStr})</div>${f.diferenciaSalto > 0 ? `<div style="color:#dc2626;font-size:9px;">Si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)} (+${_rc.fmt(f.diferenciaSalto)})</div>` : (f.enTopePlazo ? `<div style="color:#94a3b8;font-size:9px;">Ya en tope de plazo (6m)</div>` : '')}`
-                    : `<div style="color:#16a34a;">🟢 Vence ${f.fechaFinalStr} (${f.mesesPlan || '?'}m)</div>`)
-                : `<div style="color:#94a3b8;">Plazo N/D</div>`;
-            const filaHtml = `
+    let contadorGlobal = 0;
+    const seccionesCartaHtml = bloques.map(bloque => {
+        const filasBloqueHtml = bloque.clientes.map(c => {
+            contadorGlobal++;
+            const i = contadorGlobal;
+            const filasVenta = c.filas.map((f, idx) => {
+                const etiquetaVenta = c.multiVenta ? `<div style="color:#475569;font-size:9.5px;">↳ Venta ${idx + 1} · ${f.articulosText}</div>` : '';
+                const plazoHtml = f.fechaFinalStr
+                    ? (f.vencido
+                        ? `<div style="color:#dc2626;font-weight:bold;">🔴 Venció hace ${f.diasVencidos}d (${f.fechaFinalStr})</div>${f.diferenciaSalto > 0 ? `<div style="color:#dc2626;font-size:9px;">Si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)} (+${_rc.fmt(f.diferenciaSalto)})</div>` : (f.enTopePlazo ? `<div style="color:#94a3b8;font-size:9px;">Ya en tope de plazo (6m)</div>` : '')}`
+                        : `<div style="color:#16a34a;">🟢 Vence ${f.fechaFinalStr} (${f.mesesPlan || '?'}m)</div>`)
+                    : `<div style="color:#94a3b8;">Plazo N/D</div>`;
+                return `
                 <tr style="border-bottom:${idx === c.filas.length - 1 && !c.multiVenta ? '2px solid #cbd5e1' : '1px solid #e2e8f0'};">
-                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;font-weight:bold;font-size:13px;vertical-align:top;">${i + 1}</td>` : ''}
+                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;font-weight:bold;font-size:13px;vertical-align:top;">${i}</td>` : ''}
                     ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;vertical-align:top;">
                         <div style="font-weight:900;font-size:12.5px;">${c.nombre}</div>
                         <div style="font-size:9.5px;color:#475569;">📞 ${c.telefono}</div>
@@ -1749,10 +1782,9 @@ window.generarListadoCobranza = function() {
                         <div style="border-bottom:1px solid #94a3b8;height:20px;"></div>
                     </td>` : ''}
                 </tr>`;
-            return filaHtml;
-        }).join('');
+            }).join('');
 
-        const filaTotal = c.multiVenta ? `
+            const filaTotal = c.multiVenta ? `
                 <tr style="border-bottom:2px solid #cbd5e1;background:#f1f5f9;">
                     <td style="padding:5px 4px;font-weight:900;font-size:10px;" colspan="2">TOTAL CLIENTE (${c.filas.length} ventas)</td>
                     <td style="padding:5px 4px;text-align:right;font-weight:900;color:#16a34a;font-size:10.5px;">${_rc.fmt(c.totalAbonado)}</td>
@@ -1760,7 +1792,12 @@ window.generarListadoCobranza = function() {
                     <td colspan="2"></td>
                 </tr>` : '';
 
-        return filasVenta + filaTotal;
+            return filasVenta + filaTotal;
+        }).join('');
+
+        return `
+        <tr><td colspan="8" style="padding:10px 4px 4px;font-weight:900;font-size:11px;color:#1e40af;border-bottom:1px solid #93c5fd;">📅 ${bloque.etiqueta} · ${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''}</td></tr>
+        ${filasBloqueHtml}`;
     }).join('');
 
     const htmlCarta = `
@@ -1790,82 +1827,108 @@ window.generarListadoCobranza = function() {
                     <th style="padding:6px 4px;">Firma / notas</th>
                 </tr>
             </thead>
-            <tbody>${filasCartaHtml}</tbody>
-            <tfoot>
-                <tr style="border-top:3px solid #0f172a;">
-                    <td colspan="3" style="padding:8px 4px;font-weight:900;font-size:12px;">GRAN TOTAL DE LA RUTA</td>
-                    <td></td>
-                    <td style="padding:8px 4px;text-align:right;font-weight:900;font-size:13px;color:#dc2626;">${_rc.fmt(totalGeneralSaldo)}${haySaltosEnRuta ? `<div style="font-size:9px;font-weight:normal;">si suben de plazo: ${_rc.fmt(totalGeneralSiSalta)}</div>` : ''}</td>
-                    <td colspan="3"></td>
-                </tr>
-            </tfoot>
+            <tbody>${seccionesCartaHtml}</tbody>
         </table>
         ${haySaltosEnRuta ? `<p style="font-size:9px;color:#94a3b8;margin-top:8px;">* "Si sube de plazo" muestra a cuánto subiría el saldo si se aplica el salto de plazo al siguiente escalón (mismo cálculo que usa el sistema: recotiza sobre el capital original de la venta). No sube automáticamente — requiere que tú lo confirmes en Bóveda.</p>` : ''}
     `;
 
     // ============================================================
-    // FORMATO B — Imagen vertical optimizada para celular (tarjetas)
+    // FORMATO B — Imagen vertical optimizada para celular, por
+    // bloques de mes (cada bloque con su propio botón de imagen para
+    // no tener que guardar los 40 registros en una sola captura larga)
     // ============================================================
-    const tarjetasHtml = clientes.map((c, i) => {
-        const ventasHtml = c.multiVenta ? c.filas.map((f, idx) => `
-            <div style="background:#f8fafc;border-radius:6px;padding:7px 9px;margin-top:${idx === 0 ? 8 : 6}px;font-size:10.5px;">
-                <div style="display:flex;justify-content:space-between;">
-                    <span>Venta ${idx + 1} · ${f.articulosText} (${f.fechaVentaStr})</span>
-                    <span style="color:#dc2626;font-weight:bold;">${_rc.fmt(f.saldo)}</span>
+    let contadorCel = 0;
+    const bloquesCelularHtml = bloques.map((bloque, bi) => {
+        const tarjetasHtml = bloque.clientes.map(c => {
+            contadorCel++;
+            const ventasHtml = c.multiVenta ? c.filas.map((f, idx) => `
+                <div style="background:#f8fafc;border-radius:6px;padding:7px 9px;margin-top:${idx === 0 ? 8 : 6}px;font-size:10.5px;">
+                    <div style="display:flex;justify-content:space-between;">
+                        <span>Venta ${idx + 1} · ${f.articulosText} (${f.fechaVentaStr})</span>
+                        <span style="color:#dc2626;font-weight:bold;">${_rc.fmt(f.saldo)}</span>
+                    </div>
+                    <div style="color:#64748b;font-size:9.5px;">Últ. abono ${f.ultAbonoFechaStr} · ${f.ultAbonoMontoStr} · ${f.diasSinPagoStr}</div>
+                    ${f.fechaFinalStr ? `<div style="font-size:9.5px;margin-top:2px;color:${f.vencido ? '#dc2626' : '#16a34a'};font-weight:bold;">
+                        ${f.vencido ? `🔴 Venció hace ${f.diasVencidos}d` : `🟢 Vence ${f.fechaFinalStr}`}
+                        ${f.diferenciaSalto > 0 ? ` · si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)}` : ''}
+                    </div>` : ''}
+                </div>`).join('') : '';
+
+            const unaVenta = !c.multiVenta ? c.filas[0] : null;
+
+            return `
+            <div style="border:1px solid #e2e8f0;border-radius:8px;padding:11px;margin-bottom:10px;">
+                <div style="font-weight:900;font-size:14px;">${contadorCel}. ${c.nombre}</div>
+                <div style="font-size:10.5px;color:#475569;margin-top:2px;">📞 ${c.telefono} · 📍 ${c.direccion}</div>
+                ${unaVenta ? `
+                <div style="font-size:10.5px;color:#475569;">🛒 ${unaVenta.articulosText} · Venta: ${unaVenta.fechaVentaStr}</div>
+                <div style="display:flex;justify-content:space-between;margin-top:8px;">
+                    <div><div style="font-size:9px;color:#64748b;">SALDO</div><div style="font-size:19px;font-weight:900;color:#dc2626;">${_rc.fmt(unaVenta.saldo)}</div></div>
+                    <div style="text-align:right;"><div style="font-size:9px;color:#64748b;">ABONADO</div><div style="font-size:14px;font-weight:900;color:#16a34a;">${_rc.fmt(unaVenta.abonado)}</div></div>
                 </div>
-                <div style="color:#64748b;font-size:9.5px;">Últ. abono ${f.ultAbonoFechaStr} · ${f.ultAbonoMontoStr} · ${f.diasSinPagoStr}</div>
-                ${f.fechaFinalStr ? `<div style="font-size:9.5px;margin-top:2px;color:${f.vencido ? '#dc2626' : '#16a34a'};font-weight:bold;">
-                    ${f.vencido ? `🔴 Venció hace ${f.diasVencidos}d` : `🟢 Vence ${f.fechaFinalStr}`}
-                    ${f.diferenciaSalto > 0 ? ` · si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)}` : ''}
+                <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;font-size:10px;">
+                    <span>Últ. abono: <b>${unaVenta.ultAbonoFechaStr} · ${unaVenta.ultAbonoMontoStr}</b></span>
+                    <span style="font-weight:bold;color:${unaVenta.diasSinPagoStr === 'Sin abonos' ? '#7f1d1d' : '#c2410c'};">${unaVenta.diasSinPagoStr}</span>
+                </div>
+                ${unaVenta.fechaFinalStr ? `<div style="margin-top:6px;font-size:10.5px;font-weight:bold;color:${unaVenta.vencido ? '#dc2626' : '#16a34a'};">
+                    ${unaVenta.vencido ? `🔴 Plazo venció hace ${unaVenta.diasVencidos} días` : `🟢 Plazo vence ${unaVenta.fechaFinalStr}`}
+                    ${unaVenta.diferenciaSalto > 0 ? `<div style="font-size:10px;">Si sube a ${unaVenta.mesesNuevo} meses: ${_rc.fmt(unaVenta.saldoSiSalta)} (+${_rc.fmt(unaVenta.diferenciaSalto)})</div>` : (unaVenta.enTopePlazo ? `<div style="font-size:10px;color:#94a3b8;">Ya en tope de plazo (6m)</div>` : '')}
                 </div>` : ''}
-            </div>`).join('') : '';
+                ` : `
+                ${ventasHtml}
+                <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #cbd5e1;">
+                    <span style="font-weight:900;font-size:12px;">TOTAL CLIENTE</span>
+                    <span style="font-weight:900;font-size:17px;color:#dc2626;">${_rc.fmt(c.totalSaldo)}</span>
+                </div>
+                ${c.tieneSalto ? `<div style="text-align:right;font-size:10px;color:#dc2626;">si suben de plazo: ${_rc.fmt(c.totalSiSalta)}</div>` : ''}
+                `}
+            </div>`;
+        }).join('');
 
-        const unaVenta = !c.multiVenta ? c.filas[0] : null;
-
+        const bloqueId = `bloque-cob-${bi}`;
         return `
-        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:11px;margin-bottom:10px;">
-            <div style="font-weight:900;font-size:14px;">${i + 1}. ${c.nombre}</div>
-            <div style="font-size:10.5px;color:#475569;margin-top:2px;">📞 ${c.telefono} · 📍 ${c.direccion}</div>
-            ${unaVenta ? `
-            <div style="font-size:10.5px;color:#475569;">🛒 ${unaVenta.articulosText} · Venta: ${unaVenta.fechaVentaStr}</div>
-            <div style="display:flex;justify-content:space-between;margin-top:8px;">
-                <div><div style="font-size:9px;color:#64748b;">SALDO</div><div style="font-size:19px;font-weight:900;color:#dc2626;">${_rc.fmt(unaVenta.saldo)}</div></div>
-                <div style="text-align:right;"><div style="font-size:9px;color:#64748b;">ABONADO</div><div style="font-size:14px;font-weight:900;color:#16a34a;">${_rc.fmt(unaVenta.abonado)}</div></div>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;font-size:10px;">
-                <span>Últ. abono: <b>${unaVenta.ultAbonoFechaStr} · ${unaVenta.ultAbonoMontoStr}</b></span>
-                <span style="font-weight:bold;color:${unaVenta.diasSinPagoStr === 'Sin abonos' ? '#7f1d1d' : '#c2410c'};">${unaVenta.diasSinPagoStr}</span>
-            </div>
-            ${unaVenta.fechaFinalStr ? `<div style="margin-top:6px;font-size:10.5px;font-weight:bold;color:${unaVenta.vencido ? '#dc2626' : '#16a34a'};">
-                ${unaVenta.vencido ? `🔴 Plazo venció hace ${unaVenta.diasVencidos} días` : `🟢 Plazo vence ${unaVenta.fechaFinalStr}`}
-                ${unaVenta.diferenciaSalto > 0 ? `<div style="font-size:10px;">Si sube a ${unaVenta.mesesNuevo} meses: ${_rc.fmt(unaVenta.saldoSiSalta)} (+${_rc.fmt(unaVenta.diferenciaSalto)})</div>` : (unaVenta.enTopePlazo ? `<div style="font-size:10px;color:#94a3b8;">Ya en tope de plazo (6m)</div>` : '')}
-            </div>` : ''}
-            ` : `
-            ${ventasHtml}
-            <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #cbd5e1;">
-                <span style="font-weight:900;font-size:12px;">TOTAL CLIENTE</span>
-                <span style="font-weight:900;font-size:17px;color:#dc2626;">${_rc.fmt(c.totalSaldo)}</span>
-            </div>
-            ${c.tieneSalto ? `<div style="text-align:right;font-size:10px;color:#dc2626;">si suben de plazo: ${_rc.fmt(c.totalSiSalta)}</div>` : ''}
-            `}
-        </div>`;
-    }).join('');
-
-    const htmlCelular = `
-        <div style="max-width:380px;margin:0 auto;">
-            <div style="text-align:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:10px;">
-                <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
-                <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })} · ${clientes.length} cliente${clientes.length > 1 ? 's' : ''}</div>
+        <div id="${bloqueId}" style="max-width:380px;margin:0 auto 6px;padding:10px 4px;">
+            <div style="text-align:center;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:10px;">
+                <div style="font-weight:900;font-size:14px;color:#1e40af;">📅 ${bloque.etiqueta}</div>
+                <div style="font-size:10px;color:#64748b;">${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''}</div>
             </div>
             ${tarjetasHtml}
-            <div style="text-align:center;margin-top:6px;padding-top:8px;border-top:2px solid #0f172a;">
-                <span style="font-size:11px;color:#64748b;">TOTAL DE RUTA: </span>
-                <span style="font-size:16px;font-weight:900;">${_rc.fmt(totalGeneralSaldo)}${haySaltosEnRuta ? ` <span style="font-size:11px;font-weight:normal;color:#dc2626;">(si suben de plazo: ${_rc.fmt(totalGeneralSiSalta)})</span>` : ''}</span>
-            </div>
+        </div>
+        <div class="no-print" style="text-align:center;margin-bottom:22px;">
+            <button id="${bloqueId}-btn" onclick="_cobGuardarBloque('${bloqueId}', 'ruta-cobranza-${bloque.key}')" style="padding:9px 16px;border:none;border-radius:8px;background:#047857;color:#fff;font-weight:bold;cursor:pointer;font-size:12px;">📥 Guardar esta imagen (${bloque.etiqueta})</button>
         </div>`;
+    }).join('<hr style="border:none;border-top:2px dashed #cbd5e1;max-width:380px;margin:0 auto 18px;">');
+
+    const htmlCelular = `
+        <div style="text-align:center;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:14px;max-width:380px;margin-left:auto;margin-right:auto;">
+            <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
+            <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })} · ${clientes.length} cliente${clientes.length > 1 ? 's' : ''} en ${bloques.length} bloque${bloques.length > 1 ? 's' : ''} de mes</div>
+        </div>
+        ${bloquesCelularHtml}
+        <script>
+        function _cobGuardarBloque(id, filename){
+            function ir(){
+                var node = document.getElementById(id);
+                if (!node) { alert('No se encontró el bloque.'); return; }
+                var btn = document.getElementById(id + '-btn');
+                var old = btn ? btn.textContent : '';
+                if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
+                html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+                    var a = document.createElement('a');
+                    a.download = filename + '.png';
+                    a.href = canvas.toDataURL('image/png');
+                    a.click();
+                }).catch(function(err){ console.error(err); alert('No se pudo generar la imagen de este bloque.'); })
+                .finally(function(){ if (btn) { btn.disabled = false; btn.textContent = old || '📥 Guardar esta imagen'; } });
+            }
+            if (typeof html2canvas !== 'undefined') return ir();
+            if (typeof mmpCargarHtml2CanvasDocumento === 'function') { mmpCargarHtml2CanvasDocumento(ir); return; }
+            alert('No se pudo cargar el motor de imagen. Recarga la página e intenta de nuevo.');
+        }
+        <\/script>`;
 
     // 6. Ofrecer ambos formatos — el usuario elige cuál generar
-    const eleccion = confirm("Aceptar = Hoja tamaño carta (imprimir/PDF)\nCancelar = Imagen optimizada para celular");
+    const eleccion = confirm("Aceptar = Hoja tamaño carta (imprimir/PDF)\nCancelar = Imagen por bloques de mes (celular)");
     const fecha = hoy.toISOString().slice(0, 10);
     if (window.TicketService && typeof window.TicketService.openDocument === 'function') {
         if (eleccion) {
@@ -1883,7 +1946,93 @@ window.generarListadoCobranza = function() {
         <style>body{font-family:Arial,sans-serif;padding:20px;color:#0f172a;} @media print{button{display:none!important;}body{padding:0;}}</style>
         </head><body>${htmlCarta}<button onclick="window.print()" style="margin-top:14px;padding:10px 20px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🖨️ Imprimir Ruta</button></body></html>`);
     ventana.document.close();
+}
+
+// ─── Entrada 1: generar desde los checkboxes marcados en pantalla ───────
+window.generarListadoCobranza = function() {
+    const checkboxes = document.querySelectorAll('.chk-cobrador:checked');
+    if (checkboxes.length === 0) {
+        return alert("⚠️ Selecciona al menos un cliente marcando su casilla para generar el listado.");
+    }
+    const seleccion = Array.from(checkboxes)
+        .map(chk => window._filasParaCobranza[parseInt(chk.value)])
+        .filter(Boolean);
+
+    // Deshacer cualquier agrupación previa de pantalla — la ruta guardada
+    // siempre se guarda por folio individual, nunca por fila agrupada.
+    let ventasFlat = [];
+    seleccion.forEach(c => {
+        if (c.agrupadoPorCliente && Array.isArray(c.cuentasGrupo) && c.cuentasGrupo.length) {
+            ventasFlat.push(...c.cuentasGrupo);
+        } else {
+            ventasFlat.push(c);
+        }
+    });
+
+    // Ofrecer guardar esta ruta para poder reabrirla/reimprimirla después
+    // (con los saldos actualizados a ese día, no una foto congelada de hoy).
+    const nombreRuta = prompt('¿Guardar esta ruta para poder volver a generarla después?\nEscribe un nombre (o deja vacío para no guardarla):', `Ruta ${new Date().toLocaleDateString('es-MX')}`);
+    if (nombreRuta && nombreRuta.trim()) {
+        const folios = ventasFlat.map(v => v.folio).filter(Boolean);
+        const rutas = StorageService.get('rutasCobranzaGuardadas', []);
+        rutas.unshift({
+            id: Date.now(),
+            nombre: nombreRuta.trim(),
+            fechaGuardada: new Date().toISOString(),
+            folios,
+            totalClientesAlGuardar: seleccion.length
+        });
+        StorageService.set('rutasCobranzaGuardadas', rutas.slice(0, 60));
+    }
+
+    _cobranzaConstruirYAbrir(ventasFlat);
 };
+
+// ─── Entrada 2: reabrir una ruta ya guardada, con datos actualizados ────
+window._cobranzaReabrirRuta = function(id) {
+    const rutas = StorageService.get('rutasCobranzaGuardadas', []);
+    const ruta = rutas.find(r => r.id === id);
+    if (!ruta) return alert('No se encontró esa ruta guardada.');
+    const ventasFlat = _cobranzaVentasDesdeFolios(ruta.folios);
+    if (!ventasFlat.length) {
+        return alert('Ninguna de las cuentas de esta ruta sigue activa hoy (todas fueron liquidadas o canceladas).');
+    }
+    _cobranzaConstruirYAbrir(ventasFlat);
+};
+
+window._cobranzaEliminarRutaGuardada = function(id) {
+    if (!confirm('¿Eliminar esta ruta guardada?\n\nEsto solo borra la lista guardada — no afecta las cuentas ni sus saldos.')) return;
+    const rutas = StorageService.get('rutasCobranzaGuardadas', []).filter(r => r.id !== id);
+    StorageService.set('rutasCobranzaGuardadas', rutas);
+    if (typeof renderRutasCobranzaGuardadas === 'function') renderRutasCobranzaGuardadas();
+};
+
+// ─── Pantalla: listado de rutas guardadas ───────────────────────────────
+window.renderRutasCobranzaGuardadas = function() {
+    const cont = document.getElementById('arc-v3-contenido') ||
+                 document.getElementById('reportes') ||
+                 document.getElementById('dashboardContenido');
+    if (!cont) return;
+    const rutas = StorageService.get('rutasCobranzaGuardadas', []);
+    cont.innerHTML = `
+        <div style="padding:20px;max-width:800px;margin:0 auto;">
+            <button onclick="renderARC_v3()" style="margin-bottom:12px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">⬅️ Volver</button>
+            <h2 style="margin:0 0 16px;">📂 Rutas de Cobranza Guardadas</h2>
+            ${rutas.length === 0 ? '<p style="color:#64748b;">Aún no has guardado ninguna ruta. Se ofrece guardar cada vez que generas una desde "📋 Generar Cobranza".</p>' : rutas.map(r => `
+                <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-weight:900;">${r.nombre}</div>
+                        <div style="font-size:11px;color:#64748b;">Guardada el ${new Date(r.fechaGuardada).toLocaleDateString('es-MX')} · ${r.folios.length} venta(s)</div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button onclick="_cobranzaReabrirRuta(${r.id})" style="padding:8px 14px;border-radius:8px;border:none;background:#f59e0b;color:#713f12;font-weight:bold;cursor:pointer;font-size:12px;">🔁 Volver a generar</button>
+                        <button onclick="_cobranzaEliminarRutaGuardada(${r.id})" style="padding:8px 10px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">🗑️</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>`;
+};
+
 
 
 // ================================================================
