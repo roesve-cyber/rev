@@ -26,6 +26,25 @@ function _cotMontoCuponPlan(plan) {
     return Math.max(0, monto);
 }
 
+// El cupón de cada plazo se calcula de forma independiente, así que nada
+// garantiza que crezca junto con el plazo -- un plazo corto podría salir con
+// más cupón en pesos que uno largo. Para que nunca se vea un plazo corto
+// dando más que uno largo SIN tocar la configuración ni regalar un solo peso
+// extra en ningún plazo, se recorta hacia ABAJO: se recorre de mayor a menor
+// plazo y cada plazo corto queda topado al cupón del siguiente plazo más
+// largo (nunca al revés). El plazo más largo siempre se queda exactamente en
+// lo que dicta la configuración. (Misma lógica que cotizador-movil.html.)
+function _cotCuponesMonotonosPorPlazo(planesOrdenadosPorMeses) {
+    const crudos = planesOrdenadosPorMeses.map(p => _cotMontoCuponPlan(p));
+    const finales = new Array(crudos.length);
+    let techo = Infinity;
+    for (let i = crudos.length - 1; i >= 0; i--) {
+        techo = Math.min(crudos[i], techo);
+        finales[i] = techo;
+    }
+    return finales; // finales[i] corresponde a planesOrdenadosPorMeses[i]
+}
+
 // Función principal que renderiza la vista de cotizaciones
 function renderCotizaciones() {
     const cont = document.getElementById('cotizaciones');
@@ -657,9 +676,10 @@ if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
       </tr></thead>
       <tbody>`;
       
-    planes.forEach(plan => {
+    const cuponesFinales = _cotCuponesMonotonosPorPlazo(planes);
+    planes.forEach((plan, i) => {
         const customBadge = plan.custom ? ' <br><span style="background:#f59e0b;color:white;padding:2px 6px;border-radius:10px;font-size:9px;">Personalizado</span>' : '';
-        const montoCupon = _cotMontoCuponPlan(plan);
+        const montoCupon = cuponesFinales[i];
         const celdaCupon = montoCupon > 0
             ? `<span style="font-weight:bold;color:#7e22ce;">+${dinero(montoCupon)}</span>`
             : '<span style="color:#9ca3af;">--</span>';
@@ -673,7 +693,7 @@ if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
     });
     tablaHtml += '</tbody></table>';
 
-    const mejorCupon = Math.max(0, ...planes.map(p => _cotMontoCuponPlan(p)));
+    const mejorCupon = Math.max(0, ...cuponesFinales);
     if (mejorCupon > 0.01) {
         tablaHtml += `<div style="margin-top:10px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;padding:10px 12px;text-align:center;color:#7e22ce;font-size:12.5px;">
             🎟️ <b>Si liquida su crédito dentro del plazo pactado</b>, paga el total nominal y recibe hasta <b>${dinero(mejorCupon)}</b> en cupón de saldo a favor para su próxima compra.
@@ -1366,15 +1386,16 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
               planes.sort((a, b) => a.meses - b.meses);
           }
 
-          planeRows = planes.map(plan => `
+          const cuponesFinalesTicket = _cotCuponesMonotonosPorPlazo(planes);
+          planeRows = planes.map((plan, i) => `
             <tr>
               <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
               <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
               <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
-              <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${_cotMontoCuponPlan(plan) > 0 ? '+' + fmtMXN(_cotMontoCuponPlan(plan)) : '--'}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${cuponesFinalesTicket[i] > 0 ? '+' + fmtMXN(cuponesFinalesTicket[i]) : '--'}</td>
             </tr>`).join('');
 
-          mejorCuponTicket = Math.max(0, ...planes.map(p => _cotMontoCuponPlan(p)));
+          mejorCuponTicket = Math.max(0, ...cuponesFinalesTicket);
         }
 
         cotizacionHTML = `

@@ -61,6 +61,50 @@ function _cxcCalcularCuponPronto(mesesPlan, capitalContado, totalConTasaNormal) 
 }
 window._cxcCalcularCuponPronto = _cxcCalcularCuponPronto;
 
+// ============================================================================
+// 🎟️ TOPE MONOTÓNICO DE CUPÓN ENTRE PLAZOS
+// ============================================================================
+// _cxcCalcularCuponPronto calcula el cupón de CADA plazo de forma
+// independiente (con su propia tasa base), así que nada garantiza que crezca
+// junto con el plazo -- un plazo corto podría dar más cupón en pesos que uno
+// largo si el "colchón" entre tasa normal y tasa base no crece parejo. Para
+// que la promesa en venta y el cupón real que se emite al cobrar NUNCA le
+// den más a un plazo corto que a uno largo (sin tocar la configuración ni
+// regalar un peso extra en ningún plazo), se recorta hacia ABAJO: de mayor a
+// menor plazo, cada plazo corto queda topado al cupón del siguiente plazo
+// más largo (nunca al revés). El plazo más largo siempre se queda
+// exactamente en lo que dicta la configuración. MISMA lógica que
+// _cuponesMonotonosPorPlazo en cotizador-movil.html / cotizaciones.js -- esta
+// es la versión que de verdad se promete en venta y se paga al cobrar.
+function _cxcPlanesConCuponTopado(capitalContado, periodicidad) {
+    if (!(Number(capitalContado) > 0) || typeof CalculatorService === 'undefined' || typeof CalculatorService.calcularCreditoConPeriodicidad !== 'function') return [];
+    const planes = CalculatorService.calcularCreditoConPeriodicidad(Number(capitalContado), periodicidad || 'semanal')
+        .slice()
+        .sort((a, b) => a.meses - b.meses);
+    const crudos = planes.map(p => _cxcCalcularCuponPronto(p.meses, capitalContado, p.total).monto);
+    const finales = new Array(crudos.length);
+    let techo = Infinity;
+    for (let i = crudos.length - 1; i >= 0; i--) {
+        techo = Math.min(crudos[i], techo);
+        finales[i] = techo;
+    }
+    return planes.map((p, i) => ({ meses: p.meses, total: p.total, cuponTopado: finales[i] }));
+}
+window._cxcPlanesConCuponTopado = _cxcPlanesConCuponTopado;
+
+// Cupón topado para UN plazo específico -- usa el tope de arriba si ese
+// plazo coincide con uno de los planes estándar generados para ese capital y
+// periodicidad. Si es un plazo personalizado (cotizador avanzado/auditoría)
+// que no aparece entre los planes estándar, no hay con qué compararlo y se
+// regresa el monto crudo (sin tope), igual que antes.
+function _cxcCuponTopadoParaPlazo(mesesPlan, capitalContado, periodicidad, totalConTasaNormalFallback) {
+    const planesTopados = _cxcPlanesConCuponTopado(capitalContado, periodicidad);
+    const encontrado = planesTopados.find(p => Number(p.meses) === Number(mesesPlan));
+    if (encontrado) return encontrado.cuponTopado;
+    return _cxcCalcularCuponPronto(mesesPlan, capitalContado, totalConTasaNormalFallback).monto;
+}
+window._cxcCuponTopadoParaPlazo = _cxcCuponTopadoParaPlazo;
+
 // 🎟️ Redondeo del monto final de cupón (config: redondeoCuponMultiplo/
 // redondeoCuponDireccion en Configuración > Cupones de Saldo a Favor). Sin
 // múltiplo definido (0, vacío o 1) se regresa el monto exacto tal cual. Con
@@ -128,9 +172,11 @@ function _cxcEstadoPlazoCuenta(cuenta) {
     // totalFinanciado directo. Ahora usa _cxcCalcularCuponPronto, el MISMO
     // motor que usa la emisión real -- corre la fórmula de venta dos veces
     // (tasa normal vs tasa base para cupón) y saca la diferencia en pesos.
-    const { monto: montoCuponCalculado, porcentajeEfectivo: porcentajeCupon } = (aunEnPlazo && ventaEsNueva && !esPlan1Mes)
-        ? _cxcCalcularCuponPronto(mesesPlan, capitalContado, totalFinanciado)
-        : { monto: 0, porcentajeEfectivo: 0 };
+    const periodicidadCuenta = cuenta.periodicidad || 'semanal';
+    const montoCuponCalculado = (aunEnPlazo && ventaEsNueva && !esPlan1Mes)
+        ? _cxcCuponTopadoParaPlazo(mesesPlan, capitalContado, periodicidadCuenta, totalFinanciado)
+        : 0;
+    const porcentajeCupon = totalFinanciado > 0 ? Math.round((montoCuponCalculado / totalFinanciado) * 1000) / 10 : 0;
     const cuponSiLiquidaHoy = montoCuponCalculado;
 
     return {
@@ -687,7 +733,11 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
     }
 
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
-    const { monto: beneficio, porcentajeEfectivo: porcentajeCupon } = _cxcCalcularCuponPronto(mesesPlanOriginal, capitalContado, totalFinanciado);
+    // 🎟️ Topado contra los demás plazos disponibles para este mismo capital y
+    // periodicidad (ver _cxcCuponTopadoParaPlazo) -- así lo que se emite de
+    // verdad nunca le da más a un plazo corto que a uno largo.
+    const beneficio = _cxcCuponTopadoParaPlazo(mesesPlanOriginal, capitalContado, periodicidad, totalFinanciado);
+    const porcentajeCupon = totalFinanciado > 0 ? Math.round((beneficio / totalFinanciado) * 1000) / 10 : 0;
 
     return {
         ...base,
@@ -1904,8 +1954,21 @@ function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPolitica
         btnAbono.style.opacity = '0.6';
         btnAbono.style.cursor = 'not-allowed';
     }
+    // 🛡️ AVISO DE TARDANZA: la escritura a Firebase puede tardar varios
+    // segundos con señal lenta, y en ese lapso el botón solo dice
+    // "Procesando…" sin ningún otro mensaje -- eso se puede sentir igual que
+    // si el sistema se hubiera quedado mudo (nunca truena, pero tampoco
+    // avisa que sigue vivo). Este aviso NO cancela ni toca la operación real
+    // -- solo, si tras 15s sigue sin resolver, le dice al operador que siga
+    // esperando en vez de cerrar el modal o reintentar capturando de nuevo.
+    let timeoutTardanza = setTimeout(() => {
+        timeoutTardanza = null;
+        alert("⏳ El abono sigue procesándose (puede ser señal lenta).\n\nNO cierres esta pantalla ni reintentes -- espera el aviso de \"aplicado correctamente\" o de error. Si tarda demasiado, revisa tu conexión y verifica el estado de la cuenta antes de volver a capturar el abono.");
+    }, 15000);
+
     return _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion)
         .finally(() => {
+            if (timeoutTardanza) clearTimeout(timeoutTardanza);
             // Si el modal ya se cerró (abono aplicado con éxito), el botón ya no
             // existe en el DOM y no hay nada que reactivar.
             const btnFinal = document.getElementById('btnConfirmarAbonoAvanzado');

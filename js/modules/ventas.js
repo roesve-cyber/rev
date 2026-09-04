@@ -1643,17 +1643,28 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
         return;
     }
 
-    const porcentajeCupon = (typeof window._cxcPorcentajeCuponPorPlazo === 'function')
-        ? window._cxcPorcentajeCuponPorPlazo(planElegido.meses)
-        : Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
-    let montoCupon = planElegido.total * Math.max(0, porcentajeCupon) / 100;
-    const _configRedondeo = StorageService.get('configCreditoGlobal', {});
-    const _multiploRedondeo = Number(_configRedondeo?.redondeoCuponMultiplo || 0);
-    if (_multiploRedondeo > 1) {
-        const _factor = (_configRedondeo?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
-        montoCupon = _factor(montoCupon / _multiploRedondeo) * _multiploRedondeo;
-    }
+    const periodicidadPopup = document.getElementById("selPeriodicidad")?.value || "semanal";
+    // 🎟️ Topado contra los demás plazos disponibles para este mismo capital
+    // (ver _cxcCuponTopadoParaPlazo en cxc.js) -- así lo que se le promete al
+    // cliente aquí nunca le da más a un plazo corto que a uno largo, y
+    // siempre coincide con lo que de verdad se emitirá al cobrar.
+    let montoCupon = (typeof window._cxcCuponTopadoParaPlazo === 'function')
+        ? window._cxcCuponTopadoParaPlazo(planElegido.meses, capitalContado, periodicidadPopup, planElegido.total)
+        : (() => {
+            const pct = (typeof window._cxcPorcentajeCuponPorPlazo === 'function')
+                ? window._cxcPorcentajeCuponPorPlazo(planElegido.meses)
+                : Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+            let m = planElegido.total * Math.max(0, pct) / 100;
+            const _cfg = StorageService.get('configCreditoGlobal', {});
+            const _mult = Number(_cfg?.redondeoCuponMultiplo || 0);
+            if (_mult > 1) {
+                const _f = (_cfg?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
+                m = _f(m / _mult) * _mult;
+            }
+            return Math.max(0, m);
+        })();
     if (montoCupon <= 0.01) return;
+    const porcentajeCupon = planElegido.total > 0 ? Math.round((montoCupon / planElegido.total) * 1000) / 10 : 0;
 
     overlay.innerHTML = `
         <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
