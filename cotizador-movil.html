@@ -563,23 +563,36 @@ function calcularCreditoConPeriodicidad(precio, periodicidad) {
 }
 
 // 🎟️ Cupón de pronto pago mostrado en la cotización (motiva al cliente a
-// liquidar dentro de su plazo pactado). Misma lógica que
-// _cxcPorcentajeCuponPorPlazo del sistema principal (cxc.js): si el plazo
-// tiene "tasaBaseCupon" configurada, el % es tasa - tasa base; si no, cae al
-// % fijo de configCreditoGlobal.porcentajeCuponProntoPago (default 3). El
-// plan de 1 mes no genera cupón -- ya es el escalón más corto.
-function _porcentajeCuponPlan(mesesPlan) {
-  const config = configCreditoGlobal || {};
-  const plazo = (config.plazos || []).find(p => Number(p.meses) === Number(mesesPlan));
-  const tieneBase = plazo && plazo.tasaBaseCupon !== undefined && plazo.tasaBaseCupon !== null && plazo.tasaBaseCupon !== '';
-  if (tieneBase) return Math.max(0, Number(plazo.tasa || 0) - Number(plazo.tasaBaseCupon || 0));
-  return Number(config.porcentajeCuponProntoPago ?? 3);
+// liquidar dentro de su plazo pactado). CORREGIDO (sep 2026): antes se
+// calculaba un % de puntos (tasa - tasa base) aplicado directo sobre el
+// total -- eso está mal, un % de puntos no tiene relación real con el
+// interés de verdad cobrado. La regla correcta: correr la MISMA fórmula de
+// venta dos veces sobre el mismo capital y los mismos meses -- una con la
+// tasa normal del plazo (lo que ya se cobró, plan.total) y otra con la
+// "tasa base para cupón" -- el cupón es la diferencia entre esos dos
+// totales. Este archivo es standalone (no carga cxc.js), así que reimplementa
+// la misma fórmula de calcularCredito() de forma aislada para un solo
+// plazo/tasa. El plan de 1 mes no genera cupón -- ya es el escalón más corto.
+function _totalConTasaPersonalizada(precio, meses, tasaPct) {
+  const tasaDecimal = tasaPct / 100;
+  const totalBase = precio * (1 + (tasaDecimal * meses));
+  const semanas = meses * 4;
+  let pagoSemanal = Math.ceil((totalBase / semanas) / 10) * 10;
+  return pagoSemanal * semanas;
 }
-function _montoCuponPlan(plan) {
+function _montoCuponPlan(plan, capitalContado) {
   if (!plan || Number(plan.meses) === 1) return 0;
-  const pct = _porcentajeCuponPlan(plan.meses);
-  let monto = Number(plan.total || 0) * Math.max(0, pct) / 100;
   const config = configCreditoGlobal || {};
+  const plazo = (config.plazos || []).find(p => Number(p.meses) === Number(plan.meses));
+  const tieneBase = plazo && plazo.tasaBaseCupon !== undefined && plazo.tasaBaseCupon !== null && plazo.tasaBaseCupon !== '';
+  let monto;
+  if (tieneBase && Number(capitalContado) > 0) {
+    const totalConTasaBase = _totalConTasaPersonalizada(Number(capitalContado), Number(plan.meses), Number(plazo.tasaBaseCupon));
+    monto = totalConTasaBase > 0 ? Math.max(0, Number(plan.total || 0) - totalConTasaBase) : 0;
+  } else {
+    const pct = Number(config.porcentajeCuponProntoPago ?? 3);
+    monto = Number(plan.total || 0) * Math.max(0, pct) / 100;
+  }
   const multiplo = Number(config.redondeoCuponMultiplo || 0);
   if (multiplo > 1) {
     const factor = (config.redondeoCuponDireccion === 'arriba') ? Math.ceil : Math.floor;
@@ -1030,13 +1043,13 @@ function recalcularTodo() {
     return;
   }
   const etiquetaPer = periodicidadActual === 'semanal' ? 'Semanas' : periodicidadActual === 'quincenal' ? 'Quincenas' : 'Meses';
-  const mejorCupon = Math.max(0, ...planes.map(p => _montoCuponPlan(p)));
+  const mejorCupon = Math.max(0, ...planes.map(p => _montoCuponPlan(p, saldo)));
   wrap.innerHTML = `
     <table class="planes">
       <thead><tr><th>Plazo</th><th>${etiquetaPer}</th><th>Pago</th><th>Total</th><th style="color:#7e22ce;">🎟️ Cupón</th></tr></thead>
       <tbody>
         ${planes.map(p => {
-          const monto = _montoCuponPlan(p);
+          const monto = _montoCuponPlan(p, saldo);
           return `
           <tr${p.custom ? ' style="background:#fffbeb;"' : ''}>
             <td class="meses">${p.meses}m${p.custom ? ' <span style="background:#f59e0b;color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:800;">PERSONAL.</span>' : ''}</td>
@@ -1181,11 +1194,11 @@ function textoResumenCotizacion({ cot, planes }) {
     const etiquetaPer = cot.periodicidad === 'semanal' ? 'semana(s)' : cot.periodicidad === 'quincenal' ? 'quincena(s)' : 'mes(es)';
     lineas.push('Plan de crédito:');
     planes.forEach(p => {
-      const monto = _montoCuponPlan(p);
+      const monto = _montoCuponPlan(p, cot.saldoFinanciar);
       const cuponTxt = monto > 0 ? ` 🎟️ +${dinero(monto)} cupón si liquida a tiempo` : '';
       lineas.push(`  ${p.meses}m${p.custom ? ' (personalizado)' : ''} — ${p.pagos} pagos de ${dinero(p.abono)} (${etiquetaPer}) — Total: ${dinero(p.total)}${cuponTxt}`);
     });
-    const mejorCupon = Math.max(0, ...planes.map(p => _montoCuponPlan(p)));
+    const mejorCupon = Math.max(0, ...planes.map(p => _montoCuponPlan(p, cot.saldoFinanciar)));
     if (mejorCupon > 0.01) {
       lineas.push('');
       lineas.push(`🎟️ Si liquida su crédito dentro del plazo pactado, recibe hasta ${dinero(mejorCupon)} en cupón de saldo a favor para su próxima compra.`);
@@ -1250,9 +1263,9 @@ function generarTicketCotizacionHTML(cot, planesUsados) {
         <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
         <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${dinero(plan.abono)} ${labelMap[cot.periodicidad] || ''}</td>
         <td style="padding:2px 0; text-align:right; font-size:9px;">${dinero(plan.total)}</td>
-        <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${_montoCuponPlan(plan) > 0 ? '+' + dinero(_montoCuponPlan(plan)) : '--'}</td>
+        <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${_montoCuponPlan(plan, cot.saldoFinanciar) > 0 ? '+' + dinero(_montoCuponPlan(plan, cot.saldoFinanciar)) : '--'}</td>
       </tr>`).join('');
-    mejorCuponTicket = Math.max(0, ...planesUsados.map(p => _montoCuponPlan(p)));
+    mejorCuponTicket = Math.max(0, ...planesUsados.map(p => _montoCuponPlan(p, cot.saldoFinanciar)));
   }
 
   return `
