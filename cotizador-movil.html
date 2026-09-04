@@ -601,6 +601,26 @@ function _montoCuponPlan(plan, capitalContado) {
   return Math.max(0, monto);
 }
 
+// El cupón de cada plazo se calcula de forma independiente (con la tasa base
+// de ESE plazo), así que nada garantiza que crezca junto con el plazo -- un
+// plazo corto puede salir con más cupón en pesos que uno largo si el
+// "colchón" entre tasa normal y tasa base no crece parejo. Para que nunca se
+// vea un plazo corto dando más que uno largo SIN tocar la configuración ni
+// regalar un solo peso extra en ningún plazo, se recorta hacia ABAJO: se
+// recorre de mayor a menor plazo y cada plazo corto queda topado al cupón
+// del siguiente plazo más largo (nunca al revés). El plazo más largo siempre
+// se queda exactamente en lo que dicta la configuración.
+function _cuponesMonotonosPorPlazo(planesOrdenadosPorMeses, capitalContado) {
+  const crudos = planesOrdenadosPorMeses.map(p => _montoCuponPlan(p, capitalContado));
+  const finales = new Array(crudos.length);
+  let techo = Infinity;
+  for (let i = crudos.length - 1; i >= 0; i--) {
+    techo = Math.min(crudos[i], techo);
+    finales[i] = techo;
+  }
+  return finales; // finales[i] corresponde a planesOrdenadosPorMeses[i]
+}
+
 // ============================================================================
 // FIREBASE / SESIÓN
 // ============================================================================
@@ -1043,13 +1063,14 @@ function recalcularTodo() {
     return;
   }
   const etiquetaPer = periodicidadActual === 'semanal' ? 'Semanas' : periodicidadActual === 'quincenal' ? 'Quincenas' : 'Meses';
-  const mejorCupon = Math.max(0, ...planes.map(p => _montoCuponPlan(p, saldo)));
+  const cuponesFinales = _cuponesMonotonosPorPlazo(planes, saldo);
+  const mejorCupon = Math.max(0, ...cuponesFinales);
   wrap.innerHTML = `
     <table class="planes">
       <thead><tr><th>Plazo</th><th>${etiquetaPer}</th><th>Pago</th><th>Total</th><th style="color:#7e22ce;">🎟️ Cupón</th></tr></thead>
       <tbody>
-        ${planes.map(p => {
-          const monto = _montoCuponPlan(p, saldo);
+        ${planes.map((p, i) => {
+          const monto = cuponesFinales[i];
           return `
           <tr${p.custom ? ' style="background:#fffbeb;"' : ''}>
             <td class="meses">${p.meses}m${p.custom ? ' <span style="background:#f59e0b;color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:800;">PERSONAL.</span>' : ''}</td>
@@ -1193,12 +1214,13 @@ function textoResumenCotizacion({ cot, planes }) {
     lineas.push('');
     const etiquetaPer = cot.periodicidad === 'semanal' ? 'semana(s)' : cot.periodicidad === 'quincenal' ? 'quincena(s)' : 'mes(es)';
     lineas.push('Plan de crédito:');
-    planes.forEach(p => {
-      const monto = _montoCuponPlan(p, cot.saldoFinanciar);
+    const cuponesFinales = _cuponesMonotonosPorPlazo(planes, cot.saldoFinanciar);
+    planes.forEach((p, i) => {
+      const monto = cuponesFinales[i];
       const cuponTxt = monto > 0 ? ` 🎟️ +${dinero(monto)} cupón si liquida a tiempo` : '';
       lineas.push(`  ${p.meses}m${p.custom ? ' (personalizado)' : ''} — ${p.pagos} pagos de ${dinero(p.abono)} (${etiquetaPer}) — Total: ${dinero(p.total)}${cuponTxt}`);
     });
-    const mejorCupon = Math.max(0, ...planes.map(p => _montoCuponPlan(p, cot.saldoFinanciar)));
+    const mejorCupon = Math.max(0, ...cuponesFinales);
     if (mejorCupon > 0.01) {
       lineas.push('');
       lineas.push(`🎟️ Si liquida su crédito dentro del plazo pactado, recibe hasta ${dinero(mejorCupon)} en cupón de saldo a favor para su próxima compra.`);
@@ -1258,14 +1280,15 @@ function generarTicketCotizacionHTML(cot, planesUsados) {
   const hasCustom = planesUsados.some(p => p.custom);
   const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
   if (cot.saldoFinanciar > 0 && planesUsados.length > 0) {
-    planeRows = planesUsados.map(plan => `
+    const cuponesFinales = _cuponesMonotonosPorPlazo(planesUsados, cot.saldoFinanciar);
+    planeRows = planesUsados.map((plan, i) => `
       <tr>
         <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
         <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${dinero(plan.abono)} ${labelMap[cot.periodicidad] || ''}</td>
         <td style="padding:2px 0; text-align:right; font-size:9px;">${dinero(plan.total)}</td>
-        <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${_montoCuponPlan(plan, cot.saldoFinanciar) > 0 ? '+' + dinero(_montoCuponPlan(plan, cot.saldoFinanciar)) : '--'}</td>
+        <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${cuponesFinales[i] > 0 ? '+' + dinero(cuponesFinales[i]) : '--'}</td>
       </tr>`).join('');
-    mejorCuponTicket = Math.max(0, ...planesUsados.map(p => _montoCuponPlan(p, cot.saldoFinanciar)));
+    mejorCuponTicket = Math.max(0, ...cuponesFinales);
   }
 
   return `
