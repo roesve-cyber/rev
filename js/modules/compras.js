@@ -3805,6 +3805,11 @@ function abrirModalCompraDirectaMulti() {
           <button onclick="agregarArticuloCompraDirecta()" style="padding:9px 16px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">➕ Añadir Artículo</button>
         </div>
 
+        <div style="margin-bottom:12px;">
+          <button type="button" onclick="agregarGastoCompraDirecta()" style="padding:8px 14px;background:#fff7ed;color:#c2410c;border:1px dashed #fb923c;border-radius:6px;cursor:pointer;font-weight:bold;font-size:12px;">🧾 Añadir "Otro" (gasto, no se agrega al inventario)</button>
+          <span style="font-size:11px;color:#9ca3af;margin-left:6px;">Ej: bolsas, cinta, insumos que compraste junto con la mercancía pero no son para reventa.</span>
+        </div>
+
         <div id="tablaArticulosCompraDirecta" style="margin-bottom:16px;"></div>
         
         <div style="margin-bottom:15px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;">
@@ -3862,6 +3867,42 @@ function agregarArticuloCompraDirecta() {
     _renderTablaArticulosCompraDirecta();
 }
 
+// Un "Otro" (gasto) NO es un producto: no toca costo/precio ni inventario ni
+// historial de costos. Se agrega a la tabla con esGasto:true; guardarCompraDirectaFinal
+// lo excluye de toda la lógica de inventario pero SÍ lo suma al total de la
+// compra (para que el pago/deuda al banco o proveedor salga correcto) y lo
+// registra en gastosOperativos para que aparezca como gasto de operación en
+// Estados Financieros, no como costo de venta.
+function agregarGastoCompraDirecta() {
+    if (!_comprasRequireAdmin('Añadir gasto en compra directa')) return;
+    const descripcion = (prompt('📝 Descripción de lo que compraste (NO es para reventa). Ej: "Bolsas de empaque", "Cinta canela":') || '').trim();
+    if (!descripcion) return;
+
+    const montoStr = prompt(`💲 Monto total de "${descripcion}" (se suma al total a pagar de esta compra, pero NO afecta el costo ni el inventario de tus productos):`, '');
+    const monto = parseFloat(montoStr);
+    if (!monto || monto <= 0) return alert('⚠️ Monto inválido.');
+
+    const cats = (typeof window.getCategoriasGasto === 'function') ? window.getCategoriasGasto() : [{ nombre: 'Otros', icono: '📝' }];
+    const catsTxt = cats.map((c, i) => `${i + 1}. ${c.icono || ''} ${c.nombre}`).join('\n');
+    const catSel = prompt(`📂 ¿En qué categoría de gasto se registra "${descripcion}"?\n\n${catsTxt}\n\nEscribe el número:`, String(cats.length));
+    const catIdx = parseInt(catSel) - 1;
+    const categoriaGasto = (cats[catIdx] || cats[cats.length - 1] || { nombre: 'Otros' }).nombre;
+
+    window._articulosCompraDirecta = window._articulosCompraDirecta || [];
+    window._articulosCompraDirecta.push({
+        esGasto: true,
+        productoId: null,
+        nombre: descripcion,
+        categoriaGasto: categoriaGasto,
+        costo: monto,
+        cantidad: 1,
+        subtotal: monto,
+        color: '—',
+        ubicacion: '—'
+    });
+    _renderTablaArticulosCompraDirecta();
+}
+
 function _renderTablaArticulosCompraDirecta() {
     const cont = document.getElementById('tablaArticulosCompraDirecta');
     if (!cont) return;
@@ -3877,6 +3918,23 @@ function _renderTablaArticulosCompraDirecta() {
     
     const rows = arts.map((a, i) => {
         total += a.subtotal;
+        if (a.esGasto) {
+            return `<tr style="background:#fff7ed;">
+                <td style="padding:8px;">🧾 ${a.nombre} <span style="display:inline-block;margin-left:6px;padding:1px 7px;background:#fed7aa;color:#9a3412;border-radius:999px;font-size:10px;font-weight:bold;">GASTO · ${a.categoriaGasto || 'Otros'}</span></td>
+                <td style="padding:8px;text-align:center;color:#9ca3af;">—</td>
+                <td style="padding:8px;text-align:center;color:#9ca3af;">No aplica</td>
+                <td style="padding:8px;text-align:center;">
+                    <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'}
+                           onchange="if(${esAdmin}){window._articulosCompraDirecta[${i}].costo = parseFloat(event.target.value)||0; window._articulosCompraDirecta[${i}].subtotal = window._articulosCompraDirecta[${i}].cantidad * window._articulosCompraDirecta[${i}].costo; _renderTablaArticulosCompraDirecta();}" />
+                </td>
+                <td style="padding:8px;text-align:center;">
+                    <input type="number" min="1" value="${a.cantidad}" style="width:60px;text-align:center;"
+                           onchange="window._articulosCompraDirecta[${i}].cantidad = parseInt(event.target.value)||1; window._articulosCompraDirecta[${i}].subtotal = window._articulosCompraDirecta[${i}].cantidad * window._articulosCompraDirecta[${i}].costo; _renderTablaArticulosCompraDirecta();" />
+                </td>
+                <td style="padding:8px;text-align:right; font-weight:bold;">${dinero(a.subtotal)}</td>
+                <td style="padding:8px;text-align:center;"><button onclick="window._articulosCompraDirecta.splice(${i},1);_renderTablaArticulosCompraDirecta();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
+            </tr>`;
+        }
         return `<tr>
             <td style="padding:8px;">${a.nombre}</td>
             <td style="padding:8px;text-align:center;"><input type="text" value="${a.color}" placeholder="Color" onchange="window._articulosCompraDirecta[${i}].color = this.value;" style="width:80px;padding:5px;border:1px solid #cbd5e1;border-radius:4px;"></td>
@@ -3962,7 +4020,9 @@ function guardarCompraDirectaFinal() {
         }
     }
 
-    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nCosto Total: ${dinero(totalCompra)}\n${montoUsadoDelSaldo > 0 ? 'Saldo a favor aplicado: -' + dinero(montoUsadoDelSaldo) + '\n' : ''}Total a pagar: ${dinero(totalAPagarReal)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
+    const totalGastosPreview = arts.filter(a => a.esGasto).reduce((s, a) => s + (Number(a.subtotal) || 0), 0);
+    const desgloseGastoTxt = totalGastosPreview > 0 ? `\nDe los cuales son "Otros" (gasto de operación, no inventario): ${dinero(totalGastosPreview)}` : '';
+    const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nCosto Total: ${dinero(totalCompra)}${desgloseGastoTxt}\n${montoUsadoDelSaldo > 0 ? 'Saldo a favor aplicado: -' + dinero(montoUsadoDelSaldo) + '\n' : ''}Total a pagar: ${dinero(totalAPagarReal)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
     if (!confirm(msjConfirmar)) return;
 
     // Si usó el saldo, lo descontamos de la base de datos
@@ -3981,6 +4041,12 @@ function guardarCompraDirectaFinal() {
     let avisoActualizacion = "";
 
     arts.forEach((art, index) => {
+        // Los "otros" (gastos, no producto) no tocan costo/precio, inventario,
+        // historial de costos ni recepciones — solo cuentan para el total a
+        // pagar (ya sumado arriba en totalCompra) y se registran abajo en
+        // gastosOperativos.
+        if (art.esGasto) return;
+
         // 1. Historial de Costos
         guardarHistorialCosto({
             productoId: art.productoId, precioCompra: art.costo, fecha: fechaFormatMX,
@@ -4121,7 +4187,7 @@ function guardarCompraDirectaFinal() {
                     proveedorId: prov.id,
                     folioOrigen: folioCompraDirecta,
                     fecha: fechaFormatMX,
-                    articulos: arts,
+                    articulos: arts.filter(a => !a.esGasto), // los "otros" (gasto) no son inventario pendiente de consignación
                     cantidadCampo: 'cantidad',
                     factorCosto: 1, // FIJADO: La base de datos mantendrá siempre el 100% del costo original
                     origen: 'compraDirecta'
@@ -4216,8 +4282,37 @@ function guardarCompraDirectaFinal() {
     StorageService.set("recepciones", recepciones);
     StorageService.set("movimientosInventario", movimientosInventario);
 
+    // 6. Registrar los "otros" (gastos, no producto) en gastosOperativos.
+    // El dinero YA se contabilizó arriba (contado/crédito/MSI/consignación
+    // usan totalCompra, que incluye estos renglones), así que aquí NO se
+    // vuelve a tocar caja/banco — solo se deja el registro contable para que
+    // aparezca como gasto de operación (Estado de Resultados) y no como costo
+    // de venta ni como producto en inventario.
+    const gastoLines = arts.filter(a => a.esGasto);
+    if (gastoLines.length > 0) {
+        let gastosOperativos = StorageService.get('gastosOperativos', []);
+        gastoLines.forEach((g, idx) => {
+            gastosOperativos.push({
+                id: idCompraUnico + 1000 + idx,
+                categoria: g.categoriaGasto || 'Otros',
+                descripcion: `${g.nombre} (Compra ${folioCompraDirecta} — ${prov.nombre})`,
+                monto: Number(g.subtotal) || 0,
+                fecha: fechaStr,
+                cuentaDebito: metodoPago === 'contado' ? cuentaOrigenId : metodoPago,
+                etiquetaCuenta: metodoPago === 'contado' ? cuentaOrigenNombre : formaPagoTexto,
+                recurrente: false,
+                periodicidad: null,
+                ultimaVez: null,
+                origenCompraId: idCompraUnico,
+                folioCompra: folioCompraDirecta,
+                registradoDesde: 'compraDirecta'
+            });
+        });
+        StorageService.set('gastosOperativos', gastosOperativos);
+    }
+
     document.querySelector('[data-modal="nueva-compra-directa"]')?.remove();
-    alert(`✅ Compra Directa Registrada Exitosamente.${ingresoInmediato ? '' : '\\n⏳ La mercancía fue enviada a Recepciones Pendientes.'}${avisoActualizacion}`);
+    alert(`✅ Compra Directa Registrada Exitosamente.${ingresoInmediato ? '' : '\\n⏳ La mercancía fue enviada a Recepciones Pendientes.'}${gastoLines.length > 0 ? `\n🧾 ${gastoLines.length} gasto(s) por ${dinero(gastoLines.reduce((s,g)=>s+g.subtotal,0))} registrados como gasto de operación (no como producto).` : ''}${avisoActualizacion}`);
 
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
@@ -7701,6 +7796,7 @@ window.iniciarOrdenDesdeRequisiciones = iniciarOrdenDesdeRequisiciones;
 window.iniciarCompraDirectaDesdeRequisiciones = iniciarCompraDirectaDesdeRequisiciones;
 window.abrirModalCompraDirectaMulti = abrirModalCompraDirectaMulti;
 window.agregarArticuloCompraDirecta = agregarArticuloCompraDirecta;
+window.agregarGastoCompraDirecta = agregarGastoCompraDirecta;
 window.guardarCompraDirectaFinal = guardarCompraDirectaFinal;
 window.abrirModalAbonoOC = abrirModalAbonoOC;
 window.confirmarAbonoOC = confirmarAbonoOC;
