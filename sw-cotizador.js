@@ -4,7 +4,7 @@
 // SIEMPRE va a la red por los datos reales (precios, tasas, guardado de
 // cotizaciones). Nunca cachea ni intercepta nada de Firebase/Firestore/Google.
 
-const CACHE_NAME = 'cotizador-shell-v3';
+const CACHE_NAME = 'cotizador-shell-v5';
 
 const SHELL_URLS = [
   '/cotizador-movil.html',
@@ -58,8 +58,27 @@ self.addEventListener('fetch', (event) => {
   const esArchivoDelCascaron = SHELL_URLS.includes(req.url) || url.pathname === '/cotizador-movil.html';
   if (!esArchivoDelCascaron) return; // todo lo demás sigue su curso normal
 
-  // Stale-while-revalidate: responde con lo que ya está en caché al instante
-  // (si existe) y en paralelo pide una versión fresca para la próxima vez.
+  // El HTML de la app se actualiza seguido: red primero, y solo si no hay
+  // conexión se usa la copia guardada. Así cada cambio se ve en la PRIMERA
+  // carga, no hasta la segunda (que es lo que pasaba con stale-while-revalidate
+  // aplicado también al propio documento).
+  const esDocumentoPrincipal = url.pathname === '/cotizador-movil.html';
+  if (esDocumentoPrincipal) {
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.ok) {
+          const copia = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copia)).catch(() => {});
+        }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // El resto del cascarón (íconos, SDK de Firebase, ticket-service y sus
+  // vendors) cambia poco: stale-while-revalidate para que abra al instante,
+  // actualizando en segundo plano para la próxima carga.
   event.respondWith(
     caches.match(req).then((cached) => {
       const actualizar = fetch(req).then((res) => {
