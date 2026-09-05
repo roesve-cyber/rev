@@ -1643,28 +1643,17 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
         return;
     }
 
-    const periodicidadPopup = document.getElementById("selPeriodicidad")?.value || "semanal";
-    // 🎟️ Topado contra los demás plazos disponibles para este mismo capital
-    // (ver _cxcCuponTopadoParaPlazo en cxc.js) -- así lo que se le promete al
-    // cliente aquí nunca le da más a un plazo corto que a uno largo, y
-    // siempre coincide con lo que de verdad se emitirá al cobrar.
-    let montoCupon = (typeof window._cxcCuponTopadoParaPlazo === 'function')
-        ? window._cxcCuponTopadoParaPlazo(planElegido.meses, capitalContado, periodicidadPopup, planElegido.total)
-        : (() => {
-            const pct = (typeof window._cxcPorcentajeCuponPorPlazo === 'function')
-                ? window._cxcPorcentajeCuponPorPlazo(planElegido.meses)
-                : Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
-            let m = planElegido.total * Math.max(0, pct) / 100;
-            const _cfg = StorageService.get('configCreditoGlobal', {});
-            const _mult = Number(_cfg?.redondeoCuponMultiplo || 0);
-            if (_mult > 1) {
-                const _f = (_cfg?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
-                m = _f(m / _mult) * _mult;
-            }
-            return Math.max(0, m);
-        })();
+    const porcentajeCupon = (typeof window._cxcPorcentajeCuponPorPlazo === 'function')
+        ? window._cxcPorcentajeCuponPorPlazo(planElegido.meses)
+        : Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
+    let montoCupon = planElegido.total * Math.max(0, porcentajeCupon) / 100;
+    const _configRedondeo = StorageService.get('configCreditoGlobal', {});
+    const _multiploRedondeo = Number(_configRedondeo?.redondeoCuponMultiplo || 0);
+    if (_multiploRedondeo > 1) {
+        const _factor = (_configRedondeo?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
+        montoCupon = _factor(montoCupon / _multiploRedondeo) * _multiploRedondeo;
+    }
     if (montoCupon <= 0.01) return;
-    const porcentajeCupon = planElegido.total > 0 ? Math.round((montoCupon / planElegido.total) * 1000) / 10 : 0;
 
     overlay.innerHTML = `
         <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
@@ -2012,7 +2001,7 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     // (queda en resguardo hasta liquidar). Solo cuando de verdad hay 2+
     // ubicaciones posibles se le pregunta al vendedor.
     let productosAmbiguos = [];
-    if (metodoPago !== "apartado") {
+    {
         productosConStock.forEach(x => {
             // 🏷️ Segunda siempre sale de "General" — no tiene el concepto de
             // múltiples ubicaciones de stock nuevo, así que nunca entra a la
@@ -2044,8 +2033,13 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
     }
 
     // Nada que preguntar: se procesa directo, sin abrir el modal. Cubre la
-    // inmensa mayoría de las ventas (un solo almacén, o apartado).
-    if (metodoPago === "apartado" || productosAmbiguos.length === 0) {
+    // inmensa mayoría de las ventas (un solo almacén, o ya resuelto solo).
+    // 🔒 Los apartados YA NO se saltan esta pregunta cuando son ambiguos: si
+    // el producto existe en 2+ ubicaciones hace falta decidir de cuál se
+    // reserva, o la reserva de inventario termina apuntando a un lugar sin
+    // existencia real (ver 'STOCK GENERAL' hardcodeado que causaba
+    // desfases entre lo reservado y el stock físico real).
+    if (productosAmbiguos.length === 0) {
         confirmarDecisionesInventario(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido);
         return;
     }
@@ -2100,8 +2094,13 @@ function mostrarDialogoInventario(metodoPago, totalContado, enganche, saldoAFina
             // decisión con un segundo par de botones grandes.
             let accionesInventario;
             if (metodoPago === "apartado") {
+                // 🔒 Para apartado no existe "mandar sobre pedido": la pieza ya
+                // existe físicamente y hay que decidir de cuál ubicación se
+                // reserva (los botones de arriba, en ubicacionSelectorHtml).
+                // No se ofrece bypass porque sin ubicación elegida la reserva
+                // no se puede crear correctamente.
                 accionesInventario = `<div style="padding:10px 12px; background:#fffbeb; color:#92400e; border:1px solid #fcd34d; border-radius:10px; font-size:12px; max-width:220px;">
-                        Apartado: queda en resguardo. No se descuenta inventario ni se emite entrega hasta liquidar.
+                        📌 Elige de qué ubicación se reserva esta pieza para el cliente. No se descuenta inventario ni se entrega hasta liquidar el apartado.
                    </div>`;
             } else if (opcionesDisponibles.length > 0) {
                 accionesInventario = `
@@ -2395,6 +2394,18 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
         if (!prod || errorInventario) return;
         const decision = decisionesInventario[_decisionInvKey(item)];
         const tieneStock = _stockDisponibleParaSolicitudVenta(prod, item) >= (item.cantidad || 1);
+
+        if (tieneStock && metodoPago === "apartado") {
+            // 🔒 No hay "sobre pedido" para apartado: el producto SÍ existe
+            // físicamente, así que hace falta saber de qué ubicación se va a
+            // reservar (si no, la reserva de inventario queda sin origen real
+            // y deja de bloquear correctamente esa pieza para otras ventas).
+            const ubicacionResuelta = (decision && decision.ubicacion) || item.ubicacionElegida || '';
+            if (!ubicacionResuelta) {
+                errorInventario = `Hay existencia de "${prod.nombre || item.nombre}". Elige de qué ubicación se reserva para este apartado antes de continuar.`;
+                return;
+            }
+        }
 
         if (metodoPago !== "apartado" && tieneStock && (!decision || typeof decision.entregar !== "boolean")) {
             errorInventario = `Hay inventario disponible para "${prod.nombre || item.nombre}". Debes elegir la ubicacion de salida o confirmar que quedara sobre pedido.`;
@@ -2930,21 +2941,44 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
         // No descontamos stock real: el apartado sigue físicamente en la
         // tienda hasta que se entrega (ver entregarMercanciaApartado en
         // apartados.js). Solo bloqueamos su disponibilidad para nuevas ventas.
+        //
+        // 🩹 Antes se reservaba SIEMPRE contra el literal "STOCK GENERAL" en
+        // cuanto art.ubicacionElegida venía vacío. Si el producto en realidad
+        // vivía todo en una bodega/variante específica (Stock General sin
+        // asignar = 0), la reserva no bloqueaba nada real: alguien más podía
+        // vender esa misma pieza desde su ubicación física, y al liquidar el
+        // apartado la entrega fallaba ("stock insuficiente en STOCK GENERAL")
+        // aunque la pieza SÍ existiera en la tienda. Ahora: si el vendedor ya
+        // resolvió la ubicación (única existencia, o eligió entre varias),
+        // se usa esa. Si no llegó resuelta por algún motivo, se recalcula
+        // aquí mismo con la misma regla (autoasignar si hay una sola
+        // ubicación con existencia); si de verdad no hay stock en ningún
+        // lado, NO se crea una reserva falsa — queda igual que cualquier
+        // producto sin existencia (requerimiento de inventario) y
+        // entregarMercanciaApartado avisará que falta reserva al liquidar.
         if (typeof window.crearReservaInventario === 'function') {
             (datosVentaP.articulos || []).forEach(art => {
-                // Los apartados no pasan por el selector de ubicación de salida
-                // (ver metodoPago !== "apartado" en la clasificación de carrito),
-                // así que casi siempre llegan sin ubicacionElegida. Se reserva
-                // contra "STOCK GENERAL" (la bolsa sin asignar a variantes),
-                // que es exactamente cómo el resto del sistema interpreta un
-                // origen no especificado.
+                let ubicacionResuelta = art.ubicacionElegida || '';
+                if (!ubicacionResuelta) {
+                    const prodArt = productos.find(p => String(p.id) === String(art.productoId ?? art.id));
+                    const opcionesArt = _ubicacionesSalidaVentaDetalle(prodArt, art.colorElegido || '');
+                    if (opcionesArt.length === 1) {
+                        ubicacionResuelta = opcionesArt[0].ubicacion;
+                    } else if (opcionesArt.length === 0) {
+                        console.warn(`Apartado ${folioVenta}: "${art.nombre}" no tiene existencia en ninguna ubicación — no se creó reserva de inventario. Requiere compra antes de poder entregarse.`);
+                        return;
+                    } else {
+                        console.warn(`Apartado ${folioVenta}: "${art.nombre}" tiene existencia en ${opcionesArt.length} ubicaciones y no llegó una decisión del vendedor — se reserva de la sugerida (${opcionesArt[0].ubicacion}). Revisa este apartado.`);
+                        ubicacionResuelta = opcionesArt[0].ubicacion;
+                    }
+                }
                 const r = window.crearReservaInventario({
                     folio: folioVenta,
                     clienteNombre: datosVentaP.cliente?.nombre || '',
                     productoId: art.productoId ?? art.id,
                     nombreProducto: art.nombre || '',
                     color: art.colorElegido || '',
-                    ubicacion: art.ubicacionElegida || 'STOCK GENERAL',
+                    ubicacion: ubicacionResuelta,
                     cantidad: art.cantidad || 1
                 });
                 if (!r.ok) console.error('No se pudo reservar inventario del apartado', folioVenta, art, r.mensaje);
@@ -3464,8 +3498,42 @@ function abrirDetalleEntrega(idSalida) {
     const itemsHtml = (s.items || []).map((i, index) => {
         if (i.cantidad <= 0) return ''; // Si ya se entregó todo este item, lo omitimos
         const prodActual = StorageService.get("productos", []).find(p => String(p.id) === String(i.productoId));
-        const opcionesUbicacion = _opcionesUbicacionSalidaVenta(prodActual, i.colorElegido || '', i.ubicacionElegida || '');
-        const avisoColorFlexible = i.colorElegido && prodActual
+        // 🏷️ Misma regla que en la venta: si el stock actual solo puede
+        // salir de UN lugar, se autoasigna y ya no se pregunta nada — el
+        // selector solo aparece cuando de verdad hay 2+ ubicaciones con
+        // existencia. Si no hay ninguna, el renglón queda bloqueado (sigue
+        // como requerimiento de inventario, no se puede entregar hoy).
+        const opcionesDetalle = _ubicacionesSalidaVentaDetalle(prodActual, i.colorElegido || '');
+        let selectorUbicacionHtml;
+        let cantidadInputHtml;
+        if (opcionesDetalle.length === 1) {
+            const unica = opcionesDetalle[0].ubicacion;
+            selectorUbicacionHtml = `
+                <input type="hidden" id="entregaUbi-${s.id}-${index}" value="${_escapeHtml(unica)}">
+                <div style="margin-top:6px;padding:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;color:#166534;font-weight:700;">
+                    ✅ Sale de: ${_escapeHtml(unica)} (${opcionesDetalle[0].stock} disp.)
+                </div>`;
+            cantidadInputHtml = `<input type="number" id="entregar-${s.id}-${index}" min="0" max="${i.cantidad}" value="${i.cantidad}" 
+                    style="width:60px; padding:6px; text-align:center; border:2px solid #3b82f6; border-radius:6px; font-weight:bold;">`;
+        } else if (opcionesDetalle.length === 0) {
+            selectorUbicacionHtml = `
+                <input type="hidden" id="entregaUbi-${s.id}-${index}" value="">
+                <div style="margin-top:6px;padding:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#991b1b;font-weight:700;">
+                    ⏳ Sin existencia en ninguna ubicación todavía — sigue como requerimiento de inventario.
+                </div>`;
+            cantidadInputHtml = `<input type="number" id="entregar-${s.id}-${index}" min="0" max="0" value="0" disabled
+                    style="width:60px; padding:6px; text-align:center; border:2px solid #cbd5e1; border-radius:6px; font-weight:bold; background:#f1f5f9; color:#94a3b8;">`;
+        } else {
+            const opcionesUbicacion = _opcionesUbicacionSalidaVenta(prodActual, i.colorElegido || '', i.ubicacionElegida || '');
+            selectorUbicacionHtml = `
+                <label style="font-size:11px; color:#475569; display:block; margin-top:6px;">Hay existencia en varias ubicaciones — elige de dónde sale</label>
+                <select id="entregaUbi-${s.id}-${index}" style="width:100%; max-width:230px; padding:6px; border:1px solid #cbd5e1; border-radius:6px; background:white;">
+                    ${opcionesUbicacion}
+                </select>`;
+            cantidadInputHtml = `<input type="number" id="entregar-${s.id}-${index}" min="0" max="${i.cantidad}" value="${i.cantidad}" 
+                    style="width:60px; padding:6px; text-align:center; border:2px solid #3b82f6; border-radius:6px; font-weight:bold;">`;
+        }
+        const avisoColorFlexible = i.colorElegido && prodActual && opcionesDetalle.length > 1
             ? `<div style="margin-top:6px; font-size:11px; color:#92400e; background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:6px;">
                 Si el color vendido fue capturado diferente al inventario, puedes elegir una ubicacion con stock en otro color registrado. El sistema lo dejara trazado.
                </div>`
@@ -3476,19 +3544,14 @@ function abrirDetalleEntrega(idSalida) {
             <td style="padding:8px; border-bottom:1px solid #f3f4f6;">
                 <strong>${i.nombre || ''}</strong>
                 ${i.colorElegido ? `<br><small style="color:#64748b;">Color: ${i.colorElegido}</small>` : ''}
-                <br>
-                <label style="font-size:11px; color:#475569; display:block; margin-top:6px;">Ubicacion de salida</label>
-                <select id="entregaUbi-${s.id}-${index}" style="width:100%; max-width:230px; padding:6px; border:1px solid #cbd5e1; border-radius:6px; background:white;">
-                    ${opcionesUbicacion}
-                </select>
+                ${selectorUbicacionHtml}
                 ${avisoColorFlexible}
             </td>
             <td style="padding:8px; text-align:center; border-bottom:1px solid #f3f4f6; color:#b91c1c; font-weight:bold;">
                 ${i.cantidad}
             </td>
             <td style="padding:8px; text-align:center; border-bottom:1px solid #f3f4f6;">
-                <input type="number" id="entregar-${s.id}-${index}" min="0" max="${i.cantidad}" value="${i.cantidad}" 
-                    style="width:60px; padding:6px; text-align:center; border:2px solid #3b82f6; border-radius:6px; font-weight:bold;">
+                ${cantidadInputHtml}
             </td>
         </tr>`;
     }).join('');

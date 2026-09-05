@@ -403,14 +403,33 @@ window.migrarReservasApartadosExistentes = function() {
                 avisos.push(`⚠️ ${ap.folio} (${ap.clienteNombre || 'Cliente'}): no tiene artículos guardados, no se pudo reservar. Revísalo a mano.`);
                 return;
             }
+            const productosActuales = StorageService.get('productos', []);
             articulos.forEach(art => {
+                // 🩹 Mismo criterio que en la reserva en vivo (ventas.js,
+                // ejecutarVentaAutorizadaReal): ya no se asume "STOCK GENERAL"
+                // a ciegas. Se resuelve contra la existencia real de HOY.
+                let ubicacionResuelta = art.ubicacionElegida || '';
+                if (!ubicacionResuelta && typeof window._ubicacionesSalidaVentaDetalle === 'function') {
+                    const prodArt = productosActuales.find(p => String(p.id) === String(art.productoId ?? art.id));
+                    const opcionesArt = window._ubicacionesSalidaVentaDetalle(prodArt, art.colorElegido || '');
+                    if (opcionesArt.length === 1) {
+                        ubicacionResuelta = opcionesArt[0].ubicacion;
+                    } else if (opcionesArt.length > 1) {
+                        ubicacionResuelta = opcionesArt[0].ubicacion;
+                        avisos.push(`⚠️ ${ap.folio}: "${art.nombre}" existe en ${opcionesArt.length} ubicaciones, se reservó de la sugerida (${opcionesArt[0].ubicacion}). Verifica que sea la correcta.`);
+                    } else {
+                        avisos.push(`⚠️ ${ap.folio}: "${art.nombre}" no tiene existencia en ninguna ubicación ahora mismo, no se reservó.`);
+                        return;
+                    }
+                }
+                if (!ubicacionResuelta) return;
                 const r = window.crearReservaInventario({
                     folio: ap.folio,
                     clienteNombre: ap.clienteNombre || '',
                     productoId: art.productoId ?? art.id,
                     nombreProducto: art.nombre || '',
                     color: art.colorElegido || '',
-                    ubicacion: art.ubicacionElegida || 'STOCK GENERAL',
+                    ubicacion: ubicacionResuelta,
                     cantidad: art.cantidad || 1
                 });
                 if (r.ok) creadas++;
