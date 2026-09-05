@@ -109,11 +109,12 @@ window._cxcCuponTopadoParaPlazo = _cxcCuponTopadoParaPlazo;
 // redondeoCuponDireccion en Configuración > Cupones de Saldo a Favor). Sin
 // múltiplo definido (0, vacío o 1) se regresa el monto exacto tal cual. Con
 // múltiplo > 1, redondea hacia arriba o abajo a cifras de ese múltiplo según
-// la dirección configurada (default 'abajo' si nunca se ha tocado) --
-// MISMO criterio que ya replican por su cuenta ventas.js
-// (_mostrarPopupBeneficioPlan), cotizaciones.js y cotizador-movil.html al
-// mostrarle el cupón al cliente en la cotización, para que ese número nunca
-// se desalinee del que de verdad se emite aquí al liquidar.
+// la dirección configurada (default 'abajo' si nunca se ha tocado). Se aplica
+// aquí adentro, dentro de _cxcCalcularCuponPronto -- por eso ventas.js y
+// cotizaciones.js ya NO necesitan replicarlo por su cuenta: llaman directo a
+// _cxcCuponTopadoParaPlazo y reciben el monto ya redondeado y topado.
+// cotizador-movil.html sigue siendo la única excepción -- corre standalone
+// sin cxc.js cargado, así que ahí sí replica esta misma lógica de redondeo.
 function _cxcRedondearMontoCupon(monto) {
     const m = Math.max(0, Number(monto) || 0);
     const config = StorageService.get('configCreditoGlobal', {});
