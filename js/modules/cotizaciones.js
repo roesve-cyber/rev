@@ -1,48 +1,27 @@
 // ===== COTIZACIONES (DUAL: VENTAS Y AUDITORÍA MULTI-PLAZO) =====
 
 // 🎟️ Cupón de pronto pago mostrado en la cotización (motiva al cliente a
-// liquidar dentro de su plazo pactado). Reutiliza la MISMA fuente de verdad
-// que usa cxc.js al emitir el cupón de verdad (window._cxcPorcentajeCuponPorPlazo,
-// que a su vez lee la tasa base por plazo o el % fijo de Configuración >
-// Cupones de Saldo a Favor) -- así lo que se le promete al cliente en la
-// cotización SIEMPRE coincide con lo que recibirá si liquida a tiempo. El
-// plan de 1 mes no genera cupón (ya es el escalón más corto -- ver la misma
-// excepción en cxc.js y ventas.js).
-function _cotPorcentajeCuponPlan(mesesPlan) {
-    if (typeof window._cxcPorcentajeCuponPorPlazo === 'function') return window._cxcPorcentajeCuponPorPlazo(mesesPlan);
-    const config = StorageService.get('configCreditoGlobal', {});
-    return Number(config?.porcentajeCuponProntoPago ?? 3);
-}
-function _cotMontoCuponPlan(plan) {
+// liquidar dentro de su plazo pactado).
+// 🛡️ CORREGIDO (sep 2026, auditoría): esto llamaba a
+// window._cxcPorcentajeCuponPorPlazo, una función que NUNCA se definió en
+// ningún archivo del repo -- el typeof siempre daba falso y esto caía
+// siempre al % fijo (porcentajeCuponProntoPago), ignorando por completo la
+// tasaBaseCupon por plazo. Resultado real: cotizaciones.js le prometía al
+// cliente un cupón distinto al que cxc.js de verdad emitía al liquidar, cada
+// vez que un plazo tuviera tasaBaseCupon configurada.
+// Ahora, igual que ya hacía bien cotizador-movil.html (que sí reimplementa
+// la fórmula real porque corre standalone sin cxc.js), pero aquí SÍ tenemos
+// cxc.js cargado en la misma app -- así que en vez de reimplementar nada, se
+// llama directo a la fuente de verdad: _cxcCuponTopadoParaPlazo (cxc.js), la
+// MISMA función que usa _cxcEvaluarPoliticaPagoAnticipado al liquidar de
+// verdad. Ya incluye la tasa base por plazo, el redondeo, y el tope
+// monótono entre plazos (nunca le da más a un plazo corto que a uno largo).
+// El plan de 1 mes no genera cupón (ya es el escalón más corto -- misma
+// excepción que cxc.js y ventas.js), así que se filtra aquí antes de llamar.
+function _cotMontoCuponPlan(plan, capitalContado, periodicidad) {
     if (!plan || Number(plan.meses) === 1) return 0;
-    const pct = _cotPorcentajeCuponPlan(plan.meses);
-    let monto = Number(plan.total || 0) * Math.max(0, pct) / 100;
-    const config = StorageService.get('configCreditoGlobal', {});
-    const multiplo = Number(config?.redondeoCuponMultiplo || 0);
-    if (multiplo > 1) {
-        const factor = (config?.redondeoCuponDireccion === 'arriba') ? Math.ceil : Math.floor;
-        monto = factor(monto / multiplo) * multiplo;
-    }
-    return Math.max(0, monto);
-}
-
-// El cupón de cada plazo se calcula de forma independiente, así que nada
-// garantiza que crezca junto con el plazo -- un plazo corto podría salir con
-// más cupón en pesos que uno largo. Para que nunca se vea un plazo corto
-// dando más que uno largo SIN tocar la configuración ni regalar un solo peso
-// extra en ningún plazo, se recorta hacia ABAJO: se recorre de mayor a menor
-// plazo y cada plazo corto queda topado al cupón del siguiente plazo más
-// largo (nunca al revés). El plazo más largo siempre se queda exactamente en
-// lo que dicta la configuración. (Misma lógica que cotizador-movil.html.)
-function _cotCuponesMonotonosPorPlazo(planesOrdenadosPorMeses) {
-    const crudos = planesOrdenadosPorMeses.map(p => _cotMontoCuponPlan(p));
-    const finales = new Array(crudos.length);
-    let techo = Infinity;
-    for (let i = crudos.length - 1; i >= 0; i--) {
-        techo = Math.min(crudos[i], techo);
-        finales[i] = techo;
-    }
-    return finales; // finales[i] corresponde a planesOrdenadosPorMeses[i]
+    if (typeof window._cxcCuponTopadoParaPlazo !== 'function') return 0;
+    return window._cxcCuponTopadoParaPlazo(plan.meses, capitalContado, periodicidad || 'semanal', plan.total);
 }
 
 // Función principal que renderiza la vista de cotizaciones
@@ -676,7 +655,7 @@ if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
       </tr></thead>
       <tbody>`;
       
-    const cuponesFinales = _cotCuponesMonotonosPorPlazo(planes);
+    const cuponesFinales = planes.map(p => _cotMontoCuponPlan(p, saldo, periodicidadSel));
     planes.forEach((plan, i) => {
         const customBadge = plan.custom ? ' <br><span style="background:#f59e0b;color:white;padding:2px 6px;border-radius:10px;font-size:9px;">Personalizado</span>' : '';
         const montoCupon = cuponesFinales[i];
@@ -1386,7 +1365,7 @@ function imprimirCotizacion(id, articulosConImagenTemporal) {
               planes.sort((a, b) => a.meses - b.meses);
           }
 
-          const cuponesFinalesTicket = _cotCuponesMonotonosPorPlazo(planes);
+          const cuponesFinalesTicket = planes.map(p => _cotMontoCuponPlan(p, c.saldoFinanciar, c.periodicidad || 'semanal'));
           planeRows = planes.map((plan, i) => `
             <tr>
               <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>

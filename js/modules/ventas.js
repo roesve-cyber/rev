@@ -1605,13 +1605,18 @@ function actualizarInterfazPago() {
 // agosto 2026 (decisión de Roberto tras su análisis de margen con el
 // simulador de tasas): si el cliente liquida DENTRO de su plazo pactado,
 // paga el saldo nominal completo (sin descuento) y recibe un cupón de saldo
-// a favor -- ya no importa en qué mes exacto liquide. Desde sep 2026 el % ya
-// no es necesariamente fijo: se calcula con _cxcPorcentajeCuponPorPlazo(cxc.js),
-// que usa tasa - tasa base del plazo si esa tasa base está configurada
-// (Configuración > Regla Global de Crédito), y si no cae al % fijo de
-// Configuración > Cupones de Saldo a Favor -- para que este aviso siempre
-// coincida con lo que cxc.js aplicará de verdad al cobrar.
-function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
+// a favor -- ya no importa en qué mes exacto liquide.
+// 🛡️ CORREGIDO (sep 2026, auditoría): esto llamaba a
+// window._cxcPorcentajeCuponPorPlazo, una función que NUNCA se definió en
+// ningún archivo del repo -- el typeof siempre daba falso y esto caía
+// siempre al % fijo (porcentajeCuponProntoPago), ignorando la tasaBaseCupon
+// por plazo. Resultado real: este popup, en el momento mismo de la venta,
+// le mostraba al vendedor/cliente un cupón distinto al que cxc.js de verdad
+// iba a emitir al liquidar. Ahora se llama directo a _cxcCuponTopadoParaPlazo
+// (cxc.js) -- la MISMA función que usa _cxcEvaluarPoliticaPagoAnticipado al
+// liquidar de verdad -- que ya incluye tasa base por plazo, redondeo, y el
+// tope monótono entre plazos.
+function _mostrarPopupBeneficioPlan(planes, index, capitalContado, periodicidad) {
     const planElegido = planes[index];
     if (!planElegido) return;
 
@@ -1643,17 +1648,11 @@ function _mostrarPopupBeneficioPlan(planes, index, capitalContado) {
         return;
     }
 
-    const porcentajeCupon = (typeof window._cxcPorcentajeCuponPorPlazo === 'function')
-        ? window._cxcPorcentajeCuponPorPlazo(planElegido.meses)
-        : Number(StorageService.get('configCreditoGlobal', {})?.porcentajeCuponProntoPago ?? 3);
-    let montoCupon = planElegido.total * Math.max(0, porcentajeCupon) / 100;
-    const _configRedondeo = StorageService.get('configCreditoGlobal', {});
-    const _multiploRedondeo = Number(_configRedondeo?.redondeoCuponMultiplo || 0);
-    if (_multiploRedondeo > 1) {
-        const _factor = (_configRedondeo?.redondeoCuponDireccion || 'abajo') === 'arriba' ? Math.ceil : Math.floor;
-        montoCupon = _factor(montoCupon / _multiploRedondeo) * _multiploRedondeo;
-    }
+    const montoCupon = (typeof window._cxcCuponTopadoParaPlazo === 'function')
+        ? window._cxcCuponTopadoParaPlazo(planElegido.meses, capitalContado, periodicidad || 'semanal', planElegido.total)
+        : 0;
     if (montoCupon <= 0.01) return;
+    const porcentajeCupon = planElegido.total > 0 ? Math.round((montoCupon / planElegido.total) * 1000) / 10 : 0;
 
     overlay.innerHTML = `
         <div style="background:white;border-radius:16px;max-width:420px;width:100%;padding:20px;max-height:85vh;overflow-y:auto;">
@@ -1684,7 +1683,7 @@ function seleccionarPlan(index) {
         if (planes && planes[index]) {
             window._estadoPago.plan = planes[index];
             console.log("Plan guardado con éxito:", window._estadoPago.plan);
-            _mostrarPopupBeneficioPlan(planes, index, saldo > 0 ? saldo : totalCarrito);
+            _mostrarPopupBeneficioPlan(planes, index, saldo > 0 ? saldo : totalCarrito, periodicidad);
         }
     } catch(e) {
         console.error("Error al guardar el plan:", e);

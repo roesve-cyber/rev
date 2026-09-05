@@ -33,10 +33,15 @@ function _dibujarPlazosGlobales(plazos) {
     plazos.sort((a,b) => a.meses - b.meses);
 
     cont.innerHTML = plazos.map((p, i) => {
+        // 🛡️ CORREGIDO: antes mostraba "cupón: tasa-tasaBaseCupon=X%", la resta
+        // de puntos que Roberto mismo determinó que no refleja el cupón real
+        // (el cupón real corre la fórmula de venta dos veces y saca la
+        // diferencia en PESOS, no en puntos -- ver _cxcCalcularCuponPronto en
+        // cxc.js). Esta etiqueta solo confirma que el plazo tiene tasa base
+        // propia; el monto real depende del capital y se ve en cotización/venta.
         const tieneBase = p.tasaBaseCupon !== undefined && p.tasaBaseCupon !== null && p.tasaBaseCupon !== '';
-        const cuponDif = tieneBase ? Math.max(0, Number(p.tasa || 0) - Number(p.tasaBaseCupon || 0)) : null;
         const etiquetaCupon = tieneBase
-            ? ` &middot; cupón: ${p.tasa}-${p.tasaBaseCupon}=${cuponDif}%`
+            ? ` &middot; cupón: tasa base ${p.tasaBaseCupon}%`
             : '';
         return `
         <div style="background:#dbeafe; color:#1e40af; padding:8px 14px; border-radius:20px; font-size:13px; font-weight:bold; display:flex; align-items:center; gap:8px; border:1px solid #bfdbfe; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
