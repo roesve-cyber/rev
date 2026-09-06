@@ -695,7 +695,12 @@ function registrarComisionVenta(folio, datos, vendedorId) {
         montoComisionSinRedondeo: montoComisionCalculado,
         montoComision,
         pisoUtilidadAplicado,
-        fecha: Date.now(),
+        // 🛡️ CORREGIDO: antes siempre Date.now() -- si ventas.js manda
+        // datos.fechaVenta (la fecha real, posiblemente personalizada, de la
+        // venta que generó esta comisión), se usa esa; solo cae a "ahora"
+        // cuando no viene (otros llamadores, como recuperación de cartera,
+        // donde "ahora" SÍ es la fecha correcta del hecho económico).
+        fecha: (esObjeto && datos.fechaVenta) ? datos.fechaVenta : Date.now(),
         tipo: 'al_cierre',
         estado: 'Pendiente'
     });

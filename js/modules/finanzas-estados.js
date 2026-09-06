@@ -672,10 +672,22 @@ function _efCalcularBalanceGeneral(hastaStr) {
     // renderDashboardMSI: total de la compra menos lo ya pagado, por cada
     // cuenta MSI. Sin esto el pasivo queda incompleto y las "Utilidades
     // acumuladas" (que se calculan como residual) se inflan de más.
+    // 🛡️ CORREGIDO: leía solo d.montoPagado -- pero confirmarPagoIndividualMSI
+    // (bancos.js, el flujo normal de "pagar una cuota a la vez") SOLO
+    // actualiza d.pagosRealizados, nunca d.montoPagado. El propio bancos.js ya
+    // sabe esto y en 6+ lugares distintos usa este mismo respaldo (deducir lo
+    // pagado de pagosRealizados × cuotaMensual cuando montoPagado es
+    // undefined) -- finanzas-estados.js era el único que no lo tenía, así que
+    // cualquier deuda MSI pagada cuota-por-cuota (no por la migración inicial,
+    // que sí inicializa montoPagado) se seguía contando como si no se hubiera
+    // pagado nada, para siempre.
     const cuentasMSI = StorageService.get('cuentasMSI', []);
     const totalDeudaMSI = cuentasMSI.reduce((s, d) => {
         const total = parseFloat(String(d.total || 0).replace(/[$,]/g, '')) || 0;
-        const pagado = Number(d.montoPagado || 0);
+        const cuota = parseFloat(String(d.cuotaMensual || 0).replace(/[$,]/g, '')) || 0;
+        const pagado = d.montoPagado !== undefined
+            ? Number(d.montoPagado) || 0
+            : (Number(d.pagosRealizados) || 0) * cuota;
         return s + Math.max(0, total - pagado);
     }, 0);
 

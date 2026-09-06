@@ -3097,7 +3097,15 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
             articulos: datosVentaP.articulos,
             listaProductos: productosActuales,
             clienteNombre: datosVentaP.cliente?.nombre || null,
-            clienteId: datosVentaP.cliente?.id || null
+            clienteId: datosVentaP.cliente?.id || null,
+            // 🛡️ CORREGIDO: sin esto, la comisión siempre se fechaba con
+            // Date.now() (hoy) aunque la venta se haya registrado con fecha
+            // personalizada (campo #inputFechaVenta, "CORRECCIÓN DE FECHA"
+            // arriba) -- el Estado de Resultados (finanzas-estados.js) cuenta
+            // el ingreso de la venta en el periodo de fechaVenta pero la
+            // comisión quedaba en el periodo de hoy: dos periodos distintos
+            // para el mismo hecho económico.
+            fechaVenta: fechaVentaIso
         }, window._vendedorSeleccionado.id);
     }
 
