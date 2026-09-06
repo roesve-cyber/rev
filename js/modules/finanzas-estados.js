@@ -439,6 +439,28 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         totalGastos += monto;
     });
 
+    // 💸 "Otros ingresos y gastos" (NIF B-3): partidas ajenas a la operación
+    // normal del negocio y que no encajan ni en Ventas ni en RIF -- el botón
+    // "💸 Movimiento Manual" del Reporte de Flujo (reportes.js,
+    // guardarMovManual) es exactamente para esto ("Gasto/Salida" o "Ingreso
+    // Extra" de propósito genérico, sin categoría). Antes ese botón NUNCA
+    // tocaba movimientosCaja (solo escribía en una tabla aislada,
+    // movimientosManuales, que ni el Balance ni este Estado de Resultados
+    // leían) -- se corrigió para que sí use _egresarCuenta/_ingresarCuenta
+    // como cualquier otro movimiento real, así que ahora vive en
+    // movimientosCaja con referencia "MOV-MANUAL-...", identificable aquí.
+    const movimientosCajaParaManuales = StorageService.get('movimientosCaja', []);
+    const movimientosManualesEnRango = movimientosCajaParaManuales.filter(m =>
+        String(m.referencia || '').startsWith('MOV-MANUAL-') && _efEnRango(m.fecha, desde, hasta)
+    );
+    const otrosIngresos = movimientosManualesEnRango
+        .filter(m => m.tipo === 'ingreso')
+        .reduce((s, m) => s + (Number(m.monto) || 0), 0);
+    const otrosGastos = movimientosManualesEnRango
+        .filter(m => m.tipo === 'egreso')
+        .reduce((s, m) => s + (Number(m.monto) || 0), 0);
+    const otrosIngresosYGastos = otrosIngresos - otrosGastos;
+
     const prestamos = StorageService.get('prestamosOtorgados', []);
     const incobrables = prestamos
         .filter(p => p.estado === 'Incobrable' && _efEnRango(p.fechaIncobrable || p.fecha, desde, hasta))
@@ -502,7 +524,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     // administración), NO como parte del RIF.
     const utilidadOperacion = utilidadBruta - totalComisiones - totalMermasNetas - totalGastos - incobrables;
     const rif = ingresosFinancieros - gastosFinancieros - cuponesEmitidosEnPeriodo + cuponesRecuperadosEnPeriodo;
-    const utilidadNeta = utilidadOperacion + rif;
+    const utilidadNeta = utilidadOperacion + otrosIngresosYGastos + rif;
 
     return {
         desde: desdeStr, hasta: hastaStr,
@@ -520,6 +542,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         productosMermaSinCosto: Array.from(productosMermaSinCosto.values())
             .sort((a, b) => b.ocurrencias - a.ocurrencias),
         gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
+        otrosIngresos, otrosGastos, otrosIngresosYGastos,
         ingresosFinancieros, gastosFinancieros,
         cuponesEmitidosEnPeriodo, cuponesRecuperadosEnPeriodo,
         cuponesVencidosEnPeriodo, cuponesCanceladosEnPeriodo,
@@ -645,8 +668,32 @@ function _efCalcularBalanceGeneral(hastaStr) {
         .filter(c => c.estado === 'Activo' && !(c.fechaVencimiento && new Date(c.fechaVencimiento) < new Date()))
         .reduce((s, c) => s + Math.max(0, Number(c.montoDisponible) || 0), 0);
 
-    const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario + totalSaldoFavorProveedores;
-    const totalPasivo = totalCxP + totalDeudaMSI + totalCuponesPorCanjear;
+    // 💵 Anticipos de comisión a vendedores (vendedores.js): cuando se
+    // registra un anticipo, _egresarCuenta SÍ baja el efectivo real, pero ese
+    // dinero no se perdió -- se convirtió en un derecho de cobro contra el
+    // vendedor (se descuenta de su próxima comisión, o él lo regresa en
+    // efectivo). Es un activo -- antes no aparecía en ningún lado del
+    // Balance, así que cada anticipo hacía bajar las utilidades acumuladas
+    // (residual) como si fuera una pérdida, cuando en realidad solo cambió
+    // efectivo por una cuenta por cobrar.
+    const anticiposComision = StorageService.get('anticiposComisionVendedor', []);
+    const totalAnticiposComisionPorCobrar = anticiposComision
+        .reduce((s, a) => s + Math.max(0, Number(a.saldoPendiente ?? a.monto) || 0), 0);
+
+    // 💼 Comisiones devengadas y aún no pagadas (comisionesRegistradas,
+    // estado 'Pendiente'): _efCalcularEstadoResultados ya las gasta en base
+    // devengada (al momento de la venta que las generó), no hasta que se
+    // pagan -- así que mientras sigan sin pagarse, son un pasivo real (se le
+    // deben al vendedor) que antes no aparecía en el Balance. Sin este
+    // pasivo, las utilidades acumuladas quedaban sobreestimadas por el monto
+    // pendiente de pago.
+    const comisionesRegistradasParaPasivo = StorageService.get('comisionesRegistradas', []);
+    const totalComisionesPorPagar = comisionesRegistradasParaPasivo
+        .filter(c => c.estado === 'Pendiente')
+        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+
+    const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario + totalSaldoFavorProveedores + totalAnticiposComisionPorCobrar;
+    const totalPasivo = totalCxP + totalDeudaMSI + totalCuponesPorCanjear + totalComisionesPorPagar;
 
     const { neto: capitalAportadoNeto, aportado, retirado } = _efTotalesCapital();
     const utilidadesAcumuladas = totalActivo - totalPasivo - capitalAportadoNeto;
@@ -661,8 +708,9 @@ function _efCalcularBalanceGeneral(hastaStr) {
         totalInventario,
         totalSaldoFavorProveedores,
         totalCuponesPorCanjear,
+        totalAnticiposComisionPorCobrar,
         totalActivo,
-        totalCxP, totalDeudaMSI, totalPasivo,
+        totalCxP, totalDeudaMSI, totalComisionesPorPagar, totalPasivo,
         capitalAportado: aportado, capitalRetirado: retirado, capitalAportadoNeto,
         utilidadesAcumuladas, totalCapital
     };
@@ -749,6 +797,17 @@ function renderEstadosFinancieros() {
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Utilidad de operación</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadOperacion)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadOperacion, er.ingresosVentas)}</td></tr>
     </table>
     <details style="margin-bottom:12px;">
+        <summary style="cursor:pointer;color:#1e40af;font-weight:bold;font-size:13px;">Ver Otros ingresos y gastos (${_efDinero(er.otrosIngresosYGastos)})</summary>
+        <p style="font-size:12px;color:#6b7280;margin:6px 0;">Partidas ajenas a la operación normal del negocio (NIF B-3) — lo que registras con el botón "💸 Movimiento Manual" en Reportes → Flujo de Caja, sin categoría específica de gasto operativo ni relación con intereses.</p>
+        <table style="width:100%;border-collapse:collapse;">
+            <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;">+ Otros ingresos</td><td style="padding:6px 8px;text-align:right;">${_efDinero(er.otrosIngresos)}</td></tr>
+            <tr><td style="padding:6px 8px;color:#dc2626;">– Otros gastos</td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.otrosGastos)}</td></tr>
+        </table>
+    </details>
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">± Otros ingresos y gastos</td><td style="padding:8px;text-align:right;color:${er.otrosIngresosYGastos >= 0 ? '#059669' : '#dc2626'};">${_efDinero(er.otrosIngresosYGastos)}</td><td style="padding:8px;text-align:right;color:#6b7280;width:70px;">${_efPct(er.otrosIngresosYGastos, er.ingresosVentas)}</td></tr>
+    </table>
+    <details style="margin-bottom:12px;">
         <summary style="cursor:pointer;color:#1e40af;font-weight:bold;font-size:13px;">Ver Resultado Integral de Financiamiento — RIF (${_efDinero(er.rif)})</summary>
         <p style="font-size:12px;color:#6b7280;margin:6px 0;">Intereses cobrados por vender a crédito, menos intereses/comisiones pagados (si categorizas un gasto con "interés", "financiero" o "comisión bancaria" en Gastos Operativos, se cuenta aquí en vez de en gastos operativos). Así lo separa la NIF B-3: no es parte de la operación del negocio.</p>
         <table style="width:100%;border-collapse:collapse;">
@@ -778,6 +837,7 @@ function renderEstadosFinancieros() {
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Reserva para cuentas incobrables<span title="Cuentas marcadas 'incobrable' en CxC y Préstamos otorgados — antes se excluían en silencio (Préstamos) o ni siquiera se filtraban (CxC); ahora se restan aquí de forma explícita." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(bg.totalReservaIncobrables)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Inventario (incl. segunda, sin consignación)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalInventario)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Saldo a favor de proveedores</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalSaldoFavorProveedores)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Anticipos de comisión por cobrar (vendedores)<span title="Efectivo entregado a vendedores como anticipo de comisión, aún sin descontar ni devolver. Es un derecho de cobro, no un gasto." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalAnticiposComisionPorCobrar)}</td></tr>
                 <tr style="font-weight:bold;background:#eff6ff;"><td style="padding:8px;">TOTAL ACTIVO</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalActivo)}</td></tr>
             </table>
         </div>
@@ -787,6 +847,7 @@ function renderEstadosFinancieros() {
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cuentas por pagar (proveedores)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCxP)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Deuda TDC a MSI</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalDeudaMSI)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Cupones por canjear<span title="Cupones de saldo a favor activos y no vencidos (beneficio por pago anticipado). Es dinero/valor que se le debe a los clientes hasta que lo canjeen o venza." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalCuponesPorCanjear)}</td></tr>
+                <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Comisiones devengadas por pagar<span title="Comisiones de vendedores ya reconocidas como gasto (al momento de la venta) pero aún no pagadas ni cubiertas con anticipo." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalComisionesPorPagar)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Capital aportado (neto)</td><td style="padding:8px;text-align:right;">${_efDinero(bg.capitalAportadoNeto)}</td></tr>
                 <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Utilidades acumuladas</td><td style="padding:8px;text-align:right;">${_efDinero(bg.utilidadesAcumuladas)}</td></tr>
                 <tr style="font-weight:bold;background:#fffbeb;"><td style="padding:8px;">TOTAL PASIVO + CAPITAL</td><td style="padding:8px;text-align:right;">${_efDinero(bg.totalPasivo + bg.totalCapital)}</td></tr>

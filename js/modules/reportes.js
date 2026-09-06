@@ -1506,8 +1506,16 @@ window.renderReporteFlujo = function() {
     });
 
     // ======================================================
-    // 2. MOVIMIENTOS MANUALES
-    // Estos sí se agregan aparte.
+    // 2. MOVIMIENTOS MANUALES (histórico)
+    // 🛡️ CORREGIDO: guardarMovManual ya NO escribe aquí -- desde la
+    // corrección, cada "Movimiento Manual" nuevo llama a _egresarCuenta/
+    // _ingresarCuenta, así que ya queda dentro de movimientosCaja (paso 1,
+    // arriba) con referencia "MOV-MANUAL-...". Volver a agregarlo aquí
+    // duplicaría el monto en este reporte. Se conserva la lectura de
+    // `movimientosManuales` solo por si quedaron registros viejos de antes
+    // de la corrección (cuando esta SÍ era su única fuente) -- si el
+    // arreglo se aplicó antes de que existiera algún registro aquí, este
+    // bloque simplemente no encuentra nada y no hace nada.
     // ======================================================
     manuales.forEach(m => {
         const mov = crearMovimiento({
@@ -2187,11 +2195,7 @@ window.abrirModalGastoExtra = function() {
             </select>
 
             <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">CUENTA:</label>
-            <select id="mCta" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1;">
-                <option value="efectivo">Caja / Efectivo</option>
-                <option value="transferencia">Banco / Transferencia</option>
-                <option value="tarjeta">Tarjeta / Terminal</option>
-            </select>
+            ${window._buildSelectorCuentas ? window._buildSelectorCuentas('mCta', false) : '<select id="mCta"><option value="efectivo">Caja / Efectivo</option></select>'}
 
             <label style="display:block; margin-top:10px; font-size:11px; font-weight:bold;">CONCEPTO:</label>
             <input type="text" id="mCon" placeholder="Ej. Pago de luz, comida, ajuste..." style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; box-sizing:border-box;">
@@ -2211,39 +2215,53 @@ window.abrirModalGastoExtra = function() {
 
 window.guardarMovManual = function() {
     const tipo = document.getElementById('mTipo')?.value;
-    const cuentaRaw = document.getElementById('mCta')?.value;
+    const sel = document.getElementById('mCta');
     const concepto = document.getElementById('mCon')?.value.trim();
     const monto = parseFloat(document.getElementById('mMon')?.value);
 
     if (!concepto || isNaN(monto) || monto <= 0) {
         return alert("❌ Datos inválidos");
     }
+    if (!sel) return alert("❌ No se pudo leer la cuenta seleccionada.");
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
 
-    const normalizarCuentaManual = (valor) => {
-        const c = String(valor || '').toLowerCase().trim();
-
-        if (c === 'caja' || c === 'efectivo') return 'efectivo';
-        if (c === 'banco' || c === 'transferencia') return 'transferencia';
-        if (c === 'terminal' || c === 'tarjeta') return 'tarjeta';
-
-        return valor || 'efectivo';
-    };
-
-    const movimientosRaw = StorageService.get("movimientosManuales", []);
-    const movimientos = Array.isArray(movimientosRaw)
-        ? movimientosRaw
-        : [];
-
-    movimientos.push({
-        id: Date.now(),
-        fecha: Date.now(),
-        tipo,
-        cuenta: normalizarCuentaManual(cuentaRaw),
+    // 🛡️ CORREGIDO: antes esto solo escribía en `movimientosManuales`, una
+    // tabla aislada que SOLO alimentaba este reporte de Flujo -- nunca
+    // llamaba a _egresarCuenta/_ingresarCuenta, así que el saldo real de
+    // `cuentasEfectivo`/cuentas bancarias JAMÁS se movía. Cualquier "Gasto/
+    // Salida" o "Ingreso Extra" registrado aquí quedaba fantasma: no bajaba
+    // ni subía tu caja real en ningún otro lado del sistema (Balance,
+    // cortes de caja, dashboard). Ahora sí mueve la cuenta real, igual que
+    // cualquier otro gasto/ingreso del sistema.
+    const fn = tipo === 'ingreso' ? window._ingresarCuenta : window._egresarCuenta;
+    if (typeof fn !== 'function') {
+        alert("No se pudo registrar el movimiento: el módulo de caja no está disponible. Nada se aplicó.");
+        return;
+    }
+    const id = Date.now();
+    const ok = fn({
+        monto, cuentaId, etiqueta,
         concepto: `[Manual] ${concepto}`,
-        monto
+        referencia: `MOV-MANUAL-${id}`,
+        idOperacion: `mov-manual-${id}`
     });
+    if (!ok) {
+        alert(`No se pudo registrar el movimiento para "${etiqueta || cuentaId}". Nada se aplicó.`);
+        return;
+    }
 
-    StorageService.set("movimientosManuales", movimientos);
+    // Ya no se duplica en `movimientosManuales`: ahora la única fuente de
+    // verdad es `movimientosCaja` (recién escrita arriba por _egresarCuenta/
+    // _ingresarCuenta), identificable por su `referencia` con prefijo
+    // "MOV-MANUAL-". El reporte de Flujo (ver "FUENTE PRINCIPAL:
+    // movimientosCaja" abajo) y el Estado de Resultados
+    // (_efCalcularEstadoResultados, finanzas-estados.js -- sección "Otros
+    // ingresos y gastos") ya la leen de ahí. Escribir también en
+    // `movimientosManuales` duplicaría el movimiento en el reporte de Flujo
+    // (antes era seguro porque nunca coincidía con nada en movimientosCaja;
+    // ahora sí coincidiría con la entrada que _egresarCuenta/_ingresarCuenta
+    // acaban de crear).
 
     const modal = document.getElementById('mFin');
     if (modal) modal.remove();
