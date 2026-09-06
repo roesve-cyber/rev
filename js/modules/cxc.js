@@ -3455,6 +3455,13 @@ function _cxcAnularCuponPorAbono(cuponId, motivo) {
     const montoDisponiblePrevio = Number(cupon.montoDisponible || 0);
     cupon.estado = 'Cancelado';
     cupon.montoDisponible = 0;
+    // 🛡️ Se guarda aparte de montoDisponible (que se resetea a 0 arriba) para
+    // que _efCalcularEstadoResultados (finanzas-estados.js) pueda recuperar,
+    // por periodo, cuánto quedaba disponible al cancelarse -- ver Estado de
+    // Resultados: NIF D-1 (pasivo por reembolso) exige remedir el pasivo a $0
+    // cuando cambia la circunstancia (aquí, cancelación), y esa remedición se
+    // reconoce como ingreso financiero recuperado en el periodo que ocurre.
+    cupon.montoAlCancelar = montoDisponiblePrevio;
     cupon.fechaCancelacion = new Date().toISOString();
     cupon.motivoCancelacion = motivo || 'Abono de origen corregido/eliminado en auditoría';
     StorageService.set("cuponesCliente", cupones);

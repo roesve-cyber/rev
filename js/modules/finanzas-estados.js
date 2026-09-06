@@ -444,6 +444,39 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         .filter(p => p.estado === 'Incobrable' && _efEnRango(p.fechaIncobrable || p.fecha, desde, hasta))
         .reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
 
+    // 🎟️ Cupones de saldo a favor por pronto pago (cxc.js): NIF D-1 los trata
+    // como contraprestación variable de la venta original -- el mecanismo es
+    // un "pasivo por reembolso" que se remide cada vez que cambia la
+    // circunstancia, y esa remedición SIEMPRE pasa por resultados (nunca es
+    // "gratis" para el Estado de Resultados, aunque tampoco es un gasto
+    // operativo nuevo -- es Ingreso Financiero, porque el monto del cupón se
+    // calculó exactamente como el interés que se le regresa al cliente, ver
+    // _cxcCalcularCuponPronto).
+    // - Emisión (liquida a tiempo): la circunstancia pasa de "incierta" a
+    //   "cierta y conocida" -- se resta de RIF en el periodo de emisión.
+    // - Vencimiento o cancelación sin canjear (breakage): la circunstancia
+    //   pasa a "ya no se debe" -- se recupera como RIF en el periodo que
+    //   ocurre. El vencimiento conserva montoDisponible tal cual estaba al
+    //   marcarse 'Vencido' (_cxcMarcarCuponesVencidos no lo toca); la
+    //   cancelación usa montoAlCancelar porque _cxcAnularCuponPorAbono sí
+    //   resetea montoDisponible a 0 al cancelar.
+    // - Canje (se usa como forma de pago en una compra futura): SIN efecto
+    //   aquí -- el descuento ya se reconoció al emitir; volver a restarlo en
+    //   la venta donde se canjea sería doble conteo, y además rompería la
+    //   asociación de ingresos y gastos (NIF A-2): esa venta futura puede no
+    //   tener ninguna relación con el crédito que originó el cupón.
+    const cuponesCliente = StorageService.get('cuponesCliente', []);
+    const cuponesEmitidosEnPeriodo = cuponesCliente
+        .filter(c => _efEnRango(c.fechaEmision, desde, hasta))
+        .reduce((s, c) => s + (Number(c.montoOriginal) || 0), 0);
+    const cuponesVencidosEnPeriodo = cuponesCliente
+        .filter(c => c.estado === 'Vencido' && _efEnRango(c.fechaMarcadoVencido, desde, hasta))
+        .reduce((s, c) => s + (Number(c.montoDisponible) || 0), 0);
+    const cuponesCanceladosEnPeriodo = cuponesCliente
+        .filter(c => c.estado === 'Cancelado' && _efEnRango(c.fechaCancelacion, desde, hasta))
+        .reduce((s, c) => s + (Number(c.montoAlCancelar) || 0), 0);
+    const cuponesRecuperadosEnPeriodo = cuponesVencidosEnPeriodo + cuponesCanceladosEnPeriodo;
+
     // 🛡️ REPARACIÓN: las comisiones de vendedores se acumulan en
     // comisionesRegistradas (vendedores.js) al cerrar la venta, y su pago se
     // hace vía _egresarCuenta (mueve caja, ver bancos/vendedores) — pero
@@ -468,7 +501,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     // Cuentas incobrables: NIF las clasifica como gasto de operación (venta/
     // administración), NO como parte del RIF.
     const utilidadOperacion = utilidadBruta - totalComisiones - totalMermasNetas - totalGastos - incobrables;
-    const rif = ingresosFinancieros - gastosFinancieros;
+    const rif = ingresosFinancieros - gastosFinancieros - cuponesEmitidosEnPeriodo + cuponesRecuperadosEnPeriodo;
     const utilidadNeta = utilidadOperacion + rif;
 
     return {
@@ -487,7 +520,10 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         productosMermaSinCosto: Array.from(productosMermaSinCosto.values())
             .sort((a, b) => b.ocurrencias - a.ocurrencias),
         gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
-        ingresosFinancieros, gastosFinancieros, rif,
+        ingresosFinancieros, gastosFinancieros,
+        cuponesEmitidosEnPeriodo, cuponesRecuperadosEnPeriodo,
+        cuponesVencidosEnPeriodo, cuponesCanceladosEnPeriodo,
+        rif,
         utilidadNeta
     };
 }
@@ -718,6 +754,8 @@ function renderEstadosFinancieros() {
         <table style="width:100%;border-collapse:collapse;">
             <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;">+ Ingresos financieros (intereses cobrados)</td><td style="padding:6px 8px;text-align:right;">${_efDinero(er.ingresosFinancieros)}</td></tr>
             <tr><td style="padding:6px 8px;color:#dc2626;">– Gastos financieros (intereses pagados)</td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.gastosFinancieros)}</td></tr>
+            <tr><td style="padding:6px 8px;color:#dc2626;">– Cupones de pronto pago emitidos<span title="NIF D-1: contraprestación variable de la venta a crédito original. Se reconoce como pasivo por reembolso al momento en que el monto se vuelve cierto y conocido (liquidación anticipada)." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.cuponesEmitidosEnPeriodo)}</td></tr>
+            <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;color:#059669;">+ Cupones recuperados (vencidos/cancelados sin canjear)<span title="NIF D-1: remedición del pasivo por reembolso a $0 cuando ya no se debe (breakage) -- vencimiento natural o cancelación administrativa." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#059669;">${_efDinero(er.cuponesRecuperadosEnPeriodo)}</td></tr>
         </table>
     </details>
     <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
