@@ -577,15 +577,38 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
 // ---------------------------------------------------------------
 
 // Reconstruye el saldo de una lista de cuentas (efectivo o bancarias) a una
-// fecha de corte, partiendo del saldo actual y deshaciendo los movimientos de
-// movimientosCaja posteriores a esa fecha (ingreso posterior se resta,
-// egreso posterior se suma de vuelta).
-function _efSaldoCuentasAFecha(cuentas, tipoCuenta, hastaDate, movimientosCaja) {
-    return cuentas.map(c => {
+// fecha de corte. Parte del saldo YA RECALCULADO EN VIVO desde
+// movimientosCaja (saldosCalculados, vía _bancosCalcularSaldosDesdeMovimientos
+// en bancos.js) en vez del campo c.saldo guardado en el registro -- ver nota
+// abajo sobre por qué c.saldo no es confiable por sí solo -- y deshace los
+// movimientos posteriores a esa fecha (ingreso posterior se resta, egreso
+// posterior se suma de vuelta) para reconstruir el saldo histórico.
+function _efSaldoCuentasAFecha(cuentas, tipoCuenta, hastaDate, movimientosCaja, saldosCalculados) {
+    return cuentas.map((c, index) => {
+        const key = tipoCuenta === 'banco' ? (c.banco || c.id) : c.id;
+        const saldoBase = (saldosCalculados && saldosCalculados[key] !== undefined)
+            ? Number(saldosCalculados[key]) || 0
+            : Number(c.saldo) || 0; // respaldo si bancos.js no está cargado, o la cuenta no matcheó ningún movimiento
+        // 🛡️ CORREGIDO: filtraba con String(m.cuenta) === String(c.id) -- una
+        // comparación simple que validator.js documenta explícitamente como
+        // INCORRECTA: "ÚNICA función de verdad para '¿este movimiento es de
+        // esta cuenta?'" es movimientoPerteneceACuenta (revisa etiquetaCuenta/
+        // cuenta/cuentaId/origen contra id/nombre/banco, normalizados) --
+        // exactamente la que ya usa _bancosCalcularSaldosDesdeMovimientos para
+        // armar saldosCalculados arriba. Sin esto, un movimiento identificado
+        // por cuentaId o etiquetaCuenta (en vez de cuenta) se colaba sin
+        // deshacerse en un corte histórico, aunque sí contara en el saldo
+        // actual -- desalineando el saldo reconstruido a una fecha pasada.
+        const aliases = (typeof window.movimientoPerteneceACuenta === 'function')
+            ? (tipoCuenta === 'banco'
+                ? (typeof window._bancosAliasesDebito === 'function' ? window._bancosAliasesDebito({ banco: key, id: c.id, nombre: c.nombre }) : [c.id])
+                : (typeof window._bancosAliasesCaja === 'function' ? window._bancosAliasesCaja(c, index) : [c.id]))
+            : null;
         const efectoPosterior = movimientosCaja
-            .filter(m => String(m.cuenta) === String(c.id) && _efParseFecha(m.fecha) > hastaDate)
+            .filter(m => (aliases ? window.movimientoPerteneceACuenta(m, aliases) : String(m.cuenta) === String(c.id))
+                && _efParseFecha(m.fecha) > hastaDate)
             .reduce((s, m) => s + (m.tipo === 'ingreso' ? Number(m.monto) || 0 : -(Number(m.monto) || 0)), 0);
-        return { ...c, saldoAFecha: (Number(c.saldo) || 0) - efectoPosterior };
+        return { ...c, saldoAFecha: saldoBase - efectoPosterior };
     });
 }
 
@@ -594,9 +617,22 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const hoyStr = _efHoyInput();
     const esHistorico = hastaStr !== hoyStr;
 
+    // 🛡️ CORREGIDO: antes se partía de c.saldo (el campo guardado en
+    // cuentasEfectivo/cuentas-bancarias) -- pero el propio bancos.js
+    // (renderCuentasBancarias) ya sabe que ese campo puede desincronizarse
+    // de lo que dicen los movimientos reales: calcula AMBOS valores
+    // ("guardado" vs "calculado" desde movimientosCaja) y muestra una
+    // advertencia visible cuando difieren. finanzas-estados.js leía el
+    // "guardado" sin ninguna de esas comprobaciones, así que un desface ahí
+    // (detectable en Mis Cuentas Bancarias) se colaba silenciosamente al
+    // Balance. Ahora se usa _bancosCalcularSaldosDesdeMovimientos (la misma
+    // función que arma esa comparación) como fuente principal.
     const movimientosCaja = StorageService.get('movimientosCaja', []);
-    const efectivo = _efSaldoCuentasAFecha(StorageService.get('cuentasEfectivo', []), 'efectivo', hasta, movimientosCaja);
-    const bancos = _efSaldoCuentasAFecha(StorageService.get('cuentas-bancarias', []), 'banco', hasta, movimientosCaja);
+    const saldosDesdeMov = (typeof window._bancosCalcularSaldosDesdeMovimientos === 'function')
+        ? window._bancosCalcularSaldosDesdeMovimientos()
+        : null;
+    const efectivo = _efSaldoCuentasAFecha(StorageService.get('cuentasEfectivo', []), 'efectivo', hasta, movimientosCaja, saldosDesdeMov?.saldosCajas);
+    const bancos = _efSaldoCuentasAFecha(StorageService.get('cuentas-bancarias', []), 'banco', hasta, movimientosCaja, saldosDesdeMov?.saldosDebito);
     const totalEfectivoBancos = [...efectivo, ...bancos].reduce((s, c) => s + (Number(c.saldoAFecha) || 0), 0);
 
     // 🛡️ CORREGIDO: leía c.saldoActual directo del registro -- pero ese campo
@@ -664,30 +700,43 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const totalConsignacionNoPropia = consignaciones.reduce((s, c) => s + (Number(c.cantidadPendiente) || 0) * (Number(c.costoUnitario) || 0), 0);
     const totalInventario = Math.max(0, totalInventarioBruto - totalConsignacionNoPropia);
 
-    const cxp = StorageService.get('cuentasPorPagar', []);
-    const totalCxP = cxp.reduce((s, c) => s + (Number(c.saldoPendiente ?? c.saldo) || 0), 0);
+    // 🛡️ Se excluyen registros marcados liquidados por flag (pagado/liquidado/
+    // estado) aunque su campo de saldo no se haya quedado en exactamente 0 --
+    // mismo criterio que ya usa compras.js (_consigCxpLiquidada) en los flujos
+    // de CxP por consignación, donde depender solo del campo de saldo no es
+    // suficiente porque hay casos que marcan el flag sin dejar el saldo en
+    // cero exacto.
+    const cxp = StorageService.get('cuentasPorPagar', []).filter(c => {
+        if (typeof window._consigCxpLiquidada === 'function') return !window._consigCxpLiquidada(c);
+        return true; // respaldo si compras.js no está cargado en la página
+    });
+    const totalCxP = cxp.reduce((s, c) => s + Math.max(0, Number(c.saldoPendiente ?? c.saldo) || 0), 0);
 
     // Deuda con el banco por compras a Tarjeta de Crédito a Meses Sin
     // Intereses (bancos.js / cuentasMSI). Mismo cálculo que usa
     // renderDashboardMSI: total de la compra menos lo ya pagado, por cada
     // cuenta MSI. Sin esto el pasivo queda incompleto y las "Utilidades
     // acumuladas" (que se calculan como residual) se inflan de más.
-    // 🛡️ CORREGIDO: leía solo d.montoPagado -- pero confirmarPagoIndividualMSI
-    // (bancos.js, el flujo normal de "pagar una cuota a la vez") SOLO
-    // actualiza d.pagosRealizados, nunca d.montoPagado. El propio bancos.js ya
-    // sabe esto y en 6+ lugares distintos usa este mismo respaldo (deducir lo
-    // pagado de pagosRealizados × cuotaMensual cuando montoPagado es
-    // undefined) -- finanzas-estados.js era el único que no lo tenía, así que
-    // cualquier deuda MSI pagada cuota-por-cuota (no por la migración inicial,
-    // que sí inicializa montoPagado) se seguía contando como si no se hubiera
-    // pagado nada, para siempre.
+    // 🛡️ CORREGIDO (y vuelto a corregir): mi versión anterior usaba
+    // deuda.calendario como fuente principal por ser más granular -- pero
+    // encontré que el propio dashboard de MSI que Roberto ve todos los días
+    // (_msiCalcularResumen, usado por renderCuentasMSI en "Seguimiento de
+    // Compras MSI") NO usa calendario -- usa exactamente el criterio de dos
+    // niveles (montoPagado si existe, si no pagosRealizados × cuotaMensual).
+    // Si aquí uso una fórmula más precisa pero DISTINTA a la que ve todos los
+    // días, el Balance vuelve a desalinearse de "la cartera del sistema" --
+    // el mismo problema que ya arreglamos con cuentasPorCobrar. Mejor llamar
+    // directo a la función canónica del dashboard: así quedan garantizados
+    // idénticos para siempre, sea cual sea la fórmula que se use ahí.
     const cuentasMSI = StorageService.get('cuentasMSI', []);
     const totalDeudaMSI = cuentasMSI.reduce((s, d) => {
+        if (typeof window._msiCalcularResumen === 'function') {
+            return s + (Number(window._msiCalcularResumen(d)?.saldo) || 0);
+        }
+        // respaldo si bancos.js no está cargado en la página
         const total = parseFloat(String(d.total || 0).replace(/[$,]/g, '')) || 0;
         const cuota = parseFloat(String(d.cuotaMensual || 0).replace(/[$,]/g, '')) || 0;
-        const pagado = d.montoPagado !== undefined
-            ? Number(d.montoPagado) || 0
-            : (Number(d.pagosRealizados) || 0) * cuota;
+        const pagado = d.montoPagado !== undefined ? Number(d.montoPagado) || 0 : (Number(d.pagosRealizados) || 0) * cuota;
         return s + Math.max(0, total - pagado);
     }, 0);
 
@@ -707,7 +756,9 @@ function _efCalcularBalanceGeneral(hastaStr) {
     // ellos, ya no representan una obligación real de canje.
     const cuponesCliente = StorageService.get('cuponesCliente', []);
     const totalCuponesPorCanjear = cuponesCliente
-        .filter(c => c.estado === 'Activo' && !(c.fechaVencimiento && new Date(c.fechaVencimiento) < new Date()))
+        .filter(c => c.estado === 'Activo' && !(typeof window._cxcCuponVencido === 'function'
+            ? window._cxcCuponVencido(c)
+            : (c.fechaVencimiento && new Date(c.fechaVencimiento) < new Date()))) // respaldo si cxc.js no está cargado
         .reduce((s, c) => s + Math.max(0, Number(c.montoDisponible) || 0), 0);
 
     // 💵 Anticipos de comisión a vendedores (vendedores.js): cuando se
@@ -719,8 +770,10 @@ function _efCalcularBalanceGeneral(hastaStr) {
     // (residual) como si fuera una pérdida, cuando en realidad solo cambió
     // efectivo por una cuenta por cobrar.
     const anticiposComision = StorageService.get('anticiposComisionVendedor', []);
-    const totalAnticiposComisionPorCobrar = anticiposComision
-        .reduce((s, a) => s + Math.max(0, Number(a.saldoPendiente ?? a.monto) || 0), 0);
+    const totalAnticiposComisionPorCobrar = anticiposComision.reduce((s, a) => {
+        if (typeof window._anticipoSaldoPendiente === 'function') return s + window._anticipoSaldoPendiente(a);
+        return s + Math.max(0, Number(a.saldoPendiente ?? a.monto) || 0); // respaldo si vendedores.js no está cargado
+    }, 0);
 
     // 💼 Comisiones devengadas y aún no pagadas (comisionesRegistradas,
     // estado 'Pendiente'): _efCalcularEstadoResultados ya las gasta en base
