@@ -462,9 +462,30 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     const otrosIngresosYGastos = otrosIngresos - otrosGastos;
 
     const prestamos = StorageService.get('prestamosOtorgados', []);
-    const incobrables = prestamos
+    const incobrablesPrestamos = prestamos
         .filter(p => p.estado === 'Incobrable' && _efEnRango(p.fechaIncobrable || p.fecha, desde, hasta))
         .reduce((s, p) => s + (Number(p.saldoPendiente) || 0), 0);
+
+    // 🛡️ CORREGIDO: esta línea solo leía prestamosOtorgados (préstamos de
+    // efectivo) -- nunca cuentasPorCobrar (las ventas a crédito, el producto
+    // principal del negocio). El Balance (_efCalcularBalanceGeneral) ya
+    // resta reservaCxCIncobrable del activo cuando se marca una cuenta
+    // incobrable (marcarIncobrable, cxc.js) -- pero esa resta nunca pasaba
+    // por aquí como gasto en ningún periodo, así que la utilidad neta
+    // reportada no bajaba aunque el Balance sí, exactamente el mismo
+    // desfase que ya corregimos con cupones/comisiones/anticipos. Esto
+    // importa más aquí que en cualquier otro rubro: el 100% del interés de
+    // una venta a crédito se reconoce de golpe en el mes de la venta (ver
+    // ingresosFinancieros arriba), así que si la cuenta después resulta
+    // incobrable, ese interés (más la utilidad de mercancía) ya se había
+    // contado como ganancia y necesita revertirse en algún lado.
+    const cuentasPorCobrarParaIncobrables = StorageService.get('cuentasPorCobrar', []);
+    const incobrablesCxC = cuentasPorCobrarParaIncobrables
+        .filter(c => c.incobrable === true && _efEnRango(c.incobrableFecha, desde, hasta))
+        .reduce((s, c) => s + ((typeof window._calcularEstadoCuenta === 'function'
+            ? Number(window._calcularEstadoCuenta(c.folio)?.saldoTotal)
+            : Number(c.saldoActual)) || 0), 0);
+    const incobrables = incobrablesPrestamos + incobrablesCxC;
 
     // 🎟️ Cupones de saldo a favor por pronto pago (cxc.js): NIF D-1 los trata
     // como contraprestación variable de la venta original -- el mecanismo es
@@ -541,7 +562,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         totalMermasNetas, totalMermasBruto, totalSobrantesAjuste,
         productosMermaSinCosto: Array.from(productosMermaSinCosto.values())
             .sort((a, b) => b.ocurrencias - a.ocurrencias),
-        gastosPorCategoria, totalGastos, incobrables, utilidadOperacion,
+        gastosPorCategoria, totalGastos, incobrables, incobrablesPrestamos, incobrablesCxC, utilidadOperacion,
         otrosIngresos, otrosGastos, otrosIngresosYGastos,
         ingresosFinancieros, gastosFinancieros,
         cuponesEmitidosEnPeriodo, cuponesRecuperadosEnPeriodo,
@@ -578,18 +599,27 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const bancos = _efSaldoCuentasAFecha(StorageService.get('cuentas-bancarias', []), 'banco', hasta, movimientosCaja);
     const totalEfectivoBancos = [...efectivo, ...bancos].reduce((s, c) => s + (Number(c.saldoAFecha) || 0), 0);
 
-    // 🛡️ REPARACIÓN: leía c.saldoPendiente ?? c.saldo, campos que NO existen
-    // en cuentasPorCobrar (ese registro solo se crea en ventas.js con
-    // saldoActual/saldoOriginal, y cxc.js mantiene el saldo vivo únicamente
-    // en saldoActual — ver abonos/liquidaciones). Leer el campo equivocado
-    // subestimaba (o volvía $0) este activo. Se excluyen cuentas Canceladas
-    // por si acaso (ya deberían traer saldoActual=0, ver ventas.js) y se
-    // separa la porción marcada incobrable como reserva explícita en vez de
-    // dejarla mezclada silenciosamente en el activo (ver reservaIncobrables
-    // más abajo) — antes ni se filtraba ni se mostraba aparte.
+    // 🛡️ CORREGIDO: leía c.saldoActual directo del registro -- pero ese campo
+    // NO es la fuente de verdad del saldo real. Lo confirmé contra el propio
+    // comentario de cxc.js (_cxcAjustarPagaresPorEnganche): "el 'Saldo
+    // actual' que se muestra en Mis Cuentas y en el Estado de Cuenta NO sale
+    // de cuenta.saldoActual: sale de _calcularEstadoCuenta(folio), que solo
+    // suma los pagarés Pendiente/Parcial". TODOS los demás módulos que
+    // muestran cartera (dashboard, dashboard.js, dos reportes de crédito,
+    // ARC v3, Mis Cuentas, condonar-deuda.js) ya usan _calcularEstadoCuenta
+    // -- finanzas-estados.js era el único que leía el campo crudo, así que
+    // en cuanto una cuenta tuviera un ajuste de enganche (u otro caso que
+    // solo toque pagarés sin tocar cuenta.saldoActual) el Balance quedaba
+    // desalineado de la cartera real que ves en cualquier otro reporte.
+    // Además, _calcularEstadoCuenta incluye los moratorios pendientes en
+    // saldoTotal (cuenta.saldoActual nunca los cargaba), así que de paso
+    // esto también agrega ese saldo que antes no aparecía en ningún lado.
     const cxc = StorageService.get('cuentasPorCobrar', []).filter(c => c.estado !== 'Cancelado');
-    const totalCxCCreditoBruto = cxc.reduce((s, c) => s + (Number(c.saldoActual) || 0), 0);
-    const reservaCxCIncobrable = cxc.filter(c => c.incobrable === true).reduce((s, c) => s + (Number(c.saldoActual) || 0), 0);
+    const _efSaldoRealCuenta = (c) => (typeof window._calcularEstadoCuenta === 'function')
+        ? Number(window._calcularEstadoCuenta(c.folio)?.saldoTotal) || 0
+        : Number(c.saldoActual) || 0; // respaldo si cxc.js no está cargado en la página
+    const totalCxCCreditoBruto = cxc.reduce((s, c) => s + _efSaldoRealCuenta(c), 0);
+    const reservaCxCIncobrable = cxc.filter(c => c.incobrable === true).reduce((s, c) => s + _efSaldoRealCuenta(c), 0);
     const totalCxCCredito = Math.max(0, totalCxCCreditoBruto - reservaCxCIncobrable);
 
     // 🛡️ Apartados (layaway) son una cuenta por cobrar aparte de
@@ -793,7 +823,7 @@ function renderEstadosFinancieros() {
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Comisiones a vendedores</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalComisiones)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalComisiones, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Mermas y ajustes de inventario${er.productosMermaSinCosto.length > 0 ? ` <span title="${er.productosMermaSinCosto.length} producto(s) con merma en el periodo sin costo capturado — no incluidos en este monto: ${_efEsc(er.productosMermaSinCosto.map(p => p.nombre + ' (' + p.ocurrencias + ')').join(', '))}" style="cursor:help;">⚠️</span>` : ''}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalMermasNetas)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalMermasNetas, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Gastos operativos</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalGastos)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalGastos, er.ingresosVentas)}</td></tr>
-        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Préstamos incobrables</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.incobrables)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.incobrables, er.ingresosVentas)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Cuentas incobrables<span title="Ventas a crédito (${_efDinero(er.incobrablesCxC)}) + préstamos otorgados (${_efDinero(er.incobrablesPrestamos)}) marcados incobrables en el periodo. Se revierte aquí porque su interés y utilidad de mercancía ya se habían reconocido de golpe al momento de la venta." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.incobrables)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.incobrables, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Utilidad de operación</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadOperacion)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadOperacion, er.ingresosVentas)}</td></tr>
     </table>
     <details style="margin-bottom:12px;">
