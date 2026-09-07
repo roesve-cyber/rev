@@ -853,10 +853,120 @@ window.imprimirTicketEstadoCuentaCliente = function() {
     }
 };
 
+// 📱 Tarjeta de folio para la imagen de tablet: en vez de una tabla de 10
+// columnas (ilegible en una pantalla angosta), cada folio se muestra como
+// una tarjeta apilada con pares etiqueta:valor y tipografía grande.
+function _eccTarjetaFolioImagen(c) {
+    const badge = _eccBadgeColores(c.estado);
+    const filaDato = (label, valor, colorValor = '#1e293b', negrita = true) => `
+        <div style="display:flex; justify-content:space-between; align-items:baseline; padding:7px 0; border-bottom:1px solid #f1f5f9;">
+            <span style="font-size:15px; color:#64748b;">${label}</span>
+            <span style="font-size:17px; color:${colorValor}; ${negrita ? 'font-weight:bold;' : ''} text-align:right;">${valor}</span>
+        </div>`;
+
+    const productos = c.articulosDetalle.length ? `
+        <p style="margin:16px 0 6px 0; font-size:15px; font-weight:bold; color:#1e293b;">🛋️ Productos</p>
+        ${c.articulosDetalle.map(a => `
+            <div style="display:flex; justify-content:space-between; padding:5px 0; font-size:15px; color:#334155;">
+                <span>${_escCuenta(a.nombre)} ${a.cantidad > 1 ? `x${a.cantidad}` : ''}</span>
+                <span>${_dinéroCuenta(a.precio)}</span>
+            </div>`).join('')}
+    ` : '';
+
+    const abonos = c.abonosDetalle.length ? `
+        <p style="margin:16px 0 6px 0; font-size:15px; font-weight:bold; color:#1e293b;">💵 Historial de abonos</p>
+        ${c.abonosDetalle.map(a => `
+            <div style="display:flex; justify-content:space-between; padding:5px 0; font-size:14px; color:#334155; border-bottom:1px dashed #e2e8f0;">
+                <span>${a.numero}. ${a.fecha} · ${_escCuenta(a.medio)}</span>
+                <span style="font-weight:bold; color:#059669;">${_dinéroCuenta(a.monto)}</span>
+            </div>`).join('')}
+    ` : `<p style="margin:16px 0 0 0; font-size:14px; color:#94a3b8;">Sin abonos registrados.</p>`;
+
+    // 🛋️ Encabezado por PRODUCTO vendido (no por folio) -- es lo que
+    // realmente identifica la venta para quien lee el reporte. El folio
+    // se conserva como referencia chica, no como título.
+    const nombreProductos = c.articulosDetalle.length
+        ? c.articulosDetalle.map(a => a.cantidad > 1 ? `${a.nombre} x${a.cantidad}` : a.nombre).join(' + ')
+        : 'Producto no especificado';
+
+    return `
+    <div style="background:white; border:2px solid #e2e8f0; border-radius:14px; padding:20px; margin-bottom:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:4px; flex-wrap:wrap; gap:8px;">
+            <span style="font-size:19px; font-weight:bold; color:#1e40af;">🛋️ ${_escCuenta(nombreProductos)}</span>
+            <span style="background:${badge.bg}; color:${badge.color}; padding:6px 14px; border-radius:20px; font-weight:bold; font-size:13px; white-space:nowrap;">${c.estado}</span>
+        </div>
+        <p style="margin:0 0 10px 0; font-size:12px; color:#94a3b8;">Folio ${_escCuenta(c.folio)}</p>
+        ${filaDato('Fecha de venta', c.fechaVentaCorta, '#1e293b', false)}
+        ${filaDato('Total venta', _dinéroCuenta(c.totalVenta))}
+        ${filaDato('Enganche', _dinéroCuenta(c.enganche), '#1e293b', false)}
+        ${filaDato('Saldo actual', _dinéroCuenta(c.saldo), c.saldo > 0.01 ? '#b91c1c' : '#059669')}
+        ${filaDato('Plazo', _escCuenta(c.plazoTexto), '#1e293b', false)}
+        ${filaDato('Antigüedad', `${c.diasAntiguo} día(s)`, '#1e293b', false)}
+        ${filaDato('Último abono', c.ultimoAbono, '#1e293b', false)}
+        ${productos}
+        ${abonos}
+    </div>`;
+}
+
+// 📱 Construye el documento completo pensado para leerse cómodo en tablet:
+// una sola columna, ancho angosto tipo pantalla vertical, tipografía grande
+// y folios como tarjetas en vez de tabla comprimida (nada de "hoja carta").
+function _eccConstruirHtmlImagenTablet(estado, cuentasImprimir) {
+    return `
+    <div style="width:720px; background:#f8fafc; padding:26px; font-family:Arial, sans-serif;">
+        <div style="background:white; border-radius:16px; padding:26px;">
+            <div style="text-align:center; margin-bottom:20px;">
+                <img src="img/Logo.svg" alt="Mi Pueblito" style="width:60px; height:60px; object-fit:contain;" onerror="this.style.display='none'">
+                <h1 style="margin:10px 0 4px 0; font-size:24px; color:#1e293b;">📊 Estado de Cuenta</h1>
+                <p style="margin:0; font-size:14px; color:#64748b;">Emitido: ${_fechaCortaCuenta(new Date())}</p>
+                <div style="display:inline-block; margin-top:12px; background:${estado.colorEstatus}; color:white; padding:8px 22px; border-radius:20px; font-weight:bold; font-size:16px;">${estado.estadoEstatus}</div>
+            </div>
+
+            <div style="background:#eff6ff; border-radius:12px; padding:18px; margin-bottom:20px;">
+                <p style="margin:0 0 4px 0; font-size:13px; color:#0284c7; font-weight:bold; text-transform:uppercase;">Cliente</p>
+                <p style="margin:0 0 10px 0; font-size:22px; color:#0c4a6e; font-weight:bold;">${_escCuenta(estado.clienteNombre)}</p>
+                ${estado.clienteTelefono !== '-' ? `<p style="margin:0 0 4px 0; font-size:16px; color:#1e293b;">📞 ${_escCuenta(estado.clienteTelefono)}</p>` : ''}
+                ${estado.clienteDireccion !== '-' ? `<p style="margin:0; font-size:15px; color:#475569;">📍 ${_escCuenta(estado.clienteDireccion)}</p>` : ''}
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px;">
+                <div style="background:#eff6ff; border:2px solid #0ea5e9; border-radius:12px; padding:16px;">
+                    <p style="margin:0 0 6px 0; font-size:13px; color:#0284c7; font-weight:bold; text-transform:uppercase;">Total Vendido</p>
+                    <p style="margin:0; font-size:24px; color:#0c4a6e; font-weight:bold;">${_dinéroCuenta(estado.totalVendido)}</p>
+                </div>
+                <div style="background:#f0fdf4; border:2px solid #10b981; border-radius:12px; padding:16px;">
+                    <p style="margin:0 0 6px 0; font-size:13px; color:#059669; font-weight:bold; text-transform:uppercase;">Total Abonado</p>
+                    <p style="margin:0; font-size:24px; color:#065f46; font-weight:bold;">${_dinéroCuenta(estado.totalAbonado)}</p>
+                </div>
+                <div style="background:#fef2f2; border:2px solid #dc2626; border-radius:12px; padding:16px;">
+                    <p style="margin:0 0 6px 0; font-size:13px; color:#dc2626; font-weight:bold; text-transform:uppercase;">Saldo Pendiente</p>
+                    <p style="margin:0; font-size:24px; color:#7f1d1d; font-weight:bold;">${_dinéroCuenta(estado.totalSaldo)}</p>
+                </div>
+                <div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:12px; padding:16px;">
+                    <p style="margin:0 0 6px 0; font-size:13px; color:#b45309; font-weight:bold; text-transform:uppercase;">% Pagado</p>
+                    <p style="margin:0; font-size:24px; color:#78350f; font-weight:bold;">${estado.porcentajePago}%</p>
+                </div>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:16px; margin-bottom:26px;">
+                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Antigüedad de deuda</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.diasAntiguo} días</span></div>
+                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Frecuencia de pago</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.frecuenciaPago}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Próximo cobro (estimado)</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.proximaFecha}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Total de operaciones</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.cuentas.length} folio(s)</span></div>
+            </div>
+
+            <h2 style="font-size:19px; color:#1e293b; margin:0 0 14px 0;">📋 Detalle por Folio</h2>
+            ${cuentasImprimir.length ? cuentasImprimir.map(_eccTarjetaFolioImagen).join('') : `<p style="color:#94a3b8; font-size:15px;">No hay folios para este filtro.</p>`}
+
+            <p style="text-align:center; margin-top:14px; font-size:12px; color:#94a3b8;">Mueblería Mi Pueblito · Documento informativo de saldo</p>
+        </div>
+    </div>`;
+}
+
 window.descargarImagenEstadoCuentaCliente = function() {
     if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
-    const contenedor = document.getElementById('contenidoReporteECC');
-    if (!contenedor) return;
+    const estado = window._estadoClienteActual;
+    const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
 
     const btn = document.getElementById('btnImgECC');
     const txtOriginal = btn.innerHTML;
@@ -874,16 +984,17 @@ window.descargarImagenEstadoCuentaCliente = function() {
     };
 
     loadScript(() => {
-        const clon = contenedor.cloneNode(true);
-        // Ajustamos el clon para la foto
-        clon.style.width = '850px';
-        clon.style.padding = '20px';
-        clon.style.background = 'white';
-        clon.style.position = 'absolute';
-        clon.style.left = '-9999px';
-        document.body.appendChild(clon);
+        // 📱 Contenedor propio (angosto, una sola columna, tipografía grande)
+        // pensado para leerse en tablet/celular -- ya no es un clon de la
+        // vista de escritorio con tabla ancha tipo hoja carta.
+        const wrap = document.createElement('div');
+        wrap.style.position = 'absolute';
+        wrap.style.left = '-9999px';
+        wrap.style.top = '0';
+        wrap.innerHTML = _eccConstruirHtmlImagenTablet(estado, cuentasImprimir);
+        document.body.appendChild(wrap);
 
-        html2canvas(clon, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+        html2canvas(wrap, { scale: 2, backgroundColor: '#f8fafc', useCORS: true }).then(canvas => {
             const link = document.createElement('a');
             link.download = `Estado_Cuenta_${window._estadoClienteActual.clienteNombre.replace(/\s+/g, '_')}.png`;
             link.href = canvas.toDataURL('image/png');
@@ -892,7 +1003,7 @@ window.descargarImagenEstadoCuentaCliente = function() {
             console.error("Error html2canvas:", e);
             alert('Hubo un error al generar la imagen.');
         }).finally(() => {
-            clon.remove();
+            wrap.remove();
             btn.innerHTML = txtOriginal;
             btn.disabled = false;
         });
