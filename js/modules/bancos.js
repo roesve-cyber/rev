@@ -1010,6 +1010,18 @@ window.confirmarPagoIndividualMSI = function(id, numeroCuota) {
     movimientos.forEach(m => { if (m.idOperacion === refPago) m.medioPago = "tarjeta_msi"; });
     StorageService.set("movimientosCaja", movimientos);
 
+    // 🛡️ CORREGIDO: esto avanzaba pagosRealizados pero nunca tocaba
+    // montoPagado -- el campo que _msiCalcularResumen (el dashboard que ves) y
+    // finanzas-estados.js (Balance) usan primero si existe. Como resultado,
+    // cualquier cuenta MSI pagada por este camino (el normal, cuota por
+    // cuota) quedaba con montoPagado desactualizado o inexistente para
+    // siempre, y ambos lectores tenían que adivinar mediante un respaldo. Se
+    // corrige aquí, en el origen, para que el campo caché quede bien sin
+    // depender de que cada lector sepa reconstruirlo.
+    const montoPagadoPrevio = deuda.montoPagado !== undefined
+        ? Number(deuda.montoPagado) || 0
+        : pagosActuales * (Number(deuda.cuotaMensual) || 0);
+    deuda.montoPagado = montoPagadoPrevio + (Number(deuda.cuotaMensual) || 0);
     deuda.pagosRealizados = pagosActuales + 1;
     // 🛡️ Guardamos el idOperacion del movimiento en el propio calendario para
     // que deshacerPagoMSI pueda revertirlo con precisión (antes no quedaba

@@ -912,7 +912,15 @@ window._cxcAplicarSaltoPlazo = function(idPendiente) {
         montoMoratoriosCancelados += pendienteMoratorio;
     });
 
-    cuenta.saldoActual = Number(cuenta.saldoActual || 0) + pendiente.diferencia;
+    // 🛡️ CORREGIDO: sumaba pendiente.diferencia (el pagaré nuevo) pero nunca
+    // restaba montoMoratoriosCancelados -- los moratorios pendientes que este
+    // mismo flujo acaba de cancelar arriba. cuenta.saldoActual SÍ incluye
+    // moratorios pendientes en su definición real (ver
+    // _cxcRecalcularCuentaPorAbonos: saldoPagares + saldoMoratorios), así que
+    // sin esto, saldoActual quedaba sobreestimado por el monto exacto de los
+    // moratorios recién cancelados -- desalineado de lo que _calcularEstadoCuenta
+    // (la fuente real que se muestra en Mis Cuentas) mostraría para el mismo folio.
+    cuenta.saldoActual = Math.max(0, Number(cuenta.saldoActual || 0) + pendiente.diferencia - montoMoratoriosCancelados);
     StorageService.set("cuentasPorCobrar", cuentas);
 
     pendiente.estado = 'Aplicado';

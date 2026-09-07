@@ -6482,7 +6482,16 @@ function _cancelRecalcularCredito(cuenta) {
     if (cuenta.plan && cuenta.plan.total) deudaTotal = Number(cuenta.plan.total);
     else if (cuenta.saldoOriginal) deudaTotal = Number(cuenta.saldoOriginal);
 
-    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado);
+    // 🛡️ CORREGIDO: solo restaba abonos del total del plan -- nunca sumaba
+    // los moratorios pendientes, que sí forman parte de la definición real de
+    // saldoActual (ver _calcularEstadoCuenta: saldoTotal = saldo de pagarés +
+    // saldoMoratorios). Una cuenta con moratorios pendientes en el momento en
+    // que se recalcula aquí (reversión de cancelación) quedaba con
+    // saldoActual desalineado del que muestra Mis Cuentas para esa misma cuenta.
+    const saldoMoratoriosRecalc = (typeof window._cxcMoratoriosPendientes === 'function')
+        ? window._cxcMoratoriosPendientes(cuenta).reduce((sum, m) => sum + Number(m.pendiente || 0), 0)
+        : 0;
+    cuenta.saldoActual = Math.max(0, deudaTotal - totalAbonado) + saldoMoratoriosRecalc;
     cuenta.estado = cuenta.saldoActual <= 0.01 ? "Saldado" : "Pendiente";
     if (cuenta.saldoActual <= 0.01) cuenta.saldoActual = 0;
 
