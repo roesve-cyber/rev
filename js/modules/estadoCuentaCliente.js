@@ -864,54 +864,62 @@ function _eccTarjetaFolioImagen(c) {
             <span style="font-size:17px; color:${colorValor}; ${negrita ? 'font-weight:bold;' : ''} text-align:right;">${valor}</span>
         </div>`;
 
-    const productos = c.articulosDetalle.length ? `
-        <p style="margin:16px 0 6px 0; font-size:15px; font-weight:bold; color:#1e293b;">🛋️ Productos</p>
-        ${c.articulosDetalle.map(a => `
-            <div style="display:flex; justify-content:space-between; padding:5px 0; font-size:15px; color:#334155;">
-                <span>${_escCuenta(a.nombre)} ${a.cantidad > 1 ? `x${a.cantidad}` : ''}</span>
-                <span>${_dinéroCuenta(a.precio)}</span>
-            </div>`).join('')}
-    ` : '';
-
-    const abonos = c.abonosDetalle.length ? `
-        <p style="margin:16px 0 6px 0; font-size:15px; font-weight:bold; color:#1e293b;">💵 Historial de abonos</p>
-        ${c.abonosDetalle.map(a => `
-            <div style="display:flex; justify-content:space-between; padding:5px 0; font-size:14px; color:#334155; border-bottom:1px dashed #e2e8f0;">
-                <span>${a.numero}. ${a.fecha} · ${_escCuenta(a.medio)}</span>
-                <span style="font-weight:bold; color:#059669;">${_dinéroCuenta(a.monto)}</span>
-            </div>`).join('')}
-    ` : `<p style="margin:16px 0 0 0; font-size:14px; color:#94a3b8;">Sin abonos registrados.</p>`;
-
     // 🛋️ Encabezado por PRODUCTO vendido (no por folio) -- es lo que
-    // realmente identifica la venta para quien lee el reporte. El folio
-    // se conserva como referencia chica, no como título.
+    // realmente identifica la venta para quien lee el reporte.
     const nombreProductos = c.articulosDetalle.length
         ? c.articulosDetalle.map(a => a.cantidad > 1 ? `${a.nombre} x${a.cantidad}` : a.nombre).join(' + ')
         : 'Producto no especificado';
 
+    // Solo lo esencial por tarjeta: producto, fecha de venta, saldo y
+    // último pago -- sin desglose de plazo/enganche/productos/abonos.
     return `
-    <div style="background:white; border:2px solid #e2e8f0; border-radius:14px; padding:20px; margin-bottom:20px;">
-        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:4px; flex-wrap:wrap; gap:8px;">
+    <div style="background:white; border:2px solid #e2e8f0; border-radius:14px; padding:20px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
             <span style="font-size:19px; font-weight:bold; color:#1e40af;">🛋️ ${_escCuenta(nombreProductos)}</span>
             <span style="background:${badge.bg}; color:${badge.color}; padding:6px 14px; border-radius:20px; font-weight:bold; font-size:13px; white-space:nowrap;">${c.estado}</span>
         </div>
-        <p style="margin:0 0 10px 0; font-size:12px; color:#94a3b8;">Folio ${_escCuenta(c.folio)}</p>
         ${filaDato('Fecha de venta', c.fechaVentaCorta, '#1e293b', false)}
-        ${filaDato('Total venta', _dinéroCuenta(c.totalVenta))}
-        ${filaDato('Enganche', _dinéroCuenta(c.enganche), '#1e293b', false)}
         ${filaDato('Saldo actual', _dinéroCuenta(c.saldo), c.saldo > 0.01 ? '#b91c1c' : '#059669')}
-        ${filaDato('Plazo', _escCuenta(c.plazoTexto), '#1e293b', false)}
-        ${filaDato('Antigüedad', `${c.diasAntiguo} día(s)`, '#1e293b', false)}
-        ${filaDato('Último abono', c.ultimoAbono, '#1e293b', false)}
-        ${productos}
-        ${abonos}
+        ${filaDato('Último pago', c.ultimoAbono, '#1e293b', false)}
     </div>`;
+}
+
+// Fecha corta ("dd-mm-yyyy", ver _fechaCortaCuenta) -> Date, para poder
+// comparar cuál es el pago más reciente entre varias cuentas.
+function _eccParseFechaCorta(fechaCorta) {
+    if (!fechaCorta || fechaCorta === '-') return null;
+    const partes = String(fechaCorta).split('-');
+    if (partes.length !== 3) return null;
+    const [d, m, y] = partes.map(Number);
+    if (!d || !m || !y) return null;
+    const fecha = new Date(y, m - 1, d);
+    return isNaN(fecha.getTime()) ? null : fecha;
+}
+
+// 🔎 Último pago registrado, buscando SOLO entre las cuentas activas
+// (con saldo pendiente) del cliente -- sin importar el filtro de
+// pantalla, para que el resumen siempre refleje el estado real.
+function _eccUltimoPagoActivo(cuentas) {
+    let mejor = null;
+    (cuentas || []).forEach(c => {
+        if (c.saldo <= 0.01) return; // solo cuentas activas
+        const detalle = c.abonosDetalle || [];
+        if (!detalle.length) return;
+        const ultimo = detalle[detalle.length - 1];
+        const fecha = _eccParseFechaCorta(ultimo.fecha);
+        if (!fecha) return;
+        if (!mejor || fecha > mejor.fecha) {
+            mejor = { fecha, fechaTexto: ultimo.fecha, monto: ultimo.monto };
+        }
+    });
+    return mejor;
 }
 
 // 📱 Construye el documento completo pensado para leerse cómodo en tablet:
 // una sola columna, ancho angosto tipo pantalla vertical, tipografía grande
 // y folios como tarjetas en vez de tabla comprimida (nada de "hoja carta").
 function _eccConstruirHtmlImagenTablet(estado, cuentasImprimir) {
+    const ultimoPago = _eccUltimoPagoActivo(estado.cuentas);
     return `
     <div style="width:720px; background:#f8fafc; padding:26px; font-family:Arial, sans-serif;">
         <div style="background:white; border-radius:16px; padding:26px;">
@@ -950,8 +958,8 @@ function _eccConstruirHtmlImagenTablet(estado, cuentasImprimir) {
 
             <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:12px; padding:16px; margin-bottom:26px;">
                 <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Antigüedad de deuda</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.diasAntiguo} días</span></div>
-                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Frecuencia de pago</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.frecuenciaPago}</span></div>
-                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Próximo cobro (estimado)</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.proximaFecha}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Último pago</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${ultimoPago ? ultimoPago.fechaTexto : '-'}</span></div>
+                <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Importe pagado</span><span style="font-size:16px; font-weight:bold; color:#059669;">${ultimoPago ? _dinéroCuenta(ultimoPago.monto) : '-'}</span></div>
                 <div style="display:flex; justify-content:space-between; padding:6px 0;"><span style="font-size:15px; color:#475569;">Total de operaciones</span><span style="font-size:16px; font-weight:bold; color:#1e293b;">${estado.cuentas.length} folio(s)</span></div>
             </div>
 
