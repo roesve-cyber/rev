@@ -481,14 +481,14 @@ function renderApartados() {
     if (apartadosFiltrados.length === 0) {
         html += `<p>No hay apartados ${filtro === 'todos' ? 'registrados' : 'con ese estado'}.</p>`;
     } else {
-        html += `<table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Fecha</th><th>Compromiso</th><th>Total</th><th>Abonado</th><th>Pendiente</th><th>Estado</th><th style="text-align:center;">Acciones</th></tr></thead><tbody>`;
+        html += `<table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Fecha</th><th>Compromiso</th><th>Total</th><th>Abonado</th><th>Pendiente</th><th>Estado</th><th style="text-align:center;">Acciones</th></tr></thead><tbody>`;
         
         apartadosFiltrados.forEach(a => {
             const abonado = _apartadoTotalPagado(a);
             const saldoVisible = _apartadoSaldoReal(a);
             html += `<tr>
-                <td><strong>${a.folio}</strong></td>
-                <td>${a.clienteNombre}</td>
+                <td><strong>${a.clienteNombre}</strong><br><small style="color:#94a3b8;">${a.folio}</small></td>
+                <td style="max-width:220px;">${window.resumenProductosVenta(a.articulos)}</td>
                 <td>${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fechaApartado) : a.fechaApartado}</td>
                 <td>${a.fechaCompromiso ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fechaCompromiso) : a.fechaCompromiso) : '—'}</td>
                 <td>${dinero(a.importeApartado)}</td>

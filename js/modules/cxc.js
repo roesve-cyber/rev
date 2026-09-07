@@ -1275,7 +1275,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
     </div>`;
 
     let htmlTabla = `<div style="overflow-x:auto;"><table class="tabla-admin">
-        <thead><tr><th>Cliente / Folio</th><th>Fecha Venta</th><th>Total Venta</th><th>Saldo Actual</th><th>Pagarés</th><th>Estatus</th><th>Acciones</th></tr></thead>
+        <thead><tr><th>Cliente</th><th>Producto(s)</th><th>Fecha Venta</th><th>Total Venta</th><th>Saldo Actual</th><th>Pagarés</th><th>Estatus</th><th>Acciones</th></tr></thead>
         <tbody>`;
 
     let cuentasMostradas = 0;
@@ -1311,7 +1311,8 @@ function renderCuentasXCobrar(filtroCliente = "") {
                     <button onclick="exentarMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Exentar moratorio sugerido">Exentar</button>` : '';
 
         htmlTabla += `<tr>
-            <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong><br><small style="color:#718096;">${c.folio}</small></td>
+            <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong><br><small style="color:#94a3b8;">${c.folio}</small></td>
+            <td style="max-width:220px;">${window.resumenProductosVenta(c.articulos)}</td>
             <td>${c.fechaVenta ? _cxcFechaVista(c.fechaVenta) : '-'}</td>
             <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
             <td style="font-weight:bold; color:${estadoCta.saldoTotal > 0 ? '#dc2626' : '#9ca3af'};">${_cxcDinero(estadoCta.saldoTotal)}${textoMoratorio}</td>
