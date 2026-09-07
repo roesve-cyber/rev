@@ -159,6 +159,26 @@ window._esc = function(estu) {
         .replace(/'/g, "&#039;");
 };
 
+// Resumen corto y seguro (HTML-escaped) de los productos de una venta/cuenta/apartado,
+// para mostrar en tablas en lugar del folio (Punto: "productos en vez de folio").
+// articulos: array de {nombre, cantidad}. maxItems: cuántos nombres mostrar antes de "+N más".
+window.resumenProductosVenta = function(articulos, maxItems = 2) {
+    const lista = Array.isArray(articulos) ? articulos.filter(a => a && a.nombre) : [];
+    if (lista.length === 0) return '<span style="color:#9ca3af; font-style:italic;">Sin detalle</span>';
+
+    const nombres = lista.map(a => {
+        const cant = Number(a.cantidad || 1);
+        return cant > 1 ? `${a.nombre} x${cant}` : `${a.nombre}`;
+    });
+
+    const visibles = nombres.slice(0, maxItems);
+    const restantes = nombres.length - visibles.length;
+    const textoCompleto = window._esc(nombres.join(', '));
+    const textoCorto = window._esc(visibles.join(', ')) + (restantes > 0 ? ` <span style="color:#64748b;">+${restantes} más</span>` : '');
+
+    return `<span title="${textoCompleto}">${textoCorto}</span>`;
+};
+
 window.formatearDineroMX = function(monto) {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
 };
