@@ -17,7 +17,57 @@ function renderConfiguracion() {
     
     _dibujarPlazosGlobales(config.plazos);
     renderConfigCupon();
+    _dibujarConfigCarpetaRaiz();
     if (typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig();
+}
+
+// 📁 Sección de Configuración para elegir/cambiar/desactivar la carpeta donde
+// se guardan los documentos generados (ver js/services/carpeta-raiz.js).
+// Se inyecta dinámicamente (en vez de vivir como HTML estático en
+// index.html) para no depender de tocar el layout existente de esta
+// pantalla -- se ancla justo después del bloque de plazos globales, que
+// siempre existe en esta vista.
+function _dibujarConfigCarpetaRaiz() {
+    const anclaPlazos = document.getElementById('listaPlazosGlobales');
+    if (!anclaPlazos) return;
+    if (document.getElementById('cfgCarpetaRaizSeccion')) {
+        _actualizarEstadoCarpetaRaiz();
+        return;
+    }
+    const contenedorPlazos = anclaPlazos.closest('div') || anclaPlazos.parentElement;
+    if (!contenedorPlazos) return;
+    contenedorPlazos.insertAdjacentHTML('afterend', `
+    <div id="cfgCarpetaRaizSeccion" style="background:white; padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.06); margin-top:16px;">
+        <h3 style="margin:0 0 8px; color:#0f172a;">📁 Carpeta de Documentos</h3>
+        <p style="margin:0 0 12px; color:#6b7280; font-size:13px;">
+            Elige una carpeta en esta computadora donde se guarden automáticamente, organizados por tipo,
+            los PDF/imágenes que genera el sistema (cotizaciones, comprobantes, cortes de caja, etc.).
+            Esta elección es solo para este dispositivo/navegador -- en Chrome/Edge de escritorio.
+            No funciona en Android, iPhone/iPad ni Safari/Firefox (es una limitación de esos navegadores,
+            no de este sistema); ahí los documentos se siguen descargando normal.
+        </p>
+        <p id="cfgCarpetaRaizEstado" style="margin:0 0 14px; font-size:13px; font-weight:bold;"></p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" onclick="window.CarpetaRaizService && window.CarpetaRaizService.configurarManualmente().then(_actualizarEstadoCarpetaRaiz)" style="padding:10px 16px; background:#2563eb; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Elegir / cambiar carpeta</button>
+            <button type="button" onclick="window.CarpetaRaizService && window.CarpetaRaizService.desactivar().then(_actualizarEstadoCarpetaRaiz)" style="padding:10px 16px; background:#f1f5f9; color:#475569; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Desactivar (volver a Descargas)</button>
+        </div>
+    </div>`);
+    _actualizarEstadoCarpetaRaiz();
+}
+
+function _actualizarEstadoCarpetaRaiz() {
+    const estado = document.getElementById('cfgCarpetaRaizEstado');
+    if (!estado || !window.CarpetaRaizService) return;
+    if (!window.CarpetaRaizService.soportado()) {
+        estado.textContent = 'Este navegador/dispositivo no soporta esta función -- los documentos se descargan normal.';
+        estado.style.color = '#9ca3af';
+    } else if (window.CarpetaRaizService.estaActiva()) {
+        estado.textContent = '✅ Activa -- tus documentos se están guardando en la carpeta elegida.';
+        estado.style.color = '#16a34a';
+    } else {
+        estado.textContent = 'Sin configurar -- se te preguntará la primera vez que generes un documento, o puedes elegirla aquí.';
+        estado.style.color = '#b45309';
+    }
 }
 
 function _dibujarPlazosGlobales(plazos) {
