@@ -117,8 +117,8 @@ function renderDashboard() {
             const folio = cuenta.folio || cuenta.folioVenta || '—';
             const fechaTxt = window.CobranzaRiskService.formatearFecha(r.fechaUltimoPago);
             return `<tr style="border-bottom:1px solid #f3f4f6;">
-                <td style="padding:8px 10px;">${cliente}</td>
-                <td style="padding:8px 10px; color:#1d4ed8; font-weight:bold;">${folio}</td>
+                <td style="padding:8px 10px;">${cliente}<br><small style="color:#94a3b8;">${folio}</small></td>
+                <td style="padding:8px 10px; max-width:200px;">${window.resumenProductosVenta(cuenta.articulos)}</td>
                 <td style="padding:8px 10px;">${fechaTxt}</td>
                 <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(r.saldo || 0)}</td>
                 <td style="padding:8px 10px; text-align:center;">
@@ -196,7 +196,7 @@ function renderDashboard() {
                     <thead>
                         <tr style="background:#f3f4f6;">
                             <th style="padding:10px; text-align:left;">Cliente</th>
-                            <th style="padding:10px; text-align:left;">Folio</th>
+                            <th style="padding:10px; text-align:left;">Producto(s)</th>
                             <th style="padding:10px; text-align:left;">Último pago</th>
                             <th style="padding:10px; text-align:right;">Saldo</th>
                             <th style="padding:10px; text-align:center;">Nivel</th>
@@ -273,8 +273,8 @@ function verificarAlertasPagares() {
         const folio = cuenta.folio || cuenta.folioVenta || '-';
         const fechaTxt = window.CobranzaRiskService.formatearFecha(r.fechaUltimoPago);
         return `<tr style="border-bottom:1px solid #f1f5f9;">
-            <td style="padding:8px 10px;">${cliente}</td>
-            <td style="padding:8px 10px; color:#1d4ed8; font-weight:bold;">${folio}</td>
+            <td style="padding:8px 10px;">${cliente}<br><small style="color:#94a3b8;">${folio}</small></td>
+            <td style="padding:8px 10px; max-width:200px;">${window.resumenProductosVenta(cuenta.articulos)}</td>
             <td style="padding:8px 10px;">${fechaTxt}</td>
             <td style="padding:8px 10px; text-align:right; font-weight:bold;">${dinero(r.saldo || 0)}</td>
             <td style="padding:8px 10px; text-align:center;">
@@ -305,7 +305,7 @@ function verificarAlertasPagares() {
                             <thead>
                                 <tr style="background:#fff7ed;">
                                     <th style="padding:10px; text-align:left; color:#9a3412;">Cliente</th>
-                                    <th style="padding:10px; text-align:left; color:#9a3412;">Folio</th>
+                                    <th style="padding:10px; text-align:left; color:#9a3412;">Producto(s)</th>
                                     <th style="padding:10px; text-align:left; color:#9a3412;">Ultimo pago</th>
                                     <th style="padding:10px; text-align:right; color:#9a3412;">Saldo</th>
                                     <th style="padding:10px; text-align:center; color:#9a3412;">Nivel</th>

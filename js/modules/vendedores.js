@@ -393,6 +393,7 @@ function obtenerSugerenciasRecuperacionCartera(diasGracia = 3) {
         sugerencias.push({
             folio: c.folio,
             clienteNombre: c.nombre || '',
+            articulos: c.articulos,
             vendedorId: c.vendedorId,
             vendedorNombre: v ? v.nombre : (c.vendedorNombre || 'Vendedor'),
             diasAtraso,
@@ -411,8 +412,8 @@ function renderSugerenciasRecuperacionCartera() {
     const filas = sugerencias.map(s => `
       <tr>
         <td style="padding:8px;">${s.vendedorNombre}</td>
-        <td style="padding:8px;">${s.folio}</td>
-        <td style="padding:8px;">${s.clienteNombre}</td>
+        <td style="padding:8px;">${s.clienteNombre}<br><small style="color:#94a3b8;">${s.folio}</small></td>
+        <td style="padding:8px;max-width:200px;">${window.resumenProductosVenta(s.articulos)}</td>
         <td style="padding:8px;text-align:center;color:#b45309;font-weight:bold;">${s.diasAtraso} días</td>
         <td style="padding:8px;">${s.fechaRecuperacion}</td>
         <td style="padding:8px;text-align:center;display:flex;gap:6px;justify-content:center;">
@@ -429,8 +430,8 @@ function renderSugerenciasRecuperacionCartera() {
           <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <thead><tr style="background:#fef3c7;">
               <th style="padding:8px;text-align:left;">Vendedor</th>
-              <th style="padding:8px;text-align:left;">Folio</th>
               <th style="padding:8px;text-align:left;">Cliente</th>
+              <th style="padding:8px;text-align:left;">Producto(s)</th>
               <th style="padding:8px;text-align:center;">Días de atraso</th>
               <th style="padding:8px;text-align:left;">Recuperada el</th>
               <th style="padding:8px;text-align:center;">Acción</th>

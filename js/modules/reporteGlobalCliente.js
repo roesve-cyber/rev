@@ -102,6 +102,7 @@ window.obtenerReporteGlobalCliente = function(clienteId, clienteNombre = '') {
             tipo: 'Crédito',
             icono: '🧾',
             folio: cuenta.folio,
+            articulos: cuenta.articulos,
             fecha,
             fechaCorta: _fechaCortaCuenta(fecha),
             total,
@@ -130,6 +131,7 @@ window.obtenerReporteGlobalCliente = function(clienteId, clienteNombre = '') {
             tipo: 'Apartado',
             icono: '📦',
             folio: ap.folio,
+            articulos: ap.articulos,
             fecha,
             fechaCorta: _fechaCortaCuenta(fecha),
             total,
@@ -154,6 +156,7 @@ window.obtenerReporteGlobalCliente = function(clienteId, clienteNombre = '') {
             tipo: 'Contado',
             icono: '💵',
             folio: venta.folio,
+            articulos: venta.articulos,
             fecha,
             fechaCorta: _fechaCortaCuenta(fecha),
             total,
@@ -333,7 +336,8 @@ window._rgcRenderTabla = function() {
                 ? `<div style="font-size:10px; color:#94a3b8;">→ crédito ${f.folioCredito}</div>` : '';
             return `
             <tr style="border-bottom:1px solid #e2e8f0; background:${f.saldo <= 0.01 ? '#f8fafc' : 'white'};">
-                <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;">${f.folio}${notaMigrado}</td>
+                <td style="padding:12px; border:1px solid #cbd5e1; max-width:200px;">${window.resumenProductosVenta(f.articulos)}</td>
+                <td style="padding:12px; border:1px solid #cbd5e1; font-size:11px; color:#94a3b8;">${f.folio}${notaMigrado}</td>
                 <td style="padding:12px; text-align:center; border:1px solid #cbd5e1; font-size:12px;">${f.icono} ${f.tipo}</td>
                 <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${f.fechaCorta}</td>
                 <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dineroCuenta(f.total)}</td>
@@ -342,7 +346,7 @@ window._rgcRenderTabla = function() {
                 <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${badge.bg}; color:${badge.color}; padding:6px 12px; border-radius:6px; display:inline-block; font-weight:bold; font-size:11px;">${f.estado}</span></td>
             </tr>`;
         }).join('')
-        : `<tr><td colspan="7" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay registros ${etiquetaFiltro} para este cliente.</td></tr>`;
+        : `<tr><td colspan="8" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay registros ${etiquetaFiltro} para este cliente.</td></tr>`;
 
     wrap.innerHTML = `
         <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:20px;">
@@ -352,6 +356,7 @@ window._rgcRenderTabla = function() {
                 <table style="width:100%; border-collapse:collapse; font-size:13px;">
                     <thead>
                         <tr style="background:#1e40af; color:white; font-weight:bold;">
+                            <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Producto(s)</th>
                             <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Folio</th>
                             <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Tipo</th>
                             <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha</th>

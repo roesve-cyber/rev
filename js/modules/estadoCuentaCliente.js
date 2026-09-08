@@ -454,7 +454,8 @@ function _eccFilaFolio(c, clienteNombre = '') {
     const nombreClienteFila = String(clienteNombre || '').replace(/'/g, "\\'");
     return `
         <tr style="border-bottom:1px solid #e2e8f0; background:${c.saldo <= 0.01 ? '#f0fdf4' : 'white'};">
-            <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="abrirDetalleVentaECC('${c.folio}'); return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer;">${_escCuenta(c.folio)}</a></td>
+            <td style="padding:12px; border:1px solid #cbd5e1; font-weight:bold; color:#0c4a6e;"><a href="#" onclick="abrirDetalleVentaECC('${c.folio}'); return false;" style="color:#0c4a6e; text-decoration:underline; cursor:pointer; font-size:12px;">${_escCuenta(c.folio)}</a></td>
+            <td style="padding:12px; border:1px solid #cbd5e1; max-width:200px;">${window.resumenProductosVenta(c.articulosDetalle)}</td>
             <td style="padding:12px; text-align:center; border:1px solid #cbd5e1;">${c.fechaVentaCorta}</td>
             <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dinéroCuenta(c.totalVenta)}</td>
             <td style="padding:12px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:${c.saldo > 0 ? '#7f1d1d' : '#065f46'};"><span style="background:${c.saldo <= 0.01 ? '#d1fae5' : '#fee2e2'}; padding:4px 8px; border-radius:4px; display:inline-block;">${_dinéroCuenta(c.saldo)}</span></td>
@@ -475,7 +476,7 @@ function _eccConstruirBloqueTabla(estado, filtro) {
     const etiquetaFiltro = filtro === 'pendiente' ? 'con saldo pendiente' : filtro === 'saldada' ? 'saldadas' : 'totales';
     const filasHtml = cuentasFiltradas.length > 0
         ? cuentasFiltradas.map(c => _eccFilaFolio(c, estado.clienteNombre)).join('')
-        : `<tr><td colspan="10" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
+        : `<tr><td colspan="11" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">No hay folios ${etiquetaFiltro} para este cliente.</td></tr>`;
 
     return `
         <h3 style="margin:0 0 15px 0; color:#1e293b; font-size:16px; font-weight:bold;">📋 Detalle por Folio de Venta</h3>
@@ -485,6 +486,7 @@ function _eccConstruirBloqueTabla(estado, filtro) {
                 <thead>
                     <tr style="background:#1e40af; color:white; font-weight:bold;">
                         <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Folio</th>
+                        <th style="padding:12px; text-align:left; border:1px solid #cbd5e1;">Producto(s)</th>
                         <th style="padding:12px; text-align:center; border:1px solid #cbd5e1;">Fecha Venta</th>
                         <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Total Venta</th>
                         <th style="padding:12px; text-align:right; border:1px solid #cbd5e1;">Saldo</th>

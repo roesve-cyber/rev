@@ -151,7 +151,8 @@ function renderReestructuraPlazo(filtroCliente = "") {
             <table class="tabla-admin" style="margin:0;">
                 <thead>
                     <tr>
-                        <th>Cliente / Folio</th>
+                        <th>Cliente</th>
+                        <th>Producto(s)</th>
                         <th>Plazo actual</th>
                         <th>Saldo</th>
                         <th style="text-align:right;">Acciones</th>
@@ -163,7 +164,8 @@ function renderReestructuraPlazo(filtroCliente = "") {
                         const saldo = estado?.saldoTotal ?? cuenta.saldoActual ?? 0;
                         return `
                         <tr>
-                            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
+                            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#94a3b8;">${_cxcEscHTML(cuenta.folio)}</small></td>
+                            <td style="max-width:200px;">${window.resumenProductosVenta(cuenta.articulos)}</td>
                             <td>${Number(cuenta.plan?.meses || 0) || '—'} meses (${_cxcEscHTML(cuenta.periodicidad || 'semanal')})</td>
                             <td style="font-weight:800; color:#dc2626;">${_cxcDinero(saldo)}</td>
                             <td style="text-align:right;">

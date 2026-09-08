@@ -62,9 +62,8 @@ function renderControlGarantias() {
         }
         const colors = { Vigente: '#16a34a', Próxima: '#d97706', Vencida: '#9ca3af', 'En reclamación': '#dc2626' };
         return `<tr>
-          <td style="padding:10px;">${g.folio}</td>
           <td style="padding:10px;">${g.productoNombre}</td>
-          <td style="padding:10px;">${nombre}</td>
+          <td style="padding:10px;">${nombre}<br><small style="color:#94a3b8;">${g.folio}</small></td>
           <td style="padding:10px;text-align:center;">${g.mesesGarantia} meses</td>
           <td style="padding:10px;text-align:center;">${new Date(g.fechaCompra).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
           <td style="padding:10px;text-align:center;">${fv.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
@@ -80,7 +79,6 @@ function renderControlGarantias() {
         <div style="overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <thead><tr style="background:#f3f4f6;">
-              <th style="padding:10px;">Folio Venta</th>
               <th style="padding:10px;">Producto</th>
               <th style="padding:10px;">Cliente</th>
               <th style="padding:10px;text-align:center;">Garantía</th>

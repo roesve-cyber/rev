@@ -98,7 +98,8 @@ window._condonarActualizarLista = function () {
         <div onclick="_condonarAbrirFormulario('${_cxcEscHTML(cuenta.folio)}')" style="cursor:pointer; padding:12px; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='white'">
             <div>
                 <strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br>
-                <small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small>
+                <span style="font-size:12px; color:#4b5563;">${window.resumenProductosVenta(cuenta.articulos)}</span><br>
+                <small style="color:#94a3b8;">${_cxcEscHTML(cuenta.folio)}</small>
             </div>
             <strong style="color:#dc2626;">${_cxcDinero(saldo)}</strong>
         </div>`;
@@ -121,7 +122,8 @@ window._condonarAbrirFormulario = function (folio) {
 
         <div style="font-size:13px; color:#475569; margin-bottom:14px; line-height:1.6;">
             Cliente: <strong>${_cxcEscHTML(nombreCliente)}</strong><br>
-            Folio: <strong>${_cxcEscHTML(folio)}</strong>
+            Producto(s): ${window.resumenProductosVenta(cuenta.articulos)}<br>
+            <span style="color:#94a3b8;">Folio: ${_cxcEscHTML(folio)}</span>
         </div>
 
         <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:14px; font-size:13px;">

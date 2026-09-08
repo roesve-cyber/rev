@@ -3464,23 +3464,20 @@ function renderEntregas() {
     let html = `
         <table class="tabla-admin">
             <thead><tr>
-                <th>Folio</th>
                 <th>Cliente</th>
+                <th>Producto(s)</th>
                 <th>Fecha</th>
                 <th>Método Pago</th>
-                <th>Productos</th>
                 <th style="text-align:center;">Acciones</th>
             </tr></thead>
             <tbody>`;
 
     pendientes.forEach(s => {
-        const resumen = (s.items || []).map(item => `${item.nombre} ${item.cantidad || 1}`).join(', ');
         html += `<tr>
-            <td><strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="abrirDetalleEntrega(${s.id})">${s.folioVenta}</strong></td>
-            <td>${s.clienteNombre || ''}</td>
+            <td><strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="abrirDetalleEntrega(${s.id})">${s.clienteNombre || ''}</strong><br><small style="color:#94a3b8;">${s.folioVenta || ''}</small></td>
+            <td style="max-width:220px;">${window.resumenProductosVenta(s.items)}</td>
             <td>${s.fecha || ''}</td>
             <td><small>${s.metodoPago || ''}</small></td>
-            <td style="font-size:13px;">${resumen || ''}</td>
             <td style="text-align:center;">
                 <button onclick="abrirDetalleEntrega(${s.id})" style="background:#3498db; color:white; border:none; padding:6px 10px; border-radius:4px; cursor:pointer; margin-right:4px;">Detalle</button>
             </td>
@@ -6641,6 +6638,7 @@ function _renderCancelacionesVentas(filtro) {
         fechaVenta: v.datosVenta?.fechaIso || v.args?.[7],
         total: v.totalVenta || v.args?.[1],
         metodoPago: v.args?.[0] || v.datosVenta?.metodo,
+        articulos: v.datosVenta?.articulos,
         _origenCancel: 'cuarentena',
         _pendienteIndex: idx
     }));
@@ -6652,10 +6650,10 @@ function _renderCancelacionesVentas(filtro) {
         .slice()
         .sort((a,b) => new Date(a.fechaVenta || a.fechaIso || 0) - new Date(b.fechaVenta || b.fechaIso || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin ventas para cancelar.</div>';
-    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Origen</th><th>Acción</th></tr></thead><tbody>${filas.map(v => `
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Tipo</th><th>Total</th><th>Origen</th><th>Acción</th></tr></thead><tbody>${filas.map(v => `
         <tr>
-            <td><b>${_cancelEsc(v.folio)}</b></td>
-            <td>${_cancelEsc(v.clienteNombre || v.cliente?.nombre || 'Público General')}</td>
+            <td>${_cancelEsc(v.clienteNombre || v.cliente?.nombre || 'Público General')}<br><small style="color:#94a3b8;">${_cancelEsc(v.folio)}</small></td>
+            <td style="max-width:220px;">${window.resumenProductosVenta(v.articulos)}</td>
             <td>${_cancelEsc(v.metodoPago || v.metodo || '-')}</td>
             <td>${_cancelDinero(v.total || v.totalVenta || 0)}</td>
             <td>${v._origenCancel === 'cuarentena' ? 'Cuarentena' : 'Registrada'}</td>
@@ -6669,18 +6667,18 @@ function _renderCancelacionesAbonos(filtro) {
     const filas = [];
     cxc.forEach(c => (c.abonos || []).forEach((ab, idx) => {
         if (String(c.estado || '').toLowerCase().includes('cancel') || ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
-        filas.push({ origen: 'credito', folio: c.folio, cliente: c.nombre || c.clienteNombre, fecha: ab.fecha || ab.fechaAbono, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago, idx });
+        filas.push({ origen: 'credito', folio: c.folio, cliente: c.nombre || c.clienteNombre, articulos: c.articulos, fecha: ab.fecha || ab.fechaAbono, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.medioPago, idx });
     }));
     apartados.forEach(a => (a.abonos || []).forEach((ab, idx) => {
         if (String(a.estado || '').toLowerCase().includes('cancel') || ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
-        filas.push({ origen: 'apartado', folio: a.folio, cliente: a.clienteNombre, fecha: ab.fechaAbono || ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.cuentaId, idx });
+        filas.push({ origen: 'apartado', folio: a.folio, cliente: a.clienteNombre, articulos: a.articulos, fecha: ab.fechaAbono || ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.cuentaId, idx });
     }));
     const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(a.fecha || 0) - new Date(b.fecha || 0));
     if (!filtradas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin abonos para cancelar.</div>';
-    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead><tbody>${filtradas.map(a => `
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead><tbody>${filtradas.map(a => `
         <tr>
-            <td><b>${_cancelEsc(a.folio)}</b></td>
-            <td>${_cancelEsc(a.cliente)}</td>
+            <td>${_cancelEsc(a.cliente)}<br><small style="color:#94a3b8;">${_cancelEsc(a.folio)}</small></td>
+            <td style="max-width:220px;">${window.resumenProductosVenta(a.articulos)}</td>
             <td>${a.origen === 'credito' ? 'Crédito' : 'Apartado'}</td>
             <td>${a.fecha ? (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(a.fecha) : String(a.fecha).slice(0,10)) : '-'}</td>
             <td>${_cancelDinero(a.monto)}</td>
@@ -6693,11 +6691,11 @@ function _renderCancelacionesApartados(filtro) {
     const apartados = StorageService.get("apartados", []).filter(a => a.estado !== 'Cancelado');
     const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(a.fechaApartado || 0) - new Date(b.fechaApartado || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin apartados para cancelar.</div>';
-    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Folio</th><th>Cliente</th><th>Total</th><th>Pagado</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${filas.map(a => {
+    return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Total</th><th>Pagado</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${filas.map(a => {
         const pagado = Number(a.enganche || 0) + (a.abonos || []).reduce((s, ab) => s + Number(ab.monto || 0), 0);
         return `<tr>
-            <td><b>${_cancelEsc(a.folio)}</b></td>
-            <td>${_cancelEsc(a.clienteNombre)}</td>
+            <td>${_cancelEsc(a.clienteNombre)}<br><small style="color:#94a3b8;">${_cancelEsc(a.folio)}</small></td>
+            <td style="max-width:220px;">${window.resumenProductosVenta(a.articulos)}</td>
             <td>${_cancelDinero(a.importeApartado || a.total || 0)}</td>
             <td>${_cancelDinero(pagado)}</td>
             <td>${_cancelEsc(a.estado || 'Pendiente')}</td>
