@@ -253,7 +253,12 @@ window.renderReporteAbonEnganches = function() {
     // TOTALES
     const totalAbonos = listado.reduce((s, m) => s + m.monto, 0);
     const totalSaldoAnterior = listado.reduce((s, m) => s + m.saldoAnterior, 0);
-    const totalSaldoPosterior = listado.reduce((s, m) => s + m.saldoPosterior, 0);
+    // ⚠️ El saldo pendiente es un dato de LA CUENTA (hoy), no del movimiento — si una cuenta
+    // tiene 4 abonos, su saldo actual aparece en las 4 filas. Sumarlo tal cual multiplicaría
+    // el mismo saldo una vez por cada abono. Para el total real se cuenta una sola vez por folio.
+    const _saldoPorFolio = new Map();
+    listado.forEach(m => { if (!_saldoPorFolio.has(m.folio)) _saldoPorFolio.set(m.folio, m.saldoPosterior); });
+    const totalSaldoPosterior = [..._saldoPorFolio.values()].reduce((s, v) => s + v, 0);
 
     // CONSTRUIR HTML
     let html = `
@@ -373,7 +378,11 @@ window.renderReporteAbonEnganches = function() {
             }).join('');
 
             const subtotalAbonos = movimientos.reduce((s, m) => s + m.monto, 0);
-            const subtotalSaldoPosterior = movimientos.reduce((s, m) => s + m.saldoPosterior, 0);
+            // Igual que en el total general: contar el saldo pendiente una sola vez por folio,
+            // no una vez por cada abono/enganche que tenga esa cuenta.
+            const _saldoPorFolioUb = new Map();
+            movimientos.forEach(m => { if (!_saldoPorFolioUb.has(m.folio)) _saldoPorFolioUb.set(m.folio, m.saldoPosterior); });
+            const subtotalSaldoPosterior = [..._saldoPorFolioUb.values()].reduce((s, v) => s + v, 0);
 
             html += `
                 <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:18px; margin-bottom:20px;">
