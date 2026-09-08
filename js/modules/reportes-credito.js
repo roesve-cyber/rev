@@ -921,7 +921,7 @@ window.abrirDetalleScorecardCliente = function(claveCodificada) {
     document.querySelector('[data-modal="scorecard-cliente"]')?.remove();
     const filas = grupo.cuentas.map(c => `
         <tr style="border-bottom:1px solid #e2e8f0;">
-            <td style="padding:10px;"><b>${c.folio || '-'}</b></td>
+            <td style="padding:10px;max-width:180px;">${window.resumenProductosVenta(c.articulos)}<br><small style="color:#94a3b8;">${c.folio || '-'}</small></td>
             <td style="padding:10px;text-align:right;font-weight:900;color:#dc2626;">${_rc.fmt(c.sne.saldoActual)}</td>
             <td style="padding:10px;text-align:right;">${_rc.fmt(c.sne.excedente)}</td>
             <td style="padding:10px;">${_rc.badge(c.sne.emojiRiesgo + ' ' + c.sne.nivelRiesgo, c.sne.colorRiesgo + '18', c.sne.colorRiesgo)}</td>
@@ -938,7 +938,7 @@ window.abrirDetalleScorecardCliente = function(claveCodificada) {
                 </div>
                 <div style="overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
                     <table style="width:100%;border-collapse:collapse;min-width:680px;font-size:12px;">
-                        <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:10px;text-align:left;">Folio</th><th style="padding:10px;text-align:right;">Saldo</th><th style="padding:10px;text-align:right;">SNE</th><th style="padding:10px;text-align:left;">Riesgo</th><th style="padding:10px;"></th></tr></thead>
+                        <thead style="background:#f8fafc;color:#475569;"><tr><th style="padding:10px;text-align:left;">Producto(s)</th><th style="padding:10px;text-align:right;">Saldo</th><th style="padding:10px;text-align:right;">SNE</th><th style="padding:10px;text-align:left;">Riesgo</th><th style="padding:10px;"></th></tr></thead>
                         <tbody>${filas}</tbody>
                     </table>
                 </div>

@@ -388,9 +388,9 @@ window.renderReporteVentas = function() {
             : '<span style="color:#94a3b8;">Sin costo</span>';
         return `
             <tr style="border-bottom:1px solid #e2e8f0;">
-                <td data-label="Folio" style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.folio)}</strong><br>${_rvBadgeOrigen(v.origen)}<br>${_rvBadgeEstado(v.estado)}</td>
+                <td data-label="Cliente" style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_rvEsc(v.vendedor)}</small>` : ""}<br><small style="color:#94a3b8;">${_rvEsc(v.folio)}</small></td>
+                <td data-label="Estado" style="padding:12px; vertical-align:top;">${_rvBadgeOrigen(v.origen)}<br>${_rvBadgeEstado(v.estado)}</td>
                 <td data-label="Fecha" style="padding:12px; vertical-align:top; white-space:nowrap;">${_rvEsc(v.fechaTexto)}</td>
-                <td data-label="Cliente" style="padding:12px; vertical-align:top;"><strong>${_rvEsc(v.cliente)}</strong>${v.vendedor ? `<br><small style="color:#64748b;">Vendedor: ${_rvEsc(v.vendedor)}</small>` : ""}</td>
                 <td data-label="Método" style="padding:12px; vertical-align:top;">${_rvBadgeMetodo(v.metodo)}</td>
                 <td data-label="Artículos" style="padding:12px; vertical-align:top; font-size:12px;">${articulosTxt}${v.articulos.length > 3 ? `<br><small style="color:#64748b;">+${v.articulos.length - 3} más</small>` : ""}</td>
                 <td data-label="Piezas" style="padding:12px; vertical-align:top; text-align:center; font-weight:900;">${v.unidades}</td>
@@ -411,7 +411,7 @@ window.renderReporteVentas = function() {
            <table class="tabla-responsive" style="width:100%; border-collapse:collapse; min-width:980px;">
                 <thead>
                     <tr style="background:#f8fafc; color:#334155; text-align:left;">
-                        <th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Cliente</th><th style="padding:12px;">Método</th><th style="padding:12px;">Artículos</th><th style="padding:12px; text-align:right;">Mercancía</th><th style="padding:12px; text-align:right;">Cobrado/Eng.</th><th style="padding:12px; text-align:right;">Saldo</th>
+                        <th style="padding:12px;">Cliente</th><th style="padding:12px;">Estado</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Método</th><th style="padding:12px;">Artículos</th><th style="padding:12px; text-align:right;">Mercancía</th><th style="padding:12px; text-align:right;">Cobrado/Eng.</th><th style="padding:12px; text-align:right;">Saldo</th>
                     </tr>
                 </thead>
                 <tbody>${filas}</tbody>

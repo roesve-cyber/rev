@@ -93,8 +93,8 @@ function abrirDiaAgenda(fechaStr) {
     const rows = lista.map(p => {
         const cuenta = cxc.find(c => c.folio === p.folio);
         return `<tr>
-          <td style="padding:10px;">${p.folio}</td>
-          <td style="padding:10px;">${cuenta ? cuenta.nombre : '-'}</td>
+          <td style="padding:10px;">${cuenta ? cuenta.nombre : '-'}<br><small style="color:#94a3b8;">${p.folio}</small></td>
+          <td style="padding:10px;max-width:200px;">${window.resumenProductosVenta(cuenta ? cuenta.articulos : [])}</td>
           <td style="padding:10px;text-align:right;">${dinero(p.monto || 0)}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${p.estado==='Vencido'?'#dc2626':'#d97706'};font-weight:bold;">${p.estado}</span></td>
           <td style="padding:10px;text-align:center;">${cuenta ? `<button onclick="abrirModalAbonoAvanzado('${p.folio}')" style="padding:4px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">💰 Abonar</button>` : ''}</td>
@@ -110,8 +110,8 @@ function abrirDiaAgenda(fechaStr) {
         <div style="overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:14px;">
             <thead><tr style="background:#f3f4f6;">
-              <th style="padding:10px;text-align:left;">Folio</th>
               <th style="padding:10px;text-align:left;">Cliente</th>
+              <th style="padding:10px;text-align:left;">Producto(s)</th>
               <th style="padding:10px;text-align:right;">Monto</th>
               <th style="padding:10px;text-align:center;">Estado</th>
               <th style="padding:10px;text-align:center;">Acción</th>

@@ -653,7 +653,7 @@
 
         const table = rows.length ? `<table style="width:100%;border-collapse:collapse;min-width:1180px;">
             <thead><tr style="background:#f8fafc;color:#334155;text-align:left;">
-                <th style="padding:12px;">Folio</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Cliente</th><th style="padding:12px;">Proveedor</th><th style="padding:12px;">Metodo</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Venta</th><th style="padding:12px;text-align:right;">Utilidad</th><th style="padding:12px;text-align:right;">Cobrado</th><th style="padding:12px;text-align:right;">Saldo</th>
+                <th style="padding:12px;">Cliente</th><th style="padding:12px;">Estado</th><th style="padding:12px;">Fecha</th><th style="padding:12px;">Proveedor</th><th style="padding:12px;">Metodo</th><th style="padding:12px;">Articulos</th><th style="padding:12px;text-align:center;">Pzas</th><th style="padding:12px;text-align:right;">Venta</th><th style="padding:12px;text-align:right;">Utilidad</th><th style="padding:12px;text-align:right;">Cobrado</th><th style="padding:12px;text-align:right;">Saldo</th>
             </tr></thead><tbody>${rows.map(v => {
                 const itemText = v.items.length ? v.items.slice(0, 3).map(a => `${a.cantidad || 1}x ${esc(a.nombre || a.productoNombre || '-')}`).join('<br>') : '<span style="color:#94a3b8;">Sin detalle</span>';
                 const source = v.source === 'cuarentena' ? badge('Boveda', '#fff7ed', '#c2410c') : badge('Registrada', '#ecfdf5', '#047857');
@@ -661,9 +661,9 @@
                 const detalleArg = v.source === 'cuarentena' ? String(v.index) : 'null';
                 const folioArg = esc(v.folio).replace(/'/g, "\\'");
                 return `<tr style="border-bottom:1px solid #e2e8f0;cursor:pointer;transition:background .12s;" onclick="window._rvAbrirDetalle('${v.source}','${folioArg}',${detalleArg})" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'" title="Clic para ver el detalle de la venta">
-                    <td style="padding:12px;vertical-align:top;"><strong>${esc(v.folio)}</strong><br>${source}<br>${status}</td>
+                    <td style="padding:12px;vertical-align:top;"><strong>${esc(v.customer)}</strong>${v.seller ? `<br><small style="color:#64748b;">Vendedor: ${esc(v.seller)}</small>` : ''}<br><small style="color:#94a3b8;">${esc(v.folio)}</small></td>
+                    <td style="padding:12px;vertical-align:top;">${source}<br>${status}</td>
                     <td style="padding:12px;vertical-align:top;white-space:nowrap;">${esc(v.dateText)}</td>
-                    <td style="padding:12px;vertical-align:top;"><strong>${esc(v.customer)}</strong>${v.seller ? `<br><small style="color:#64748b;">Vendedor: ${esc(v.seller)}</small>` : ''}</td>
                     <td style="padding:12px;vertical-align:top;">${v.suppliers.length ? v.suppliers.map(s => `<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 7px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:800;">${esc(s)}</span>`).join('') : '<span style="color:#94a3b8;">Sin proveedor</span>'}</td>
                     <td style="padding:12px;vertical-align:top;">${badge(v.method, '#f1f5f9', '#334155')}</td>
                     <td style="padding:12px;vertical-align:top;font-size:12px;">${itemText}${v.items.length > 3 ? `<br><small style="color:#64748b;">+${v.items.length - 3} mas</small>` : ''}</td>

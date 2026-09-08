@@ -479,8 +479,8 @@ window.renderReporteRentabilidadCartera = function() {
 
     const filasHtml = resumen.filas.map(f => `
         <tr style="border-bottom:1px solid #f1f5f9; cursor:pointer;" onclick="window.renderDetalleRentabilidadCuenta('${_rrcEsc(f.folio)}')">
-            <td style="padding:10px 8px;font-weight:800;color:#0f172a;">${_rrcEsc(f.folio)}</td>
-            <td style="padding:10px 8px;">${_rrcEsc(f.clienteNombre)}</td>
+            <td style="padding:10px 8px;">${_rrcEsc(f.clienteNombre)}<br><small style="color:#94a3b8;">${_rrcEsc(f.folio)}</small></td>
+            <td style="padding:10px 8px;max-width:180px;">${window.resumenProductosVenta(f.detalleArticulos)}</td>
             <td style="padding:10px 8px;text-align:right;">${_rrcDinero(f.costoTotal)}</td>
             <td style="padding:10px 8px;text-align:right;">${_rrcDinero(f.comision.montoComision)}</td>
             <td style="padding:10px 8px;text-align:right;font-weight:800;">${_rrcDinero(f.totalCobradoActual)}</td>
@@ -513,8 +513,8 @@ window.renderReporteRentabilidadCartera = function() {
                     <table style="width:100%;border-collapse:collapse;font-size:13px;">
                         <thead>
                             <tr style="background:#f8fafc;text-align:left;">
-                                <th style="padding:10px 8px;">Folio</th>
                                 <th style="padding:10px 8px;">Cliente</th>
+                                <th style="padding:10px 8px;">Producto(s)</th>
                                 <th style="padding:10px 8px;text-align:right;">Costo</th>
                                 <th style="padding:10px 8px;text-align:right;">Comisión</th>
                                 <th style="padding:10px 8px;text-align:right;">Cobrado</th>
