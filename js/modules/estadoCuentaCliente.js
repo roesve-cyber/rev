@@ -84,9 +84,14 @@ function _eccAbonosDetalleCuenta(cuenta = {}, totalCredito = 0) {
     return abonos.map((a, idx) => {
         const monto = _montoAbonoCuenta(a);
         saldo = Math.max(0, saldo - monto);
+        const fechaRaw = _fechaAbonoCuenta(a);
+        const fechaDate = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(fechaRaw) : new Date(fechaRaw || 0);
         return {
             numero: idx + 1,
-            fecha: _fechaCortaCuenta(_fechaAbonoCuenta(a)),
+            fecha: _fechaCortaCuenta(fechaRaw),
+            // 🕒 Timestamp real (no solo el texto "dd-mm-yyyy") para poder
+            // ordenar cronológicamente abonos que vienen de folios distintos.
+            fechaTs: (fechaDate && !isNaN(fechaDate.getTime())) ? fechaDate.getTime() : 0,
             medio: a.etiquetaCuenta || a.medioPago || a.cuentaId || 'Efectivo',
             monto,
             saldoDespues: saldo
@@ -471,6 +476,146 @@ function _eccFilaFolio(c, clienteNombre = '') {
     `;
 }
 
+// 🧾 NUEVA SUBOPCIÓN "Detalle de Abonos": junta TODOS los abonos/enganches
+// de TODAS las cuentas del cliente en una sola lista cronológica, sin
+// separarlos por cuenta/lugar de recepción de pago (eso es lo que hace
+// el Reporte de Abonos y Enganches, que tiene otro propósito y no se toca).
+function _eccMovimientosClienteCombinados(estado) {
+    const movimientos = [];
+    (estado.cuentas || []).forEach(c => {
+        const productoTexto = window.resumenProductosVenta ? window.resumenProductosVenta(c.articulosDetalle, 3) : _escCuenta(c.folio);
+
+        // El enganche inicial también es un "pago" del cliente -- se incluye
+        // como primer movimiento de la venta, fechado el día de la venta.
+        if (Number(c.enganche || 0) > 0.01) {
+            const fVenta = window.parseFechaMXOrNull ? window.parseFechaMXOrNull(c.fechaVenta) : new Date(c.fechaVenta || 0);
+            movimientos.push({
+                folio: c.folio,
+                producto: productoTexto,
+                fecha: c.fechaVentaCorta,
+                fechaTs: (fVenta && !isNaN(fVenta.getTime())) ? fVenta.getTime() : 0,
+                medio: 'Enganche inicial',
+                monto: c.enganche,
+                tipo: 'Enganche'
+            });
+        }
+
+        (c.abonosDetalle || []).forEach(a => {
+            movimientos.push({
+                folio: c.folio,
+                producto: productoTexto,
+                fecha: a.fecha,
+                fechaTs: a.fechaTs || 0,
+                medio: a.medio,
+                monto: a.monto,
+                tipo: 'Abono'
+            });
+        });
+    });
+
+    // Más reciente primero (igual que el resto de los reportes de cobranza)
+    movimientos.sort((a, b) => b.fechaTs - a.fechaTs);
+    return movimientos;
+}
+
+// Construye el bloque de la vista "Detalle de Abonos": un resumen arriba
+// (qué compró el cliente + su saldo) y abajo la lista combinada de pagos.
+// Ya NO repite "Fecha Venta" en cada fila -- esa fecha es la misma para
+// todos los abonos de un mismo folio y solo aporta ruido en una lista
+// pensada para verse cronológicamente por fecha de PAGO.
+function _eccConstruirVistaDetalleAbonos(estado) {
+    const movimientos = _eccMovimientosClienteCombinados(estado);
+
+    const todosLosArticulos = (estado.cuentas || []).flatMap(c => c.articulosDetalle || []);
+    const productosResumen = window.resumenProductosVenta ? window.resumenProductosVenta(todosLosArticulos, 8) : '-';
+
+    const filas = movimientos.length
+        ? movimientos.map(m => {
+            const tipoColor = m.tipo === 'Enganche' ? { bg: '#fce7f3', fg: '#831843' } : { bg: '#dbeafe', fg: '#1e40af' };
+            return `
+                <tr style="border-bottom:1px solid #e2e8f0;">
+                    <td style="padding:10px; border:1px solid #cbd5e1; font-size:12px; white-space:nowrap;">${m.fecha}</td>
+                    <td style="padding:10px; border:1px solid #cbd5e1; max-width:220px;">
+                        ${m.producto}
+                        <br><small style="color:#94a3b8; cursor:pointer;" onclick="abrirDetalleVentaECC('${_escCuenta(m.folio)}')">Ver folio →</small>
+                    </td>
+                    <td style="padding:10px; text-align:center; border:1px solid #cbd5e1;"><span style="background:${tipoColor.bg}; color:${tipoColor.fg}; padding:3px 9px; border-radius:5px; font-size:11px; font-weight:bold;">${m.tipo}</span></td>
+                    <td style="padding:10px; text-align:right; border:1px solid #cbd5e1; font-weight:bold; color:#065f46;">${_dinéroCuenta(m.monto)}</td>
+                    <td style="padding:10px; text-align:center; border:1px solid #cbd5e1; font-size:12px; color:#64748b;">${_escCuenta(m.medio)}</td>
+                </tr>`;
+        }).join('')
+        : `<tr><td colspan="5" style="padding:20px; text-align:center; color:#64748b; border:1px solid #cbd5e1;">Este cliente no tiene abonos registrados.</td></tr>`;
+
+    return `
+        <div style="background:#eff6ff; border:2px solid #0ea5e9; border-radius:10px; padding:16px; margin-bottom:18px;">
+            <p style="margin:0 0 6px 0; font-size:11px; color:#0284c7; font-weight:bold; text-transform:uppercase;">🛋️ Lo que compró</p>
+            <p style="margin:0 0 14px 0; font-size:15px; color:#0c4a6e;">${productosResumen}</p>
+            <div style="display:flex; gap:28px; flex-wrap:wrap;">
+                <div>
+                    <span style="font-size:11px; color:#64748b; font-weight:bold; text-transform:uppercase;">Saldo del cliente</span><br>
+                    <span style="font-size:22px; font-weight:900; color:${estado.totalSaldo > 0.01 ? '#b91c1c' : '#059669'};">${_dinéroCuenta(estado.totalSaldo)}</span>
+                </div>
+                <div>
+                    <span style="font-size:11px; color:#64748b; font-weight:bold; text-transform:uppercase;">Pagos registrados</span><br>
+                    <span style="font-size:22px; font-weight:900; color:#1e293b;">${movimientos.length}</span>
+                </div>
+            </div>
+        </div>
+
+        <h3 style="margin:0 0 12px 0; color:#1e293b; font-size:16px; font-weight:bold;">🧾 Todos los Abonos (combinados)</h3>
+        <p style="margin:0 0 12px 0; color:#64748b; font-size:12px;">Todos los pagos del cliente juntos en una sola lista, sin separar por lugar de recepción.</p>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr style="background:#1e40af; color:white; font-weight:bold;">
+                        <th style="padding:10px; text-align:left; border:1px solid #cbd5e1;">Fecha</th>
+                        <th style="padding:10px; text-align:left; border:1px solid #cbd5e1;">Producto</th>
+                        <th style="padding:10px; text-align:center; border:1px solid #cbd5e1;">Tipo</th>
+                        <th style="padding:10px; text-align:right; border:1px solid #cbd5e1;">Monto</th>
+                        <th style="padding:10px; text-align:center; border:1px solid #cbd5e1;">Recibido en</th>
+                    </tr>
+                </thead>
+                <tbody>${filas}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+// Dispatcher: decide cuál de las dos subopciones dibujar dentro de
+// #eccTablaFoliosWrap según lo que haya elegido el usuario.
+function _eccConstruirVistaActual(estado) {
+    const vista = window._eccVistaActiva || 'resumen';
+    return vista === 'detalleAbonos'
+        ? _eccConstruirVistaDetalleAbonos(estado)
+        : _eccConstruirBloqueTabla(estado, _eccObtenerFiltroSaldo());
+}
+
+// Refleja visualmente cuál de los dos botones de vista está activo.
+function _eccActualizarBotonesVista(vista) {
+    const btnResumen = document.getElementById('eccVistaBtnResumen');
+    const btnDetalle = document.getElementById('eccVistaBtnDetalle');
+    if (!btnResumen || !btnDetalle) return;
+    const activo = { bg: '#1e40af', fg: 'white' };
+    const inactivo = { bg: 'white', fg: '#1e40af' };
+    const rResumen = vista === 'detalleAbonos' ? inactivo : activo;
+    const rDetalle = vista === 'detalleAbonos' ? activo : inactivo;
+    btnResumen.style.background = rResumen.bg;
+    btnResumen.style.color = rResumen.fg;
+    btnDetalle.style.background = rDetalle.bg;
+    btnDetalle.style.color = rDetalle.fg;
+}
+
+// Cambia entre "Resumen por Folio" y "Detalle de Abonos" sin volver a
+// pedir los datos -- ya están en window._estadoClienteActual.
+window._eccCambiarVista = function(vista) {
+    const estado = window._estadoClienteActual;
+    const wrap = document.getElementById('eccTablaFoliosWrap');
+    if (!estado || !wrap) return;
+    window._eccVistaActiva = vista;
+    _eccActualizarBotonesVista(vista);
+    wrap.innerHTML = _eccConstruirVistaActual(estado);
+};
+
 function _eccConstruirBloqueTabla(estado, filtro) {
     const cuentasFiltradas = _eccFiltrarCuentasPorSaldo(estado.cuentas, filtro);
     const etiquetaFiltro = filtro === 'pendiente' ? 'con saldo pendiente' : filtro === 'saldada' ? 'saldadas' : 'totales';
@@ -511,6 +656,11 @@ window._eccAplicarFiltroSaldo = function() {
     const estado = window._estadoClienteActual;
     const wrap = document.getElementById('eccTablaFoliosWrap');
     if (!estado || !wrap) return;
+    // Este filtro es por folio -- si el usuario estaba viendo el detalle
+    // de abonos combinados, lo regresamos a "Resumen por Folio" para que
+    // el filtro tenga efecto visible.
+    window._eccVistaActiva = 'resumen';
+    _eccActualizarBotonesVista('resumen');
     wrap.innerHTML = _eccConstruirBloqueTabla(estado, _eccObtenerFiltroSaldo());
 };
 
@@ -535,6 +685,10 @@ window.generarEstadoCuentaClienteConsolidado = function() {
     
     // Guardar estado global para impresión
     window._estadoClienteActual = estado;
+    // Cada vez que se genera el reporte de un cliente, arrancamos en
+    // "Resumen por Folio" (vista de siempre); el usuario elige si quiere
+    // cambiar a "Detalle de Abonos".
+    window._eccVistaActiva = 'resumen';
     
     // Mostrar botones de impresión
     const btnGroup = document.getElementById('btnGroupImpresionECC');
@@ -638,9 +792,22 @@ window.generarEstadoCuentaClienteConsolidado = function() {
             </div>
         </div>
         
-        <!-- TABLA DE FOLIOS (filtrable por estado de saldo) -->
+        <!-- SUBOPCIÓN: Resumen por Folio (de siempre) vs Detalle de Abonos combinados (nuevo) -->
+        <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
+            <span style="font-size:12px; font-weight:bold; color:#475569; text-transform:uppercase;">Ver:</span>
+            <button id="eccVistaBtnResumen" onclick="window._eccCambiarVista('resumen')"
+                    style="padding:9px 16px; border-radius:8px; border:2px solid #1e40af; background:#1e40af; color:white; font-weight:bold; cursor:pointer; font-size:12px;">
+                📋 Resumen por Folio
+            </button>
+            <button id="eccVistaBtnDetalle" onclick="window._eccCambiarVista('detalleAbonos')"
+                    style="padding:9px 16px; border-radius:8px; border:2px solid #1e40af; background:white; color:#1e40af; font-weight:bold; cursor:pointer; font-size:12px;">
+                🧾 Detalle de Abonos
+            </button>
+        </div>
+
+        <!-- CONTENIDO DE LA SUBOPCIÓN SELECCIONADA -->
         <div id="eccTablaFoliosWrap" style="margin-bottom:30px;">
-            ${_eccConstruirBloqueTabla(estado, _eccObtenerFiltroSaldo())}
+            ${_eccConstruirVistaActual(estado)}
         </div>
         
         <div style="text-align:center; padding:20px; border-top:2px solid #e2e8f0; margin-top:30px; color:#64748b; font-size:12px;">
