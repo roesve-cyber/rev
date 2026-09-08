@@ -5,8 +5,18 @@
 // Ordena: más reciente a más antiguo
 // ========================================================================
 
+// Resuelve el cliente VIGENTE (unificado) para un registro de cxc/apartado, en vez de
+// confiar en el nombre "congelado" que quedó guardado en el momento de la venta.
+function _repClienteVigente(clienteId, nombreSnapshot, telefono) {
+    if (typeof window.obtenerClienteCanonico !== 'function') {
+        return { id: clienteId || null, nombre: nombreSnapshot };
+    }
+    const canonico = window.obtenerClienteCanonico(clienteId, nombreSnapshot, telefono);
+    return canonico ? { id: canonico.id ?? clienteId ?? null, nombre: canonico.nombre || nombreSnapshot } : { id: clienteId || null, nombre: nombreSnapshot };
+}
+
 // FUNCIÓN AUXILIAR: Obtiene el listado completo filtrado y ordenado (una sola fuente de verdad)
-function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroCliente) {
+function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroClienteId) {
     const desdeD = filtroDesde ? new Date(filtroDesde + 'T00:00:00') : null;
     const hastaD = filtroHasta ? new Date(filtroHasta + 'T23:59:59') : null;
     
@@ -37,11 +47,13 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
             const saldoAnterior = totalPagares + Number(abono.monto || abono.montoAbonado || 0);
             const saldoPosterior = Math.max(0, Number(cuenta.saldoActual || 0));
 
+            const _cliAbonoCred = _repClienteVigente(cuenta.clienteId, cuenta.nombre || cuenta.clienteNombre || '-', cuenta.telefono);
             listado.push({
                 tipo: 'abono_credito',
                 folio: cuenta.folio,
                 articulos: cuenta.articulos || [],
-                cliente: cuenta.nombre || cuenta.clienteNombre || '-',
+                cliente: _cliAbonoCred.nombre,
+                clienteId: _cliAbonoCred.id,
                 fechaVenta: _repFechaTexto(fechaVenta, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaVenta) : fechaVenta.toLocaleDateString('es-MX')),
                 fechaAbono: _repFechaTexto(fechaAbono, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAbono) : fechaAbono.toLocaleDateString('es-MX')),
                 fechaKey: fechaAbono.getTime(),
@@ -87,11 +99,13 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
         const saldoAnterior = totalPagares + Number(mov.monto || 0);
         const saldoPosterior = Math.max(0, Number(cuenta.saldoActual || 0));
 
+        const _cliEngCred = _repClienteVigente(cuenta.clienteId, cuenta.nombre || cuenta.clienteNombre || '-', cuenta.telefono);
         listado.push({
             tipo: 'enganche_credito',
             folio: cuenta.folio,
             articulos: cuenta.articulos || [],
-            cliente: cuenta.nombre || cuenta.clienteNombre || '-',
+            cliente: _cliEngCred.nombre,
+            clienteId: _cliEngCred.id,
             fechaVenta: _repFechaTexto(_repParseDate(cuenta.fechaVenta || cuenta.fecha), window.formatearFechaCortaMX ? window.formatearFechaCortaMX(_repParseDate(cuenta.fechaVenta || cuenta.fecha)) : (_repParseDate(cuenta.fechaVenta || cuenta.fecha)).toLocaleDateString('es-MX')),
             fechaAbono: _repFechaTexto(fechaEng, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaEng) : fechaEng.toLocaleDateString('es-MX')),
             fechaKey: fechaEng.getTime(),
@@ -121,11 +135,13 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
         const saldoAnterior = Number(ap.importeApartado || ap.enganche || 0);
         const saldoPosterior = Number(ap.saldoPendiente || 0);
 
+        const _cliEngApto = _repClienteVigente(ap.clienteId, ap.clienteNombre || '-', ap.telefono);
         listado.push({
             tipo: 'enganche_apartado',
             folio: ap.folio,
             articulos: ap.articulos || [],
-            cliente: ap.clienteNombre || '-',
+            cliente: _cliEngApto.nombre,
+            clienteId: _cliEngApto.id,
             fechaVenta: _repFechaTexto(fechaAp, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAp) : fechaAp.toLocaleDateString('es-MX')),
             fechaAbono: _repFechaTexto(fechaAp, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAp) : fechaAp.toLocaleDateString('es-MX')),
             fechaKey: fechaAp.getTime(),
@@ -149,7 +165,8 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
                 tipo: 'abono_apartado',
                 folio: ap.folio,
                 articulos: ap.articulos || [],
-                cliente: ap.clienteNombre || '-',
+                cliente: _cliEngApto.nombre,
+                clienteId: _cliEngApto.id,
                 fechaVenta: _repFechaTexto(fechaAp, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAp) : fechaAp.toLocaleDateString('es-MX')),
                 fechaAbono: _repFechaTexto(fechaAbono, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAbono) : fechaAbono.toLocaleDateString('es-MX')),
                 fechaKey: fechaAbono.getTime(),
@@ -173,9 +190,9 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
     }
 
     // FILTRAR POR CLIENTE
-    if (filtroCliente) {
-        const clienteQ = filtroCliente.toLowerCase();
-        const listadoFiltrado = listado.filter(m => (m.cliente || '').toLowerCase().includes(clienteQ));
+    if (filtroClienteId) {
+        const idQ = String(filtroClienteId);
+        const listadoFiltrado = listado.filter(m => String(m.clienteId ?? '') === idQ);
         listado.length = 0;
         listado.push(...listadoFiltrado);
     }
@@ -219,10 +236,11 @@ window.renderReporteAbonEnganches = function() {
     const filtroTipo = document.getElementById('abonTipo')?.value || '';
     const filtroUbicacion = document.getElementById('abonUbicacion')?.value || '';
     const ordenFlujo = document.getElementById('abonOrden')?.value || 'desc';
-    const filtroCliente = document.getElementById('abonCliente')?.value || '';
+    const clienteSel = window._abonClienteSeleccionado || null;
+    const filtroClienteId = clienteSel?.id ?? '';
 
     // OBTENER LISTADO FILTRADO Y ORDENADO (función auxiliar)
-    const listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroCliente);
+    const listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroClienteId);
 
     // AGRUPAR POR UBICACIÓN (si aplica)
     const agrupado = new Map();
@@ -258,7 +276,10 @@ window.renderReporteAbonEnganches = function() {
             </div>
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">CLIENTE</label>
-                <input type="text" id="abonCliente" value="${esc(filtroCliente)}" placeholder="Buscar cliente..." style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" id="abonClienteNombre" readonly value="${esc(clienteSel?.nombre || '')}" placeholder="Todos" onclick="window._abonAbrirSelectorCliente()" style="flex:1; min-width:0; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box; background:#f8fafc; cursor:pointer;">
+                    ${clienteSel ? `<button onclick="window._abonLimpiarFiltroCliente()" title="Quitar filtro" style="padding:0 10px; background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer; font-weight:bold;">✕</button>` : `<button onclick="window._abonAbrirSelectorCliente()" title="Buscar cliente" style="padding:0 10px; background:#0f172a; color:white; border:none; border-radius:6px; cursor:pointer;">🔍</button>`}
+                </div>
             </div>
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">ESTATUS</label>
@@ -402,6 +423,26 @@ window.renderReporteAbonEnganches = function() {
     if (logoImg && !logoImg.complete) logoImg.addEventListener('load', forzarScrollArriba, { once: true });
 };
 
+// Selector universal de cliente para el filtro del reporte (usa la tabla "clientes" vigente)
+window._abonAbrirSelectorCliente = function() {
+    if (typeof window.abrirSelectorCliente !== 'function') {
+        alert('El selector de clientes aún no está disponible.');
+        return;
+    }
+    window.abrirSelectorCliente({
+        titulo: '👤 Filtrar por Cliente',
+        onSeleccion: function(c) {
+            window._abonClienteSeleccionado = c;
+            if (typeof window.renderReporteAbonEnganches === 'function') window.renderReporteAbonEnganches();
+        }
+    });
+};
+
+window._abonLimpiarFiltroCliente = function() {
+    window._abonClienteSeleccionado = null;
+    if (typeof window.renderReporteAbonEnganches === 'function') window.renderReporteAbonEnganches();
+};
+
 window.exportarReporteAbonEnganches = function() {
     // 🛡️ El botón ya está oculto para no-admin, pero esto es invocable
     // directo desde la consola — el candado real va aquí, no solo en la UI.
@@ -411,7 +452,7 @@ window.exportarReporteAbonEnganches = function() {
     }
     const filtroDesde = document.getElementById('abonDesde')?.value || '';
     const filtroHasta = document.getElementById('abonHasta')?.value || '';
-    const filtroCliente = document.getElementById('abonCliente')?.value.toLowerCase() || '';
+    const filtroClienteId = window._abonClienteSeleccionado?.id ?? '';
 
     // Recopilar datos igual que renderReporteAbonEnganches
     const listado = [];
@@ -420,7 +461,8 @@ window.exportarReporteAbonEnganches = function() {
 
     const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
     cuentasCxC.forEach(cuenta => {
-        if (filtroCliente && !(cuenta.nombre || cuenta.clienteNombre || '').toLowerCase().includes(filtroCliente)) return;
+        const _cliCsv = _repClienteVigente(cuenta.clienteId, cuenta.nombre || cuenta.clienteNombre || '-', cuenta.telefono);
+        if (filtroClienteId && String(_cliCsv.id ?? '') !== String(filtroClienteId)) return;
         (cuenta.abonos || []).forEach((abono, indexAbono) => {
             const fechaAbono = _repParseDate(abono.fechaAbonoIso || abono.fecha);
             if (desdeD && fechaAbono < desdeD) return;
@@ -433,7 +475,7 @@ window.exportarReporteAbonEnganches = function() {
 
             listado.push({
                 Folio: cuenta.folio,
-                Cliente: cuenta.nombre || cuenta.clienteNombre,
+                Cliente: _cliCsv.nombre,
                 Tipo: 'Abono Crédito',
                 'Fecha Venta': cuenta.fechaVenta || cuenta.fecha,
                 'Fecha Abono': abono.fechaAbonoIso || abono.fecha,
@@ -448,7 +490,8 @@ window.exportarReporteAbonEnganches = function() {
 
     const apartados = StorageService.get('apartados', []);
     apartados.forEach(ap => {
-        if (filtroCliente && !(ap.clienteNombre || '').toLowerCase().includes(filtroCliente)) return;
+        const _cliCsvApto = _repClienteVigente(ap.clienteId, ap.clienteNombre || '-', ap.telefono);
+        if (filtroClienteId && String(_cliCsvApto.id ?? '') !== String(filtroClienteId)) return;
         if (ap.enganche > 0) {
             const fechaAp = ap.fechaApartado || ap.fecha;
             if (desdeD && _repParseDate(fechaAp) < desdeD) return;
@@ -456,7 +499,7 @@ window.exportarReporteAbonEnganches = function() {
 
             listado.push({
                 Folio: ap.folio,
-                Cliente: ap.clienteNombre,
+                Cliente: _cliCsvApto.nombre,
                 Tipo: 'Enganche Apartado',
                 'Fecha Venta': fechaAp,
                 'Fecha Abono': fechaAp,
@@ -507,10 +550,11 @@ window.generarDocumentoReporteAbonEnganches = function() {
     const filtroTipo = document.getElementById('abonTipo')?.value || '';
     const filtroUbicacion = document.getElementById('abonUbicacion')?.value || '';
     const ordenFlujo = document.getElementById('abonOrden')?.value || 'desc';
-    const filtroCliente = document.getElementById('abonCliente')?.value || '';
+    const clienteSel = window._abonClienteSeleccionado || null;
+    const filtroClienteId = clienteSel?.id ?? '';
 
     // OBTENER LISTADO FILTRADO Y ORDENADO (función auxiliar con propiedades lowercase)
-    let listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroCliente);
+    let listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroClienteId);
 
     // TRANSFORMAR AL FORMATO DE VISUALIZACIÓN PARA DOCUMENTOS
     listado = listado.map(m => {
@@ -576,7 +620,7 @@ window.generarDocumentoReporteAbonEnganches = function() {
             <strong style="color: #334155;">Filtros:</strong>
             ${filtroDesde || filtroHasta ? `${filtroDesde || 'inicio'} → ${filtroHasta || 'hoy'}` : 'Sin rango de fechas'}
             ${filtroEstatus ? ` · Estatus: ${esc(filtroEstatus)}` : ''}
-            ${filtroCliente ? ` · Cliente: ${esc(filtroCliente)}` : ''}
+            ${clienteSel ? ` · Cliente: ${esc(clienteSel.nombre)}` : ''}
             ${filtroUbicacion ? ` · Ubicación: ${esc(filtroUbicacion)}` : ''}
         </div>
 
