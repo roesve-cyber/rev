@@ -6,7 +6,7 @@
 // ========================================================================
 
 // FUNCIÓN AUXILIAR: Obtiene el listado completo filtrado y ordenado (una sola fuente de verdad)
-function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo) {
+function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroCliente) {
     const desdeD = filtroDesde ? new Date(filtroDesde + 'T00:00:00') : null;
     const hastaD = filtroHasta ? new Date(filtroHasta + 'T23:59:59') : null;
     
@@ -40,6 +40,7 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
             listado.push({
                 tipo: 'abono_credito',
                 folio: cuenta.folio,
+                articulos: cuenta.articulos || [],
                 cliente: cuenta.nombre || cuenta.clienteNombre || '-',
                 fechaVenta: _repFechaTexto(fechaVenta, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaVenta) : fechaVenta.toLocaleDateString('es-MX')),
                 fechaAbono: _repFechaTexto(fechaAbono, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAbono) : fechaAbono.toLocaleDateString('es-MX')),
@@ -89,6 +90,7 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
         listado.push({
             tipo: 'enganche_credito',
             folio: cuenta.folio,
+            articulos: cuenta.articulos || [],
             cliente: cuenta.nombre || cuenta.clienteNombre || '-',
             fechaVenta: _repFechaTexto(_repParseDate(cuenta.fechaVenta || cuenta.fecha), window.formatearFechaCortaMX ? window.formatearFechaCortaMX(_repParseDate(cuenta.fechaVenta || cuenta.fecha)) : (_repParseDate(cuenta.fechaVenta || cuenta.fecha)).toLocaleDateString('es-MX')),
             fechaAbono: _repFechaTexto(fechaEng, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaEng) : fechaEng.toLocaleDateString('es-MX')),
@@ -122,6 +124,7 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
         listado.push({
             tipo: 'enganche_apartado',
             folio: ap.folio,
+            articulos: ap.articulos || [],
             cliente: ap.clienteNombre || '-',
             fechaVenta: _repFechaTexto(fechaAp, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAp) : fechaAp.toLocaleDateString('es-MX')),
             fechaAbono: _repFechaTexto(fechaAp, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAp) : fechaAp.toLocaleDateString('es-MX')),
@@ -145,6 +148,7 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
             listado.push({
                 tipo: 'abono_apartado',
                 folio: ap.folio,
+                articulos: ap.articulos || [],
                 cliente: ap.clienteNombre || '-',
                 fechaVenta: _repFechaTexto(fechaAp, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAp) : fechaAp.toLocaleDateString('es-MX')),
                 fechaAbono: _repFechaTexto(fechaAbono, window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaAbono) : fechaAbono.toLocaleDateString('es-MX')),
@@ -164,6 +168,14 @@ function _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEst
     if (filtroUbicacion) {
         const filtroQ = filtroUbicacion.toLowerCase();
         const listadoFiltrado = listado.filter(m => m.cuentaRecepcion.toLowerCase().includes(filtroQ));
+        listado.length = 0;
+        listado.push(...listadoFiltrado);
+    }
+
+    // FILTRAR POR CLIENTE
+    if (filtroCliente) {
+        const clienteQ = filtroCliente.toLowerCase();
+        const listadoFiltrado = listado.filter(m => (m.cliente || '').toLowerCase().includes(clienteQ));
         listado.length = 0;
         listado.push(...listadoFiltrado);
     }
@@ -207,9 +219,10 @@ window.renderReporteAbonEnganches = function() {
     const filtroTipo = document.getElementById('abonTipo')?.value || '';
     const filtroUbicacion = document.getElementById('abonUbicacion')?.value || '';
     const ordenFlujo = document.getElementById('abonOrden')?.value || 'desc';
+    const filtroCliente = document.getElementById('abonCliente')?.value || '';
 
     // OBTENER LISTADO FILTRADO Y ORDENADO (función auxiliar)
-    const listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo);
+    const listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroCliente);
 
     // AGRUPAR POR UBICACIÓN (si aplica)
     const agrupado = new Map();
@@ -242,6 +255,10 @@ window.renderReporteAbonEnganches = function() {
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">HASTA</label>
                 <input type="date" id="abonHasta" value="${esc(filtroHasta)}" style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">CLIENTE</label>
+                <input type="text" id="abonCliente" value="${esc(filtroCliente)}" placeholder="Buscar cliente..." style="width:100%; padding:9px; border:1px solid #cbd5e1; border-radius:6px; box-sizing:border-box;">
             </div>
             <div>
                 <label style="font-size:11px; font-weight:800; color:#475569; display:block; margin-bottom:5px;">ESTATUS</label>
@@ -323,7 +340,7 @@ window.renderReporteAbonEnganches = function() {
                 const badgeTextColor = m.tipoMovimiento.includes('Enganche') ? '#831843' : '#1e40af';
                 return `
                     <tr style="border-bottom:1px solid #e2e8f0;">
-                        <td style="padding:8px 6px; vertical-align:top; width:18%; max-width:120px; font-size:12px; word-break:break-word;\"><strong>${esc(m.folio)}</strong><br><span style="background:${badgeColor}; color:${badgeTextColor}; padding:1px 4px; border-radius:3px; font-size:9px; font-weight:bold; display:inline-block; margin-top:2px;\">${esc(m.tipoMovimiento)}</span></td>
+                        <td style="padding:8px 6px; vertical-align:top; width:18%; max-width:120px; font-size:12px; word-break:break-word;\">${window.resumenProductosVenta ? window.resumenProductosVenta(m.articulos) : `<strong>${esc(m.folio)}</strong>`}<br><span style="background:${badgeColor}; color:${badgeTextColor}; padding:1px 4px; border-radius:3px; font-size:9px; font-weight:bold; display:inline-block; margin-top:2px;\">${esc(m.tipoMovimiento)}</span></td>
                         <td style="padding:12px; vertical-align:top;\"><strong>${esc(m.cliente)}</strong><br><small style="color:#64748b;">${esc(m.vendedor)}</small></td>
                         <td class="col-fecha-venta" style="padding:8px 6px; vertical-align:top; font-size:11px; display:table-cell;">${m.fechaVenta}</td>
                         <td style="padding:8px 6px; vertical-align:top; font-size:11px;"><strong>${m.fechaAbono}</strong></td>
@@ -344,7 +361,7 @@ window.renderReporteAbonEnganches = function() {
                         <table style="width:100%; border-collapse:collapse; min-width:900px; font-size:13px;">
                             <thead>
                                 <tr style="background:#f8fafc; border-bottom:2px solid #cbd5e1;">
-                                    <th style="padding:8px 6px; text-align:left; width:18%; max-width:120px; font-size:12px;">Folio / Tipo</th>
+                                    <th style="padding:8px 6px; text-align:left; width:18%; max-width:120px; font-size:12px;">Producto / Tipo</th>
                                     <th style="padding:8px 6px; text-align:left;">Cliente / Vendedor</th>
                                     <th class="header-fecha-venta" style="padding:8px 6px; text-align:center; display:table-cell; font-size:12px;">Fecha Venta</th>
                                     <th style="padding:8px 6px; text-align:center; font-size:12px;">Fecha</th>
@@ -394,6 +411,7 @@ window.exportarReporteAbonEnganches = function() {
     }
     const filtroDesde = document.getElementById('abonDesde')?.value || '';
     const filtroHasta = document.getElementById('abonHasta')?.value || '';
+    const filtroCliente = document.getElementById('abonCliente')?.value.toLowerCase() || '';
 
     // Recopilar datos igual que renderReporteAbonEnganches
     const listado = [];
@@ -402,6 +420,7 @@ window.exportarReporteAbonEnganches = function() {
 
     const cuentasCxC = StorageService.get('cuentasPorCobrar', []);
     cuentasCxC.forEach(cuenta => {
+        if (filtroCliente && !(cuenta.nombre || cuenta.clienteNombre || '').toLowerCase().includes(filtroCliente)) return;
         (cuenta.abonos || []).forEach((abono, indexAbono) => {
             const fechaAbono = _repParseDate(abono.fechaAbonoIso || abono.fecha);
             if (desdeD && fechaAbono < desdeD) return;
@@ -429,6 +448,7 @@ window.exportarReporteAbonEnganches = function() {
 
     const apartados = StorageService.get('apartados', []);
     apartados.forEach(ap => {
+        if (filtroCliente && !(ap.clienteNombre || '').toLowerCase().includes(filtroCliente)) return;
         if (ap.enganche > 0) {
             const fechaAp = ap.fechaApartado || ap.fecha;
             if (desdeD && _repParseDate(fechaAp) < desdeD) return;
@@ -487,26 +507,34 @@ window.generarDocumentoReporteAbonEnganches = function() {
     const filtroTipo = document.getElementById('abonTipo')?.value || '';
     const filtroUbicacion = document.getElementById('abonUbicacion')?.value || '';
     const ordenFlujo = document.getElementById('abonOrden')?.value || 'desc';
+    const filtroCliente = document.getElementById('abonCliente')?.value || '';
 
     // OBTENER LISTADO FILTRADO Y ORDENADO (función auxiliar con propiedades lowercase)
-    let listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo);
+    let listado = _obtenerListadoReporteAbonEnganches(filtroDesde, filtroHasta, filtroEstatus, filtroUbicacion, filtroTipo, ordenFlujo, filtroCliente);
 
     // TRANSFORMAR AL FORMATO DE VISUALIZACIÓN PARA DOCUMENTOS
-    listado = listado.map(m => ({
-        Folio: m.folio,
-        Cliente: m.cliente,
-        Tipo: m.tipoMovimiento === 'Abono a Crédito' ? 'Abono Crédito' : 
-              m.tipoMovimiento === 'Enganche Crédito' ? 'Enganche Crédito' :
-              m.tipoMovimiento === 'Enganche Apartado' ? 'Enganche Apartado' : 'Abono Apartado',
-        'Fecha Venta': m.fechaVenta,
-        'Fecha Abono': m.fechaAbono,
-        'Saldo Anterior': m.saldoAnterior,
-        'Monto Cobrado': m.monto,
-        'Saldo Posterior': m.saldoPosterior,
-        'Ubicación Recepción': m.cuentaRecepcion,
-        Vendedor: m.vendedor,
-        fechaKey: m.fechaKey
-    }));
+    listado = listado.map(m => {
+        const articulos = Array.isArray(m.articulos) ? m.articulos.filter(a => a && a.nombre) : [];
+        const producto = articulos.length
+            ? articulos.map(a => Number(a.cantidad || 1) > 1 ? `${a.nombre} x${a.cantidad}` : a.nombre).join(', ')
+            : 'Sin detalle';
+        return {
+            Folio: m.folio,
+            Producto: producto,
+            Cliente: m.cliente,
+            Tipo: m.tipoMovimiento === 'Abono a Crédito' ? 'Abono Crédito' :
+                  m.tipoMovimiento === 'Enganche Crédito' ? 'Enganche Crédito' :
+                  m.tipoMovimiento === 'Enganche Apartado' ? 'Enganche Apartado' : 'Abono Apartado',
+            'Fecha Venta': m.fechaVenta,
+            'Fecha Abono': m.fechaAbono,
+            'Saldo Anterior': m.saldoAnterior,
+            'Monto Cobrado': m.monto,
+            'Saldo Posterior': m.saldoPosterior,
+            'Ubicación Recepción': m.cuentaRecepcion,
+            Vendedor: m.vendedor,
+            fechaKey: m.fechaKey
+        };
+    });
 
     // VALIDAR QUE HAYA DATOS CON LOS FILTROS APLICADOS
     if (listado.length === 0) {
@@ -518,127 +546,97 @@ window.generarDocumentoReporteAbonEnganches = function() {
     const porUbicacion = {};
     let totalMovimientos = 0;
     let totalCobrado = 0;
-    let totalPendiente = 0;
 
     listado.forEach(m => {
         const ub = m['Ubicación Recepción'];
-        if (!porUbicacion[ub]) porUbicacion[ub] = { items: [], subtotalCobrado: 0, subtotalPendiente: 0 };
+        if (!porUbicacion[ub]) porUbicacion[ub] = { items: [], subtotalCobrado: 0 };
         porUbicacion[ub].items.push(m);
         porUbicacion[ub].subtotalCobrado += Number(m['Monto Cobrado'] || 0);
-        porUbicacion[ub].subtotalPendiente += Number(m['Saldo Posterior'] || 0);
-        
+
         totalMovimientos++;
         totalCobrado += Number(m['Monto Cobrado'] || 0);
-        totalPendiente += Number(m['Saldo Posterior'] || 0);
     });
 
-    // GENERAR HTML PARA DOCUMENTO
+    // 📱 GENERAR HTML PARA DOCUMENTO — diseño de una sola columna (tarjetas), pensado
+    // para leerse en tablet/celular. Ya no es una tabla ancha de 8 columnas forzada
+    // a hoja carta (eso terminaba viéndose como una captura de pantalla ilegible).
+    const badgeColor = tipo => tipo === 'Enganche Apartado' ? { bg: '#fce7f3', fg: '#831843' } : { bg: '#e0e7ff', fg: '#1e3a8a' };
+
     let html = `
-    <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 0;">
-        <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px;">
-            <img src="img/Logo.png" style="height: 60px; width: auto; object-fit: contain;" alt="Logo">
+    <div style="max-width: 640px; margin: 0 auto; font-family: Arial, sans-serif; color: #0f172a; background: #f8fafc; padding: 18px;">
+        <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 20px; border-radius: 14px; margin-bottom: 18px; display: flex; align-items: center; gap: 16px;">
+            <img src="img/Logo.png" style="height: 50px; width: auto; object-fit: contain;" alt="Logo">
             <div>
-                <h1 style="margin: 0; font-size: 22px; font-weight: 900;">📊 Reporte de Abonos y Enganches</h1>
-                <p style="margin: 5px 0 0; color: #d1fae5; font-size: 12px;">Análisis de cobros en cobranza con saldos antes y después del movimiento.</p>
+                <h1 style="margin: 0; font-size: 19px; font-weight: 900;">📊 Reporte de Abonos y Enganches</h1>
+                <p style="margin: 4px 0 0; color: #d1fae5; font-size: 12px;">${new Date().toLocaleDateString('es-MX')} ${new Date().toLocaleTimeString('es-MX')}</p>
             </div>
         </div>
 
-        <p style="text-align: center; margin: 0 0 20px; font-size: 11px; color: #64748b;">
-            Reporte generado: ${new Date().toLocaleDateString('es-MX')} ${new Date().toLocaleTimeString('es-MX')}
-        </p>
-
-        <div style="background: #f1f5f9; padding: 12px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #1e40af;">
-            <h3 style="margin: 0 0 10px; font-size: 13px; color: #334155;">Filtros Aplicados</h3>
-            <table style="font-size: 12px; width: 100%; border-collapse: collapse;">
-                <tr>
-                    <td style="padding: 4px 8px;"><strong>Fecha desde:</strong> ${filtroDesde || 'Sin límite'}</td>
-                    <td style="padding: 4px 8px;"><strong>Fecha hasta:</strong> ${filtroHasta || 'Sin límite'}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 4px 8px;"><strong>Estatus:</strong> ${filtroEstatus || 'Todos'}</td>
-                    <td style="padding: 4px 8px;"><strong>Ubicación:</strong> ${filtroUbicacion || 'Todas'}</td>
-                </tr>
-            </table>
+        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; font-size: 13px; color: #475569;">
+            <strong style="color: #334155;">Filtros:</strong>
+            ${filtroDesde || filtroHasta ? `${filtroDesde || 'inicio'} → ${filtroHasta || 'hoy'}` : 'Sin rango de fechas'}
+            ${filtroEstatus ? ` · Estatus: ${esc(filtroEstatus)}` : ''}
+            ${filtroCliente ? ` · Cliente: ${esc(filtroCliente)}` : ''}
+            ${filtroUbicacion ? ` · Ubicación: ${esc(filtroUbicacion)}` : ''}
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
-            <div style="background: #dbeafe; padding: 12px; border-radius: 6px; border-left: 4px solid #1e40af;">
-                <div style="font-size: 11px; color: #0c4a6e; font-weight: bold;">Total Movimientos</div>
-                <div style="font-size: 20px; color: #1e40af; font-weight: bold; margin-top: 4px;">${totalMovimientos}</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px;">
+            <div style="background: #dbeafe; padding: 14px; border-radius: 12px; border-left: 5px solid #1e40af;">
+                <div style="font-size: 11px; color: #0c4a6e; font-weight: bold; text-transform: uppercase;">Movimientos</div>
+                <div style="font-size: 24px; color: #1e40af; font-weight: 900; margin-top: 4px;">${totalMovimientos}</div>
             </div>
-            <div style="background: #d1fae5; padding: 12px; border-radius: 6px; border-left: 4px solid #047857;">
-                <div style="font-size: 11px; color: #065f46; font-weight: bold;">Total Cobrado</div>
-                <div style="font-size: 16px; color: #047857; font-weight: bold; margin-top: 4px;">${fmt(totalCobrado)}</div>
+            <div style="background: #d1fae5; padding: 14px; border-radius: 12px; border-left: 5px solid #047857;">
+                <div style="font-size: 11px; color: #065f46; font-weight: bold; text-transform: uppercase;">Total Cobrado</div>
+                <div style="font-size: 19px; color: #047857; font-weight: 900; margin-top: 4px;">${fmt(totalCobrado)}</div>
             </div>
         </div>
-        <style>
-            @media print { .doc-saldo-pendiente { display: none !important; } }
-        </style>
-
-        <div style="border-top: 2px solid #e2e8f0; padding-top: 15px;">
     `;
 
-    // TABLAS POR UBICACIÓN
+    // TARJETAS POR UBICACIÓN
     Object.keys(porUbicacion).forEach(ubicacion => {
         const grupo = porUbicacion[ubicacion];
         html += `
-            <div style="margin-bottom: 20px; page-break-inside: avoid;">
-                <h3 style="background: #f0f9ff; padding: 10px 12px; margin: 0 0 10px; font-size: 14px; color: #0c4a6e; border-left: 4px solid #0284c7;">
+            <div style="margin-bottom: 18px;">
+                <div style="background: #0284c7; color: white; padding: 10px 14px; border-radius: 10px 10px 0 0; font-size: 14px; font-weight: 800;">
                     📍 ${esc(ubicacion)}
-                </h3>
-                <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px;">
-                    <thead>
-                        <tr style="background: #e0e7ff; border-bottom: 2px solid #1e40af;">
-                            <th style="padding: 8px; text-align: left; color: #1e40af; font-weight: bold;">Folio</th>
-                            <th style="padding: 8px; text-align: left; color: #1e40af; font-weight: bold;">Cliente</th>
-                            <th style="padding: 8px; text-align: center; color: #1e40af; font-weight: bold;">Tipo</th>
-                            <th class="doc-col-fecha-venta" style="padding: 8px; text-align: center; color: #1e40af; font-weight: bold; display: none;">F. Venta</th>
-                            <th style="padding: 8px; text-align: center; color: #1e40af; font-weight: bold;">Fecha</th>
-                            <th class="doc-col-saldo-anterior" style="padding: 8px; text-align: right; color: #1e40af; font-weight: bold; display: none;">Saldo Anterior</th>
-                            <th style="padding: 8px; text-align: right; color: #1e40af; font-weight: bold;">Cobrado</th>
-                            <th class="doc-col-saldo-posterior" style="padding: 8px; text-align: right; color: #1e40af; font-weight: bold; display: none;">Saldo Posterior</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                </div>
+                <div style="background: white; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 10px 10px; padding: 10px;">
         `;
 
-        grupo.items.forEach((item, idx) => {
-            const bgColor = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+        grupo.items.forEach(item => {
+            const bc = badgeColor(item.Tipo);
             html += `
-                        <tr style="background: ${bgColor}; border-bottom: 1px solid #e2e8f0;">
-                            <td style="padding: 6px 8px; color: #1e40af; font-weight: bold;">${esc(item.Folio)}</td>
-                            <td style="padding: 6px 8px;">${esc(item.Cliente)}</td>
-                            <td style="padding: 6px 8px; text-align: center; font-size: 10px; color: #64748b;">
-                                <span style="background: ${item.Tipo === 'Enganche Apartado' ? '#fce7f3' : '#e0e7ff'}; padding: 2px 6px; border-radius: 3px; color: ${item.Tipo === 'Enganche Apartado' ? '#831843' : '#1e3a8a'};">
-                                    ${esc(item.Tipo.substring(0, 3))}
-                                </span>
-                            </td>
-                            <td class="doc-col-fecha-venta" style="padding: 6px 8px; text-align: center; font-size: 10px; display: none;">${esc(item['Fecha Venta'])}</td>
-                            <td style="padding: 6px 8px; text-align: center; font-size: 10px;">${esc(item['Fecha Abono'])}</td>
-                            <td class="doc-col-saldo-anterior" style="padding: 6px 8px; text-align: right; font-weight: bold; color: #0f172a; display: none;">${fmt(item['Saldo Anterior'])}</td>
-                            <td style="padding: 6px 8px; text-align: right; font-weight: bold; color: #047857;">${fmt(item['Monto Cobrado'])}</td>
-                            <td class="doc-col-saldo-posterior" style="padding: 6px 8px; text-align: right; font-weight: bold; color: #dc2626; display: none;">${fmt(item['Saldo Posterior'])}</td>
-                        </tr>
+                    <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; page-break-inside: avoid;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="font-size: 14px; font-weight: 800; color: #0f172a; line-height: 1.3;">${esc(item.Producto)}</div>
+                                <span style="display: inline-block; margin-top: 5px; background: ${bc.bg}; color: ${bc.fg}; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">${esc(item.Tipo)}</span>
+                            </div>
+                            <div style="text-align: right; white-space: nowrap;">
+                                <div style="font-size: 11px; color: #64748b;">${esc(item['Fecha Abono'])}</div>
+                                <div style="font-size: 16px; font-weight: 900; color: #047857; margin-top: 2px;">${fmt(item['Monto Cobrado'])}</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e2e8f0; font-size: 12px; color: #334155;">
+                            👤 <strong>${esc(item.Cliente)}</strong>
+                            <span style="color: #94a3b8;"> · Folio ${esc(item.Folio)} · Vendedor: ${esc(item.Vendedor)}</span>
+                        </div>
+                    </div>
             `;
         });
 
         html += `
-                    </tbody>
-                    <tfoot>
-                        <tr style="background: #f0f9ff; border-top: 2px solid #0284c7; border-bottom: 2px solid #0284c7; font-weight: bold;">
-                            <td colspan="4" style="padding: 8px; text-align: right; color: #0c4a6e;">Subtotal ${esc(ubicacion)}:</td>
-                            <td style="padding: 8px; text-align: right; color: #047857; background: #d1fae5;">${fmt(grupo.subtotalCobrado)}</td>
-                        </tr>
-                    </tfoot>
-                </table>
+                    <div style="text-align: right; padding: 8px 6px 4px; font-size: 13px; font-weight: 800; color: #0c4a6e;">
+                        Subtotal ${esc(ubicacion)}: <span style="color: #047857;">${fmt(grupo.subtotalCobrado)}</span>
+                    </div>
+                </div>
             </div>
         `;
     });
 
     html += `
-        </div>
-        <div style="border-top: 2px solid #0f172a; padding-top: 12px; margin-top: 20px; font-size: 11px; color: #64748b; text-align: center;">
-            <p style="margin: 0;">Sistema MMP | ${new Date().getFullYear()}</p>
+        <div style="text-align: center; padding-top: 8px; font-size: 11px; color: #94a3b8;">
+            Sistema MMP · Mueblería Mi Pueblito · ${new Date().getFullYear()}
         </div>
     </div>
     `;
