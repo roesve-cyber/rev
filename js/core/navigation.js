@@ -2,6 +2,38 @@
 
 // ===== CONTROL DE NAVEGACIÓN Y BOTÓN "ATRÁS" (PWA) =====
 
+// ===== PILA DE NAVEGACIÓN PROPIA (independiente de history.pushState) =====
+// Por qué: dentro de una PWA instalada o un WebView de celular,
+// history.pushState/popstate del navegador es notoriamente poco confiable —
+// en muchos casos el primer "atrás" cierra la app entera en vez de regresar
+// a la vista anterior, aunque técnicamente se hayan hecho pushState (que es
+// justo lo que le pasaba a Roberto: entrar a una opción y que un solo
+// "atrás" saliera del sistema). Para no depender del comportamiento nativo,
+// se lleva una pila propia en memoria (window._navPila) con el registro real
+// de qué vistas visitó el usuario y en qué orden. El evento popstate del
+// navegador se usa solo como "disparador": cada vez que se consume, se
+// vuelve a anclar un history.state extra para que SIEMPRE quede algo qué
+// consumir antes de poder salir de verdad de la app -- salvo cuando ya se
+// llegó de nuevo a "inicio" sin nada detrás, donde SÍ se deja salir (como
+// cualquier app: un "atrás" desde la pantalla principal, sale).
+window._navPila = ['inicio'];
+
+function _navApilar(vistaId) {
+    // No apilar si es la misma vista que ya está arriba (evita que
+    // re-renders repetidos de la misma pantalla inflen la pila).
+    if (window._navPila[window._navPila.length - 1] === vistaId) return;
+    window._navPila.push(vistaId);
+    // Límite razonable para no crecer sin fin en una sesión muy larga.
+    if (window._navPila.length > 50) window._navPila.shift();
+}
+
+function _navAnclarHistorial(vistaId) {
+    try {
+        history.replaceState({ vista: vistaId, _ancla: true }, '', `#${vistaId}`);
+        history.pushState({ vista: vistaId, _ancla: true }, '', `#${vistaId}`);
+    } catch (e) { /* noop */ }
+}
+
 function _navGrupoVista(vistaId) {
     const operacion = new Set([
     'tienda', 'carrito', 'seleccionarcliente', 'apartados', 'entregas',
@@ -179,9 +211,11 @@ window.navA = function(vistaId, isPopState = false) {
         }
     }
 
-    // 5. GUARDAR EN EL HISTORIAL
+    // 5. GUARDAR EN EL HISTORIAL (pila propia + ancla del navegador -- ver
+    // arriba por qué no basta con un pushState suelto).
     if (!isPopState) {
-        try { history.pushState({ vista: vistaId }, '', `#${vistaId}`); } catch (e) {}
+        _navApilar(vistaId);
+        _navAnclarHistorial(vistaId);
     }
     window._vistaActualSistema = vistaId;
 };
@@ -190,8 +224,8 @@ window.navA = function(vistaId, isPopState = false) {
 window.addEventListener('popstate', (event) => {
     const sidebar = document.getElementById('sidebar');
     if (sidebar && sidebar.classList.contains('active')) {
-        window.toggleMenu(); 
-        try { history.pushState({ vista: event.state ? event.state.vista : 'inicio' }, '', window.location.hash); } catch(e){}
+        window.toggleMenu();
+        _navAnclarHistorial(window._vistaActualSistema || 'inicio');
         return;
     }
 
@@ -201,23 +235,37 @@ window.addEventListener('popstate', (event) => {
             modalAbierto.classList.add('oculto');
             modalAbierto.style.display = 'none';
         } else {
-            modalAbierto.remove(); 
+            modalAbierto.remove();
         }
-        try { history.pushState({ vista: event.state ? event.state.vista : 'inicio' }, '', window.location.hash); } catch(e){}
+        _navAnclarHistorial(window._vistaActualSistema || 'inicio');
         return;
     }
 
-    if (event.state && event.state.vista) {
-        navA(event.state.vista, true);
-    } else {
-        navA('inicio', true);
+    // Quitar de la pila la vista actual (si sigue arriba) y pasar a la
+    // anterior -- esta es la vista real a la que regresa el usuario, no lo
+    // que diga event.state (que en PWA/WebView puede venir vacío o desfasado).
+    if (window._navPila.length > 1 && window._navPila[window._navPila.length - 1] === window._vistaActualSistema) {
+        window._navPila.pop();
+    }
+    const vistaPrevia = window._navPila[window._navPila.length - 1] || 'inicio';
+
+    navA(vistaPrevia, true);
+
+    // Si todavía queda algo en la pila detrás de esta vista, se vuelve a
+    // anclar el historial para que el SIGUIENTE "atrás" lo siga
+    // interceptando este mismo sistema. Si ya se llegó a "inicio" sin nada
+    // detrás, se deja el historial tal cual -- el próximo "atrás" sale de la
+    // app con normalidad, como cualquier otra.
+    if (window._navPila.length > 1 || vistaPrevia !== 'inicio') {
+        _navAnclarHistorial(vistaPrevia);
     }
 });
 
 // Guardar la vista inicial cuando el sistema arranca
 document.addEventListener('DOMContentLoaded', () => {
     if (!window.location.pathname.includes("catalogo.html")) {
-        try { history.replaceState({ vista: 'inicio' }, '', '#inicio'); } catch(e){}
+        window._navPila = ['inicio'];
+        try { history.replaceState({ vista: 'inicio' }, '', '#inicio'); } catch(e) {}
     }
 });
 
