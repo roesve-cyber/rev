@@ -221,14 +221,21 @@ function guardarGasto() {
         alert("No se pudo registrar el gasto: el módulo de caja no está disponible. Nada se guardó.");
         return;
     }
+    const idOpInicial = `GASTO-${gasto.id}-INIT`;
     const _egresoOkGasto = window._egresarCuenta({
         monto: monto, cuentaId: cuentaId, etiqueta: etiqueta,
-        concepto: `Gasto: ${categoria} — ${descripcion}`, referencia: `GASTO-${gasto.id}`
+        concepto: `Gasto: ${categoria} — ${descripcion}`, referencia: `GASTO-${gasto.id}`,
+        idOperacion: idOpInicial
     });
     if (!_egresoOkGasto) {
         alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}".\n\nEl gasto NO se guardó. Verifica que esa cuenta exista.`);
         return;
     }
+    // Guardamos el id exacto del movimiento de caja recién creado -- así, si
+    // más adelante se corrige este gasto, se puede editar ese movimiento
+    // en sitio en vez de adivinar cuál es por concepto/referencia.
+    const movCreado = StorageService.get('movimientosCaja', []).find(m => m.idOperacion === idOpInicial);
+    if (movCreado) gasto.movimientoCajaId = movCreado.id;
 
     const gastos = StorageService.get('gastosOperativos', []);
     gastos.push(gasto);
@@ -345,10 +352,33 @@ function guardarEdicionGasto(id) {
         recurrente === !!gastoAnterior.recurrente && (!recurrente || periodicidad === gastoAnterior.periodicidad);
     if (sinCambios) { alert('No hay cambios que guardar.'); return; }
 
-    const msjConf = `⚠️ CONFIRMAR CORRECCIÓN DE GASTO\n\n` +
+    const msjConfBase = `⚠️ CONFIRMAR CORRECCIÓN DE GASTO\n\n` +
         `ANTES:\n${gastoAnterior.categoria} — ${gastoAnterior.descripcion}\n${formatoDinero(gastoAnterior.monto)} de ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}\n\n` +
-        `DESPUÉS:\n${categoria} — ${descripcion}\n${formatoDinero(monto)} de ${etiqueta}\n\n` +
-        `Se regresará ${formatoDinero(gastoAnterior.monto)} a "${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}" y se sacará ${formatoDinero(monto)} de "${etiqueta}". ¿Continuar?`;
+        `DESPUÉS:\n${categoria} — ${descripcion}\n${formatoDinero(monto)} de ${etiqueta}`;
+
+    // 🔎 Opción C (mismo patrón que la corrección de transferencias en
+    // bancos.js, aquí con una sola cuenta en vez de dos): si no hay ningún
+    // corte de caja cerrado de por medio, se edita el movimiento original
+    // en sitio (1 movimiento). Si lo hay -- o si este gasto es viejo y no
+    // tiene guardado el id de su movimiento de caja -- se usa el camino
+    // seguro de reversión + reaplicación (2 movimientos, como hasta ahora).
+    const fechaOriginalSolo = gastoAnterior.fecha || '';
+    const fechaLimiteSolo = (fechaOriginalSolo && fechaOriginalSolo < fecha) ? fechaOriginalSolo : fecha;
+    const cuentasAfectadas = [...new Set([gastoAnterior.cuentaDebito, cuentaId])];
+    let corteBloqueante = (gastoAnterior.movimientoCajaId && fechaOriginalSolo)
+        ? null
+        : { folio: '(gasto sin referencia de movimiento o sin fecha confiable)', fechaFin: '—' };
+    if (!corteBloqueante && typeof _bancosHayCorteCerradoDesde === 'function') {
+        for (const cid of cuentasAfectadas) {
+            const c = _bancosHayCorteCerradoDesde(cid, fechaLimiteSolo);
+            if (c) { corteBloqueante = c; break; }
+        }
+    }
+    const debeUsarReversion = !!corteBloqueante;
+
+    const msjConf = debeUsarReversion
+        ? msjConfBase + `\n\n⚠️ Ya existe un corte de caja cerrado (folio ${corteBloqueante.folio || '-'}, hasta ${corteBloqueante.fechaFin}) que cubre una de las cuentas involucradas, o este gasto no tiene una referencia exacta de su movimiento. Para no descuadrar nada, la corrección se hará con 2 MOVIMIENTOS (reversión del monto anterior + reaplicación del nuevo).\n\n¿Continuar?`
+        : msjConfBase + `\n\nNo hay ningún corte de caja cerrado que se vea afectado, así que la corrección editará DIRECTAMENTE el movimiento original -- sin movimientos adicionales.\n\n¿Continuar?`;
     if (!confirm(msjConf)) return;
 
     if (typeof window._ingresarCuenta !== 'function' || typeof window._egresarCuenta !== 'function') {
@@ -356,6 +386,110 @@ function guardarEdicionGasto(id) {
         return;
     }
 
+    let movimientoCajaIdFinal = gastoAnterior.movimientoCajaId || null;
+
+    if (!debeUsarReversion) {
+        // ───────────────────────────────────────────────────────────
+        // CAMINO SEGURO: edición en sitio, 1 solo movimiento tocado,
+        // nada de reversión fantasma fechada hoy.
+        // ───────────────────────────────────────────────────────────
+        if (typeof _resolverCuentaMovimiento !== 'function') {
+            alert("No se pudo corregir el gasto: funciones de cuenta no disponibles. Nada se guardó.");
+            return;
+        }
+
+        const deltas = {};
+        const acumular = (cid, delta) => { deltas[cid] = (deltas[cid] || 0) + delta; };
+        acumular(gastoAnterior.cuentaDebito, +Number(gastoAnterior.monto)); // deshace el egreso viejo
+        acumular(cuentaId, -monto);                                         // aplica el egreso nuevo
+
+        const resueltas = {};
+        for (const cid of Object.keys(deltas)) {
+            const r = _resolverCuentaMovimiento(cid);
+            if (!r.ok) { alert(`❌ No se pudo corregir: la cuenta "${cid}" no existe. Nada se guardó.`); return; }
+            resueltas[cid] = r;
+        }
+
+        const movsCheck = StorageService.get('movimientosCaja', []);
+        if (!movsCheck.some(m => m.id === gastoAnterior.movimientoCajaId)) {
+            alert('❌ No se encontró el movimiento de caja original de este gasto. La corrección se canceló, nada se movió.');
+            return;
+        }
+
+        Object.keys(deltas).forEach(cid => {
+            const r = resueltas[cid];
+            if (Math.abs(deltas[cid]) < 0.005) return; // nada que ajustar en esta cuenta
+            r.cuentas[r.idx].saldo = (Number(r.cuentas[r.idx].saldo) || 0) + deltas[cid];
+            const tabla = r.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
+            if (typeof StorageService.actualizarAtomo === 'function') {
+                StorageService.actualizarAtomo(tabla, r.cuentaRealId, { saldo: r.cuentas[r.idx].saldo });
+            } else {
+                StorageService.set(tabla, r.cuentas);
+            }
+        });
+
+        const rDestino = resueltas[cuentaId];
+        const fechaIsoMov = window.localISO ? window.localISO(new Date(fecha + 'T12:00:00')) : new Date(fecha + 'T12:00:00').toISOString();
+        const cambiosMov = {
+            monto: monto,
+            cuenta: rDestino.cuentaRealId,
+            etiquetaCuenta: etiqueta,
+            medioPago: rDestino.medioPago,
+            fecha: fechaIsoMov,
+            concepto: `Gasto: ${categoria} — ${descripcion} [corregido]`
+        };
+        if (typeof StorageService.actualizarAtomo === 'function') {
+            StorageService.actualizarAtomo('movimientosCaja', gastoAnterior.movimientoCajaId, cambiosMov);
+        } else {
+            const movs = StorageService.get('movimientosCaja', []);
+            const movOriginal = movs.find(m => m.id === gastoAnterior.movimientoCajaId);
+            if (movOriginal) Object.assign(movOriginal, cambiosMov);
+            StorageService.set('movimientosCaja', movs);
+        }
+        // movimientoCajaIdFinal no cambia: se editó el mismo registro en sitio.
+
+        const gastoCorregido = {
+            ...gastoAnterior,
+            categoria, descripcion, monto, fecha,
+            cuentaDebito: cuentaId, etiquetaCuenta: etiqueta,
+            recurrente, periodicidad: recurrente ? periodicidad : gastoAnterior.periodicidad,
+            movimientoCajaId: movimientoCajaIdFinal
+        };
+        gastoCorregido.historialCorrecciones = Array.isArray(gastoAnterior.historialCorrecciones) ? [...gastoAnterior.historialCorrecciones] : [];
+        gastoCorregido.historialCorrecciones.push({
+            fechaCorreccionIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+            metodo: 'edicion_directa',
+            anterior: {
+                categoria: gastoAnterior.categoria, descripcion: gastoAnterior.descripcion, monto: gastoAnterior.monto,
+                fecha: gastoAnterior.fecha, cuentaDebito: gastoAnterior.cuentaDebito, etiquetaCuenta: gastoAnterior.etiquetaCuenta
+            }
+        });
+        gastos[idx] = gastoCorregido;
+        StorageService.set('gastosOperativos', gastos);
+
+        if (window.AuditService?.log) {
+            window.AuditService.log({
+                accion: 'GASTO_CORREGIDO_EN_SITIO',
+                modulo: 'Gastos',
+                entidad: 'gasto',
+                entidadId: String(id),
+                detalle: `Gasto corregido en sitio (sin corte de caja de por medio): "${gastoAnterior.categoria} — ${gastoAnterior.descripcion}" (${formatoDinero(gastoAnterior.monto)} de ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}) → "${categoria} — ${descripcion}" (${formatoDinero(monto)} de ${etiqueta})`,
+                monto: monto,
+                severidad: 'riesgo',
+                datos: { anterior: gastoAnterior, nuevo: gastoCorregido, metodo: 'edicion_directa' }
+            });
+        }
+
+        document.querySelector('[data-modal="editar-gasto"]')?.remove();
+        alert(`✅ Gasto corregido (sin movimientos adicionales).\n\nAhora: ${formatoDinero(monto)} de ${etiqueta}.`);
+        renderGestionGastos();
+        return;
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // CAMINO SEGURO CON CORTE CERRADO DE POR MEDIO (o gasto sin
+    // referencia confiable): reversión + reaplicación, como siempre.
+    // ───────────────────────────────────────────────────────────────
     // 1) Revertir el egreso original a la cuenta donde salió.
     const idOpBase = `GASTO-${id}-CORR-${Date.now()}`;
     const reversaOk = window._ingresarCuenta({
@@ -387,16 +521,23 @@ function guardarEdicionGasto(id) {
         return;
     }
 
+    // Guardamos el id exacto del movimiento nuevo, para que la PRÓXIMA
+    // corrección (si la hay) pueda intentar el camino directo otra vez.
+    const movApl = StorageService.get('movimientosCaja', []).find(m => m.idOperacion === `${idOpBase}-APL`);
+    movimientoCajaIdFinal = movApl ? movApl.id : null;
+
     // 3) Actualizar el registro del gasto, guardando historial de la corrección.
     const gastoCorregido = {
         ...gastoAnterior,
         categoria, descripcion, monto, fecha,
         cuentaDebito: cuentaId, etiquetaCuenta: etiqueta,
-        recurrente, periodicidad: recurrente ? periodicidad : gastoAnterior.periodicidad
+        recurrente, periodicidad: recurrente ? periodicidad : gastoAnterior.periodicidad,
+        movimientoCajaId: movimientoCajaIdFinal
     };
     gastoCorregido.historialCorrecciones = Array.isArray(gastoAnterior.historialCorrecciones) ? [...gastoAnterior.historialCorrecciones] : [];
     gastoCorregido.historialCorrecciones.push({
         fechaCorreccionIso: window.localISO ? window.localISO(new Date()) : new Date().toISOString(),
+        metodo: 'reversion_reaplicacion',
         anterior: {
             categoria: gastoAnterior.categoria, descripcion: gastoAnterior.descripcion, monto: gastoAnterior.monto,
             fecha: gastoAnterior.fecha, cuentaDebito: gastoAnterior.cuentaDebito, etiquetaCuenta: gastoAnterior.etiquetaCuenta
@@ -415,7 +556,7 @@ function guardarEdicionGasto(id) {
             detalle: `Gasto corregido: "${gastoAnterior.categoria} — ${gastoAnterior.descripcion}" (${formatoDinero(gastoAnterior.monto)} de ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito}) → "${categoria} — ${descripcion}" (${formatoDinero(monto)} de ${etiqueta})`,
             monto: monto,
             severidad: 'riesgo',
-            datos: { anterior: gastoAnterior, nuevo: gastoCorregido }
+            datos: { anterior: gastoAnterior, nuevo: gastoCorregido, metodo: 'reversion_reaplicacion' }
         });
     }
 

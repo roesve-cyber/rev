@@ -624,6 +624,21 @@ function _normalizarFechaMovimientoCuenta(fecha) {
     return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
+// 🛡️ StorageService.set() reordena automáticamente por fecha cualquier
+// tabla que tenga ese campo; pushAtomo()/actualizarAtomo() NO lo hacen
+// (solo agregan/actualizan un registro puntual). Esta función reproduce
+// ese mismo reordenamiento sobre la caché local después de un push/
+// actualización atómica, para no perder ese invariante en movimientosCaja,
+// cuentasEfectivo y cuentas-bancarias.
+function _reordenarCacheLocalTrasAtomo(key) {
+    if (typeof StorageService._ordenarCronologicoSiTieneFechas !== 'function') return;
+    const actual = StorageService.get(key, []);
+    if (!Array.isArray(actual)) return;
+    const ordenado = StorageService._ordenarCronologicoSiTieneFechas(key, actual);
+    StorageService._cache[key] = ordenado;
+    window[key] = ordenado;
+}
+
 function _resolverCuentaMovimiento(cuentaId) {
     let cuentaRealId = (cuentaId === 'caja') ? 'efectivo' : (cuentaId || 'efectivo');
     let isCaja = String(cuentaRealId).startsWith('caja_') || cuentaRealId === 'efectivo';
@@ -694,16 +709,22 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         return false;
     }
 
-    if (cuenta.tipo === 'efectivo') {
-        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) - montoNum;
-        StorageService.set('cuentasEfectivo', cuenta.cuentas);
+    // UI local instantánea: se ajusta el saldo en memoria; el guardado
+    // real (local + Firestore) va por la escritura atómica de abajo.
+    cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) - montoNum;
+
+    // 🛡️ Escritura atómica por registro (transacción Firestore) en vez de
+    // subir el arreglo COMPLETO de cuentas -- así no se pisa el saldo de
+    // OTRA cuenta si dos dispositivos ajustan cuentas distintas casi al
+    // mismo tiempo.
+    const tablaCuentaEgreso = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
+    if (typeof StorageService.actualizarAtomo === 'function') {
+        StorageService.actualizarAtomo(tablaCuentaEgreso, cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
     } else {
-        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) - montoNum;
-        StorageService.set('cuentas-bancarias', cuenta.cuentas);
+        StorageService.set(tablaCuentaEgreso, cuenta.cuentas);
     }
 
-    const movs = StorageService.get('movimientosCaja', []);
-    movs.push({
+    const movimientoEgreso = {
         id: Date.now() + Math.random(),
         tipo: 'egreso',
         concepto,
@@ -714,8 +735,19 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         medioPago: cuenta.medioPago,
         referencia,
         idOperacion: idOperacion || null
-    });
-    StorageService.set('movimientosCaja', movs);
+    };
+    // 🛡️ Igual aquí: escritura atómica por registro en vez de subir el
+    // arreglo COMPLETO de movimientosCaja (puede tener miles de filas) --
+    // así nunca se pisa el movimiento que otro dispositivo acaba de
+    // registrar mientras este se procesaba.
+    if (typeof StorageService.pushAtomo === 'function') {
+        StorageService.pushAtomo('movimientosCaja', movimientoEgreso);
+        _reordenarCacheLocalTrasAtomo('movimientosCaja');
+    } else {
+        const movs = StorageService.get('movimientosCaja', []);
+        movs.push(movimientoEgreso);
+        StorageService.set('movimientosCaja', movs);
+    }
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'EGRESO_CUENTA',
@@ -741,16 +773,22 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         return false;
     }
 
-    if (cuenta.tipo === 'efectivo') {
-        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) + montoNum;
-        StorageService.set('cuentasEfectivo', cuenta.cuentas);
+    // UI local instantánea: se ajusta el saldo en memoria; el guardado
+    // real (local + Firestore) va por la escritura atómica de abajo.
+    cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) + montoNum;
+
+    // 🛡️ Escritura atómica por registro (transacción Firestore) en vez de
+    // subir el arreglo COMPLETO de cuentas -- así no se pisa el saldo de
+    // OTRA cuenta si dos dispositivos ajustan cuentas distintas casi al
+    // mismo tiempo.
+    const tablaCuentaIngreso = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
+    if (typeof StorageService.actualizarAtomo === 'function') {
+        StorageService.actualizarAtomo(tablaCuentaIngreso, cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
     } else {
-        cuenta.cuentas[cuenta.idx].saldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) + montoNum;
-        StorageService.set('cuentas-bancarias', cuenta.cuentas);
+        StorageService.set(tablaCuentaIngreso, cuenta.cuentas);
     }
 
-    const movs = StorageService.get('movimientosCaja', []);
-    movs.push({
+    const movimientoIngreso = {
         id: Date.now() + Math.random(),
         tipo: 'ingreso',
         concepto,
@@ -764,8 +802,19 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         grupoConciliacion: grupoConciliacion || '',
         referenciaBancaria: referenciaBancaria || '',
         foliosGrupo: Array.isArray(foliosGrupo) ? foliosGrupo : []
-    });
-    StorageService.set('movimientosCaja', movs);
+    };
+    // 🛡️ Igual aquí: escritura atómica por registro en vez de subir el
+    // arreglo COMPLETO de movimientosCaja (puede tener miles de filas) --
+    // así nunca se pisa el movimiento que otro dispositivo acaba de
+    // registrar mientras este se procesaba.
+    if (typeof StorageService.pushAtomo === 'function') {
+        StorageService.pushAtomo('movimientosCaja', movimientoIngreso);
+        _reordenarCacheLocalTrasAtomo('movimientosCaja');
+    } else {
+        const movs = StorageService.get('movimientosCaja', []);
+        movs.push(movimientoIngreso);
+        StorageService.set('movimientosCaja', movs);
+    }
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'INGRESO_CUENTA',
