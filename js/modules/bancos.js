@@ -2611,6 +2611,30 @@ function _renderModalEditarTransferencia(idOperacion) {
     }, 0);
 }
 
+// 🔎 Ayudantes para la corrección de transferencias (opción C: edición
+// directa si es segura, o el camino de reversión+reaplicación si ya hay
+// un corte de caja cerrado que dependa de los montos originales).
+function _bancosFechaSolo(f) {
+    return String(f || '').split('T')[0];
+}
+
+// Busca el corte de caja MÁS RECIENTE ya guardado para una cuenta que
+// cubra (o sea posterior a) la fecha límite dada. Si existe, editar el
+// movimiento original en sitio dejaría ese corte descuadrado en silencio.
+function _bancosHayCorteCerradoDesde(cuentaId, fechaLimiteSolo) {
+    if (!cuentaId || !fechaLimiteSolo) return null;
+    const cortesRaw = StorageService.get('cortesCaja', []);
+    const cortes = Array.isArray(cortesRaw) ? cortesRaw : [];
+    let encontrado = null;
+    cortes.forEach(c => {
+        if (String(c.cuentaId) !== String(cuentaId)) return;
+        const finCorte = _bancosFechaSolo(c.fechaFin);
+        if (!finCorte || finCorte < fechaLimiteSolo) return;
+        if (!encontrado || finCorte > _bancosFechaSolo(encontrado.fechaFin)) encontrado = c;
+    });
+    return encontrado;
+}
+
 window.guardarEdicionTransferencia = function(idOperacion) {
     const movimientos = StorageService.get("movimientosCaja", []);
     const legs = movimientos.filter(m => _claveTransferencia(m) === idOperacion && _esLegTransferencia(m));
@@ -2639,7 +2663,29 @@ window.guardarEdicionTransferencia = function(idOperacion) {
         nuevoMonto === Number(egresoAnterior.monto) && fechaRaw === String(egresoAnterior.fecha).split('T')[0];
     if (sinCambios) return alert('No hay cambios que guardar.');
 
-    if (!confirm(`CONFIRMAR CORRECCIÓN\n\nANTES: ${dinero(egresoAnterior.monto)} de ${egresoAnterior.etiquetaCuenta} → ${ingresoAnterior.etiquetaCuenta}\nDESPUÉS: ${dinero(nuevoMonto)} de ${nombreOrigenFull} → ${nombreDestinoFull}\n\nSe revertirá la transferencia original y se aplicará la corregida. ¿Continuar?`)) return;
+    // 🔎 Opción C: decidir si es seguro editar en sitio (2 movimientos) o si
+    // hace falta el camino de reversión + reaplicación (4 movimientos)
+    // porque ya existe un corte de caja cerrado que se vería descuadrado.
+    const fechaOriginalSolo = _bancosFechaSolo(egresoAnterior.fecha);
+    const fechaLimiteSolo = (fechaOriginalSolo && fechaOriginalSolo < fechaRaw) ? fechaOriginalSolo : fechaRaw;
+    const cuentasAfectadas = [...new Set([egresoAnterior.cuenta, ingresoAnterior.cuenta, nuevoOrigen, nuevoDestino])];
+    // Si no hay fecha original confiable, no podemos garantizar que sea
+    // seguro editar en sitio -- por seguridad, se fuerza el camino de 4
+    // movimientos (igual que si hubiera un corte cerrado de por medio).
+    let corteBloqueante = fechaOriginalSolo ? null : { folio: '(fecha original no disponible)', fechaFin: '—' };
+    if (fechaOriginalSolo) {
+        for (const cid of cuentasAfectadas) {
+            const c = _bancosHayCorteCerradoDesde(cid, fechaLimiteSolo);
+            if (c) { corteBloqueante = c; break; }
+        }
+    }
+    const debeUsarReversion = !!corteBloqueante;
+
+    const mensajeBase = `CONFIRMAR CORRECCIÓN\n\nANTES: ${dinero(egresoAnterior.monto)} de ${egresoAnterior.etiquetaCuenta} → ${ingresoAnterior.etiquetaCuenta}\nDESPUÉS: ${dinero(nuevoMonto)} de ${nombreOrigenFull} → ${nombreDestinoFull}`;
+    const mensajeExtra = debeUsarReversion
+        ? `\n\n⚠️ Ya existe un corte de caja cerrado (folio ${corteBloqueante.folio || '-'}, hasta ${corteBloqueante.fechaFin}) que cubre una de las cuentas involucradas. Para no descuadrarlo, la corrección se hará con 4 MOVIMIENTOS (reversión del monto anterior + reaplicación del nuevo).`
+        : `\n\nNo hay ningún corte de caja cerrado que se vea afectado, así que la corrección editará DIRECTAMENTE el movimiento original — sin movimientos adicionales.`;
+    if (!confirm(mensajeBase + mensajeExtra + '\n\n¿Continuar?')) return;
 
     if (typeof window._egresarCuenta !== 'function' || typeof window._ingresarCuenta !== 'function') {
         return alert("❌ No se pudo corregir: funciones de cuenta no disponibles.");
@@ -2647,6 +2693,103 @@ window.guardarEdicionTransferencia = function(idOperacion) {
 
     const fechaBase = new Date(fechaRaw + 'T12:00:00');
     const fechaIso = window.localISO ? window.localISO(fechaBase) : fechaBase.toISOString();
+
+    if (!debeUsarReversion) {
+        // ───────────────────────────────────────────────────────────
+        // CAMINO SEGURO: edición en sitio, solo los 2 movimientos de
+        // siempre. Nada de reversión fantasma con la fecha de hoy.
+        // ───────────────────────────────────────────────────────────
+        if (typeof _resolverCuentaMovimiento !== 'function') {
+            return alert("❌ No se pudo corregir: funciones de cuenta no disponibles.");
+        }
+
+        // Ajuste neto por cuenta (una misma cuenta puede recibir más de
+        // un ajuste si origen o destino no cambiaron).
+        const deltas = {};
+        const acumular = (cid, delta) => { deltas[cid] = (deltas[cid] || 0) + delta; };
+        acumular(egresoAnterior.cuenta, +Number(egresoAnterior.monto));   // deshace el egreso viejo
+        acumular(ingresoAnterior.cuenta, -Number(ingresoAnterior.monto)); // deshace el ingreso viejo
+        acumular(nuevoOrigen, -nuevoMonto);                                // aplica el egreso nuevo
+        acumular(nuevoDestino, +nuevoMonto);                               // aplica el ingreso nuevo
+
+        // Validar que TODAS las cuentas involucradas existan antes de
+        // tocar cualquier saldo o movimiento.
+        const resueltas = {};
+        for (const cid of Object.keys(deltas)) {
+            const r = _resolverCuentaMovimiento(cid);
+            if (!r.ok) return alert(`❌ No se pudo corregir: la cuenta "${cid}" no existe. Nada se guardó.`);
+            resueltas[cid] = r;
+        }
+
+        // Aplicar los deltas de saldo.
+        Object.keys(deltas).forEach(cid => {
+            const r = resueltas[cid];
+            if (Math.abs(deltas[cid]) < 0.005) return; // nada que ajustar en esta cuenta
+            r.cuentas[r.idx].saldo = (Number(r.cuentas[r.idx].saldo) || 0) + deltas[cid];
+            StorageService.set(r.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias', r.cuentas);
+        });
+
+        // Editar los 2 movimientos originales en sitio -- no se crea nada nuevo.
+        const movsDirectos = StorageService.get('movimientosCaja', []);
+        const rOrigen = resueltas[nuevoOrigen];
+        const rDestino = resueltas[nuevoDestino];
+        movsDirectos.forEach(m => {
+            if (m.id === egresoAnterior.id) {
+                m.monto = nuevoMonto;
+                m.cuenta = rOrigen.cuentaRealId;
+                m.etiquetaCuenta = nombreOrigenFull;
+                m.medioPago = rOrigen.medioPago;
+                m.fecha = fechaIso;
+                m.concepto = `Transferencia a: ${nombreDestinoFull} (${motivo}) [corregida]`;
+                m.cuentaOrigen = nuevoOrigen;
+                m.cuentaDestino = nuevoDestino;
+                m.cuentaOrigenNombre = nombreOrigenFull;
+                m.cuentaDestinoNombre = nombreDestinoFull;
+                m.tipoMovimiento = 'transferencia_interna';
+            } else if (m.id === ingresoAnterior.id) {
+                m.monto = nuevoMonto;
+                m.cuenta = rDestino.cuentaRealId;
+                m.etiquetaCuenta = nombreDestinoFull;
+                m.medioPago = rDestino.medioPago;
+                m.fecha = fechaIso;
+                m.concepto = `Transferencia de: ${nombreOrigenFull} (${motivo}) [corregida]`;
+                m.cuentaOrigen = nuevoOrigen;
+                m.cuentaDestino = nuevoDestino;
+                m.cuentaOrigenNombre = nombreOrigenFull;
+                m.cuentaDestinoNombre = nombreDestinoFull;
+                m.tipoMovimiento = 'transferencia_interna';
+            }
+        });
+        StorageService.set('movimientosCaja', movsDirectos);
+
+        if (window.AuditService?.log) {
+            window.AuditService.log({
+                accion: 'TRANSFERENCIA_CORREGIDA_EN_SITIO',
+                modulo: 'Bancos',
+                entidad: 'transferencia',
+                entidadId: idOperacion,
+                detalle: `Transferencia corregida en sitio (sin corte de caja de por medio): ${dinero(egresoAnterior.monto)} (${egresoAnterior.etiquetaCuenta} → ${ingresoAnterior.etiquetaCuenta}) → ${dinero(nuevoMonto)} (${nombreOrigenFull} → ${nombreDestinoFull})`,
+                monto: nuevoMonto,
+                severidad: 'riesgo',
+                datos: {
+                    anterior: { monto: egresoAnterior.monto, origen: egresoAnterior.etiquetaCuenta, destino: ingresoAnterior.etiquetaCuenta, fecha: egresoAnterior.fecha },
+                    nuevo: { monto: nuevoMonto, origen: nombreOrigenFull, destino: nombreDestinoFull, fecha: fechaIso },
+                    metodo: 'edicion_directa'
+                }
+            });
+        }
+
+        document.querySelector('[data-modal="editar-transferencia"]')?.remove();
+        alert('✅ Transferencia corregida (sin movimientos adicionales).');
+        if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+        if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
+        return;
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // CAMINO SEGURO CON CORTE CERRADO DE POR MEDIO: reversión + reaplicación
+    // (comportamiento de siempre, 4 movimientos, para no descuadrar cortes).
+    // ───────────────────────────────────────────────────────────────
     const idBase = `${idOperacion}-CORR-${Date.now()}`;
 
     // 1) Revertir la transferencia original: regresar el monto viejo al

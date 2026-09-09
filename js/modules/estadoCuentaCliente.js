@@ -665,23 +665,32 @@ window._eccAplicarFiltroSaldo = function() {
 };
 
 window.generarEstadoCuentaClienteConsolidado = function() {
-    const clienteId = document.getElementById('eccClienteId')?.value || '';
-    const clienteNombre = document.getElementById('eccClienteNombre')?.value || '';
-    
-    if (!clienteId && !clienteNombre) {
-        alert('⚠️ Selecciona un cliente primero.');
-        return;
-    }
-    
-    const estado = window.obtenerEstadoClienteConsolidado(clienteId, clienteNombre);
-    
-    if (!estado.existe) {
-        alert('❌ No se encontraron cuentas para este cliente.');
-        return;
-    }
-    
-    const contenidoReporte = document.getElementById('contenidoReporteECC');
-    if (!contenidoReporte) return;
+    try {
+        let clienteId = document.getElementById('eccClienteId')?.value || '';
+        let clienteNombre = document.getElementById('eccClienteNombre')?.value || '';
+
+        // 🛟 Respaldo: si por alguna razón los campos ocultos no se llenaron
+        // pero sí hay un cliente elegido en el buscador, lo usamos igual en
+        // vez de mostrar "Selecciona un cliente" con uno ya seleccionado.
+        if (!clienteId && !clienteNombre && window._eccClienteSeleccionado) {
+            clienteId = window._eccClienteSeleccionado.id ?? '';
+            clienteNombre = window._eccClienteSeleccionado.nombre || '';
+        }
+
+        if (!clienteId && !clienteNombre) {
+            alert('⚠️ Selecciona un cliente primero.');
+            return;
+        }
+
+        const estado = window.obtenerEstadoClienteConsolidado(clienteId, clienteNombre);
+
+        if (!estado.existe) {
+            alert('❌ No se encontraron cuentas para este cliente.');
+            return;
+        }
+
+        const contenidoReporte = document.getElementById('contenidoReporteECC');
+        if (!contenidoReporte) return;
     
     // Guardar estado global para impresión
     window._estadoClienteActual = estado;
@@ -816,7 +825,13 @@ window.generarEstadoCuentaClienteConsolidado = function() {
     </div>
     `;
     
-    contenidoReporte.innerHTML = html;
+        contenidoReporte.innerHTML = html;
+    } catch (err) {
+        // Antes esto fallaba en silencio y el botón parecía "no hacer nada".
+        // Ahora, si algo truena, se ve el error en consola y una alerta.
+        console.error('Error al generar Estado de Cuenta Consolidado:', err);
+        alert('⚠️ Ocurrió un error al generar el reporte: ' + (err?.message || err));
+    }
 };
 
 window.abrirDetalleVentaECC = function(folio) {
@@ -883,6 +898,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                 <div class="metrica"><div class="metrica-label">Estatus Global</div><div class="metrica-valor">${estado.estadoEstatus}</div></div>
             </div>
             
+            ${window._eccVistaActiva === 'detalleAbonos' ? _eccBloquePdfDetalleAbonos(estado) : `
             <table>
                 <thead>
                     <tr>
@@ -934,6 +950,7 @@ window.imprimirPdfEstadoCuentaCliente = function() {
                     </table>
                 </div>
             `).join('')}
+            `}
             
             <p style="text-align:center; margin-top:40px; font-size:11px; color:#64748b;">
                 Mueblería Mi Pueblito | Documento Informativo de Saldo
@@ -1006,7 +1023,7 @@ window.imprimirTicketEstadoCuentaCliente = function() {
         <div style="display:flex; justify-content:space-between; margin-top:4px;"><span>Estatus:</span><span>${estado.estadoEstatus}</span></div>
         <hr>
         <div class="centro negrita" style="margin-bottom:6px;">DETALLE POR FOLIO</div>
-        ${lineasCuentas}
+        ${window._eccVistaActiva === 'detalleAbonos' ? _eccBloqueTicketDetalleAbonos(estado) : lineasCuentas}
         <div class="centro" style="margin-top:12px; font-size:9px;">Documento informativo de saldos.</div>
     </div>
     </body>
@@ -1087,6 +1104,123 @@ function _eccUltimoPagoActivo(cuentas) {
 // 📱 Construye el documento completo pensado para leerse cómodo en tablet:
 // una sola columna, ancho angosto tipo pantalla vertical, tipografía grande
 // y folios como tarjetas en vez de tabla comprimida (nada de "hoja carta").
+// 🧾 Bloque PDF/A4 para la vista "Detalle de Abonos": mismo resumen de
+// productos + saldo, luego la lista combinada de pagos (sin segmentar
+// por ubicación de recepción, sin repetir Fecha Venta por fila).
+function _eccBloquePdfDetalleAbonos(estado) {
+    const movimientos = _eccMovimientosClienteCombinados(estado);
+    const todosLosArticulos = (estado.cuentas || []).flatMap(c => c.articulosDetalle || []);
+    const productosResumenTexto = window.resumenProductosVenta ? window.resumenProductosVenta(todosLosArticulos, 10) : '-';
+    return `
+        <div class="cliente-info" style="margin-top:10px;">
+            <p style="font-size:12px; color:#0284c7; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">🛋️ Lo que compró</p>
+            <p style="margin:0;">${productosResumenTexto}</p>
+        </div>
+
+        <h1 style="margin-top:30px; border-top:3px solid #1e40af; padding-top:20px;">🧾 Todos los Abonos (combinados)</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Producto</th>
+                    <th style="text-align:center;">Tipo</th>
+                    <th style="text-align:right;">Monto</th>
+                    <th style="text-align:center;">Recibido en</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${movimientos.length ? movimientos.map(m => `
+                    <tr>
+                        <td style="text-align:center; white-space:nowrap;">${m.fecha}</td>
+                        <td>${m.producto} <span style="color:#94a3b8; font-size:10px;">(Folio ${_escCuenta(m.folio)})</span></td>
+                        <td style="text-align:center;">${_escCuenta(m.tipo)}</td>
+                        <td style="text-align:right; font-weight:bold; color:#059669;">${_dinéroCuenta(m.monto)}</td>
+                        <td style="text-align:center; font-size:11px;">${_escCuenta(m.medio)}</td>
+                    </tr>
+                `).join('') : `<tr><td colspan="5" style="text-align:center; color:#64748b;">Sin abonos registrados.</td></tr>`}
+            </tbody>
+        </table>
+    `;
+}
+
+// 🧾 Bloque para el ticket térmico de la vista "Detalle de Abonos".
+function _eccBloqueTicketDetalleAbonos(estado) {
+    const movimientos = _eccMovimientosClienteCombinados(estado);
+    const todosLosArticulos = (estado.cuentas || []).flatMap(c => c.articulosDetalle || []);
+    const productosResumenTexto = window.resumenProductosVenta ? window.resumenProductosVenta(todosLosArticulos, 10) : '-';
+    return `
+        <div class="centro negrita" style="margin-bottom:4px;">LO QUE COMPRÓ</div>
+        <div style="margin-bottom:6px;">${productosResumenTexto}</div>
+        <hr>
+        <div class="centro negrita" style="margin-bottom:6px;">TODOS LOS ABONOS</div>
+        ${movimientos.length ? movimientos.map(m => `
+            <div style="display:flex; justify-content:space-between;"><span>${m.fecha} (${_escCuenta(m.tipo)})</span><span>${_dinéroCuenta(m.monto)}</span></div>
+            <div style="font-size:9px; color:#555; margin-bottom:3px;">${m.producto} · Folio ${_escCuenta(m.folio)} · ${_escCuenta(m.medio)}</div>
+        `).join('') : `<div>Sin abonos registrados.</div>`}
+    `;
+}
+
+// 📱 Versión tablet/PNG de la vista "Detalle de Abonos": tarjetas, sin
+// tabla ancha de 10 columnas y sin segmentar por lugar de recepción.
+function _eccConstruirHtmlImagenTabletDetalleAbonos(estado) {
+    const movimientos = _eccMovimientosClienteCombinados(estado);
+    const todosLosArticulos = (estado.cuentas || []).flatMap(c => c.articulosDetalle || []);
+    const productosResumenTexto = window.resumenProductosVenta ? window.resumenProductosVenta(todosLosArticulos, 10) : '-';
+    return `
+    <div style="width:720px; background:#f8fafc; padding:26px; font-family:Arial, sans-serif;">
+        <div style="background:white; border-radius:16px; padding:26px;">
+            <div style="text-align:center; margin-bottom:20px;">
+                <img src="img/Logo.svg" alt="Mi Pueblito" style="width:60px; height:60px; object-fit:contain;" onerror="this.style.display='none'">
+                <h1 style="margin:10px 0 4px 0; font-size:24px; color:#1e293b;">📊 Estado de Cuenta</h1>
+                <p style="margin:0; font-size:14px; color:#64748b;">Emitido: ${_fechaCortaCuenta(new Date())}</p>
+                <div style="display:inline-block; margin-top:12px; background:${estado.colorEstatus}; color:white; padding:8px 22px; border-radius:20px; font-weight:bold; font-size:16px;">${estado.estadoEstatus}</div>
+            </div>
+
+            <div style="background:#eff6ff; border-radius:12px; padding:18px; margin-bottom:20px;">
+                <p style="margin:0 0 4px 0; font-size:13px; color:#0284c7; font-weight:bold; text-transform:uppercase;">Cliente</p>
+                <p style="margin:0 0 10px 0; font-size:22px; color:#0c4a6e; font-weight:bold;">${_escCuenta(estado.clienteNombre)}</p>
+                ${estado.clienteTelefono !== '-' ? `<p style="margin:0 0 4px 0; font-size:16px; color:#1e293b;">📞 ${_escCuenta(estado.clienteTelefono)}</p>` : ''}
+                ${estado.clienteDireccion !== '-' ? `<p style="margin:0; font-size:15px; color:#475569;">📍 ${_escCuenta(estado.clienteDireccion)}</p>` : ''}
+            </div>
+
+            <div style="background:#f0fdf4; border:2px solid #10b981; border-radius:12px; padding:18px; margin-bottom:20px;">
+                <p style="margin:0 0 6px 0; font-size:13px; color:#059669; font-weight:bold; text-transform:uppercase;">🛋️ Lo que compró</p>
+                <p style="margin:0; font-size:16px; color:#065f46;">${productosResumenTexto}</p>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:26px;">
+                <div style="background:#fef2f2; border:2px solid #dc2626; border-radius:12px; padding:16px;">
+                    <p style="margin:0 0 6px 0; font-size:13px; color:#dc2626; font-weight:bold; text-transform:uppercase;">Saldo Pendiente</p>
+                    <p style="margin:0; font-size:24px; color:#7f1d1d; font-weight:bold;">${_dinéroCuenta(estado.totalSaldo)}</p>
+                </div>
+                <div style="background:#eff6ff; border:2px solid #0ea5e9; border-radius:12px; padding:16px;">
+                    <p style="margin:0 0 6px 0; font-size:13px; color:#0284c7; font-weight:bold; text-transform:uppercase;">Pagos Registrados</p>
+                    <p style="margin:0; font-size:24px; color:#0c4a6e; font-weight:bold;">${movimientos.length}</p>
+                </div>
+            </div>
+
+            <h2 style="font-size:19px; color:#1e293b; margin:0 0 14px 0;">🧾 Todos los Abonos (combinados)</h2>
+            ${movimientos.length ? movimientos.map(m => `
+                <div style="border:1px solid #e2e8f0; border-radius:12px; padding:14px 16px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                        <div style="flex:1;">
+                            <div style="font-size:15px; font-weight:bold; color:#0f172a;">${m.producto}</div>
+                            <span style="display:inline-block; margin-top:5px; background:${m.tipo === 'Enganche' ? '#fce7f3' : '#dbeafe'}; color:${m.tipo === 'Enganche' ? '#831843' : '#1e40af'}; padding:3px 10px; border-radius:6px; font-size:12px; font-weight:bold;">${m.tipo}</span>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:13px; color:#64748b;">${m.fecha}</div>
+                            <div style="font-size:18px; font-weight:900; color:#059669; margin-top:2px;">${_dinéroCuenta(m.monto)}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0; font-size:13px; color:#475569;">Folio ${_escCuenta(m.folio)} · Recibido en: ${_escCuenta(m.medio)}</div>
+                </div>
+            `).join('') : `<p style="color:#94a3b8; font-size:15px;">Este cliente no tiene abonos registrados.</p>`}
+
+            <p style="text-align:center; margin-top:14px; font-size:12px; color:#94a3b8;">Mueblería Mi Pueblito · Documento informativo de saldo</p>
+        </div>
+    </div>`;
+}
+
 function _eccConstruirHtmlImagenTablet(estado, cuentasImprimir) {
     const ultimoPago = _eccUltimoPagoActivo(estado.cuentas);
     return `
@@ -1168,7 +1302,9 @@ window.descargarImagenEstadoCuentaCliente = function() {
         wrap.style.position = 'absolute';
         wrap.style.left = '-9999px';
         wrap.style.top = '0';
-        wrap.innerHTML = _eccConstruirHtmlImagenTablet(estado, cuentasImprimir);
+        wrap.innerHTML = window._eccVistaActiva === 'detalleAbonos'
+            ? _eccConstruirHtmlImagenTabletDetalleAbonos(estado)
+            : _eccConstruirHtmlImagenTablet(estado, cuentasImprimir);
         document.body.appendChild(wrap);
 
         html2canvas(wrap, { scale: 2, backgroundColor: '#f8fafc', useCORS: true }).then(canvas => {
