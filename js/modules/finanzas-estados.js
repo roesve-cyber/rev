@@ -315,6 +315,30 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         .reduce((s, m) => s + _efValorAjuste(m), 0);
     const totalMermasNetas = Math.max(0, totalMermasBruto - totalSobrantesAjuste);
 
+    // 🛡️ NUEVO: Modificación de Inventario (corrección de identidad de
+    // producto — botón "🔁 Modificación" en inventario.js,
+    // ejecutarModificacionInv). No es una merma (la pieza física sigue en
+    // el negocio, nunca salió) ni una compra/venta: es cuando se capturó o
+    // vendió bajo el producto equivocado del catálogo (ej. se dio de alta
+    // una estufa Whirlpool que en realidad es Mabe). Se registran 2
+    // movimientos (salida del producto origen + entrada del producto
+    // destino) con origen:'modificacionProducto' y costoUnitario ya
+    // congelado al momento del movimiento (no se recalcula con el costo
+    // actual del producto, que pudo cambiar después). La diferencia de
+    // costo entre ambos productos es una ganancia o pérdida real para el
+    // Estado de Resultados -- nunca se mezcla con "Mermas y ajustes" ni se
+    // recorta a cero si sale positiva (a diferencia de totalMermasNetas,
+    // aquí SÍ puede ser ganancia neta del periodo).
+    const modificacionesProductoMovs = kardex.filter(m =>
+        m.origen === 'modificacionProducto' && _efEnRango(m.fecha, desde, hasta)
+    );
+    const totalGananciaPerdidaModificacionInventario = modificacionesProductoMovs.reduce((s, m) => {
+        const costo = Number(m.costoUnitario) || 0;
+        const cant = Number(m.cantidad) || 0;
+        const esEntrada = typeof window._kardexTipoBase === 'function' && window._kardexTipoBase(m) === 'entrada';
+        return s + (esEntrada ? 1 : -1) * costo * cant;
+    }, 0);
+
     // 🛡️ REPARACIÓN: cuando ni el kardex NI el producto traen un costo
     // utilizable (costo=0 o vacío, precioCompra=0 o vacío — típicamente un
     // hueco de captura, no una compra gratis), la estimación de arriba
@@ -543,7 +567,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     const utilidadBruta = ingresosNetos - costoVentasFinal;
     // Cuentas incobrables: NIF las clasifica como gasto de operación (venta/
     // administración), NO como parte del RIF.
-    const utilidadOperacion = utilidadBruta - totalComisiones - totalMermasNetas - totalGastos - incobrables;
+    const utilidadOperacion = utilidadBruta - totalComisiones - totalMermasNetas - totalGastos - incobrables + totalGananciaPerdidaModificacionInventario;
     const rif = ingresosFinancieros - gastosFinancieros - cuponesEmitidosEnPeriodo + cuponesRecuperadosEnPeriodo;
     const utilidadNeta = utilidadOperacion + otrosIngresosYGastos + rif;
 
@@ -562,6 +586,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         totalMermasNetas, totalMermasBruto, totalSobrantesAjuste,
         productosMermaSinCosto: Array.from(productosMermaSinCosto.values())
             .sort((a, b) => b.ocurrencias - a.ocurrencias),
+        totalGananciaPerdidaModificacionInventario,
         gastosPorCategoria, totalGastos, incobrables, incobrablesPrestamos, incobrablesCxC, utilidadOperacion,
         otrosIngresos, otrosGastos, otrosIngresosYGastos,
         ingresosFinancieros, gastosFinancieros,
@@ -887,6 +912,7 @@ function renderEstadosFinancieros() {
     <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Comisiones a vendedores</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalComisiones)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalComisiones, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Mermas y ajustes de inventario${er.productosMermaSinCosto.length > 0 ? ` <span title="${er.productosMermaSinCosto.length} producto(s) con merma en el periodo sin costo capturado — no incluidos en este monto: ${_efEsc(er.productosMermaSinCosto.map(p => p.nombre + ' (' + p.ocurrencias + ')').join(', '))}" style="cursor:help;">⚠️</span>` : ''}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalMermasNetas)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalMermasNetas, er.ingresosVentas)}</td></tr>
+        ${er.totalGananciaPerdidaModificacionInventario !== 0 ? `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:${er.totalGananciaPerdidaModificacionInventario >= 0 ? '#059669' : '#dc2626'};">${er.totalGananciaPerdidaModificacionInventario >= 0 ? '(+) Ganancia' : '(–) Pérdida'} por corrección de identidad de inventario<span title="Producto capturado o vendido bajo el catálogo equivocado (ej. Whirlpool en vez de Mabe), corregido con el botón 🔁 Modificación. Es la diferencia de costo entre el producto correcto y el que se había registrado -- la pieza física nunca salió del negocio." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;color:${er.totalGananciaPerdidaModificacionInventario >= 0 ? '#059669' : '#dc2626'};">${_efDinero(Math.abs(er.totalGananciaPerdidaModificacionInventario))}</td><td style="padding:8px;text-align:right;color:${er.totalGananciaPerdidaModificacionInventario >= 0 ? '#059669' : '#dc2626'};width:70px;">${_efPct(Math.abs(er.totalGananciaPerdidaModificacionInventario), er.ingresosVentas)}</td></tr>` : ''}
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Gastos operativos</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.totalGastos)}</td><td style="padding:8px;text-align:right;color:#dc2626;width:70px;">${_efPct(er.totalGastos, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">(–) Cuentas incobrables<span title="Ventas a crédito (${_efDinero(er.incobrablesCxC)}) + préstamos otorgados (${_efDinero(er.incobrablesPrestamos)}) marcados incobrables en el periodo. Se revierte aquí porque su interés y utilidad de mercancía ya se habían reconocido de golpe al momento de la venta." style="cursor:help;"> ℹ️</span></td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(er.incobrables)}</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efPct(er.incobrables, er.ingresosVentas)}</td></tr>
         <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;"><td style="padding:8px;">= Utilidad de operación</td><td style="padding:8px;text-align:right;">${_efDinero(er.utilidadOperacion)}</td><td style="padding:8px;text-align:right;color:#059669;font-weight:bold;">${_efPct(er.utilidadOperacion, er.ingresosVentas)}</td></tr>

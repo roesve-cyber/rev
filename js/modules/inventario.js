@@ -1422,6 +1422,7 @@ window.renderConsultaInventario = function() {
  </td>
  <td style="padding:12px; text-align:center;">
  <button onclick="abrirAjusteProductoDesdeVisor('${p.id}')" title="Ajustar existencia (merma/sobrante)" style="padding:7px 10px;background:#f59e0b;color:white;border:0;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;white-space:nowrap;">⚖️ Ajuste</button>
+ <button onclick="abrirModificacionProductoDesdeVisor('${p.id}')" title="Corregir identidad (es otro producto)" style="padding:7px 10px;background:#7c3aed;color:white;border:0;border-radius:6px;font-weight:bold;cursor:pointer;font-size:12px;white-space:nowrap;margin-top:6px;">🔁 Modificación</button>
  </td>
  </tr>`;
  });
@@ -2610,6 +2611,7 @@ function mostrarDetalleProductoMaestro(id) {
  <div style="display:grid;gap:8px;">
  <button onclick="abrirAjusteProductoDesdeVisor('${p.id}')" style="padding:11px;background:#b45309;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Ajustar existencia</button>
  <button onclick="abrirTransferenciaProductoDesdeVisor('${p.id}')" style="padding:11px;background:#1d4ed8;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Transferir ubicacion</button>
+ <button onclick="abrirModificacionProductoDesdeVisor('${p.id}')" style="padding:11px;background:#7c3aed;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">🔁 Modificación (es otro producto)</button>
  ${stockSinAsignar > 0 ? `<button onclick="navA('consulta-inventario'); setTimeout(()=>{window.renderConsultaInventario && window.renderConsultaInventario();}, 80)" style="padding:10px;background:#f59e0b;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Asignar stock sin ubicacion</button>` : ''}
  </div>
  <div style="margin-top:12px;color:#64748b;font-size:12px;line-height:1.4;">Recomendacion: no editar existencias a mano desde la ficha. Usa ajuste o transferencia para conservar auditoria y Kardex.</div>
@@ -3395,6 +3397,238 @@ window.ejecutarAjusteInv = function() {
  
  // Refresco instantaneo: se aplica en cualquier vista donde se haya abierto el ajuste
  // (Inventario, Consulta de Inventario o el Visor de producto), no solo en Inventario.
+ if (typeof renderInventario === 'function') renderInventario();
+ if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
+ if (typeof mostrarDetalleProductoMaestro === 'function' && window._visorProductoIdActual) mostrarDetalleProductoMaestro(window._visorProductoIdActual);
+};
+
+// =========================================================
+// MODULO: MODIFICACION DE INVENTARIO (correccion de identidad de producto)
+// =========================================================
+// No es una Alta (no entro mercancia nueva al negocio), no es una Baja/Merma
+// (la pieza fisica sigue existiendo, no se perdio ni se daño) y no es una
+// Transferencia (no cambio de bodega). Es para cuando la pieza se capturo o
+// vendio bajo el producto equivocado del catalogo -- ej. se dio de alta una
+// estufa Whirlpool que en realidad es Mabe. Se resta la variante del
+// producto ORIGEN (el mal capturado) y se suma al producto DESTINO (el
+// correcto) en la MISMA ubicacion (la pieza fisica no se movio de lugar), y
+// la diferencia de costo entre ambos productos queda registrada como
+// ganancia o perdida explicita para los Estados Financieros -- nunca se
+// mueve el valor del inventario en silencio (ver finanzas-estados.js,
+// totalGananciaPerdidaModificacionInventario).
+function _modifInvVariantesDeProducto(prodId) {
+ const p = (window.productos || []).find(prod => String(prod.id) === String(prodId));
+ if (!p) return [];
+ return (p.variantes || [])
+ .filter(v => (Number(v.stock) || 0) > 0)
+ .map(v => ({ ubicacion: v.ubicacion || 'General', color: v.color || 'General', stock: Number(v.stock) || 0 }))
+ .sort((a, b) => a.ubicacion.localeCompare(b.ubicacion, 'es') || a.color.localeCompare(b.color, 'es'));
+}
+
+function _modifInvRecalcularCacheUbicacion(p, ubicacion) {
+ p.stockPorUbicacion = p.stockPorUbicacion || {};
+ p.stockPorUbicacion[ubicacion] = (p.variantes || [])
+ .filter(v => _transfInvNormClave(v.ubicacion || 'General') === _transfInvNormClave(ubicacion))
+ .reduce((s, v) => s + (Number(v.stock) || 0), 0);
+}
+
+window.abrirModalModificacionInv = function() {
+ if (!_invRequireAdmin('Abrir modificacion de inventario')) return;
+ ['modifOrigenId', 'modifDestinoId', 'modifCantidad', 'modifMotivo'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+ ['modifOrigenDisplay', 'modifDestinoDisplay'].forEach(id => {
+ const el = document.getElementById(id);
+ if (el) { el.innerText = 'Sin seleccionar'; el.style.color = '#64748b'; el.style.fontWeight = 'normal'; }
+ });
+ document.getElementById('modifOrigenVariante').innerHTML = '<option value="">Selecciona primero el producto origen</option>';
+ document.getElementById('modifDestinoColor').value = '';
+ document.getElementById('modifResumenCosto').innerHTML = '';
+ window._modifInvOrigenColor = '';
+ window._modifInvOrigenUbicacion = '';
+
+ const modal = document.getElementById('modalModificacionInv');
+ modal.classList.remove('oculto');
+ modal.style.display = 'flex';
+};
+
+window.abrirModificacionProductoDesdeVisor = function(prodId) {
+ const p = (window.productos || []).find(prod => String(prod.id) === String(prodId));
+ if (!p) return alert('Producto no encontrado.');
+ window.abrirModalModificacionInv();
+ setTimeout(() => window._modifInvSeleccionarOrigen(p), 50);
+};
+
+window._modifInvSeleccionarOrigen = function(p) {
+ document.getElementById('modifOrigenId').value = p.id;
+ const d = document.getElementById('modifOrigenDisplay');
+ d.innerText = p.nombre || 'Producto seleccionado';
+ d.style.color = '#1e40af'; d.style.fontWeight = 'bold';
+
+ const variantes = _modifInvVariantesDeProducto(p.id);
+ const sel = document.getElementById('modifOrigenVariante');
+ if (variantes.length === 0) {
+ sel.innerHTML = '<option value="">Este producto no tiene existencia registrada</option>';
+ } else {
+ sel.innerHTML = variantes.map(v =>
+ `<option value="${_kardexEsc(v.ubicacion)}||${_kardexEsc(v.color)}" data-stock="${v.stock}">${_kardexEsc(v.ubicacion)} — ${_kardexEsc(v.color)} (hay ${v.stock})</option>`
+ ).join('');
+ }
+ window._modifInvOnVarianteChange();
+ _modifActualizarResumenCosto();
+};
+
+window._modifInvOnVarianteChange = function() {
+ const sel = document.getElementById('modifOrigenVariante');
+ const [ubicacion, color] = (sel.value || '').split('||');
+ window._modifInvOrigenUbicacion = ubicacion || '';
+ window._modifInvOrigenColor = color || '';
+ const opt = sel.selectedOptions[0];
+ const disponible = opt ? Number(opt.dataset.stock) || 0 : 0;
+ const cantInput = document.getElementById('modifCantidad');
+ cantInput.max = disponible;
+ if (!cantInput.value || Number(cantInput.value) > disponible) cantInput.value = disponible > 0 ? 1 : '';
+ const destinoColorInput = document.getElementById('modifDestinoColor');
+ if (!destinoColorInput.value) destinoColorInput.value = color || 'General';
+ _modifActualizarResumenCosto();
+};
+
+function _modifActualizarResumenCosto() {
+ const origenId = document.getElementById('modifOrigenId').value;
+ const destinoId = document.getElementById('modifDestinoId').value;
+ const cant = parseFloat(document.getElementById('modifCantidad').value) || 0;
+ const resumen = document.getElementById('modifResumenCosto');
+ if (!origenId || !destinoId || cant <= 0) { resumen.innerHTML = ''; return; }
+ const productos = window.productos || [];
+ const pO = productos.find(p => String(p.id) === String(origenId));
+ const pD = productos.find(p => String(p.id) === String(destinoId));
+ if (!pO || !pD) { resumen.innerHTML = ''; return; }
+ const costoO = Number(pO.costo || pO.precioCompra) || 0;
+ const costoD = Number(pD.costo || pD.precioCompra) || 0;
+ const diferencia = (costoD - costoO) * cant;
+ const esGanancia = diferencia >= 0;
+ resumen.innerHTML = `<div style="margin-top:6px;padding:10px;border-radius:6px;background:${esGanancia ? '#f0fdf4' : '#fef2f2'};border:1px solid ${esGanancia ? '#bbf7d0' : '#fecaca'};font-size:12px;line-height:1.5;">
+ Costo "${_kardexEsc(pO.nombre)}": ${dinero(costoO)} × ${cant} = ${dinero(costoO * cant)}<br>
+ Costo "${_kardexEsc(pD.nombre)}": ${dinero(costoD)} × ${cant} = ${dinero(costoD * cant)}<br>
+ <b style="color:${esGanancia ? '#16a34a' : '#dc2626'};">${esGanancia ? '⬆️ Ganancia' : '⬇️ Pérdida'} para Estados Financieros: ${dinero(Math.abs(diferencia))}</b>
+ </div>`;
+}
+window._modifActualizarResumenCosto = _modifActualizarResumenCosto;
+
+window.ejecutarModificacionInv = function() {
+ if (!_invRequireAdmin('Aplicar modificacion de inventario')) return;
+ const origenId = document.getElementById('modifOrigenId').value;
+ const destinoId = document.getElementById('modifDestinoId').value;
+ const cant = parseFloat(document.getElementById('modifCantidad').value);
+ const ubicacion = window._modifInvOrigenUbicacion;
+ const colorOrigen = window._modifInvOrigenColor || 'General';
+ const colorDestino = (document.getElementById('modifDestinoColor').value || 'General').trim() || 'General';
+ const motivo = document.getElementById('modifMotivo').value.trim();
+
+ if (!origenId) return alert('Selecciona el producto que esta mal capturado (origen).');
+ if (!ubicacion) return alert('Selecciona la existencia especifica (ubicacion/color) del producto origen.');
+ if (!destinoId) return alert('Selecciona el producto correcto (destino).');
+ if (String(origenId) === String(destinoId) && colorOrigen === colorDestino) {
+ return alert('El producto origen y destino (con el mismo color) no pueden ser iguales -- usa "Ajustar existencia" si solo es cantidad.');
+ }
+ if (isNaN(cant) || cant <= 0) return alert('Ingresa una cantidad valida.');
+ if (!motivo) return alert('Debes ingresar un motivo (queda en auditoria).');
+
+ const productos = StorageService.get('productos', []);
+ const idxO = productos.findIndex(p => String(p.id) === String(origenId));
+ const idxD = productos.findIndex(p => String(p.id) === String(destinoId));
+ if (idxO === -1) return alert('Producto origen no encontrado.');
+ if (idxD === -1) return alert('Producto destino no encontrado.');
+ const pO = productos[idxO];
+ const pD = productos[idxD];
+
+ const costoO = Number(pO.costo || pO.precioCompra) || 0;
+ const costoD = Number(pD.costo || pD.precioCompra) || 0;
+ const diferencia = (costoD - costoO) * cant;
+ const esGanancia = diferencia >= 0;
+
+ const msj = `RESUMEN — MODIFICACION DE INVENTARIO (correccion de identidad)\n\n` +
+ `Sale: ${cant} pieza(s) de "${pO.nombre}" (${colorOrigen}) en ${ubicacion}\n` +
+ `Entra: ${cant} pieza(s) de "${pD.nombre}" (${colorDestino}) en ${ubicacion}\n` +
+ `Motivo: ${motivo}\n\n` +
+ `Diferencia de costo: ${esGanancia ? 'GANANCIA' : 'PERDIDA'} de ${dinero(Math.abs(diferencia))} -- se vera reflejada en el Estado de Resultados, no solo en el stock.\n\n` +
+ `¿Continuar?`;
+ if (!confirm(msj)) return;
+
+ const resOrigen = ajustarStockVariante(productos, origenId, cant, { color: colorOrigen, ubicacion, modo: 'salida' });
+ if (!resOrigen.ok && resOrigen.motivo === 'producto_no_encontrado') return alert('Producto origen no encontrado.');
+ if (resOrigen.stockNegativoDetectado) {
+ // ajustarStockVariante ya reporto el descuadre (reportarDescuadreInventario);
+ // seguimos, pero dejando el stock en 0 en vez de negativo (mismo criterio que Ajuste).
+ }
+ const resDestino = ajustarStockVariante(productos, destinoId, cant, { color: colorDestino, ubicacion, modo: 'entrada' });
+ if (!resDestino.ok) return alert('No se pudo aplicar al producto destino: ' + resDestino.motivo);
+
+ _modifInvRecalcularCacheUbicacion(productos[idxO], ubicacion);
+ _modifInvRecalcularCacheUbicacion(productos[idxD], ubicacion);
+
+ const sesion = _invSesionActiva() || {};
+ const grupoModificacionId = `MODIF-${Date.now()}`;
+ const fechaMov = window.localISO(new Date());
+ const movs = StorageService.get('movimientosInventario', []);
+ movs.push({
+ id: Date.now(),
+ fecha: fechaMov,
+ tipo: 'Salida (Modificación de producto)',
+ productoId: pO.id,
+ productoNombre: pO.nombre,
+ cantidad: cant,
+ color: colorOrigen,
+ ubicacion: ubicacion,
+ motivo: motivo,
+ origen: 'modificacionProducto',
+ referencia: grupoModificacionId,
+ grupoModificacionId,
+ productoParejaId: pD.id,
+ productoParejaNombre: pD.nombre,
+ costoUnitario: costoO,
+ usuario: sesion.nombre || sesion.usuario || 'Admin',
+ rol: sesion.rol || ''
+ });
+ movs.push({
+ id: Date.now() + 1,
+ fecha: fechaMov,
+ tipo: 'Entrada (Modificación de producto)',
+ productoId: pD.id,
+ productoNombre: pD.nombre,
+ cantidad: cant,
+ color: colorDestino,
+ ubicacion: ubicacion,
+ motivo: motivo,
+ origen: 'modificacionProducto',
+ referencia: grupoModificacionId,
+ grupoModificacionId,
+ productoParejaId: pO.id,
+ productoParejaNombre: pO.nombre,
+ costoUnitario: costoD,
+ usuario: sesion.nombre || sesion.usuario || 'Admin',
+ rol: sesion.rol || ''
+ });
+
+ StorageService.set('productos', productos);
+ StorageService.set('movimientosInventario', movs);
+ window.productos = productos;
+ window.movimientosInventario = movs;
+
+ window.AuditService?.log?.({
+ accion: 'INVENTARIO_MODIFICACION_PRODUCTO',
+ modulo: 'Inventario',
+ entidad: `${pO.nombre} → ${pD.nombre}`,
+ entidadId: grupoModificacionId,
+ detalle: `${cant} pieza(s) en ${ubicacion}. Motivo: ${motivo}. ${esGanancia ? 'Ganancia' : 'Perdida'} para Edos. Financieros: ${dinero(Math.abs(diferencia))}`,
+ severidad: 'riesgo',
+ datos: { productoOrigenId: pO.id, productoDestinoId: pD.id, cantidad: cant, ubicacion, colorOrigen, colorDestino, motivo, costoOrigen: costoO, costoDestino: costoD, diferencia, grupoModificacionId }
+ });
+
+ alert(`✅ Modificacion aplicada. ${esGanancia ? 'Ganancia' : 'Perdida'} de ${dinero(Math.abs(diferencia))} registrada para Estados Financieros.`);
+
+ const modal = document.getElementById('modalModificacionInv');
+ modal.classList.add('oculto');
+ modal.style.display = 'none';
+
  if (typeof renderInventario === 'function') renderInventario();
  if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
  if (typeof mostrarDetalleProductoMaestro === 'function' && window._visorProductoIdActual) mostrarDetalleProductoMaestro(window._visorProductoIdActual);
