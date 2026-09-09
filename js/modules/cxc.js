@@ -754,6 +754,329 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
 }
 
 // ===================================================================
+// EXCEPCIÓN MANUAL: PROMO DE CONTADO A PESAR DE PLAZO YA VENCIDO
+// A diferencia de _cxcEvaluarPoliticaPagoAnticipado (que exige estar AUN
+// dentro del plazo pactado), esta función detecta el caso contrario: el
+// plazo ya venció, pero -- por desfases reales de captura en un negocio
+// que apenas arranca (abonos registrados días/semanas después de recibidos)
+// -- lo que el cliente YA PAGÓ alcanza (o casi alcanza) el precio de
+// contado real. En ese caso Roberto puede decidir, caso por caso, seguir
+// respetando la promo y condonar la diferencia contra el saldo nominal
+// (con interés) que marca el sistema.
+// Nunca es automática: solo calcula y expone los números; quien decide y
+// ejecuta (solo Admin, ver window._cxcAplicarPromoContadoVencida) es
+// exactamente el mismo mecanismo ya probado de condonar-deuda.js.
+// Devuelve null si no aplica (sigue en plazo, no hay cuenta, no hay saldo,
+// o el precio de contado ya no representa ningún beneficio real).
+function _cxcEvaluarPromoContadoVencida(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return null;
+    if (typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(cuenta)) return null;
+
+    const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(folio) : null;
+    const moratoriosPendientesMonto = Number(estado?.saldoMoratorios ?? (typeof _cxcTotalMoratoriosPendientes === 'function' ? _cxcTotalMoratoriosPendientes(cuenta) : 0));
+    const saldoTotalActual = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0);
+    const saldoActual = Math.max(0, saldoTotalActual - moratoriosPendientesMonto); // solo capital+interés, sin moratorios
+    if (saldoActual <= 0.01) return null;
+
+    const fechaVentaDate = _cxcFechaVentaDate(cuenta);
+    const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVentaDate) / (1000 * 60 * 60 * 24)));
+    const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    if (mesesPlanOriginal <= 0) return null; // sin plazo pactado conocido, no hay "vencimiento" que evaluar
+    const diasPlazoOriginal = mesesPlanOriginal * 30.44;
+    const aunEnPlazo = diasDesdeVenta < diasPlazoOriginal;
+    if (aunEnPlazo) return null; // sigue vigente: aplica la política normal, no esta excepción
+
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const totalContado = _cxcImporteContadoCuenta(cuenta);
+    const capitalContado = Math.max(0, totalContado - enganche);
+    const totalPagado = _cxcTotalPagadoPolitica(folio, cuenta);
+    const faltantePorContado = Math.max(0, Number((capitalContado - totalPagado).toFixed(2)));
+
+    // Solo tiene sentido ofrecerlo si de verdad hay diferencia a favor del
+    // cliente frente al saldo nominal vigente (con interés) -- si no, no hay
+    // nada que "respetar".
+    if (faltantePorContado >= saldoActual - 0.01) return null;
+
+    const montoCondonarSiSeAplica = Math.max(0, Number((saldoActual - faltantePorContado).toFixed(2)));
+    const diasVencido = Math.max(0, Math.floor(diasDesdeVenta - diasPlazoOriginal));
+
+    return {
+        folio, cuenta,
+        saldoActual, capitalContado, totalPagado,
+        faltantePorContado,          // lo que aún faltaría abonar para llegar al precio de contado
+        montoCondonarSiSeAplica,     // lo que se condonaría del saldo nominal si se respeta la promo
+        elegibleParaCondonarTotal: faltantePorContado <= 0.01, // ya pagó igual o más que el precio de contado
+        mesesPlanOriginal, diasDesdeVenta, diasVencido
+    };
+}
+window._cxcEvaluarPromoContadoVencida = _cxcEvaluarPromoContadoVencida;
+
+// ===================================================================
+// EVALUACIÓN MANUAL DE CUALQUIER CUENTA (búsqueda libre)
+// Variante permisiva de _cxcEvaluarPromoContadoVencida: NO exige que el
+// plazo ya haya vencido ni que exista beneficio -- calcula siempre los
+// mismos números para que el admin pueda revisar cualquier folio que
+// busque, aunque todavía esté en plazo o el beneficio ya no exista. Quien
+// filtra para "ya califica" o "ordenado por cercanía" son las funciones de
+// más abajo; esta es el detalle base que ambas reutilizan.
+// ===================================================================
+function _cxcEvaluarPromoContadoDetalle(folio) {
+    const cuentas = StorageService.get("cuentasPorCobrar", []);
+    const cuenta = cuentas.find(c => c.folio === folio);
+    if (!cuenta) return null;
+    if (typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(cuenta)) return null;
+
+    const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(folio) : null;
+    const moratoriosPendientesMonto = Number(estado?.saldoMoratorios ?? (typeof _cxcTotalMoratoriosPendientes === 'function' ? _cxcTotalMoratoriosPendientes(cuenta) : 0));
+    const saldoTotalActual = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0);
+    const saldoActual = Math.max(0, saldoTotalActual - moratoriosPendientesMonto);
+    if (saldoActual <= 0.01) return null;
+
+    const fechaVentaDate = _cxcFechaVentaDate(cuenta);
+    const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVentaDate) / (1000 * 60 * 60 * 24)));
+    const mesesPlanOriginal = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    if (mesesPlanOriginal <= 0) return null;
+    const diasPlazoOriginal = mesesPlanOriginal * 30.44;
+    const aunEnPlazo = diasDesdeVenta < diasPlazoOriginal;
+
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const totalContado = _cxcImporteContadoCuenta(cuenta);
+    const capitalContado = Math.max(0, totalContado - enganche);
+    if (capitalContado <= 0.01) return null;
+    const totalPagado = _cxcTotalPagadoPolitica(folio, cuenta);
+    const faltantePorContado = Math.max(0, Number((capitalContado - totalPagado).toFixed(2)));
+    const hayBeneficio = faltantePorContado < saldoActual - 0.01;
+    const montoCondonarSiSeAplica = hayBeneficio ? Math.max(0, Number((saldoActual - faltantePorContado).toFixed(2))) : 0;
+    const diasVencido = Math.max(0, Math.floor(diasDesdeVenta - diasPlazoOriginal));
+    const porcentajeCubierto = Math.max(0, Math.min(1, totalPagado / capitalContado));
+
+    return {
+        folio, cuenta,
+        saldoActual, capitalContado, totalPagado, faltantePorContado,
+        montoCondonarSiSeAplica,
+        elegibleParaCondonarTotal: faltantePorContado <= 0.01,
+        hayBeneficio, aunEnPlazo, porcentajeCubierto,
+        mesesPlanOriginal, diasDesdeVenta, diasVencido
+    };
+}
+
+// Mantiene el nombre anterior (usado desde otras partes del código) como
+// alias estricto: solo cuentas YA vencidas y con beneficio real.
+function _cxcEvaluarPromoContadoVencida(folio) {
+    const info = _cxcEvaluarPromoContadoDetalle(folio);
+    if (!info || info.aunEnPlazo || !info.hayBeneficio) return null;
+    return info;
+}
+window._cxcEvaluarPromoContadoVencida = _cxcEvaluarPromoContadoVencida;
+window._cxcEvaluarPromoContadoDetalle = _cxcEvaluarPromoContadoDetalle;
+
+// Ranking de "las que más se acercan" a la política -- TODAS las cuentas con
+// plazo ya vencido, ordenadas por % ya cubierto del precio de contado
+// (de más cerca a más lejos), tengan o no beneficio monetario ya hoy.
+function _cxcListaPromoContadoCercanas(limite = 20) {
+    const cuentas = StorageService.get("cuentasPorCobrar", [])
+        .filter(c => !(typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(c)))
+        .filter(c => String(c.estado || '').toLowerCase() !== 'saldado');
+    return cuentas
+        .map(c => _cxcEvaluarPromoContadoDetalle(c.folio))
+        .filter(info => info && !info.aunEnPlazo)
+        .sort((a, b) => b.porcentajeCubierto - a.porcentajeCubierto)
+        .slice(0, limite);
+}
+
+// 🛡️ Solo Admin -- usa el MISMO núcleo transaccional que "Condonar Deuda"
+// (condonar-deuda.js: _condonarEjecutarTransaccion), así que queda con el
+// mismo rastro de auditoría/historialCondonaciones, solo con un motivo y una
+// acción de auditoría propios para poder distinguir este caso del resto.
+window._cxcAplicarPromoContadoVencida = async function(folio) {
+    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
+        return alert("Solo un administrador puede aplicar esta excepción y condonar la diferencia.");
+    }
+    const info = _cxcEvaluarPromoContadoDetalle(folio);
+    if (!info || info.aunEnPlazo || !info.hayBeneficio) return alert("Esta cuenta no (o ya no) califica para condonar por esta excepción (sigue en plazo, cambió el saldo, o no hay beneficio real).");
+
+    const btn = document.getElementById('btnPromoContadoVencida');
+    if (btn && btn.disabled) return;
+
+    const motivoManual = (document.getElementById('motivoPromoContadoVencida')?.value || '').trim();
+    if (!motivoManual) return alert("Escribe el motivo/justificación de por qué se respeta la promo pese al atraso.");
+
+    const nombreCliente = typeof _cxcNombreClienteVigente === 'function' ? _cxcNombreClienteVigente(info.cuenta) : '';
+    if (!confirm(`⚠️ RESPETAR PROMO DE CONTADO PESE AL ATRASO\n\nFolio: ${folio}${nombreCliente ? `\nCliente: ${nombreCliente}` : ''}\nDías vencido sobre su plazo: ${info.diasVencido}\nSe condonará: ${_cxcDinero(info.montoCondonarSiSeAplica)}\nMotivo: ${motivoManual}\n\n¿Confirmas?`)) {
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Procesando…'; btn.style.opacity = '0.6'; btn.style.cursor = 'not-allowed'; }
+
+    const usuarioActual = window.usuarioActivo?.nombre || window._usuarioActual?.nombre || 'Admin';
+    const motivoCompleto = `Promo de contado retroactiva pese a plazo vencido (${info.diasVencido} días). ${motivoManual}`;
+
+    let resultadoTx;
+    try {
+        resultadoTx = await window._condonarEjecutarTransaccion(folio, info.montoCondonarSiSeAplica, motivoCompleto, false, usuarioActual);
+    } catch (e) {
+        console.error('[promo-contado-vencida] transacción falló:', e);
+        alert("No se pudo aplicar: error al escribir los cambios. Nada quedó a medias; intenta de nuevo.");
+        if (btn) { btn.disabled = false; btn.textContent = '💸 Respetar promo y condonar'; btn.style.opacity = ''; btn.style.cursor = 'pointer'; }
+        return;
+    }
+
+    if (!resultadoTx || !resultadoTx.ok) {
+        alert("No se pudo aplicar: la cuenta cambió justo antes de confirmar (otro abono, cancelación, etc.). Refresca e intenta de nuevo.");
+        if (btn) { btn.disabled = false; btn.textContent = '💸 Respetar promo y condonar'; btn.style.opacity = ''; btn.style.cursor = 'pointer'; }
+        return;
+    }
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'PROMO_CONTADO_VENCIDA_APLICADA',
+            modulo: 'CxC',
+            entidad: 'cuentaPorCobrar',
+            entidadId: folio,
+            detalle: `Se respetó la promo de contado pese a plazo vencido (${info.diasVencido} días). Condonado: ${_cxcDinero(resultadoTx.montoCondonar)}. Motivo: ${motivoManual}`,
+            monto: resultadoTx.montoCondonar,
+            severidad: 'riesgo',
+            datos: { usuario: usuarioActual, motivo: motivoManual, saldoResultante: resultadoTx.saldoTotalNuevo, saldado: resultadoTx.saldado }
+        });
+    }
+
+    alert(resultadoTx.saldado
+        ? `✅ Promo de contado respetada. La cuenta quedó SALDADA.`
+        : `✅ Promo de contado respetada.\n\nSaldo restante: ${_cxcDinero(resultadoTx.saldoTotalNuevo)}`);
+
+    if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof window._promoContadoMostrarLista === 'function') window._promoContadoMostrarLista();
+};
+
+// ===================================================================
+// CONSULTA EN COBRANZA: "las que más se acercan" a la política + búsqueda
+// manual de cualquier cuenta. Reemplaza el botón por-cuenta (que obligaba a
+// entrar primero al abono de cada folio) por un único lugar centralizado.
+// Solo Admin, mismo candado que Condonar Deuda.
+// ===================================================================
+window.abrirModalPromoContadoVencida = function() {
+    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
+        return alert("⛔ Solo Administradores pueden usar esta consulta.");
+    }
+    document.querySelector('[data-modal="promo-contado-vencida"]')?.remove();
+    const modalHTML = `
+    <div data-modal="promo-contado-vencida" style="position:fixed; inset:0; background:rgba(15,23,42,0.9); z-index:99999; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px; backdrop-filter: blur(5px);">
+        <div style="background:white; padding:30px; border-radius:12px; width:100%; max-width:580px; margin-top:40px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); max-height:92vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #9333ea; padding-bottom:15px; margin-bottom:20px;">
+                <div>
+                    <h2 style="margin:0; color:#7e22ce; font-size:20px;">🔎 Promo de Contado Pese a Atraso</h2>
+                    <p style="margin:0; color:#64748b; font-size:12.5px;">Plazo ya vencido -- revisa las cuentas más cercanas a la política o busca cualquier folio.</p>
+                </div>
+                <button onclick="document.querySelector('[data-modal=&quot;promo-contado-vencida&quot;]')?.remove()" style="background:#f1f5f9; border:none; padding:8px 15px; border-radius:6px; cursor:pointer; font-weight:bold; color:#475569;">✕ Cerrar</button>
+            </div>
+            <div id="promoContadoCuerpo"></div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    window._promoContadoMostrarLista();
+};
+
+window._promoContadoMostrarLista = function() {
+    const cuerpo = document.getElementById("promoContadoCuerpo");
+    if (!cuerpo) return;
+    cuerpo.innerHTML = `
+        <div style="margin-bottom:14px; display:flex; gap:8px;">
+            <input type="text" id="promoContadoBuscador" placeholder="Buscar cualquier cuenta por cliente o folio..." onkeyup="if(event.key==='Enter') _promoContadoBuscar();" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:6px; box-sizing:border-box;">
+            <button onclick="_promoContadoBuscar()" style="padding:10px 16px; background:#7e22ce; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">Buscar</button>
+        </div>
+        <div style="font-size:11px; color:#94a3b8; margin-bottom:10px;">Sin buscar nada, se muestran abajo las cuentas más cercanas a calificar (ordenadas por % ya cubierto del precio de contado).</div>
+        <div id="promoContadoListaResultados"></div>`;
+    window._promoContadoActualizarLista(_cxcListaPromoContadoCercanas(), 'cercania');
+};
+
+window._promoContadoBuscar = function() {
+    const filtro = (document.getElementById('promoContadoBuscador')?.value || '').trim().toLowerCase();
+    if (!filtro) return window._promoContadoMostrarLista();
+    const cuentas = StorageService.get("cuentasPorCobrar", [])
+        .filter(c => !(typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(c)))
+        .filter(c => String(c.estado || '').toLowerCase() !== 'saldado')
+        .filter(c => `${_cxcNombreClienteVigente(c)} ${c.folio || ''}`.toLowerCase().includes(filtro));
+    const resultados = cuentas.map(c => _cxcEvaluarPromoContadoDetalle(c.folio)).filter(Boolean);
+    window._promoContadoActualizarLista(resultados, 'busqueda');
+};
+
+window._promoContadoActualizarLista = function(resultados, modo) {
+    const lista = document.getElementById("promoContadoListaResultados");
+    if (!lista) return;
+    if (!resultados.length) {
+        lista.innerHTML = `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:18px; border-radius:8px; text-align:center; color:#64748b; font-size:13px;">${modo === 'busqueda' ? 'Sin resultados para esa búsqueda.' : 'No hay cuentas con plazo vencido ahora mismo.'}</div>`;
+        return;
+    }
+    lista.innerHTML = resultados.map(info => {
+        const badge = info.aunEnPlazo
+            ? `<span style="font-size:11px; color:#0f766e;">Aún en plazo</span>`
+            : info.hayBeneficio
+                ? `<strong style="color:#9333ea;">Condonaría ${_cxcDinero(info.montoCondonarSiSeAplica)}</strong>`
+                : `<span style="font-size:11px; color:#94a3b8;">Sin beneficio aún</span>`;
+        return `
+        <div onclick="_promoContadoAbrirDetalle('${_cxcEscHTML(info.folio)}')" style="cursor:pointer; padding:12px; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px;" onmouseover="this.style.background='#faf5ff'" onmouseout="this.style.background='white'">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <strong>${_cxcEscHTML(_cxcNombreClienteVigente(info.cuenta))}</strong><br>
+                    <span style="font-size:12px; color:#4b5563;">${window.resumenProductosVenta ? window.resumenProductosVenta(info.cuenta.articulos) : ''}</span><br>
+                    <small style="color:#94a3b8;">${_cxcEscHTML(info.folio)} -- ${Math.round(info.porcentajeCubierto * 100)}% del precio de contado cubierto${!info.aunEnPlazo ? `, vencido hace ${info.diasVencido} día(s)` : ''}</small>
+                </div>
+                <div style="text-align:right;">${badge}</div>
+            </div>
+        </div>`;
+    }).join('');
+};
+
+window._promoContadoAbrirDetalle = function(folio) {
+    const cuerpo = document.getElementById("promoContadoCuerpo");
+    if (!cuerpo) return;
+    const info = _cxcEvaluarPromoContadoDetalle(folio);
+    if (!info) return alert("No se encontró la cuenta o ya no tiene saldo pendiente.");
+    const esAdminModal = typeof _esAdmin === 'function' && _esAdmin();
+
+    const estadoTxt = info.aunEnPlazo
+        ? `<span style="color:#0f766e; font-weight:bold;">Aún dentro de su plazo pactado -- esta excepción es solo para cuentas ya vencidas.</span>`
+        : info.hayBeneficio
+            ? `Su plazo (${info.mesesPlanOriginal} mes${info.mesesPlanOriginal === 1 ? '' : 'es'}) venció hace <b>${info.diasVencido} día(s)</b>.`
+            : `Su plazo (${info.mesesPlanOriginal} mes${info.mesesPlanOriginal === 1 ? '' : 'es'}) venció hace <b>${info.diasVencido} día(s)</b>, pero lo pagado aún no da beneficio frente al saldo nominal.`;
+
+    cuerpo.innerHTML = `
+        <button onclick="window._promoContadoMostrarLista()" style="background:none; border:none; color:#7e22ce; font-weight:bold; cursor:pointer; padding:0; margin-bottom:14px; font-size:13px;">← Volver a la lista</button>
+
+        <div style="font-size:13px; color:#475569; margin-bottom:14px; line-height:1.6;">
+            Cliente: <strong>${_cxcEscHTML(_cxcNombreClienteVigente(info.cuenta))}</strong><br>
+            Producto(s): ${window.resumenProductosVenta ? window.resumenProductosVenta(info.cuenta.articulos) : ''}<br>
+            <span style="color:#94a3b8;">Folio: ${_cxcEscHTML(folio)}</span>
+        </div>
+
+        <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:14px; font-size:13px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span style="color:#64748b;">Precio de contado (sin interés):</span><strong>${_cxcDinero(info.capitalContado)}</strong></div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span style="color:#64748b;">Ya pagado:</span><strong>${_cxcDinero(info.totalPagado)}</strong></div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span style="color:#64748b;">Saldo nominal vigente (con interés):</span><strong>${_cxcDinero(info.saldoActual)}</strong></div>
+            <div style="display:flex; justify-content:space-between;"><span style="color:#64748b;">% del precio de contado cubierto:</span><strong>${Math.round(info.porcentajeCubierto * 100)}%</strong></div>
+        </div>
+
+        <div style="font-size:13px; color:#374151; margin-bottom:14px; line-height:1.5;">${estadoTxt}</div>
+
+        ${(!info.aunEnPlazo && info.hayBeneficio) ? (esAdminModal ? `
+        <div style="background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px;padding:12px 15px;">
+            <div style="font-size:13px;color:#581c87;margin-bottom:8px;">Si se respeta la promo, se condonarían <b>${_cxcDinero(info.montoCondonarSiSeAplica)}</b> del saldo nominal.</div>
+            <textarea id="motivoPromoContadoVencida" placeholder="Motivo/justificación (obligatorio) -- ej. desfase de captura, abono recibido antes pero registrado tarde..." style="width:100%; padding:8px; border-radius:6px; border:1px solid #d8b4fe; box-sizing:border-box; resize:vertical; min-height:50px; font-size:12.5px;"></textarea>
+            <button id="btnPromoContadoVencida" type="button" onclick="_cxcAplicarPromoContadoVencida('${_cxcEscHTML(folio)}')" style="margin-top:8px; width:100%; background:#9333ea; color:white; border:none; padding:10px; border-radius:8px; font-size:13px; font-weight:bold; cursor:pointer;">
+                💸 Respetar promo y condonar ${_cxcDinero(info.montoCondonarSiSeAplica)}
+            </button>
+        </div>` : `<div style="font-size:12px;color:#7e22ce;">Solo un administrador puede aplicar esta excepción.</div>`) : ''}
+
+        <div style="margin-top:14px;">
+            <button onclick="document.querySelector('[data-modal=&quot;promo-contado-vencida&quot;]')?.remove(); abrirModalAbonoAvanzado('${_cxcEscHTML(folio)}')" style="width:100%; padding:10px; background:#0f766e; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">
+                Ir a registrar un abono en esta cuenta
+            </button>
+        </div>`;
+};
+
+// ===================================================================
 // SALTO DE PLAZO POR ANTIGUEDAD (pieza opuesta a la politica de pago
 // anticipado): un cliente que compro a "mesesPlanOriginal" meses y ya paso
 // esa fecha limite sin liquidar debe recotizarse al SIGUIENTE escalon de la
@@ -1306,9 +1629,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
         const textoMoratorio = estadoCta.saldoMoratorios > 0.01
             ? `<br><small style="color:#7f1d1d; font-weight:800;">Moratorios pendientes: ${_cxcDinero(estadoCta.saldoMoratorios)}</small>`
             : (moratorio?.aplica ? `<br><small style="color:#b45309; font-weight:800;">Moratorio sugerido: ${_cxcDinero(moratorio.montoSugerido)}</small>` : '');
-        const accionesMoratorio = moratorio?.aplica ? `
-                    <button onclick="abrirModalMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#7f1d1d; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Aplicar moratorio manual">Moratorio</button>
-                    <button onclick="exentarMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Exentar moratorio sugerido">Exentar</button>` : '';
 
         htmlTabla += `<tr>
             <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong><br><small style="color:#94a3b8;">${c.folio}</small></td>
@@ -1321,9 +1641,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
             <td>
                 <div style="display:flex; gap:5px; flex-wrap:wrap;">
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
-                    ${accionesMoratorio}
-                    <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
-                    <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
                     <button onclick="CxcNotas.abrirModal('${_cxcEscHTML(c.folio)}', '${String(nombreCliente).replace(/'/g, "\\'")}')" style="padding:6px 9px; background:#eab308; color:#422006; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Observación y notas de cobranza">🗒️ Notas</button>
                 </div>
             </td>
@@ -1367,18 +1684,21 @@ function renderAbonosDirectos(filtroCliente = "") {
                         const avisoMoratorio = estado.saldoMoratorios > 0.01
                             ? `<br><small style="display:inline-block; margin-top:4px; color:#7f1d1d; font-weight:800;">Moratorios pendientes: ${_cxcDinero(estado.saldoMoratorios)}</small>`
                             : (moratorio?.aplica ? `<br><small style="display:inline-block; margin-top:4px; color:#b45309; font-weight:800;">Moratorio sugerido: ${_cxcDinero(moratorio.montoSugerido)}</small>` : '');
+                        const avisoPromesa = estado.promesaVigente ? `<br><small style="display:inline-block; margin-top:4px; color:#d97706; font-weight:800;">📝 Promesa: ${_cxcFechaVista(cuenta.promesaPago.fecha)}</small>` : '';
                         const accionesMoratorio = moratorio?.aplica ? `
                                     <button onclick="abrirModalMoratorio('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#7f1d1d; color:white; font-weight:bold; cursor:pointer;">Moratorio</button>
                                     <button onclick="exentarMoratorio('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#64748b; color:white; font-weight:bold; cursor:pointer;">Exentar</button>` : '';
                         return `
                         <tr>
                             <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
-                            <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}${avisoMoratorio}</td>
+                            <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}${avisoMoratorio}${avisoPromesa}</td>
                             <td>${estado.pagaresPendientes.length} pendiente(s)</td>
                             <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2'}; color:${estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b'}; font-weight:bold; font-size:12px;">${_cxcEscHTML(estado.estadoGeneral)}</span></td>
                             <td style="text-align:right;">
                                 <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
                                     ${accionesMoratorio}
+                                    <button onclick="abrirModalPromesaPago('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#f59e0b; color:white; font-weight:bold; cursor:pointer;" title="Registrar promesa de pago">📝 Promesa</button>
+                                    <button onclick="enviarRecordatorioWhatsApp('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#25D366; color:white; font-weight:bold; cursor:pointer;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
                                     <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: (typeof _esAdmin === 'function' && _esAdmin()) ? 'directo' : 'pendiente' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">${(typeof _esAdmin === 'function' && _esAdmin()) ? 'Aplicar' : 'Registrar'}</button>
                                 </div>
                             </td>

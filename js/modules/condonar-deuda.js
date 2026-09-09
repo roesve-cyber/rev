@@ -159,6 +159,115 @@ window._condonarAbrirFormulario = function (folio) {
         </button>`;
 };
 
+// 🧩 NÚCLEO TRANSACCIONAL REUTILIZABLE (extraído de confirmarCondonarDeuda,
+// misma lógica exacta) -- lee pagarés/cuenta FRESCOS y aplica la
+// condonación de forma atómica. NO valida admin, NO hace confirm(), NO
+// muestra alerts ni loguea auditoría -- eso es responsabilidad de cada
+// llamador (confirmarCondonarDeuda, y el atajo de promo de contado vencida
+// en cxc.js), para que cada uno pueda dar su propio mensaje/accion de
+// auditoría sin duplicar la parte delicada (lecturas frescas + escritura
+// atómica de pagarés).
+// Devuelve resultadoTx ({ok:true,...} o null si la cuenta ya no calificaba)
+// o lanza si falla la escritura -- igual que antes.
+async function _condonarEjecutarTransaccion(folio, montoInput, motivo, incluirMoratorios, usuarioActual) {
+    const idsPagaresCandidatos = StorageService.get("pagaresSistema", [])
+        .filter(p => p.folio === folio)
+        .map(p => p.id);
+
+    const fechaObj = new Date();
+    const fechaIso = window.localISO ? window.localISO(fechaObj) : fechaObj.toISOString();
+    const fechaStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaObj) : fechaObj.toLocaleDateString('es-MX');
+
+    const lecturas = [
+        { tabla: 'cuentasPorCobrar', clave: folio },
+        ...idsPagaresCandidatos.map(id => ({ tabla: 'pagaresSistema', clave: id }))
+    ];
+
+    return StorageService.transaccionRegistros(lecturas, (frescos) => {
+        const cuentaFresca = frescos[`cuentasPorCobrar:${folio}`];
+        if (!cuentaFresca) return null;
+        if (typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(cuentaFresca)) return null;
+
+        const pagaresFrescos = idsPagaresCandidatos
+            .map(id => frescos[`pagaresSistema:${id}`])
+            .filter(p => p && p.folio === folio);
+
+        const pendientesFrescos = pagaresFrescos.filter(p => p.estado === "Pendiente" || p.estado === "Parcial");
+        const saldoFresco = Number(pendientesFrescos.reduce((s, p) => s + Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)), 0).toFixed(2));
+        if (saldoFresco <= 0.01) return null;
+
+        const montoCondonar = Math.min(montoInput, saldoFresco);
+
+        // Ordena de más reciente vencimiento a más próximo (perdona la cola primero)
+        const ordenDesc = [...pendientesFrescos].sort((a, b) => Number(b.fechaVencimiento || 0) - Number(a.fechaVencimiento || 0));
+        let restante = montoCondonar;
+        const pagaresEscritura = [];
+        for (const p of ordenDesc) {
+            if (restante <= 0.01) break;
+            const pendienteP = Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0));
+            if (pendienteP <= restante + 0.01) {
+                // Se condona completo
+                restante = Number((restante - pendienteP).toFixed(2));
+                pagaresEscritura.push({
+                    tabla: 'pagaresSistema', clave: p.id,
+                    data: { ...p, estado: "Cancelado", nota: `Condonado ${_cxcDinero(pendienteP)} (${fechaStr}). Motivo: ${motivo}` }
+                });
+            } else {
+                // Se recorta el monto de este pagaré (queda con lo no condonado)
+                const nuevoMonto = Number((Number(p.monto || 0) - restante).toFixed(2));
+                restante = 0;
+                pagaresEscritura.push({
+                    tabla: 'pagaresSistema', clave: p.id,
+                    data: { ...p, monto: nuevoMonto, nota: `${p.nota ? p.nota + ' | ' : ''}Recortado por condonación parcial de ${_cxcDinero(montoCondonar)} (${fechaStr})` }
+                });
+            }
+        }
+
+        let totalMoratorios = typeof _cxcTotalMoratoriosPendientes === 'function' ? _cxcTotalMoratoriosPendientes(cuentaFresca) : 0;
+        let cargosMoratoriosAct = cuentaFresca.cargosMoratorios || [];
+        let moratoriosCondonados = 0;
+        if (incluirMoratorios && totalMoratorios > 0.01) {
+            cargosMoratoriosAct = cargosMoratoriosAct.map(m => {
+                if (m.cancelado || m.anulado || String(m.tipo || 'cargo') === 'exencion') return m;
+                const pendiente = Math.max(0, Number(m.monto || 0) - Number(m.montoAbonado || 0));
+                if (pendiente <= 0.01) return m;
+                moratoriosCondonados = Number((moratoriosCondonados + pendiente).toFixed(2));
+                return { ...m, montoAbonado: Number(m.monto || 0), estado: "Pagado", nota: `${m.nota ? m.nota + ' | ' : ''}Condonado (${fechaStr})` };
+            });
+            totalMoratorios = 0;
+        }
+
+        const saldoPagaresRestante = Number((saldoFresco - montoCondonar).toFixed(2));
+        const saldoTotalNuevo = Number((saldoPagaresRestante + totalMoratorios).toFixed(2));
+
+        const cuentaAct = { ...cuentaFresca };
+        cuentaAct.cargosMoratorios = cargosMoratoriosAct;
+        cuentaAct.saldoActual = saldoTotalNuevo;
+        if (saldoTotalNuevo <= 0.01) {
+            cuentaAct.estado = "Saldado";
+            cuentaAct.condonado = true;
+            cuentaAct.condonadoFecha = fechaIso;
+            cuentaAct.condonadoMotivo = motivo;
+            cuentaAct.condonadoPor = usuarioActual;
+        }
+        cuentaAct.historialCondonaciones = [...(cuentaFresca.historialCondonaciones || []), {
+            fecha: fechaIso,
+            usuario: usuarioActual,
+            montoCondonadoPagares: montoCondonar,
+            moratoriosCondonados,
+            motivo,
+            saldoAntes: saldoFresco + (typeof _cxcTotalMoratoriosPendientes === 'function' ? _cxcTotalMoratoriosPendientes(cuentaFresca) : 0),
+            saldoDespues: saldoTotalNuevo
+        }];
+
+        return {
+            escrituras: [{ tabla: 'cuentasPorCobrar', clave: folio, data: cuentaAct }, ...pagaresEscritura],
+            resultado: { ok: true, montoCondonar, moratoriosCondonados, saldoTotalNuevo, saldado: saldoTotalNuevo <= 0.01 }
+        };
+    });
+}
+window._condonarEjecutarTransaccion = _condonarEjecutarTransaccion;
+
 window.confirmarCondonarDeuda = async function (folio) {
     if (!(typeof _esAdmin === 'function' && _esAdmin())) {
         return alert("Solo un administrador puede condonar deuda.");
@@ -181,19 +290,7 @@ window.confirmarCondonarDeuda = async function (folio) {
     const btn = document.querySelector('#condonarCuerpo button[onclick^="confirmarCondonarDeuda"]');
     if (btn) { btn.disabled = true; btn.textContent = 'Procesando…'; btn.style.opacity = '0.6'; btn.style.cursor = 'not-allowed'; }
 
-    const idsPagaresCandidatos = StorageService.get("pagaresSistema", [])
-        .filter(p => p.folio === folio)
-        .map(p => p.id);
-
-    const fechaObj = new Date();
-    const fechaIso = window.localISO ? window.localISO(fechaObj) : fechaObj.toISOString();
-    const fechaStr = window.formatearFechaCortaMX ? window.formatearFechaCortaMX(fechaObj) : fechaObj.toLocaleDateString('es-MX');
     const usuarioActual = window.usuarioActivo?.nombre || window._usuarioActual?.nombre || 'Admin';
-
-    const lecturas = [
-        { tabla: 'cuentasPorCobrar', clave: folio },
-        ...idsPagaresCandidatos.map(id => ({ tabla: 'pagaresSistema', clave: id }))
-    ];
 
     const reactivarBoton = () => {
         if (btn) { btn.disabled = false; btn.textContent = '💾 Confirmar Condonación'; btn.style.opacity = ''; btn.style.cursor = 'pointer'; }
@@ -201,88 +298,7 @@ window.confirmarCondonarDeuda = async function (folio) {
 
     let resultadoTx;
     try {
-        resultadoTx = await StorageService.transaccionRegistros(lecturas, (frescos) => {
-            const cuentaFresca = frescos[`cuentasPorCobrar:${folio}`];
-            if (!cuentaFresca) return null;
-            if (typeof _cxcCuentaCancelada === 'function' && _cxcCuentaCancelada(cuentaFresca)) return null;
-
-            const pagaresFrescos = idsPagaresCandidatos
-                .map(id => frescos[`pagaresSistema:${id}`])
-                .filter(p => p && p.folio === folio);
-
-            const pendientesFrescos = pagaresFrescos.filter(p => p.estado === "Pendiente" || p.estado === "Parcial");
-            const saldoFresco = Number(pendientesFrescos.reduce((s, p) => s + Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0)), 0).toFixed(2));
-            if (saldoFresco <= 0.01) return null;
-
-            const montoCondonar = Math.min(montoInput, saldoFresco);
-
-            // Ordena de más reciente vencimiento a más próximo (perdona la cola primero)
-            const ordenDesc = [...pendientesFrescos].sort((a, b) => Number(b.fechaVencimiento || 0) - Number(a.fechaVencimiento || 0));
-            let restante = montoCondonar;
-            const pagaresEscritura = [];
-            for (const p of ordenDesc) {
-                if (restante <= 0.01) break;
-                const pendienteP = Math.max(0, Number(p.monto || 0) - Number(p.montoAbonado || 0));
-                if (pendienteP <= restante + 0.01) {
-                    // Se condona completo
-                    restante = Number((restante - pendienteP).toFixed(2));
-                    pagaresEscritura.push({
-                        tabla: 'pagaresSistema', clave: p.id,
-                        data: { ...p, estado: "Cancelado", nota: `Condonado ${_cxcDinero(pendienteP)} (${fechaStr}). Motivo: ${motivo}` }
-                    });
-                } else {
-                    // Se recorta el monto de este pagaré (queda con lo no condonado)
-                    const nuevoMonto = Number((Number(p.monto || 0) - restante).toFixed(2));
-                    restante = 0;
-                    pagaresEscritura.push({
-                        tabla: 'pagaresSistema', clave: p.id,
-                        data: { ...p, monto: nuevoMonto, nota: `${p.nota ? p.nota + ' | ' : ''}Recortado por condonación parcial de ${_cxcDinero(montoCondonar)} (${fechaStr})` }
-                    });
-                }
-            }
-
-            let totalMoratorios = typeof _cxcTotalMoratoriosPendientes === 'function' ? _cxcTotalMoratoriosPendientes(cuentaFresca) : 0;
-            let cargosMoratoriosAct = cuentaFresca.cargosMoratorios || [];
-            let moratoriosCondonados = 0;
-            if (incluirMoratorios && totalMoratorios > 0.01) {
-                cargosMoratoriosAct = cargosMoratoriosAct.map(m => {
-                    if (m.cancelado || m.anulado || String(m.tipo || 'cargo') === 'exencion') return m;
-                    const pendiente = Math.max(0, Number(m.monto || 0) - Number(m.montoAbonado || 0));
-                    if (pendiente <= 0.01) return m;
-                    moratoriosCondonados = Number((moratoriosCondonados + pendiente).toFixed(2));
-                    return { ...m, montoAbonado: Number(m.monto || 0), estado: "Pagado", nota: `${m.nota ? m.nota + ' | ' : ''}Condonado (${fechaStr})` };
-                });
-                totalMoratorios = 0;
-            }
-
-            const saldoPagaresRestante = Number((saldoFresco - montoCondonar).toFixed(2));
-            const saldoTotalNuevo = Number((saldoPagaresRestante + totalMoratorios).toFixed(2));
-
-            const cuentaAct = { ...cuentaFresca };
-            cuentaAct.cargosMoratorios = cargosMoratoriosAct;
-            cuentaAct.saldoActual = saldoTotalNuevo;
-            if (saldoTotalNuevo <= 0.01) {
-                cuentaAct.estado = "Saldado";
-                cuentaAct.condonado = true;
-                cuentaAct.condonadoFecha = fechaIso;
-                cuentaAct.condonadoMotivo = motivo;
-                cuentaAct.condonadoPor = usuarioActual;
-            }
-            cuentaAct.historialCondonaciones = [...(cuentaFresca.historialCondonaciones || []), {
-                fecha: fechaIso,
-                usuario: usuarioActual,
-                montoCondonadoPagares: montoCondonar,
-                moratoriosCondonados,
-                motivo,
-                saldoAntes: saldoFresco + (typeof _cxcTotalMoratoriosPendientes === 'function' ? _cxcTotalMoratoriosPendientes(cuentaFresca) : 0),
-                saldoDespues: saldoTotalNuevo
-            }];
-
-            return {
-                escrituras: [{ tabla: 'cuentasPorCobrar', clave: folio, data: cuentaAct }, ...pagaresEscritura],
-                resultado: { ok: true, montoCondonar, moratoriosCondonados, saldoTotalNuevo, saldado: saldoTotalNuevo <= 0.01 }
-            };
-        });
+        resultadoTx = await _condonarEjecutarTransaccion(folio, montoInput, motivo, incluirMoratorios, usuarioActual);
     } catch (e) {
         console.error('[condonar-deuda] transacción falló:', e);
         alert("No se pudo condonar: error al escribir los cambios. Nada quedó a medias; intenta de nuevo.");
