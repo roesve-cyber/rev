@@ -1222,6 +1222,57 @@
     </div>
 </div>
 
+<div id="modalModificacionInv" class="modal oculto" style="display:none;">
+    <div class="modal-content" style="max-width:520px;">
+        <h2 style="color:#7c3aed; margin-top:0;">🔁 Modificación de Inventario</h2>
+        <p style="font-size:12px; color:#64748b; margin-bottom:20px;">Úsalo cuando una pieza se capturó o vendió bajo el producto equivocado del catálogo (ej. diste de alta un Whirlpool y en realidad es Mabe). No es alta, no es baja, no es transferencia: la pieza física no cambia ni de cantidad ni de lugar, solo de identidad — y la diferencia de costo se registra como ganancia o pérdida en tus Estados Financieros.</p>
+
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <div class="campo" style="background:#fef2f2; padding:10px; border-radius:8px; border:1px solid #fecaca;">
+                <label style="color:#991b1b;">PRODUCTO ORIGEN (el mal capturado)</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="hidden" id="modifOrigenId">
+                    <div id="modifOrigenDisplay" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:6px; background:white; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Sin seleccionar</div>
+                    <button onclick="abrirSelectorProducto({titulo:'Seleccionar Producto Origen (mal capturado)', soloConStock:true, onSeleccion: p => window._modifInvSeleccionarOrigen(p)})" style="padding:10px; background:#991b1b; color:white; border:none; border-radius:6px; cursor:pointer;">🔍</button>
+                </div>
+                <select id="modifOrigenVariante" onchange="window._modifInvOnVarianteChange()" style="width:100%; margin-top:8px;">
+                    <option value="">Selecciona primero el producto origen</option>
+                </select>
+            </div>
+
+            <div class="campo" style="background:#f0fdf4; padding:10px; border-radius:8px; border:1px solid #bbf7d0;">
+                <label style="color:#166534;">PRODUCTO DESTINO (el correcto)</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="hidden" id="modifDestinoId">
+                    <div id="modifDestinoDisplay" style="flex:1; padding:10px; border:1px solid #d1d5db; border-radius:6px; background:white; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Sin seleccionar</div>
+                    <button onclick="abrirSelectorProducto({titulo:'Seleccionar Producto Destino (correcto)', onSeleccion: p => { document.getElementById('modifDestinoId').value = p.id; const d = document.getElementById('modifDestinoDisplay'); d.innerText = p.nombre; d.style.color = '#166534'; d.style.fontWeight = 'bold'; window._modifActualizarResumenCosto(); }})" style="padding:10px; background:#166534; color:white; border:none; border-radius:6px; cursor:pointer;">🔍</button>
+                </div>
+                <div style="margin-top:8px;">
+                    <label style="font-size:11px;">COLOR/VARIANTE DESTINO</label>
+                    <input type="text" id="modifDestinoColor" placeholder="General" oninput="window._modifActualizarResumenCosto()" style="width:100%;">
+                </div>
+            </div>
+
+            <div class="campo">
+                <label>CANTIDAD</label>
+                <input type="number" id="modifCantidad" min="1" placeholder="Ej. 1" oninput="window._modifActualizarResumenCosto()" style="width:100%; text-align:center;">
+            </div>
+
+            <div class="campo">
+                <label>MOTIVO / JUSTIFICACIÓN</label>
+                <input type="text" id="modifMotivo" placeholder="Ej. Se etiquetó como Whirlpool pero el modelo es Mabe..." style="width:100%;">
+            </div>
+
+            <div id="modifResumenCosto"></div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:25px;">
+            <button onclick="ejecutarModificacionInv()" style="flex:1; padding:12px; background:#7c3aed; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">💾 Aplicar Modificación</button>
+            <button onclick="document.getElementById('modalModificacionInv').style.display='none'" style="flex:1; padding:12px; background:#e2e8f0; color:#475569; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 <script src="js/services/storage2.js"></script>
 <script src="js/services/recovery.js"></script>
@@ -1237,7 +1288,7 @@
 <script src="js/core/data.js?v=3"></script>
 
 <script src="js/modules/auth.js?v=2.9"></script>
-<script src="js/modules/inventario.js?v=24"></script>
+<script src="js/modules/inventario.js?v=25"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/ventas.js?v=4.1"></script>
@@ -1257,7 +1308,7 @@
 <script src="js/modules/vendedores.js"></script>
 <script src="js/modules/corte-caja.js?v=7"></script>
 <script src="js/modules/gastos.js?v=3"></script>
-<script src="js/modules/finanzas-estados.js?v=7"></script>
+<script src="js/modules/finanzas-estados.js?v=8"></script>
 <script src="js/modules/condonar-deuda.js?v=1"></script>
 <script src="js/modules/reestructura-plazo.js?v=1"></script>
 <script src="js/modules/prestamos.js"></script>
