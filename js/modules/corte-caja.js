@@ -539,11 +539,104 @@
             );
             return;
         }
+        // 🛡️ NUEVO: antes de resetear a "todo marcado" (el default de un corte
+        // nuevo), se busca si hay un borrador guardado para esta MISMA cuenta y
+        // periodo -- esto es lo que faltaba: window._corteCajaSeleccion vive
+        // solo en RAM, así que salir de la app (cerrar pestaña, que el celular
+        // mate la pestaña en segundo plano, recargar) la borraba sin avisar,
+        // aunque el usuario llevara rato desmarcando movimientos y escribiendo
+        // observaciones. El borrador SÍ se guarda en StorageService (local +
+        // nube), así que sobrevive a salir y volver a entrar.
+        const borrador = _corteCajaLeerBorrador(key);
+        if (borrador) {
+            const disponibles = new Set(resumen.movimientos.map(m => m._corteId));
+            const excluidos = new Set(borrador.idsExcluidos || []);
+            window._corteCajaSeleccion = {
+                key,
+                ids: new Set(Array.from(disponibles).filter(id => !excluidos.has(id)))
+            };
+            window._corteCajaBorradorRestaurado = borrador;
+            return;
+        }
+        window._corteCajaBorradorRestaurado = null;
         window._corteCajaSeleccion = {
             key,
             ids: new Set(resumen.movimientos.map(m => m._corteId))
         };
     }
+
+    // --- BORRADOR DE CORTE EN PROGRESO (selección de movimientos + observaciones) ---
+    // Se guarda en StorageService bajo 'corteCajaBorradores', un objeto plano
+    // {clave -> {idsExcluidos, observaciones, guardadoEn}} -- NO usa la tabla
+    // 'cortesCaja' (esa es solo para cortes ya cerrados). La clave incluye al
+    // usuario para que dos personas no se pisen el borrador entre sí.
+    function _corteCajaClaveActual() {
+        const resumen = window._corteCajaResumen;
+        if (!resumen) return null;
+        return `${resumen.filtros.fechaInicio}|${resumen.filtros.fechaFin}|${resumen.cuenta.id}`;
+    }
+
+    function _corteCajaLeerBorradores() {
+        const raw = StorageService.get('corteCajaBorradores', {});
+        return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    }
+
+    function _corteCajaLeerBorrador(key) {
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        const usuario = sesion?.usuario || sesion?.nombre || 'Usuario';
+        const claveCompleta = `${usuario}::${key}`;
+        return _corteCajaLeerBorradores()[claveCompleta] || null;
+    }
+
+    let _corteCajaBorradorTimer = null;
+    function _corteCajaGuardarBorrador() {
+        if (_corteCajaBorradorTimer) clearTimeout(_corteCajaBorradorTimer);
+        _corteCajaBorradorTimer = setTimeout(() => {
+            const key = _corteCajaClaveActual();
+            if (!key || !window._corteCajaResumen || !window._corteCajaSeleccion) return;
+            const todosLosIds = new Set(window._corteCajaResumen.movimientos.map(m => m._corteId));
+            const marcados = window._corteCajaSeleccion.ids || new Set();
+            const idsExcluidos = Array.from(todosLosIds).filter(id => !marcados.has(id));
+            const observaciones = document.getElementById('corteObservaciones')?.value || '';
+
+            // Si no hay nada que valga la pena recordar (todo marcado y sin
+            // observaciones) no se guarda un borrador vacío.
+            if (idsExcluidos.length === 0 && !observaciones.trim()) {
+                _corteCajaBorrarBorrador(key);
+                return;
+            }
+
+            const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+            const usuario = sesion?.usuario || sesion?.nombre || 'Usuario';
+            const borradores = _corteCajaLeerBorradores();
+            borradores[`${usuario}::${key}`] = {
+                idsExcluidos,
+                observaciones,
+                guardadoEn: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+            };
+            StorageService.set('corteCajaBorradores', borradores);
+        }, 600);
+    }
+
+    function _corteCajaBorrarBorrador(key) {
+        const sesion = (() => { try { return JSON.parse(sessionStorage.getItem('sesionActiva') || 'null'); } catch { return null; } })();
+        const usuario = sesion?.usuario || sesion?.nombre || 'Usuario';
+        const borradores = _corteCajaLeerBorradores();
+        const clave = `${usuario}::${key}`;
+        if (borradores[clave]) {
+            delete borradores[clave];
+            StorageService.set('corteCajaBorradores', borradores);
+        }
+    }
+    window._corteCajaGuardarBorrador = _corteCajaGuardarBorrador;
+
+    window._corteCajaDescartarBorrador = function() {
+        const key = _corteCajaClaveActual();
+        if (key) _corteCajaBorrarBorrador(key);
+        window._corteCajaBorradorRestaurado = null;
+        window._corteCajaSeleccion = null; // fuerza el reseteo a "todo marcado" en el próximo render
+        renderCorteCaja();
+    };
 
     function movimientosSeleccionados(resumen = window._corteCajaResumen) {
         if (!resumen) return [];
@@ -680,7 +773,7 @@
         return `
             <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,0.05);margin-top:16px;">
                 <label style="font-size:11px;font-weight:800;color:#64748b;">OBSERVACIONES DEL CORTE</label>
-                <textarea id="corteObservaciones" placeholder="Ej. movimientos revisados, efectivo separado, pendiente por aclarar..." style="width:100%;min-height:72px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;box-sizing:border-box;margin-top:6px;"></textarea>
+                <textarea id="corteObservaciones" oninput="window._corteCajaGuardarBorrador()" placeholder="Ej. movimientos revisados, efectivo separado, pendiente por aclarar..." style="width:100%;min-height:72px;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;box-sizing:border-box;margin-top:6px;"></textarea>
             </div>`;
     }
 
@@ -810,6 +903,15 @@
                 </ul>
             </div>` : '';
 
+        // 🛡️ NUEVO: si resetSeleccionCorte() encontró un borrador guardado para
+        // esta cuenta/periodo (ver arriba), se avisa -- para que no parezca que
+        // "adivinó" la selección sin que el usuario sepa que viene de antes.
+        const borradorHTML = window._corteCajaBorradorRestaurado ? `
+            <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:16px;color:#713f12;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span>📝 Recuperamos tu conteo sin guardar (${esc(window.formatearFechaMX ? window.formatearFechaMX(window._corteCajaBorradorRestaurado.guardadoEn) : window._corteCajaBorradorRestaurado.guardadoEn)}) -- revísalo antes de guardar el corte.</span>
+                <button onclick="_corteCajaDescartarBorrador()" style="padding:5px 10px;background:white;color:#713f12;border:1px solid #fde047;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px;">Descartar y empezar de cero</button>
+            </div>` : '';
+
         cont.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
                 <div>
@@ -824,6 +926,7 @@
             </div>
 
             ${renderTabsCuentas(filtros.cuentaId)}
+            ${borradorHTML}
             ${huerfanosHTML}
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;background:white;border:1px solid #e2e8f0;border-radius:10px;padding:15px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
@@ -858,6 +961,11 @@
             ${renderHistorial()}
         `;
         recalcularSeleccionCorte();
+        // Restaurar el texto de observaciones del borrador, si había uno.
+        if (window._corteCajaBorradorRestaurado?.observaciones) {
+            const obsEl = document.getElementById('corteObservaciones');
+            if (obsEl) obsEl.value = window._corteCajaBorradorRestaurado.observaciones;
+        }
         const seleccionCortes = resumenCortesSeleccionados();
         if (seleccionCortes.cortes.length > 0) {
             pintarKpisCorte({
@@ -882,6 +990,7 @@
         const row = input.closest('tr');
         if (row) row.style.background = input.checked ? '#f8fafc' : '#ffffff';
         recalcularSeleccionCorte();
+        _corteCajaGuardarBorrador();
     };
 
     window.marcarTodosMovimientosCorte = function(marcar) {
@@ -898,6 +1007,7 @@
             if (row) row.style.background = marcar ? '#f8fafc' : '#ffffff';
         });
         recalcularSeleccionCorte();
+        _corteCajaGuardarBorrador();
     };
 
     function limpiarSeleccionCortesRecientes() {
@@ -1108,6 +1218,12 @@
         // El saldo final de este corte se fija de inmediato como el nuevo saldo inicial de esta
         // cuenta/ubicación (unico disparador junto con la edición manual que puede moverlo).
         persistirSaldoInicialManual(corte.cuentaId, corte.saldoFinalSistema);
+
+        // Corte cerrado con éxito: el borrador de esta cuenta/periodo ya no
+        // sirve (si vuelve a abrir el mismo periodo verá el corte guardado,
+        // no un borrador viejo pisándolo).
+        const claveBorrador = `${corte.fechaInicio}|${corte.fechaFin}|${corte.cuentaId}`;
+        _corteCajaBorrarBorrador(claveBorrador);
 
         alert(`Corte guardado: ${corte.folio}\n\nEl saldo final de ${dinero(corte.saldoFinalSistema)} se ha fijado como nuevo saldo inicial para ${corte.cuentaNombre || 'esta cuenta'}.`);
         renderCorteCaja();
