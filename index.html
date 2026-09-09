@@ -118,6 +118,9 @@
         <button onclick="navA('reporte-rentabilidad-cartera'); if(typeof renderReporteRentabilidadCartera === 'function') renderReporteRentabilidadCartera();">💹 Rentabilidad de Cartera</button>
         <button onclick="navA('simulador-tasa-pronto-pago'); if(typeof renderSimuladorTasaProntoPago === 'function') renderSimuladorTasaProntoPago();">🧮 Simulador de Tasa y Pronto Pago</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
+        <button onclick="abrirModalPromoContadoVencida()" style="color: #9333ea; font-weight: bold;">
+            🔎 Promo de Contado (plazo vencido)
+        </button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
     </div>
@@ -181,9 +184,6 @@
         </button>
         <button onclick="abrirModalCondonarDeuda()" style="color: #dc2626; font-weight: bold;">
             💸 Condonar Deuda
-        </button>
-        <button onclick="abrirModalPromoContadoVencida()" style="color: #9333ea; font-weight: bold;">
-            🔎 Promo de Contado (plazo vencido)
         </button>
         <button onclick="navA('reestructura-plazo'); if(typeof renderReestructuraPlazo === 'function') renderReestructuraPlazo();" style="color: #7c3aed; font-weight: bold;">
             🗓️ Reestructurar Plazo
@@ -1296,7 +1296,7 @@
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/ventas.js?v=4.1"></script>
 <script src="js/modules/clientes.js?v=5"></script>
-<script src="js/modules/cxc.js?v=57"></script>
+<script src="js/modules/cxc.js?v=58"></script>
 <script src="js/modules/apartados.js?v=8"></script>
 <script src="js/modules/compras.js?v=54"></script>
 <script src="js/modules/bancos.js?v=21"></script>
