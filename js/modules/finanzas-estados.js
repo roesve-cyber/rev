@@ -837,6 +837,128 @@ function _efCalcularBalanceGeneral(hastaStr) {
 }
 
 // ---------------------------------------------------------------
+// ESTADO DE FLUJO DE EFECTIVO (NIF B-2, método directo)
+// ---------------------------------------------------------------
+// La NIF B-2 permite método directo o indirecto para la actividad de
+// operación. Se eligió DIRECTO aquí porque el sistema reconstruye el saldo
+// histórico de Efectivo y Bancos movimiento por movimiento (ver
+// _efSaldoCuentasAFecha) pero NO reconstruye CxC/Inventario/CxP a fechas
+// pasadas (solo su saldo ACTUAL, ver nota al inicio del archivo) -- el
+// método indirecto necesitaría esos históricos para conciliar la Utilidad
+// Neta contra el cambio en Efectivo, y hoy no existen. El método directo
+// solo necesita clasificar cada movimiento de movimientosCaja por su
+// actividad (operación/inversión/financiamiento), que sí se puede hacer con
+// el patrón de "referencia" que cada módulo ya usa de forma consistente.
+function _efClasificarFlujoCaja(m) {
+    const ref = String(m.referencia || '');
+    // Transferencia entre cuentas propias del negocio (bancos.js,
+    // transferirEntreCuentas): no es una entrada/salida de efectivo del
+    // negocio como entidad, es efectivo moviéndose de un bolsillo a otro.
+    // Siempre debe sumar ~0 en el periodo -- si no, algo quedó descuadrado
+    // (transferencia a medias) y se muestra aparte para que se note.
+    if (/^TR-/.test(ref)) return 'transferencia';
+    // Aportaciones/retiros del dueño (finanzas-estados.js, guardarMovimientoCapital).
+    if (/^CAPITAL-/.test(ref)) return 'financiamiento';
+    // Reembolso de proveedor por compra a MSI no entregada (bancos.js): se
+    // liga a la deuda bancaria de MSI (pasivo de financiamiento), no a la
+    // operación normal de venta de mercancía.
+    if (/^MSI-/.test(ref)) return 'financiamiento';
+    // Préstamos otorgados a terceros y su cobro (prestamos.js): no es la
+    // actividad principal del negocio (venta de mercancía a crédito/contado),
+    // es una inversión de excedentes de efectivo.
+    if (/^PRESTAMO-/.test(ref) || /^ABONO-PRESTAMO-/.test(ref)) return 'inversion';
+    // Todo lo demás es operación: ventas de contado (VENTA-), abonos de
+    // CxC/apartados (ABONO-, ABN-APT-), compras y pagos a proveedores
+    // (COMPRA-, ABONO-PROV-, anticipos/recepciones OC, consignación),
+    // gastos (GASTO-), comisiones y anticipos a vendedores, devoluciones,
+    // ajustes de corte de caja, movimientos manuales (MOV-MANUAL-).
+    return 'operacion';
+}
+
+function _efDiaAnteriorStr(fechaStr) {
+    const d = new Date(fechaStr + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+}
+
+function _efCalcularFlujoEfectivo(desdeStr, hastaStr) {
+    const desde = _efParseFecha(desdeStr + 'T00:00:00');
+    const hasta = _efParseFecha(hastaStr + 'T23:59:59');
+    const movs = StorageService.get('movimientosCaja', []).filter(m => _efEnRango(m.fecha, desde, hasta));
+
+    const grupos = { operacion: [], inversion: [], financiamiento: [], transferencia: [] };
+    movs.forEach(m => grupos[_efClasificarFlujoCaja(m)].push(m));
+
+    const cobros = lista => lista.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+    const pagos = lista => lista.filter(m => m.tipo === 'egreso').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+    const neto = lista => cobros(lista) - pagos(lista);
+
+    const flujoOperacion = neto(grupos.operacion);
+    const flujoInversion = neto(grupos.inversion);
+    const flujoFinanciamiento = neto(grupos.financiamiento);
+    const flujoNetoPeriodo = flujoOperacion + flujoInversion + flujoFinanciamiento;
+    const netoTransferencias = neto(grupos.transferencia); // debe dar ~0; si no, hay una transferencia a medias
+
+    // Efectivo inicial/final vía el mismo motor que usa el Balance General
+    // (reconstrucción real desde movimientosCaja, no un cálculo aparte) --
+    // así el Flujo de Efectivo y el Balance siempre parten de la misma
+    // fuente de verdad para "cuánto efectivo/bancos hay".
+    const efectivoInicial = _efCalcularBalanceGeneral(_efDiaAnteriorStr(desdeStr)).totalEfectivoBancos;
+    const efectivoFinal = _efCalcularBalanceGeneral(hastaStr).totalEfectivoBancos;
+    const cuadra = Math.abs((efectivoFinal - efectivoInicial) - flujoNetoPeriodo) < 1;
+
+    return {
+        desde: desdeStr, hasta: hastaStr,
+        cobrosOperacion: cobros(grupos.operacion), pagosOperacion: pagos(grupos.operacion), flujoOperacion,
+        cobrosInversion: cobros(grupos.inversion), pagosInversion: pagos(grupos.inversion), flujoInversion,
+        cobrosFinanciamiento: cobros(grupos.financiamiento), pagosFinanciamiento: pagos(grupos.financiamiento), flujoFinanciamiento,
+        flujoNetoPeriodo, efectivoInicial, efectivoFinal, cuadra, netoTransferencias
+    };
+}
+
+// ---------------------------------------------------------------
+// ESTADO DE VARIACIONES EN EL CAPITAL CONTABLE (NIF B-4)
+// ---------------------------------------------------------------
+// Negocio simple (una sola clase de capital, sin ORI ni participación de
+// terceros), así que solo tiene 2 columnas: Capital Aportado y Utilidades
+// Acumuladas. "Capital Aportado" sí tiene historial real por fecha
+// (capitalMovimientos), pero "Utilidades Acumuladas" NUNCA se guardó como
+// saldo propio -- siempre se derivó como residuo del Balance (Activo -
+// Pasivo - Capital Aportado, ver _efCalcularBalanceGeneral). Por eso aquí
+// el saldo INICIAL de Utilidades Acumuladas se obtiene restándole la
+// Utilidad Neta del periodo al saldo FINAL (que sí sale del Balance a
+// "hasta") -- no es un dato capturado aparte, es despejar la incógnita para
+// que el estado cuadre siempre por construcción, igual que ya hace el
+// Balance con su propio residuo.
+function _efCalcularVariacionesCapital(desdeStr, hastaStr, utilidadNetaPeriodo, utilidadesAcumuladasFinal) {
+    const desde = _efParseFecha(desdeStr + 'T00:00:00');
+    const hasta = _efParseFecha(hastaStr + 'T23:59:59');
+    const movs = StorageService.get('capitalMovimientos', []);
+
+    const fechaMov = m => m.fechaIso || m.fecha;
+    const antesDelPeriodo = movs.filter(m => {
+        const d = _efParseFecha(fechaMov(m));
+        return d && d < desde;
+    });
+    const enElPeriodo = movs.filter(m => _efEnRango(fechaMov(m), desde, hasta));
+
+    const netoDe = lista => lista.reduce((s, m) => s + (m.tipo === 'aportacion' ? Number(m.monto) || 0 : -(Number(m.monto) || 0)), 0);
+    const capitalAportadoInicial = netoDe(antesDelPeriodo);
+    const aportacionesPeriodo = enElPeriodo.filter(m => m.tipo === 'aportacion').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+    const retirosPeriodo = enElPeriodo.filter(m => m.tipo === 'retiro').reduce((s, m) => s + (Number(m.monto) || 0), 0);
+    const capitalAportadoFinal = capitalAportadoInicial + aportacionesPeriodo - retirosPeriodo;
+
+    const utilidadesAcumuladasInicial = utilidadesAcumuladasFinal - utilidadNetaPeriodo;
+
+    return {
+        capitalAportadoInicial, aportacionesPeriodo, retirosPeriodo, capitalAportadoFinal,
+        utilidadesAcumuladasInicial, utilidadNetaPeriodo, utilidadesAcumuladasFinal,
+        totalInicial: capitalAportadoInicial + utilidadesAcumuladasInicial,
+        totalFinal: capitalAportadoFinal + utilidadesAcumuladasFinal
+    };
+}
+
+// ---------------------------------------------------------------
 // RENDER
 // ---------------------------------------------------------------
 
@@ -845,13 +967,18 @@ function renderEstadosFinancieros() {
     if (!cont) return;
 
     const hoy = _efHoyInput();
-    const desde = window._efRangoDesde || (hoy.slice(0, 8) + '01');
+    // Default ANUAL (del 1 de enero del año en curso a hoy), no mensual --
+    // pedido explícito para que el reporte abra mostrando el año completo
+    // en vez de solo el mes. Sigue siendo editable con los inputs DESDE/HASTA.
+    const desde = window._efRangoDesde || (hoy.slice(0, 4) + '-01-01');
     const hasta = window._efRangoHasta || hoy;
     window._efRangoDesde = desde;
     window._efRangoHasta = hasta;
 
     const er = _efCalcularEstadoResultados(desde, hasta);
     const bg = _efCalcularBalanceGeneral(hasta);
+    const fe = _efCalcularFlujoEfectivo(desde, hasta);
+    const vc = _efCalcularVariacionesCapital(desde, hasta, er.utilidadNeta, bg.utilidadesAcumuladas);
     const { movs: capitalMovs } = _efTotalesCapital();
 
     const filasGastos = Object.entries(er.gastosPorCategoria)
@@ -975,6 +1102,50 @@ function renderEstadosFinancieros() {
             </table>
         </div>
     </div>
+
+    <div style="margin:24px 0 10px;">
+        <h3 style="margin:0;color:#0f172a;">🔄 Estado de Variaciones en el Capital Contable <span style="font-weight:normal;color:#6b7280;font-size:13px;">(${_efEsc(desde)} a ${_efEsc(hasta)})</span></h3>
+    </div>
+    ${bg.esHistorico ? `<p style="background:#fffbeb;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:10px;">⚠️ El corte (HASTA) es distinto de hoy: el saldo final de Utilidades Acumuladas hereda la misma limitación que el Balance General de arriba (CxC/Inventario/CxP actuales, no reconstruidos a esa fecha), así que este estado es más confiable cuando HASTA es la fecha de hoy.</p>` : ''}
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:20px;">
+        <thead><tr style="background:#f9fafb;font-size:12px;color:#6b7280;text-align:right;">
+            <th style="text-align:left;padding:6px 8px;">Concepto</th><th style="padding:6px 8px;">Capital Aportado</th><th style="padding:6px 8px;">Utilidades Acumuladas</th><th style="padding:6px 8px;">Total</th>
+        </tr></thead>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">Saldo al inicio del periodo</td><td style="padding:8px;text-align:right;">${_efDinero(vc.capitalAportadoInicial)}</td><td style="padding:8px;text-align:right;">${_efDinero(vc.utilidadesAcumuladasInicial)}</td><td style="padding:8px;text-align:right;font-weight:bold;">${_efDinero(vc.totalInicial)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#059669;">+ Aportaciones de capital</td><td style="padding:8px;text-align:right;color:#059669;">${_efDinero(vc.aportacionesPeriodo)}</td><td style="padding:8px;text-align:right;color:#9ca3af;">—</td><td style="padding:8px;text-align:right;color:#059669;">${_efDinero(vc.aportacionesPeriodo)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">– Retiros de capital</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(vc.retirosPeriodo)}</td><td style="padding:8px;text-align:right;color:#9ca3af;">—</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(vc.retirosPeriodo)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">+ Utilidad neta del periodo</td><td style="padding:8px;text-align:right;color:#9ca3af;">—</td><td style="padding:8px;text-align:right;color:${vc.utilidadNetaPeriodo >= 0 ? '#059669' : '#dc2626'};">${_efDinero(vc.utilidadNetaPeriodo)}</td><td style="padding:8px;text-align:right;color:${vc.utilidadNetaPeriodo >= 0 ? '#059669' : '#dc2626'};">${_efDinero(vc.utilidadNetaPeriodo)}</td></tr>
+        <tr style="font-weight:bold;background:#eff6ff;"><td style="padding:8px;">= Saldo al final del periodo</td><td style="padding:8px;text-align:right;">${_efDinero(vc.capitalAportadoFinal)}</td><td style="padding:8px;text-align:right;">${_efDinero(vc.utilidadesAcumuladasFinal)}</td><td style="padding:8px;text-align:right;">${_efDinero(vc.totalFinal)}</td></tr>
+    </table>
+
+    <div style="margin:24px 0 10px;">
+        <h3 style="margin:0;color:#0f172a;">💵 Estado de Flujo de Efectivo <span style="font-weight:normal;color:#6b7280;font-size:13px;">(${_efEsc(desde)} a ${_efEsc(hasta)}, método directo)</span></h3>
+    </div>
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <thead><tr style="background:#f9fafb;font-size:12px;color:#6b7280;text-align:right;"><th style="text-align:left;padding:6px 8px;">Actividades de operación</th><th style="padding:6px 8px;">Monto</th></tr></thead>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">+ Cobros de clientes y otros cobros de operación</td><td style="padding:8px;text-align:right;">${_efDinero(fe.cobrosOperacion)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">– Pagos a proveedores, gastos, comisiones y otros pagos de operación</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(fe.pagosOperacion)}</td></tr>
+        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Flujo neto de actividades de operación</td><td style="padding:8px;text-align:right;color:${fe.flujoOperacion >= 0 ? '#059669' : '#dc2626'};">${_efDinero(fe.flujoOperacion)}</td></tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <thead><tr style="background:#f9fafb;font-size:12px;color:#6b7280;text-align:right;"><th style="text-align:left;padding:6px 8px;">Actividades de inversión</th><th style="padding:6px 8px;">Monto</th></tr></thead>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">+ Cobro de préstamos otorgados</td><td style="padding:8px;text-align:right;">${_efDinero(fe.cobrosInversion)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">– Préstamos otorgados a terceros</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(fe.pagosInversion)}</td></tr>
+        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Flujo neto de actividades de inversión</td><td style="padding:8px;text-align:right;color:${fe.flujoInversion >= 0 ? '#059669' : '#dc2626'};">${_efDinero(fe.flujoInversion)}</td></tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <thead><tr style="background:#f9fafb;font-size:12px;color:#6b7280;text-align:right;"><th style="text-align:left;padding:6px 8px;">Actividades de financiamiento</th><th style="padding:6px 8px;">Monto</th></tr></thead>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">+ Aportaciones de capital y reembolsos de proveedor por MSI</td><td style="padding:8px;text-align:right;">${_efDinero(fe.cobrosFinanciamiento)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;color:#dc2626;">– Retiros de capital</td><td style="padding:8px;text-align:right;color:#dc2626;">${_efDinero(fe.pagosFinanciamiento)}</td></tr>
+        <tr style="border-bottom:2px solid #cbd5e1;font-weight:bold;background:#f0fdf4;"><td style="padding:8px;">= Flujo neto de actividades de financiamiento</td><td style="padding:8px;text-align:right;color:${fe.flujoFinanciamiento >= 0 ? '#059669' : '#dc2626'};">${_efDinero(fe.flujoFinanciamiento)}</td></tr>
+    </table>
+    <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+        <tr style="border-bottom:1px solid #e5e7eb;font-weight:bold;"><td style="padding:8px;">= Incremento (disminución) neto de efectivo</td><td style="padding:8px;text-align:right;color:${fe.flujoNetoPeriodo >= 0 ? '#059669' : '#dc2626'};">${_efDinero(fe.flujoNetoPeriodo)}</td></tr>
+        <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:8px;">+ Efectivo y bancos al inicio del periodo</td><td style="padding:8px;text-align:right;">${_efDinero(fe.efectivoInicial)}</td></tr>
+        <tr style="font-weight:bold;background:${fe.efectivoFinal >= 0 ? '#eff6ff' : '#fef2f2'};"><td style="padding:10px 8px;">= Efectivo y bancos al final del periodo</td><td style="padding:10px 8px;text-align:right;">${_efDinero(fe.efectivoFinal)}</td></tr>
+    </table>
+    ${!fe.cuadra ? `<p style="background:#fef2f2;color:#991b1b;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;">🚨 El Flujo de Efectivo no cuadra contra el Balance: la suma de las 3 actividades (${_efDinero(fe.flujoNetoPeriodo)}) no coincide con el cambio real de Efectivo y Bancos (${_efDinero(fe.efectivoFinal - fe.efectivoInicial)}). Revisa si hay movimientos de caja con referencia atípica que no se estén clasificando bien.</p>` : ''}
+    ${Math.abs(fe.netoTransferencias) >= 1 ? `<p style="background:#fffbeb;color:#92400e;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;">⚠️ Hay transferencias entre cuentas propias que no cuadran entre sí en el periodo (diferencia de ${_efDinero(fe.netoTransferencias)}) — probablemente una transferencia quedó a medias (revisa Bancos → Movimientos).</p>` : ''}
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 10px;">
         <h3 style="margin:0;color:#0f172a;">💼 Capital (aportaciones y retiros del dueño)</h3>
