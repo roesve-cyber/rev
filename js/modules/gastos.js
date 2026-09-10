@@ -677,29 +677,72 @@ function _ejecutarEliminarGasto(id) {
     if (!g) return alert('⚠️ Ese gasto ya no existe.');
 
     const formatoDinero = (val) => '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2 });
-    if (!confirm(`¿Eliminar este gasto?\n\n${g.categoria} — ${g.descripcion}\n${formatoDinero(g.monto)}\n\nSe regresará ese dinero a "${g.etiquetaCuenta || g.cuentaDebito}".`)) return;
 
-    // 🛡️ Igual que la corrección: nunca se borra el gasto sin devolver el
-    // dinero a la cuenta de donde salió. Se revierte con un INGRESO nuevo
-    // (mismo patrón que guardarEdicionGasto y deshacerUltimoPagoCorteTarjeta),
-    // conservando el rastro completo en movimientosCaja.
-    if (typeof window._ingresarCuenta !== 'function') {
-        alert("No se pudo eliminar el gasto: el módulo de caja no está disponible. Nada se borró.");
-        return;
+    // 🔎 Ubicar el movimiento de caja EXACTO de este gasto (mismo id que
+    // guarda guardarGasto/guardarEdicionGasto). Si es un gasto viejo sin
+    // esa referencia, se busca por concepto como respaldo -- tomando el
+    // egreso más reciente con esa referencia (el "vigente").
+    const movsActuales = StorageService.get('movimientosCaja', []);
+    let movimientoAEliminar = g.movimientoCajaId
+        ? movsActuales.find(m => m.id === g.movimientoCajaId)
+        : null;
+    if (!movimientoAEliminar) {
+        const candidatos = movsActuales.filter(m => m.tipo === 'egreso' && m.referencia === `GASTO-${id}`);
+        movimientoAEliminar = candidatos.length ? candidatos[candidatos.length - 1] : null;
     }
-    const reversaOk = window._ingresarCuenta({
-        monto: g.monto,
-        cuentaId: g.cuentaDebito,
-        etiqueta: g.etiquetaCuenta || g.cuentaDebito,
-        concepto: `Eliminación de gasto — reversión: ${g.categoria} — ${g.descripcion}`,
-        referencia: `GASTO-${id}`,
-        idOperacion: `GASTO-${id}-DEL-${Date.now()}`
-    });
-    if (!reversaOk) {
-        alert(`No se pudo regresar el dinero a "${g.etiquetaCuenta || g.cuentaDebito}" (¿ya no existe esa cuenta?). El gasto NO se eliminó.`);
+    if (!movimientoAEliminar) {
+        alert('⚠️ No se encontró el movimiento de caja de este gasto. Por seguridad, no se eliminó nada -- revisa manualmente en movimientos de caja.');
         return;
     }
 
+    // 🔎 Igual que en la corrección: si ya hay un corte de caja cerrado
+    // desde la fecha de este gasto, borrar el movimiento directamente
+    // dejaría ese corte descuadrado (su total ya no sumaría lo mismo que
+    // los movimientos reales). Se avisa, pero se respeta lo que pida el
+    // usuario -- aquí NO se ofrece la alternativa de "reversión con
+    // registro nuevo", porque es justo lo que se pidió evitar.
+    const fechaGastoSolo = g.fecha || '';
+    let corteBloqueante = null;
+    if (fechaGastoSolo && typeof _bancosHayCorteCerradoDesde === 'function') {
+        corteBloqueante = _bancosHayCorteCerradoDesde(g.cuentaDebito, fechaGastoSolo);
+    }
+
+    const msjBase = `¿Eliminar este gasto?\n\n${g.categoria} — ${g.descripcion}\n${formatoDinero(g.monto)}\n\nSe borrará el registro por completo (nada de un movimiento nuevo) y se le regresará ${formatoDinero(g.monto)} al saldo de "${g.etiquetaCuenta || g.cuentaDebito}".`;
+    const msjExtra = corteBloqueante
+        ? `\n\n⚠️ Ya existe un corte de caja cerrado (folio ${corteBloqueante.folio || '-'}, hasta ${corteBloqueante.fechaFin}) que cubre esta cuenta desde esa fecha. Borrar este movimiento hará que ese corte ya no cuadre con la suma real de movimientos. ¿Aun así continuar?`
+        : '';
+    if (!confirm(msjBase + msjExtra)) return;
+
+    if (typeof _resolverCuentaMovimiento !== 'function') {
+        alert("No se pudo eliminar el gasto: funciones de cuenta no disponibles. Nada se borró.");
+        return;
+    }
+    const cuenta = _resolverCuentaMovimiento(g.cuentaDebito);
+    if (!cuenta.ok) {
+        alert(`No se pudo eliminar el gasto: la cuenta "${g.cuentaDebito}" ya no existe. Nada se borró.`);
+        return;
+    }
+
+    // 1) Ajustar el saldo directamente (se regresa el dinero, sin movimiento nuevo).
+    const nuevoSaldo = (Number(cuenta.cuentas[cuenta.idx].saldo) || 0) + Number(g.monto);
+    cuenta.cuentas[cuenta.idx].saldo = nuevoSaldo;
+    const tabla = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
+    if (typeof StorageService.actualizarAtomo === 'function') {
+        StorageService.actualizarAtomo(tabla, cuenta.cuentaRealId, { saldo: nuevoSaldo });
+    } else {
+        StorageService.set(tabla, cuenta.cuentas);
+    }
+
+    // 2) Eliminar el movimiento de caja original -- por completo, no se
+    // agrega ningún registro que lo "compense".
+    if (typeof StorageService.removeAtomo === 'function') {
+        StorageService.removeAtomo('movimientosCaja', movimientoAEliminar.id);
+    } else {
+        const movsFiltrados = movsActuales.filter(m => m.id !== movimientoAEliminar.id);
+        StorageService.set('movimientosCaja', movsFiltrados);
+    }
+
+    // 3) Eliminar el gasto en sí.
     const gastosRestantes = gastos.filter(x => x.id !== id);
     StorageService.set('gastosOperativos', gastosRestantes);
 
@@ -709,14 +752,14 @@ function _ejecutarEliminarGasto(id) {
             modulo: 'Gastos',
             entidad: 'gasto',
             entidadId: String(id),
-            detalle: `Gasto eliminado: "${g.categoria} — ${g.descripcion}" (${formatoDinero(g.monto)} de ${g.etiquetaCuenta || g.cuentaDebito}), dinero devuelto a caja`,
+            detalle: `Gasto eliminado directamente (sin movimiento de reversión): "${g.categoria} — ${g.descripcion}" (${formatoDinero(g.monto)} de ${g.etiquetaCuenta || g.cuentaDebito}). Movimiento de caja borrado: ${movimientoAEliminar.id}.`,
             monto: g.monto,
             severidad: 'riesgo',
-            datos: { gastoEliminado: g }
+            datos: { gastoEliminado: g, movimientoEliminado: movimientoAEliminar, corteAfectado: corteBloqueante || null }
         });
     }
 
-    alert(`✅ Gasto eliminado. Se regresaron ${formatoDinero(g.monto)} a ${g.etiquetaCuenta || g.cuentaDebito}.`);
+    alert(`✅ Gasto eliminado. Se ajustó el saldo de "${g.etiquetaCuenta || g.cuentaDebito}" en +${formatoDinero(g.monto)}, sin crear ningún movimiento nuevo.`);
     renderGestionGastos();
 }
 
