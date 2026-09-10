@@ -438,14 +438,17 @@ function guardarEdicionGasto(id) {
             fecha: fechaIsoMov,
             concepto: `Gasto: ${categoria} — ${descripcion} [corregido]`
         };
-        if (typeof StorageService.actualizarAtomo === 'function') {
-            StorageService.actualizarAtomo('movimientosCaja', gastoAnterior.movimientoCajaId, cambiosMov);
-        } else {
-            const movs = StorageService.get('movimientosCaja', []);
-            const movOriginal = movs.find(m => m.id === gastoAnterior.movimientoCajaId);
-            if (movOriginal) Object.assign(movOriginal, cambiosMov);
-            StorageService.set('movimientosCaja', movs);
-        }
+        // 🩹 CORRECCIÓN: movimientosCaja es tabla de "registro individual"
+        // (posData/movimientosCaja/registros/{id}), NO un documento único.
+        // actualizarAtomo() siempre apunta a posData/{key} como documento
+        // único -- para esta tabla en particular escribe en el lugar
+        // equivocado y el cambio nunca llega a donde el resto del sistema
+        // lo busca. set() sí revisa esto y lo enruta bien, así que aquí se
+        // usa set() a propósito, NO actualizarAtomo.
+        const movs = StorageService.get('movimientosCaja', []);
+        const movOriginal = movs.find(m => m.id === gastoAnterior.movimientoCajaId);
+        if (movOriginal) Object.assign(movOriginal, cambiosMov);
+        StorageService.set('movimientosCaja', movs);
         // movimientoCajaIdFinal no cambia: se editó el mismo registro en sitio.
 
         const gastoCorregido = {
@@ -483,6 +486,8 @@ function guardarEdicionGasto(id) {
         document.querySelector('[data-modal="editar-gasto"]')?.remove();
         alert(`✅ Gasto corregido (sin movimientos adicionales).\n\nAhora: ${formatoDinero(monto)} de ${etiqueta}.`);
         renderGestionGastos();
+        if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+        if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
         return;
     }
 
@@ -563,6 +568,8 @@ function guardarEdicionGasto(id) {
     document.querySelector('[data-modal="editar-gasto"]')?.remove();
     alert(`✅ Gasto corregido.\n\nSe regresó ${formatoDinero(gastoAnterior.monto)} a ${gastoAnterior.etiquetaCuenta || gastoAnterior.cuentaDebito} y se sacó ${formatoDinero(monto)} de ${etiqueta}.`);
     renderGestionGastos();
+    if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+    if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
 }
 
 function toggleRecurrente() {
@@ -735,12 +742,12 @@ function _ejecutarEliminarGasto(id) {
 
     // 2) Eliminar el movimiento de caja original -- por completo, no se
     // agrega ningún registro que lo "compense".
-    if (typeof StorageService.removeAtomo === 'function') {
-        StorageService.removeAtomo('movimientosCaja', movimientoAEliminar.id);
-    } else {
-        const movsFiltrados = movsActuales.filter(m => m.id !== movimientoAEliminar.id);
-        StorageService.set('movimientosCaja', movsFiltrados);
-    }
+    // 🩹 CORRECCIÓN: igual que en la edición -- movimientosCaja es tabla de
+    // "registro individual", removeAtomo() apunta al lugar equivocado para
+    // ella (documento único en vez de la subcolección real). set() sí la
+    // enruta bien, así que se usa set() con el arreglo ya filtrado.
+    const movsFiltrados = StorageService.get('movimientosCaja', []).filter(m => m.id !== movimientoAEliminar.id);
+    StorageService.set('movimientosCaja', movsFiltrados);
 
     // 3) Eliminar el gasto en sí.
     const gastosRestantes = gastos.filter(x => x.id !== id);
@@ -761,6 +768,13 @@ function _ejecutarEliminarGasto(id) {
 
     alert(`✅ Gasto eliminado. Se ajustó el saldo de "${g.etiquetaCuenta || g.cuentaDebito}" en +${formatoDinero(g.monto)}, sin crear ningún movimiento nuevo.`);
     renderGestionGastos();
+    // 🛡️ Antes esto solo refrescaba la pantalla de Gastos -- si el usuario
+    // tenía abierta Cuenta Bancaria u otra vista de movimientos, se quedaba
+    // viendo datos viejos (el movimiento ya estaba borrado en el fondo,
+    // pero la pantalla no se enteraba hasta recargar todo a mano).
+    if (typeof window.renderCuentasBancarias === 'function') window.renderCuentasBancarias();
+    if (typeof window.renderConciliacion === 'function') window.renderConciliacion();
+    if (typeof window.renderCorteCaja === 'function') window.renderCorteCaja();
 }
 
 function verificarGastosRecurrentes() {

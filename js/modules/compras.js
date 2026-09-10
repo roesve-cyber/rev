@@ -624,21 +624,6 @@ function _normalizarFechaMovimientoCuenta(fecha) {
     return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
-// 🛡️ StorageService.set() reordena automáticamente por fecha cualquier
-// tabla que tenga ese campo; pushAtomo()/actualizarAtomo() NO lo hacen
-// (solo agregan/actualizan un registro puntual). Esta función reproduce
-// ese mismo reordenamiento sobre la caché local después de un push/
-// actualización atómica, para no perder ese invariante en movimientosCaja,
-// cuentasEfectivo y cuentas-bancarias.
-function _reordenarCacheLocalTrasAtomo(key) {
-    if (typeof StorageService._ordenarCronologicoSiTieneFechas !== 'function') return;
-    const actual = StorageService.get(key, []);
-    if (!Array.isArray(actual)) return;
-    const ordenado = StorageService._ordenarCronologicoSiTieneFechas(key, actual);
-    StorageService._cache[key] = ordenado;
-    window[key] = ordenado;
-}
-
 function _resolverCuentaMovimiento(cuentaId) {
     let cuentaRealId = (cuentaId === 'caja') ? 'efectivo' : (cuentaId || 'efectivo');
     let isCaja = String(cuentaRealId).startsWith('caja_') || cuentaRealId === 'efectivo';
@@ -736,18 +721,18 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         referencia,
         idOperacion: idOperacion || null
     };
-    // 🛡️ Igual aquí: escritura atómica por registro en vez de subir el
-    // arreglo COMPLETO de movimientosCaja (puede tener miles de filas) --
-    // así nunca se pisa el movimiento que otro dispositivo acaba de
-    // registrar mientras este se procesaba.
-    if (typeof StorageService.pushAtomo === 'function') {
-        StorageService.pushAtomo('movimientosCaja', movimientoEgreso);
-        _reordenarCacheLocalTrasAtomo('movimientosCaja');
-    } else {
-        const movs = StorageService.get('movimientosCaja', []);
-        movs.push(movimientoEgreso);
-        StorageService.set('movimientosCaja', movs);
-    }
+    // 🩹 CORRECCIÓN: movimientosCaja está configurada como tabla de
+    // "registro individual" (posData/movimientosCaja/registros/{id} --
+    // ver _tablasRegistroIndividual en storage2.js), NO como documento
+    // único. pushAtomo/actualizarAtomo/removeAtomo escriben siempre en
+    // posData/{key} como documento único -- para esta tabla en particular
+    // apuntan al lugar equivocado y el registro nunca llega a donde el
+    // resto del sistema lo busca. set() sí revisa _tablasRegistroIndividual
+    // y lo enruta bien (_sincronizarTablaPorRegistro), así que aquí se usa
+    // set() a propósito, NO pushAtomo.
+    const movs = StorageService.get('movimientosCaja', []);
+    movs.push(movimientoEgreso);
+    StorageService.set('movimientosCaja', movs);
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'EGRESO_CUENTA',
@@ -803,18 +788,12 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         referenciaBancaria: referenciaBancaria || '',
         foliosGrupo: Array.isArray(foliosGrupo) ? foliosGrupo : []
     };
-    // 🛡️ Igual aquí: escritura atómica por registro en vez de subir el
-    // arreglo COMPLETO de movimientosCaja (puede tener miles de filas) --
-    // así nunca se pisa el movimiento que otro dispositivo acaba de
-    // registrar mientras este se procesaba.
-    if (typeof StorageService.pushAtomo === 'function') {
-        StorageService.pushAtomo('movimientosCaja', movimientoIngreso);
-        _reordenarCacheLocalTrasAtomo('movimientosCaja');
-    } else {
-        const movs = StorageService.get('movimientosCaja', []);
-        movs.push(movimientoIngreso);
-        StorageService.set('movimientosCaja', movs);
-    }
+    // 🩹 CORRECCIÓN: mismo motivo que en el egreso -- movimientosCaja es
+    // tabla de "registro individual", set() la enruta bien y pushAtomo no.
+    const movs = StorageService.get('movimientosCaja', []);
+    movs.push(movimientoIngreso);
+    StorageService.set('movimientosCaja', movs);
+
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'INGRESO_CUENTA',
