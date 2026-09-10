@@ -755,7 +755,7 @@ window.renderReporteCompromisos = function() {
     if (!contenedor) return;
 
     const hoy = new Date();
-    const cxc = StorageService.get("cuentasPorCobrar", []);
+    const cxc = window._conNombreClienteVigente(StorageService.get("cuentasPorCobrar", []));
     const cxp = StorageService.get("cuentasPorPagar", []);
     const msi = StorageService.get("cuentasMSI", []);
 
@@ -1474,8 +1474,8 @@ window.renderReporteFlujo = function() {
 
     const tickets = asegurarArray(StorageService.get("registroTickets", []));
     const ventasRegistradas = asegurarArray(StorageService.get("ventasRegistradas", []));
-    const cuentasCxC = asegurarArray(StorageService.get("cuentasPorCobrar", []));
-    const apartadosData = asegurarArray(StorageService.get("apartados", []));
+    const cuentasCxC = window._conNombreClienteVigente(asegurarArray(StorageService.get("cuentasPorCobrar", [])));
+    const apartadosData = window._conNombreClienteVigente(asegurarArray(StorageService.get("apartados", [])), { campoNombre: 'clienteNombre' });
     const ordenesCompra = asegurarArray(StorageService.get("ordenesCompra", []));
     const comprasDirectas = asegurarArray(StorageService.get("compras", []));
     const cuentasPorPagar = asegurarArray(StorageService.get("cuentasPorPagar", []));

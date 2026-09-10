@@ -68,6 +68,41 @@ window.obtenerClienteCanonico = function(id, nombre, telefono) {
 };
 
 // ================================================================
+// 🩹 PARCHE DE VISUALIZACIÓN PARA REPORTES: la inmensa mayoría de los
+// reportes de cartera/cobranza (reportes-credito.js, dashboard.js,
+// finanzas-estados.js, condonar-deuda.js, reestructura-plazo.js,
+// vendedores.js, reportes-simulador-tasa.js, reportes-rentabilidad-
+// cartera.js) leían el nombre directo del registro de la cuenta o el
+// apartado -- una copia "congelada" del nombre al momento de la venta.
+// Si el cliente se corrige después en el módulo de Clientes, esos
+// reportes seguían mostrando el nombre viejo.
+//
+// Esta función NO modifica cuentasPorCobrar/apartados en el
+// almacenamiento -- regresa una copia nueva de la lista (los objetos
+// originales no se tocan) con el nombre actualizado al vigente en la
+// tabla "clientes", lista para usarse en pantalla justo después de
+// leer cualquier lista de cuentas/apartados en un reporte.
+// ================================================================
+window._conNombreClienteVigente = function(lista, opts = {}) {
+    if (!Array.isArray(lista)) return lista;
+    if (typeof window.obtenerClienteCanonico !== 'function') return lista;
+    const campoId = opts.campoId || 'clienteId';
+    const campoNombre = opts.campoNombre || 'nombre';
+    const campoTelefono = opts.campoTelefono || 'telefono';
+
+    return lista.map(item => {
+        const nombreActual = item[campoNombre] || item.clienteNombre || '';
+        const canonico = window.obtenerClienteCanonico(item[campoId], nombreActual, item[campoTelefono]);
+        if (!canonico || !canonico.nombre || canonico.nombre === nombreActual) return item;
+
+        const copia = { ...item, [campoNombre]: canonico.nombre };
+        if ('clienteNombre' in item) copia.clienteNombre = canonico.nombre;
+        if (!copia[campoId] && canonico.id !== undefined) copia[campoId] = canonico.id;
+        return copia;
+    });
+};
+
+// ================================================================
 // 🔗 MIGRACIÓN DE ENLACE: las cuentas por cobrar / apartados creados
 // antes de tener "id" en clientes (o antes de este blindaje) quedaron
 // con el nombre "congelado" y sin clienteId. Aquí se enlazan una sola

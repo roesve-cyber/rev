@@ -2445,20 +2445,34 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         if (confirm(`${encabezado}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta?`)) {
             montoFinal = politicaAbono.montoLiquidacion;
             liquidacionPorPolitica = true;
-            cuponEmitido = (politicaAbono.beneficio > 0.01 && ventaEsNueva)
-                ? _cxcEmitirCuponBeneficio(cuenta, folio, politicaAbono.beneficio, `Pago anticipado dentro de plazo (${politicaAbono.porcentajeCupon}% del total financiado)`)
-                : null;
-            // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
-            // el descuento de pronto pago aplicado.
-            if (typeof notificarBovedaAutorizacion === 'function') {
-                notificarBovedaAutorizacion({
-                    tipo: 'prontoPagoLiquidado',
-                    titulo: '✅ Cuenta liquidada con descuento por pronto pago',
-                    cuerpo: `Folio ${folio} (${_cxcNombreClienteVigente(cuenta)}): ${tipoPolitica}. Se aplicó ${_cxcDinero(politicaAbono.montoLiquidacion)}.${cuponEmitido ? ` Cupón ${cuponEmitido.codigo} emitido por ${_cxcDinero(cuponEmitido.montoOriginal)}.` : ''}`
-                }).catch(() => {});
-            }
-            if (cuponEmitido) {
-                alert(`Cuenta liquidada. Se emitió el cupón ${cuponEmitido.codigo} por ${_cxcDinero(cuponEmitido.montoOriginal)} a favor de ${cuponEmitido.clienteNombre}. Es saldo a favor aplicable en su próxima compra (contado, crédito o apartado) -- no es reembolsable en efectivo salvo autorización de admin. Vigente hasta el ${new Date(cuponEmitido.fechaVencimiento).toLocaleDateString('es-MX')}.`);
+            // 🛡️ Blindaje adicional: este bloque (emitir cupón + avisar a
+            // Bóveda) antes no estaba dentro de ningún try/catch -- el error
+            // de tipoPolitica (ver arriba) se propagaba sin capturar y
+            // detenía TODA la función ahí mismo, sin que el usuario viera
+            // ningún aviso ("acepté y no pasó nada"). Ahora, si algo similar
+            // vuelve a fallar aquí, se avisa en vez de morir en silencio --
+            // pero el abono en sí sigue su curso normal (liquidacionPorPolitica
+            // y montoFinal ya quedaron fijados arriba antes de este bloque).
+            try {
+                cuponEmitido = (politicaAbono.beneficio > 0.01 && ventaEsNueva)
+                    ? _cxcEmitirCuponBeneficio(cuenta, folio, politicaAbono.beneficio, `Pago anticipado dentro de plazo (${politicaAbono.porcentajeCupon}% del total financiado)`)
+                    : null;
+                const tipoPolitica = esContado1Mes ? 'Plan de 1 mes (precio de contado, sin cupón)' : 'Pago dentro del plazo pactado';
+                // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
+                // el descuento de pronto pago aplicado.
+                if (typeof notificarBovedaAutorizacion === 'function') {
+                    notificarBovedaAutorizacion({
+                        tipo: 'prontoPagoLiquidado',
+                        titulo: '✅ Cuenta liquidada con descuento por pronto pago',
+                        cuerpo: `Folio ${folio} (${_cxcNombreClienteVigente(cuenta)}): ${tipoPolitica}. Se aplicó ${_cxcDinero(politicaAbono.montoLiquidacion)}.${cuponEmitido ? ` Cupón ${cuponEmitido.codigo} emitido por ${_cxcDinero(cuponEmitido.montoOriginal)}.` : ''}`
+                    }).catch(() => {});
+                }
+                if (cuponEmitido) {
+                    alert(`Cuenta liquidada. Se emitió el cupón ${cuponEmitido.codigo} por ${_cxcDinero(cuponEmitido.montoOriginal)} a favor de ${cuponEmitido.clienteNombre}. Es saldo a favor aplicable en su próxima compra (contado, crédito o apartado) -- no es reembolsable en efectivo salvo autorización de admin. Vigente hasta el ${new Date(cuponEmitido.fechaVencimiento).toLocaleDateString('es-MX')}.`);
+                }
+            } catch (errPolitica) {
+                console.error('Error emitiendo cupón/aviso de política de pago anticipado:', errPolitica);
+                alert('La cuenta se liquidará con el monto de política, pero hubo un problema emitiendo el cupón o el aviso. Revisa el estado de cuenta después de este abono.');
             }
         }
     }

@@ -363,8 +363,12 @@ window.obtenerRentabilidadCuenta = function(cuenta, contexto = null) {
 
     return {
         folio: cuenta.folio || cuenta.id,
-        clienteNombre: typeof window._clienteNombreCuenta === 'function'
-            ? window._clienteNombreCuenta(cuenta)
+        // 🩹 _clienteNombreCuenta es un señuelo: solo lee cuenta.nombre/
+        // cuenta.clienteNombre (la copia congelada), nunca consulta la
+        // tabla "clientes". Usamos _cxcNombreClienteVigente (cxc.js), que
+        // sí resuelve contra el nombre vigente del cliente.
+        clienteNombre: typeof window._cxcNombreClienteVigente === 'function'
+            ? window._cxcNombreClienteVigente(cuenta)
             : (cuenta.nombre || cuenta.clienteNombre || 'Cliente'),
         estado: cuenta.estado || 'Pendiente',
         fechaVenta: cuenta.fechaVenta,

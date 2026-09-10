@@ -47,7 +47,7 @@ function _stpEsIncobrable(c) {
 // 1) DIAGNÓSTICO REAL: plazo pactado vs. tiempo real de liquidación
 // ---------------------------------------------------------------
 function _stpDiagnosticoCartera() {
-    const cuentas = StorageService.get('cuentasPorCobrar', [])
+    const cuentas = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []))
         .filter(c => Number(c?.plan?.meses || 0) > 0 && !_stpCuentaCancelada(c) && !_stpEsIncobrable(c));
 
     const liquidadas = [];

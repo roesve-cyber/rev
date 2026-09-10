@@ -217,7 +217,7 @@ window.renderARC_v3 = function() {
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
-    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const cxc = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
@@ -431,7 +431,7 @@ window.renderARCTablaExcel = function() {
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
-    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const cxc = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
@@ -952,7 +952,7 @@ window.renderComportamiento = function() {
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
-    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const cxc = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
@@ -1279,7 +1279,7 @@ window.renderCobranzaMensual = function() {
     if (!cont) return;
 
     const ventas  = StorageService.get('ventasRegistradas', []);
-    const cxc     = StorageService.get('cuentasPorCobrar', []);
+    const cxc     = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
 
     const todosAbonos = [];
     cxc.forEach(c => {
@@ -1464,7 +1464,7 @@ window.renderConcentracion = function() {
                  document.getElementById('dashboardContenido');
     if (!cont) return;
 
-    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const cxc = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 
@@ -1593,7 +1593,7 @@ window.renderConcentracion = function() {
 // después con los números actualizados, no una foto congelada del día
 // que se guardó.
 function _cobranzaVentasDesdeFolios(folios) {
-    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const cxc = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date();
     const set = new Set(folios || []);
@@ -2097,7 +2097,7 @@ window.renderVencimientoPlazo = function() {
     window._vpDiasLimite = (window._vpDiasLimite === undefined) ? 15 : window._vpDiasLimite;
     const DIAS_LIMITE = Number(window._vpDiasLimite) || 0; // umbral "en el límite" antes del vencimiento, configurable en UI
 
-    const cxc = StorageService.get('cuentasPorCobrar', []);
+    const cxc = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagaresSistema = StorageService.get('pagaresSistema', []);
     const hoy = new Date(); hoy.setHours(12, 0, 0, 0);
 

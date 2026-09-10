@@ -357,7 +357,7 @@ function renderHistorialComisiones() {
 // comisión extra por la gestión de cobranza, pero no la calcula ni la aplica
 // de forma automática: el admin decide si otorgarla y por cuánto.
 function obtenerSugerenciasRecuperacionCartera(diasGracia = 3) {
-    const cuentas = StorageService.get('cuentasPorCobrar', []);
+    const cuentas = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
     const pagares = StorageService.get('pagaresSistema', []);
     const comisiones = StorageService.get('comisionesRegistradas', []);
     const descartadas = StorageService.get('sugerenciasComisionDescartadas', []);

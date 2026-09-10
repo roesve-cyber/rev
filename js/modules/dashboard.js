@@ -10,7 +10,7 @@ function renderDashboard() {
 
     const ventasRegistradas = StorageService.get("ventasRegistradas", [])
         .filter(v => !String(v.estado || v.estatus || '').toLowerCase().includes('cancel'));
-    const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", [])
+    const cuentasPorCobrar = window._conNombreClienteVigente(StorageService.get("cuentasPorCobrar", []))
         .filter(c => !_dashboardCuentaCancelada(c) && !c.incobrable);
     const pagaresSistema = StorageService.get("pagaresSistema", []);
     const movimientosCaja = StorageService.get("movimientosCaja", []);
@@ -246,7 +246,7 @@ function verificarAlertasPagares() {
         return 0;
     }
 
-    const cuentasPorCobrar = StorageService.get("cuentasPorCobrar", []);
+    const cuentasPorCobrar = window._conNombreClienteVigente(StorageService.get("cuentasPorCobrar", []));
     const pagaresSistema = StorageService.get("pagaresSistema", []);
     const hoy = new Date();
 
