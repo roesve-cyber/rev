@@ -1345,9 +1345,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
         const textoMoratorio = estadoCta.saldoMoratorios > 0.01
             ? `<br><small style="color:#7f1d1d; font-weight:800;">Moratorios pendientes: ${_cxcDinero(estadoCta.saldoMoratorios)}</small>`
             : (moratorio?.aplica ? `<br><small style="color:#b45309; font-weight:800;">Moratorio sugerido: ${_cxcDinero(moratorio.montoSugerido)}</small>` : '');
-        const accionesMoratorio = moratorio?.aplica ? `
-                    <button onclick="abrirModalMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#7f1d1d; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Aplicar moratorio manual">Moratorio</button>
-                    <button onclick="exentarMoratorio('${_cxcEscHTML(c.folio)}')" style="padding:6px 9px; background:#64748b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Exentar moratorio sugerido">Exentar</button>` : '';
 
         htmlTabla += `<tr>
             <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong><br><small style="color:#94a3b8;">${c.folio}</small></td>
@@ -1360,9 +1357,6 @@ function renderCuentasXCobrar(filtroCliente = "") {
             <td>
                 <div style="display:flex; gap:5px; flex-wrap:wrap;">
                     <button onclick="abrirModalAbonoAvanzado('${c.folio}')" style="padding:6px 9px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar abono">💰 Abonar</button>
-                    ${accionesMoratorio}
-                    <button onclick="abrirModalPromesaPago('${c.folio}')" style="padding:6px 9px; background:#f59e0b; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Registrar promesa de pago">📝 Promesa</button>
-                    <button onclick="enviarRecordatorioWhatsApp('${c.folio}')" style="padding:6px 9px; background:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
                     <button onclick="CxcNotas.abrirModal('${_cxcEscHTML(c.folio)}', '${String(nombreCliente).replace(/'/g, "\\'")}')" style="padding:6px 9px; background:#eab308; color:#422006; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;" title="Observación y notas de cobranza">🗒️ Notas</button>
                 </div>
             </td>
@@ -1418,6 +1412,8 @@ function renderAbonosDirectos(filtroCliente = "") {
                             <td style="text-align:right;">
                                 <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
                                     ${accionesMoratorio}
+                                    <button onclick="abrirModalPromesaPago('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#f59e0b; color:white; font-weight:bold; cursor:pointer;" title="Registrar promesa de pago">📝 Promesa</button>
+                                    <button onclick="enviarRecordatorioWhatsApp('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#25D366; color:white; font-weight:bold; cursor:pointer;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
                                     <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: (typeof _esAdmin === 'function' && _esAdmin()) ? 'directo' : 'pendiente' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">${(typeof _esAdmin === 'function' && _esAdmin()) ? 'Aplicar' : 'Registrar'}</button>
                                 </div>
                             </td>
@@ -4678,7 +4674,11 @@ window.guardarPromesaPago = function(folio) {
     cuentas[idx].promesaPago = { fecha, fechaRegistro: window.localISO ? window.localISO(new Date()) : new Date().toISOString() };
     StorageService.set("cuentasPorCobrar", cuentas);
     document.querySelector('[data-modal=promesa]').remove();
+    // 🛡️ El botón de Promesa ahora también vive en Abono Directo -- se
+    // refresca cualquiera de las dos pantallas que esté visible (cada
+    // render función ya se sale sola si su contenedor no existe en el DOM).
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
+    if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
 };
 
 window.filtrarCuentasCobranza = function() {

@@ -558,6 +558,19 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         .reduce((s, c) => s + (Number(c.montoAlCancelar) || 0), 0);
     const cuponesRecuperadosEnPeriodo = cuponesVencidosEnPeriodo + cuponesCanceladosEnPeriodo;
 
+    // 🆕 Condonaciones por política de pago anticipado SIN cupón (plan de
+    // 1 mes, o cuentas vigentes de antes del cambio a cupones -- ver
+    // _cxcRegistrarCondonacionPolitica en cxc.js). El ingreso financiero de
+    // esa venta ya se contó completo arriba desde el día de la venta
+    // (ingresosFinancieros usa el total nominal del documento) -- si al
+    // final se condonó parte de ese interés porque el cliente liquidó
+    // dentro de su plazo, ese ingreso nunca se cobró de verdad y hay que
+    // restarlo aquí, igual que se resta un cupón emitido.
+    const condonacionesPolitica = StorageService.get('condonacionesPolitica', []);
+    const condonacionesPoliticaEnPeriodo = condonacionesPolitica
+        .filter(c => _efEnRango(c.fecha, desde, hasta))
+        .reduce((s, c) => s + (Number(c.monto) || 0), 0);
+
     // 🛡️ REPARACIÓN: las comisiones de vendedores se acumulan en
     // comisionesRegistradas (vendedores.js) al cerrar la venta, y su pago se
     // hace vía _egresarCuenta (mueve caja, ver bancos/vendedores) — pero
@@ -582,7 +595,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     // Cuentas incobrables: NIF las clasifica como gasto de operación (venta/
     // administración), NO como parte del RIF.
     const utilidadOperacion = utilidadBruta - totalComisiones - totalMermasNetas - totalGastos - incobrables + totalGananciaPerdidaModificacionInventario;
-    const rif = ingresosFinancieros - gastosFinancieros - cuponesEmitidosEnPeriodo + cuponesRecuperadosEnPeriodo;
+    const rif = ingresosFinancieros - gastosFinancieros - cuponesEmitidosEnPeriodo + cuponesRecuperadosEnPeriodo - condonacionesPoliticaEnPeriodo;
     const utilidadNeta = utilidadOperacion + otrosIngresosYGastos + rif;
 
     return {
@@ -606,6 +619,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         ingresosFinancieros, gastosFinancieros, comisionesBancariasTarjeta,
         cuponesEmitidosEnPeriodo, cuponesRecuperadosEnPeriodo,
         cuponesVencidosEnPeriodo, cuponesCanceladosEnPeriodo,
+        condonacionesPoliticaEnPeriodo,
         rif,
         utilidadNeta
     };
@@ -1077,6 +1091,7 @@ function renderEstadosFinancieros() {
             <tr><td style="padding:6px 8px;color:#dc2626;">– Gastos financieros (intereses pagados, incluye comisiones bancarias de tarjetas de crédito${er.comisionesBancariasTarjeta > 0 ? `: ${_efDinero(er.comisionesBancariasTarjeta)}` : ''})<span title="Incluye lo capturado en Gastos con categoría 'interés'/'financiero'/'comisión bancaria', más las comisiones agregadas desde Bancos → Conciliación MSI → 🏷️ Comisión Bancaria." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.gastosFinancieros)}</td></tr>
             <tr><td style="padding:6px 8px;color:#dc2626;">– Cupones de pronto pago emitidos<span title="NIF D-1: contraprestación variable de la venta a crédito original. Se reconoce como pasivo por reembolso al momento en que el monto se vuelve cierto y conocido (liquidación anticipada)." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.cuponesEmitidosEnPeriodo)}</td></tr>
             <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;color:#059669;">+ Cupones recuperados (vencidos/cancelados sin canjear)<span title="NIF D-1: remedición del pasivo por reembolso a $0 cuando ya no se debe (breakage) -- vencimiento natural o cancelación administrativa." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#059669;">${_efDinero(er.cuponesRecuperadosEnPeriodo)}</td></tr>
+            <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;color:#dc2626;">– Condonado por política de pago anticipado (sin cupón)<span title="Plan de 1 mes liquidado a precio de contado, o cuenta vigente de antes del cambio a cupones liquidada dentro de plazo: el interés nominal de esa venta ya se contó como ingreso financiero arriba, pero se condonó y nunca se cobró." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.condonacionesPoliticaEnPeriodo)}</td></tr>
         </table>
     </details>
     <table style="width:100%;border-collapse:collapse;background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">
