@@ -2731,6 +2731,28 @@ function generarTicketAbonoTermico(datosAbono) {
             <div>No es reembolsable en efectivo.</div>
         </div>` : '';
 
+    // 🎟️ Recordatorio del beneficio por pago anticipado cuando este abono NO
+    // acaba de generar un cupón (abono parcial normal, cuenta sigue con
+    // saldo): usa el mismo helper canónico que ya muestra este dato en el
+    // modal de Registrar Abono (_cxcEstadoPlazoCuenta) para no duplicar la
+    // fórmula ni desalinearse de la política real. Se lee la cuenta fresca
+    // por folio -- para abono directo ya viene post-abono (saldo/plazo
+    // actualizados); para uno pendiente de Bóveda aún no se aplicó, así que
+    // el recordatorio se basa en el estado oficial vigente de la cuenta.
+    let avisoCuponHTML = '';
+    if (!cuponEmitido && Number(nuevoSaldo || 0) > 0.01 && folio) {
+        const cuentaFrescaParaAviso = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+        const estadoPlazo = (cuentaFrescaParaAviso && typeof _cxcEstadoPlazoCuenta === 'function')
+            ? _cxcEstadoPlazoCuenta(cuentaFrescaParaAviso) : null;
+        if (estadoPlazo?.aunEnPlazo) {
+            avisoCuponHTML = estadoPlazo.esPlan1Mes
+                ? `<div class="mensaje-ok" style="margin:6px 0;">💵 Recuerde: si liquida su cuenta dentro de su plazo pactado (le quedan ${estadoPlazo.diasRestantes} día(s)), se le respeta el precio de contado real de su mercancía, sin el interés de este plan.</div>`
+                : (estadoPlazo.ventaEsNueva && estadoPlazo.cuponSiLiquidaHoy > 0.01
+                    ? `<div class="mensaje-ok" style="margin:6px 0;">🎟️ Recuerde: si liquida su cuenta dentro de su plazo pactado (le quedan ${estadoPlazo.diasRestantes} día(s)), recibe un cupón de saldo a favor de aprox. ${dineroFmt(estadoPlazo.cuponSiLiquidaHoy)} (${estadoPlazo.porcentajeCupon}% del total financiado), aplicable en su siguiente compra.</div>`
+                    : '');
+        }
+    }
+
     const articulosHTML = (articulos || []).length > 0 ? `
         <div class="seccion-titulo">ARTÍCULOS DE LA VENTA</div>
         <table>
@@ -2875,6 +2897,7 @@ function generarTicketAbonoTermico(datosAbono) {
     <hr>
     <div class="${mensajeClase}">${mensajeEstado}</div>
     ${cuponHTML}
+    ${avisoCuponHTML}
     <hr>
     <div style="text-align:center; margin-top:10px;">
         <div style="border-top:1px solid #333; width:70%; margin:0 auto 4px auto;"></div>

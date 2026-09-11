@@ -1845,7 +1845,7 @@ function mostrarResumenVenta(metodoPago, totalContado, enganche, saldoAFinanciar
         const textoFreq = periodicidadResumen === "semanal" ? "Semanales" : periodicidadResumen === "quincenal" ? "Quincenales" : "Mensuales";
         
         detalleMetodo = `
-            <p style="color:#2b6cb0; margin-bottom:5px;"><strong>CR0DITO CONFIGURADO</strong></p>
+            <p style="color:#2b6cb0; margin-bottom:5px;"><strong>CRÉDITO CONFIGURADO</strong></p>
             <div style="background:#ebf8ff; padding:12px; border-radius:8px; border: 1px solid #bee3f8;">
                 <p style="margin:3px 0;">Enganche inicial: <strong>${dinero(engancheReal)}</strong></p>
                 <p style="margin:3px 0;">Plazo: <strong>${plan.meses} meses</strong></p>
@@ -3148,14 +3148,24 @@ function generarLeyendaPagare(datosVenta, totalAPagar, esCompacta = false) {
     const cliente = datosVenta.cliente.nombre || "________________";
     const fecha = datosVenta.fecha;
 
+    // 🎟️ Política de pago anticipado: si el cliente liquida su cuenta
+    // dentro del plazo aquí pactado, tiene un beneficio -- en el plan de 1
+    // mes se le respeta el precio de contado real (sin el interés de ese
+    // plan); en plazos mayores recibe un cupón de saldo a favor. No se
+    // fija aquí el porcentaje exacto (se calcula con la política vigente
+    // al momento de liquidar, ver Simulador de Tasa y Pronto Pago) para no
+    // dejar en el contrato impreso una cifra que pueda quedar desactualizada.
+    const clausulaCupon = ` El cliente podrá acceder a la Política de Pago Anticipado vigente: si liquida su cuenta dentro del plazo aquí pactado, en el plan de 1 mes se le respeta el precio de contado real de la mercancía (sin el interés de este plan); en plazos mayores recibe un cupón de saldo a favor -- vigente 3 meses, aplicable en su siguiente compra -- calculado conforme a las reglas vigentes al momento de liquidar. Consulte el detalle y el monto estimado de su cupón en este mismo comprobante.`;
+
     if (esCompacta) {
-        return `PAGAR0: Yo ${cliente} me obligo a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)} conforme al calendario de pagos; incumplimiento genera interés moratorio del 2% mensual; firmado  en Santiago Cuaula Tlaxcala el ${fecha}.`;
+        return `PAGARÉ: Yo ${cliente} me obligo a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)} conforme al calendario de pagos; incumplimiento genera interés moratorio del 2% mensual; firmado  en Santiago Cuaula Tlaxcala el ${fecha}.${clausulaCupon}`;
     }
 
-    return `PAGAR0: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crédito otorgado, misma que cubriré en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarán intereses moratorios del 2% mensual sobre saldos insolutos; este pagaré se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligándome a cumplir en el domicilio del acreedor y sometiéndome para su interpretación y cumplimiento a la jurisdicción de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.`;
+    return `PAGARÉ: Yo ${cliente} reconozco deber y me obligo incondicionalmente a pagar a la orden de Roberto Escobedo Vega la cantidad de ${dinero(totalAPagar)}, correspondiente al crédito otorgado, misma que cubriré en las fechas y montos establecidos en el calendario de pagos adjunto; en caso de incumplimiento total o parcial, se generarán intereses moratorios del 2% mensual sobre saldos insolutos; este pagaré se suscribe en Santiago Cuaula Tlaxcala con fecha ${fecha}, obligándome a cumplir en el domicilio del acreedor y sometiéndome para su interpretación y cumplimiento a la jurisdicción de los tribunales del domicilio del acreedor, renunciando a cualquier otro fuero que pudiera corresponderme.${clausulaCupon}`;
 }
 
-// ===== GENERADOR DE TICKET T0RMICO (80MM) CON CALENDARIO LIMPIO =====
+
+// ===== GENERADOR DE TICKET TÉRMICO (80MM) CON CALENDARIO LIMPIO =====
 function generarTicketMediaHoja(datosVenta) {
     const folio = datosVenta.folio;
     const fechaActual = datosVenta.fecha;
@@ -3210,6 +3220,7 @@ function generarTicketMediaHoja(datosVenta) {
 
     // 3. Política de Liquidación Anticipada (TODOS LOS PLAZOS)
     let planesHTML = '';
+    let cuponAvisoHTML = '';
     if (datosVenta.metodo === "credito") {
         let saldoParaPlanes = (datosVenta.articulos || []).reduce(
             (sum, a) => sum + (a.precioContado || 0) * (a.cantidad || 1), 0
@@ -3227,11 +3238,34 @@ function generarTicketMediaHoja(datosVenta) {
                     <strong style="font-size:11px;">${dinero(p.total)}</strong>
                 </div>`;
         });
+
+        // 🎟️ Aviso del beneficio por pago anticipado, para el plan que
+        // realmente compró (no para todos los plazos de arriba). Usa el
+        // mismo motor que calcula el cupón real al momento de liquidar
+        // (_cxcCuponTopadoParaPlazo, cxc.js) para no duplicar la fórmula --
+        // si ese módulo no cargó por cualquier razón, se muestra el texto
+        // sin el monto estimado en vez de romper la impresión del ticket.
+        const mesesPlanElegido = Number(datosVenta.plan?.meses || 0);
+        if (mesesPlanElegido === 1) {
+            cuponAvisoHTML = `
+                <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:6px; padding:8px; margin:8px 0; font-size:10px; color:#065f46;">
+                    💵 <b>Plan de 1 mes:</b> si liquida su cuenta dentro del plazo pactado, se le respeta el precio de contado real de la mercancía (sin el interés de este plan) -- no genera cupón.
+                </div>`;
+        } else if (mesesPlanElegido > 1) {
+            const beneficioEstimado = (typeof window._cxcCuponTopadoParaPlazo === 'function')
+                ? window._cxcCuponTopadoParaPlazo(mesesPlanElegido, saldoParaPlanes, periodicidad, totalAPagar)
+                : 0;
+            const pctEstimado = (beneficioEstimado > 0.01 && totalAPagar > 0) ? Math.round((beneficioEstimado / totalAPagar) * 1000) / 10 : null;
+            cuponAvisoHTML = `
+                <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:6px; padding:8px; margin:8px 0; font-size:10px; color:#581c87;">
+                    🎟️ <b>Si paga a tiempo, le conviene:</b> si liquida su cuenta antes de que termine su plazo pactado (${mesesPlanElegido} meses), recibe un cupón de saldo a favor${pctEstimado ? ` estimado en ${dinero(beneficioEstimado)} (${pctEstimado}% del total financiado)` : ''}, aplicable en su siguiente compra. Vigente 3 meses -- no reembolsable en efectivo salvo autorización.
+                </div>`;
+        }
     }
 
     // LEYENDAS LEGALES DINÁMICAS (Como las grandes cadenas)
     let textoLegal = '';
-    const tituloTicketBase = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CR0DITO' : 'COMPROBANTE DE VENTA');
+    const tituloTicketBase = datosVenta.metodo === 'apartado' ? 'RECIBO DE APARTADO' : (datosVenta.metodo === 'credito' ? 'CONTRATO DE CRÉDITO' : 'COMPROBANTE DE VENTA');
     const tituloTicket = datosVenta.tipoComprobante || tituloTicketBase;
     const condicionesApartado = datosVenta.apartadoCondiciones || datosVenta.condiciones || _condicionesApartadoDefault();
     const fechaCompromisoApartado = datosVenta.apartadoFechaCompromiso || datosVenta.fechaCompromiso || "";
@@ -3244,9 +3278,9 @@ function generarTicketMediaHoja(datosVenta) {
     if (datosVenta.metodo === "credito") {
         textoLegal = generarLeyendaPagare(datosVenta, totalAPagar, false);
     } else if (datosVenta.metodo === "apartado") {
-        textoLegal = `<b>T0RMINOS DE APARTADO:</b><br>El cliente ${_escapeHtml(datosVenta.cliente.nombre)} entrega ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancía descrita. El saldo pendiente es ${dinero(datosVenta.saldoPendiente)}${fechaCompromisoApartado ? ` y deberá liquidarse a más tardar el ${_escapeHtml(fechaCompromisoApartado)}` : ""}. La mercancía queda bajo resguardo de Mueblería Mi Pueblito y se entrega únicamente tras liquidación total. El cliente acepta las condiciones impresas en este comprobante.`;
+        textoLegal = `<b>TÉRMINOS DE APARTADO:</b><br>El cliente ${_escapeHtml(datosVenta.cliente.nombre)} entrega ${dinero(datosVenta.enganche)} como anticipo para apartar la mercancía descrita. El saldo pendiente es ${dinero(datosVenta.saldoPendiente)}${fechaCompromisoApartado ? ` y deberá liquidarse a más tardar el ${_escapeHtml(fechaCompromisoApartado)}` : ""}. La mercancía queda bajo resguardo de Mueblería Mi Pueblito y se entrega únicamente tras liquidación total. El cliente acepta las condiciones impresas en este comprobante.`;
     } else {
-        textoLegal = `<b>T0RMINOS DE VENTA:</b><br>El cliente ${datosVenta.cliente.nombre} recibe la mercancía a su entera satisfacción, liquidada en su totalidad. Toda aclaración o garantía deberá tramitarse en tienda presentando este comprobante original.`;
+        textoLegal = `<b>TÉRMINOS DE VENTA:</b><br>El cliente ${datosVenta.cliente.nombre} recibe la mercancía a su entera satisfacción, liquidada en su totalidad. Toda aclaración o garantía deberá tramitarse en tienda presentando este comprobante original.`;
     }
 
     // 4. Estructura HTML del Ticket de 80mm
@@ -3320,9 +3354,10 @@ function generarTicketMediaHoja(datosVenta) {
         </div>
 
         ${datosVenta.metodo === "credito" ? `
-            <div class="centro negrita" style="background:#000; color:#fff; padding:4px; font-size:10px; margin-bottom:5px;">POLÍTICA DE LIQUIDACIN</div>
+            <div class="centro negrita" style="background:#000; color:#fff; padding:4px; font-size:10px; margin-bottom:5px;">POLÍTICA DE LIQUIDACIÓN</div>
             <div style="font-size:9px; text-align:center; margin-bottom:5px;">Total de pagarés si liquida en:</div>
             ${planesHTML}
+            ${cuponAvisoHTML}
 
             <div class="separador"></div>
             <div style="font-size:10px; padding:4px 0;">
@@ -3946,7 +3981,7 @@ function limpiarFiltrosReimpresion() {
 }
 
 // =====================================================================
-// MDULO DE AUDITORÍA CXC (MODIFICACIN DE VENTAS Y PAGAR0S)
+// MDULO DE AUDITORÍA CXC (MODIFICACIN DE VENTAS Y PAGARÉS)
 // SOLO ADMINISTRADORES
 // =====================================================================
 
@@ -4257,7 +4292,7 @@ function guardarAuditoriaDefinitiva() {
         }
     }
 
-    // 2. REESCRIBIR PAGAR0S
+    // 2. REESCRIBIR PAGARÉS
     pagaresSistema = pagaresSistema.filter(p => String(p.folio).toUpperCase() !== String(folio).toUpperCase());
     pagaresSistema = pagaresSistema.concat(window._auditPagaresActuales);
 
@@ -4658,7 +4693,7 @@ window.cancelarAuditoriaCxC = function(index, estadoAnterior) {
 };
 
 // =====================================================================
-// BUSCADOR UNIFICADO DE REIMPRESIN (CONTADO, CR0DITO Y APARTADOS)
+// BUSCADOR UNIFICADO DE REIMPRESIN (CONTADO, CRÉDITO Y APARTADOS)
 // =====================================================================
 
 window.renderReimprimirVenta = function() {
@@ -4768,7 +4803,7 @@ window.renderReimprimirVenta = function() {
         
         const cliente = item.cliente?.nombre || item.clienteNombre || item.nombre || 'Desconocido';
         const total = item.total || item.totalContadoOriginal || item.importeApartado || 0;
-        const etiquetas = { contado: 'CONTADO', credito: 'CR0DITO', apartado: 'APARTADO', abono_credito: 'ABONO CREDITO', abono_apartado: 'ABONO APARTADO', entrega_mcia: 'ENTREGA MCIA', devolucion_cancelacion: 'DEVOLUCION' };
+        const etiquetas = { contado: 'CONTADO', credito: 'CRÉDITO', apartado: 'APARTADO', abono_credito: 'ABONO CREDITO', abono_apartado: 'ABONO APARTADO', entrega_mcia: 'ENTREGA MCIA', devolucion_cancelacion: 'DEVOLUCION' };
         const tipo = etiquetas[item._origen] || item._origen.toUpperCase();
         
         let colorTipo = '#6b7280';
@@ -5167,7 +5202,7 @@ window.revisarVentaPendiente = function(index) {
         if (plazo > 0 || saldoFinanciado > 0) {
             detalleCreditoHTML = `
                 <div style="background:#fffbeb; border:1px solid #fcd34d; padding:12px; border-radius:8px; margin-bottom:15px; font-size:12px;">
-                    <label style="font-weight:bold; display:block; margin-bottom:8px; color:#92400e;">" AJUSTAR T0RMINOS DEL CR0DITO (Editable):</label>
+                    <label style="font-weight:bold; display:block; margin-bottom:8px; color:#92400e;">" AJUSTAR TÉRMINOS DEL CRÉDITO (Editable):</label>
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                         <div>
                             <label style="font-size:11px; color:#92400e;">Plazo (Pagos):</label>
@@ -5360,7 +5395,7 @@ window.revisarVentaPendiente = function(index) {
         }
     }, 0);
 
-    // Agregar listener para recalcular Valor Pagaré cuando se edite plazo o abono (CR0DITO)
+    // Agregar listener para recalcular Valor Pagaré cuando se edite plazo o abono (CRÉDITO)
     if (metodoPago === "credito") {
         setTimeout(() => {
             const plazoInput = document.getElementById('authPlazoCreditoAjuste');
