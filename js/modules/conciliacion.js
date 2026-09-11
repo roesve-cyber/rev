@@ -47,6 +47,7 @@ function renderConciliacionMSI() {
     let mensualidadesEnPeriodo = [];
     let totalEsperado = 0;
     let totalConciliado = 0;
+    let totalComisionesPeriodo = 0;
 
     cuentasMSI.forEach(cta => {
         if (cta.banco !== bancoSeleccionado) return;
@@ -56,6 +57,13 @@ function renderConciliacionMSI() {
                 const fechaPago = new Date(p.fecha + "T12:00:00");
                 
                 if (fechaPago >= fechaInicio && fechaPago <= fechaFin) {
+                    // 🏷️ Comisiones bancarias (agregadas desde "+ Comisión Bancaria" en
+                    // esta misma pantalla, ver guardarComisionBancaria) se guardan como
+                    // una cuentaMSI de 1 sola mensualidad (esComisionBancaria:true) para
+                    // reusar TODO el motor de deuda/pago/conciliación que ya existe para
+                    // tarjetas de crédito -- se distinguen aquí solo para mostrarlas
+                    // distinto (badge propio) y sumarlas aparte en el KPI.
+                    const esComision = cta.esComisionBancaria === true;
                     const item = {
                         id_ref: `${cta.id}_${p.n || p.numero}`,
                         parent_id: cta.id,
@@ -65,11 +73,13 @@ function renderConciliacionMSI() {
                         fecha: p.fecha,
                         concepto: cta.concepto || cta.producto,
                         monto: parseFloat(p.monto) || 0,
-                        conciliado: p.conciliado || false
+                        conciliado: p.conciliado || false,
+                        esComision
                     };
                     mensualidadesEnPeriodo.push(item);
                     totalEsperado += item.monto;
                     if (item.conciliado) totalConciliado += item.monto;
+                    if (esComision) totalComisionesPeriodo += item.monto;
                 }
             });
         }
@@ -93,6 +103,7 @@ function renderConciliacionMSI() {
                         📅 Periodo facturado: ${periodoStr} <span style="color:#0284c7; font-size:12px; margin-left:8px;">(Corte: Día ${diaCorte})</span>
                     </div>
                 </div>
+                <button onclick="window.abrirModalComisionBancaria('${bancoSeleccionado}')" style="padding:10px 16px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; border-radius:8px; cursor:pointer; font-weight:bold; font-size:13px; white-space:nowrap;">🏷️ + Comisión Bancaria</button>
             </div>
 
             <div style="display:flex; gap:15px; margin-bottom:15px; flex-wrap:wrap;">
@@ -116,6 +127,11 @@ function renderConciliacionMSI() {
                         <div style="font-size:12px; color:#166534; font-weight:bold; text-transform:uppercase;">Total Conciliado</div>
                         <div style="font-size:26px; font-weight:900; color:#15803d;">${fmtDinero(totalConciliado)}</div>
                     </div>
+                    <div style="background:#fffbeb; padding:20px; border-radius:12px; border-top:4px solid #d97706; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                        <div style="font-size:12px; color:#92400e; font-weight:bold; text-transform:uppercase;">Comisiones Bancarias en Periodo</div>
+                        <div style="font-size:26px; font-weight:900; color:#b45309;">${fmtDinero(totalComisionesPeriodo)}</div>
+                        <div style="font-size:11px; color:#92400e; margin-top:2px;">Ya se refleja como gasto financiero (RIF) en el Estado de Resultados</div>
+                    </div>
                 </div>
             </div>
 
@@ -133,13 +149,13 @@ function renderConciliacionMSI() {
                     </thead>
                     <tbody>
                         ${mensualidadesEnPeriodo.map(m => `
-                            <tr style="border-bottom: 1px solid #e2e8f0; background: ${m.conciliado ? '#f0fdf4' : 'white'}; transition: 0.2s;">
+                            <tr style="border-bottom: 1px solid #e2e8f0; background: ${m.conciliado ? '#f0fdf4' : (m.esComision ? '#fffbeb' : 'white')}; transition: 0.2s;">
                                 <td style="padding:12px; font-size:13px;">${fmtFecha(m.fecha)}</td>
                                 <td style="padding:12px; font-weight:bold; color:#1e293b;">${m.concepto}</td>
                                 <td style="padding:12px;">
-                                    <span style="background:#e0e7ff; color:#4338ca; padding:4px 8px; border-radius:20px; font-size:11px; font-weight:bold;">
-                                        Mes ${m.numero_ms} de ${m.total_ms}
-                                    </span>
+                                    ${m.esComision
+                                        ? `<span style="background:#fef3c7; color:#92400e; padding:4px 8px; border-radius:20px; font-size:11px; font-weight:bold;">🏷️ Comisión bancaria</span>`
+                                        : `<span style="background:#e0e7ff; color:#4338ca; padding:4px 8px; border-radius:20px; font-size:11px; font-weight:bold;">Mes ${m.numero_ms} de ${m.total_ms}</span>`}
                                 </td>
                                 <td style="padding:12px; text-align:right; font-weight:bold; color:#ef4444;">
                                     -${fmtDinero(m.monto)}
@@ -342,6 +358,109 @@ window.abrirModalReasignarBanco = function(cuentaId) {
     </div>`;
     
     document.body.insertAdjacentHTML('beforeend', html);
+};
+
+// --- COMISIONES BANCARIAS (tarjetas de crédito) ---
+// 🏷️ Se guardan como una cuentaMSI de UNA sola mensualidad (esComisionBancaria:
+// true) en vez de crear una tabla/mecánica aparte -- así heredan gratis todo
+// lo que ya existe para tarjetas de crédito: aparecen en "Deuda TDC a MSI"
+// del Balance General (_msiCalcularResumen las suma igual que cualquier
+// compra), se pagan solas cuando se cubre el corte mensual de esa tarjeta
+// (procesarPagoTarjetaGlobal ya barre TODO calendario pendiente del banco,
+// sin importar su origen) y se pueden reprogramar/reasignar/eliminar con los
+// mismos botones de esta pantalla. Lo único nuevo es que
+// finanzas-estados.js las reconoce por separado (esComisionBancaria:true)
+// para sumarlas como GASTO FINANCIERO (RIF) en el Estado de Resultados, en
+// vez de dejarlas invisibles como el resto de la deuda MSI (que solo pega al
+// Balance, no al Estado de Resultados, porque es financiamiento de mercancía
+// que ya se costea aparte vía kardex).
+window.abrirModalComisionBancaria = function(bancoPreseleccionado) {
+    document.querySelector('[data-modal="comision-bancaria"]')?.remove();
+    const tarjetasConfig = StorageService.get("tarjetasConfig", []);
+    const bancos = [...new Set([
+        ...tarjetasConfig.filter(t => !t.tipo || t.tipo === 'credito').map(t => t.banco),
+        ...StorageService.get("cuentasMSI", []).map(c => c.banco)
+    ].filter(Boolean))];
+    const opcionesBancos = bancos.map(b => `<option value="${b}" ${b === bancoPreseleccionado ? 'selected' : ''}>💳 ${b}</option>`).join('');
+    const hoyStr = typeof window.obtenerHoyInputMX === 'function' ? window.obtenerHoyInputMX() : new Date().toISOString().slice(0, 10);
+
+    const html = `
+    <div data-modal="comision-bancaria" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:28px; border-radius:16px; width:90%; max-width:380px; box-shadow:0 20px 25px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:#92400e;">🏷️ Agregar Comisión Bancaria</h3>
+            <p style="font-size:12px; color:#64748b; margin-bottom:20px;">Anualidad, comisión por manejo de cuenta, IVA de comisión u otro cargo del banco que NO sea una mensualidad MSI. Se suma a la deuda de la tarjeta y se refleja como gasto financiero en el Estado de Resultados.</p>
+
+            <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:5px;">Tarjeta / Banco:</label>
+            <select id="comisionBanco" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:14px; font-weight:bold; box-sizing:border-box;">
+                <option value="">-- Elige un banco --</option>
+                ${opcionesBancos}
+            </select>
+
+            <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:5px;">Monto:</label>
+            <input type="number" id="comisionMonto" min="0.01" step="0.01" placeholder="0.00" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:14px; box-sizing:border-box;">
+
+            <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:5px;">Fecha en que se causó:</label>
+            <input type="date" id="comisionFecha" value="${hoyStr}" style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:14px; box-sizing:border-box;">
+
+            <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:5px;">Motivo (opcional):</label>
+            <input type="text" id="comisionMotivo" placeholder="Ej. Anualidad, manejo de cuenta..." style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:20px; box-sizing:border-box;">
+
+            <div style="display:flex; gap:10px;">
+                <button onclick="window.guardarComisionBancaria()" style="flex:2; padding:12px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">💾 Guardar</button>
+                <button onclick="this.closest('[data-modal]').remove()" style="flex:1; padding:12px; background:#f1f5f9; border:none; border-radius:8px; cursor:pointer; color:#475569; font-weight:bold;">Cancelar</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.guardarComisionBancaria = function() {
+    const banco = document.getElementById('comisionBanco')?.value;
+    const monto = parseFloat(document.getElementById('comisionMonto')?.value);
+    const fechaStr = document.getElementById('comisionFecha')?.value;
+    const motivo = document.getElementById('comisionMotivo')?.value.trim() || '';
+
+    if (!banco) return alert('⚠️ Selecciona a qué tarjeta/banco pertenece la comisión.');
+    if (!Number.isFinite(monto) || monto <= 0) return alert('⚠️ Ingresa un monto válido.');
+    if (!fechaStr) return alert('⚠️ Selecciona la fecha en que se causó la comisión.');
+
+    const concepto = `Comisión bancaria${motivo ? ' - ' + motivo : ''}`;
+    if (!confirm(`⚠️ COMISIÓN BANCARIA\n\nBanco: ${banco}\nMonto: ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto)}\nConcepto: ${concepto}\n\nSe sumará a la deuda de esta tarjeta y aparecerá como gasto financiero en el Estado de Resultados. ¿Confirmar?`)) return;
+
+    const id = Date.now();
+    const cuentasMSI = StorageService.get('cuentasMSI', []);
+    cuentasMSI.push({
+        id,
+        compraId: id,
+        banco,
+        concepto,
+        producto: concepto,
+        total: monto,
+        meses: 1,
+        cuotaMensual: monto,
+        fecha: fechaStr,
+        fechaCompra: fechaStr,
+        pagosRealizados: 0,
+        esComisionBancaria: true,
+        calendario: [{ n: 1, fecha: fechaStr, monto, estado: 'Pendiente', montoAbonado: 0, conciliado: false }]
+    });
+    StorageService.set('cuentasMSI', cuentasMSI);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'COMISION_BANCARIA_AGREGADA',
+            modulo: 'Bancos', entidad: 'cuentaMSI', entidadId: id,
+            detalle: `${concepto} — ${banco}`,
+            monto, severidad: 'riesgo', datos: { banco, fecha: fechaStr, motivo }
+        });
+    }
+
+    document.querySelector('[data-modal="comision-bancaria"]')?.remove();
+    window._filtroMSIBanco = banco;
+    alert('✅ Comisión bancaria registrada.');
+    if (typeof renderConciliacionMSI === 'function') renderConciliacionMSI();
+    if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
 };
 
 window.ejecutarReasignacionBanco = function(cuentaId) {

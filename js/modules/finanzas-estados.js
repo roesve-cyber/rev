@@ -463,6 +463,20 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         totalGastos += monto;
     });
 
+    // 🏷️ Comisiones bancarias de tarjetas de crédito (conciliacion.js, botón
+    // "🏷️ + Comisión Bancaria" en Conciliación MSI) -- se guardan como una
+    // cuentaMSI de 1 sola mensualidad con esComisionBancaria:true (así
+    // reusan el motor de deuda/pago de tarjetas sin tocarlo). NIF B-3: es
+    // gasto financiero (RIF), no gasto de operación -- mismo criterio que
+    // los gastos categorizados "interés"/"comisión bancaria" arriba. Se
+    // reconoce en base acumulada (fecha en que se causó la comisión, no la
+    // fecha en que se cubre el corte mensual de la tarjeta).
+    const cuentasMSIParaComisiones = StorageService.get('cuentasMSI', []);
+    const comisionesBancariasTarjeta = cuentasMSIParaComisiones
+        .filter(c => c.esComisionBancaria === true && _efEnRango(c.fechaCompra || c.fecha, desde, hasta))
+        .reduce((s, c) => s + (Number(c.total) || 0), 0);
+    gastosFinancieros += comisionesBancariasTarjeta;
+
     // 💸 "Otros ingresos y gastos" (NIF B-3): partidas ajenas a la operación
     // normal del negocio y que no encajan ni en Ventas ni en RIF -- el botón
     // "💸 Movimiento Manual" del Reporte de Flujo (reportes.js,
@@ -589,7 +603,7 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         totalGananciaPerdidaModificacionInventario,
         gastosPorCategoria, totalGastos, incobrables, incobrablesPrestamos, incobrablesCxC, utilidadOperacion,
         otrosIngresos, otrosGastos, otrosIngresosYGastos,
-        ingresosFinancieros, gastosFinancieros,
+        ingresosFinancieros, gastosFinancieros, comisionesBancariasTarjeta,
         cuponesEmitidosEnPeriodo, cuponesRecuperadosEnPeriodo,
         cuponesVencidosEnPeriodo, cuponesCanceladosEnPeriodo,
         rif,
@@ -1060,7 +1074,7 @@ function renderEstadosFinancieros() {
         <p style="font-size:12px;color:#6b7280;margin:6px 0;">Intereses cobrados por vender a crédito, menos intereses/comisiones pagados (si categorizas un gasto con "interés", "financiero" o "comisión bancaria" en Gastos Operativos, se cuenta aquí en vez de en gastos operativos). Así lo separa la NIF B-3: no es parte de la operación del negocio.</p>
         <table style="width:100%;border-collapse:collapse;">
             <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;">+ Ingresos financieros (intereses cobrados)</td><td style="padding:6px 8px;text-align:right;">${_efDinero(er.ingresosFinancieros)}</td></tr>
-            <tr><td style="padding:6px 8px;color:#dc2626;">– Gastos financieros (intereses pagados)</td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.gastosFinancieros)}</td></tr>
+            <tr><td style="padding:6px 8px;color:#dc2626;">– Gastos financieros (intereses pagados, incluye comisiones bancarias de tarjetas de crédito${er.comisionesBancariasTarjeta > 0 ? `: ${_efDinero(er.comisionesBancariasTarjeta)}` : ''})<span title="Incluye lo capturado en Gastos con categoría 'interés'/'financiero'/'comisión bancaria', más las comisiones agregadas desde Bancos → Conciliación MSI → 🏷️ Comisión Bancaria." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.gastosFinancieros)}</td></tr>
             <tr><td style="padding:6px 8px;color:#dc2626;">– Cupones de pronto pago emitidos<span title="NIF D-1: contraprestación variable de la venta a crédito original. Se reconoce como pasivo por reembolso al momento en que el monto se vuelve cierto y conocido (liquidación anticipada)." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#dc2626;">${_efDinero(er.cuponesEmitidosEnPeriodo)}</td></tr>
             <tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:6px 8px;color:#059669;">+ Cupones recuperados (vencidos/cancelados sin canjear)<span title="NIF D-1: remedición del pasivo por reembolso a $0 cuando ya no se debe (breakage) -- vencimiento natural o cancelación administrativa." style="cursor:help;"> ℹ️</span></td><td style="padding:6px 8px;text-align:right;color:#059669;">${_efDinero(er.cuponesRecuperadosEnPeriodo)}</td></tr>
         </table>
