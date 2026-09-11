@@ -54,20 +54,12 @@ function renderCotizaciones() {
 }
 
 function _foliosCot() {
-    const hoy = new Date();
-    const ymd = hoy.getFullYear().toString() +
-        String(hoy.getMonth() + 1).padStart(2, '0') +
-        String(hoy.getDate()).padStart(2, '0');
-    
-    const lista = StorageService.get('cotizaciones', []);
-    const foliosHoy = lista.filter(c => c.folio.startsWith('COT-' + ymd));
-    const ultimoNum = foliosHoy.reduce((max, c) => {
-        const num = parseInt(c.folio.split('-')[2]);
-        return num > max ? num : max;
-    }, 0);
-    
-    const seq = String(ultimoNum + 1).padStart(4, '0');
-    return 'COT-' + ymd + '-' + seq;
+    // 🛡️ Migrado de folio por fecha (COT-YYYYMMDD-NNNN) al motor
+    // consecutivo central (COT-00001), igual que ventas/devoluciones/etc.
+    // Ver js/services/folio-service.js.
+    return window.generarFolioSistema
+        ? window.generarFolioSistema('COT')
+        : 'COT-TMP-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
 const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {

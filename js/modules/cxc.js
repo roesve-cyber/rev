@@ -14,7 +14,21 @@
 // 🛡️ Fecha FIJA (no "new Date()") -- si se recalculara en cada carga de
 // página, el corte se movería solo y nunca habría ventas "nuevas" que
 // califiquen.
+// 🛡️ OBSOLETO desde el cambio a folio consecutivo (VTA-00001...): el corte
+// de "venta nueva" ya NO usa esta fecha, usa el formato del folio (ver
+// _cxcFolioEsConsecutivoNuevo abajo). Se deja esta constante sin borrar
+// solo para no perder el rastro histórico de la decisión original.
 const CUPONES_FECHA_INICIO = "2026-08-31T00:00:00.000Z";
+
+// 🎟️ Reemplaza el corte por fecha: una "venta nueva" (elegible para cupón
+// de pronto pago) es aquella cuyo folio ya sigue el formato consecutivo
+// nuevo (ej. "VTA-00001"). Las ventas con el folio viejo (con timestamp,
+// dispositivo y sufijo aleatorio) o con un folio de emergencia ("-TMP-",
+// ver folio-service.js) quedan fuera, igual que antes quedaban las
+// vendidas antes de CUPONES_FECHA_INICIO.
+function _cxcFolioEsConsecutivoNuevo(folio) {
+    return /^VTA-\d{5}$/.test(String(folio || ''));
+}
 
 // 🎟️ Monto EXACTO del cupón de pronto pago para UN plazo específico (sep
 // 2026, decisión de Roberto -- corrige un error mío anterior). NO es un %
@@ -165,7 +179,7 @@ function _cxcEstadoPlazoCuenta(cuenta) {
     // revés (mes/día invertidos), pudiendo clasificar mal una venta vieja
     // como nueva o viceversa. _cxcFechaVentaDate ya sabe parsear esto bien
     // (usa parseFechaMX/parseFechaMXOrNull).
-    const ventaEsNueva = !!(cuenta.fechaVenta && _cxcFechaVentaDate(cuenta) >= new Date(CUPONES_FECHA_INICIO));
+    const ventaEsNueva = _cxcFolioEsConsecutivoNuevo(cuenta.folio);
     // 🛡️ EXCEPCIÓN plan de 1 mes: no genera cupón (ver _cxcEvaluarPoliticaPagoAnticipado,
     // tipo 'contado_1_mes') -- se le respeta precio de contado en su lugar.
     const esPlan1Mes = mesesPlan === 1;
@@ -2145,7 +2159,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         // se decide si se emite el cupón -- un error aquí podía emitir
         // cupón a una cuenta vieja, o negarlo a una nueva, según cómo
         // cayera la fecha mal interpretada.
-        const ventaEsNueva = cuenta.fechaVenta && _cxcFechaVentaDate(cuenta) >= new Date(CUPONES_FECHA_INICIO);
+        const ventaEsNueva = _cxcFolioEsConsecutivoNuevo(cuenta.folio);
         const beneficioTxt = esContado1Mes
             ? `\nPlan de 1 mes: no genera cupón -- se cobra precio de contado real (sin el interés del plan).`
             : (politicaAbono.beneficio > 0.01

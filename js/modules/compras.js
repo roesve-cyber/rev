@@ -4083,7 +4083,7 @@ function guardarCompraDirectaFinal() {
     let movimientosInventario = StorageService.get("movimientosInventario", []);
 
     const idCompraUnico = Date.now();
-    const folioCompraDirecta = window.generarFolioSistema ? window.generarFolioSistema("CD") : `CD-${idCompraUnico}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const folioCompraDirecta = window.generarFolioSistema ? window.generarFolioSistema("COM") : `COM-TMP-${idCompraUnico}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     let avisoActualizacion = "";
 
     arts.forEach((art, index) => {
@@ -5185,7 +5185,7 @@ window.marcarConsignacionVendida = function(idConsig) {
     if (folioVentaOrigen && _consigReporteVentaExiste({ consignacionId: c.id, folioVenta: folioVentaOrigen })) {
         return alert("Esta venta de consignacion ya fue reportada. No se generara otra cuenta por pagar.");
     }
-    const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("RCON") : `RCON-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("CON") : `CON-TMP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     const fechaActual = new Date();
 
@@ -6297,7 +6297,7 @@ window.marcarConsignacionVendida = function(idConsig) {
     if (folioVentaOrigen && _consigReporteVentaExiste({ consignacionId: c.id, folioVenta: folioVentaOrigen })) {
         return alert("Esta venta de consignacion ya fue reportada. No se generara otra cuenta por pagar.");
     }
-    const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("RCON") : `RCON-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const folioReporteConsignacion = window.generarFolioSistema ? window.generarFolioSistema("CON") : `CON-TMP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const fechaVencimientoConsignacion = new Date(fechaPagoInput + "T12:00:00");
     const fechaActual = new Date();
 

@@ -2365,7 +2365,7 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
         montoVentaFinal = enganche + (planElegido.total || 0);
     }
 
-    const folioVenta = window.generarFolioSistema ? window.generarFolioSistema("V") : "V-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7).toUpperCase();
+    const folioVenta = window.generarFolioSistema ? window.generarFolioSistema("VTA") : "VTA-TMP-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7).toUpperCase();
 
     // --- CORRECCIN DE FECHA ---
     const inputFechaEl = document.getElementById("inputFechaVenta");
@@ -4314,7 +4314,7 @@ function generarValeEntrega(datosVenta, articulosAEntregar, opciones = {}) {
     const folioVenta = datosVenta.folio || datosVenta.folioVenta || datosVenta.folioSalida || "S/F";
     const fechaIso = opciones.fechaIso || datosVenta.fechaIso || window.localISO?.(new Date()) || new Date().toISOString();
     const fechaEntrega = opciones.fechaEntrega || datosVenta.fecha || (window.formatearFechaMX ? window.formatearFechaMX(new Date(fechaIso)) : new Date(fechaIso).toLocaleString("es-MX"));
-    const folioDocumento = opciones.folioDocumento || datosVenta.folioDocumento || (window.generarFolioSistema ? window.generarFolioSistema("ENT") : `ENT-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`);
+    const folioDocumento = opciones.folioDocumento || datosVenta.folioDocumento || (window.generarFolioSistema ? window.generarFolioSistema("ENT") : `ENT-TMP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`);
     const cliente = datosVenta.cliente || {};
     const receptorNombre = opciones.receptorNombre || datosVenta.receptorNombre || cliente.nombre || "";
     const identificacionReceptor = opciones.identificacionReceptor || datosVenta.identificacionReceptor || "";
@@ -6553,7 +6553,7 @@ function _cancelRecalcularCredito(cuenta) {
 }
 
 function generarComprobanteDevolucionCancelacion({ tipo, referencia, clienteNombre, monto, cuenta, motivo, folioDoc: folioDocExistente, fechaIso, registrar = true }) {
-    const folioDoc = folioDocExistente || (window.generarFolioSistema ? window.generarFolioSistema("DEV") : `DEV-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`);
+    const folioDoc = folioDocExistente || (window.generarFolioSistema ? window.generarFolioSistema("DEV") : `DEV-TMP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`);
     const fechaRegistro = fechaIso || _cancelIsoAhora();
     const fecha = window.formatearFechaMX ? window.formatearFechaMX(new Date(fechaRegistro)) : new Date(fechaRegistro).toLocaleString('es-MX');
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><style>

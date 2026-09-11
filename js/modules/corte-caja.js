@@ -1144,7 +1144,7 @@
             .map(input => ({ denominacion: Number(input.dataset.denom), cantidad: Number(input.value || 0) }))
             .filter(d => d.cantidad > 0);
         const usuario = document.getElementById('nombreUsuarioActivo')?.textContent?.trim() || 'Usuario';
-        const folio = window.generarFolioSistema ? window.generarFolioSistema("CORTE") : `CORTE-${fechaKey(new Date()).replace(/-/g, '')}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+        const folio = window.generarFolioSistema ? window.generarFolioSistema("COR") : `COR-TMP-${fechaKey(new Date()).replace(/-/g, '')}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 
         return {
             folio,
