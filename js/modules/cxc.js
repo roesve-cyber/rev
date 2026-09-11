@@ -488,6 +488,45 @@ function _cxcEmitirCuponBeneficio(cuenta, folio, montoBeneficio, motivo) {
     return cupon;
 }
 
+// 🆕 Registro explícito de condonaciones por política de pago anticipado
+// SIN cupón (plan de 1 mes, o ventas vigentes de antes del cambio a
+// cupones). Antes esto no dejaba ningún rastro: _cxcEvaluarPoliticaPagoAnticipado
+// calculaba el monto correcto y la cuenta se liquidaba, pero el ingreso
+// financiero de la venta ya se había contado completo en el Estado de
+// Resultados desde el día de la venta -- sin este registro, no había forma
+// de restar ese ingreso nunca reconocido de verdad. Mismo patrón que
+// _cxcEmitirCuponBeneficio, pero sin cupón: es dinero que simplemente nunca
+// se va a cobrar, no saldo a favor.
+function _cxcRegistrarCondonacionPolitica(cuenta, folio, montoCondonado, motivo, fechaIso) {
+    if (!cuenta || Number(montoCondonado || 0) <= 0.01) return null;
+    const condonaciones = StorageService.get("condonacionesPolitica", []);
+    const registro = {
+        id: `condona_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        folioOrigen: folio,
+        clienteId: cuenta.clienteId || cuenta.cliente?.id || null,
+        clienteNombre: _cxcNombreClienteVigente(cuenta),
+        monto: Number(montoCondonado),
+        motivo: motivo || 'Condonación por política de pago anticipado (sin cupón)',
+        fecha: fechaIso || (window.localISO ? window.localISO(new Date()) : new Date().toISOString())
+    };
+    condonaciones.push(registro);
+    StorageService.set("condonacionesPolitica", condonaciones);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'CONDONACION_POLITICA_PAGO',
+            modulo: 'CxC',
+            entidad: 'Condonacion',
+            entidadId: registro.id,
+            detalle: `Se condonó ${_cxcDinero(montoCondonado)} a ${registro.clienteNombre} por liquidación anticipada (${registro.motivo}). Folio ${folio}.`,
+            monto: Number(montoCondonado),
+            severidad: 'normal',
+            datos: { registro }
+        });
+    }
+    return registro;
+}
+
 // API de consulta/aplicación -- pensada para que el flujo de venta
 // (contado/crédito/apartado) la use al capturar enganche o pago. La
 // aplicación de un cupón NUNCA mueve movimientosCaja ni cuentasEfectivo/
@@ -2044,6 +2083,8 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
     let montoFinal = montoAbonoInput;
     let liquidacionPorPolitica = false;
     let cuponEmitido = null; // 🎟️ se llena si el beneficio de esta liquidación se convierte en cupón
+    let montoCondonadoPolitica = 0; // 🆕 monto que nunca se va a cobrar, cuando no hay cupón
+    let motivoCondonacionPolitica = '';
 
     const fechaClaveAbono = _cxcFechaClave(fechaAbonoRaw || fechaObj);
     const abonosRegistradosDia = (cuenta.abonos || []).filter(ab =>
@@ -2128,6 +2169,17 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
             cuponEmitido = (politicaAbono.beneficio > 0.01 && ventaEsNueva)
                 ? _cxcEmitirCuponBeneficio(cuenta, folio, politicaAbono.beneficio, `Pago anticipado dentro de plazo (${politicaAbono.porcentajeCupon}% del total financiado)`)
                 : null;
+            // 🛡️ CORREGIDO: tipoPolitica se usaba más abajo sin declarar --
+            // se declara aquí, junto con el resto del bloque que la usa.
+            const tipoPolitica = esContado1Mes ? 'Plan de 1 mes (precio de contado, sin cupón)' : 'Pago dentro del plazo pactado';
+            // 🆕 Monto condonado (sin cupón) para el Estado de Resultados:
+            // el ingreso financiero de esta venta ya se contó completo desde
+            // el día de la venta -- si no hay cupón, esta diferencia nunca
+            // se va a cobrar y hay que dejar rastro para poder restarla.
+            montoCondonadoPolitica = (!cuponEmitido) ? Math.max(0, Number(saldoActual || 0) - Number(politicaAbono.montoLiquidacion || 0)) : 0;
+            motivoCondonacionPolitica = esContado1Mes
+                ? 'Plan de 1 mes liquidado a precio de contado (sin cupón)'
+                : 'Cuenta vigente (de antes del cambio a cupones) liquidada dentro de plazo (sin cupón)';
             // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
             // el descuento de pronto pago aplicado.
             if (typeof notificarBovedaAutorizacion === 'function') {
@@ -2173,7 +2225,12 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         // 🎟️ Si este abono liquidó la cuenta y generó un cupón, se guarda su
         // id aquí -- si el abono se corrige o se elimina después por
         // auditoría, hay que poder encontrar y anular ese cupón también.
-        cuponEmitidoId: cuponEmitido?.id || null
+        cuponEmitidoId: cuponEmitido?.id || null,
+        // 🆕 Igual para la condonación sin cupón -- el monto y motivo viajan
+        // hasta ejecutarAbonoAutorizadoReal, que es donde se registra de
+        // verdad (solo si el abono realmente se aplica, no si se rechaza).
+        montoCondonadoPolitica: montoCondonadoPolitica,
+        motivoCondonacionPolitica: motivoCondonacionPolitica
     };
 
     if (!esDirecto) {
@@ -2609,6 +2666,19 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 
     if (typeof window.registrarComisionAbono === 'function' && a.vendedorId) {
         window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId);
+    }
+
+    // 🆕 Registrar la condonación (si la hay) SOLO ahora que el abono ya se
+    // aplicó de verdad -- no en el momento de capturarlo, para no dejar un
+    // registro huérfano si el abono se llega a rechazar en la Bóveda.
+    if (a.liquidacionPorPolitica && Number(a.montoCondonadoPolitica || 0) > 0.01) {
+        _cxcRegistrarCondonacionPolitica(
+            resultadoTx.resultado?.cuentaAct || { clienteId: null, clienteNombre: a.clienteNombre },
+            a.folioCXC,
+            a.montoCondonadoPolitica,
+            a.motivoCondonacionPolitica,
+            a.fechaAbonoIso
+        );
     }
 
     // ── Marcar como aprobado en la lista local persistente ────────────────
