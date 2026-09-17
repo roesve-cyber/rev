@@ -16,6 +16,10 @@ const StorageService = {
     _syncRemotoEnCurso: null,
     _syncRemotoTimer: null,
     _syncTimers: {}, // <-- AGREGAR ESTO PARA CONTROLAR EL TRÁFICO A FIREBASE
+    // 🛡️ Espejo de qué valor/timestamp está esperando cada _syncTimers[key],
+    // para que _flushSyncPendiente() pueda dispararlo de inmediato sin
+    // depender de que el setTimeout llegue a cumplirse (ver set()).
+    _syncPendienteData: {},
 
     // Claves que NO deben considerarse tablas de base de datos
     _clavesIgnoradas: new Set([
@@ -876,43 +880,79 @@ const StorageService = {
                 clearTimeout(this._syncTimers[key]);
             }
 
+            // 🛡️ Guardamos qué se va a subir y con qué timestamp, aparte del
+            // propio setTimeout -- así _flushSyncPendiente() (ver visibilitychange/
+            // pagehide más abajo) puede disparar esta MISMA subida de inmediato,
+            // sin duplicar la lógica ni esperar los 1.5s si la pestaña está a
+            // punto de cerrarse o pasar a segundo plano.
+            this._syncPendienteData[key] = { value, ts: tsAhora };
+
             // Programamos el nuevo envío con 1.5 segundos de espera
             this._syncTimers[key] = setTimeout(() => {
-                const ts = this._cache[`_ts_${key}`] || Date.now();
-
-                if (this._esTablaCriticaVacia(key, value)) {
-                    console.warn(`Firebase protegido: no se sube ${key} vacia.`);
-                    return;
-                }
-
-                // Tablas configuradas como "registro individual" (pagaresSistema, cortesCaja):
-                // en vez de reescribir un documento gigante con todo el arreglo, se sube SOLO
-                // lo que cambió, un documento por registro, en lotes.
-                if (this._tablasRegistroIndividual[key]) {
-                    this._sincronizarTablaPorRegistro(key, value, ts)
-                        .then(() => this._marcarCambioRemoto(key, ts))
-                        .catch(e => this._notificarFalloSync(key, e));
-                    return;
-                }
-
-                try {
-                    this._subirTablaAFirestore(key, value, ts);
-                    // 🛡️ Espejo público saneado del catálogo: "productos" trae el
-                    // costo real embebido (posData/productos ya NO es de lectura
-                    // pública, ver firestore.rules). catalogo.html es una vitrina
-                    // sin sesión, así que necesita SU PROPIA copia — sin costo ni
-                    // ningún otro campo interno — en un documento separado.
-                    if (key === 'productos') {
-                        this._subirCatalogoPublico(value, ts);
-                    }
-                } catch (e) {
-                    console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
-                }
+                this._ejecutarSyncPendiente(key);
             }, 1500); // 1.5 segundos de "respiro"
         }
 
         return dbPromise;
     },
+
+    // Cuerpo real de la subida a Firestore para una tabla con debounce
+    // pendiente -- extraído de set() para que tanto el setTimeout normal
+    // como el flush de emergencia (_flushSyncPendiente) llamen exactamente
+    // el mismo código, sin duplicar la lógica de registro-individual vs.
+    // documento único ni el blindaje de "tabla crítica vacía".
+    _ejecutarSyncPendiente(key) {
+        const pendiente = this._syncPendienteData[key];
+        delete this._syncTimers[key];
+        delete this._syncPendienteData[key];
+        if (!pendiente) return;
+        const { value, ts } = pendiente;
+
+        if (this._esTablaCriticaVacia(key, value)) {
+            console.warn(`Firebase protegido: no se sube ${key} vacia.`);
+            return;
+        }
+
+        // Tablas configuradas como "registro individual" (pagaresSistema, cortesCaja):
+        // en vez de reescribir un documento gigante con todo el arreglo, se sube SOLO
+        // lo que cambió, un documento por registro, en lotes.
+        if (this._tablasRegistroIndividual[key]) {
+            this._sincronizarTablaPorRegistro(key, value, ts)
+                .then(() => this._marcarCambioRemoto(key, ts))
+                .catch(e => this._notificarFalloSync(key, e));
+            return;
+        }
+
+        try {
+            this._subirTablaAFirestore(key, value, ts);
+            // 🛡️ Espejo público saneado del catálogo: "productos" trae el
+            // costo real embebido (posData/productos ya NO es de lectura
+            // pública, ver firestore.rules). catalogo.html es una vitrina
+            // sin sesión, así que necesita SU PROPIA copia — sin costo ni
+            // ningún otro campo interno — en un documento separado.
+            if (key === 'productos') {
+                this._subirCatalogoPublico(value, ts);
+            }
+        } catch (e) {
+            console.warn("Firebase rechazó el dato para sincronización. Se conserva localmente.", e);
+        }
+    },
+
+    // 🛡️ Flush de emergencia: dispara YA MISMO cualquier subida a Firebase que
+    // estuviera esperando su debounce de 1.5s, en vez de arriesgarse a perderla
+    // si la pestaña se cierra, pasa a segundo plano, o el dispositivo se queda
+    // sin batería/conexión antes de que el setTimeout normal dispare. Se llama
+    // desde visibilitychange (oculta) y pagehide -- ver el bloque de listeners
+    // al fondo de este archivo. Nunca lanza (best-effort): si Firestore ya no
+    // responde a estas alturas, el dato de todos modos ya está a salvo en
+    // IndexedDB local (paso 3 de set()) para la próxima sincronización.
+    _flushSyncPendiente() {
+        Object.keys(this._syncTimers).forEach(key => {
+            clearTimeout(this._syncTimers[key]);
+            this._ejecutarSyncPendiente(key);
+        });
+    },
+
 
     // 🛡️ AUDITORÍA: lista blanca explícita de campos que el catálogo público
     // (catalogo.html, sin sesión) puede ver. Cualquier campo nuevo que se le
@@ -1021,6 +1061,7 @@ const StorageService = {
         if (this._syncTimers[key]) {
             clearTimeout(this._syncTimers[key]);
             delete this._syncTimers[key];
+            delete this._syncPendienteData[key];
         }
 
         const tsAhora = Date.now();
@@ -1178,6 +1219,7 @@ const StorageService = {
         if (this._syncTimers[key]) {
             clearTimeout(this._syncTimers[key]);
             delete this._syncTimers[key];
+            delete this._syncPendienteData[key];
         }
 
         const cambiosLimpios = this._limpiarParaFirestore(cambios, true);
@@ -1868,8 +1910,27 @@ const StorageService = {
 
         window.addEventListener('focus', () => this.solicitarSyncRemoto('focus', 3000));
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) this.solicitarSyncRemoto('visibility', 1500);
+            if (!document.hidden) {
+                this.solicitarSyncRemoto('visibility', 1500);
+            } else {
+                // 🛡️ La pestaña se va a segundo plano (o el usuario cambió de
+                // app en el celular) -- es el momento más confiable para
+                // disparar cualquier subida a Firebase que seguía esperando
+                // su debounce de 1.5s, en vez de arriesgarnos a que el
+                // dispositivo nunca vuelva a esta pestaña. 'visibilitychange'
+                // es el evento recomendado para esto (a diferencia de
+                // 'beforeunload', SÍ dispara de forma confiable en móvil).
+                this._flushSyncPendiente();
+            }
         });
+        // 🛡️ Respaldo para el caso de escritorio/cierre de pestaña directo:
+        // 'pagehide' dispara igual con navegación normal y con bfcache (a
+        // diferencia de 'unload'), así que es seguro usarlo junto con
+        // visibilitychange sin arriesgar duplicar nada -- _ejecutarSyncPendiente
+        // ya borra el timer pendiente antes de subir, así que un flush que
+        // ya se disparó por visibilitychange simplemente no encuentra nada
+        // que hacer aquí.
+        window.addEventListener('pagehide', () => this._flushSyncPendiente());
         window.addEventListener('online', () => this.solicitarSyncRemoto('online', 1000));
         setInterval(() => this.solicitarSyncRemoto('intervalo', 1000), 60000);
     }
