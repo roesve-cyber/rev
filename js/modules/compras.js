@@ -732,7 +732,12 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
     // set() a propósito, NO pushAtomo.
     const movs = StorageService.get('movimientosCaja', []);
     movs.push(movimientoEgreso);
-    StorageService.set('movimientosCaja', movs);
+    // 🛡️ setInmediato (sin esperar aquí -- _egresarCuenta sigue siendo
+    // síncrona para no romper a sus llamadores) en vez de set(): dispara la
+    // subida a Firestore de inmediato en lugar de esperar 1.5s de debounce,
+    // reduciendo la ventana en la que este movimiento de caja solo existe
+    // en este dispositivo (ver auditoría de Firebase).
+    StorageService.setInmediato('movimientosCaja', movs);
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'EGRESO_CUENTA',
@@ -792,7 +797,13 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
     // tabla de "registro individual", set() la enruta bien y pushAtomo no.
     const movs = StorageService.get('movimientosCaja', []);
     movs.push(movimientoIngreso);
-    StorageService.set('movimientosCaja', movs);
+    // 🛡️ setInmediato (sin esperar aquí -- _ingresarCuenta sigue siendo
+    // síncrona para no romper a sus 14 llamadores) en vez de set(): dispara
+    // la subida a Firestore de inmediato en lugar de esperar 1.5s de
+    // debounce, reduciendo la ventana en la que este ingreso (venta o
+    // abono cobrado) solo existe en este dispositivo (ver auditoría de
+    // Firebase).
+    StorageService.setInmediato('movimientosCaja', movs);
 
     if (window.AuditService?.log) {
         window.AuditService.log({

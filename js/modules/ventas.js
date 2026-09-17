@@ -2910,8 +2910,19 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
             window.CxcNotas.agregarComentario(folioVenta, `Observación registrada al crear la venta a crédito: ${observacionCarteraInicial}`, { clienteId: datosVentaP.cliente.id });
         }
         pagaresSistema.push(...pagaresNuevos);
-        StorageService.set("cuentasPorCobrar", cuentasPorCobrar);
-        StorageService.set("pagaresSistema", pagaresSistema);
+        // 🛡️ setInmediato en vez de set(): la cuenta y los pagarés de una
+        // venta a crédito son justo el caso que puede perderse si el
+        // dispositivo se cierra/pierde conexión dentro de los 1.5s de
+        // debounce normales (ver auditoría de Firebase) -- aquí sí esperamos
+        // la confirmación real de Firestore antes de seguir. Si falla, la
+        // venta ya se registró localmente (mercancía y caja ya se aplicaron,
+        // igual que el resto de este flujo), así que solo se avisa para que
+        // se revise manualmente en vez de abortar a medio camino.
+        const _cxcGuardadoOk = await StorageService.setInmediato("cuentasPorCobrar", cuentasPorCobrar);
+        const _pagaresGuardadoOk = await StorageService.setInmediato("pagaresSistema", pagaresSistema);
+        if (_cxcGuardadoOk?.subioANube === false || _pagaresGuardadoOk?.subioANube === false) {
+            console.warn(`⚠️ Venta ${folioVenta}: la cuenta y/o los pagarés no confirmaron subida a Firebase de inmediato (quedan en local para sincronizar después).`, { _cxcGuardadoOk, _pagaresGuardadoOk });
+        }
 
     } else if (metodoPago === "apartado") {
         // 🛡️ Se centraliza en registrarApartado() (apartados.js) en vez de
