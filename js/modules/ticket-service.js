@@ -249,7 +249,6 @@ img { max-width: 100%; }
 
     function documentImageScript(filename) {
         const file = safeName(filename || 'documento');
-        const tituloOriginal = JSON.stringify(String(filename || 'documento'));
         return `
 <script>
 function mmpCargarHtml2CanvasDocumento(cb){
@@ -270,24 +269,10 @@ function mmpGuardarDocumentoImagen(){
         var old = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
         html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
-            function descargaNormal(){
-                var a = document.createElement('a');
-                a.download = '${file}.png';
-                a.href = canvas.toDataURL('image/png');
-                a.click();
-            }
-            // 🛡️ Esta ventana es emergente (window.open + document.write desde
-            // la ventana principal) pero del mismo origen, así que puede
-            // llegar directo a window.opener.CarpetaRaizService sin postMessage.
-            if (window.opener && window.opener.CarpetaRaizService) {
-                canvas.toBlob(function(blob){
-                    window.opener.CarpetaRaizService.guardarArchivo(blob, '${file}.png', ${tituloOriginal}).then(function(resultado){
-                        if (!resultado || !resultado.guardado) descargaNormal();
-                    }).catch(descargaNormal);
-                }, 'image/png');
-            } else {
-                descargaNormal();
-            }
+            var a = document.createElement('a');
+            a.download = '${file}.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
         }).catch(function(err){
             console.error(err);
             alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
@@ -402,15 +387,7 @@ function mmpGuardarDocumentoPdf(){
                             pdf.text('Pagina ' + p + ' de ' + totalPaginas, pageWidth - margin, pageHeight - 10, { align: 'right' });
                         }
                     }
-                    function descargaNormalPdf(){ pdf.save('${file}.pdf'); }
-                    if (window.opener && window.opener.CarpetaRaizService) {
-                        var blobPdf = pdf.output('blob');
-                        window.opener.CarpetaRaizService.guardarArchivo(blobPdf, '${file}.pdf', ${tituloOriginal}).then(function(resultado){
-                            if (!resultado || !resultado.guardado) descargaNormalPdf();
-                        }).catch(descargaNormalPdf);
-                    } else {
-                        descargaNormalPdf();
-                    }
+                    pdf.save('${file}.pdf');
                 }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
             }
 
@@ -683,22 +660,8 @@ function documentToolbar(options = {}) {
         mostrarGenerando('Generando imagen...');
         try {
             const canvas = await prepararCanvasDocumento(html, options);
-            const nombreArchivo = `${safeName(options.filename || options.title || 'documento')}.png`;
-
-            // 🛡️ Si hay una carpeta raíz configurada (CarpetaRaizService,
-            // js/services/carpeta-raiz.js), el archivo se escribe ahí
-            // directamente, organizado por categoría, en vez de ir a la
-            // carpeta de Descargas genérica. Si no está configurada, no hay
-            // soporte del navegador, o el usuario ya dijo que no, se sigue
-            // exactamente con la descarga normal de siempre.
-            if (window.CarpetaRaizService) {
-                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                const resultado = await window.CarpetaRaizService.guardarArchivo(blob, nombreArchivo, options.title);
-                if (resultado.guardado) return true;
-            }
-
             const a = document.createElement('a');
-            a.download = nombreArchivo;
+            a.download = `${safeName(options.filename || options.title || 'documento')}.png`;
             a.href = canvas.toDataURL('image/png');
             a.click();
             return true;
@@ -782,18 +745,7 @@ function documentToolbar(options = {}) {
                 }
             }
 
-            const nombreArchivo = `${safeName(options.filename || options.title || 'documento')}.pdf`;
-
-            // 🛡️ Igual que en descargarImagen: si hay carpeta raíz
-            // configurada, se escribe ahí organizado por categoría; si no,
-            // se sigue exactamente con la descarga normal (pdf.save).
-            if (window.CarpetaRaizService) {
-                const blob = pdf.output('blob');
-                const resultado = await window.CarpetaRaizService.guardarArchivo(blob, nombreArchivo, options.title);
-                if (resultado.guardado) return true;
-            }
-
-            pdf.save(nombreArchivo);
+            pdf.save(`${safeName(options.filename || options.title || 'documento')}.pdf`);
             return true;
         } catch (err) {
             console.error('No se pudo generar el PDF:', err);
@@ -802,6 +754,65 @@ function documentToolbar(options = {}) {
         } finally {
             iframe?.remove();
             ocultarGenerando();
+        }
+    }
+
+    // 🛡️ Impresión nativa del navegador (vector real, no captura de pantalla):
+    // a diferencia de descargarPdf/descargarImagen (que renderizan todo con
+    // html2canvas y empujan ese PNG dentro de un PDF/PNG -- texto no
+    // seleccionable, se ve borroso al hacer zoom), esto abre la MISMA
+    // plantilla en un iframe oculto y llama a window.print() nativo del
+    // navegador: el "Guardar como PDF" del propio diálogo de impresión
+    // produce un PDF vectorial real. No reemplaza a los otros dos formatos
+    // (siguen sirviendo para compartir rápido por WhatsApp/redes), es una
+    // tercera opción para cuando el documento se va a imprimir o archivar
+    // formalmente.
+    async function imprimirNativo(html, options = {}) {
+        let iframe = null;
+        try {
+            const iframeEl = document.createElement('iframe');
+            iframeEl.setAttribute('aria-hidden', 'true');
+            iframeEl.style.cssText = 'position:fixed;left:-100000px;top:0;width:900px;height:1200px;border:0;opacity:0;pointer-events:none;';
+            document.body.appendChild(iframeEl);
+            iframe = iframeEl;
+
+            const doc = iframeEl.contentDocument;
+            const contenido = normalizeDocumentHtml(html, { ...options, autoPrint: false, autoImage: false });
+            doc.open();
+            doc.write(contenido);
+            doc.close();
+
+            await new Promise(resolve => {
+                if (doc.readyState === 'complete') resolve();
+                else iframeEl.addEventListener('load', resolve, { once: true });
+            });
+            doc.querySelectorAll('.mmp-document-toolbar,.mmp-print-toolbar,.no-print,script').forEach(el => el.remove());
+            await Promise.all(Array.from(doc.images || []).map(img => img.complete
+                ? Promise.resolve()
+                : new Promise(resolve => {
+                    img.addEventListener('load', resolve, { once: true });
+                    img.addEventListener('error', resolve, { once: true });
+                })));
+            if (doc.fonts?.ready) {
+                try { await doc.fonts.ready; } catch {}
+            }
+
+            // El iframe se queda montado mientras dura el diálogo de impresión
+            // (algunos navegadores lo requieren); se retira después de que el
+            // usuario imprime/cancela, o por un respaldo de tiempo si ese
+            // evento no llega a disparar en algún navegador.
+            const limpiar = () => iframeEl.remove();
+            iframeEl.contentWindow.addEventListener('afterprint', limpiar, { once: true });
+            setTimeout(limpiar, 60000);
+
+            iframeEl.contentWindow.focus();
+            iframeEl.contentWindow.print();
+            return true;
+        } catch (err) {
+            console.error('No se pudo abrir la impresión nativa:', err);
+            alert('No se pudo abrir el diálogo de impresión. Usa PDF o Imagen en su lugar.');
+            iframe?.remove();
+            return false;
         }
     }
 
@@ -816,6 +827,10 @@ function documentToolbar(options = {}) {
                 <div style="width:100%;max-width:520px;background:white;border-radius:8px;padding:24px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
                     <h3 style="margin:0;color:#0f172a;">Emitir documento</h3>
                     <p style="margin:6px 0 20px;color:#64748b;font-size:13px;">${esc(title)}</p>
+                    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                        <button onclick="TicketService.abrirFormato('${esc(modalId)}','imprimir')" style="padding:16px 8px;border:0;border-radius:7px;background:#0f172a;color:white;font-weight:900;cursor:pointer;" title="Imprimir o guardar como PDF real (vectorial) usando el navegador">🖨️ Imprimir / PDF real</button>
+                    </div>
+                    <p style="margin:8px 0 4px;color:#94a3b8;font-size:11px;">Para compartir rápido por WhatsApp o redes:</p>
                     <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
                         <button onclick="TicketService.abrirFormato('${esc(modalId)}','pdf')" style="padding:16px 8px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:900;cursor:pointer;">PDF</button>
                         <button onclick="TicketService.abrirFormato('${esc(modalId)}','ticket')" style="padding:16px 8px;border:0;border-radius:7px;background:#7c3aed;color:white;font-weight:900;cursor:pointer;">Ticket</button>
@@ -839,6 +854,8 @@ function documentToolbar(options = {}) {
         let resultado = false;
         if (formato === 'ticket') {
             resultado = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
+        } else if (formato === 'imprimir') {
+            resultado = imprimirNativo(cfg.html, cfg);
         } else if (formato === 'pdf') {
             resultado = descargarPdf(cfg.html, cfg);
         } else if (formato === 'imagen') {
@@ -949,6 +966,7 @@ function documentToolbar(options = {}) {
         openThermal,
         descargarPdf,
         descargarImagen,
+        imprimirNativo,
         elegirFormato,
         abrirFormato,
         cerrarSelectorFormato,

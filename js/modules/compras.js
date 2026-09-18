@@ -2110,8 +2110,9 @@ function abrirNuevaOrdenCompra() {
                 </div>
                 <div id="ocLibreWrap" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
                     <div style="font-size:11.5px;color:#92400e;font-weight:700;margin-bottom:6px;">✏️ ¿Aún no decides si lo vas a comprar? Escribe el nombre sin ligarlo al catálogo (solo disponible en Borrador; al formalizar la OC deberás vincularlo a un producto del catálogo)</div>
-                    <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;">
                         <input type="text" id="ocLibreNombre" placeholder="Nombre del producto (a decidir)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                        <input type="text" id="ocLibreCaracteristicas" placeholder="Características (tela, color, etc)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                         <input type="number" id="ocLibreCosto" placeholder="Costo estimado" min="0" step="0.01" value="0" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                         <input type="number" id="ocLibreCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                     </div>
@@ -2194,15 +2195,18 @@ function agregarArticuloLibreOC() {
     const nombreInput = document.getElementById('ocLibreNombre');
     const costoInput = document.getElementById('ocLibreCosto');
     const cantInput = document.getElementById('ocLibreCantidad');
+    const caracInput = document.getElementById('ocLibreCaracteristicas');
     const nombre = (nombreInput?.value || '').trim();
     if (!nombre) return alert('Escribe el nombre del producto.');
     const costo = parseFloat(costoInput?.value) || 0;
     const cant = parseInt(cantInput?.value) || 1;
+    const caracteristicas = caracInput ? caracInput.value.trim() : '';
     if (!window._articulosOC) window._articulosOC = [];
-    window._articulosOC.push({ productoId: null, nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas: '' });
+    window._articulosOC.push({ productoId: null, nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas });
     if (nombreInput) nombreInput.value = '';
     if (costoInput) costoInput.value = 0;
     if (cantInput) cantInput.value = 1;
+    if (caracInput) caracInput.value = '';
     _renderTablaArticulosOC();
 }
 
@@ -2224,7 +2228,12 @@ function _renderTablaArticulosOC() {
                 if (typeof a.yaEnInventario === 'undefined') a.yaEnInventario = false;
                 
                 return `<tr>
-                        <td style="padding:8px;">${a.nombre}${!a.productoId ? ' <span style="display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;">⏳ SIN CATÁLOGO</span>' : ''}</td>
+                        <td style="padding:8px;">${!a.productoId
+                            ? `<input type="text" value="${String(a.nombre || '').replace(/"/g, '&quot;')}" placeholder="Nombre del producto"
+                                   style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;"
+                                   onchange="window._articulosOC[${i}].nombre = event.target.value.trim() || window._articulosOC[${i}].nombre; _renderTablaArticulosOC();">
+                               <span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;">⏳ SIN CATÁLOGO</span>`
+                            : a.nombre}</td>
                         <td style="padding:8px;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
                         <td style="padding:8px;text-align:center;">
                                 <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
@@ -2399,20 +2408,30 @@ function _generarBloqueBodegaQR(oc, cb) {
     if (!oc.entregaUbicacionId) return cb('');
     const ubicaciones = StorageService.get('ubicacionesConfig', []) || [];
     const ubic = ubicaciones.find(u => String(u.id) === String(oc.entregaUbicacionId));
+    // 🛡️ Modelo de dos campos: "direccion" es SIEMPRE texto legible para
+    // mostrar en el documento (nunca una URL); "mapsUrl" es el link de
+    // Google Maps opcional que arma el QR. Antes había un solo campo que
+    // aceptaba cualquiera de los dos y el documento mostraba lo que fuera
+    // que se hubiera guardado ahí -- si alguien pegaba un link de Maps,
+    // ese link se imprimía tal cual en vez de una dirección.
     const direccion = (ubic?.direccion || '').trim();
-    if (!direccion) return cb('');
+    const mapsUrlGuardado = (ubic?.mapsUrl || '').trim();
+    if (!direccion && !mapsUrlGuardado) return cb('');
     const nombreUbic = ubic.nombre || oc.entregaUbicacionNombre || 'Bodega';
     _cargarQRCodeLibOC(() => {
         try {
             if (typeof window.qrcode === 'undefined') return cb('');
             window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs['UTF-8'];
-            const mapsUrl = /^https?:\/\//i.test(direccion) ? direccion : ('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion));
+            const mapsUrl = mapsUrlGuardado || ('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion));
             const qr = window.qrcode(0, 'M');
             qr.addData(mapsUrl);
             qr.make();
             let svgTag = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
             svgTag = svgTag.replace('<svg ', '<svg style="width:100%;height:100%;display:block;" ');
-            const dirEsc = _comprasEscHTML ? _comprasEscHTML(direccion) : direccion;
+            // Si aún no hay dirección legible capturada (solo el link), no imprimimos
+            // la URL como si fuera la dirección -- mostramos un texto neutral en su lugar.
+            const textoDireccion = direccion || 'Ver ubicación escaneando el código';
+            const dirEsc = _comprasEscHTML ? _comprasEscHTML(textoDireccion) : textoDireccion;
             const nombreEsc = _comprasEscHTML ? _comprasEscHTML(nombreUbic) : nombreUbic;
             cb(`
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:20px;display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap;">
@@ -3619,8 +3638,9 @@ function editarOrdenCompra(id) {
         ${oc.estado === 'Borrador' ? `
         <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
             <div style="font-size:11.5px;color:#92400e;font-weight:700;margin-bottom:6px;">✏️ ¿Aún no decides si lo vas a comprar? Escribe el nombre sin ligarlo al catálogo (al formalizar la OC deberás vincularlo a un producto del catálogo)</div>
-            <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;">
+            <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;">
                 <input type="text" id="editOcLibreNombre" placeholder="Nombre del producto (a decidir)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                <input type="text" id="editOcLibreCaracteristicas" placeholder="Características (tela, color, etc)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                 <input type="number" id="editOcLibreCosto" placeholder="Costo estimado" min="0" step="0.01" value="0" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                 <input type="number" id="editOcLibreCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
             </div>
@@ -3677,15 +3697,18 @@ function agregarArticuloLibreEditOC() {
     const nombreInput = document.getElementById('editOcLibreNombre');
     const costoInput = document.getElementById('editOcLibreCosto');
     const cantInput = document.getElementById('editOcLibreCantidad');
+    const caracInput = document.getElementById('editOcLibreCaracteristicas');
     const nombre = (nombreInput?.value || '').trim();
     if (!nombre) return alert('Escribe el nombre del producto.');
     const costo = parseFloat(costoInput?.value) || 0;
     const cant = parseInt(cantInput?.value) || 1;
+    const caracteristicas = caracInput ? caracInput.value.trim() : '';
     if (!window._editArticulosOC) window._editArticulosOC = [];
-    window._editArticulosOC.push({ productoId: null, nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas: '' });
+    window._editArticulosOC.push({ productoId: null, nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas });
     if (nombreInput) nombreInput.value = '';
     if (costoInput) costoInput.value = 0;
     if (cantInput) cantInput.value = 1;
+    if (caracInput) caracInput.value = '';
     _renderEditTablaOC();
 }
 
@@ -3697,7 +3720,12 @@ function _renderEditTablaOC() {
     const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
     let total = 0;
     const rows = arts.map((a, i) => { total += a.subtotal; return `<tr>
-        <td style="padding:8px;">${a.nombre}${!a.productoId ? ' <span style="display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;">⏳ SIN CATÁLOGO</span>' : ''}</td>
+        <td style="padding:8px;">${!a.productoId
+            ? `<input type="text" value="${String(a.nombre || '').replace(/"/g, '&quot;')}" placeholder="Nombre del producto"
+                   style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;"
+                   onchange="window._editArticulosOC[${i}].nombre = event.target.value.trim() || window._editArticulosOC[${i}].nombre; _renderEditTablaOC();">
+               <span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;">⏳ SIN CATÁLOGO</span>`
+            : a.nombre}</td>
         <td style="padding:8px;">
             <input type="text" value="${(a.caracteristicas || '').replace(/"/g, '&quot;')}" placeholder="Características"
                    style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"

@@ -3167,27 +3167,50 @@ function renderUbicaciones() {
  // Ubicaciones) y ninguna ubicación tiene dirección aún, la trasladamos
  // a la ubicación que parezca ser la bodega (o a la primera si no hay match).
  const cfgEmpresaMigr = StorageService.get('configEmpresa', {}) || {};
- if (cfgEmpresaMigr.direccionBodega && !ubicaciones.some(u => u.direccion)) {
+ let huboMigracion = false;
+ if (cfgEmpresaMigr.direccionBodega && !ubicaciones.some(u => u.direccion || u.mapsUrl)) {
      const destino = ubicaciones.find(u => /bodega/i.test(u.nombre || '')) || ubicaciones[0];
      if (destino) {
          destino.direccion = cfgEmpresaMigr.direccionBodega;
-         StorageService.set('ubicacionesConfig', ubicaciones);
+         huboMigracion = true;
      }
  }
 
+ // 🛡️ Migración del campo único al modelo de dos campos: antes "direccion"
+ // aceptaba tanto texto libre como un link de Maps pegado directamente (así
+ // fue como quedó, por ejemplo, "https://maps.app.goo.gl/..." guardado como
+ // si fuera la dirección -- se imprimía la URL cruda en la Orden de Compra
+ // en vez de un domicilio legible). Si detectamos ese caso, movemos el link
+ // a "mapsUrl" y dejamos "direccion" vacía para que se vuelva a capturar en
+ // texto -- el QR sigue funcionando igual mientras tanto, con ese mismo link.
+ ubicaciones.forEach(u => {
+     if (u.direccion && /^https?:\/\//i.test(u.direccion.trim()) && !u.mapsUrl) {
+         u.mapsUrl = u.direccion.trim();
+         u.direccion = '';
+         huboMigracion = true;
+     }
+ });
+ if (huboMigracion) StorageService.set('ubicacionesConfig', ubicaciones);
+
  let filas = ubicaciones.map(u => `
  <tr style="border-bottom:1px solid #eee;">
- <td style="padding:12px; font-weight:bold; color:#1e40af;">${u.nombre}</td>
+ <td style="padding:12px; font-weight:bold; color:#1e40af;vertical-align:top;">${u.nombre}</td>
  <td style="padding:12px;">
-     <div style="display:flex;gap:6px;align-items:center;">
-         <input type="text" id="ubicDireccion-${u.id}" value="${_comprasEscAttr ? _comprasEscAttr(u.direccion || '') : (u.direccion || '')}"
-                placeholder="Dirección física o link de Google Maps"
-                style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;">
-         <button onclick="guardarDireccionUbicacion(${u.id})" title="Guardar y ver vista previa" style="padding:7px 10px;background:#eff6ff;color:#1e40af;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">💾</button>
+     <div style="display:flex;flex-direction:column;gap:6px;">
+         <div style="display:flex;gap:6px;align-items:center;">
+             <input type="text" id="ubicDireccion-${u.id}" value="${_comprasEscAttr ? _comprasEscAttr(u.direccion || '') : (u.direccion || '')}"
+                    placeholder="Dirección (calle, número, colonia...)"
+                    style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;">
+             <button onclick="guardarDireccionUbicacion(${u.id})" title="Guardar y ver vista previa" style="padding:7px 10px;background:#eff6ff;color:#1e40af;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">💾</button>
+         </div>
+         <input type="text" id="ubicMapsUrl-${u.id}" value="${_comprasEscAttr ? _comprasEscAttr(u.mapsUrl || '') : (u.mapsUrl || '')}"
+                placeholder="Link de Google Maps (opcional -- si lo pegas, se usa para el QR)"
+                oninput="_ubicIntentarPrellenarDireccion(${u.id})"
+                style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;color:#475569;">
      </div>
      <div id="ubicPreview-${u.id}" style="margin-top:6px;"></div>
  </td>
- <td style="padding:12px; text-align:center;">
+ <td style="padding:12px; text-align:center;vertical-align:top;">
  <button onclick="eliminarUbicacion(${u.id})" style="background:#fee2e2; color:#ef4444; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">Eliminar</button>
  </td>
  </tr>
@@ -3196,14 +3219,14 @@ function renderUbicaciones() {
  contenedor.innerHTML = `
  <div style="background:white; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); overflow:hidden;">
  <p style="margin:0;padding:12px 16px 0;color:#6b7280;font-size:12.5px;">
-     La dirección se usa para generar el código QR (abre Google Maps) que se imprime en las Órdenes de Compra al elegir esa ubicación como destino de entrega.
-     Puedes escribir la dirección en texto o pegar directamente un link de Google Maps.
+     La dirección se imprime tal cual en las Órdenes de Compra; el link de Google Maps (opcional) es lo que abre el código QR.
+     Si pegas un link "largo" de Maps (el que empieza con google.com/maps/place/...), la dirección se intenta rellenar sola -- puedes corregirla si no queda exacta.
  </p>
  <table style="width:100%; border-collapse:collapse; font-size:14px;">
  <thead style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
  <tr>
  <th style="padding:12px; text-align:left;">Nombre de la Ubicacion</th>
- <th style="padding:12px; text-align:left;">Dirección</th>
+ <th style="padding:12px; text-align:left;">Dirección / Link de Maps</th>
  <th style="padding:12px; text-align:center; width:100px;">Accion</th>
  </tr>
  </thead>
@@ -3211,8 +3234,8 @@ function renderUbicaciones() {
  </table>
  </div>
  `;
- // Mostrar vista previa (QR + link) de las ubicaciones que ya tienen dirección capturada
- ubicaciones.forEach(u => { if (u.direccion) _actualizarPreviewUbicacion(u.id); });
+ // Mostrar vista previa (QR + link) de las ubicaciones que ya tienen dirección o link capturado
+ ubicaciones.forEach(u => { if (u.direccion || u.mapsUrl) _actualizarPreviewUbicacion(u.id); });
 }
 
 // Convierte lo capturado en "Dirección" a un link de Google Maps: si ya es un
@@ -3224,6 +3247,42 @@ function _ubicResolverMapsUrl(direccion) {
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(val);
 }
 
+// 🛡️ Prellenado best-effort de la dirección a partir de un link de Google
+// Maps: solo funciona con links "largos" (google.com/maps/place/<texto>/@...),
+// donde Google ya incluye el nombre/dirección legible en la propia URL. Los
+// links CORTOS (maps.app.goo.gl/xxxx) no traen nada legible -- son solo un
+// código que redirige, y resolver ese redirect requeriría una petición de
+// red que el navegador no puede hacer entre dominios -- así que en ese caso
+// devolvemos '' y se deja la dirección para captura manual, tal como se
+// pidió explícitamente en vez de adivinar.
+function _ubicExtraerDireccionDeLink(url) {
+    try {
+        const u = new URL((url || '').trim());
+        const m = u.pathname.match(/\/maps\/place\/([^/]+)/i);
+        if (!m) return '';
+        const texto = decodeURIComponent(m[1].replace(/\+/g, ' ')).trim();
+        // Si lo único que trae el link es coordenadas ("19.4326,-99.1332"),
+        // no es una dirección legible -- se descarta igual que un link corto.
+        if (!texto || /^[\d.,\-\s]+$/.test(texto)) return '';
+        return texto;
+    } catch (e) {
+        return '';
+    }
+}
+
+// Se dispara al pegar/editar el link de Maps de una ubicación: si el campo
+// de dirección sigue vacío, intenta prellenarlo -- nunca sobreescribe una
+// dirección que el usuario ya haya escrito a mano, porque el propio usuario
+// pidió poder corregirla si la extracción no queda exacta.
+function _ubicIntentarPrellenarDireccion(id) {
+    const linkInput = document.getElementById(`ubicMapsUrl-${id}`);
+    const dirInput = document.getElementById(`ubicDireccion-${id}`);
+    if (!linkInput || !dirInput || dirInput.value.trim()) return;
+    const extraida = _ubicExtraerDireccionDeLink(linkInput.value);
+    if (extraida) dirInput.value = extraida;
+}
+window._ubicIntentarPrellenarDireccion = _ubicIntentarPrellenarDireccion;
+
 // Dibuja, junto al campo de dirección de una ubicación, un QR pequeño + el
 // link resultante, para que se pueda verificar que se capturó correctamente
 // sin tener que ir hasta imprimir una Orden de Compra.
@@ -3233,9 +3292,14 @@ function _actualizarPreviewUbicacion(id) {
     const ubicaciones = StorageService.get('ubicacionesConfig', []) || [];
     const u = ubicaciones.find(x => x.id === id);
     const direccion = (u?.direccion || '').trim();
-    if (!direccion) { cont.innerHTML = ''; return; }
+    const mapsUrlGuardado = (u?.mapsUrl || '').trim();
+    if (!direccion && !mapsUrlGuardado) { cont.innerHTML = ''; return; }
 
-    const mapsUrl = _ubicResolverMapsUrl(direccion);
+    // El link de Maps guardado manda para el QR (es la ubicación exacta que
+    // pegaron); si no hay link, se arma una búsqueda con el texto de la
+    // dirección -- igual que antes, solo que ahora son dos campos separados
+    // en vez de adivinar cuál de los dos se guardó en un campo único.
+    const mapsUrl = mapsUrlGuardado || _ubicResolverMapsUrl(direccion);
     cont.innerHTML = '<span style="color:#94a3b8;font-size:11.5px;">Generando vista previa...</span>';
 
     if (typeof _cargarQRCodeLibOC !== 'function') {
@@ -3257,6 +3321,7 @@ function _actualizarPreviewUbicacion(id) {
                     <div style="font-size:11.5px;">
                         <div style="color:#16a34a;font-weight:700;">✅ Se capturó correctamente</div>
                         <a href="${mapsUrl}" target="_blank" rel="noopener" style="color:#2563eb;">Abrir en Google Maps</a>
+                        ${!direccion ? '<div style="color:#b45309;margin-top:2px;">⚠️ Falta capturar la dirección en texto (se usará este link para el QR, pero la orden de compra no mostrará dirección legible)</div>' : ''}
                     </div>
                 </div>`;
         } catch (e) {
@@ -3269,12 +3334,15 @@ function _actualizarPreviewUbicacion(id) {
 function guardarDireccionUbicacion(id) {
  if (!_invRequireAdmin('Guardar dirección de ubicación')) return;
  const input = document.getElementById(`ubicDireccion-${id}`);
+ const linkInput = document.getElementById(`ubicMapsUrl-${id}`);
  if (!input) return;
  const direccion = input.value.trim();
+ const mapsUrl = linkInput ? linkInput.value.trim() : '';
  let ubicaciones = StorageService.get("ubicacionesConfig", []);
  const u = ubicaciones.find(x => x.id === id);
  if (!u) return;
  u.direccion = direccion;
+ u.mapsUrl = mapsUrl;
  StorageService.set("ubicacionesConfig", ubicaciones);
  _actualizarPreviewUbicacion(id);
 }
