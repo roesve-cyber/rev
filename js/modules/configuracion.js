@@ -21,6 +21,11 @@ function renderConfiguracion() {
     if (typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig();
 }
 
+// Nota: la dirección para el QR de bodega en Órdenes de Compra ya no vive
+// aquí -- se captura por ubicación en Inventario > Ubicaciones (ver
+// renderUbicaciones/guardarDireccionUbicacion en js/modules/inventario.js),
+// para no duplicar el concepto de "bodega" que Roberto ya maneja ahí.
+
 // 📁 Sección de Configuración para elegir/cambiar/desactivar la carpeta donde
 // se guardan los documentos generados (ver js/services/carpeta-raiz.js).
 // Se inyecta dinámicamente (en vez de vivir como HTML estático en

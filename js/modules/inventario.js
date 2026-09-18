@@ -3162,9 +3162,30 @@ function renderUbicaciones() {
  StorageService.set("ubicacionesConfig", ubicaciones);
  }
 
+ // Migración única: si ya existía una dirección de bodega capturada en
+ // Configuración (versión anterior de esta función, antes de ligarla a
+ // Ubicaciones) y ninguna ubicación tiene dirección aún, la trasladamos
+ // a la ubicación que parezca ser la bodega (o a la primera si no hay match).
+ const cfgEmpresaMigr = StorageService.get('configEmpresa', {}) || {};
+ if (cfgEmpresaMigr.direccionBodega && !ubicaciones.some(u => u.direccion)) {
+     const destino = ubicaciones.find(u => /bodega/i.test(u.nombre || '')) || ubicaciones[0];
+     if (destino) {
+         destino.direccion = cfgEmpresaMigr.direccionBodega;
+         StorageService.set('ubicacionesConfig', ubicaciones);
+     }
+ }
+
  let filas = ubicaciones.map(u => `
  <tr style="border-bottom:1px solid #eee;">
  <td style="padding:12px; font-weight:bold; color:#1e40af;">${u.nombre}</td>
+ <td style="padding:12px;">
+     <div style="display:flex;gap:6px;align-items:center;">
+         <input type="text" id="ubicDireccion-${u.id}" value="${_comprasEscAttr ? _comprasEscAttr(u.direccion || '') : (u.direccion || '')}"
+                placeholder="Dirección física (para el QR en Órdenes de Compra)"
+                style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;">
+         <button onclick="guardarDireccionUbicacion(${u.id})" title="Guardar dirección" style="padding:7px 10px;background:#eff6ff;color:#1e40af;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">💾</button>
+     </div>
+ </td>
  <td style="padding:12px; text-align:center;">
  <button onclick="eliminarUbicacion(${u.id})" style="background:#fee2e2; color:#ef4444; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">Eliminar</button>
  </td>
@@ -3173,17 +3194,34 @@ function renderUbicaciones() {
 
  contenedor.innerHTML = `
  <div style="background:white; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); overflow:hidden;">
+ <p style="margin:0;padding:12px 16px 0;color:#6b7280;font-size:12.5px;">
+     La dirección se usa para generar el código QR (abre Google Maps) que se imprime en las Órdenes de Compra al elegir esa ubicación como destino de entrega.
+ </p>
  <table style="width:100%; border-collapse:collapse; font-size:14px;">
  <thead style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
  <tr>
  <th style="padding:12px; text-align:left;">Nombre de la Ubicacion</th>
+ <th style="padding:12px; text-align:left;">Dirección</th>
  <th style="padding:12px; text-align:center; width:100px;">Accion</th>
  </tr>
  </thead>
- <tbody>${filas || '<tr><td colspan="2" style="text-align:center; padding:20px; color:#94a3b8;">No hay ubicaciones registradas</td></tr>'}</tbody>
+ <tbody>${filas || '<tr><td colspan="3" style="text-align:center; padding:20px; color:#94a3b8;">No hay ubicaciones registradas</td></tr>'}</tbody>
  </table>
  </div>
  `;
+}
+
+function guardarDireccionUbicacion(id) {
+ if (!_invRequireAdmin('Guardar dirección de ubicación')) return;
+ const input = document.getElementById(`ubicDireccion-${id}`);
+ if (!input) return;
+ const direccion = input.value.trim();
+ let ubicaciones = StorageService.get("ubicacionesConfig", []);
+ const u = ubicaciones.find(x => x.id === id);
+ if (!u) return;
+ u.direccion = direccion;
+ StorageService.set("ubicacionesConfig", ubicaciones);
+ alert(direccion ? `✅ Dirección guardada para "${u.nombre}".` : `✅ Dirección borrada para "${u.nombre}".`);
 }
 
 function guardarUbicacion() {

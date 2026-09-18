@@ -2022,6 +2022,19 @@ function _comprasProductoActivo(p) {
     return !!p && p.activo !== false && p.Activo !== 0 && p.Activo !== false;
 }
 
+// Arma las <option> de "Entregar en (Bodega)" a partir de las ubicaciones de
+// inventario ya existentes (Inventario > Ubicaciones), marcando cuáles tienen
+// dirección capturada (esas son las que generan el QR al imprimir la OC).
+function _comprasOpcionesUbicacionesOC(selectedId) {
+    const ubicaciones = StorageService.get('ubicacionesConfig', []) || [];
+    const opts = ubicaciones.map(u => {
+        const sel = selectedId != null && String(u.id) === String(selectedId) ? 'selected' : '';
+        const etiqueta = u.direccion ? `📍 ${u.nombre}` : `${u.nombre} (sin dirección)`;
+        return `<option value="${u.id}" ${sel}>${etiqueta}</option>`;
+    }).join('');
+    return `<option value="">-- Sin especificar --</option>${opts}`;
+}
+
 function abrirNuevaOrdenCompra() {
     const provs = StorageService.get('proveedores', []);
     const prods = StorageService.get('productos', []);
@@ -2072,6 +2085,8 @@ function abrirNuevaOrdenCompra() {
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA ENTREGA ESTIMADA</label>
             <input type="date" id="ocFechaEntrega" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <label style="font-size:12px;font-weight:bold;color:#374151;margin-top:12px;display:block;">ENTREGAR EN (BODEGA)</label>
+            <select id="ocUbicacionEntrega" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">${_comprasOpcionesUbicacionesOC()}</select>
           </div>
         </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:10px;align-items:end;margin-bottom:12px;">
@@ -2093,6 +2108,15 @@ function abrirNuevaOrdenCompra() {
                     <input type="number" id="ocCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
                     <button onclick="agregarArticuloOC()" style="padding:9px 16px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
                 </div>
+                <div id="ocLibreWrap" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+                    <div style="font-size:11.5px;color:#92400e;font-weight:700;margin-bottom:6px;">✏️ ¿Aún no decides si lo vas a comprar? Escribe el nombre sin ligarlo al catálogo (solo disponible en Borrador; al formalizar la OC deberás vincularlo a un producto del catálogo)</div>
+                    <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;">
+                        <input type="text" id="ocLibreNombre" placeholder="Nombre del producto (a decidir)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                        <input type="number" id="ocLibreCosto" placeholder="Costo estimado" min="0" step="0.01" value="0" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                        <input type="number" id="ocLibreCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                    </div>
+                    <button onclick="agregarArticuloLibreOC()" style="margin-top:8px;padding:9px 16px;background:#b45309;color:white;border:none;border-radius:6px;cursor:pointer;">➕ Agregar sin catálogo</button>
+                </div>
         <div id="tablaArticulosOC" style="margin-bottom:16px;"></div>
         <div style="margin-bottom:12px;">
           <label style="font-size:12px;font-weight:bold;color:#374151;">NOTAS</label>
@@ -2101,7 +2125,7 @@ function abrirNuevaOrdenCompra() {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <strong>Total: <span id="ocTotal" style="color:#1e40af;font-size:18px;">$0.00</span></strong>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;">
-            <input type="checkbox" id="ocBorrador" checked style="width:16px;height:16px;"> Guardar como Borrador
+            <input type="checkbox" id="ocBorrador" checked onchange="const w=document.getElementById('ocLibreWrap'); if(w) w.style.display=this.checked?'block':'none';" style="width:16px;height:16px;"> Guardar como Borrador
           </label>
         </div>
         <div style="display:flex;gap:10px;">
@@ -2163,6 +2187,25 @@ function agregarArticuloOC() {
     _renderTablaArticulosOC();
 }
 
+// Agrega un artículo "aún sin decidir": sin productoId, no ligado al catálogo.
+// Solo tiene sentido mientras la OC se guarde como Borrador -- al formalizarla
+// (ver formalizarOrdenCompra) se exige vincular cada uno a un producto real.
+function agregarArticuloLibreOC() {
+    const nombreInput = document.getElementById('ocLibreNombre');
+    const costoInput = document.getElementById('ocLibreCosto');
+    const cantInput = document.getElementById('ocLibreCantidad');
+    const nombre = (nombreInput?.value || '').trim();
+    if (!nombre) return alert('Escribe el nombre del producto.');
+    const costo = parseFloat(costoInput?.value) || 0;
+    const cant = parseInt(cantInput?.value) || 1;
+    if (!window._articulosOC) window._articulosOC = [];
+    window._articulosOC.push({ productoId: null, nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas: '' });
+    if (nombreInput) nombreInput.value = '';
+    if (costoInput) costoInput.value = 0;
+    if (cantInput) cantInput.value = 1;
+    _renderTablaArticulosOC();
+}
+
 function _renderTablaArticulosOC() {
     const cont = document.getElementById('tablaArticulosOC');
     if (!cont) return;
@@ -2181,7 +2224,7 @@ function _renderTablaArticulosOC() {
                 if (typeof a.yaEnInventario === 'undefined') a.yaEnInventario = false;
                 
                 return `<tr>
-                        <td style="padding:8px;">${a.nombre}</td>
+                        <td style="padding:8px;">${a.nombre}${!a.productoId ? ' <span style="display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;">⏳ SIN CATÁLOGO</span>' : ''}</td>
                         <td style="padding:8px;">${a.caracteristicas ? `<span style='color:#64748b;font-size:12px;'>${a.caracteristicas}</span>` : ''}</td>
                         <td style="padding:8px;text-align:center;">
                                 <input type="number" min="0" step="0.01" value="${a.costo}" style="width:80px;text-align:right;" ${esAdmin ? '' : 'readonly disabled'} onchange="if(${esAdmin}){window._articulosOC[${i}].costo = parseFloat(event.target.value)||0; window._articulosOC[${i}].subtotal = window._articulosOC[${i}].cantidad * window._articulosOC[${i}].costo; _renderTablaArticulosOC();}" />
@@ -2214,6 +2257,13 @@ function guardarOrdenCompra() {
     if (!_comprasRequireAdmin('Guardar orden de compra')) return;
     const arts = window._articulosOC || [];
     if (arts.length === 0) return alert('⚠️ Agrega al menos un artículo.');
+    const borradorChk = document.getElementById('ocBorrador')?.checked ?? true;
+    if (!borradorChk) {
+        const sinCatalogo = arts.filter(a => !a.productoId);
+        if (sinCatalogo.length > 0) {
+            return alert(`⚠️ Hay ${sinCatalogo.length} artículo(s) sin ligar al catálogo (${sinCatalogo.map(a => a.nombre).join(', ')}).\n\nMarca "Guardar como Borrador" o vincúlalos a un producto del catálogo antes de guardar como Enviada.`);
+        }
+    }
     
     // --- CORRECCIÓN: Mover estas 3 líneas HACIA ARRIBA ---
     const provId = document.getElementById('ocProveedor')?.value;
@@ -2223,6 +2273,8 @@ function guardarOrdenCompra() {
     // -------------------------------------------------------
 
     const fechaEntrega = document.getElementById('ocFechaEntrega')?.value;
+    const ubicEntregaId = document.getElementById('ocUbicacionEntrega')?.value || '';
+    const ubicEntregaNombre = ubicEntregaId ? (document.getElementById('ocUbicacionEntrega')?.selectedOptions[0]?.textContent.replace('📍 ', '').replace(' (sin dirección)', '') || '') : '';
     const notas = document.getElementById('ocNotas')?.value.trim() || '';
     const borrador = document.getElementById('ocBorrador')?.checked ?? true;
     const metodoPago = document.getElementById('ocMetodoPago')?.value || '';
@@ -2286,6 +2338,8 @@ function guardarOrdenCompra() {
         total: parseFloat(total) || 0,
         fechaEmision: Date.now(),
         fechaEntregaEstimada: fechaEntrega || null,
+        entregaUbicacionId: ubicEntregaId || null,
+        entregaUbicacionNombre: ubicEntregaNombre || null,
         estado: borrador ? 'Borrador' : 'Enviada',
         notas: notas || "",
         condicionesComerciales: {
@@ -2322,27 +2376,95 @@ function guardarOrdenCompra() {
     imprimirOrdenCompra(oc.id);
 }
 
+// Carga bajo demanda la librería vendorizada de generación de QR
+// (kazuhikoarase/qrcode-generator, MIT) para el QR de ubicación de bodega.
+function _cargarQRCodeLibOC(cb) {
+    if (typeof window.qrcode !== 'undefined') return cb();
+    document.getElementById('qrcode-lib-compras')?.remove();
+    const script = document.createElement('script');
+    script.id = 'qrcode-lib-compras';
+    script.src = new URL('js/vendor/qrcode.min.js', document.baseURI).href;
+    script.onload = cb;
+    script.onerror = () => { script.remove(); cb(); }; // Falla silenciosa: se imprime sin el bloque de QR
+    document.head.appendChild(script);
+}
+
+// Genera (de forma asíncrona) el bloque HTML de "Entregar en (Bodega)" con
+// el QR que abre la ubicación en Google Maps. Usa la dirección capturada en
+// Inventario > Ubicaciones para la ubicación elegida como destino de entrega
+// de la OC (oc.entregaUbicacionId). Si no hay ubicación elegida, o esa
+// ubicación no tiene dirección capturada, entrega cadena vacía (no rompe la
+// impresión).
+function _generarBloqueBodegaQR(oc, cb) {
+    if (!oc.entregaUbicacionId) return cb('');
+    const ubicaciones = StorageService.get('ubicacionesConfig', []) || [];
+    const ubic = ubicaciones.find(u => String(u.id) === String(oc.entregaUbicacionId));
+    const direccion = (ubic?.direccion || '').trim();
+    if (!direccion) return cb('');
+    const nombreUbic = ubic.nombre || oc.entregaUbicacionNombre || 'Bodega';
+    _cargarQRCodeLibOC(() => {
+        try {
+            if (typeof window.qrcode === 'undefined') return cb('');
+            window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs['UTF-8'];
+            const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion);
+            const qr = window.qrcode(0, 'M');
+            qr.addData(mapsUrl);
+            qr.make();
+            let svgTag = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+            svgTag = svgTag.replace('<svg ', '<svg style="width:100%;height:100%;display:block;" ');
+            const dirEsc = _comprasEscHTML ? _comprasEscHTML(direccion) : direccion;
+            const nombreEsc = _comprasEscHTML ? _comprasEscHTML(nombreUbic) : nombreUbic;
+            cb(`
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:20px;display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap;">
+            <div style="flex:1;min-width:200px;">
+                <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">📍 Entregar en (${nombreEsc})</div>
+                <div style="font-size:13.5px;color:#0f172a;font-weight:600;">${dirEsc}</div>
+                <div style="color:#94a3b8;font-size:11px;margin-top:4px;">Escanea el código para abrir la ubicación en Google Maps</div>
+            </div>
+            <div style="flex-shrink:0;width:96px;height:96px;">${svgTag}</div>
+        </div>`);
+        } catch (e) {
+            console.error('No se pudo generar el QR de la bodega:', e);
+            cb('');
+        }
+    });
+}
+
 function imprimirOrdenCompra(id) {
     const lista = _getOrdenesCompra();
     const oc = lista.find(x => x.id === id);
     if (!oc) return;
+    _generarBloqueBodegaQR(oc, (bloqueBodegaHtml) => _imprimirOrdenCompraConBodega(oc, bloqueBodegaHtml));
+}
+
+function _imprimirOrdenCompraConBodega(oc, bloqueBodegaHtml) {
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
     const esConsignacionOC = oc.condicionesComerciales?.metodoPago === 'consignacion' || oc.esConsignacion === true;
 
-    const rows = (oc.articulos || []).map((a, i) =>
-        `<tr style="background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+    const rows = (oc.articulos || []).map((a, i) => {
+        const pendienteCatalogo = !a.productoId;
+        return `<tr style="background:${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
             <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;">
-                <div style="font-weight:700;color:#0f172a;">${a.nombre}</div>
+                <div style="font-weight:700;color:#0f172a;">${a.nombre}${pendienteCatalogo ? ' <span style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;vertical-align:middle;">⏳ PENDIENTE DE CATÁLOGO</span>' : ''}</div>
                 ${a.caracteristicas ? `<div style="color:#64748b;font-size:12px;margin-top:2px;">${a.caracteristicas}</div>` : ''}
             </td>
             <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;text-align:center;color:#334155;">${a.cantidad}</td>
             <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;text-align:right;color:#334155;">${dinero(a.costo)}</td>
             <td style="padding:11px 12px;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#0f172a;">${dinero(a.subtotal)}</td>
-        </tr>`
-    ).join('');
+        </tr>`;
+    }).join('');
 
     const estadoColor = oc.estado === 'Enviada' ? { bg: '#dcfce7', fg: '#166534' } : { bg: '#fef3c7', fg: '#92400e' };
+
+    const bannerBorrador = oc.estado === 'Borrador' ? `
+    <div style="display:flex;align-items:center;gap:10px;background:#fffbeb;border:1px solid #fde68a;border-left:5px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+        <span style="font-size:22px;">📝</span>
+        <div>
+            <div style="font-weight:900;color:#92400e;font-size:13px;letter-spacing:.03em;">BORRADOR — DOCUMENTO DE TRABAJO</div>
+            <div style="color:#92400e;font-size:12.5px;">Esta orden aún no está autorizada. No constituye una solicitud de compra formal ni un compromiso con el proveedor.</div>
+        </div>
+    </div>` : '';
 
     const bannerConsignacion = esConsignacionOC ? `
     <div style="display:flex;align-items:center;gap:10px;background:#f5f3ff;border:1px solid #c4b5fd;border-left:5px solid #7c3aed;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
@@ -2386,6 +2508,7 @@ function imprimirOrdenCompra(id) {
             </div>
         </div>
 
+        ${bannerBorrador}
         ${bannerConsignacion}
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
@@ -2401,6 +2524,8 @@ function imprimirOrdenCompra(id) {
                 </div>
             </div>
         </div>
+
+        ${bloqueBodegaHtml}
 
         ${condicionesComercialesHtml}
 
@@ -2444,7 +2569,7 @@ function imprimirOrdenCompra(id) {
     </div>
     </body></html>`;
     if (window.TicketService?.elegirFormato) {
-        const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC ? 'half-letter' : 'letter';
+        const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC && !bloqueBodegaHtml && oc.estado !== 'Borrador' ? 'half-letter' : 'letter';
         window.TicketService.elegirFormato({
             html: ocHTML,
             title: `Orden de Compra ${oc.folio}`,
@@ -2454,7 +2579,7 @@ function imprimirOrdenCompra(id) {
         return;
     }
     if (window.TicketService?.openDocument) {
-        const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC ? 'half-letter' : 'letter';
+        const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC && !bloqueBodegaHtml && oc.estado !== 'Borrador' ? 'half-letter' : 'letter';
         window.TicketService.openDocument(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}`, pageSize });
         return;
     }
@@ -3386,6 +3511,7 @@ function renderListaOrdenesCompra() {
                             <button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>
                             <button onclick="abrirModalAbonoOC(${oc.id})" title="Abonar a OC" style="background:none;border:none;cursor:pointer;font-size:17px; opacity:${saldoPendiente <= 0 ? '0.3' : '1'};" ${saldoPendiente <= 0 ? 'disabled' : ''}>💰</button>
                             ${esActiva ? `<button onclick="recibirOrdenCompra(${oc.id})" title="Recibir mercancía" style="background:none;border:none;cursor:pointer;font-size:17px;">📦</button>` : ''}
+                            ${oc.estado === 'Borrador' ? `<button onclick="formalizarOrdenCompra(${oc.id})" title="Formalizar (pasar a Enviada)" style="background:none;border:none;cursor:pointer;font-size:17px;">✅</button>` : ''}
                             ${(oc.estado === 'Borrador' || oc.estado === 'Enviada') ? `<button onclick="editarOrdenCompra(${oc.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:17px;">✏️</button>` : ''}
                             ${(oc.estado === 'Borrador' || oc.estado === 'Enviada') ? `<button onclick="confirmarEliminarOC(${oc.id})" title="Cancelar y Revertir Orden" style="background:none;border:none;cursor:pointer;font-size:17px;">🗑️</button>` : ''}
                     </td>
@@ -3450,6 +3576,8 @@ function editarOrdenCompra(id) {
             <label style="font-size:12px;font-weight:bold;color:#374151;">FECHA ENTREGA ESTIMADA</label>
             <input type="date" id="editOcFechaEntrega" value="${oc.fechaEntregaEstimada?.substring(0,10) || ''}"
                    style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <label style="font-size:12px;font-weight:bold;color:#374151;margin-top:12px;display:block;">ENTREGAR EN (BODEGA)</label>
+            <select id="editOcUbicacionEntrega" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">${_comprasOpcionesUbicacionesOC(oc.entregaUbicacionId)}</select>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
@@ -3488,6 +3616,16 @@ function editarOrdenCompra(id) {
           <input type="number" id="editOcCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
           <button onclick="agregarArticuloEditOC()" style="padding:9px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;">➕</button>
         </div>
+        ${oc.estado === 'Borrador' ? `
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+            <div style="font-size:11.5px;color:#92400e;font-weight:700;margin-bottom:6px;">✏️ ¿Aún no decides si lo vas a comprar? Escribe el nombre sin ligarlo al catálogo (al formalizar la OC deberás vincularlo a un producto del catálogo)</div>
+            <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;">
+                <input type="text" id="editOcLibreNombre" placeholder="Nombre del producto (a decidir)" style="padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                <input type="number" id="editOcLibreCosto" placeholder="Costo estimado" min="0" step="0.01" value="0" style="width:120px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+                <input type="number" id="editOcLibreCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;">
+            </div>
+            <button onclick="agregarArticuloLibreEditOC()" style="margin-top:8px;padding:9px 16px;background:#b45309;color:white;border:none;border-radius:6px;cursor:pointer;">➕ Agregar sin catálogo</button>
+        </div>` : ''}
         <div id="editTablaArticulosOC" style="margin-bottom:14px;"></div>
         <div style="margin-bottom:12px;">
           <label style="font-size:12px;font-weight:bold;color:#374151;">NOTAS</label>
@@ -3534,6 +3672,23 @@ function agregarArticuloEditOC() {
     _renderEditTablaOC();
 }
 
+// Igual que agregarArticuloLibreOC pero para el modal de Editar OC (Borrador).
+function agregarArticuloLibreEditOC() {
+    const nombreInput = document.getElementById('editOcLibreNombre');
+    const costoInput = document.getElementById('editOcLibreCosto');
+    const cantInput = document.getElementById('editOcLibreCantidad');
+    const nombre = (nombreInput?.value || '').trim();
+    if (!nombre) return alert('Escribe el nombre del producto.');
+    const costo = parseFloat(costoInput?.value) || 0;
+    const cant = parseInt(cantInput?.value) || 1;
+    if (!window._editArticulosOC) window._editArticulosOC = [];
+    window._editArticulosOC.push({ productoId: null, nombre, costo, cantidad: cant, subtotal: cant * costo, caracteristicas: '' });
+    if (nombreInput) nombreInput.value = '';
+    if (costoInput) costoInput.value = 0;
+    if (cantInput) cantInput.value = 1;
+    _renderEditTablaOC();
+}
+
 function _renderEditTablaOC() {
     const cont = document.getElementById('editTablaArticulosOC');
     if (!cont) return;
@@ -3542,7 +3697,7 @@ function _renderEditTablaOC() {
     const esAdmin = (typeof window.esAdmin === 'function') ? window.esAdmin() : (typeof esAdmin === 'function' ? esAdmin() : false);
     let total = 0;
     const rows = arts.map((a, i) => { total += a.subtotal; return `<tr>
-        <td style="padding:8px;">${a.nombre}</td>
+        <td style="padding:8px;">${a.nombre}${!a.productoId ? ' <span style="display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:800;">⏳ SIN CATÁLOGO</span>' : ''}</td>
         <td style="padding:8px;">
             <input type="text" value="${(a.caracteristicas || '').replace(/"/g, '&quot;')}" placeholder="Características"
                    style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
@@ -3569,6 +3724,8 @@ function guardarEdicionOC(id) {
     
     const provId       = document.getElementById('editOcProveedor')?.value;
     const fechaEntrega = document.getElementById('editOcFechaEntrega')?.value;
+    const ubicEntregaId = document.getElementById('editOcUbicacionEntrega')?.value || '';
+    const ubicEntregaNombre = ubicEntregaId ? (document.getElementById('editOcUbicacionEntrega')?.selectedOptions[0]?.textContent.replace('📍 ', '').replace(' (sin dirección)', '') || '') : '';
     const notas        = document.getElementById('editOcNotas')?.value.trim() || '';
     const metodoPago   = document.getElementById('editOcMetodoPago')?.value || 'contado';
     const meses        = document.getElementById('editOcMeses')?.value || '';
@@ -3605,6 +3762,8 @@ function guardarEdicionOC(id) {
         total:                 totalVerdadero,
         saldoPendiente:        saldoVerdadero, // <- Ahora el saldo camina de la mano del total
         fechaEntregaEstimada:  fechaEntrega || null,
+        entregaUbicacionId:    ubicEntregaId || null,
+        entregaUbicacionNombre: ubicEntregaNombre || null,
         notas:                 notas || "",
         condicionesComerciales: {
             ...(lista[idx].condicionesComerciales || {}),
@@ -3623,6 +3782,106 @@ function guardarEdicionOC(id) {
     alert('✅ Orden de compra actualizada y balanceada matemáticamente.');
     
     if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+}
+
+// ============================================================
+// FORMALIZAR OC (Borrador -> Enviada)
+// Exige que todo artículo esté ligado a un producto real del catálogo
+// antes de permitir la transición: si hay artículos "sin catálogo"
+// (agregados vía agregarArticuloLibreOC/agregarArticuloLibreEditOC),
+// se bloquea la formalización hasta que se vinculen.
+// ============================================================
+function formalizarOrdenCompra(id) {
+    if (!_comprasRequireAdmin('Formalizar orden de compra')) return;
+    const lista = _getOrdenesCompra();
+    const oc = lista.find(x => x.id === id);
+    if (!oc) return alert('OC no encontrada.');
+    if (oc.estado !== 'Borrador') return alert('Esta orden ya no es un borrador.');
+
+    const pendientes = (oc.articulos || []).filter(a => !a.productoId);
+    if (pendientes.length > 0) {
+        _renderModalResolverPendientesOC(oc);
+        return;
+    }
+    if (!confirm(`¿Formalizar la Orden de Compra ${oc.folio}?\n\nDejará de ser un borrador y se convertirá en una solicitud de compra formal al proveedor.`)) return;
+    _confirmarFormalizacionOC(id);
+}
+
+function _confirmarFormalizacionOC(id) {
+    const lista = _getOrdenesCompra();
+    const idx = lista.findIndex(x => x.id === id);
+    if (idx === -1) return;
+    lista[idx].estado = 'Enviada';
+    lista[idx].fechaFormalizacion = typeof window.localISO === 'function' ? window.localISO(new Date()) : new Date().toISOString();
+    StorageService.set('ordenesCompra', lista);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'OC_FORMALIZADA',
+            modulo: 'Compras',
+            entidad: lista[idx].folio,
+            detalle: `OC ${lista[idx].folio} formalizada (Borrador -> Enviada)`,
+            severidad: 'info'
+        });
+    }
+    document.querySelector('[data-modal="resolver-oc"]')?.remove();
+    alert(`✅ Orden de compra ${lista[idx].folio} formalizada. Ya es una solicitud de compra formal.`);
+    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
+}
+
+function _renderModalResolverPendientesOC(oc) {
+    document.querySelector('[data-modal="resolver-oc"]')?.remove();
+    const pendientes = (oc.articulos || [])
+        .map((a, i) => ({ ...a, _idx: i }))
+        .filter(a => !a.productoId);
+
+    const filas = pendientes.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;margin-bottom:8px;">
+            <div>
+                <div style="font-weight:700;color:#92400e;">${_comprasEscHTML(a.nombre)}</div>
+                <div style="font-size:12px;color:#92400e;">Cant: ${a.cantidad} · Costo est.: ${dinero(a.costo)}</div>
+            </div>
+            <button onclick="abrirSelectorProducto({titulo:'🔍 Vincular producto del catálogo',campoPrecio:'costo',onSeleccion:function(p){ _ocVincularPendiente(${oc.id}, ${a._idx}, p); }})" style="padding:8px 14px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">🔗 Vincular</button>
+        </div>`).join('');
+
+    const html = `
+    <div data-modal="resolver-oc" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
+      <div style="background:white;border-radius:12px;width:100%;max-width:600px;padding:28px;margin:auto;">
+        <h3 style="margin:0 0 10px;color:#92400e;">⏳ Vincula estos productos al catálogo</h3>
+        <p style="margin:0 0 16px;color:#6b7280;font-size:13.5px;">
+            Antes de formalizar la Orden de Compra <strong>${oc.folio}</strong>, cada artículo debe estar ligado a un producto real del catálogo.
+            Si el producto aún no existe, créalo primero en Inventario y regresa aquí para vincularlo.
+        </p>
+        <div id="ocPendientesLista">${filas}</div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+            <button onclick="document.querySelector('[data-modal=resolver-oc]')?.remove()" style="flex:1;padding:11px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">Cerrar</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function _ocVincularPendiente(ocId, idxArticulo, producto) {
+    const lista = _getOrdenesCompra();
+    const idx = lista.findIndex(x => x.id === ocId);
+    if (idx === -1) return;
+    const art = lista[idx].articulos[idxArticulo];
+    if (!art) return;
+    art.productoId = producto.id;
+    art.nombre = producto.nombre; // Alineamos el nombre con el del catálogo
+    StorageService.set('ordenesCompra', lista);
+
+    const oc = lista[idx];
+    const quedanPendientes = (oc.articulos || []).some(a => !a.productoId);
+    if (quedanPendientes) {
+        _renderModalResolverPendientesOC(oc);
+    } else {
+        document.querySelector('[data-modal="resolver-oc"]')?.remove();
+        if (confirm(`✅ Todos los artículos ya están ligados al catálogo.\n\n¿Formalizar ahora la Orden de Compra ${oc.folio}?`)) {
+            _confirmarFormalizacionOC(ocId);
+        } else if (typeof renderListaOrdenesCompra === 'function') {
+            renderListaOrdenesCompra();
+        }
+    }
 }
 
 // ============================================================
