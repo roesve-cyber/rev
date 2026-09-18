@@ -3181,10 +3181,11 @@ function renderUbicaciones() {
  <td style="padding:12px;">
      <div style="display:flex;gap:6px;align-items:center;">
          <input type="text" id="ubicDireccion-${u.id}" value="${_comprasEscAttr ? _comprasEscAttr(u.direccion || '') : (u.direccion || '')}"
-                placeholder="Dirección física (para el QR en Órdenes de Compra)"
+                placeholder="Dirección física o link de Google Maps"
                 style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;">
-         <button onclick="guardarDireccionUbicacion(${u.id})" title="Guardar dirección" style="padding:7px 10px;background:#eff6ff;color:#1e40af;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">💾</button>
+         <button onclick="guardarDireccionUbicacion(${u.id})" title="Guardar y ver vista previa" style="padding:7px 10px;background:#eff6ff;color:#1e40af;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">💾</button>
      </div>
+     <div id="ubicPreview-${u.id}" style="margin-top:6px;"></div>
  </td>
  <td style="padding:12px; text-align:center;">
  <button onclick="eliminarUbicacion(${u.id})" style="background:#fee2e2; color:#ef4444; border:none; padding:6px 10px; border-radius:4px; cursor:pointer;">Eliminar</button>
@@ -3196,6 +3197,7 @@ function renderUbicaciones() {
  <div style="background:white; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05); overflow:hidden;">
  <p style="margin:0;padding:12px 16px 0;color:#6b7280;font-size:12.5px;">
      La dirección se usa para generar el código QR (abre Google Maps) que se imprime en las Órdenes de Compra al elegir esa ubicación como destino de entrega.
+     Puedes escribir la dirección en texto o pegar directamente un link de Google Maps.
  </p>
  <table style="width:100%; border-collapse:collapse; font-size:14px;">
  <thead style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569;">
@@ -3209,6 +3211,59 @@ function renderUbicaciones() {
  </table>
  </div>
  `;
+ // Mostrar vista previa (QR + link) de las ubicaciones que ya tienen dirección capturada
+ ubicaciones.forEach(u => { if (u.direccion) _actualizarPreviewUbicacion(u.id); });
+}
+
+// Convierte lo capturado en "Dirección" a un link de Google Maps: si ya es un
+// link (pegaron una URL de Maps), se usa tal cual; si es texto libre, se arma
+// una búsqueda de Maps con ese texto.
+function _ubicResolverMapsUrl(direccion) {
+    const val = (direccion || '').trim();
+    if (/^https?:\/\//i.test(val)) return val;
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(val);
+}
+
+// Dibuja, junto al campo de dirección de una ubicación, un QR pequeño + el
+// link resultante, para que se pueda verificar que se capturó correctamente
+// sin tener que ir hasta imprimir una Orden de Compra.
+function _actualizarPreviewUbicacion(id) {
+    const cont = document.getElementById(`ubicPreview-${id}`);
+    if (!cont) return;
+    const ubicaciones = StorageService.get('ubicacionesConfig', []) || [];
+    const u = ubicaciones.find(x => x.id === id);
+    const direccion = (u?.direccion || '').trim();
+    if (!direccion) { cont.innerHTML = ''; return; }
+
+    const mapsUrl = _ubicResolverMapsUrl(direccion);
+    cont.innerHTML = '<span style="color:#94a3b8;font-size:11.5px;">Generando vista previa...</span>';
+
+    if (typeof _cargarQRCodeLibOC !== 'function') {
+        cont.innerHTML = `<a href="${mapsUrl}" target="_blank" rel="noopener" style="font-size:11.5px;color:#2563eb;">🔗 Ver en Google Maps</a>`;
+        return;
+    }
+    _cargarQRCodeLibOC(() => {
+        try {
+            if (typeof window.qrcode === 'undefined') throw new Error('Librería de QR no disponible');
+            window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs['UTF-8'];
+            const qr = window.qrcode(0, 'M');
+            qr.addData(mapsUrl);
+            qr.make();
+            let svgTag = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+            svgTag = svgTag.replace('<svg ', '<svg style="width:100%;height:100%;display:block;" ');
+            cont.innerHTML = `
+                <div style="display:flex;align-items:center;gap:10px;margin-top:2px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+                    <div style="width:56px;height:56px;flex-shrink:0;background:white;border-radius:4px;padding:4px;">${svgTag}</div>
+                    <div style="font-size:11.5px;">
+                        <div style="color:#16a34a;font-weight:700;">✅ Se capturó correctamente</div>
+                        <a href="${mapsUrl}" target="_blank" rel="noopener" style="color:#2563eb;">Abrir en Google Maps</a>
+                    </div>
+                </div>`;
+        } catch (e) {
+            console.error('No se pudo generar el QR de vista previa:', e);
+            cont.innerHTML = `<span style="color:#dc2626;font-size:11.5px;">No se pudo generar el QR. <a href="${mapsUrl}" target="_blank" rel="noopener">Ver en Maps</a></span>`;
+        }
+    });
 }
 
 function guardarDireccionUbicacion(id) {
@@ -3221,7 +3276,7 @@ function guardarDireccionUbicacion(id) {
  if (!u) return;
  u.direccion = direccion;
  StorageService.set("ubicacionesConfig", ubicaciones);
- alert(direccion ? `✅ Dirección guardada para "${u.nombre}".` : `✅ Dirección borrada para "${u.nombre}".`);
+ _actualizarPreviewUbicacion(id);
 }
 
 function guardarUbicacion() {

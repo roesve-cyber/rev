@@ -2406,7 +2406,7 @@ function _generarBloqueBodegaQR(oc, cb) {
         try {
             if (typeof window.qrcode === 'undefined') return cb('');
             window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs['UTF-8'];
-            const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion);
+            const mapsUrl = /^https?:\/\//i.test(direccion) ? direccion : ('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion));
             const qr = window.qrcode(0, 'M');
             qr.addData(mapsUrl);
             qr.make();
