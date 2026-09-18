@@ -158,6 +158,27 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // 🛡️ Folios consecutivos (folio-service.js): un documento por prefijo
+    // (VTA, DEV, COR, COM, ENT, CON, COT, ...), con un solo campo numérico
+    // que avanza vía runTransaction cada vez que un dispositivo reserva un
+    // bloque nuevo. Antes de esta regla, "contadoresFolio" no hacía match
+    // con ningún bloque de este archivo y caía en el catch-all final
+    // ("allow read, write: if false"), así que NINGÚN dispositivo podía
+    // reservar folios -- toda venta, devolución, corte, compra, entrega,
+    // consignación y cotización terminaba cayendo al folio de emergencia
+    // "-TMP-" (no consecutivo) en vez del formato VTA-00001 esperado.
+    // Cualquier usuario activo (no solo admin) necesita poder escribir
+    // aquí: un vendedor haciendo una venta reserva folios igual que un
+    // admin. hasOnly() evita que se cuele cualquier otro campo.
+    match /contadoresFolio/{prefijo} {
+      allow get: if activeUser();
+      allow create, update: if activeUser()
+        && request.resource.data.keys().hasOnly(['siguiente', '_actualizadoEn'])
+        && request.resource.data.siguiente is int
+        && request.resource.data.siguiente > 0;
+      allow list, delete: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
