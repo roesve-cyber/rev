@@ -3194,7 +3194,14 @@ function renderUbicaciones() {
 
  let filas = ubicaciones.map(u => `
  <tr style="border-bottom:1px solid #eee;">
- <td style="padding:12px; font-weight:bold; color:#1e40af;vertical-align:top;">${u.nombre}</td>
+ <td style="padding:12px;vertical-align:top;">
+     <div style="display:flex;gap:6px;align-items:center;">
+         <input type="text" id="ubicNombre-${u.id}" value="${_comprasEscAttr ? _comprasEscAttr(u.nombre || '') : (u.nombre || '')}"
+                onkeydown="if(event.key==='Enter'){renombrarUbicacion(${u.id});}"
+                style="flex:1;min-width:110px;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:bold;color:#1e40af;">
+         <button onclick="renombrarUbicacion(${u.id})" title="Guardar nombre" style="padding:7px 10px;background:#eff6ff;color:#1e40af;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">💾</button>
+     </div>
+ </td>
  <td style="padding:12px;">
      <div style="display:flex;flex-direction:column;gap:6px;">
          <div style="display:flex;gap:6px;align-items:center;">
@@ -3365,6 +3372,21 @@ function guardarUbicacion() {
  input.value = "";
  renderUbicaciones();
 }
+
+function renombrarUbicacion(id) {
+ if (!_invRequireAdmin('Renombrar ubicacion de inventario')) return;
+ const input = document.getElementById(`ubicNombre-${id}`);
+ if (!input) return;
+ const nuevoNombre = input.value.trim();
+ if (!nuevoNombre) { alert('El nombre no puede quedar vacío.'); return; }
+ let ubicaciones = StorageService.get("ubicacionesConfig", []);
+ const u = ubicaciones.find(x => x.id === id);
+ if (!u) return;
+ u.nombre = nuevoNombre;
+ StorageService.set("ubicacionesConfig", ubicaciones);
+ renderUbicaciones();
+}
+window.renombrarUbicacion = renombrarUbicacion;
 
 function eliminarUbicacion(id) {
  if (!_invRequireAdmin('Eliminar ubicacion de inventario')) return;
