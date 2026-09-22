@@ -4260,12 +4260,18 @@ function _cxcEstadoCuentaAbonosRows(m) {
     if (!m.abonos.length) {
         return `<tr><td colspan="5" class="mmp-edo-center mmp-edo-muted">Sin abonos registrados.</td></tr>`;
     }
+    // 🛡️ El saldo corrido se calcula en orden cronológico real (m.abonos
+    // viene ascendente desde _cxcEstadoCuentaAbonos) para que cada fila
+    // muestre el saldo correcto justo después de ESE abono. Recién
+    // calculado se invierte el arreglo para presentarlo más reciente
+    // primero, igual que el resto de los documentos de cobranza.
     let saldo = Number(m.totalCredito || 0);
-    return m.abonos.map((a, idx) => {
+    const filas = m.abonos.map((a, idx) => {
         const monto = Number(a.monto || a.montoAbonado || 0);
         saldo = Math.max(0, saldo - monto);
         return `<tr><td>${idx + 1}</td><td>${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(a))}</td><td>${_cxcEscHTML(a.etiquetaCuenta || a.medioPago || a.cuentaId || 'Efectivo')}</td><td class="mmp-edo-right mmp-edo-total">${_cxcDinero(monto)}</td><td class="mmp-edo-right mmp-edo-saldo">${_cxcDinero(saldo)}</td></tr>`;
-    }).join('');
+    });
+    return filas.slice().reverse().join('');
 }
 
 function _cxcEstadoCuentaHtml(m, opts = {}) {
@@ -4316,8 +4322,11 @@ function _cxcEstadoCuentaTicketBody(m) {
     const productos = m.articulos.length
         ? m.articulos.map(a => `${a.nombre || a.productoNombre || 'Producto'} x${a.cantidad || 1}\n  ${_cxcDinero(Number(a.precioContado || a.precio || 0))}`).join('\n')
         : 'Sin detalle de productos';
+    // 📅 Más reciente primero (mismo criterio que la tabla del documento
+    // de pagarés): se numera en orden cronológico real y luego se
+    // invierte solo para mostrarlo.
     const abonos = m.abonos.length
-        ? m.abonos.map((a, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(a))}  ${_cxcDinero(a.monto || a.montoAbonado || 0)}`).join('\n')
+        ? m.abonos.map((a, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(a))}  ${_cxcDinero(a.monto || a.montoAbonado || 0)}`).slice().reverse().join('\n')
         : 'Sin abonos registrados';
     return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.25;color:#000;">
         <div style="text-align:center;"><img src="img/Logo.svg" alt="Mi Pueblito" style="width:48px;height:48px;object-fit:contain;" onerror="this.style.display='none'"></div>
@@ -4430,8 +4439,9 @@ function _cxcEstadoCuentaTicketBodyAntiguedad(m) {
     const productos = m.articulos.length
         ? m.articulos.map(art => `${art.nombre || art.productoNombre || 'Producto'} x${art.cantidad || 1}\n  ${_cxcDinero(Number(art.precioContado || art.precio || 0))}`).join('\n')
         : 'Sin detalle de productos';
+    // 📅 Más reciente primero, mismo criterio que la versión por pagarés.
     const abonos = m.abonos.length
-        ? m.abonos.map((ab, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(ab))}  ${_cxcDinero(ab.monto || ab.montoAbonado || 0)}`).join('\n')
+        ? m.abonos.map((ab, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(ab))}  ${_cxcDinero(ab.monto || ab.montoAbonado || 0)}`).slice().reverse().join('\n')
         : 'Sin abonos registrados';
     return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.25;color:#000;">
         <div style="text-align:center;"><img src="img/Logo.svg" alt="Mi Pueblito" style="width:48px;height:48px;object-fit:contain;" onerror="this.style.display='none'"></div>
@@ -4533,8 +4543,11 @@ function _cxcClonarDocEstadoCuentaFolio(folio) {
     if (docEl?.querySelector('.mmp-edo-wrap')) {
         const clone = docEl.cloneNode(true);
         clone.removeAttribute('id');
-        clone.style.width = '860px';
-        clone.style.maxWidth = '860px';
+        // 📱 720px activa el @media(max-width:760px) ya definido en
+        // _cxcEstadoCuentaCss (encabezado y métricas se apilan a 1-2
+        // columnas), igual que el formato de Estado de Cuenta Cliente.
+        clone.style.width = '720px';
+        clone.style.maxWidth = '720px';
         clone.style.background = '#ffffff';
         clone.style.boxSizing = 'border-box';
         return clone;
@@ -4544,8 +4557,8 @@ function _cxcClonarDocEstadoCuentaFolio(folio) {
     if (!modelo) return null;
     const wrap = document.createElement('div');
     wrap.innerHTML = vista === 'antiguedad' ? _cxcEstadoCuentaHtmlAntiguedad(modelo) : _cxcEstadoCuentaHtml(modelo);
-    wrap.style.width = '860px';
-    wrap.style.maxWidth = '860px';
+    wrap.style.width = '720px';
+    wrap.style.maxWidth = '720px';
     wrap.style.background = '#ffffff';
     wrap.style.boxSizing = 'border-box';
     return wrap;

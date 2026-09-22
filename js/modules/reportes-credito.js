@@ -1678,7 +1678,14 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
     // 4. Estructura de datos que alimenta AMBOS formatos
     const clientes = clientesRaw.map(({ base, ventas }) => {
         const fechaVentaBase = _rc.parseFecha(base.fechaVenta || base.fechaIso || base.fecha);
-        const filas = ventas.map(v => {
+        // 📅 Más reciente primero: cuando un cliente tiene varias ventas,
+        // se listan de la más nueva a la más vieja.
+        const ventasOrdenadas = ventas.slice().sort((a, b) => {
+            const fa = _rc.parseFecha(a.fechaVenta || a.fechaIso || a.fecha)?.getTime() || 0;
+            const fb = _rc.parseFecha(b.fechaVenta || b.fechaIso || b.fecha)?.getTime() || 0;
+            return fb - fa;
+        });
+        const filas = ventasOrdenadas.map(v => {
             const s = v.sne || {};
             const plazo = evaluarPlazo(v);
             const ult = ultimoAbono(v);
@@ -1746,11 +1753,18 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
         const key = bloqueClave(c.ultimaFechaAbonoCliente);
         (bloquesMap[key] = bloquesMap[key] || []).push(c);
     });
-    const clavesOrdenadas = Object.keys(bloquesMap).sort((a, b) => a === 'sin-abonos' ? 1 : b === 'sin-abonos' ? -1 : a.localeCompare(b));
+    // 📅 Meses más recientes primero; "sin abonos" siempre al final porque
+    // no tiene fecha que ordenar, no porque sea "el más viejo".
+    const clavesOrdenadas = Object.keys(bloquesMap).sort((a, b) => a === 'sin-abonos' ? 1 : b === 'sin-abonos' ? -1 : b.localeCompare(a));
     const bloques = clavesOrdenadas.map(key => ({
         key,
         etiqueta: key === 'sin-abonos' ? 'SIN ABONOS REGISTRADOS' : _rc.mesLabel(key),
-        clientes: bloquesMap[key]
+        // 📅 Dentro de cada bloque, cliente con pago más reciente primero.
+        clientes: bloquesMap[key].slice().sort((a, b) => {
+            const fa = a.ultimaFechaAbonoCliente?.getTime() || 0;
+            const fb = b.ultimaFechaAbonoCliente?.getTime() || 0;
+            return fb - fa;
+        })
     }));
 
     // ============================================================

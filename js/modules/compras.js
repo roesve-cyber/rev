@@ -1497,44 +1497,56 @@ window.verDetalleCompra = function(idCuenta) {
     const detalleDomId = `estado-cuenta-proveedor-${String(c.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
     let movimientosHTML = '';
+    const filasOrdenadas = [];
 
     // Fila de compra inicial
-    movimientosHTML += `
+    filasOrdenadas.push(`
         <tr style="border-bottom:1px solid #e2e8f0; background:#fefce8;">
             <td style="padding:10px;">${c.fecha || '-'}</td>
             <td style="padding:10px;">Compra registrada</td>
             <td style="padding:10px;text-align:right;color:#dc2626;font-weight:bold;">${dinero(subtotalReal)}</td>
             <td style="padding:10px;text-align:right;">—</td>
             <td style="padding:10px;text-align:right;font-weight:bold;color:#dc2626;">${dinero(subtotalReal)}</td>
-        </tr>`;
+        </tr>`);
 
     // Anticipo al registrar (solo si es un pago genuino no representado en los abonos)
     let saldoCorriente = subtotalReal;
     if (mostrarFilaAnticipo) {
         saldoCorriente -= anticipoInicial;
-        movimientosHTML += `
+        filasOrdenadas.push(`
             <tr style="border-bottom:1px solid #e2e8f0; background:#f0fdf4;">
                 <td style="padding:10px;">${c.fecha || '-'}</td>
                 <td style="padding:10px;">Anticipo al registrar compra</td>
                 <td style="padding:10px;text-align:right;">—</td>
                 <td style="padding:10px;text-align:right;color:#16a34a;font-weight:bold;">${dinero(anticipoInicial)}</td>
                 <td style="padding:10px;text-align:right;font-weight:bold;color:#dc2626;">${dinero(saldoCorriente)}</td>
-            </tr>`;
+            </tr>`);
     }
 
-    // Abonos posteriores
-    abonos.forEach(ab => {
+    // 🛡️ Abonos ordenados cronológicamente (no venían ordenados) para que
+    // el saldo corrido se calcule correctamente antes de invertir el
+    // orden de presentación.
+    const abonosOrdenados = abonos.slice().sort((a, b) => {
+        const fa = (window.parseFechaMX ? window.parseFechaMX(a.fecha) : new Date(a.fecha || 0))?.getTime() || 0;
+        const fb = (window.parseFechaMX ? window.parseFechaMX(b.fecha) : new Date(b.fecha || 0))?.getTime() || 0;
+        return fa - fb;
+    });
+    abonosOrdenados.forEach(ab => {
         saldoCorriente -= (parseFloat(ab.monto) || 0);
         const fechaAb = ab.fecha ? window.formatearFechaMX(ab.fecha) : '-';
-        movimientosHTML += `
+        filasOrdenadas.push(`
             <tr style="border-bottom:1px solid #e2e8f0; background:#f0fdf4;">
                 <td style="padding:10px;">${fechaAb}</td>
                 <td style="padding:10px;">Abono — ${ab.cuenta || 'No especificado'}</td>
                 <td style="padding:10px;text-align:right;">—</td>
                 <td style="padding:10px;text-align:right;color:#16a34a;font-weight:bold;">${dinero(ab.monto)}</td>
                 <td style="padding:10px;text-align:right;font-weight:bold;color:${saldoCorriente > 0.01 ? '#dc2626' : '#16a34a'};">${dinero(Math.max(0, saldoCorriente))}</td>
-            </tr>`;
+            </tr>`);
     });
+
+    // 📅 Más reciente primero: el saldo corrido ya se calculó arriba en
+    // orden cronológico real; aquí solo se invierte para mostrarlo.
+    movimientosHTML = filasOrdenadas.slice().reverse().join('');
 
     // 5. Modal HTML
     const modalHTML = `
@@ -1652,8 +1664,11 @@ function _clonarEstadoCuentaProveedor(idCuenta) {
     if (!original) return null;
     const clone = original.cloneNode(true);
     clone.querySelectorAll('button').forEach(btn => btn.remove());
-    clone.style.width = '820px';
-    clone.style.maxWidth = '820px';
+    // 📱 720px (formato tablet), igual que Estado de Cuenta Cliente. Las
+    // tablas de este documento ya viven dentro de contenedores
+    // overflow-x:auto, así que se ajustan sin recortarse.
+    clone.style.width = '720px';
+    clone.style.maxWidth = '720px';
     clone.style.margin = '0 auto';
     clone.style.boxSizing = 'border-box';
     return clone;
@@ -5717,6 +5732,16 @@ function _consigNormTexto(valor) {
 function _consigFechaOrdenDoc(valor) {
     const raw = String(valor || '').trim();
     if (!raw) return 0;
+    // 🛡️ CORREGIDO: antes probaba `new Date(raw)` primero, y para fechas
+    // como "05/03/2025" JS la interpreta en formato US (mes/día) sin
+    // lanzar error -- así que una fecha MX válida se leía invertida en
+    // silencio (5 de marzo se volvía 3 de mayo) y nunca llegaba a caer en
+    // el parseo correcto de abajo. window.parseFechaMX es el parser MX
+    // real que usa el resto del sistema; se prueba primero.
+    if (window.parseFechaMX) {
+        const p = window.parseFechaMX(raw);
+        if (p instanceof Date && !isNaN(p.getTime())) return p.getTime();
+    }
     const directo = new Date(raw).getTime();
     if (!Number.isNaN(directo)) return directo;
     const limpio = _consigNormTexto(raw).replace(/\b(lun|mar|mie|jue|vie|sab|dom)\b/g, '').trim();
@@ -6883,9 +6908,10 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
                 </div>`;
         }).join('');
 
-        const anticiposBloque = _comprasAsegurarArray(f.anticipos).slice().sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaStr) - _consigFechaOrdenDoc(b.fecha || b.fechaStr)).map(a => `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;font-size:12px;border-top:1px solid #ddd6fe;padding:6px 0;color:#6d28d9;"><span>${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))}</span><strong>${dinero(a.monto || 0)}</strong></div>`).join('');
-        const ventasBloque = _comprasAsegurarArray(f.cuentasCxp).slice().sort((a, b) => _consigFechaOrdenDoc(a.fecha || a.fechaISO || a.fechaIso) - _consigFechaOrdenDoc(b.fecha || b.fechaISO || b.fechaIso)).map(cxp => {
-                const pagos = _consigPagosRealesCxp(cxp);
+        // 📅 Más reciente primero, igual que el resto de los documentos.
+        const anticiposBloque = _comprasAsegurarArray(f.anticipos).slice().sort((a, b) => _consigFechaOrdenDoc(b.fecha || b.fechaStr) - _consigFechaOrdenDoc(a.fecha || a.fechaStr)).map(a => `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;font-size:12px;border-top:1px solid #ddd6fe;padding:6px 0;color:#6d28d9;"><span>${_comprasEscHTML(_comprasFechaVista(a.fecha || a.fechaStr, '-'))}</span><strong>${dinero(a.monto || 0)}</strong></div>`).join('');
+        const ventasBloque = _comprasAsegurarArray(f.cuentasCxp).slice().sort((a, b) => _consigFechaOrdenDoc(b.fecha || b.fechaISO || b.fechaIso) - _consigFechaOrdenDoc(a.fecha || a.fechaISO || a.fechaIso)).map(cxp => {
+                const pagos = _consigPagosRealesCxp(cxp).slice().sort((a, b) => _consigFechaOrdenDoc(b.fecha || b.fechaIso || b.fechaAbonoIso) - _consigFechaOrdenDoc(a.fecha || a.fechaIso || a.fechaAbonoIso));
                 const productoLimpio = _consigProductoCxp(cxp);
                 const piezasCxp = _consigPiezasCxp(cxp);
                 return pagos.map(p => `<div style="display:grid;grid-template-columns:minmax(0,1fr) 56px auto 92px;gap:10px;font-size:12px;border-top:1px dashed #bbf7d0;padding:5px 0;color:#15803d;align-items:center;"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_comprasEscHTML(productoLimpio)}</span><span style="text-align:center;color:#334155;">${piezasCxp}</span><strong>${dinero(p.monto || 0)}</strong><span style="text-align:right;color:#334155;">${_comprasEscHTML(_comprasFechaVista(p.fecha || p.fechaIso || p.fechaAbonoIso, '-'))}</span></div>`).join('');
@@ -6898,9 +6924,9 @@ window.abrirEstadoCuentaConsignaciones = function(scope = 'actual', key = '') {
         return `
             <section style="border:1px solid #dbe4ee;border-radius:9px;margin:10px 0;overflow:hidden;background:#fff;">
                 ${tituloBloque}
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:10px;">${productos || '<div style="color:#94a3b8;">Sin productos.</div>'}</div>
+                <div style="display:grid;grid-template-columns:1fr;gap:9px;padding:10px;">${productos || '<div style="color:#94a3b8;">Sin productos.</div>'}</div>
                 <div style="margin:0 10px 10px;padding:8px 10px;border-top:2px solid #1d4ed8;background:#eff6ff;border-radius:7px;text-align:right;font-size:13px;color:#1d4ed8;font-weight:900;">Subtotal productos: ${dinero(subtotalProductos)}</div>
-                ${(anticiposBloque || ventasBloque) ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 10px 10px;">
+                ${(anticiposBloque || ventasBloque) ? `<div style="display:grid;grid-template-columns:1fr;gap:12px;padding:0 10px 10px;">
                     <div style="border:1px solid #ddd6fe;border-radius:9px;padding:9px;background:#f5f3ff;"><div style="font-size:14px;font-weight:900;color:#6d28d9;margin-bottom:4px;">Anticipos</div>${anticiposBloque || '<div style="font-size:12px;color:#94a3b8;">Sin anticipos.</div>'}<div style="border-top:2px solid #c4b5fd;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#6d28d9;">Subtotal anticipos: ${dinero(subtotalAnticipos)}</div></div>
                     <div style="border:1px solid #bbf7d0;border-radius:9px;padding:9px;background:#f0fdf4;"><div style="font-size:14px;font-weight:900;color:#15803d;margin-bottom:4px;">Pagado por ventas</div>${ventasBloque || '<div style="font-size:12px;color:#94a3b8;">Sin ventas.</div>'}<div style="border-top:2px solid #86efac;margin-top:6px;padding-top:6px;text-align:right;font-weight:900;color:#15803d;">Subtotal pagado: ${dinero(subtotalVentas)}</div></div>
                 </div>` : ''}
@@ -6959,7 +6985,11 @@ window.descargarImagenEstadoCuentaConsignacion = function(scope = 'actual', key 
     _cargarHtml2CanvasEstadoProveedor(() => {
         const clone = origen.cloneNode(true);
         clone.querySelectorAll('button, script, .no-print').forEach(el => el.remove());
-        clone.style.width = `${Math.max(origen.offsetWidth || 960, 960)}px`;
+        // 📱 720px (formato tablet), igual que Estado de Cuenta Cliente.
+        // Antes se forzaba un mínimo de 960px (hoja ancha); con las
+        // rejillas de este documento ya en una sola columna, 720px es
+        // legible sin saturar la vista.
+        clone.style.width = '720px';
         clone.style.background = '#ffffff';
 
         const wrap = document.createElement('div');

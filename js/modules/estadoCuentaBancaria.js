@@ -208,9 +208,10 @@ window._ecbGenerar = function() {
     const cont = document.getElementById('ecbPreviewContenedor');
     if (!cont) return;
 
+    // 📅 Más reciente primero, igual que el resto de los documentos.
     const filasHTML = estado.movimientos.length === 0
         ? `<tr><td colspan="4" style="text-align:center; padding:20px; color:#94a3b8;">Sin movimientos en este rango.</td></tr>`
-        : estado.movimientos.map(m => `
+        : estado.movimientos.slice().reverse().map(m => `
             <tr style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:8px; white-space:nowrap; font-size:12px;">${m.fechaCorta}</td>
                 <td style="padding:8px; font-size:12px;">${_escECB(m.concepto)}${m.referencia ? `<br><small style="color:#94a3b8;">Ref: ${_escECB(m.referencia)}</small>` : ''}</td>
@@ -268,18 +269,24 @@ window._ecbGenerar = function() {
 
 // 🧾 Arma el documento imprimible (letter, con logo, márgenes, encabezado repetido y paginado)
 function _construirHtmlDocEstadoCuentaBancaria(estado) {
+    // 📅 Más reciente primero: el saldo corrido de cada movimiento
+    // (estado.movimientos[].saldo) ya se calculó en orden cronológico real
+    // dentro de obtenerEstadoCuentaBancaria -- aquí solo se invierte el
+    // orden de presentación, y por eso SALDO ACTUAL (el dato más útil
+    // ahora mismo) va arriba y SALDO INICIAL (la referencia más vieja) va
+    // al final, en vez de al revés.
     const filas = [];
 
     filas.push(`
-        <tr style="background:#eef2ff;">
-            <td colspan="3" style="padding:8px; font-weight:bold; color:#312e81;">SALDO INICIAL AL ${_fechaCortaECB(estado.fechaDesde)}</td>
-            <td colspan="2" style="padding:8px; text-align:right; font-weight:bold; color:#312e81;">${_dineroECB(estado.saldoInicial)}</td>
+        <tr style="background:#eff6ff;">
+            <td colspan="3" style="padding:9px 8px; font-weight:bold; color:#1e3a8a; font-size:13px;">SALDO ACTUAL AL ${_fechaCortaECB(estado.fechaHasta)}</td>
+            <td colspan="2" style="padding:9px 8px; text-align:right; font-weight:bold; color:#1e3a8a; font-size:13px;">${_dineroECB(estado.saldoFinal)}</td>
         </tr>`);
 
     if (estado.movimientos.length === 0) {
         filas.push(`<tr><td colspan="5" style="padding:14px; text-align:center; color:#94a3b8;">Sin movimientos registrados en este rango.</td></tr>`);
     } else {
-        estado.movimientos.forEach(m => {
+        estado.movimientos.slice().reverse().forEach(m => {
             filas.push(`
             <tr>
                 <td style="padding:7px 8px; white-space:nowrap;">${m.fechaCorta}</td>
@@ -292,9 +299,9 @@ function _construirHtmlDocEstadoCuentaBancaria(estado) {
     }
 
     filas.push(`
-        <tr style="background:#eff6ff;">
-            <td colspan="3" style="padding:9px 8px; font-weight:bold; color:#1e3a8a; font-size:13px;">SALDO ACTUAL AL ${_fechaCortaECB(estado.fechaHasta)}</td>
-            <td colspan="2" style="padding:9px 8px; text-align:right; font-weight:bold; color:#1e3a8a; font-size:13px;">${_dineroECB(estado.saldoFinal)}</td>
+        <tr style="background:#eef2ff;">
+            <td colspan="3" style="padding:8px; font-weight:bold; color:#312e81;">SALDO INICIAL AL ${_fechaCortaECB(estado.fechaDesde)}</td>
+            <td colspan="2" style="padding:8px; text-align:right; font-weight:bold; color:#312e81;">${_dineroECB(estado.saldoInicial)}</td>
         </tr>`);
 
     return `

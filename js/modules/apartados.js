@@ -4,6 +4,17 @@ function _apartadoAbonosVigentes(ap) {
     return (ap?.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
 }
 
+// 🛡️ Igual que _cxcAbonoAnteriorYNumero en cxc.js: el "abono anterior" y el
+// número de pago del recibo NUNCA deben salir por POSICIÓN del arreglo --
+// una corrección de fecha in-place o una eliminación con splice() lo
+// desordena. Esta variante siempre ordena por fecha real.
+function _apartadoAbonosVigentesOrdenados(ap) {
+    return _apartadoAbonosVigentes(ap)
+        .map(a => ({ abono: a, t: (window.parseFechaMX ? window.parseFechaMX(a.fechaAbono || a.fecha) : new Date(a.fechaAbono || a.fecha || 0))?.getTime() || 0 }))
+        .sort((a, b) => a.t - b.t)
+        .map(x => x.abono);
+}
+
 function _apartadoTotalPagado(ap) {
     return (Number(ap?.enganche || 0) || 0) + _apartadoAbonosVigentes(ap).reduce((s, ab) => s + (Number(ab.monto) || 0), 0);
 }
@@ -239,8 +250,9 @@ async function registrarAbonoApartado(folio, monto, fechaAbono, cuentaId = 'efec
     // Disparar la impresión del ticket térmico
     if (opciones.imprimir !== false) {
         // apAct.abonos ya incluye este abono, así que el "anterior" es
-        // el penúltimo vigente y el número de pago es el total.
-        const _vigentes = _apartadoAbonosVigentes(apAct);
+        // el penúltimo vigente y el número de pago es el total. Se usa
+        // el orden por fecha real, no por posición en el arreglo.
+        const _vigentes = _apartadoAbonosVigentesOrdenados(apAct);
         const _abonoAnteriorApt = _vigentes.length >= 2 ? _vigentes[_vigentes.length - 2] : null;
         imprimirTicketAbonoApartado(apAct, montoAplicado, etiquetaCuenta, fechaAbono, {
             abonoAnterior: _abonoAnteriorApt ? { monto: Number(_abonoAnteriorApt.monto || 0), fecha: _abonoAnteriorApt.fechaAbono || _abonoAnteriorApt.fecha || '' } : null,
@@ -721,8 +733,9 @@ function registrarAbonoApartadoDesdeModal() {
 
     // Aquí ap.abonos todavía NO incluye este abono (va a la cuarentena de
     // la Bóveda, no se hace push directo), así que el "anterior" es
-    // simplemente el último vigente y el número de pago es vigentes+1.
-    const _vigentesProvisional = _apartadoAbonosVigentes(ap);
+    // simplemente el último vigente (por fecha real) y el número de pago
+    // es vigentes+1.
+    const _vigentesProvisional = _apartadoAbonosVigentesOrdenados(ap);
     const _abonoAnteriorAptProvisional = _vigentesProvisional.length ? _vigentesProvisional[_vigentesProvisional.length - 1] : null;
     imprimirTicketAbonoApartado({ ...ap, saldoPendiente: nuevoSaldoEstimado }, monto, etiquetaCuenta, fechaIso, {
         provisional: true,
