@@ -188,7 +188,14 @@ function mmpImprimirBluetooth(){
 
     function documentCss(options = {}) {
         const pageSize = options.pageSize === 'half-letter' ? '5.5in 8.5in' : 'letter portrait';
-        const maxWidth = options.pageSize === 'half-letter' ? '5.2in' : '8in';
+        // 📱 Cuando se está generando IMAGEN (no PDF/impresión), el ancho se
+        // recorta a formato tablet/celular (720px, igual que Estado de
+        // Cuenta Cliente) para que el PNG sea legible en un teléfono en vez
+        // de una hoja carta reducida. PDF e impresión conservan su ancho de
+        // hoja normal -- solo la imagen usa imageMode.
+        const maxWidth = options.imageMode
+            ? '720px'
+            : (options.pageSize === 'half-letter' ? '5.2in' : '8in');
         return `
 <style id="mmp-document-print-style">
 @page { size: ${pageSize}; margin: ${options.margin || '12mm'}; }
@@ -268,7 +275,15 @@ function mmpGuardarDocumentoImagen(){
         var btn = document.getElementById('mmp-doc-btn-imagen');
         var old = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
-        html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
+        // 📱 Angostar SOLO para esta captura (720px, formato tablet) --
+        // el documento se abrió sin saber si el usuario pediría PDF o
+        // Imagen, así que aquí se recorta el ancho justo antes de
+        // capturar y se restaura después, sin afectar Imprimir/PDF.
+        var prevMaxWidth = node.style.maxWidth;
+        var prevWidth = node.style.width;
+        node.style.maxWidth = '720px';
+        node.style.width = '720px';
+        html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false, windowWidth: node.scrollWidth, windowHeight: node.scrollHeight }).then(function(canvas){
             var a = document.createElement('a');
             a.download = '${file}.png';
             a.href = canvas.toDataURL('image/png');
@@ -277,6 +292,8 @@ function mmpGuardarDocumentoImagen(){
             console.error(err);
             alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
         }).finally(function(){
+            node.style.maxWidth = prevMaxWidth;
+            node.style.width = prevWidth;
             if (btn) { btn.disabled = false; btn.textContent = old || 'Guardar imagen'; }
         });
     });
@@ -601,12 +618,16 @@ function documentToolbar(options = {}) {
         document.body.appendChild(iframe);
 
         const doc = iframe.contentDocument;
+        // 📱 imageMode:true -> documentCss() usa 720px (formato tablet) en
+        // vez del ancho de hoja carta/media carta, solo para esta captura
+        // (prepararCanvasDocumento solo la usa descargarImagen, nunca PDF).
         const contenido = normalizeDocumentHtml(html, {
             ...options,
             autoPrint: false,
             autoImage: false,
             thermal: false,
-            image: false
+            image: false,
+            imageMode: true
         });
         doc.open();
         doc.write(contenido);
@@ -789,6 +810,19 @@ function documentToolbar(options = {}) {
         if (!cfg) return false;
         document.querySelector('[data-modal="mmp-formato-documento"]')?.remove();
         let resultado = false;
+        // 🛡️ CORRECCIÓN: contenido tipo ticket (80mm) empaquetado como
+        // "documento" con pageSize:'roll' (ej. cotizaciones en
+        // cotizaciones.js/cotizador-movil.html) -- si PDF/Imagen se piden
+        // aquí, se generaban con el ancho de una hoja carta/media carta
+        // (documentCss/prepararCanvasDocumento), no con el ancho real del
+        // ticket. Se resuelve reutilizando el propio flujo de ticket
+        // (openHtml), que ya recorta imagen y PDF al ancho de
+        // #ticket-contenido.
+        if (cfg.pageSize === 'roll' && (formato === 'pdf' || formato === 'imagen')) {
+            resultado = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
+            delete window._mmpDocumentosPendientes[id];
+            return resultado;
+        }
         if (formato === 'ticket') {
             resultado = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
         } else if (formato === 'pdf') {
