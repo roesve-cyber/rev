@@ -958,9 +958,12 @@ function abrirListaCotizaciones() {
     const rows = lista.slice().reverse().map(c => {
         const color = c.estado === 'Vigente' ? '#16a34a' : c.estado === 'Convertida' ? '#2563eb' : '#dc2626';
         const checked = window._cotSeleccionadas.has(c.id) ? 'checked' : '';
+        // 📦 Solo se ofrece "registrar en catálogo" mientras queden productos
+        // libres SIN registrar -- si ya se registraron todos, no se muestra.
+        const tieneLibresPendientes = Array.isArray(c.articulos) && c.articulos.some(a => a.esLibre && !a._registradoEnCatalogo);
         return `<tr>
           <td style="padding:10px;text-align:center;"><input type="checkbox" class="cotChk" data-id="${c.id}" onchange="_cotToggleSeleccion(${c.id}, this.checked)" ${checked} style="width:16px;height:16px;cursor:pointer;"></td>
-          <td style="padding:10px;">${c.folio}${c.modalidad === 'mayoreo' ? ' <span style="font-size:10px;background:#cffafe;color:#0e7490;padding:2px 7px;border-radius:10px;font-weight:bold;">MAYOREO</span>' : ''}</td>
+          <td style="padding:10px;">${c.folio}${c.modalidad === 'mayoreo' ? ' <span style="font-size:10px;background:#cffafe;color:#0e7490;padding:2px 7px;border-radius:10px;font-weight:bold;">MAYOREO</span>' : ''}${c.origen === 'cotizador-movil' ? ' <span style="font-size:10px;background:#ede9fe;color:#6d28d9;padding:2px 7px;border-radius:10px;font-weight:bold;">MÓVIL</span>' : ''}</td>
           <td style="padding:10px;">${c.clienteNombre}</td>
           <td style="padding:10px;">${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
           <td style="padding:10px;">${new Date(c.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
@@ -970,6 +973,7 @@ function abrirListaCotizaciones() {
             <button onclick="imprimirCotizacion(${c.id})" title="Imprimir" style="background:none;border:none;cursor:pointer;font-size:18px;">🖨️</button>
             ${c.estado !== 'Convertida' ? `<button onclick="editarCotizacion(${c.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:18px;">✏️</button>` : ''}
             ${c.estado === 'Vigente' ? `<button onclick="convertirCotizacionAVenta(${c.id})" title="Convertir a Venta" style="background:none;border:none;cursor:pointer;font-size:18px;">🛒</button>` : ''}
+            ${tieneLibresPendientes ? `<button onclick="_cotAbrirLibresPendientes(${c.id})" title="Registrar producto(s) en catálogo" style="background:none;border:none;cursor:pointer;font-size:18px;">📦</button>` : ''}
             <button onclick="eliminarCotizacion(${c.id})" title="Eliminar" style="background:none;border:none;cursor:pointer;font-size:18px;">🗑️</button>
           </td>
         </tr>`;
@@ -1527,6 +1531,87 @@ function convertirCotizacionAVenta(id) {
     navA('carrito');
 }
 
+function _cotEsc(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 📦 Mini-panel con solo los productos libres SIN registrar de una
+// cotización (venga de escritorio o del cotizador móvil -- ambos llegan
+// a la misma tabla 'cotizaciones'). Independiente de convertir a venta:
+// el cliente puede haber aceptado sin que todavía se registre la venta.
+function _cotAbrirLibresPendientes(id) {
+    const lista = StorageService.get('cotizaciones', []);
+    const cot = lista.find(c => c.id === id);
+    if (!cot) return alert('⚠️ Cotización no encontrada.');
+
+    document.querySelector('[data-modal="cot-libres-pendientes"]')?.remove();
+    const filas = (cot.articulos || []).map((a, idx) => ({ a, idx }))
+        .filter(({ a }) => a.esLibre && !a._registradoEnCatalogo)
+        .map(({ a, idx }) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+            <div>
+                <div style="font-weight:bold;color:#1e293b;">${_cotEsc(a.nombre)}</div>
+                <div style="font-size:12px;color:#64748b;">Precio cotizado: ${dinero(a.precio)}${a.costo ? ` · Costo capturado: ${dinero(a.costo)}` : ''}</div>
+            </div>
+            <button onclick="_cotRegistrarLibreEnCatalogo(${cot.id}, ${idx})" style="background:#047857;color:white;border:none;padding:8px 14px;border-radius:6px;font-weight:bold;cursor:pointer;white-space:nowrap;">Registrar en catálogo</button>
+        </div>`).join('');
+
+    const modalHTML = `
+    <div data-modal="cot-libres-pendientes" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:6500;display:flex;justify-content:center;align-items:center;padding:20px;">
+        <div style="background:white;border-radius:10px;width:95%;max-width:520px;padding:20px;max-height:85vh;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h3 style="margin:0;color:#1e40af;">📦 Productos por registrar — ${_cotEsc(cot.folio)}</h3>
+                <button onclick="document.querySelector('[data-modal=\\'cot-libres-pendientes\\']').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">✕</button>
+            </div>
+            ${filas || '<div style="color:#94a3b8;text-align:center;padding:20px;">Ya no hay productos libres pendientes en esta cotización.</div>'}
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// 📦 Pregunta compra única y abre el formulario real de Nuevo Producto
+// (inventario.js) precargado -- el usuario completa categoría/existencia
+// y guarda por el camino normal y validado de siempre. La línea de la
+// cotización se marca como registrada DESPUÉS de que ese guardado tenga
+// éxito (ver _cotMarcarLibreRegistrado, llamada desde guardarProductoDB).
+function _cotRegistrarLibreEnCatalogo(cotId, articuloIndex) {
+    const lista = StorageService.get('cotizaciones', []);
+    const cot = lista.find(c => c.id === cotId);
+    const art = cot?.articulos?.[articuloIndex];
+    if (!art) return alert('⚠️ No se encontró ese artículo en la cotización.');
+
+    const esUnicaCompra = confirm('¿Es compra única (no resurtible)?\n\nAceptar = Sí, es compra única.\nCancelar = No, será parte permanente del catálogo.');
+
+    document.querySelector('[data-modal="cot-libres-pendientes"]')?.remove();
+
+    window._cotLibrePendienteRegistro = { cotId, articuloIndex };
+    if (typeof abrirProductoForm !== 'function') {
+        window._cotLibrePendienteRegistro = null;
+        return alert('⚠️ El formulario de productos no está disponible en esta pantalla.');
+    }
+    abrirProductoForm(null, {
+        nombre: art.nombre || '',
+        costo: art.costo || 0,
+        precio: art.precio || 0,
+        esUnicaCompra
+    });
+}
+
+// Llamada desde inventario.js (guardarProductoDB) cuando el producto
+// creado desde este flujo se guardó con éxito.
+function _cotMarcarLibreRegistrado(cotId, articuloIndex) {
+    const lista = StorageService.get('cotizaciones', []);
+    const idx = lista.findIndex(c => c.id === cotId);
+    if (idx === -1) return;
+    const art = lista[idx].articulos?.[articuloIndex];
+    if (!art) return;
+    art._registradoEnCatalogo = true;
+    StorageService.set('cotizaciones', lista);
+    if (typeof abrirListaCotizaciones === 'function' && document.getElementById('listaCotizaciones')) {
+        abrirListaCotizaciones();
+    }
+}
+
 function eliminarCotizacion(id) {
     if (!confirm('¿Eliminar esta cotización?')) return;
     let lista = StorageService.get('cotizaciones', []);
@@ -1564,6 +1649,9 @@ window.generarCotizacion = generarCotizacion;
 window.abrirListaCotizaciones = abrirListaCotizaciones;
 window.imprimirCotizacion = imprimirCotizacion;
 window.convertirCotizacionAVenta = convertirCotizacionAVenta;
+window._cotAbrirLibresPendientes = _cotAbrirLibresPendientes;
+window._cotRegistrarLibreEnCatalogo = _cotRegistrarLibreEnCatalogo;
+window._cotMarcarLibreRegistrado = _cotMarcarLibreRegistrado;
 window.eliminarCotizacion = eliminarCotizacion;
 window.editarCotizacion = editarCotizacion;
 window._cotToggleSeleccion = _cotToggleSeleccion;

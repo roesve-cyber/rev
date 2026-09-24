@@ -2363,7 +2363,7 @@ function actualizarSelectorCategorias() {
  select.innerHTML = options || "<option>Crea una categoria primero</option>";
 }
 
-function abrirProductoForm(id = null) {
+function abrirProductoForm(id = null, prefill = null) {
  actualizarSelectorCategorias();
  const modal = document.getElementById("modalProductoForm");
  if (!modal) return;
@@ -2407,9 +2407,13 @@ function abrirProductoForm(id = null) {
  } else {
  productoEditando = null;
  document.getElementById("tituloModalProducto").innerText = "Nuevo Producto";
- inputNombre.value = "";
- inputCosto.value = "";
- if (inputPrecio) inputPrecio.value = "";
+ // 📦 Precarga desde un producto libre de una cotización (ver
+ // _cotRegistrarLibreEnCatalogo en cotizaciones.js) -- el resto de los
+ // campos (categoría, imagen, existencia) los completa el usuario aquí,
+ // igual que con cualquier producto nuevo.
+ inputNombre.value = prefill?.nombre || "";
+ inputCosto.value = prefill?.costo || "";
+ if (inputPrecio) inputPrecio.value = prefill?.precio || "";
  if (inputPrecioSegunda) inputPrecioSegunda.value = "";
  inputColor.value = "";
  inputMarca.value = "";
@@ -2419,7 +2423,7 @@ function abrirProductoForm(id = null) {
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = false;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = "";
  if (inputActivo) inputActivo.checked = true;
- if (inputEsUnicaCompra) inputEsUnicaCompra.checked = false;
+ if (inputEsUnicaCompra) inputEsUnicaCompra.checked = !!prefill?.esUnicaCompra;
  }
  
  // --- LAGICA FINANCIERA DEL PRODUCTO ---
@@ -2517,6 +2521,14 @@ function guardarProductoDB() {
  }
 
  if (!StorageService.set("productos", window.productos)) return alert("Error guardando producto");
+
+ // 📦 Si este producto se creó desde "Registrar en catálogo" de un
+ // producto libre de una cotización (ver cotizaciones.js), marca esa
+ // línea como ya registrada para no ofrecer crearlo dos veces.
+ if (!productoEditando && window._cotLibrePendienteRegistro && typeof window._cotMarcarLibreRegistrado === 'function') {
+ window._cotMarcarLibreRegistrado(window._cotLibrePendienteRegistro.cotId, window._cotLibrePendienteRegistro.articuloIndex);
+ window._cotLibrePendienteRegistro = null;
+ }
 
  cerrarProductoForm();
  aplicarFiltros();
@@ -2638,6 +2650,9 @@ function cerrarProductoForm() {
  modal.style.display = 'none';
  }
  productoEditando = null;
+ // 📦 Si se cerró sin guardar, no debe quedar pendiente para la próxima
+ // vez que se abra "Nuevo Producto" por otro motivo.
+ window._cotLibrePendienteRegistro = null;
 }
 
 // ===== CALCULO AUTOMATICO EN FORMULARIO DE PRODUCTOS =====
