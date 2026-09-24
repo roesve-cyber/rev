@@ -1,0 +1,1682 @@
+// ===== COTIZACIONES (DUAL: VENTAS Y AUDITORÍA MULTI-PLAZO) =====
+
+// 🎟️ Cupón de pronto pago mostrado en la cotización (motiva al cliente a
+// liquidar dentro de su plazo pactado).
+// 🛡️ CORREGIDO (sep 2026, auditoría): esto llamaba a
+// window._cxcPorcentajeCuponPorPlazo, una función que NUNCA se definió en
+// ningún archivo del repo -- el typeof siempre daba falso y esto caía
+// siempre al % fijo (porcentajeCuponProntoPago), ignorando por completo la
+// tasaBaseCupon por plazo. Resultado real: cotizaciones.js le prometía al
+// cliente un cupón distinto al que cxc.js de verdad emitía al liquidar, cada
+// vez que un plazo tuviera tasaBaseCupon configurada.
+// Ahora, igual que ya hacía bien cotizador-movil.html (que sí reimplementa
+// la fórmula real porque corre standalone sin cxc.js), pero aquí SÍ tenemos
+// cxc.js cargado en la misma app -- así que en vez de reimplementar nada, se
+// llama directo a la fuente de verdad: _cxcCuponTopadoParaPlazo (cxc.js), la
+// MISMA función que usa _cxcEvaluarPoliticaPagoAnticipado al liquidar de
+// verdad. Ya incluye la tasa base por plazo, el redondeo, y el tope
+// monótono entre plazos (nunca le da más a un plazo corto que a uno largo).
+// El plan de 1 mes no genera cupón (ya es el escalón más corto -- misma
+// excepción que cxc.js y ventas.js), así que se filtra aquí antes de llamar.
+function _cotMontoCuponPlan(plan, capitalContado, periodicidad) {
+    if (!plan || Number(plan.meses) === 1) return 0;
+    if (typeof window._cxcCuponTopadoParaPlazo !== 'function') return 0;
+    return window._cxcCuponTopadoParaPlazo(plan.meses, capitalContado, periodicidad || 'semanal', plan.total);
+}
+
+// Función principal que renderiza la vista de cotizaciones
+function renderCotizaciones() {
+    const cont = document.getElementById('cotizaciones');
+    if (!cont) return;
+
+    // "Avanzada" es la cotización con planes de crédito multi-plazo
+    // personalizados — herramienta de auditoría/administración, no de venta
+    // en piso. Un vendedor no debe tener esa opción.
+    const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
+    const btnAvanzada = esAdminActual
+        ? `<button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>`
+        : '';
+
+    cont.innerHTML = `
+        <div class="vista-header">
+            <h2>📄 Cotizaciones</h2>
+            <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button onclick="abrirCotizador()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">➕ Nueva Cotización (Simple)</button>
+                ${btnAvanzada}
+                <button onclick="abrirCotizadorMayoreo()" style="padding:10px 20px; background:#0891b2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🏷️ Nueva Cotización (Mayoreo)</button>
+            </div>
+        </div>
+        <div id="listaCotizaciones" style="background:white; padding:20px; border-radius:8px; margin-top:20px;"></div>
+    `;
+    
+    abrirListaCotizaciones();
+}
+
+function _foliosCot() {
+    // 🛡️ Migrado de folio por fecha (COT-YYYYMMDD-NNNN) al motor
+    // consecutivo central (COT-00001), igual que ventas/devoluciones/etc.
+    // Ver js/services/folio-service.js.
+    return window.generarFolioSistema
+        ? window.generarFolioSistema('COT')
+        : 'COT-TMP-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+
+const fmtMXN = (n) => new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN'
+}).format(n);
+
+// Llama al cotizador simple (Ventas)
+function abrirCotizador() {
+    window._customPlanesAuditoria = [];
+    window._cotEditandoId = null;
+    _renderCotizadorHTML('simple');
+}
+
+// Llama al cotizador avanzado (Auditoría)
+function abrirCotizadorAuditoria() {
+    window._customPlanesAuditoria = [];
+    window._cotEditandoId = null;
+    _renderCotizadorHTML('auditoria');
+}
+
+// Llama al cotizador de Mayoreo (pago de contado, sin planes de crédito)
+function abrirCotizadorMayoreo() {
+    window._customPlanesAuditoria = [];
+    window._cotEditandoId = null;
+    _renderCotizadorHTML('mayoreo');
+}
+
+// Abre el cotizador precargado con los datos de una cotización ya existente para modificarla.
+function editarCotizacion(id) {
+    const lista = StorageService.get('cotizaciones', []);
+    const cot = lista.find(c => c.id === id);
+    if (!cot) return alert('⚠️ Cotización no encontrada.');
+    if (cot.estado === 'Convertida') return alert('⚠️ No se puede editar una cotización ya convertida a venta.');
+
+    const modo = cot.modalidad === 'mayoreo' ? 'mayoreo' : ((cot.customPlanes && cot.customPlanes.length > 0) ? 'auditoria' : 'simple');
+
+    // El modo "auditoria" (Avanzada) expone costo de adquisición y planes de
+    // crédito personalizados: solo admin puede editarlo, aunque la cotización
+    // ya exista. El vendedor puede seguir convirtiéndola a venta normalmente
+    // (botón "Convertir a Venta"), solo no puede abrir este editor.
+    if (modo === 'auditoria' && !(typeof _esAdmin === 'function' && _esAdmin())) {
+        return alert('⚠️ Esta cotización es de tipo Avanzada y solo puede editarla un administrador. Puedes convertirla a venta directamente con el botón 🛒.');
+    }
+
+    window._customPlanesAuditoria = cot.customPlanes ? cot.customPlanes.map(p => ({ ...p })) : [];
+    window._cotEditandoId = cot.id;
+    _renderCotizadorHTML(modo, cot);
+}
+
+// Generador dinámico de la vista según el rol/sección
+// cotExistente (opcional): si se pasa, el formulario se precarga para EDITAR esa cotización en vez de crear una nueva.
+function _renderCotizadorHTML(modo, cotExistente) {
+    const isAuditoria = modo === 'auditoria';
+    const isMayoreo = modo === 'mayoreo';
+    const conCosto = isAuditoria || isMayoreo; // ambos modos capturan costo del producto libre
+    window._isCotizadorAuditoria = isAuditoria;
+    window._isCotizadorMayoreo = isMayoreo;
+    document.querySelector('[data-modal="cotizador"]')?.remove();
+
+    // Campos condicionales para producto libre
+    const camposLibre = conCosto ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">NOMBRE DEL PRODUCTO</label>
+                <input type="text" id="cotNombreLibre" placeholder="Ej: Mesa de madera..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">COSTO DE ADQUISICIÓN ($)</label>
+                <input type="number" id="cotCostoLibre" value="0" min="0" oninput="_actualizarPrecioSugerido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">MARGEN DESEADO (%)</label>
+                <input type="number" id="cotMargenLibre" value="30" min="0" max="99" oninput="_actualizarPrecioSugerido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">PRECIO FINAL (editable)</label>
+                <input type="number" id="cotPrecioManual" value="0" min="0" step="0.01" style="width:100%;padding:8px;border:1px solid #2563eb;border-radius:6px;margin-top:3px;font-weight:bold;">
+            </div>
+        </div>
+    ` : `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">NOMBRE DEL PRODUCTO</label>
+                <input type="text" id="cotNombreLibre" placeholder="Ej: Mesa de madera..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+                <label style="font-size:11px;font-weight:bold;color:#374151;">PRECIO FINAL ($)</label>
+                <input type="number" id="cotPrecioManual" value="0" min="0" step="0.01" style="width:100%;padding:8px;border:1px solid #2563eb;border-radius:6px;margin-top:3px;font-weight:bold;">
+            </div>
+        </div>
+    `;
+
+    // Panel condicional MULTIPLE de plan personalizado
+    const camposCustomPlan = isAuditoria ? `
+        <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin-bottom:14px;">
+            <h4 style="margin:0 0 8px;color:#92400e;font-size:13px;">⚙️ Agregar Planes de Crédito (Auditoría)</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+                <div>
+                    <label style="font-size:11px;font-weight:bold;color:#92400e;">PLAZO ADICIONAL (Meses)</label>
+                    <input type="number" id="cotPlazoCustomInput" placeholder="Ej: 9" min="1" style="width:100%;padding:8px;border:1px solid #fcd34d;border-radius:6px;margin-top:3px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;color:#92400e;">TASA MENSUAL (%)</label>
+                    <input type="number" id="cotTasaCustomInput" placeholder="Ej: 3" min="0" step="0.1" style="width:100%;padding:8px;border:1px solid #fcd34d;border-radius:6px;margin-top:3px;">
+                </div>
+                <button type="button" onclick="_agregarPlanCustom()" style="padding:9px 14px;background:#d97706;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;" title="Agregar Plan">➕ Agregar</button>
+            </div>
+            <div id="listaCustomPlanes" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;"></div>
+        </div>
+    ` : '';
+
+    const tituloModal = cotExistente
+        ? `✏️ Editar Cotización ${cotExistente.folio}`
+        : (isMayoreo ? '🏷️ Cotización de Mayoreo (Pago de Contado)' : `📄 Nueva Cotización ${isAuditoria ? '(Avanzada)' : ''}`);
+    const colorModal = isMayoreo ? '#0891b2' : (isAuditoria ? '#d97706' : '#1e40af');
+
+    const campoPeriodicidad = isMayoreo ? `
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">FORMA DE PAGO</label>
+            <div style="width:100%;padding:9px;border:1px solid #a5f3fc;border-radius:6px;margin-top:4px;background:#ecfeff;color:#0e7490;font-weight:bold;text-align:center;">💵 CONTADO</div>
+          </div>` : `
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">PERIODICIDAD DE PAGO</label>
+            <select id="cotPeriodicidad" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+              <option value="semanal">Semanal</option>
+              <option value="quincenal">Quincenal</option>
+              <option value="mensual">Mensual</option>
+            </select>
+          </div>`;
+
+    const html = `
+    <div data-modal="cotizador" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
+      <div style="background:white;border-radius:12px;width:100%;max-width:760px;padding:28px;margin:auto;">
+        <h2 style="margin:0 0 20px;color:${colorModal};">${tituloModal}</h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">CLIENTE</label>
+            <input type="hidden" id="cotCliente" value="">
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <span id="cotCliente-display"
+                    style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                Sin seleccionar
+              </span>
+              <button type="button"
+                      onclick="abrirSelectorCliente({titulo:'👤 Seleccionar Cliente',onSeleccion:function(c){
+                          document.getElementById('cotCliente').value=c.id;
+                          var d=document.getElementById('cotCliente-display');
+                          d.textContent=c.nombre; d.style.color='#111827';
+                          document.getElementById('cotClienteLibre').value='';
+                      }})"
+                      style="padding:9px 12px;background:#1e40af;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+                👤 Buscar
+              </button>
+            </div>
+            <input type="text" id="cotClienteLibre" placeholder="O escribe nombre libre..." style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:6px;">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:bold;color:#374151;">VIGENCIA (días)</label>
+            <input type="number" id="cotVigencia" value="15" min="1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+          </div>
+          ${campoPeriodicidad}
+        </div>
+
+        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:12px;">
+          <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;margin-bottom:10px;">
+            <div>
+              <input type="hidden" id="cotProductoSel" value="">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span id="cotProductoSel-display"
+                      style="flex:1;padding:9px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#6b7280;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  Sin seleccionar
+                </span>
+                <button type="button"
+                        onclick="abrirSelectorProducto({titulo:'🔍 Seleccionar Producto',onSeleccion:function(p){
+                            document.getElementById('cotProductoSel').value=p.id;
+                            var d=document.getElementById('cotProductoSel-display');
+                            d.textContent=p.nombre+' — '+dinero(p.precio||0);
+                            d.style.color='#111827';
+                            _onCotProductoChange();
+                            _cotSetImagenPreview(p.imagen || null);
+                        }})"
+                        style="padding:9px 12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;">
+                  🔍 Buscar
+                </button>
+                <button type="button"
+                        onclick="document.getElementById('cotProductoSel').value='__libre__';var d=document.getElementById('cotProductoSel-display');d.textContent='✏️ Producto no registrado';d.style.color='#92400e';_onCotProductoChange();_cotSetImagenPreview(null);"
+                        style="padding:9px 10px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:13px;"
+                        title="Producto no registrado en sistema">
+                  ✏️
+                </button>
+              </div>
+            </div>
+            <input type="number" id="cotCantidad" value="1" min="1" style="width:70px;padding:9px;border:1px solid #d1d5db;border-radius:6px;" placeholder="Cant">
+            <button onclick="agregarArticuloCotizacion()" style="padding:9px 16px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">➕ Agregar</button>
+          </div>
+          <div id="cotProductoLibreFields" style="display:none;background:#f9fafb;border-radius:6px;padding:12px;">
+            ${camposLibre}
+          </div>
+          <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px;margin-top:10px;">
+            <label style="font-size:11px;font-weight:bold;color:#0369a1;">🖼️ IMAGEN DEL PRODUCTO (opcional, se agrega con el artículo)</label>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+              <div id="cotImagenPreviewWrap" style="width:60px;height:60px;border:1px dashed #94a3b8;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:white;flex-shrink:0;">
+                <span id="cotImagenPreviewVacio" style="font-size:9px;color:#94a3b8;text-align:center;line-height:1.2;">Sin<br>imagen</span>
+                <img id="cotImagenPreviewImg" style="display:none;width:100%;height:100%;object-fit:cover;">
+              </div>
+              <div style="flex:1;min-width:220px;display:flex;flex-direction:column;gap:6px;">
+                <input type="file" id="cotImagenArchivo" accept="image/*" onchange="_cotCargarImagenArchivo(this.files[0])" style="font-size:12px;">
+                <div id="cotImagenPasteZone" tabindex="0" contenteditable="true"
+                     style="font-size:11px;color:#64748b;border:1px dashed #94a3b8;border-radius:6px;padding:6px 8px;cursor:text;background:white;outline:none;"
+                     onpaste="_cotPegarImagen(event)">
+                  📋 Haz clic aquí y pega (Ctrl+V) una imagen copiada de otro lado
+                </div>
+              </div>
+              <button type="button" onclick="_cotQuitarImagen()" style="padding:8px 10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap;">✕ Quitar</button>
+            </div>
+          </div>
+        </div>
+
+        ${isMayoreo ? `
+        <div style="background:#ecfeff;border:1px solid #67e8f9;border-radius:8px;padding:14px;margin-bottom:16px;">
+          <h4 style="margin:0 0 6px;color:#0e7490;font-size:13px;">🏷️ Ajustar precios en bloque</h4>
+          <p style="font-size:11px;color:#0e7490;margin:0 0 10px;">Se aplica a todos los artículos ya agregados a la tabla de abajo.</p>
+
+          <div style="background:white;border:1px solid #a5f3fc;border-radius:6px;padding:10px;margin-bottom:10px;">
+            <label style="font-size:11px;font-weight:bold;color:#0e7490;">MARGEN FIJO (%) SOBRE COSTO</label>
+            <p style="font-size:10px;color:#64748b;margin:2px 0 6px;">Recalcula el precio de cada producto directo desde su costo (precio = costo ÷ (1 − margen)). Es la forma de controlar el margen real, no un descuento sobre el precio actual. Si se usa, ignora los campos de descuento de abajo.</p>
+            <div style="display:flex;gap:10px;align-items:end;">
+              <input type="number" id="cotMargenBloque" min="0" max="99" step="0.1" placeholder="Ej: 20" style="width:140px;padding:8px;border:1px solid #67e8f9;border-radius:6px;">
+              <button type="button" onclick="_cotAplicarAjusteBloque()" style="padding:9px 14px;background:#0e7490;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;white-space:nowrap;">Aplicar margen a todos</button>
+            </div>
+          </div>
+
+          <p style="font-size:11px;color:#0e7490;margin:0 0 6px;">— o bien, descuenta sobre el precio actual (nunca baja del costo) —</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+            <div>
+              <label style="font-size:11px;font-weight:bold;color:#0e7490;">DESCUENTO (%)</label>
+              <input type="number" id="cotDescuentoBloquePct" min="0" max="100" step="0.1" placeholder="Ej: 10" style="width:100%;padding:8px;border:1px solid #67e8f9;border-radius:6px;margin-top:3px;">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:bold;color:#0e7490;">O REBAJA FIJA POR PIEZA ($)</label>
+              <input type="number" id="cotDescuentoBloqueMonto" min="0" step="0.01" placeholder="Ej: 200" style="width:100%;padding:8px;border:1px solid #67e8f9;border-radius:6px;margin-top:3px;">
+            </div>
+            <button type="button" onclick="_cotAplicarAjusteBloque()" style="padding:9px 14px;background:#0891b2;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;white-space:nowrap;">Aplicar a todos</button>
+          </div>
+        </div>` : ''}
+
+        <div id="tablaArticulosCot" style="margin-bottom:16px;"></div>
+
+        <div style="margin-bottom:12px;">
+          <label style="font-size:12px;font-weight:bold;color:#374151;">NOTAS</label>
+          <textarea id="cotNotas" rows="2" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;" placeholder="Condiciones, observaciones..."></textarea>
+        </div>
+
+        <div style="background:#f8fafc;border-radius:8px;padding:14px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${isMayoreo ? '0' : '10px'};">
+            <strong style="font-size:16px;">Subtotal: <span id="cotTotal" style="color:#1e40af;font-size:18px;">$0.00</span></strong>
+          </div>
+          ${isMayoreo ? '' : `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:bold;">
+              <input type="checkbox" id="cotizEngancheCheck" onchange="_toggleEngancheCot()" style="width:16px;height:16px;">
+              ¿Aplica enganche?
+            </label>
+            <div id="cotEngancheDiv" style="display:none;">
+              <input type="number" id="cotizEngancheMonto" value="0" min="0" oninput="_actualizarPlanesCot()" placeholder="Monto enganche" style="padding:8px;border:1px solid #3182ce;border-radius:6px;width:140px;font-weight:bold;">
+            </div>
+          </div>
+          <div id="cotSaldoDiv" style="display:none;font-size:14px;color:#6b7280;margin-bottom:8px;">
+            Saldo a financiar: <strong id="cotSaldoFinanciar" style="color:#1e40af;">$0.00</strong>
+          </div>`}
+        </div>
+
+        ${camposCustomPlan}
+
+        ${isMayoreo ? '' : `
+        <div id="cotPlanesDiv" style="margin-bottom:14px;display:none;">
+          <h4 style="margin:0 0 8px;color:#374151;font-size:14px;">📅 Tabla de Plazos de Crédito</h4>
+          <div id="cotTablaPlanesContainer"></div>
+        </div>`}
+
+        <div style="display:flex;gap:10px;">
+          <button onclick="generarCotizacion()" id="cotBtnGenerar" style="flex:1;padding:12px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">${cotExistente ? '💾 Actualizar Cotización' : '✅ Generar Cotización'}</button>
+          <button onclick="document.querySelector('[data-modal=cotizador]')?.remove()" style="padding:12px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    window._articulosCot = [];
+    window._cotImagenTemp = null;
+
+    if (cotExistente) {
+        // Precarga de artículos vinculando las imágenes dinámicamente
+        window._articulosCot = cotExistente.articulos.map((a, index) => {
+            let img = null;
+            if (a.productoId) {
+                // Referenciar imagen desde base de datos de inventario
+                const prod = StorageService.get('productos', []).find(p => String(p.id) === String(a.productoId));
+                if (prod) img = prod.imagen;
+            } else if (a.esLibre) {
+                // Referenciar imagen libre desde el disco duro local
+                img = localStorage.getItem(`cot_img_${cotExistente.id}_${index}`) || null;
+            }
+            return { ...a, imagen: img };
+        });
+
+        if (cotExistente.clienteId) {
+            const inputCliente = document.getElementById('cotCliente');
+            const dispCliente = document.getElementById('cotCliente-display');
+            if (inputCliente) inputCliente.value = cotExistente.clienteId;
+            if (dispCliente) { dispCliente.textContent = cotExistente.clienteNombre; dispCliente.style.color = '#111827'; }
+        } else if (cotExistente.clienteNombre && cotExistente.clienteNombre !== 'Cliente general') {
+            const libreCliente = document.getElementById('cotClienteLibre');
+            if (libreCliente) libreCliente.value = cotExistente.clienteNombre;
+        }
+
+        const vigenciaInput = document.getElementById('cotVigencia');
+        if (vigenciaInput) vigenciaInput.value = cotExistente.vigenciaDias;
+
+        const notasInput = document.getElementById('cotNotas');
+        if (notasInput) notasInput.value = cotExistente.notas || '';
+
+        const periodicidadSel = document.getElementById('cotPeriodicidad');
+        if (periodicidadSel) periodicidadSel.value = cotExistente.periodicidad || 'semanal';
+
+        if (cotExistente.enganche > 0) {
+            const chk = document.getElementById('cotizEngancheCheck');
+            const montoInput = document.getElementById('cotizEngancheMonto');
+            if (montoInput) montoInput.value = cotExistente.enganche;
+            if (chk) { chk.checked = true; _toggleEngancheCot(); }
+        }
+
+        if (isAuditoria) _renderCustomPlanes();
+    }
+
+    _renderTablaArticulosCot();
+}
+
+// ── Helpers de Planes Personalizados ──
+window._agregarPlanCustom = function() {
+    const meses = parseInt(document.getElementById('cotPlazoCustomInput').value);
+    const tasa = parseFloat(document.getElementById('cotTasaCustomInput').value);
+    
+    if (isNaN(meses) || meses <= 0 || isNaN(tasa) || tasa < 0) {
+        return alert("⚠️ Ingresa un plazo en meses y una tasa válida.");
+    }
+    
+    window._customPlanesAuditoria.push({ meses, tasa });
+    document.getElementById('cotPlazoCustomInput').value = '';
+    document.getElementById('cotTasaCustomInput').value = '';
+    _renderCustomPlanes();
+    _actualizarPlanesCot();
+};
+
+window._eliminarPlanCustom = function(idx) {
+    window._customPlanesAuditoria.splice(idx, 1);
+    _renderCustomPlanes();
+    _actualizarPlanesCot();
+};
+
+window._renderCustomPlanes = function() {
+    const cont = document.getElementById('listaCustomPlanes');
+    if (!cont) return;
+    cont.innerHTML = window._customPlanesAuditoria.map((p, i) => `
+        <div style="background:#fde68a;color:#92400e;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:6px;">
+            ${p.meses}m al ${p.tasa}%
+            <button type="button" onclick="_eliminarPlanCustom(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;margin-left:4px;">✕</button>
+        </div>
+    `).join('');
+};
+
+
+// ── Imagen del producto (subir de disco o pegar del portapapeles) ──
+window._cotImagenTemp = null; // dataURL en preparación para el próximo artículo que se agregue
+
+function _cotSetImagenPreview(dataUrl) {
+    window._cotImagenTemp = dataUrl || null;
+    const img = document.getElementById('cotImagenPreviewImg');
+    const vacio = document.getElementById('cotImagenPreviewVacio');
+    if (!img || !vacio) return;
+    if (dataUrl) {
+        img.src = dataUrl;
+        img.style.display = 'block';
+        vacio.style.display = 'none';
+    } else {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+        vacio.style.display = 'block';
+    }
+}
+
+function _cotRedimensionarImagen(dataUrl, maxDim, calidad) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            let width = img.naturalWidth || img.width;
+            let height = img.naturalHeight || img.height;
+            if (!width || !height) return resolve(dataUrl);
+            if (width > maxDim || height > maxDim) {
+                if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+                else { width = Math.round(width * maxDim / height); height = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            try {
+                resolve(canvas.toDataURL('image/jpeg', calidad || 0.82));
+            } catch (e) {
+                resolve(dataUrl); // p.ej. imagen con CORS bloqueado: se usa la original
+            }
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+}
+
+function _cotCargarImagenArchivo(file) {
+    if (!file) return;
+    if (!file.type || !file.type.startsWith('image/')) {
+        return alert('⚠️ Selecciona un archivo de imagen válido.');
+    }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const optimizada = await _cotRedimensionarImagen(e.target.result, 700, 0.82);
+        _cotSetImagenPreview(optimizada);
+    };
+    reader.onerror = () => alert('⚠️ No se pudo leer el archivo de imagen.');
+    reader.readAsDataURL(file);
+}
+
+function _cotPegarImagen(event) {
+    event.preventDefault();
+    const zone = document.getElementById('cotImagenPasteZone');
+    const items = (event.clipboardData || window.clipboardData)?.items || [];
+    let encontrada = false;
+    for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+            encontrada = true;
+            const file = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const optimizada = await _cotRedimensionarImagen(e.target.result, 700, 0.82);
+                _cotSetImagenPreview(optimizada);
+                if (zone) zone.textContent = '✅ Imagen pegada. Pega otra para reemplazarla.';
+            };
+            reader.readAsDataURL(file);
+            break;
+        }
+    }
+    if (!encontrada && zone) {
+        zone.textContent = '⚠️ No se encontró una imagen en el portapapeles. Copia una imagen e intenta de nuevo.';
+    }
+}
+
+function _cotQuitarImagen() {
+    _cotSetImagenPreview(null);
+    const fileInput = document.getElementById('cotImagenArchivo');
+    if (fileInput) fileInput.value = '';
+    const zone = document.getElementById('cotImagenPasteZone');
+    if (zone) zone.textContent = '📋 Haz clic aquí y pega (Ctrl+V) una imagen copiada de otro lado';
+}
+
+function _onCotProductoChange() {
+    const sel = document.getElementById('cotProductoSel');
+    const libFields = document.getElementById('cotProductoLibreFields');
+    if (!libFields) return;
+    if (sel.value === '__libre__') {
+        libFields.style.display = 'block';
+    } else {
+        libFields.style.display = 'none';
+    }
+}
+
+function _actualizarPrecioSugerido() {
+    if (!window._isCotizadorAuditoria) return; // Solo disponible en Auditoría
+    const costo = parseFloat(document.getElementById('cotCostoLibre')?.value) || 0;
+    const margen = parseFloat(document.getElementById('cotMargenLibre')?.value) || 0;
+    let precioSugerido = 0;
+    if (costo > 0 && margen < 100) {
+        precioSugerido = costo / (1 - margen / 100);
+    }
+    const precioInput = document.getElementById('cotPrecioManual');
+    if (precioInput) precioInput.value = precioSugerido.toFixed(2);
+}
+
+function _toggleEngancheCot() {
+    const checked = document.getElementById('cotizEngancheCheck')?.checked;
+    const div = document.getElementById('cotEngancheDiv');
+    const saldoDiv = document.getElementById('cotSaldoDiv');
+    if (div) div.style.display = checked ? 'block' : 'none';
+    if (saldoDiv) saldoDiv.style.display = checked ? 'block' : 'none';
+    _actualizarPlanesCot();
+}
+
+function _actualizarPlanesCot() {
+    const total = (window._articulosCot || []).reduce((s, a) => s + a.subtotal, 0);
+    const engancheCheck = document.getElementById('cotizEngancheCheck')?.checked;
+    const enganche = engancheCheck ? (parseFloat(document.getElementById('cotizEngancheMonto')?.value) || 0) : 0;
+    const saldo = Math.max(0, total - enganche);
+
+    const saldoEl = document.getElementById('cotSaldoFinanciar');
+    if (saldoEl) saldoEl.textContent = dinero(saldo);
+
+    const planesDiv = document.getElementById('cotPlanesDiv');
+    const container = document.getElementById('cotTablaPlanesContainer');
+    if (!planesDiv || !container) return;
+
+    if (total <= 0) {
+        planesDiv.style.display = 'none';
+        return;
+    }
+
+    planesDiv.style.display = 'block';
+
+    const periodicidadSel = document.getElementById('cotPeriodicidad')?.value || 'semanal';
+    const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+    
+    // Obtener los planes estándar de sistema
+    const planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, periodicidadSel);
+
+    // Calcular los planes personalizados si estamos en modo auditoría
+if (window._isCotizadorAuditoria && window._customPlanesAuditoria.length > 0) {
+    let mult = 1;
+    if (periodicidadSel === 'quincenal') mult = 2;
+    if (periodicidadSel === 'mensual') mult = 4;
+
+    let totalAnteriorCustom = 0;
+
+    // Ordenar los plazos custom de menor a mayor ANTES de calcular,
+    // para que la lógica de progresividad funcione igual que en calcularCredito()
+    const customOrdenados = [...window._customPlanesAuditoria].sort((a, b) => a.meses - b.meses);
+
+    customOrdenados.forEach(custom => {
+        const tasaDecimal = custom.tasa / 100;
+        const semanas = custom.meses * 4;
+
+        // ✅ Misma fórmula que calcularCredito()
+        let totalBase = saldo * (1 + (tasaDecimal * custom.meses));
+        let pagoSemanal = totalBase / semanas;
+
+        // ✅ Mismo redondeo que calcularCredito(): múltiplo de 10 superior
+        pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+        let totalFinal = pagoSemanal * semanas;
+
+        // ✅ Misma lógica de progresividad que calcularCredito()
+        let intentos = 0;
+        while (totalFinal <= totalAnteriorCustom && intentos++ < 100) {
+            pagoSemanal += 5;
+            totalFinal = pagoSemanal * semanas;
+        }
+
+        // ✅ Mismo guard de seguridad que calcularCredito()
+        if (intentos >= 100) return;
+
+        totalAnteriorCustom = totalFinal;
+
+        // ✅ El abono se escala por periodicidad (igual que calcularCreditoConPeriodicidad())
+        const pagos = Math.round(semanas / mult);
+        const abono = pagoSemanal * mult;
+
+        planes.push({
+            meses: custom.meses,
+            pagos,
+            abono,
+            total: totalFinal,  // ✅ SIN sumar enganche — consistente con planes estándar
+            custom: true
+        });
+    });
+
+    // Ordenar todos los planes combinados por meses
+    planes.sort((a, b) => a.meses - b.meses);
+}
+
+    let tablaHtml = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:#f3f4f6;">
+        <th style="padding:8px;text-align:center;">Plazo</th>
+        <th style="padding:8px;text-align:center;">Periodicidad</th>
+        <th style="padding:8px;text-align:right;">Pago / Período</th>
+        <th style="padding:8px;text-align:right;">Total a Pagar</th>
+        <th style="padding:8px;text-align:right;color:#7e22ce;">🎟️ Cupón si paga a tiempo</th>
+      </tr></thead>
+      <tbody>`;
+      
+    const cuponesFinales = planes.map(p => _cotMontoCuponPlan(p, saldo, periodicidadSel));
+    planes.forEach((plan, i) => {
+        const customBadge = plan.custom ? ' <br><span style="background:#f59e0b;color:white;padding:2px 6px;border-radius:10px;font-size:9px;">Personalizado</span>' : '';
+        const montoCupon = cuponesFinales[i];
+        const celdaCupon = montoCupon > 0
+            ? `<span style="font-weight:bold;color:#7e22ce;">+${dinero(montoCupon)}</span>`
+            : '<span style="color:#9ca3af;">--</span>';
+        tablaHtml += `<tr style="${plan.custom ? 'background:#fffbeb;' : ''}">
+          <td style="padding:7px;text-align:center;">${plan.meses} meses (${plan.pagos} pagos)${customBadge}</td>
+          <td style="padding:7px;text-align:center;">${labelMap[periodicidadSel]}</td>
+          <td style="padding:7px;text-align:right;font-weight:bold;color:#1e40af;">${dinero(plan.abono)}</td>
+          <td style="padding:7px;text-align:right;">${dinero(plan.total)}</td>
+          <td style="padding:7px;text-align:right;">${celdaCupon}</td>
+        </tr>`;
+    });
+    tablaHtml += '</tbody></table>';
+
+    const mejorCupon = Math.max(0, ...cuponesFinales);
+    if (mejorCupon > 0.01) {
+        tablaHtml += `<div style="margin-top:10px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;padding:10px 12px;text-align:center;color:#7e22ce;font-size:12.5px;">
+            🎟️ <b>Si liquida su crédito dentro del plazo pactado</b>, paga el total nominal y recibe hasta <b>${dinero(mejorCupon)}</b> en cupón de saldo a favor para su próxima compra.
+        </div>`;
+    }
+
+    container.innerHTML = tablaHtml;
+
+    const periodicidadCombo = document.getElementById('cotPeriodicidad');
+    if (periodicidadCombo && !periodicidadCombo._cotListener) {
+        periodicidadCombo.addEventListener('change', _actualizarPlanesCot);
+        periodicidadCombo._cotListener = true;
+    }
+}
+
+function agregarArticuloCotizacion() {
+    const sel = document.getElementById('cotProductoSel');
+    const cantInput = document.getElementById('cotCantidad');
+    if (!sel.value) return;
+
+    const cant = parseInt(cantInput.value) || 1;
+    if (!window._articulosCot) window._articulosCot = [];
+
+    if (sel.value === '__libre__') {
+        const nombre = document.getElementById('cotNombreLibre')?.value.trim();
+        const precio = parseFloat(document.getElementById('cotPrecioManual')?.value) || 0;
+        
+        if (!nombre) return alert('⚠️ Escribe el nombre del producto.');
+        if (precio <= 0) return alert('⚠️ El precio debe ser mayor a 0.');
+        
+        let costo = 0;
+        let margen = 0;
+        
+        if (window._isCotizadorAuditoria) {
+            costo = parseFloat(document.getElementById('cotCostoLibre')?.value) || 0;
+            margen = parseFloat(document.getElementById('cotMargenLibre')?.value) || 0;
+        }
+
+        window._articulosCot.push({
+            productoId: null,
+            nombre,
+            precio,
+            costo,
+            margen,
+            esLibre: true,
+            cantidad: cant,
+            subtotal: cant * precio,
+            imagen: window._cotImagenTemp || null
+        });
+        
+        document.getElementById('cotNombreLibre').value = '';
+        document.getElementById('cotPrecioManual').value = '0';
+        if (window._isCotizadorAuditoria) {
+            document.getElementById('cotCostoLibre').value = '0';
+            document.getElementById('cotMargenLibre').value = '30';
+        }
+    } else {
+        const productosLista = StorageService.get('productos', []);
+        const prod = productosLista.find(p => String(p.id) === String(sel.value) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
+        if (!prod) return alert('Este producto esta inactivo y no se puede agregar a la cotizacion.');
+        const precio = parseFloat(prod.precio) || 0;
+        const costoProd = parseFloat(prod.costo) || 0;
+        const idx = window._articulosCot.findIndex(a => String(a.productoId) === String(prod.id));
+        if (idx !== -1) {
+            window._articulosCot[idx].cantidad += cant;
+            window._articulosCot[idx].subtotal = window._articulosCot[idx].cantidad * window._articulosCot[idx].precio;
+            if (window._cotImagenTemp) window._articulosCot[idx].imagen = window._cotImagenTemp;
+        } else {
+            window._articulosCot.push({ productoId: prod.id, nombre: prod.nombre, precio, costo: costoProd, cantidad: cant, subtotal: cant * precio, imagen: window._cotImagenTemp || prod.imagen || null });
+        }
+    }
+
+    cantInput.value = 1;
+    sel.value = '';
+    const displayCot = document.getElementById('cotProductoSel-display');
+    if (displayCot) { displayCot.textContent = 'Sin seleccionar'; displayCot.style.color = '#6b7280'; }
+    _onCotProductoChange();
+    _cotQuitarImagen();
+    _renderTablaArticulosCot();
+}
+
+// Aplica el piso permitido (nunca por debajo del costo de compra) y redondea a centavos.
+function _cotClampAlCosto(precio, costo) {
+    const c = Number(costo || 0);
+    let p = Number(precio) || 0;
+    if (p < 0) p = 0;
+    let ajustado = false;
+    if (c > 0 && p < c) { p = c; ajustado = true; }
+    return { precio: Math.round(p * 100) / 100, ajustado };
+}
+
+window._cotEditarPrecioLinea = function(idx, valor) {
+    const arts = window._articulosCot || [];
+    const a = arts[idx];
+    if (!a) return;
+    const { precio: nuevoPrecio, ajustado } = _cotClampAlCosto(valor, a.costo);
+    if (ajustado) {
+        // El piso (no vender debajo del costo) se sigue aplicando siempre,
+        // pero el costo exacto solo se revela al admin. Al vendedor solo se
+        // le informa que el precio se ajustó, sin el número.
+        const esAdminActual = typeof _esAdmin === 'function' && _esAdmin();
+        alert(esAdminActual
+            ? `⚠️ El precio de "${a.nombre}" no puede quedar por debajo de su costo de compra (${dinero(a.costo)}). Se ajustó al costo.`
+            : `⚠️ El precio de "${a.nombre}" no puede quedar por debajo del mínimo autorizado. Se ajustó automáticamente.`);
+    }
+    a.precio = nuevoPrecio;
+    a.subtotal = a.cantidad * nuevoPrecio;
+    _renderTablaArticulosCot();
+};
+
+window._cotAplicarAjusteBloque = function() {
+    const arts = window._articulosCot || [];
+    if (arts.length === 0) return alert('⚠️ Agrega artículos a la cotización antes de ajustar precios.');
+
+    const margenFijo = parseFloat(document.getElementById('cotMargenBloque')?.value) || 0;
+
+    if (margenFijo > 0) {
+        if (margenFijo >= 100) return alert('⚠️ El margen debe ser menor a 100%.');
+        let sinCosto = 0;
+        arts.forEach(a => {
+            const costo = Number(a.costo || 0);
+            if (costo <= 0) { sinCosto++; return; } // sin costo conocido no se puede calcular el margen
+            const nuevoPrecio = Math.round((costo / (1 - margenFijo / 100)) * 100) / 100;
+            a.precio = nuevoPrecio;
+            a.subtotal = a.cantidad * nuevoPrecio;
+        });
+        _renderTablaArticulosCot();
+        if (sinCosto > 0) alert(`⚠️ ${sinCosto} producto(s) no tienen costo registrado, así que no se les pudo aplicar el margen. Edítales el precio manualmente en la tabla.`);
+        return;
+    }
+
+    const pct = parseFloat(document.getElementById('cotDescuentoBloquePct')?.value) || 0;
+    const montoFijo = parseFloat(document.getElementById('cotDescuentoBloqueMonto')?.value) || 0;
+    if (pct <= 0 && montoFijo <= 0) return alert('⚠️ Indica un margen fijo, un porcentaje de descuento o una rebaja fija por pieza.');
+
+    let tocaronPiso = 0;
+    arts.forEach(a => {
+        let precioCalculado = a.precio;
+        if (pct > 0) precioCalculado = precioCalculado * (1 - pct / 100);
+        if (montoFijo > 0) precioCalculado = precioCalculado - montoFijo;
+        const { precio: nuevoPrecio, ajustado } = _cotClampAlCosto(precioCalculado, a.costo);
+        if (ajustado) tocaronPiso++;
+        a.precio = nuevoPrecio;
+        a.subtotal = a.cantidad * nuevoPrecio;
+    });
+
+    _renderTablaArticulosCot();
+    if (tocaronPiso > 0) alert(`⚠️ ${tocaronPiso} producto(s) llegaron a su costo mínimo: no se descontaron más allá de eso para no vender con pérdida.`);
+};
+
+function _renderTablaArticulosCot() {
+    const cont = document.getElementById('tablaArticulosCot');
+    if (!cont) return;
+    const arts = window._articulosCot || [];
+    if (arts.length === 0) {
+        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:12px;">Sin artículos</p>';
+        const totEl = document.getElementById('cotTotal');
+        if (totEl) totEl.textContent = dinero(0);
+        _actualizarPlanesCot();
+        return;
+    }
+    let total = 0;
+    let rows = arts.map((a, i) => {
+        total += a.subtotal;
+        const celdaPrecio = window._isCotizadorMayoreo
+            ? `<input type="number" value="${a.precio}" min="0" step="0.01" onchange="_cotEditarPrecioLinea(${i}, this.value)" style="width:95px;padding:5px;border:1px solid #67e8f9;border-radius:5px;text-align:right;">`
+            : dinero(a.precio);
+        return `<tr>
+          <td style="padding:8px;text-align:center;">${a.imagen ? `<img src="${a.imagen}" style="width:34px;height:34px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;">` : '<span style="color:#cbd5e1;font-size:11px;">—</span>'}</td>
+          <td style="padding:8px;">${a.nombre}${a.esLibre ? ' <span style="font-size:10px;color:#7c3aed;background:#f3e8ff;padding:2px 6px;border-radius:10px;">libre</span>' : ''}</td>
+          <td style="padding:8px;text-align:center;">${celdaPrecio}</td>
+          <td style="padding:8px;text-align:center;">${a.cantidad}</td>
+          <td style="padding:8px;text-align:right;">${dinero(a.subtotal)}</td>
+          <td style="padding:8px;text-align:center;"><button onclick="window._articulosCot.splice(${i},1);_renderTablaArticulosCot();" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑️</button></td>
+        </tr>`;
+    }).join('');
+    cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
+      <thead><tr style="background:#f3f4f6;">
+        <th style="padding:8px;"></th>
+        <th style="padding:8px;text-align:left;">Artículo</th>
+        <th style="padding:8px;text-align:center;">Precio Unit.</th>
+        <th style="padding:8px;text-align:center;">Cant.</th>
+        <th style="padding:8px;text-align:right;">Subtotal</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+    const totEl = document.getElementById('cotTotal');
+    if (totEl) totEl.textContent = dinero(total);
+    _actualizarPlanesCot();
+}
+
+function generarCotizacion() {
+    const arts = window._articulosCot || [];
+    if (arts.length === 0) return alert('⚠️ Agrega al menos un artículo.');
+    const selCliente = document.getElementById('cotCliente');
+    const libreCliente = document.getElementById('cotClienteLibre');
+    const vigDias = parseInt(document.getElementById('cotVigencia')?.value) || 15;
+    const notas = document.getElementById('cotNotas')?.value.trim() || '';
+    const clienteNombre = (selCliente?.value
+        ? (StorageService.get('clientes', []).find(c => String(c.id) === String(selCliente.value))?.nombre || libreCliente?.value.trim())
+        : libreCliente?.value.trim()) || 'Cliente general';
+
+    const total = arts.reduce((s, a) => s + a.subtotal, 0);
+    const engancheCheck = document.getElementById('cotizEngancheCheck')?.checked;
+    const enganche = engancheCheck ? (parseFloat(document.getElementById('cotizEngancheMonto')?.value) || 0) : 0;
+    const saldoFinanciar = Math.max(0, total - enganche);
+
+    const hoy = new Date();
+    const fechaVenc = new Date(hoy.getTime() + vigDias * 24 * 3600 * 1000);
+    const periodicidad = document.getElementById('cotPeriodicidad')?.value || 'semanal';
+    
+    // Capturar TODOS los planes custom creados
+    const customPlanes = window._isCotizadorAuditoria ? [...(window._customPlanesAuditoria || [])] : [];
+
+    const editandoId = window._cotEditandoId || null;
+    const lista = StorageService.get('cotizaciones', []);
+    const idxExistente = editandoId ? lista.findIndex(c => c.id === editandoId) : -1;
+    const original = idxExistente !== -1 ? lista[idxExistente] : null;
+    
+    // Generamos el ID antes para poder asociar las imágenes locales
+    const cotId = original ? original.id : Date.now();
+
+    const articulosParaGuardar = arts.map((a, index) => {
+        const { imagen, ...resto } = a;
+        
+        // Guardado exclusivo en equipo local para productos ajenos al catálogo
+        if (a.esLibre && imagen) {
+            try {
+                localStorage.setItem(`cot_img_${cotId}_${index}`, imagen);
+            } catch (e) {
+                console.warn('No se pudo guardar la imagen localmente (posible límite de almacenamiento).');
+            }
+        }
+        return resto;
+    });
+
+    const cot = {
+      id: cotId,
+      folio: original ? original.folio : _foliosCot(),
+      fecha: original ? original.fecha : window.localISO(hoy),
+      fechaVencimiento: window.localISO(fechaVenc),
+      clienteNombre,
+      clienteId: selCliente?.value || null,
+      articulos: articulosParaGuardar, // Se guarda sin imágenes pesadas para no subir a la nube
+      total,
+      enganche,
+      saldoFinanciar,
+      periodicidad,
+      vigenciaDias: vigDias,
+      notas,
+      estado: 'Vigente',
+      modalidad: window._isCotizadorMayoreo ? 'mayoreo' : 'normal',
+      customPlanes 
+    };
+
+    if (idxExistente !== -1) {
+        lista[idxExistente] = cot;
+    } else {
+        lista.push(cot);
+    }
+    StorageService.set('cotizaciones', lista);
+    window._cotEditandoId = null;
+
+    document.querySelector('[data-modal="cotizador"]')?.remove();
+    alert(original ? `✅ Cotización ${cot.folio} actualizada correctamente.` : `✅ Cotización ${cot.folio} generada correctamente.`);
+    if (document.getElementById('listaCotizaciones')) abrirListaCotizaciones();
+    // Se pasan los artículos originales (con imagen en memoria) solo para esta impresión;
+    // no quedan guardados en ningún lado una vez cerrada la ventana.
+    imprimirCotizacion(cot.id, arts);
+}
+
+function abrirListaCotizaciones() {
+    const cont = document.getElementById('listaCotizaciones');
+    if (!cont) return;
+    let lista = StorageService.get('cotizaciones', []);
+    lista = _actualizarEstadosCotizaciones(lista);
+    if (lista.length === 0) {
+        cont.innerHTML = `<div style="text-align:center;padding:40px;color:#9ca3af;">
+            <p style="font-size:48px;">📄</p>
+            <p>No hay cotizaciones registradas.</p>
+            <button onclick="abrirCotizador()" style="padding:12px 24px;background:#2563eb;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;margin-top:12px;">📄 Nueva Cotización</button>
+        </div>`;
+        return;
+    }
+    // Se conserva la selección de checkboxes entre re-renders (p.ej. al eliminar una vencida).
+    if (!window._cotSeleccionadas) window._cotSeleccionadas = new Set();
+    const idsVigentes = new Set(lista.map(c => c.id));
+    window._cotSeleccionadas.forEach(id => { if (!idsVigentes.has(id)) window._cotSeleccionadas.delete(id); });
+
+    const rows = lista.slice().reverse().map(c => {
+        const color = c.estado === 'Vigente' ? '#16a34a' : c.estado === 'Convertida' ? '#2563eb' : '#dc2626';
+        const checked = window._cotSeleccionadas.has(c.id) ? 'checked' : '';
+        // 📦 Solo se ofrece "registrar en catálogo" mientras queden productos
+        // libres SIN registrar -- si ya se registraron todos, no se muestra.
+        const tieneLibresPendientes = Array.isArray(c.articulos) && c.articulos.some(a => a.esLibre && !a._registradoEnCatalogo);
+        return `<tr>
+          <td style="padding:10px;text-align:center;"><input type="checkbox" class="cotChk" data-id="${c.id}" onchange="_cotToggleSeleccion(${c.id}, this.checked)" ${checked} style="width:16px;height:16px;cursor:pointer;"></td>
+          <td style="padding:10px;">${c.folio}${c.modalidad === 'mayoreo' ? ' <span style="font-size:10px;background:#cffafe;color:#0e7490;padding:2px 7px;border-radius:10px;font-weight:bold;">MAYOREO</span>' : ''}${c.origen === 'cotizador-movil' ? ' <span style="font-size:10px;background:#ede9fe;color:#6d28d9;padding:2px 7px;border-radius:10px;font-weight:bold;">MÓVIL</span>' : ''}</td>
+          <td style="padding:10px;">${c.clienteNombre}</td>
+          <td style="padding:10px;">${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
+          <td style="padding:10px;">${new Date(c.fechaVencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}</td>
+          <td style="padding:10px;text-align:right;">${dinero(c.total)}</td>
+          <td style="padding:10px;text-align:center;"><span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${c.estado}</span></td>
+          <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
+            <button onclick="imprimirCotizacion(${c.id})" title="Imprimir" style="background:none;border:none;cursor:pointer;font-size:18px;">🖨️</button>
+            ${c.estado !== 'Convertida' ? `<button onclick="editarCotizacion(${c.id})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:18px;">✏️</button>` : ''}
+            ${c.estado === 'Vigente' ? `<button onclick="convertirCotizacionAVenta(${c.id})" title="Convertir a Venta" style="background:none;border:none;cursor:pointer;font-size:18px;">🛒</button>` : ''}
+            ${tieneLibresPendientes ? `<button onclick="_cotAbrirLibresPendientes(${c.id})" title="Registrar producto(s) en catálogo" style="background:none;border:none;cursor:pointer;font-size:18px;">📦</button>` : ''}
+            <button onclick="eliminarCotizacion(${c.id})" title="Eliminar" style="background:none;border:none;cursor:pointer;font-size:18px;">🗑️</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    const numVencidas = lista.filter(c => c.estado === 'Vencida').length;
+    const numSeleccionadas = window._cotSeleccionadas.size;
+
+    cont.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <h3 style="margin:0;color:#1e40af;">📋 Cotizaciones (${lista.length})</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${numSeleccionadas > 0 ? `<button onclick="eliminarCotizacionesSeleccionadas()" style="padding:10px 16px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🗑️ Eliminar seleccionadas (${numSeleccionadas})</button>` : ''}
+          ${numVencidas > 0 ? `<button onclick="eliminarCotizacionesVencidas()" style="padding:10px 16px;background:#f97316;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">🧹 Eliminar vencidas (${numVencidas})</button>` : ''}
+          <button onclick="abrirCotizador()" style="padding:10px 18px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">📄 Nueva Cotización</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead><tr style="background:#f3f4f6;">
+            <th style="padding:10px;text-align:center;"><input type="checkbox" id="cotChkTodas" onchange="_cotToggleSeleccionTodas(this.checked)" style="width:16px;height:16px;cursor:pointer;"></th>
+            <th style="padding:10px;text-align:left;">Folio</th>
+            <th style="padding:10px;text-align:left;">Cliente</th>
+            <th style="padding:10px;text-align:left;">Fecha</th>
+            <th style="padding:10px;text-align:left;">Vencimiento</th>
+            <th style="padding:10px;text-align:right;">Total</th>
+            <th style="padding:10px;text-align:center;">Estado</th>
+            <th style="padding:10px;text-align:center;">Acciones</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    const chkTodas = document.getElementById('cotChkTodas');
+    if (chkTodas) chkTodas.checked = lista.length > 0 && numSeleccionadas === lista.length;
+}
+
+function _cotToggleSeleccion(id, marcado) {
+    if (!window._cotSeleccionadas) window._cotSeleccionadas = new Set();
+    if (marcado) window._cotSeleccionadas.add(id);
+    else window._cotSeleccionadas.delete(id);
+    abrirListaCotizaciones();
+}
+
+function _cotToggleSeleccionTodas(marcado) {
+    const lista = StorageService.get('cotizaciones', []);
+    window._cotSeleccionadas = marcado ? new Set(lista.map(c => c.id)) : new Set();
+    abrirListaCotizaciones();
+}
+
+function eliminarCotizacionesSeleccionadas() {
+    const ids = window._cotSeleccionadas ? Array.from(window._cotSeleccionadas) : [];
+    if (ids.length === 0) return;
+    if (!confirm(`¿Eliminar ${ids.length} cotización(es) seleccionada(s)? Esta acción no se puede deshacer.`)) return;
+    let lista = StorageService.get('cotizaciones', []);
+    lista = lista.filter(c => !ids.includes(c.id));
+    StorageService.set('cotizaciones', lista);
+    window._cotSeleccionadas = new Set();
+    abrirListaCotizaciones();
+}
+
+function eliminarCotizacionesVencidas() {
+    let lista = StorageService.get('cotizaciones', []);
+    const numVencidas = lista.filter(c => c.estado === 'Vencida').length;
+    if (numVencidas === 0) return;
+    if (!confirm(`¿Eliminar las ${numVencidas} cotización(es) con estado "Vencida"? Esta acción no se puede deshacer.`)) return;
+    lista = lista.filter(c => c.estado !== 'Vencida');
+    StorageService.set('cotizaciones', lista);
+    abrirListaCotizaciones();
+}
+
+function _actualizarEstadosCotizaciones(lista) {
+    const hoy = new Date();
+    let cambios = false;
+
+    // 🛡️ Las cotizaciones normales (no mayoreo) son papel de trabajo de vida
+    // corta: si nadie las convierte en venta antes de que venza su vigencia,
+    // se eliminan por completo de la base de datos aquí mismo — no solo se
+    // marcan "Vencida" — para no acumular basura para siempre. Una vez
+    // Convertida (ya generó una venta) nunca se borra sola, sea o no
+    // mayoreo, porque queda como respaldo del origen de esa venta. Las
+    // cotizaciones de mayoreo tampoco se borran solas: conservan el
+    // comportamiento anterior (solo se marcan "Vencida") porque suelen ser
+    // documentos formales para clientes grandes que el usuario puede querer
+    // conservar o imprimir de nuevo; se siguen pudiendo borrar a mano con el
+    // botón "🧹 Eliminar vencidas".
+    //
+    // 🛡️ CORREGIDO: si se junta un backlog grande de vencidas (p.ej. no se
+    // abrió esta pantalla en un tiempo), intentar borrarlas TODAS de un
+    // golpe puede superar el ~30% que el circuit-breaker de storage2.js
+    // tolera de una sola vez, y bloquea la sincronización por completo
+    // ("se iban a borrar X de Y registros de golpe"). En vez de tocar ese
+    // freno de seguridad, aquí se depuran en tandas chicas: cada vez que se
+    // abre la lista se borran como máximo MAX_BORRADOS_POR_CORRIDA, y el
+    // resto se queda para la siguiente apertura, hasta vaciarse.
+    const MAX_BORRADOS_POR_CORRIDA = 6;
+    let borradosEstaCorrida = 0;
+    const listaFiltrada = lista.filter(c => {
+        if (c.estado === 'Convertida' || c.modalidad === 'mayoreo') return true;
+        const yaVencio = new Date(c.fechaVencimiento) < hoy;
+        if (!yaVencio) return true;
+        if (borradosEstaCorrida >= MAX_BORRADOS_POR_CORRIDA) return true; // se queda para la próxima corrida
+        borradosEstaCorrida++;
+        cambios = true;
+        return false;
+    });
+
+    listaFiltrada.forEach(c => {
+        if (c.modalidad === 'mayoreo' && c.estado === 'Vigente' && new Date(c.fechaVencimiento) < hoy) {
+            c.estado = 'Vencida';
+            cambios = true;
+        }
+    });
+
+    if (cambios) StorageService.set('cotizaciones', listaFiltrada);
+    return listaFiltrada;
+}
+
+function imprimirCotizacion(id, articulosConImagenTemporal) {
+    const lista = StorageService.get('cotizaciones', []);
+    const c = lista.find(x => x.id === id);
+    if (!c) return alert('Cotización no encontrada.');
+    
+    // Carga dinámica de imágenes al momento de la impresión
+    const articulos = (articulosConImagenTemporal || c.articulos).map((a, index) => {
+        let img = a.imagen;
+        if (!img) {
+            if (a.productoId) {
+                const prod = StorageService.get('productos', []).find(p => String(p.id) === String(a.productoId));
+                if (prod) img = prod.imagen;
+            } else if (a.esLibre) {
+                img = localStorage.getItem(`cot_img_${c.id}_${index}`);
+            }
+        }
+        return { ...a, imagen: img };
+    });
+    
+    const cfg = StorageService.get('configEmpresa', {});
+    const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
+    
+    let cotizacionHTML = '';
+
+    // ============================================================
+    // 1. FORMATO CARTA (MAYOREO) - 2 COLUMNAS TIPO TARJETA, PDF E IMAGEN
+    // ============================================================
+    if (c.modalidad === 'mayoreo') {
+        // Calcular el total de piezas de la cotización
+        const totalPiezas = articulos.reduce((acc, art) => acc + (parseInt(art.cantidad) || 0), 0);
+
+        // Agrupar los artículos de 2 en 2 para las columnas
+        const filasArticulos = [];
+        for (let i = 0; i < articulos.length; i += 2) {
+            filasArticulos.push([articulos[i], articulos[i+1]]);
+        }
+
+        const renderCartaCell = (a) => {
+            if (!a) return `<td style="border:none; width:49%;"></td>`; 
+            
+            // width y height en auto aseguran que la imagen JAMÁS se deforme.
+            // max-width y max-height aseguran que ocupe el máximo espacio posible dentro de la tarjeta.
+            const imgHtml = a.imagen 
+                ? `<img src="${a.imagen}" style="max-width:100%; max-height:270px; width:auto; height:auto; display:block; margin:0 auto; border-radius:6px;">` 
+                : `<div style="width:100%; height:190px; border:1.5px dashed #cbd5e1; border-radius:6px; background:#f8fafc; display:flex; align-items:center; justify-content:center;"><span style="font-size:12px; color:#94a3b8; letter-spacing:.5px;">SIN IMAGEN DISPONIBLE</span></div>`;
+
+            return `
+              <td style="padding: 0; vertical-align: top; width:49%;">
+                 <div class="product-card">
+                     <!-- Barra de acento superior -->
+                     <div class="product-card-accent"></div>
+
+                     <!-- ENCABEZADO: NOMBRE DEL PRODUCTO -->
+                     <div class="product-card-title">${a.nombre}</div>
+
+                     <!-- IMAGEN PROPORCIONAL Y AMPLIA -->
+                     <div style="flex-grow: 1; display:flex; justify-content:center; align-items:center; padding: 6px 4px;">
+                         ${imgHtml}
+                     </div>
+
+                     <!-- PIE DE TARJETA: CANTIDAD E IMPORTE -->
+                     <div class="product-card-footer">
+                         <div class="product-card-cant">
+                             <span class="product-card-cant-label">Cantidad</span>
+                             <span class="product-card-cant-value">${a.cantidad} pz</span>
+                         </div>
+                         <div class="product-card-precio">
+                             <div class="product-card-pu">P.U. ${fmtMXN(a.precio)}</div>
+                             <div class="product-card-sub">${fmtMXN(a.precio * a.cantidad)}</div>
+                         </div>
+                     </div>
+                 </div>
+              </td>
+            `;
+        };
+
+        // Forzamos page-break-inside en cada fila para evitar cortes a mitad de la tarjeta
+        const rowsCarta = filasArticulos.map(par => `
+            <tr style="break-inside: avoid; page-break-inside: avoid;">
+                ${renderCartaCell(par[0])}
+                <td style="width:2%; border:none;"></td> <!-- Separador mínimo entre columnas -->
+                ${renderCartaCell(par[1])}
+            </tr>
+            <tr style="break-inside: avoid; page-break-inside: avoid;"><td colspan="3" style="height:10px; border:none;"></td></tr>
+        `).join('');
+
+        cotizacionHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>COT-${c.folio}</title>
+          <style>
+            @page { 
+                size: letter; 
+                margin: 4mm; /* Márgenes de milímetros para impresión */
+            }
+            * { box-sizing: border-box; }
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #e2e8f0; display:flex; justify-content:center; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            #cotizacion-wrapper { position:relative; background: white; width: 100%; max-width: 215.9mm; min-height: 279.4mm; margin: 0 auto; padding: 0 6mm 6mm; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.12); overflow:hidden; }
+
+            /* Franja de acento tipo membrete en la parte superior de la hoja */
+            .letterhead-bar { height: 7mm; margin: 0 -6mm 5mm; background: linear-gradient(90deg, #0f172a 0%, #0e7490 55%, #0891b2 100%); }
+
+            table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+
+            /* ===== Encabezado / membrete ===== */
+            .header-container { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; border-bottom: 2px solid #0e7490; padding-bottom: 12px; margin-bottom: 12px; }
+            .logo-empresa { display:flex; align-items:center; gap:12px; }
+            .logo-empresa img { width:58px; height:58px; object-fit:contain; flex:0 0 58px; }
+            .empresa-info h1 { margin: 0 0 3px 0; font-size: 21px; color: #0f172a; letter-spacing:.3px; }
+            .empresa-info .empresa-subtitulo { margin:0 0 4px 0; font-size:10px; font-weight:700; color:#0e7490; letter-spacing:1.4px; text-transform:uppercase; }
+            .empresa-info p { margin: 0; font-size: 11.5px; color: #64748b; line-height:1.5; }
+
+            .cot-info { text-align: right; flex-shrink:0; }
+            .cot-badge { display:inline-block; background:#0f172a; color:#fff; font-size:12px; font-weight:800; letter-spacing:.6px; padding:6px 14px; border-radius:5px; margin-bottom:8px; }
+            .cot-meta { border-collapse:collapse; margin-left:auto; }
+            .cot-meta td { font-size:11.5px; padding:1.5px 0; }
+            .cot-meta td:first-child { color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; font-size:9.5px; padding-right:8px; }
+            .cot-meta td:last-child { color:#0f172a; font-weight:700; text-align:right; }
+
+            .cliente-box { display:flex; align-items:center; gap:8px; background:#f0fdfa; border:1px solid #ccfbf1; border-left:4px solid #0e7490; border-radius:6px; padding:8px 12px; margin-bottom:14px; }
+            .cliente-label { font-size:9.5px; font-weight:800; letter-spacing:1px; color:#0e7490; text-transform:uppercase; }
+            .cliente-nombre { font-size:15px; font-weight:700; color:#0f172a; }
+
+            /* ===== Tarjetas de producto ===== */
+            .product-card { position:relative; border: 1px solid #e2e8f0; border-radius: 9px; padding: 12px 10px 10px; background: #fff; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; box-shadow: 0 1px 3px rgba(15,23,42,0.05); }
+            .product-card-accent { position:absolute; top:0; left:12px; right:12px; height:3px; border-radius:0 0 3px 3px; background: linear-gradient(90deg, #0e7490, #0891b2); }
+            .product-card-title { font-size:13.5px; font-weight:700; color:#0f172a; text-align:center; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 8px; min-height:18px; display:flex; align-items:center; justify-content:center; }
+            .product-card-footer { display:flex; justify-content:space-between; align-items:flex-end; margin-top:8px; padding-top:8px; border-top:1px dashed #e2e8f0; }
+            .product-card-cant-label { display:block; font-size:9px; color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; }
+            .product-card-cant-value { font-size:15px; font-weight:800; color:#0f172a; }
+            .product-card-pu { font-size:10.5px; color:#94a3b8; }
+            .product-card-sub { font-size:15px; font-weight:800; color:#0e7490; }
+
+            .notas-box { background: #f8fafc; border: 1px solid #e2e8f0; border-left:3px solid #94a3b8; border-radius: 6px; padding: 10px 12px; margin-top: 14px; font-size: 11.5px; color: #334155; break-inside: avoid; page-break-inside: avoid; }
+            .notas-box strong { color:#0f172a; }
+
+            /* ===== Totales y pie de página ===== */
+            .totales-banner { display:flex; justify-content:space-between; align-items:center; background:#0f172a; border-radius:8px; padding:12px 16px; margin-top:6px; break-inside: avoid; page-break-inside: avoid; }
+            .totales-piezas { font-size:12.5px; color:#94a3b8; font-weight:600; }
+            .totales-piezas strong { color:#fff; font-size:15px; }
+            .totales-monto-label { font-size:11px; color:#5eead4; font-weight:700; letter-spacing:1px; text-transform:uppercase; }
+            .totales-monto-valor { margin:0; font-size:23px; font-weight:800; color:#fff; }
+
+            .footer-final { margin-top: 16px; padding-top: 10px; border-top: 1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; }
+            .footer-firma { font-size:10.5px; color:#94a3b8; }
+            .footer-firma span { display:block; width:150px; border-top:1px solid #cbd5e1; margin-top:24px; padding-top:4px; text-align:center; }
+            .footer-gracias { text-align:right; font-size:11px; letter-spacing:1px; color:#0e7490; font-weight:700; text-transform:uppercase; }
+            .footer-gracias small { display:block; margin-top:2px; font-size:9.5px; color:#94a3b8; font-weight:500; letter-spacing:.3px; text-transform:none; }
+
+            @media print {
+                body { background: white; margin: 0; display:block; }
+                #cotizacion-wrapper { width: 100%; max-width: 100%; min-height: auto; margin: 0; padding: 0 0 4mm; box-shadow: none; }
+                .letterhead-bar { margin: 0 0 5mm; }
+                thead { display: table-header-group; }
+                tfoot { display: table-footer-group; }
+                tr { page-break-inside: avoid; break-inside: avoid; }
+            }
+          </style>
+        </head>
+        <body>
+          <div id="cotizacion-wrapper">
+             <div class="letterhead-bar"></div>
+             <table>
+                <thead>
+                   <tr>
+                      <td colspan="3" style="border:none; padding:0;">
+                         <div class="header-container">
+                             <div class="logo-empresa">
+                                 <img src="img/Logo.svg" onerror="this.onerror=null; this.src='img/Logo.png';" alt="${empresa}">
+                                 <div class="empresa-info">
+                                     <h1>${empresa}</h1>
+                                     <p class="empresa-subtitulo">Ventas al mayoreo</p>
+                                     <p>${cfg.direccion || ''}</p>
+                                     <p>Tel: ${cfg.telefono || '---'}</p>
+                                 </div>
+                             </div>
+                             <div class="cot-info">
+                                 <div class="cot-badge">COTIZACIÓN MAYOREO</div>
+                                 <table class="cot-meta">
+                                     <tr><td>Folio</td><td>${c.folio}</td></tr>
+                                     <tr><td>Fecha</td><td>${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX')}</td></tr>
+                                     <tr><td>Vigencia</td><td>${c.vigenciaDias} días</td></tr>
+                                 </table>
+                             </div>
+                         </div>
+                         <div class="cliente-box">
+                             <span class="cliente-label">Cliente</span>
+                             <span class="cliente-nombre">${c.clienteNombre.toUpperCase()}</span>
+                         </div>
+                      </td>
+                   </tr>
+                </thead>
+                <tbody>
+                   ${rowsCarta}
+                </tbody>
+                <tfoot>
+                   <tr>
+                      <td colspan="3" style="border:none; padding-top:5px;">
+                          <div class="totales-banner">
+                              <div class="totales-piezas">Total de piezas <strong>${totalPiezas}</strong></div>
+                              <div style="text-align:right;">
+                                  <div class="totales-monto-label">Total a pagar</div>
+                                  <p class="totales-monto-valor">${fmtMXN(c.total)}</p>
+                              </div>
+                          </div>
+                          ${c.notas ? `<div class="notas-box"><strong>Observaciones:</strong><br>${c.notas}</div>` : ''}
+                          <div class="footer-final">
+                              <div class="footer-firma"><span>Atendido por ${empresa}</span></div>
+                              <div class="footer-gracias">Gracias por su preferencia<small>Documento generado por ${empresa}</small></div>
+                          </div>
+                      </td>
+                   </tr>
+                </tfoot>
+             </table>
+          </div>
+        </body>
+        </html>`;
+    }
+    // ============================================================
+    // 2. FORMATO TICKET (ORIGINAL / VENTAS Y AUDITORIA)
+    // ============================================================
+    else {
+        const rows = articulos.map(a => {
+            const filaTexto = `
+            <tr>
+                <td style="padding:2px 0; border-bottom:1px dashed #ccc; font-size:10px;">${a.nombre}</td>
+                <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:center; font-size:10px;">${a.cantidad}</td>
+                <td style="padding:2px 0; border-bottom:1px dashed #ccc; text-align:right; font-size:10px;">${fmtMXN(a.precio)}</td>
+            </tr>`;
+            const filaImagen = a.imagen ? `
+            <tr>
+                <td colspan="3" style="padding:4px 0; border-bottom:1px dashed #ccc; text-align:center;">
+                    <img src="${a.imagen}" style="max-width:35mm; max-height:28mm; object-fit:contain; border-radius:3px;">
+                </td>
+            </tr>` : '';
+            return filaTexto + filaImagen;
+        }).join('');
+
+        let planeRows = '';
+        let hasCustom = false;
+        let mejorCuponTicket = 0;
+        
+        if (c.saldoFinanciar > 0) {
+          const labelMap = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+          const planes = CalculatorService.calcularCreditoConPeriodicidad(c.saldoFinanciar, c.periodicidad || 'semanal');
+          
+          if (c.customPlanes && c.customPlanes.length > 0) {
+              let mult = 1;
+              if (c.periodicidad === 'quincenal') mult = 2;
+              if (c.periodicidad === 'mensual') mult = 4;
+
+              let totalAnteriorCustom = 0;
+              const customOrdenados = [...c.customPlanes].sort((a, b) => a.meses - b.meses);
+
+              customOrdenados.forEach(custom => {
+                  const tasaDecimal = custom.tasa / 100;
+                  const semanas = custom.meses * 4;
+                  let totalBase = c.saldoFinanciar * (1 + (tasaDecimal * custom.meses));
+                  let pagoSemanal = totalBase / semanas;
+                  pagoSemanal = Math.ceil(pagoSemanal / 10) * 10;
+                  let totalFinal = pagoSemanal * semanas;
+                  let intentos = 0;
+                  while (totalFinal <= totalAnteriorCustom && intentos++ < 100) {
+                      pagoSemanal += 5;
+                      totalFinal = pagoSemanal * semanas;
+                  }
+                  if (intentos >= 100) return;
+                  totalAnteriorCustom = totalFinal;
+                  planes.push({
+                      meses: custom.meses,
+                      pagos: Math.round(semanas / mult),
+                      abono: pagoSemanal * mult,
+                      total: totalFinal,
+                      custom: true
+                  });
+                  hasCustom = true;
+              });
+              planes.sort((a, b) => a.meses - b.meses);
+          }
+
+          const cuponesFinalesTicket = planes.map(p => _cotMontoCuponPlan(p, c.saldoFinanciar, c.periodicidad || 'semanal'));
+          planeRows = planes.map((plan, i) => `
+            <tr>
+              <td style="padding:2px 0; font-size:9px;">${plan.meses}m (${plan.pagos} pagos)${plan.custom ? ' *' : ''}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px; font-weight:bold;">${fmtMXN(plan.abono)} ${labelMap[c.periodicidad] || ''}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px;">${fmtMXN(plan.total)}</td>
+              <td style="padding:2px 0; text-align:right; font-size:9px; color:#7e22ce; font-weight:bold;">${cuponesFinalesTicket[i] > 0 ? '+' + fmtMXN(cuponesFinalesTicket[i]) : '--'}</td>
+            </tr>`).join('');
+
+          mejorCuponTicket = Math.max(0, ...cuponesFinalesTicket);
+        }
+
+        cotizacionHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>COT-${c.folio}</title>
+          <style>
+            @page { size: 80mm auto; margin: 0; }
+            body { font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; }
+            #ticket-contenido { width: 72mm; padding: 4mm; background: white; box-sizing: border-box; }
+            .controles { margin: 10px 0; display: flex; gap: 5px; }
+            h2 { margin: 0; font-size: 13px; text-align: center; text-transform: uppercase; }
+            .separator { border-top: 1px double #000; margin: 5px 0; }
+            .info-box { font-size: 9px; text-align: center; line-height: 1.2; }
+            .folio-line { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin: 5px 0; }
+            table { width: 100%; border-collapse: collapse; }
+            th { font-size: 9px; text-align: left; border-bottom: 1px solid #000; padding: 2px 0; }
+            .totales { text-align: right; margin-top: 5px; font-size: 11px; font-weight: bold; }
+            .seccion-titulo { font-size: 9px; font-weight: bold; margin-top: 8px; text-align: center; background: #eee; }
+            .footer { font-size: 8px; text-align: center; margin-top: 10px; border-top: 1px dashed #999; padding-top: 5px; }
+            .notas-box { font-size: 9px; background: #f9fafb; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #374151; }
+            .enganche-box { font-size: 9px; background: #f3e8ff; border-radius: 6px; padding: 6px 8px; margin: 8px 0; color: #7c3aed; text-align: right; }
+            .cupon-box { font-size: 9px; background: #faf5ff; border: 1px dashed #d8b4fe; border-radius: 6px; padding: 6px 8px; margin: 8px 0 2px; color: #7e22ce; text-align: center; font-weight: bold; line-height: 1.4; }
+            @media print { .controles { display: none !important; } body { background: white; } #ticket-contenido { width: 100%; padding: 2mm; } }
+          </style>
+        </head>
+        <body>
+          <div id="ticket-contenido">
+            <h2>${empresa}</h2>
+            <div class="info-box">${cfg.direccion || ''}<br>Tel: ${cfg.telefono || ''}</div>
+                
+            <div class="separator"></div>
+            <div class="folio-line">
+              <span>FOLIO: ${c.folio}</span>
+            </div>
+            <div style="font-size: 9px;">
+              FECHA: ${(window.parseFechaMX ? window.parseFechaMX(c.fecha) : new Date(c.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City'})}<br>
+              CLIENTE: ${c.clienteNombre.toUpperCase()}
+            </div>
+            <div class="separator"></div>
+
+            <table>
+              <thead>
+                <tr><th>ART</th><th style="text-align:center;">CT</th><th style="text-align:right;">PREC</th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+
+            <div class="totales">TOTAL: ${fmtMXN(c.total)}</div>
+
+            ${typeof c.enganche === 'number' && c.enganche > 0 ? `<div class="enganche-box">Enganche: <strong>${fmtMXN(c.enganche)}</strong></div>` : ''}
+            ${c.notas && c.notas.length > 0 ? `<div class="notas-box">Observaciones: ${c.notas}</div>` : ''}
+
+            ${planeRows ? `
+              <div class="seccion-titulo">PAGOS ${c.periodicidad ? (c.periodicidad === 'semanal' ? 'SEMANAL' : c.periodicidad === 'quincenal' ? 'QUINCENAL' : 'MENSUAL') : 'SEMANAL'}</div>
+              <table>
+                <thead>
+                  <tr><th style="font-size:8px;">PLAZO</th><th style="text-align:right; font-size:8px;">ABONO</th><th style="text-align:right; font-size:8px;">TOTAL</th><th style="text-align:right; font-size:8px; color:#7e22ce;">CUPÓN</th></tr>
+                </thead>
+                <tbody>${planeRows}</tbody>
+              </table>
+              ${hasCustom ? '<div style="font-size:8px; margin-top:4px;">* Plan personalizado</div>' : ''}
+              ${mejorCuponTicket > 0.01 ? `<div class="cupon-box">🎟️ ¡Si liquida dentro de su plazo, recibe hasta ${fmtMXN(mejorCuponTicket)} en cupón de saldo a favor!</div>` : ''}
+            ` : ''}
+
+            <div class="footer">
+              Válido por ${c.vigenciaDias} días.<br>
+              *** GRACIAS POR SU PREFERENCIA ***
+            </div>
+          </div>
+        </body>
+        </html>`;
+    }
+
+    // ============================================================
+    // 3. ENVÍO A IMPRESIÓN / SERVICIO
+    // ============================================================
+    if (window.TicketService?.elegirFormato) {
+      window.TicketService.elegirFormato({
+        html: cotizacionHTML,
+        title: `Cotizacion ${c.folio}`,
+        filename: `cotizacion_${c.folio}`,
+        pageSize: c.modalidad === 'mayoreo' ? 'letter' : 'roll' // Hint adaptado
+      });
+      return;
+    }
+    
+    if (window.TicketService?.openHtml) {
+      window.TicketService.openHtml(cotizacionHTML, { title: `Cotizacion ${c.folio}`, filename: `cotizacion_${c.folio}` });
+      return;
+    }
+    
+    // Fallback estándar a ventana emergente
+    const w = window.open('', '_blank', c.modalidad === 'mayoreo' ? 'width=850,height=900' : 'width=400,height=600');
+    w.document.write(cotizacionHTML);
+    w.document.close();
+}
+
+function convertirCotizacionAVenta(id) {
+    if (!confirm('¿Convertir esta cotización a venta? Se agregarán los artículos al carrito.')) return;
+    const lista = StorageService.get('cotizaciones', []);
+    const idx = lista.findIndex(c => c.id === id);
+    if (idx === -1) return;
+    
+    const cot = lista[idx];
+    if (cot.estado !== 'Vigente') return alert('⚠️ Solo se pueden convertir cotizaciones vigentes.');
+    
+    let carritoActual = StorageService.get('carrito', []);
+    const productosLista = StorageService.get('productos', []);
+    const articulosNoDisponibles = cot.articulos.filter(art => {
+        if (art.esLibre) return false;
+        return !productosLista.some(p => String(p.id) === String(art.productoId) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
+    });
+    if (articulosNoDisponibles.length) {
+        return alert('No se puede convertir la cotizacion porque contiene producto(s) inactivos o eliminados.');
+    }
+
+    cot.articulos.forEach(art => {
+        if (art.esLibre) {
+            const planes = CalculatorService.calcularCredito(art.precio);
+            const plan = planes[5] || planes[0];
+            carritoActual.push({
+                id: 'LIBRE-' + Date.now() + Math.random(), 
+                nombre: art.nombre,
+                precioContado: art.precio,
+                plazo: plan.meses,
+                totalCredito: plan.total,
+                abonoSemanal: plan.abono,
+                cantidad: art.cantidad,
+                esLibre: true
+            });
+        } else {
+            const prod = productosLista.find(p => String(p.id) === String(art.productoId) && (typeof window.productoEstaActivo !== 'function' || window.productoEstaActivo(p)));
+            if (!prod) return;
+            const existe = carritoActual.findIndex(ci => String(ci.id) === String(prod.id));
+            if (existe !== -1) {
+                carritoActual[existe].cantidad += art.cantidad;
+            } else {
+                const planes = CalculatorService.calcularCredito(prod.precio);
+                const plan = planes[5] || planes[0];
+                carritoActual.push({
+                    id: prod.id, nombre: prod.nombre, precioContado: parseFloat(prod.precio),
+                    plazo: plan.meses, totalCredito: plan.total, abonoSemanal: plan.abono,
+                    imagen: prod.imagen, cantidad: art.cantidad
+                });
+            }
+        }
+    });
+
+    StorageService.set('carrito', carritoActual);
+    lista[idx].estado = 'Convertida';
+    StorageService.set('cotizaciones', lista);
+    
+    if (window.actualizarContadorCarrito) actualizarContadorCarrito();
+    alert('✅ Convertido con éxito. Folio: ' + cot.folio);
+    navA('carrito');
+}
+
+function _cotEsc(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 📦 Mini-panel con solo los productos libres SIN registrar de una
+// cotización (venga de escritorio o del cotizador móvil -- ambos llegan
+// a la misma tabla 'cotizaciones'). Independiente de convertir a venta:
+// el cliente puede haber aceptado sin que todavía se registre la venta.
+function _cotAbrirLibresPendientes(id) {
+    const lista = StorageService.get('cotizaciones', []);
+    const cot = lista.find(c => c.id === id);
+    if (!cot) return alert('⚠️ Cotización no encontrada.');
+
+    document.querySelector('[data-modal="cot-libres-pendientes"]')?.remove();
+    const filas = (cot.articulos || []).map((a, idx) => ({ a, idx }))
+        .filter(({ a }) => a.esLibre && !a._registradoEnCatalogo)
+        .map(({ a, idx }) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+            <div>
+                <div style="font-weight:bold;color:#1e293b;">${_cotEsc(a.nombre)}</div>
+                <div style="font-size:12px;color:#64748b;">Precio cotizado: ${dinero(a.precio)}${a.costo ? ` · Costo capturado: ${dinero(a.costo)}` : ''}</div>
+            </div>
+            <button onclick="_cotRegistrarLibreEnCatalogo(${cot.id}, ${idx})" style="background:#047857;color:white;border:none;padding:8px 14px;border-radius:6px;font-weight:bold;cursor:pointer;white-space:nowrap;">Registrar en catálogo</button>
+        </div>`).join('');
+
+    const modalHTML = `
+    <div data-modal="cot-libres-pendientes" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:6500;display:flex;justify-content:center;align-items:center;padding:20px;">
+        <div style="background:white;border-radius:10px;width:95%;max-width:520px;padding:20px;max-height:85vh;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                <h3 style="margin:0;color:#1e40af;">📦 Productos por registrar — ${_cotEsc(cot.folio)}</h3>
+                <button onclick="document.querySelector('[data-modal=\\'cot-libres-pendientes\\']').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">✕</button>
+            </div>
+            ${filas || '<div style="color:#94a3b8;text-align:center;padding:20px;">Ya no hay productos libres pendientes en esta cotización.</div>'}
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// 📦 Pregunta compra única y abre el formulario real de Nuevo Producto
+// (inventario.js) precargado -- el usuario completa categoría/existencia
+// y guarda por el camino normal y validado de siempre. La línea de la
+// cotización se marca como registrada DESPUÉS de que ese guardado tenga
+// éxito (ver _cotMarcarLibreRegistrado, llamada desde guardarProductoDB).
+function _cotRegistrarLibreEnCatalogo(cotId, articuloIndex) {
+    const lista = StorageService.get('cotizaciones', []);
+    const cot = lista.find(c => c.id === cotId);
+    const art = cot?.articulos?.[articuloIndex];
+    if (!art) return alert('⚠️ No se encontró ese artículo en la cotización.');
+
+    const esUnicaCompra = confirm('¿Es compra única (no resurtible)?\n\nAceptar = Sí, es compra única.\nCancelar = No, será parte permanente del catálogo.');
+
+    document.querySelector('[data-modal="cot-libres-pendientes"]')?.remove();
+
+    window._cotLibrePendienteRegistro = { cotId, articuloIndex };
+    if (typeof abrirProductoForm !== 'function') {
+        window._cotLibrePendienteRegistro = null;
+        return alert('⚠️ El formulario de productos no está disponible en esta pantalla.');
+    }
+    abrirProductoForm(null, {
+        nombre: art.nombre || '',
+        costo: art.costo || 0,
+        precio: art.precio || 0,
+        esUnicaCompra
+    });
+}
+
+// Llamada desde inventario.js (guardarProductoDB) cuando el producto
+// creado desde este flujo se guardó con éxito.
+function _cotMarcarLibreRegistrado(cotId, articuloIndex) {
+    const lista = StorageService.get('cotizaciones', []);
+    const idx = lista.findIndex(c => c.id === cotId);
+    if (idx === -1) return;
+    const art = lista[idx].articulos?.[articuloIndex];
+    if (!art) return;
+    art._registradoEnCatalogo = true;
+    StorageService.set('cotizaciones', lista);
+    if (typeof abrirListaCotizaciones === 'function' && document.getElementById('listaCotizaciones')) {
+        abrirListaCotizaciones();
+    }
+}
+
+function eliminarCotizacion(id) {
+    if (!confirm('¿Eliminar esta cotización?')) return;
+    let lista = StorageService.get('cotizaciones', []);
+    
+    // Limpiar imágenes locales de productos libres antes de borrar
+    const cot = lista.find(c => c.id === id);
+    if (cot) {
+        cot.articulos.forEach((a, i) => {
+            if (a.esLibre) {
+                localStorage.removeItem(`cot_img_${id}_${i}`);
+            }
+        });
+    }
+    
+    lista = lista.filter(c => c.id !== id);
+    StorageService.set('cotizaciones', lista);
+    abrirListaCotizaciones();
+}
+
+window._cotSetImagenPreview = _cotSetImagenPreview;
+window._cotCargarImagenArchivo = _cotCargarImagenArchivo;
+window._cotPegarImagen = _cotPegarImagen;
+window._cotQuitarImagen = _cotQuitarImagen;
+window.abrirCotizador = abrirCotizador;
+window.abrirCotizadorAuditoria = abrirCotizadorAuditoria;
+window.abrirCotizadorMayoreo = abrirCotizadorMayoreo;
+window.renderCotizaciones = renderCotizaciones;
+window._onCotProductoChange = _onCotProductoChange;
+window._actualizarPrecioSugerido = _actualizarPrecioSugerido;
+window._toggleEngancheCot = _toggleEngancheCot;
+window._actualizarPlanesCot = _actualizarPlanesCot;
+window.agregarArticuloCotizacion = agregarArticuloCotizacion;
+window._renderTablaArticulosCot = _renderTablaArticulosCot;
+window.generarCotizacion = generarCotizacion;
+window.abrirListaCotizaciones = abrirListaCotizaciones;
+window.imprimirCotizacion = imprimirCotizacion;
+window.convertirCotizacionAVenta = convertirCotizacionAVenta;
+window._cotAbrirLibresPendientes = _cotAbrirLibresPendientes;
+window._cotRegistrarLibreEnCatalogo = _cotRegistrarLibreEnCatalogo;
+window._cotMarcarLibreRegistrado = _cotMarcarLibreRegistrado;
+window.eliminarCotizacion = eliminarCotizacion;
+window.editarCotizacion = editarCotizacion;
+window._cotToggleSeleccion = _cotToggleSeleccion;
+window._cotToggleSeleccionTodas = _cotToggleSeleccionTodas;
+window.eliminarCotizacionesSeleccionadas = eliminarCotizacionesSeleccionadas;
+window.eliminarCotizacionesVencidas = eliminarCotizacionesVencidas;
+
+// 🛡️ Limpieza automática al cargar el módulo, igual que _normalizarMovimientosEfectivoLegacy
+// en compras.js: así las cotizaciones normales vencidas se eliminan solas aunque nadie
+// abra la pantalla de "Cotizaciones" en la sesión (antes solo se limpiaban al abrir esa lista).
+setTimeout(() => {
+    const lista = StorageService.get('cotizaciones', []);
+    if (Array.isArray(lista) && lista.length > 0) _actualizarEstadosCotizaciones(lista);
+}, 0);
