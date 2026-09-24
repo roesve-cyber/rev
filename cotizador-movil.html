@@ -1162,6 +1162,15 @@ async function generarCotizacionMovil() {
 
     await db.collection('posData').doc('cotizaciones').collection('registros').doc(String(id)).set(cot);
     await db.collection('posData').doc('cotizaciones').set({ _updatedAt: Date.now(), _registroIndividual: true }, { merge: true });
+    // 🛡️ Avisa al sistema de escritorio (posData/_syncStatus) que la tabla
+    // 'cotizaciones' cambió, igual que hace _marcarCambioRemoto en
+    // storage2.js -- sin esto, el escritorio la jala solo hasta con 60s de
+    // retraso (su sincronización periódica) en vez de al instante.
+    await db.collection('posData').doc('_syncStatus').set({
+        _updatedAt: Date.now(),
+        tabla: 'cotizaciones',
+        deviceId: 'cotizador-movil'
+    }, { merge: true });
 
     // Guardar las fotos de productos libres en este celular, con la misma
     // clave que usa escritorio (cot_img_<id>_<index>), para que el ticket
