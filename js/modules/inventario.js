@@ -1275,6 +1275,56 @@ window.renderConsultaInventario = function() {
  // ORDENAR ANTES DE DIBUJAR LA TABLA PRO
  productosFiltrados = window.aplicarOrdenamientoInteligente(productosFiltrados, sub);
 
+ // ---- KPIs + seleccion en lote (compartidos con la pestaña "Resumen por categoría") ----
+ const totalSkusCiv = productosFiltrados.length;
+ const totalUnidadesCiv = productosFiltrados.reduce((s, p) => s + (Number(p.stock) || 0), 0);
+ const sinStockCountCiv = productosFiltrados.filter(p => (Number(p.stock) || 0) <= 0).length;
+ const stockBajoCountCiv = productosFiltrados.filter(p => { const s = Number(p.stock) || 0; return s > 0 && s <= window.GP_STOCK_BAJO_UMBRAL; }).length;
+ const pedidoPendienteCountCiv = productosFiltrados.filter(p => (estadoPedidoPorProd[p.id] || 'ninguno') === 'pendiente').length;
+
+ const kpiCiv = (label, valor, color, icono = '📦') => `
+ <div style="background:white; border:1px solid #e2e8f0; border-left:4px solid ${color}; border-radius:10px; padding:12px 14px; min-width:150px; flex:1; box-shadow:0 1px 3px rgba(15,23,42,0.04);">
+ <div style="display:flex;align-items:center;gap:6px;">
+ <span style="font-size:13px;">${icono}</span>
+ <span style="font-size:10px; font-weight:900; letter-spacing:.03em; color:#64748b; text-transform:uppercase;">${label}</span>
+ </div>
+ <div style="font-size:22px; font-weight:900; color:${color}; margin-top:4px;">${valor}</div>
+ </div>`;
+ const kpisHtmlCiv = `
+ <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+ ${kpiCiv('SKUs listados', totalSkusCiv, '#0f172a', '🏷️')}
+ ${kpiCiv('Unidades totales', totalUnidadesCiv, '#1e40af', '📦')}
+ ${kpiCiv('Sin stock', sinStockCountCiv, sinStockCountCiv > 0 ? '#dc2626' : '#16a34a', '⛔')}
+ ${kpiCiv('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCountCiv, stockBajoCountCiv > 0 ? '#d97706' : '#16a34a', '⚠️')}
+ ${kpiCiv('Con pedido pendiente', pedidoPendienteCountCiv, pedidoPendienteCountCiv > 0 ? '#0284c7' : '#94a3b8', '🚚')}
+ </div>`;
+
+ const herramientasHtmlCiv = `
+ <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
+ <button onclick="_gpAbrirProveedorDescontinuado()" style="padding:6px 12px; border-radius:6px; border:1px solid #fecaca; background:#fef2f2; color:#b91c1c; font-size:12px; font-weight:bold; cursor:pointer;">🚫 Proveedor descontinuado</button>
+ <button onclick="exportarGestionProductosCSV()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; font-size:12px; font-weight:bold; cursor:pointer;">⬇ Exportar CSV</button>
+ </div>`;
+
+ window._gpSeleccionados = window._gpSeleccionados || new Set();
+ const idsVisiblesCiv = productosFiltrados.map(p => String(p.id));
+ const idsExistentesCiv = new Set((window.productos || []).map(p => String(p.id)));
+ window._gpSeleccionados.forEach(id => { if (!idsExistentesCiv.has(id)) window._gpSeleccionados.delete(id); });
+ const numSelCiv = window._gpSeleccionados.size;
+ const todosVisiblesSelCiv = idsVisiblesCiv.length > 0 && idsVisiblesCiv.every(id => window._gpSeleccionados.has(id));
+ const barraLoteHtmlCiv = numSelCiv > 0 ? `
+ <div style="position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#1e293b; color:white; border-radius:10px; padding:10px 14px; margin-bottom:12px; box-shadow:0 4px 12px rgba(15,23,42,0.15);">
+ <span style="font-weight:900; font-size:13px;">${numSelCiv} seleccionado${numSelCiv === 1 ? '' : 's'}</span>
+ <button onclick="_gpAccionLote('activar')" style="padding:6px 12px; border-radius:6px; border:none; background:#16a34a; color:white; font-size:12px; font-weight:bold; cursor:pointer;">✅ Activar</button>
+ <button onclick="_gpAccionLote('desactivar')" style="padding:6px 12px; border-radius:6px; border:none; background:#dc2626; color:white; font-size:12px; font-weight:bold; cursor:pointer;">🚫 Desactivar</button>
+ <button onclick="_gpAccionLote('unica')" style="padding:6px 12px; border-radius:6px; border:none; background:#7c3aed; color:white; font-size:12px; font-weight:bold; cursor:pointer;">🔒 Marcar compra única</button>
+ <button onclick="_gpAccionLote('quitar_unica')" style="padding:6px 12px; border-radius:6px; border:none; background:#475569; color:white; font-size:12px; font-weight:bold; cursor:pointer;">↩️ Quitar compra única</button>
+ <button onclick="_gpLimpiarSeleccion()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid rgba(255,255,255,.3); background:transparent; color:white; font-size:12px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+ </div>` : '';
+
+ // Guarda las filas visibles en el formato {p} que ya usan las funciones
+ // de seleccion/lote y el resumen por categoria (compartidas entre pestañas).
+ window._gpUltimasFilas = productosFiltrados.map(p => ({ p }));
+
  // 4. Renderizado de Estructura de Tabla
  const chips = _invActiveFilterChips({
  q,
@@ -1295,11 +1345,15 @@ window.renderConsultaInventario = function() {
  ], 'renderConsultaInventario');
 
  let html = `
+ ${kpisHtmlCiv}
  ${chips}
+ ${herramientasHtmlCiv}
+ ${barraLoteHtmlCiv}
  <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.1); border-radius:12px;">
  <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white; font-size:14px;">
  <thead>
  <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
+ <th style="padding:15px; width:34px; text-align:center;"><input type="checkbox" ${todosVisiblesSelCiv ? 'checked' : ''} onchange="_gpToggleSeleccionTodos(this.checked)" style="width:15px;height:15px;cursor:pointer;" title="Seleccionar todos los visibles"></th>
  <th style="padding:15px;">Producto / Categoria</th>
  <th style="padding:15px; text-align:center;">Stock Total</th>
  <th style="padding:15px; width: 45%;">Desglose por Ubicacion y Color</th>
@@ -1401,9 +1455,10 @@ window.renderConsultaInventario = function() {
  const antiguedad = typeof calcularAntiguedadProducto === 'function' ? calcularAntiguedadProducto(p) : '-';
 
  html += `
- <tr style="border-bottom:1px solid #f1f5f9;">
+ <tr style="border-bottom:1px solid #f1f5f9; background:${window._gpSeleccionados.has(String(p.id)) ? '#eff6ff' : 'white'};">
+ <td style="padding:12px; text-align:center;"><input type="checkbox" class="gpChk" data-id="${String(p.id)}" ${window._gpSeleccionados.has(String(p.id)) ? 'checked' : ''} onchange="_gpToggleSeleccion('${String(p.id)}', this.checked)" style="width:15px;height:15px;cursor:pointer;"></td>
  <td style="padding:12px;">
- <div style="font-weight:bold; color:#1e40af;">${p.nombre}</div>
+ <div style="font-weight:bold; color:#1e40af;">${p.nombre}${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}${_invProductoActivo(p) ? '' : ' <span style="font-size:10px;color:#991b1b;font-weight:bold;">(inactivo)</span>'}</div>
  <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
  <div style="font-size:11px; color:#475569; margin-top:3px;">Proveedor: <b>${_kardexEsc(proveedorProducto || 'Sin proveedor')}</b></div>
  </td>
@@ -1433,6 +1488,7 @@ window.renderConsultaInventario = function() {
  </tbody>
  <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
  <tr style="border-bottom:1px solid #e2e8f0;">
+ <td></td>
  <td style="padding:12px 15px; text-align:right; color:#475569;">Subtotal propio:</td>
  <td style="padding:12px 15px; text-align:center; font-size:15px; color:#16a34a;">${subtotalUnidadesPropio}</td>
  <td></td>
@@ -1441,6 +1497,7 @@ window.renderConsultaInventario = function() {
  <td></td>
  </tr>
  <tr style="border-bottom:1px solid #e2e8f0;">
+ <td></td>
  <td style="padding:12px 15px; text-align:right; color:#854d0e;">Subtotal en consignacion:</td>
  <td style="padding:12px 15px; text-align:center; font-size:15px; color:#854d0e;">${subtotalUnidadesConsignacion}</td>
  <td></td>
@@ -1449,6 +1506,7 @@ window.renderConsultaInventario = function() {
  <td></td>
  </tr>
  <tr>
+ <td></td>
  <td style="padding:15px; text-align:right;">GRAN TOTAL:</td>
  <td style="padding:15px; text-align:center; font-size:18px; color:#16a34a;">${totalGlobalUnidades}</td>
  <td></td>
@@ -1875,6 +1933,13 @@ window.exportarGestionProductosCSV = function() {
  URL.revokeObjectURL(url);
 };
 
+// ===== TABLA DE ADMINISTRACION (Gestion de Productos) =====
+// 🛡️ Esta pantalla es para ADMINISTRAR (crear/editar/activar/eliminar) un
+// producto a la vez -- deliberadamente ligera, sin KPIs ni acciones en
+// lote (eso vive en "Consulta de Inventario", ver renderConsultaInventario
+// más abajo, que es la pantalla de análisis/visor). El toggle de Activo
+// inline es la optimización pedida: cambiar el estado de un producto ya
+// no requiere abrir el formulario completo.
 function renderInventario(listaAMostrar = (window.productos || [])) {
  const cont = document.getElementById("listaInventario");
  if (!cont) return;
@@ -1895,174 +1960,66 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  { key: 'subcategoria', id: 'filtroSubcategoria', label: 'Subcategoria', defaultValue: 'todos' }
  ], 'aplicarFiltros');
 
- // ---- 1) Enriquecer cada producto: costo promedio, valorizacion, pedido, antiguedad ----
- const productosBase = (window.productos || []).filter(_invProductoActivo);
- const productosMap = new Map(productosBase.map(p => [String(p.id), p]));
- const kardex = (window.movimientosInventario || [])
- .map(m => _normalizarMovimientoKardex(m, productosMap))
- .filter(m => !m.anulado);
- const estadoPedidoPorProd = _invEstadoPedidoPorProducto();
- const consignacionPendientePorProd = _invConsignacionPendientePorProducto();
-
- let filas = listaAMostrar.map(p => {
- const costoPromedio = _invCostoPromedioProducto(p, kardex);
- const stockGeneralProd = Number(p.stock) || 0;
- const stockConsignacionProd = Math.min(stockGeneralProd, Number(consignacionPendientePorProd[p.id] || 0));
- const valorTotal = stockGeneralProd * costoPromedio;
- return {
+ let filas = listaAMostrar.map(p => ({
  p,
- costoPromedio,
- valorTotal,
- stockConsignacion: stockConsignacionProd,
- activo: _invProductoActivo(p),
- estadoPedido: estadoPedidoPorProd[p.id] || 'ninguno',
- antiguedad: typeof calcularAntiguedadProducto === 'function' ? calcularAntiguedadProducto(p) : '-'
- };
- });
-
- // ---- 2) Orden manual por columna (si el usuario hizo clic en un encabezado) ----
+ activo: _invProductoActivo(p)
+ }));
  filas = _gpOrdenarFilas(filas);
- window._gpUltimasFilas = filas; // usado por exportarGestionProductosCSV
+ window._gpUltimasFilasAdmin = filas; // usado por exportarGestionProductosCSV en esta pantalla
 
- // ---- 3) KPIs del listado actualmente filtrado ----
- const totalSkus = filas.length;
  const totalUnidades = filas.reduce((s, f) => s + (Number(f.p.stock) || 0), 0);
- const valorInventarioCosto = filas.reduce((s, f) => s + f.valorTotal, 0);
- const valorVentaPotencial = filas.reduce((s, f) => s + ((Number(f.p.stock) || 0) * (Number(f.p.precio) || 0)), 0);
- const sinStockCount = filas.filter(f => (Number(f.p.stock) || 0) <= 0).length;
- const stockBajoCount = filas.filter(f => { const s = Number(f.p.stock) || 0; return s > 0 && s <= window.GP_STOCK_BAJO_UMBRAL; }).length;
- const pedidoPendienteCount = filas.filter(f => f.estadoPedido === 'pendiente').length;
-
- const kpi = (label, valor, color, sub = '', icono = '📦') => `
- <div style="background:white; border:1px solid #e2e8f0; border-left:4px solid ${color}; border-radius:10px; padding:12px 14px; min-width:150px; flex:1; box-shadow:0 1px 3px rgba(15,23,42,0.04); transition:box-shadow .15s;">
- <div style="display:flex;align-items:center;gap:6px;">
- <span style="font-size:13px;">${icono}</span>
- <span style="font-size:10px; font-weight:900; letter-spacing:.03em; color:#64748b; text-transform:uppercase;">${label}</span>
- </div>
- <div style="font-size:22px; font-weight:900; color:${color}; margin-top:4px;">${valor}</div>
- ${sub ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">${sub}</div>` : ''}
- </div>`;
-
- const kpisHtml = `
- <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
- ${kpi('SKUs listados', totalSkus, '#0f172a', '', '🏷️')}
- ${kpi('Unidades totales', totalUnidades, '#1e40af', '', '📦')}
- ${kpi('Valor inventario (costo)', typeof dinero === 'function' ? dinero(valorInventarioCosto) : valorInventarioCosto.toFixed(2), '#16a34a', '', '💰')}
- ${kpi('Valor venta potencial', typeof dinero === 'function' ? dinero(valorVentaPotencial) : valorVentaPotencial.toFixed(2), '#7c3aed', '', '💎')}
- ${kpi('Sin stock', sinStockCount, sinStockCount > 0 ? '#dc2626' : '#16a34a', '', '⛔')}
- ${kpi('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCount, stockBajoCount > 0 ? '#d97706' : '#16a34a', '', '⚠️')}
- ${kpi('Con pedido pendiente', pedidoPendienteCount, pedidoPendienteCount > 0 ? '#0284c7' : '#94a3b8', '', '🚚')}
- </div>`;
-
- // ---- 4) Chips de filtro rapido (independientes de los filtros de arriba) ----
- const qf = window._gpQuickFilter || 'todos';
- const chipRapido = (valor, label) => `<button onclick="_gpSetQuickFilter('${valor}')" style="padding:6px 12px; border-radius:999px; border:1px solid ${qf === valor ? '#1e40af' : '#e2e8f0'}; background:${qf === valor ? '#1e40af' : 'white'}; color:${qf === valor ? 'white' : '#334155'}; font-size:12px; font-weight:bold; cursor:pointer;">${label}</button>`;
- const chipsRapidosHtml = `
- <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
- ${chipRapido('todos', 'Todos')}
- ${chipRapido('sin_stock', `Sin stock (${sinStockCount})`)}
- ${chipRapido('stock_bajo', `Stock bajo (${stockBajoCount})`)}
- ${chipRapido('pedido_pendiente', `Pedido pendiente (${pedidoPendienteCount})`)}
- <button onclick="_gpAbrirProveedorDescontinuado()" style="padding:6px 12px; border-radius:6px; border:1px solid #fecaca; background:#fef2f2; color:#b91c1c; font-size:12px; font-weight:bold; cursor:pointer;">🚫 Proveedor descontinuado</button>
- <button onclick="exportarGestionProductosCSV()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; font-size:12px; font-weight:bold; cursor:pointer;">⬇ Exportar CSV</button>
- </div>`;
-
- // ---- 5) Barra de acciones en lote (aparece solo si hay seleccion) ----
- window._gpSeleccionados = window._gpSeleccionados || new Set();
- const idsVisibles = filas.map(f => String(f.p.id));
- // Depura selecciones de productos que ya no existen (fueron eliminados)
- const idsExistentes = new Set((window.productos || []).map(p => String(p.id)));
- window._gpSeleccionados.forEach(id => { if (!idsExistentes.has(id)) window._gpSeleccionados.delete(id); });
- const numSel = window._gpSeleccionados.size;
- const todosVisiblesSel = idsVisibles.length > 0 && idsVisibles.every(id => window._gpSeleccionados.has(id));
-
- const barraLoteHtml = numSel > 0 ? `
- <div style="position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#1e293b; color:white; border-radius:10px; padding:10px 14px; margin-bottom:12px; box-shadow:0 4px 12px rgba(15,23,42,0.15);">
- <span style="font-weight:900; font-size:13px;">${numSel} seleccionado${numSel === 1 ? '' : 's'}</span>
- <button onclick="_gpAccionLote('activar')" style="padding:6px 12px; border-radius:6px; border:none; background:#16a34a; color:white; font-size:12px; font-weight:bold; cursor:pointer;">✅ Activar</button>
- <button onclick="_gpAccionLote('desactivar')" style="padding:6px 12px; border-radius:6px; border:none; background:#dc2626; color:white; font-size:12px; font-weight:bold; cursor:pointer;">🚫 Desactivar</button>
- <button onclick="_gpAccionLote('unica')" style="padding:6px 12px; border-radius:6px; border:none; background:#7c3aed; color:white; font-size:12px; font-weight:bold; cursor:pointer;">🔒 Marcar compra única</button>
- <button onclick="_gpAccionLote('quitar_unica')" style="padding:6px 12px; border-radius:6px; border:none; background:#475569; color:white; font-size:12px; font-weight:bold; cursor:pointer;">↩️ Quitar compra única</button>
- <button onclick="_gpLimpiarSeleccion()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid rgba(255,255,255,.3); background:transparent; color:white; font-size:12px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
- </div>` : '';
 
  let html = `
- ${kpisHtml}
  ${chipsControl}
- ${chipsRapidosHtml}
- ${barraLoteHtml}
  <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.08); border-radius:12px;">
  <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white;">
  <thead>
  <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
- <th style="padding:13px; width:34px; text-align:center;"><input type="checkbox" ${todosVisiblesSel ? 'checked' : ''} onchange="_gpToggleSeleccionTodos(this.checked)" style="width:15px;height:15px;cursor:pointer;" title="Seleccionar todos los visibles"></th>
  <th style="padding:13px; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('nombre')">Producto ${_gpFlechaOrden('nombre')}</th>
  <th style="padding:13px; text-align:center; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('stock')">Stock ${_gpFlechaOrden('stock')}</th>
- <th style="padding:13px;">Ubicaciones</th>
- <th style="padding:13px; text-align:right; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('valor')">Valorizacion ${_gpFlechaOrden('valor')}</th>
  <th style="padding:13px; text-align:right; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('precio')">Precio ${_gpFlechaOrden('precio')}</th>
- <th style="padding:13px; text-align:center;">Estado</th>
+ <th style="padding:13px; text-align:center;">Activo</th>
  <th style="padding:13px; text-align:center;">Acciones</th>
  </tr>
  </thead>
  <tbody>`;
 
  if (filas.length === 0) {
- html += `<tr><td colspan="8" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
+ html += `<tr><td colspan="5" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
  } else {
  filas.forEach(f => {
  const p = f.p;
  const idStr = String(p.id);
- const marcado = window._gpSeleccionados.has(idStr);
  const stock = Number(p.stock) || 0;
  const colorStock = stock <= 0 ? '#dc2626' : (stock <= window.GP_STOCK_BAJO_UMBRAL ? '#d97706' : '#16a34a');
- const labelPedido = f.estadoPedido === 'pendiente' ? '<span style="display:block;color:#0284c7;font-size:11px;font-weight:bold;">Pedido pendiente</span>' :
- f.estadoPedido === 'baja' ? '<span style="display:block;color:#e11d48;font-size:11px;font-weight:bold;">Pendiente baja</span>' : '';
  const miniatura = p.imagen
- ? `<img src="${_kardexEsc(p.imagen)}" style="width:38px;height:38px;border-radius:7px;object-fit:cover;border:1px solid #e2e8f0;flex-shrink:0;" onerror="this.style.display='none';">`
- : `<div style="width:38px;height:38px;border-radius:7px;background:#f1f5f9;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px;color:#cbd5e1;">📦</div>`;
+ ? `<img src="${_kardexEsc(p.imagen)}" style="width:36px;height:36px;border-radius:7px;object-fit:cover;border:1px solid #e2e8f0;flex-shrink:0;" onerror="this.style.display='none';">`
+ : `<div style="width:36px;height:36px;border-radius:7px;background:#f1f5f9;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;color:#cbd5e1;">📦</div>`;
  html += `
- <tr data-fila-producto="${idStr}" style="border-bottom:1px solid #f1f5f9; background:${marcado ? '#eff6ff' : 'white'};" onmouseover="if(!this.dataset.sel)this.style.background='#f8fafc';" onmouseout="this.style.background='${marcado ? '#eff6ff' : 'white'}';">
- <td style="padding:12px; text-align:center;"><input type="checkbox" class="gpChk" data-id="${idStr}" ${marcado ? 'checked' : ''} onchange="_gpToggleSeleccion('${idStr}', this.checked)" style="width:15px;height:15px;cursor:pointer;"></td>
- <td style="padding:12px;">
- <div style="display:flex; gap:10px; align-items:flex-start;">
+ <tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f8fafc';" onmouseout="this.style.background='white';">
+ <td style="padding:11px;">
+ <div style="display:flex; gap:9px; align-items:center;">
  ${miniatura}
  <div>
- <div style="font-weight:bold; color:#0f172a;">${p.nombre}${p.esUnicaCompra ? ' <span title="Compra única / no resurtible" style="font-size:11px;">🔒</span>' : ''}</div>
- ${f.activo ? '' : '<span style="display:inline-block;margin:3px 0;padding:2px 7px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:10px;font-weight:900;text-transform:uppercase;">Inactivo</span>'}
+ <div style="font-weight:bold; color:#0f172a;">${p.nombre}${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}</div>
  <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
- <div style="font-size:11px; color:#94a3b8;">${_kardexEsc(_invProveedorProducto(p) || 'Sin proveedor')}</div>
  </div>
  </div>
  </td>
- <td style="padding:12px; text-align:center;">
- <span style="font-size:18px; font-weight:900; color:${colorStock};">${stock}</span>
- ${f.stockConsignacion > 0 ? `<div style="margin-top:4px;"><span style="font-size:9px;font-weight:bold;color:#854d0e;background:#fef3c7;padding:2px 6px;border-radius:10px;">${f.stockConsignacion} consig.</span></div>` : ''}
+ <td style="padding:11px; text-align:center;"><span style="font-size:16px; font-weight:900; color:${colorStock};">${stock}</span></td>
+ <td style="padding:11px; text-align:right; font-weight:bold;">${typeof dinero === 'function' ? dinero(p.precio) : p.precio}</td>
+ <td style="padding:11px; text-align:center;">
+ <label style="position:relative;display:inline-block;width:38px;height:21px;cursor:pointer;" title="${f.activo ? 'Activo -- clic para desactivar' : 'Inactivo -- clic para activar'}">
+ <input type="checkbox" ${f.activo ? 'checked' : ''} onchange="_gpToggleActivoRapido('${idStr}', this.checked)" style="position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;">
+ <span style="position:absolute;inset:0;background:${f.activo ? '#16a34a' : '#cbd5e1'};border-radius:999px;transition:.15s;pointer-events:none;"></span>
+ <span style="position:absolute;top:2px;left:${f.activo ? '19px' : '2px'};width:17px;height:17px;background:white;border-radius:50%;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.3);pointer-events:none;"></span>
+ </label>
  </td>
- <td style="padding:12px;">${_gpBadgeUbicaciones(p)}</td>
- <td style="padding:12px; text-align:right;">
- <div style="font-weight:bold; color:#1e40af;">${typeof dinero === 'function' ? dinero(f.valorTotal) : f.valorTotal.toFixed(2)}</div>
- <div style="font-size:10px; color:#94a3b8;">Costo: ${typeof dinero === 'function' ? dinero(f.costoPromedio) : f.costoPromedio.toFixed(2)}</div>
- </td>
- <td style="padding:12px; text-align:right; font-weight:bold;">${typeof dinero === 'function' ? dinero(p.precio) : p.precio}</td>
- <td style="padding:12px; text-align:center; line-height:1.3;">
- ${labelPedido || '<span style="color:#94a3b8;font-size:11px;">—</span>'}
- <div style="font-size:10px; color:#64748b; margin-top:3px;">${f.antiguedad}</div>
- </td>
- <td style="padding:12px; text-align:center;">
+ <td style="padding:11px; text-align:center;">
  <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
- <button onclick="abrirProductoForm('${idStr}')" title="Editar"
- style="padding:6px 10px; cursor:pointer; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px; font-weight:bold;">
- ✏️ Editar
- </button>
- <button onclick="abrirVisorMaestro('${idStr}')" title="Ver ficha completa"
- style="padding:6px 10px; cursor:pointer; background:#f1f5f9; color:#334155; border:1px solid #e2e8f0; border-radius:6px; font-weight:bold;">
- 🔍 Visor
- </button>
- <button onclick="confirmarEliminarProducto('${idStr}')" title="Eliminar"
- style="padding:6px 10px; cursor:pointer; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:6px; font-weight:bold;">
- 🗑️ Eliminar
- </button>
+ <button onclick="abrirProductoForm('${idStr}')" title="Editar" style="padding:6px 10px; cursor:pointer; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px; font-weight:bold;">✏️ Editar</button>
+ <button onclick="abrirVisorMaestro('${idStr}')" title="Ver ficha completa" style="padding:6px 10px; cursor:pointer; background:#f1f5f9; color:#334155; border:1px solid #e2e8f0; border-radius:6px; font-weight:bold;">🔍 Visor</button>
+ <button onclick="confirmarEliminarProducto('${idStr}')" title="Eliminar" style="padding:6px 10px; cursor:pointer; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:6px; font-weight:bold;">🗑️ Eliminar</button>
  </div>
  </td>
  </tr>`;
@@ -2073,14 +2030,9 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  </tbody>
  <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
  <tr>
- <td></td>
- <td style="padding:12px 15px;">TOTAL (${filas.length} producto${filas.length === 1 ? '' : 's'}):</td>
+ <td style="padding:12px 15px;">TOTAL: ${filas.length} producto${filas.length === 1 ? '' : 's'}</td>
  <td style="padding:12px 15px; text-align:center; color:#1e40af;">${totalUnidades}</td>
- <td></td>
- <td style="padding:12px 15px; text-align:right; color:#16a34a;">${typeof dinero === 'function' ? dinero(valorInventarioCosto) : valorInventarioCosto.toFixed(2)}</td>
- <td></td>
- <td></td>
- <td></td>
+ <td></td><td></td><td></td>
  </tr>
  </tfoot>
  </table>
@@ -2088,12 +2040,26 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  cont.innerHTML = html;
 }
 
-// ===== SELECCION Y ACCIONES EN LOTE (Gestion de Inventario) =====
+// Cambia el activo/inactivo de UN producto sin abrir el formulario --
+// mismo camino canonico (StorageService.set del arreglo completo) que
+// usa guardarProductoDB, solo que para este único campo.
+function _gpToggleActivoRapido(id, activo) {
+ if (!_invRequireAdmin('Cambiar estado activo de producto')) { renderInventario(); return; }
+ const lista = StorageService.get('productos', []);
+ const p = lista.find(x => String(x.id) === String(id));
+ if (!p) return;
+ p.activo = activo;
+ if (!StorageService.set('productos', lista)) { alert('⚠️ Error guardando el cambio. Intenta de nuevo.'); renderInventario(); return; }
+ window.productos = lista;
+ renderInventario();
+}
+
+// ===== SELECCION Y ACCIONES EN LOTE (Consulta de Inventario) =====
 function _gpToggleSeleccion(id, marcado) {
  window._gpSeleccionados = window._gpSeleccionados || new Set();
  if (marcado) window._gpSeleccionados.add(String(id));
  else window._gpSeleccionados.delete(String(id));
- renderInventario(window._gpUltimasFilas ? window._gpUltimasFilas.map(f => f.p) : (window.productos || []));
+ renderConsultaInventario();
 }
 
 function _gpToggleSeleccionTodos(marcarTodos) {
@@ -2101,12 +2067,12 @@ function _gpToggleSeleccionTodos(marcarTodos) {
  const idsVisibles = (window._gpUltimasFilas || []).map(f => String(f.p.id));
  if (marcarTodos) idsVisibles.forEach(id => window._gpSeleccionados.add(id));
  else idsVisibles.forEach(id => window._gpSeleccionados.delete(id));
- renderInventario(window._gpUltimasFilas ? window._gpUltimasFilas.map(f => f.p) : (window.productos || []));
+ renderConsultaInventario();
 }
 
 function _gpLimpiarSeleccion() {
  window._gpSeleccionados = new Set();
- renderInventario(window._gpUltimasFilas ? window._gpUltimasFilas.map(f => f.p) : (window.productos || []));
+ renderConsultaInventario();
 }
 
 // 🛡️ Toda accion en lote pasa por StorageService.set (el camino canonico),
@@ -2139,7 +2105,7 @@ function _gpAccionLote(accion) {
  if (!StorageService.set('productos', lista)) return alert('⚠️ Error guardando los cambios. Intenta de nuevo.');
  window.productos = lista;
  window._gpSeleccionados = new Set();
- aplicarFiltros();
+ renderConsultaInventario();
 }
 
 // 🛡️ Herramienta "Proveedor descontinuado": separa los productos de un
@@ -2210,28 +2176,29 @@ function _gpAplicarProveedorDescontinuado() {
  window.productos = lista;
  document.querySelector('[data-modal="gp-prov-descontinuado"]')?.remove();
  alert(`Listo. ${sinStock.length} desactivado(s), ${conStock.length} marcado(s) como compra única.`);
- aplicarFiltros();
+ renderConsultaInventario();
 }
 
-// ===== VISTA: RESUMEN POR CATEGORIA / SUBCATEGORIA =====
+// ===== VISTA: RESUMEN POR CATEGORIA / SUBCATEGORIA (Consulta de Inventario) =====
 function _gpMostrarVista(vista) {
- const tabla = document.getElementById('gpVistaTabla');
- const resumen = document.getElementById('gpVistaResumen');
- const btnTabla = document.getElementById('gpTabTabla');
- const btnResumen = document.getElementById('gpTabResumen');
- if (!tabla || !resumen) return;
+ const detalle = document.getElementById('civVistaDetalle');
+ const resumen = document.getElementById('civVistaResumen');
+ const btnDetalle = document.getElementById('civTabDetalle');
+ const btnResumen = document.getElementById('civTabResumen');
+ if (!detalle || !resumen) return;
  const activo = '#1e40af', inactivo = '#94a3b8';
  if (vista === 'resumen') {
- tabla.classList.add('oculto');
+ detalle.classList.add('oculto');
  resumen.classList.remove('oculto');
- if (btnTabla) { btnTabla.style.color = inactivo; btnTabla.style.borderBottomColor = 'transparent'; }
+ if (btnDetalle) { btnDetalle.style.color = inactivo; btnDetalle.style.borderBottomColor = 'transparent'; }
  if (btnResumen) { btnResumen.style.color = activo; btnResumen.style.borderBottomColor = activo; }
  renderResumenCategorias();
  } else {
  resumen.classList.add('oculto');
- tabla.classList.remove('oculto');
+ detalle.classList.remove('oculto');
  if (btnResumen) { btnResumen.style.color = inactivo; btnResumen.style.borderBottomColor = 'transparent'; }
- if (btnTabla) { btnTabla.style.color = activo; btnTabla.style.borderBottomColor = activo; }
+ if (btnDetalle) { btnDetalle.style.color = activo; btnDetalle.style.borderBottomColor = activo; }
+ renderConsultaInventario();
  }
 }
 
@@ -2352,7 +2319,7 @@ function _gpConstruirArbolCategorias() {
 function _gpSumar(lista, campo) { return lista.reduce((s, x) => s + (Number(x[campo]) || 0), 0); }
 
 function renderResumenCategorias() {
- const cont = document.getElementById('gpVistaResumen');
+ const cont = document.getElementById('civVistaResumen');
  if (!cont) return;
  window._gpExpandido = window._gpExpandido || new Set();
  const arbol = _gpConstruirArbolCategorias();
