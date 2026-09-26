@@ -1933,44 +1933,69 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  const stockBajoCount = filas.filter(f => { const s = Number(f.p.stock) || 0; return s > 0 && s <= window.GP_STOCK_BAJO_UMBRAL; }).length;
  const pedidoPendienteCount = filas.filter(f => f.estadoPedido === 'pendiente').length;
 
- const kpi = (label, valor, color, sub = '') => `
- <div style="background:white; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; min-width:150px; flex:1;">
- <div style="font-size:10px; font-weight:900; letter-spacing:.03em; color:#64748b; text-transform:uppercase;">${label}</div>
- <div style="font-size:20px; font-weight:900; color:${color}; margin-top:2px;">${valor}</div>
+ const kpi = (label, valor, color, sub = '', icono = '📦') => `
+ <div style="background:white; border:1px solid #e2e8f0; border-left:4px solid ${color}; border-radius:10px; padding:12px 14px; min-width:150px; flex:1; box-shadow:0 1px 3px rgba(15,23,42,0.04); transition:box-shadow .15s;">
+ <div style="display:flex;align-items:center;gap:6px;">
+ <span style="font-size:13px;">${icono}</span>
+ <span style="font-size:10px; font-weight:900; letter-spacing:.03em; color:#64748b; text-transform:uppercase;">${label}</span>
+ </div>
+ <div style="font-size:22px; font-weight:900; color:${color}; margin-top:4px;">${valor}</div>
  ${sub ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">${sub}</div>` : ''}
  </div>`;
 
  const kpisHtml = `
  <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
- ${kpi('SKUs listados', totalSkus, '#0f172a')}
- ${kpi('Unidades totales', totalUnidades, '#1e40af')}
- ${kpi('Valor inventario (costo)', typeof dinero === 'function' ? dinero(valorInventarioCosto) : valorInventarioCosto.toFixed(2), '#16a34a')}
- ${kpi('Valor venta potencial', typeof dinero === 'function' ? dinero(valorVentaPotencial) : valorVentaPotencial.toFixed(2), '#7c3aed')}
- ${kpi('Sin stock', sinStockCount, sinStockCount > 0 ? '#dc2626' : '#16a34a')}
- ${kpi('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCount, stockBajoCount > 0 ? '#d97706' : '#16a34a')}
- ${kpi('Con pedido pendiente', pedidoPendienteCount, pedidoPendienteCount > 0 ? '#0284c7' : '#94a3b8')}
+ ${kpi('SKUs listados', totalSkus, '#0f172a', '', '🏷️')}
+ ${kpi('Unidades totales', totalUnidades, '#1e40af', '', '📦')}
+ ${kpi('Valor inventario (costo)', typeof dinero === 'function' ? dinero(valorInventarioCosto) : valorInventarioCosto.toFixed(2), '#16a34a', '', '💰')}
+ ${kpi('Valor venta potencial', typeof dinero === 'function' ? dinero(valorVentaPotencial) : valorVentaPotencial.toFixed(2), '#7c3aed', '', '💎')}
+ ${kpi('Sin stock', sinStockCount, sinStockCount > 0 ? '#dc2626' : '#16a34a', '', '⛔')}
+ ${kpi('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCount, stockBajoCount > 0 ? '#d97706' : '#16a34a', '', '⚠️')}
+ ${kpi('Con pedido pendiente', pedidoPendienteCount, pedidoPendienteCount > 0 ? '#0284c7' : '#94a3b8', '', '🚚')}
  </div>`;
 
  // ---- 4) Chips de filtro rapido (independientes de los filtros de arriba) ----
  const qf = window._gpQuickFilter || 'todos';
  const chipRapido = (valor, label) => `<button onclick="_gpSetQuickFilter('${valor}')" style="padding:6px 12px; border-radius:999px; border:1px solid ${qf === valor ? '#1e40af' : '#e2e8f0'}; background:${qf === valor ? '#1e40af' : 'white'}; color:${qf === valor ? 'white' : '#334155'}; font-size:12px; font-weight:bold; cursor:pointer;">${label}</button>`;
  const chipsRapidosHtml = `
- <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+ <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
  ${chipRapido('todos', 'Todos')}
  ${chipRapido('sin_stock', `Sin stock (${sinStockCount})`)}
  ${chipRapido('stock_bajo', `Stock bajo (${stockBajoCount})`)}
  ${chipRapido('pedido_pendiente', `Pedido pendiente (${pedidoPendienteCount})`)}
+ <button onclick="_gpAbrirProveedorDescontinuado()" style="padding:6px 12px; border-radius:6px; border:1px solid #fecaca; background:#fef2f2; color:#b91c1c; font-size:12px; font-weight:bold; cursor:pointer;">🚫 Proveedor descontinuado</button>
  <button onclick="exportarGestionProductosCSV()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; font-size:12px; font-weight:bold; cursor:pointer;">⬇ Exportar CSV</button>
  </div>`;
+
+ // ---- 5) Barra de acciones en lote (aparece solo si hay seleccion) ----
+ window._gpSeleccionados = window._gpSeleccionados || new Set();
+ const idsVisibles = filas.map(f => String(f.p.id));
+ // Depura selecciones de productos que ya no existen (fueron eliminados)
+ const idsExistentes = new Set((window.productos || []).map(p => String(p.id)));
+ window._gpSeleccionados.forEach(id => { if (!idsExistentes.has(id)) window._gpSeleccionados.delete(id); });
+ const numSel = window._gpSeleccionados.size;
+ const todosVisiblesSel = idsVisibles.length > 0 && idsVisibles.every(id => window._gpSeleccionados.has(id));
+
+ const barraLoteHtml = numSel > 0 ? `
+ <div style="position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#1e293b; color:white; border-radius:10px; padding:10px 14px; margin-bottom:12px; box-shadow:0 4px 12px rgba(15,23,42,0.15);">
+ <span style="font-weight:900; font-size:13px;">${numSel} seleccionado${numSel === 1 ? '' : 's'}</span>
+ <button onclick="_gpAccionLote('activar')" style="padding:6px 12px; border-radius:6px; border:none; background:#16a34a; color:white; font-size:12px; font-weight:bold; cursor:pointer;">✅ Activar</button>
+ <button onclick="_gpAccionLote('desactivar')" style="padding:6px 12px; border-radius:6px; border:none; background:#dc2626; color:white; font-size:12px; font-weight:bold; cursor:pointer;">🚫 Desactivar</button>
+ <button onclick="_gpAccionLote('unica')" style="padding:6px 12px; border-radius:6px; border:none; background:#7c3aed; color:white; font-size:12px; font-weight:bold; cursor:pointer;">🔒 Marcar compra única</button>
+ <button onclick="_gpAccionLote('quitar_unica')" style="padding:6px 12px; border-radius:6px; border:none; background:#475569; color:white; font-size:12px; font-weight:bold; cursor:pointer;">↩️ Quitar compra única</button>
+ <button onclick="_gpLimpiarSeleccion()" style="margin-left:auto; padding:6px 12px; border-radius:6px; border:1px solid rgba(255,255,255,.3); background:transparent; color:white; font-size:12px; font-weight:bold; cursor:pointer;">✕ Cancelar</button>
+ </div>` : '';
 
  let html = `
  ${kpisHtml}
  ${chipsControl}
  ${chipsRapidosHtml}
+ ${barraLoteHtml}
  <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.08); border-radius:12px;">
  <table class="tabla-admin" style="width:100%; border-collapse:collapse; background:white;">
  <thead>
  <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0;">
+ <th style="padding:13px; width:34px; text-align:center;"><input type="checkbox" ${todosVisiblesSel ? 'checked' : ''} onchange="_gpToggleSeleccionTodos(this.checked)" style="width:15px;height:15px;cursor:pointer;" title="Seleccionar todos los visibles"></th>
  <th style="padding:13px; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('nombre')">Producto ${_gpFlechaOrden('nombre')}</th>
  <th style="padding:13px; text-align:center; cursor:pointer; user-select:none;" onclick="_gpOrdenarPor('stock')">Stock ${_gpFlechaOrden('stock')}</th>
  <th style="padding:13px;">Ubicaciones</th>
@@ -1983,21 +2008,32 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  <tbody>`;
 
  if (filas.length === 0) {
- html += `<tr><td colspan="7" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
+ html += `<tr><td colspan="8" style="text-align:center; color:gray; padding:20px;">No se encontraron productos.</td></tr>`;
  } else {
  filas.forEach(f => {
  const p = f.p;
+ const idStr = String(p.id);
+ const marcado = window._gpSeleccionados.has(idStr);
  const stock = Number(p.stock) || 0;
  const colorStock = stock <= 0 ? '#dc2626' : (stock <= window.GP_STOCK_BAJO_UMBRAL ? '#d97706' : '#16a34a');
  const labelPedido = f.estadoPedido === 'pendiente' ? '<span style="display:block;color:#0284c7;font-size:11px;font-weight:bold;">Pedido pendiente</span>' :
  f.estadoPedido === 'baja' ? '<span style="display:block;color:#e11d48;font-size:11px;font-weight:bold;">Pendiente baja</span>' : '';
+ const miniatura = p.imagen
+ ? `<img src="${_kardexEsc(p.imagen)}" style="width:38px;height:38px;border-radius:7px;object-fit:cover;border:1px solid #e2e8f0;flex-shrink:0;" onerror="this.style.display='none';">`
+ : `<div style="width:38px;height:38px;border-radius:7px;background:#f1f5f9;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px;color:#cbd5e1;">📦</div>`;
  html += `
- <tr style="border-bottom:1px solid #f1f5f9;">
+ <tr data-fila-producto="${idStr}" style="border-bottom:1px solid #f1f5f9; background:${marcado ? '#eff6ff' : 'white'};" onmouseover="if(!this.dataset.sel)this.style.background='#f8fafc';" onmouseout="this.style.background='${marcado ? '#eff6ff' : 'white'}';">
+ <td style="padding:12px; text-align:center;"><input type="checkbox" class="gpChk" data-id="${idStr}" ${marcado ? 'checked' : ''} onchange="_gpToggleSeleccion('${idStr}', this.checked)" style="width:15px;height:15px;cursor:pointer;"></td>
  <td style="padding:12px;">
- <div style="font-weight:bold; color:#0f172a;">${p.nombre}</div>
+ <div style="display:flex; gap:10px; align-items:flex-start;">
+ ${miniatura}
+ <div>
+ <div style="font-weight:bold; color:#0f172a;">${p.nombre}${p.esUnicaCompra ? ' <span title="Compra única / no resurtible" style="font-size:11px;">🔒</span>' : ''}</div>
  ${f.activo ? '' : '<span style="display:inline-block;margin:3px 0;padding:2px 7px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:10px;font-weight:900;text-transform:uppercase;">Inactivo</span>'}
  <div style="font-size:11px; color:#64748b;">${p.categoria || ''} > ${p.subcategoria || ''}</div>
  <div style="font-size:11px; color:#94a3b8;">${_kardexEsc(_invProveedorProducto(p) || 'Sin proveedor')}</div>
+ </div>
+ </div>
  </td>
  <td style="padding:12px; text-align:center;">
  <span style="font-size:18px; font-weight:900; color:${colorStock};">${stock}</span>
@@ -2015,17 +2051,17 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  </td>
  <td style="padding:12px; text-align:center;">
  <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
- <button onclick="abrirProductoForm('${String(p.id)}')" 
- style="padding:6px 10px; cursor:pointer; background:#3498db; color:white; border:none; border-radius:4px; font-weight:bold;">
- &#9998; Editar
+ <button onclick="abrirProductoForm('${idStr}')" title="Editar"
+ style="padding:6px 10px; cursor:pointer; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px; font-weight:bold;">
+ ✏️ Editar
  </button>
- <button onclick="abrirVisorMaestro('${String(p.id)}')" 
- style="padding:6px 10px; cursor:pointer; background:#2c3e50; color:white; border:none; border-radius:4px; font-weight:bold;">
- &#128269; Visor
+ <button onclick="abrirVisorMaestro('${idStr}')" title="Ver ficha completa"
+ style="padding:6px 10px; cursor:pointer; background:#f1f5f9; color:#334155; border:1px solid #e2e8f0; border-radius:6px; font-weight:bold;">
+ 🔍 Visor
  </button>
- <button onclick="confirmarEliminarProducto('${String(p.id)}')" 
- style="padding:6px 10px; cursor:pointer; background:#e74c3c; color:white; border:none; border-radius:4px; font-weight:bold;">
- &#128465; Eliminar
+ <button onclick="confirmarEliminarProducto('${idStr}')" title="Eliminar"
+ style="padding:6px 10px; cursor:pointer; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:6px; font-weight:bold;">
+ 🗑️ Eliminar
  </button>
  </div>
  </td>
@@ -2037,6 +2073,7 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  </tbody>
  <tfoot style="background:#f8fafc; font-weight:bold; border-top:2px solid #cbd5e1;">
  <tr>
+ <td></td>
  <td style="padding:12px 15px;">TOTAL (${filas.length} producto${filas.length === 1 ? '' : 's'}):</td>
  <td style="padding:12px 15px; text-align:center; color:#1e40af;">${totalUnidades}</td>
  <td></td>
@@ -2049,6 +2086,376 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  </table>
  </div>`;
  cont.innerHTML = html;
+}
+
+// ===== SELECCION Y ACCIONES EN LOTE (Gestion de Inventario) =====
+function _gpToggleSeleccion(id, marcado) {
+ window._gpSeleccionados = window._gpSeleccionados || new Set();
+ if (marcado) window._gpSeleccionados.add(String(id));
+ else window._gpSeleccionados.delete(String(id));
+ renderInventario(window._gpUltimasFilas ? window._gpUltimasFilas.map(f => f.p) : (window.productos || []));
+}
+
+function _gpToggleSeleccionTodos(marcarTodos) {
+ window._gpSeleccionados = window._gpSeleccionados || new Set();
+ const idsVisibles = (window._gpUltimasFilas || []).map(f => String(f.p.id));
+ if (marcarTodos) idsVisibles.forEach(id => window._gpSeleccionados.add(id));
+ else idsVisibles.forEach(id => window._gpSeleccionados.delete(id));
+ renderInventario(window._gpUltimasFilas ? window._gpUltimasFilas.map(f => f.p) : (window.productos || []));
+}
+
+function _gpLimpiarSeleccion() {
+ window._gpSeleccionados = new Set();
+ renderInventario(window._gpUltimasFilas ? window._gpUltimasFilas.map(f => f.p) : (window.productos || []));
+}
+
+// 🛡️ Toda accion en lote pasa por StorageService.set (el camino canonico),
+// nunca escribe cada producto por separado -- una sola escritura de todo
+// el arreglo, igual que hace guardarProductoDB. Pide confirmacion siempre,
+// mostrando la cuenta exacta de productos afectados antes de aplicar.
+function _gpAccionLote(accion) {
+ if (!_invRequireAdmin('Accion en lote sobre productos')) return;
+ const seleccionados = window._gpSeleccionados || new Set();
+ if (seleccionados.size === 0) return;
+ const lista = StorageService.get('productos', []);
+ const afectados = lista.filter(p => seleccionados.has(String(p.id)));
+ if (afectados.length === 0) return;
+
+ const textos = {
+ activar: `¿Activar ${afectados.length} producto(s)? Volveran a aparecer en catalogo y ventas.`,
+ desactivar: `¿Desactivar ${afectados.length} producto(s)? Dejaran de aparecer en catalogo y ventas (no se borran, se pueden reactivar despues).`,
+ unica: `¿Marcar ${afectados.length} producto(s) como compra unica (no resurtible)? Se desactivaran solos en automatico al agotarse su existencia.`,
+ quitar_unica: `¿Quitar la marca de compra unica a ${afectados.length} producto(s)? Volveran a tratarse como resurtibles normales.`
+ };
+ if (!confirm(textos[accion] || `¿Aplicar cambio a ${afectados.length} producto(s)?`)) return;
+
+ afectados.forEach(p => {
+ if (accion === 'activar') p.activo = true;
+ else if (accion === 'desactivar') p.activo = false;
+ else if (accion === 'unica') p.esUnicaCompra = true;
+ else if (accion === 'quitar_unica') p.esUnicaCompra = false;
+ });
+
+ if (!StorageService.set('productos', lista)) return alert('⚠️ Error guardando los cambios. Intenta de nuevo.');
+ window.productos = lista;
+ window._gpSeleccionados = new Set();
+ aplicarFiltros();
+}
+
+// 🛡️ Herramienta "Proveedor descontinuado": separa los productos de un
+// proveedor en dos grupos segun tengan existencia o no, y aplica la regla
+// de negocio que Roberto definio -- sin stock se desactiva (deja de
+// venderse/mostrarse), con stock se marca compra unica (se sigue vendiendo
+// hasta agotar lo que ya se tiene, y ahi se desactiva solo). No borra
+// ningun producto del catalogo -- "quitar del catalogo" aqui significa
+// desactivar, igual que en el resto del sistema; el historial/Kardex de
+// esos productos se conserva intacto.
+function _gpAbrirProveedorDescontinuado() {
+ if (!_invRequireAdmin('Proveedor descontinuado')) return;
+ document.querySelector('[data-modal="gp-prov-descontinuado"]')?.remove();
+ const proveedores = _invProveedoresInventario();
+ const opciones = proveedores.map(p => `<option value="${_kardexEsc(p)}">${_kardexEsc(p)}</option>`).join('');
+ const modalHTML = `
+ <div data-modal="gp-prov-descontinuado" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:6500;display:flex;justify-content:center;align-items:center;padding:20px;">
+ <div style="background:white;border-radius:10px;width:95%;max-width:460px;padding:22px;">
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+ <h3 style="margin:0;color:#b91c1c;">🚫 Proveedor descontinuado</h3>
+ <button onclick="document.querySelector('[data-modal=\\'gp-prov-descontinuado\\']').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;">✕</button>
+ </div>
+ <p style="color:#64748b;font-size:12.5px;margin:6px 0 14px;">Los productos SIN existencia de este proveedor se desactivan. Los que SI tengas en existencia se marcan como compra única y se venden hasta agotarse.</p>
+ <select id="gpProvDescId" onchange="_gpPreviewProveedorDescontinuado()" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:7px;margin-bottom:14px;">
+ <option value="">-- Selecciona un proveedor --</option>
+ ${opciones}
+ </select>
+ <div id="gpProvDescPreview" style="min-height:20px;margin-bottom:14px;font-size:13px;"></div>
+ <button onclick="_gpAplicarProveedorDescontinuado()" style="width:100%;padding:12px;background:#b91c1c;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">Aplicar</button>
+ </div>
+ </div>`;
+ document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function _gpPreviewProveedorDescontinuado() {
+ const prov = document.getElementById('gpProvDescId')?.value || '';
+ const cont = document.getElementById('gpProvDescPreview');
+ if (!cont) return;
+ if (!prov) { cont.innerHTML = ''; return; }
+ const objetivo = _invTextoNormalizado(prov);
+ const productosProveedor = (window.productos || []).filter(p => _invTextoNormalizado(_invProveedorProducto(p)) === objetivo && _invProductoActivo(p));
+ const sinStock = productosProveedor.filter(p => (Number(p.stock) || 0) <= 0);
+ const conStock = productosProveedor.filter(p => (Number(p.stock) || 0) > 0);
+ const piezasConStock = conStock.reduce((s, p) => s + (Number(p.stock) || 0), 0);
+ cont.innerHTML = `
+ <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:6px;">🚫 <b>${sinStock.length}</b> producto(s) sin existencia se desactivarán.</div>
+ <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px 12px;">🔒 <b>${conStock.length}</b> producto(s) con existencia (${piezasConStock} pieza(s)) se marcarán como compra única.</div>
+ ${productosProveedor.length === 0 ? '<div style="color:#94a3b8;margin-top:6px;">No hay productos activos de este proveedor.</div>' : ''}`;
+}
+
+function _gpAplicarProveedorDescontinuado() {
+ if (!_invRequireAdmin('Proveedor descontinuado')) return;
+ const prov = document.getElementById('gpProvDescId')?.value || '';
+ if (!prov) return alert('Selecciona un proveedor.');
+ const objetivo = _invTextoNormalizado(prov);
+ const lista = StorageService.get('productos', []);
+ const productosProveedor = lista.filter(p => _invTextoNormalizado(_invProveedorProducto(p)) === objetivo && _invProductoActivo(p));
+ const sinStock = productosProveedor.filter(p => (Number(p.stock) || 0) <= 0);
+ const conStock = productosProveedor.filter(p => (Number(p.stock) || 0) > 0);
+ if (productosProveedor.length === 0) return alert('No hay productos activos de ese proveedor.');
+
+ if (!confirm(`Proveedor "${prov}":\n\n🚫 ${sinStock.length} producto(s) se desactivarán (sin existencia).\n🔒 ${conStock.length} producto(s) se marcarán compra única (con existencia).\n\nEsta acción se puede revisar/revertir después desde cada producto. ¿Continuar?`)) return;
+
+ sinStock.forEach(p => { p.activo = false; });
+ conStock.forEach(p => { p.esUnicaCompra = true; });
+
+ if (!StorageService.set('productos', lista)) return alert('⚠️ Error guardando los cambios. Intenta de nuevo.');
+ window.productos = lista;
+ document.querySelector('[data-modal="gp-prov-descontinuado"]')?.remove();
+ alert(`Listo. ${sinStock.length} desactivado(s), ${conStock.length} marcado(s) como compra única.`);
+ aplicarFiltros();
+}
+
+// ===== VISTA: RESUMEN POR CATEGORIA / SUBCATEGORIA =====
+function _gpMostrarVista(vista) {
+ const tabla = document.getElementById('gpVistaTabla');
+ const resumen = document.getElementById('gpVistaResumen');
+ const btnTabla = document.getElementById('gpTabTabla');
+ const btnResumen = document.getElementById('gpTabResumen');
+ if (!tabla || !resumen) return;
+ const activo = '#1e40af', inactivo = '#94a3b8';
+ if (vista === 'resumen') {
+ tabla.classList.add('oculto');
+ resumen.classList.remove('oculto');
+ if (btnTabla) { btnTabla.style.color = inactivo; btnTabla.style.borderBottomColor = 'transparent'; }
+ if (btnResumen) { btnResumen.style.color = activo; btnResumen.style.borderBottomColor = activo; }
+ renderResumenCategorias();
+ } else {
+ resumen.classList.add('oculto');
+ tabla.classList.remove('oculto');
+ if (btnResumen) { btnResumen.style.color = inactivo; btnResumen.style.borderBottomColor = 'transparent'; }
+ if (btnTabla) { btnTabla.style.color = activo; btnTabla.style.borderBottomColor = activo; }
+ }
+}
+
+// 🛡️ Piezas vendidas / importe de venta / monto recuperado por producto.
+// Reutiliza el MISMO motor que "Rentabilidad de Cartera" y "Cubo de
+// Ventas" (window._rrcResolverPreciosVenta, window._rrcTotalesVenta,
+// window.obtenerResumenRentabilidadCartera en reportes-rentabilidad-
+// cartera.js) -- nunca un cálculo de ventas/cobranza aparte, para que este
+// número siempre cuadre con esos otros reportes.
+//
+// "Monto recuperado" por producto es una ESTIMACIÓN: en una venta a
+// crédito con varios artículos, no hay forma de saber qué peso pagó cuál
+// artículo, así que lo cobrado a la fecha de esa cuenta se reparte a
+// prorrata según el peso de cada artículo en el total de mercancía --
+// exactamente el mismo método que el sistema ya usa para repartir el
+// interés entre artículos (ver encabezado de reportes-cubo-ventas.js). En
+// ventas de contado/transferencia no hay prorrateo: se cobra el 100% en
+// el momento, así que recuperado = importe de esa línea.
+function _gpVentasPorProducto() {
+ const ventas = _invStorageArray('ventasRegistradas');
+ const porProducto = {};
+
+ let cobradoPorFolio = {};
+ if (typeof window.obtenerResumenRentabilidadCartera === 'function') {
+ try {
+ const resumen = window.obtenerResumenRentabilidadCartera();
+ (resumen.filas || []).forEach(f => { if (f.folio) cobradoPorFolio[String(f.folio)] = Number(f.totalCobradoActual) || 0; });
+ } catch (e) { /* si falla, se sigue con cobradoPorFolio vacío -- las líneas de crédito quedarán en $0 recuperado en vez de romper toda la vista */ }
+ }
+
+ ventas.forEach(v => {
+ const estado = String(v.estado || v.estatus || '').toLowerCase();
+ if (estado.includes('cancel')) return;
+ const articulos = Array.isArray(v.articulos) ? v.articulos : [];
+ if (!articulos.length) return;
+
+ const metodo = String(v.metodoPago || v.metodo || 'contado').toLowerCase();
+ const preciosPorArticulo = (typeof window._rrcResolverPreciosVenta === 'function') ? window._rrcResolverPreciosVenta(v) : [];
+ const totales = (typeof window._rrcTotalesVenta === 'function') ? window._rrcTotalesVenta(v) : { totalMercancia: 0 };
+ const totalMercancia = Number(totales.totalMercancia) || 0;
+
+ let cobradoVenta;
+ if (metodo === 'contado' || metodo === 'transferencia') {
+ cobradoVenta = totalMercancia; // pagado de contado, al 100%, en el momento
+ } else {
+ const folio = String(v.folio || '');
+ cobradoVenta = (folio && cobradoPorFolio[folio] != null) ? cobradoPorFolio[folio] : 0;
+ }
+
+ articulos.forEach((a, idx) => {
+ if (a.id === 'MIG') return; // artículo migrado sin producto real ligado
+ const cantidad = Number(a.cantidad) || 1;
+ const precios = preciosPorArticulo[idx] || {
+ precioBaseTotal: (Number(a.precioContado ?? a.precio ?? 0) || 0) * cantidad
+ };
+ const importeLinea = Number(precios.precioBaseTotal) || 0;
+ const peso = totalMercancia > 0 ? (importeLinea / totalMercancia) : 0;
+ const recuperadoLinea = (metodo === 'contado' || metodo === 'transferencia') ? importeLinea : (peso * cobradoVenta);
+
+ const idProd = a.productoId ?? a.id;
+ const key = (idProd !== undefined && idProd !== null && idProd !== '') ? String(idProd) : null;
+ if (!key) return; // sin producto ligado -- no hay a qué fila de inventario sumarle esto
+
+ if (!porProducto[key]) porProducto[key] = { piezasVendidas: 0, importeVenta: 0, montoRecuperado: 0 };
+ porProducto[key].piezasVendidas += cantidad;
+ porProducto[key].importeVenta += importeLinea;
+ porProducto[key].montoRecuperado += recuperadoLinea;
+ });
+ });
+
+ return porProducto;
+}
+
+// 🛡️ "Precio a 6 meses": usa CalculatorService.calcularCredito, el MISMO
+// motor de interés simple que usa el sistema para cotizar cualquier plan
+// (total = precio × (1 + tasa × meses)), con la tasa fija que Roberto
+// definió (3.5% mensual) SOLO para esta columna de resumen -- las
+// cotizaciones y ventas reales siguen usando la tasa que se capture en el
+// momento, esto no la reemplaza en ningún otro lado del sistema.
+const GP_TASA_MENSUAL_6M = 3.5;
+function _gpPrecio6Meses(precioContado) {
+ const precio = Number(precioContado) || 0;
+ if (precio <= 0 || typeof CalculatorService === 'undefined' || typeof CalculatorService.calcularCredito !== 'function') return null;
+ try {
+ const planes = CalculatorService.calcularCredito(precio, { permitirCredito: true, plazos: [{ meses: 6, tasa: GP_TASA_MENSUAL_6M }] });
+ return (planes && planes[0]) ? planes[0].total : null;
+ } catch (e) { return null; }
+}
+
+function _gpConstruirArbolCategorias() {
+ const ventasPorProducto = _gpVentasPorProducto();
+ const arbol = {};
+ (window.productos || []).forEach(p => {
+ const cat = (p.categoria || 'Sin categoría').trim() || 'Sin categoría';
+ const sub = (p.subcategoria || 'Sin subcategoría').trim() || 'Sin subcategoría';
+ const vp = ventasPorProducto[String(p.id)] || { piezasVendidas: 0, importeVenta: 0, montoRecuperado: 0 };
+ const precioContado = Number(p.precio) || 0;
+
+ if (!arbol[cat]) arbol[cat] = {};
+ if (!arbol[cat][sub]) arbol[cat][sub] = [];
+ arbol[cat][sub].push({
+ id: p.id,
+ nombre: p.nombre || '(sin nombre)',
+ stock: Number(p.stock) || 0,
+ costo: Number(p.costo) || 0,
+ precioContado,
+ precio6: _gpPrecio6Meses(precioContado),
+ piezasVendidas: vp.piezasVendidas,
+ importeVenta: vp.importeVenta,
+ montoRecuperado: vp.montoRecuperado,
+ activo: _invProductoActivo(p),
+ esUnicaCompra: !!p.esUnicaCompra
+ });
+ });
+ return arbol;
+}
+
+function _gpSumar(lista, campo) { return lista.reduce((s, x) => s + (Number(x[campo]) || 0), 0); }
+
+function renderResumenCategorias() {
+ const cont = document.getElementById('gpVistaResumen');
+ if (!cont) return;
+ window._gpExpandido = window._gpExpandido || new Set();
+ const arbol = _gpConstruirArbolCategorias();
+ const money = v => typeof dinero === 'function' ? dinero(v) : Number(v || 0).toFixed(2);
+
+ const fila = (nivel, clave, expandKey, celdas, tieneHijos) => {
+ const indent = nivel * 22;
+ const expandido = window._gpExpandido.has(expandKey);
+ const bg = nivel === 0 ? '#eff6ff' : (nivel === 1 ? '#f8fafc' : 'white');
+ const pesoTexto = nivel === 0 ? '900' : (nivel === 1 ? '700' : '400');
+ const flecha = tieneHijos ? `<span style="display:inline-block;width:16px;transition:transform .15s;transform:rotate(${expandido ? 90 : 0}deg);">▶</span>` : '<span style="display:inline-block;width:16px;"></span>';
+ return `
+ <tr style="background:${bg}; border-bottom:1px solid #e2e8f0; ${tieneHijos ? 'cursor:pointer;' : ''}" ${tieneHijos ? `onclick="_gpToggleExpandido('${expandKey}')"` : ''}>
+ <td style="padding:10px 12px 10px ${12 + indent}px; font-weight:${pesoTexto}; color:#0f172a;">${flecha}${clave}</td>
+ ${celdas}
+ </tr>`;
+ };
+
+ let filasHtml = '';
+ let granCat = 0, granSub = 0, granProd = 0;
+
+ Object.keys(arbol).sort((a, b) => a.localeCompare(b)).forEach(cat => {
+ granCat++;
+ const subcats = arbol[cat];
+ const productosCat = Object.values(subcats).flat();
+ const keyCat = `c:${cat}`;
+ filasHtml += fila(0, `${cat} <span style="font-size:11px;color:#64748b;font-weight:400;">(${productosCat.length} producto${productosCat.length === 1 ? '' : 's'})</span>`, keyCat, `
+ <td style="padding:10px;text-align:center;">${_gpSumar(productosCat, 'stock')}</td>
+ <td style="padding:10px;text-align:right;">${money(_gpSumar(productosCat, 'costo'))}</td>
+ <td style="padding:10px;"></td><td style="padding:10px;"></td>
+ <td style="padding:10px;text-align:center;">${_gpSumar(productosCat, 'piezasVendidas')}</td>
+ <td style="padding:10px;text-align:right;color:#1e40af;">${money(_gpSumar(productosCat, 'importeVenta'))}</td>
+ <td style="padding:10px;text-align:right;color:#16a34a;">${money(_gpSumar(productosCat, 'montoRecuperado'))}</td>
+ `, true);
+
+ if (!window._gpExpandido.has(keyCat)) return;
+
+ Object.keys(subcats).sort((a, b) => a.localeCompare(b)).forEach(sub => {
+ granSub++;
+ const productosSub = subcats[sub];
+ const keySub = `s:${cat}::${sub}`;
+ filasHtml += fila(1, `${sub} <span style="font-size:11px;color:#94a3b8;font-weight:400;">(${productosSub.length})</span>`, keySub, `
+ <td style="padding:10px;text-align:center;">${_gpSumar(productosSub, 'stock')}</td>
+ <td style="padding:10px;text-align:right;">${money(_gpSumar(productosSub, 'costo'))}</td>
+ <td style="padding:10px;"></td><td style="padding:10px;"></td>
+ <td style="padding:10px;text-align:center;">${_gpSumar(productosSub, 'piezasVendidas')}</td>
+ <td style="padding:10px;text-align:right;color:#1e40af;">${money(_gpSumar(productosSub, 'importeVenta'))}</td>
+ <td style="padding:10px;text-align:right;color:#16a34a;">${money(_gpSumar(productosSub, 'montoRecuperado'))}</td>
+ `, true);
+
+ if (!window._gpExpandido.has(keySub)) return;
+
+ productosSub.slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(p => {
+ granProd++;
+ filasHtml += `
+ <tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f8fafc';" onmouseout="this.style.background='white';">
+ <td style="padding:9px 12px 9px 56px; color:#334155;">
+ ${p.nombre}${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}${p.activo ? '' : ' <span style="font-size:10px;color:#991b1b;font-weight:bold;">(inactivo)</span>'}
+ </td>
+ <td style="padding:9px;text-align:center;color:${p.stock <= 0 ? '#dc2626' : '#0f172a'};font-weight:bold;">${p.stock}</td>
+ <td style="padding:9px;text-align:right;">${money(p.costo)}</td>
+ <td style="padding:9px;text-align:right;font-weight:bold;">${money(p.precioContado)}</td>
+ <td style="padding:9px;text-align:right;color:#7c3aed;">${p.precio6 != null ? money(p.precio6) : '—'}</td>
+ <td style="padding:9px;text-align:center;">${p.piezasVendidas}</td>
+ <td style="padding:9px;text-align:right;color:#1e40af;">${money(p.importeVenta)}</td>
+ <td style="padding:9px;text-align:right;color:#16a34a;">${money(p.montoRecuperado)}</td>
+ </tr>`;
+ });
+ });
+ });
+
+ if (Object.keys(arbol).length === 0) {
+ filasHtml = `<tr><td colspan="8" style="text-align:center;color:gray;padding:20px;">No hay productos en el catálogo.</td></tr>`;
+ }
+
+ cont.innerHTML = `
+ <p style="color:#64748b;font-size:12.5px;margin:0 0 12px;">
+ Click en una fila de categoría o subcategoría para expandir. "Precio a 6 meses" se calcula con una tasa fija de ${GP_TASA_MENSUAL_6M}% mensual (interés simple) -- las ventas reales usan la tasa que captures en cada caso. "Monto recuperado" en ventas a crédito con varios artículos es un reparto proporcional del cobro de esa cuenta, no un rastreo peso por peso.
+ </p>
+ <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.08); border-radius:12px;">
+ <table style="width:100%; border-collapse:collapse; background:white; font-size:13px;">
+ <thead>
+ <tr style="background:#1e293b; color:white;">
+ <th style="padding:12px; text-align:left;">Categoría / Subcategoría / Producto</th>
+ <th style="padding:12px; text-align:center;">Stock</th>
+ <th style="padding:12px; text-align:right;">Costo</th>
+ <th style="padding:12px; text-align:right;">Precio contado</th>
+ <th style="padding:12px; text-align:right;">Precio a 6 meses</th>
+ <th style="padding:12px; text-align:center;">Piezas vendidas</th>
+ <th style="padding:12px; text-align:right;">Importe de venta</th>
+ <th style="padding:12px; text-align:right;">Monto recuperado</th>
+ </tr>
+ </thead>
+ <tbody>${filasHtml}</tbody>
+ </table>
+ </div>`;
+}
+
+function _gpToggleExpandido(key) {
+ window._gpExpandido = window._gpExpandido || new Set();
+ if (window._gpExpandido.has(key)) window._gpExpandido.delete(key);
+ else window._gpExpandido.add(key);
+ renderResumenCategorias();
 }
 
 function confirmarEliminarProducto(id) {
