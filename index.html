@@ -519,6 +519,11 @@
  <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  </div>
+ <div style="display:flex; gap:6px; margin-bottom:14px; border-bottom:2px solid #e2e8f0;">
+ <button id="gpTabTabla" onclick="_gpMostrarVista('tabla')" style="padding:10px 18px; border:none; background:none; cursor:pointer; font-weight:900; color:#1e40af; border-bottom:3px solid #1e40af; margin-bottom:-2px;">📋 Tabla</button>
+ <button id="gpTabResumen" onclick="_gpMostrarVista('resumen')" style="padding:10px 18px; border:none; background:none; cursor:pointer; font-weight:900; color:#94a3b8; border-bottom:3px solid transparent; margin-bottom:-2px;">📊 Resumen por categoría</button>
+ </div>
+ <div id="gpVistaTabla">
  <div style="background:#edf2f7; padding:15px; border-radius:8px; margin-bottom:15px; display:grid; grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) minmax(130px,auto) auto auto; gap:10px; align-items:end;">
  <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Buscar:</label><input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="Buscar producto, categoria..." style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;box-sizing:border-box;"></div>
  <div><label style="display:block; font-size:12px; font-weight:bold; color:#4a5568;">Proveedor:</label><select id="filtroProveedorInventario" onchange="aplicarFiltros()" style="width:100%;padding:8px; border:1px solid #ddd; border-radius:5px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select></div>
@@ -534,6 +539,8 @@
  </details>
  </div>
  <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px;"></div>
+ </div>
+ <div id="gpVistaResumen" class="oculto"></div>
  </div>
 
     <!-- BANCOS -->
@@ -1292,7 +1299,7 @@
 <script src="js/core/data.js?v=3"></script>
 
 <script src="js/modules/auth.js?v=2.9"></script>
-<script src="js/modules/inventario.js?v=26"></script>
+<script src="js/modules/inventario.js?v=27"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/ventas.js?v=4.2"></script>
