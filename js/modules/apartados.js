@@ -15,6 +15,17 @@ function _apartadoAbonosVigentesOrdenados(ap) {
         .map(x => x.abono);
 }
 
+// 🛡️ Un abono de la Bóveda (abonosPendientes) solo cuenta como "pendiente de autorizar"
+// mientras su estado siga siendo Pendiente. Los aprobados ya viven en ap.abonos (y por
+// tanto ya restan del saldo) y los rechazados nunca se aplicaron; ambos se quedan en la
+// tabla como historial. Antes el filtro solo excluía "cancel", así que aprobados/rechazados
+// se restaban de nuevo -> saldo del recibo provisional incorrecto.
+function _apartadoPendienteBovedaVigente(p) {
+    if (typeof window._esSolicitudBovedaPendiente === 'function') return window._esSolicitudBovedaPendiente(p);
+    const e = String(p?.estado ?? p?.status ?? p?.estatus ?? '').trim().toLowerCase();
+    return !e || ['pendiente','pending','en boveda','en_boveda','en cuarentena','en_cuarentena','provisional','activo','activa','en espera','espera'].includes(e);
+}
+
 function _apartadoTotalPagado(ap) {
     return (Number(ap?.enganche || 0) || 0) + _apartadoAbonosVigentes(ap).reduce((s, ab) => s + (Number(ab.monto) || 0), 0);
 }
@@ -683,7 +694,7 @@ function registrarAbonoApartadoDesdeModal() {
     const saldoActual = _apartadoSaldoReal(ap);
     const abonosPendientes = StorageService.get("abonosPendientes", []);
     const pendientePorAutorizar = abonosPendientes
-        .filter(p => !String(p.estado || '').toLowerCase().includes('cancel') && (p.tipo === 'apartado' || p.origen === 'apartados' || p.folioApartado) && (p.folioApartado || p.folioCXC) === folio)
+        .filter(p => _apartadoPendienteBovedaVigente(p) && (p.tipo === 'apartado' || p.origen === 'apartados' || p.folioApartado) && (p.folioApartado || p.folioCXC) === folio)
         .reduce((s, p) => s + (Number(p.montoAbonado) || 0), 0);
     const saldoDisponible = Math.max(0, saldoActual - pendientePorAutorizar);
     if (monto > saldoDisponible + 0.01) {
@@ -694,7 +705,7 @@ function registrarAbonoApartadoDesdeModal() {
     const fechaKey = String(fecha || '').slice(0, 10);
     const abonosDia = _apartadoAbonosVigentes(ap).filter(ab => String(ab.fechaAbono || ab.fecha || '').slice(0, 10) === fechaKey);
     const pendientesDia = abonosPendientes.filter(p =>
-        !String(p.estado || '').toLowerCase().includes('cancel') &&
+        _apartadoPendienteBovedaVigente(p) &&
         (p.tipo === 'apartado' || p.origen === 'apartados' || p.folioApartado) &&
         (p.folioApartado || p.folioCXC) === folio &&
         String(p.fechaAbonoIso || p.fecha || '').slice(0, 10) === fechaKey
@@ -807,7 +818,7 @@ function imprimirTicketAbonoApartado(ap, montoAbono, cuentaDestino, fecha, opcio
             <span>Total Apartado:</span><span class="negrita">${dineroFmt(ap.importeApartado)}</span>
         </div>
         <div style="display:flex; justify-content:space-between; font-size:13px; margin-top:5px; border-top:1px solid #000; padding-top:4px;">
-            <span>Saldo Pendiente:</span><span class="negrita" style="color:red;">${dineroFmt(ap.saldoPendiente)}</span>
+            <span>Saldo Pendiente:</span><span class="negrita" style="color:${Number(ap.saldoPendiente) > 0.01 ? 'red' : '#15803d'};">${dineroFmt(ap.saldoPendiente)}</span>
         </div>
         
         <div style="display:flex; justify-content:space-between; margin-top:10px;">
@@ -853,6 +864,7 @@ window.registrarAbonoApartado = registrarAbonoApartado;
 window.obtenerApartados = obtenerApartados;
 window.renderApartados = renderApartados;
 window.imprimirTicketAbonoApartado = imprimirTicketAbonoApartado;
+window._apartadoAbonosVigentesOrdenados = _apartadoAbonosVigentesOrdenados;
 
 // ==========================================
 // CORRECCION / ELIMINACION DE ANTICIPO (Auditoria Apartados)

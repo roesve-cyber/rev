@@ -206,6 +206,16 @@ function _cxcEstadoPlazoCuenta(cuenta) {
 
 
 // Helper local de formato de moneda
+// 🛡️ Un abono de la Bóveda (abonosPendientes) solo está "pendiente de autorizar" mientras su
+// estado siga en Pendiente. Aprobados (ya viven en cuenta.abonos) y rechazados/cancelados se
+// quedan en la tabla como historial y NO deben contarse como pendientes.
+function _cxcAbonoBovedaPendiente(a) {
+    if (typeof window._esSolicitudBovedaPendiente === 'function') return window._esSolicitudBovedaPendiente(a);
+    const e = String(a?.estado ?? a?.status ?? a?.estatus ?? '').trim().toLowerCase();
+    return !e || ['pendiente','pending','en boveda','en_boveda','en cuarentena','en_cuarentena','provisional','activo','activa','en espera','espera'].includes(e);
+}
+window._cxcAbonoBovedaPendiente = _cxcAbonoBovedaPendiente;
+
 function _cxcDinero(v) {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
 }
@@ -1766,7 +1776,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const abonosRegistrados = Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
     const totalAbonosLista = abonosRegistrados.reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
     const abonosPendientesFolio = StorageService.get("abonosPendientes", [])
-        .filter(a => (a.folioCXC || a.folioApartado) === folio);
+        .filter(a => _cxcAbonoBovedaPendiente(a) && (a.folioCXC || a.folioApartado) === folio);
     const totalPendienteAutorizar = abonosPendientesFolio.reduce((s, a) => s + Number(a.montoAbonado || a.monto || 0), 0);
     const pagaresCubiertos = todosPagares.filter(p => p.estado === 'Pagado' || p.estado === 'Cancelado').length;
     const pagaresPendientes = todosPagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').length;
@@ -2101,6 +2111,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         _cxcFechaClave(ab.fecha || ab.fechaAbono || ab.fechaAbonoIso) === fechaClaveAbono
     );
     const abonosPendientesDia = StorageService.get("abonosPendientes", []).filter(ab =>
+        _cxcAbonoBovedaPendiente(ab) &&
         (ab.folioCXC || ab.folioApartado) === folio &&
         _cxcFechaClave(ab.fechaAbonoRaw || ab.fechaAbonoIso || ab.fechaAbonoStr || ab.fecha) === fechaClaveAbono
     );
@@ -4802,7 +4813,7 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     if (estadoApartado.includes('conversion') || estadoApartado.includes('migrado')) return alert("Este apartado ya esta en proceso de conversion o ya fue migrado a credito.");
 
     const abonosPendientesApartado = StorageService.get("abonosPendientes", []).filter(a =>
-        !String(a.estado || '').toLowerCase().includes('cancel') &&
+        _cxcAbonoBovedaPendiente(a) &&
         (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado) &&
         String(a.folioApartado || a.folioCXC || '') === String(folioApartado)
     );

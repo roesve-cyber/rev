@@ -194,7 +194,10 @@ window.abrirModalReestructurarPlazo = function (folio) {
     }
 
     const abonosPend = StorageService.get("abonosPendientes", []).filter(a =>
-        !String(a.estado || '').toLowerCase().includes('cancel') && a.folioCXC === folio
+        (typeof window._cxcAbonoBovedaPendiente === 'function'
+            ? window._cxcAbonoBovedaPendiente(a)
+            : !/cancel|aprob|rechaz|autoriz|procesad|aplicad/.test(String(a.estado || a.status || a.estatus || '').toLowerCase())) &&
+        a.folioCXC === folio
     );
     if (abonosPend.length) {
         return alert(`Esta cuenta tiene ${abonosPend.length} abono(s) pendiente(s) de autorización en la Bóveda. Resuélvelos antes de modificar el plazo.`);

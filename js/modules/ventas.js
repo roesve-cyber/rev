@@ -4888,11 +4888,33 @@ window.reimprimirFolioUnificado = function(folio, origen) {
         if (typeof window.imprimirTicketAbonoApartado !== 'function') {
             return alert("No esta disponible la reimpresion de abonos de apartado.");
         }
+        // 🛡️ El recibo debe mostrar el saldo que quedó JUSTO DESPUÉS de este abono (no el saldo de
+        // hoy), más el abono anterior y el número de pago, igual que al imprimirlo por primera vez.
+        // El orden es por fecha real (no por posición del arreglo). Si el abono está cancelado (no
+        // entra en los vigentes) se conserva el comportamiento anterior.
+        let apReimp = ap;
+        let opcionesReimp = {};
+        if (typeof window._apartadoAbonosVigentesOrdenados === 'function') {
+            const ordenados = window._apartadoAbonosVigentesOrdenados(ap);
+            const pos = ordenados.indexOf(abono);
+            if (pos >= 0) {
+                const pagadoHastaAqui = (Number(ap.enganche || 0) || 0) +
+                    ordenados.slice(0, pos + 1).reduce((t, x) => t + (Number(x.monto) || 0), 0);
+                const saldoDespues = Math.max(0, (Number(ap.importeApartado || ap.total || 0) || 0) - pagadoHastaAqui);
+                apReimp = { ...ap, saldoPendiente: saldoDespues };
+                const ant = pos > 0 ? ordenados[pos - 1] : null;
+                opcionesReimp = {
+                    abonoAnterior: ant ? { monto: Number(ant.monto || 0), fecha: ant.fechaAbono || ant.fecha || '' } : null,
+                    numeroDePago: pos + 1
+                };
+            }
+        }
         window.imprimirTicketAbonoApartado(
-            ap,
+            apReimp,
             Number(abono.monto || abono.montoAbonado || 0),
             abono.etiquetaCuenta || abono.cuentaId || 'Caja',
-            abono.fechaAbono || abono.fecha || abono.fechaAbonoIso
+            abono.fechaAbono || abono.fecha || abono.fechaAbonoIso,
+            opcionesReimp
         );
         return;
     }
