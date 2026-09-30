@@ -2751,6 +2751,7 @@ function abrirProductoForm(id = null, prefill = null) {
  const inputModelo = document.getElementById("pModelo");
  const inputImagen = document.getElementById("pImagen");
  const inputSub = document.getElementById("pSubcategoria");
+ const inputProveedorId = document.getElementById("pProveedorId");
  const inputCaracteristicas = document.getElementById("pCaracteristicas");
  const inputDestacadoCatalogo = document.getElementById("pDestacadoCatalogo");
  const inputOrdenDestacadoCatalogo = document.getElementById("pOrdenDestacadoCatalogo");
@@ -2758,6 +2759,19 @@ function abrirProductoForm(id = null, prefill = null) {
  const inputEsUnicaCompra = document.getElementById("pEsUnicaCompra");
 
  let p = null; // <--- CORRECCIAN: Declaramos 'p' aqui para que exista en toda la funcion
+
+ // 🏷️ Proveedor: opcional -- no todos los productos tienen uno fijo (ej.
+ // se compran en MercadoLibre/Walmart), solo los exclusivos de un
+ // proveedor. Se reconstruye la lista de opciones cada vez que se abre el
+ // formulario para incluir altas recientes de proveedores.
+ if (inputProveedorId) {
+ const proveedoresLista = _invStorageArray('proveedores')
+ .map(pv => ({ id: pv.id, nombre: pv.nombre || pv.nombreComercial || pv.razonSocial || pv.razon_social || pv.alias || '' }))
+ .filter(pv => pv.id !== undefined && pv.id !== null && pv.nombre)
+ .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+ inputProveedorId.innerHTML = '<option value="">-- Sin proveedor fijo / vario (ej. MercadoLibre, Walmart) --</option>'
+ + proveedoresLista.map(pv => `<option value="${_kardexEsc(String(pv.id))}">${_kardexEsc(pv.nombre)}</option>`).join('');
+ }
 
  if (id) {
  productoEditando = id;
@@ -2773,6 +2787,7 @@ function abrirProductoForm(id = null, prefill = null) {
  inputModelo.value = p.modelo || '';
  inputImagen.value = p.imagen || '';
  inputSub.value = p.subcategoria || '';
+ if (inputProveedorId) inputProveedorId.value = (p.proveedorId !== undefined && p.proveedorId !== null) ? String(p.proveedorId) : '';
  if (inputCaracteristicas) inputCaracteristicas.value = p.caracteristicas || '';
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = !!p.destacadoCatalogo;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = p.ordenDestacadoCatalogo || '';
@@ -2793,6 +2808,7 @@ function abrirProductoForm(id = null, prefill = null) {
  inputMarca.value = "";
  inputModelo.value = "";
  inputImagen.value = "";
+ if (inputProveedorId) inputProveedorId.value = "";
  if (inputCaracteristicas) inputCaracteristicas.value = "";
  if (inputDestacadoCatalogo) inputDestacadoCatalogo.checked = false;
  if (inputOrdenDestacadoCatalogo) inputOrdenDestacadoCatalogo.value = "";
@@ -2832,6 +2848,11 @@ function guardarProductoDB() {
  const modelo = document.getElementById("pModelo").value.trim();
  const imagen = document.getElementById("pImagen").value.trim();
  const subcatNombre = document.getElementById("pSubcategoria").value;
+ // 🏷️ Proveedor opcional -- guarda el id real (FK a la tabla
+ // 'proveedores'), no el nombre en texto, para que si el proveedor
+ // cambia de nombre despues el producto se siga resolviendo bien
+ // (ver _invResolverProveedor/_invProveedorProducto).
+ const proveedorId = document.getElementById("pProveedorId")?.value || "";
  const caracteristicas = document.getElementById("pCaracteristicas")?.value.trim() || "";
  const destacadoCatalogo = document.getElementById("pDestacadoCatalogo")?.checked || false;
  const ordenDestacadoCatalogoRaw = parseInt(document.getElementById("pOrdenDestacadoCatalogo")?.value, 10);
@@ -2865,6 +2886,7 @@ function guardarProductoDB() {
  marca, modelo, imagen,
  categoria: categoriaPadre,
  subcategoria: subcatNombre,
+ proveedorId: proveedorId || null,
  caracteristicas,
  activo,
  Activo: activo ? 1 : 0,
