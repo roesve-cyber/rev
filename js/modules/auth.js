@@ -508,6 +508,160 @@ function aplicarRolUI() {
 }
 
 // ── pantalla de login ─────────────────────────────────────────────────────────
+// ===== ENTRAR CON HUELLA / FACE ID (WebAuthn) =====
+// 🛡️ Aviso de seguridad honesto, para quien lea esto despues: esto NO es
+// un segundo factor criptografico real ante un atacante tecnico. WebAuthn
+// aqui funciona como una COMPUERTA DE USO: obliga a pasar el sensor de
+// huella/Face ID/Windows Hello de ESTE dispositivo antes de que el
+// sistema use la contraseña de Firebase guardada localmente (cifrada, no
+// en texto plano) para hacer el login normal de siempre. Alguien con
+// acceso tecnico completo al navegador de ESE dispositivo (DevTools/
+// localStorage) podria en teoria leer la clave y el cifrado sin tocar el
+// sensor -- la proteccion real que si ofrece es contra el uso casual del
+// equipo por alguien que no sea el dueño de esa huella, no contra un
+// ataque dirigido al dispositivo. Es el mismo tipo de "huella" que usan
+// la mayoria de apps sin backend propio de biometria.
+const BIO_AUTH_KEY = '_bioAuthV1';
+let _bioPendingEmail = null;
+let _bioPendingPass = null;
+
+function _bioSoportado() {
+    return !!(window.PublicKeyCredential && navigator.credentials && window.crypto?.subtle);
+}
+
+function _bioObtenerRegistro() {
+    try { return JSON.parse(localStorage.getItem(BIO_AUTH_KEY) || 'null'); } catch { return null; }
+}
+
+function _bioBufferABase64(buf) {
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function _bioBase64ABuffer(b64) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer;
+}
+
+// Se llama despues de un login manual exitoso por correo/contraseña (ver
+// iniciarSesion) para ofrecer activar huella en ESTE dispositivo. Si ya
+// hay una registrada aqui, o el usuario ya dijo que no antes, no insiste.
+async function _bioOfrecerActivacion(email, pass) {
+    if (!_bioSoportado()) return;
+    if (_bioObtenerRegistro()) return;
+    if (localStorage.getItem('_bioRechazado') === '1') return;
+    _bioPendingEmail = email;
+    _bioPendingPass = pass;
+    document.querySelector('[data-modal="bio-ofrecer"]')?.remove();
+    const html = `
+    <div data-modal="bio-ofrecer" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;">
+      <div style="background:white;border-radius:12px;padding:28px;width:100%;max-width:360px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:12px;">🔒</div>
+        <h3 style="margin:0 0 8px;color:#1e40af;">¿Activar huella en este dispositivo?</h3>
+        <p style="color:#6b7280;font-size:13px;margin:0 0 20px;">La próxima vez podrás entrar con tu huella o Face ID en este mismo aparato, en vez de escribir tu contraseña. Solo funciona aquí -- en otro dispositivo tendrías que activarla de nuevo.</p>
+        <div style="display:flex;gap:10px;">
+          <button onclick="_bioActivar()" style="flex:1;padding:11px;background:#1e40af;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">🔒 Activar huella</button>
+          <button onclick="_bioDescartarOferta()" style="padding:11px 16px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;cursor:pointer;">Ahora no</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function _bioDescartarOferta() {
+    localStorage.setItem('_bioRechazado', '1');
+    document.querySelector('[data-modal="bio-ofrecer"]')?.remove();
+    _bioPendingEmail = null;
+    _bioPendingPass = null;
+}
+
+async function _bioActivar() {
+    const email = _bioPendingEmail, pass = _bioPendingPass;
+    _bioPendingEmail = null;
+    _bioPendingPass = null;
+    document.querySelector('[data-modal="bio-ofrecer"]')?.remove();
+    if (!email || !pass) return;
+    try {
+        const challenge = crypto.getRandomValues(new Uint8Array(32));
+        const userId = crypto.getRandomValues(new Uint8Array(16));
+        const cred = await navigator.credentials.create({
+            publicKey: {
+                challenge,
+                rp: { name: 'REV POS' },
+                user: { id: userId, name: email, displayName: email },
+                pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+                authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
+                timeout: 60000
+            }
+        });
+        if (!cred) throw new Error('No se pudo crear la credencial.');
+
+        const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const passBuf = new TextEncoder().encode(pass);
+        const cifrado = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, passBuf);
+        const rawKey = await crypto.subtle.exportKey('raw', aesKey);
+
+        localStorage.setItem(BIO_AUTH_KEY, JSON.stringify({
+            credId: _bioBufferABase64(cred.rawId),
+            email,
+            iv: _bioBufferABase64(iv),
+            cifrado: _bioBufferABase64(cifrado),
+            clave: _bioBufferABase64(rawKey)
+        }));
+        localStorage.removeItem('_bioRechazado');
+        alert('✅ Huella activada en este dispositivo.');
+    } catch (err) {
+        console.error('Error activando huella:', err);
+        alert('No se pudo activar la huella: ' + (err.message || 'intenta de nuevo.'));
+    }
+}
+
+async function _bioEntrarConHuella() {
+    const reg = _bioObtenerRegistro();
+    if (!reg) return;
+    const btn = document.getElementById('btnLoginHuella');
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Verificando huella...'; }
+        const challenge = crypto.getRandomValues(new Uint8Array(32));
+        const assertion = await navigator.credentials.get({
+            publicKey: {
+                challenge,
+                allowCredentials: [{ id: _bioBase64ABuffer(reg.credId), type: 'public-key' }],
+                userVerification: 'required',
+                timeout: 60000
+            }
+        });
+        if (!assertion) throw new Error('No se reconoció la huella.');
+
+        const rawKey = _bioBase64ABuffer(reg.clave);
+        const aesKey = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt']);
+        const iv = new Uint8Array(_bioBase64ABuffer(reg.iv));
+        const cifradoBuf = _bioBase64ABuffer(reg.cifrado);
+        const passBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, cifradoBuf);
+        const pass = new TextDecoder().decode(passBuf);
+
+        const emailInput = document.getElementById('loginEmail');
+        const passInput = document.getElementById('loginPass');
+        if (emailInput) emailInput.value = reg.email;
+        if (passInput) passInput.value = pass;
+        await iniciarSesion();
+    } catch (err) {
+        console.error('Error entrando con huella:', err);
+        mostrarErrorLogin('No se pudo entrar con huella. Usa tu contraseña.');
+    } finally {
+        const btnFinal = document.getElementById('btnLoginHuella');
+        if (btnFinal) { btnFinal.disabled = false; btnFinal.textContent = '🔒 Entrar con huella'; }
+    }
+}
+
+function _bioOlvidarDispositivo() {
+    if (!confirm('¿Quitar la huella activada en este dispositivo? Tendrás que volver a activarla si la quieres usar despues.')) return;
+    localStorage.removeItem(BIO_AUTH_KEY);
+    localStorage.removeItem('_bioRechazado');
+    mostrarLoginScreen();
+}
+
 function _crearPantallaLogin() {
     const html = `
     <div id="loginOverlay" style="position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#1e3a5f 0%,#0f172a 60%,#1e40af 100%);display:flex;align-items:center;justify-content:center;">
@@ -515,6 +669,14 @@ function _crearPantallaLogin() {
         <img src="img/Logo.svg" style="height:80px;margin-bottom:16px;object-fit:contain;" onerror="this.style.display='none'">
         <h2 style="margin:0 0 4px;color:#1e3a5f;font-size:22px;">MUEBLERÍA MI PUEBLITO</h2>
         <p style="color:#6b7280;font-size:13px;margin:0 0 28px;">Sistema de Punto de Venta</p>
+        ${_bioSoportado() && _bioObtenerRegistro() ? `
+        <button type="button" id="btnLoginHuella" onclick="_bioEntrarConHuella()"
+          style="width:100%;padding:13px;margin-bottom:10px;background:#0f172a;color:white;border:none;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;">
+          🔒 Entrar con huella
+        </button>
+        <div style="display:flex;align-items:center;gap:10px;margin:4px 0 18px;color:#9ca3af;font-size:11px;">
+          <div style="flex:1;height:1px;background:#e5e7eb;"></div>o con tu contraseña<div style="flex:1;height:1px;background:#e5e7eb;"></div>
+        </div>` : ''}
         <form onsubmit="event.preventDefault(); iniciarSesion();">
           <div style="text-align:left;margin-bottom:14px;">
             <label style="font-size:12px;font-weight:bold;color:#374151;display:block;margin-bottom:5px;">USUARIO</label>
@@ -535,6 +697,7 @@ function _crearPantallaLogin() {
           </button>
         </form>
         <p style="color:#9ca3af;font-size:11px;margin:20px 0 0;">v1.0 — Acceso restringido</p>
+        ${_bioObtenerRegistro() ? `<p style="margin:6px 0 0;"><a href="#" onclick="_bioOlvidarDispositivo(); return false;" style="color:#9ca3af;font-size:10.5px;text-decoration:underline;">Quitar huella de este dispositivo</a></p>` : ''}
       </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
@@ -617,6 +780,10 @@ async function iniciarSesion() {
             aplicarRolUI();
             await _sincronizarFirebaseDespuesDeLogin();
             _recargarVariablesGlobales();
+            // 🔒 Ofrece activar huella en este dispositivo -- _bioOfrecerActivacion
+            // ya revisa por dentro si ya hay una activa o si el usuario dijo que no
+            // antes, así que es seguro llamarla en cada login exitoso por correo.
+            _bioOfrecerActivacion(email, pass);
             // Vendedor ya fue enviado a "tienda" por aplicarRolUI(); solo el
             // admin entra al Dashboard (evita el flash del dashboard completo
             // -con datos financieros- y el retraso de su render pesado).
