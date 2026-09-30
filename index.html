@@ -1064,6 +1064,11 @@
                 <label>Categoría / Subcategoría</label>
                 <select id="pSubcategoria"></select>
             </div>
+            <div class="campo">
+                <label>Proveedor (opcional)</label>
+                <select id="pProveedorId"><option value="">-- Sin proveedor fijo / vario (ej. MercadoLibre, Walmart) --</option></select>
+                <small style="display:block; margin-top:4px; color:#64748b;">Déjalo en "Sin proveedor fijo" si lo compras en varios lados. Selecciónalo solo si es exclusivo de ese proveedor.</small>
+            </div>
 <div class="campo">
   <label>Margen (%)</label>
   <input type="number" id="pMargenManual" placeholder="Ej: 30" min="0" max="99" step="0.1">
@@ -1293,7 +1298,7 @@
 <script src="js/core/data.js?v=3"></script>
 
 <script src="js/modules/auth.js?v=3.0"></script>
-<script src="js/modules/inventario.js?v=28"></script>
+<script src="js/modules/inventario.js?v=29"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/ventas.js?v=4.2"></script>
