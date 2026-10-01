@@ -648,7 +648,11 @@ async function _bioEntrarConHuella() {
         await iniciarSesion();
     } catch (err) {
         console.error('Error entrando con huella:', err);
-        mostrarErrorLogin('No se pudo entrar con huella. Usa tu contraseña.');
+        // Si la huella falla, se revela el formulario de contraseña --
+ // de lo contrario el mensaje de error quedaría escrito dentro de
+ // un formulario oculto y el usuario nunca lo vería.
+ _bioMostrarFormularioPassword();
+ mostrarErrorLogin('No se pudo entrar con huella. Usa tu contraseña.');
     } finally {
         const btnFinal = document.getElementById('btnLoginHuella');
         if (btnFinal) { btnFinal.disabled = false; btnFinal.textContent = '🔒 Entrar con huella'; }
@@ -670,14 +674,14 @@ function _crearPantallaLogin() {
         <h2 style="margin:0 0 4px;color:#1e3a5f;font-size:22px;">MUEBLERÍA MI PUEBLITO</h2>
         <p style="color:#6b7280;font-size:13px;margin:0 0 28px;">Sistema de Punto de Venta</p>
         ${_bioSoportado() && _bioObtenerRegistro() ? `
-        <button type="button" id="btnLoginHuella" onclick="_bioEntrarConHuella()"
-          style="width:100%;padding:13px;margin-bottom:10px;background:#0f172a;color:white;border:none;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;">
-          🔒 Entrar con huella
-        </button>
-        <div style="display:flex;align-items:center;gap:10px;margin:4px 0 18px;color:#9ca3af;font-size:11px;">
-          <div style="flex:1;height:1px;background:#e5e7eb;"></div>o con tu contraseña<div style="flex:1;height:1px;background:#e5e7eb;"></div>
+        <div id="loginBioBloque">
+          <button type="button" id="btnLoginHuella" onclick="_bioEntrarConHuella()"
+            style="width:100%;padding:13px;margin-bottom:12px;background:#0f172a;color:white;border:none;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;">
+            🔒 Entrar con huella
+          </button>
+          <p style="margin:0 0 20px;"><a href="#" onclick="_bioMostrarFormularioPassword(); return false;" style="color:#6b7280;font-size:12.5px;text-decoration:underline;">🔑 Mejor entro con contraseña</a></p>
         </div>` : ''}
-        <form onsubmit="event.preventDefault(); iniciarSesion();">
+        <form id="loginFormPass" onsubmit="event.preventDefault(); iniciarSesion();" style="${_bioSoportado() && _bioObtenerRegistro() ? 'display:none;' : ''}">
           <div style="text-align:left;margin-bottom:14px;">
             <label style="font-size:12px;font-weight:bold;color:#374151;display:block;margin-bottom:5px;">USUARIO</label>
             <input type="text" id="loginEmail" placeholder="usuario o email" autocomplete="username"
@@ -695,6 +699,7 @@ function _crearPantallaLogin() {
             style="width:100%;padding:13px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;letter-spacing:1px;">
             🔐 Entrar
           </button>
+          ${_bioSoportado() && _bioObtenerRegistro() ? `<p style="margin:14px 0 0;"><a href="#" onclick="_bioMostrarBotonHuella(); return false;" style="color:#6b7280;font-size:12.5px;text-decoration:underline;">🔒 Usar huella en su lugar</a></p>` : ''}
         </form>
         <p style="color:#9ca3af;font-size:11px;margin:20px 0 0;">v1.0 — Acceso restringido</p>
         ${_bioObtenerRegistro() ? `<p style="margin:6px 0 0;"><a href="#" onclick="_bioOlvidarDispositivo(); return false;" style="color:#9ca3af;font-size:10.5px;text-decoration:underline;">Quitar huella de este dispositivo</a></p>` : ''}
@@ -706,7 +711,30 @@ function _crearPantallaLogin() {
         sessionStorage.removeItem('_loginMensaje');
         mostrarErrorLogin(mensajeLogin);
     }
-    document.getElementById('loginEmail')?.focus();
+    // Si el formulario de contraseña está visible desde el inicio (no hay
+ // huella activa en este dispositivo), se enfoca directo. Si está oculto
+ // porque se muestra el botón de huella primero, no tiene caso enfocar un
+ // campo que no se ve.
+ if (document.getElementById('loginFormPass')?.style.display !== 'none') {
+ document.getElementById('loginEmail')?.focus();
+ }
+}
+
+// Alterna entre el botón de huella y el formulario de usuario/contraseña
+// en la pantalla de login, sin recargar nada.
+function _bioMostrarFormularioPassword() {
+ const bloqueBio = document.getElementById('loginBioBloque');
+ const form = document.getElementById('loginFormPass');
+ if (bloqueBio) bloqueBio.style.display = 'none';
+ if (form) form.style.display = '';
+ document.getElementById('loginEmail')?.focus();
+}
+
+function _bioMostrarBotonHuella() {
+ const bloqueBio = document.getElementById('loginBioBloque');
+ const form = document.getElementById('loginFormPass');
+ if (form) form.style.display = 'none';
+ if (bloqueBio) bloqueBio.style.display = '';
 }
 
 // ── verificar sesión al cargar ────────────────────────────────────────────────
