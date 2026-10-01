@@ -256,7 +256,7 @@
  <button id="civTabResumen" onclick="_gpMostrarVista('resumen')" style="padding:10px 18px; border:none; background:none; cursor:pointer; font-weight:900; color:#94a3b8; border-bottom:3px solid transparent; margin-bottom:-2px;">📊 Resumen por categoría</button>
  </div>
  <div id="civVistaDetalle">
- <div id="filtrosConsultaInventario" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:grid;grid-template-columns:minmax(240px,2fr) minmax(180px,1fr) auto;gap:10px;align-items:end;">
+ <div id="filtrosConsultaInventario" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;align-items:end;">
  <div><label style="font-size:11px;font-weight:900;color:#475569;">BUSCAR</label><input type="search" id="filtroBusquedaInv" oninput="renderConsultaInventario()" placeholder="Producto, categoria, proveedor..." style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"></div>
  <div><label style="font-size:11px;font-weight:900;color:#475569;">PROVEEDOR</label><select id="filtroProvInv" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select></div>
  <button onclick="renderConsultaInventario()" style="padding:10px 14px;background:#0f172a;color:white;border:0;border-radius:7px;font-weight:bold;cursor:pointer;">Filtrar</button>
@@ -517,24 +517,24 @@
 
     <!-- INVENTARIO -->
     <div id="inventario" class="vista oculto">
- <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
- <h2>Gestion de Productos</h2>
- <div style="display:flex; gap:8px;">
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap:wrap; gap:10px;">
+ <h2 style="margin:0;">Gestion de Productos</h2>
+ <div style="display:flex; gap:8px; flex-wrap:wrap;">
  <button onclick="abrirModalTransferenciaInv()" style="background:#3b82f6; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Transferir</button>
  <button onclick="abrirModalAjusteInv()" style="background:#f59e0b; color:white; padding:10px 15px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Ajuste</button>
  <button onclick="abrirProductoForm()" style="background:#27ae60; color:white; padding:10px 20px; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">+ Nuevo</button>
  <button onclick="renderInventario()" style="padding:10px 15px; background:#718096; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  </div>
- <div style="display:flex; gap:8px; margin-bottom:14px;">
- <input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="🔎 Buscar producto, categoria, proveedor..." style="flex:1;min-width:220px;padding:11px 14px; border:1px solid #cbd5e1; border-radius:8px;box-sizing:border-box;font-size:14px;">
- <select id="filtroProveedorInventario" onchange="aplicarFiltros()" style="padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select>
- <select id="filtroEstadoProducto" onchange="aplicarFiltros()" style="padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">Todos</option><option value="activos">Activos</option><option value="inactivos">Inactivos</option></select>
- <select id="filtroCategoria" onchange="actualizarSubcategoriasFiltro('filtroCategoria', 'filtroSubcategoria'); aplicarFiltros();" style="padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">-- Categoría --</option></select>
- <select id="filtroSubcategoria" onchange="aplicarFiltros()" style="padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">-- Subcategoría --</option></select>
+ <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+ <input type="text" id="busquedaProducto" onkeyup="aplicarFiltros()" placeholder="🔎 Buscar producto, categoria, proveedor..." style="flex:1 1 220px;min-width:0;padding:11px 14px; border:1px solid #cbd5e1; border-radius:8px;box-sizing:border-box;font-size:14px;">
+ <select id="filtroProveedorInventario" onchange="aplicarFiltros()" style="flex:1 1 140px;min-width:0;padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">Todos los proveedores</option><option value="sin_proveedor">Sin proveedor</option></select>
+ <select id="filtroEstadoProducto" onchange="aplicarFiltros()" style="flex:1 1 110px;min-width:0;padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">Todos</option><option value="activos">Activos</option><option value="inactivos">Inactivos</option></select>
+ <select id="filtroCategoria" onchange="actualizarSubcategoriasFiltro('filtroCategoria', 'filtroSubcategoria'); aplicarFiltros();" style="flex:1 1 130px;min-width:0;padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">-- Categoría --</option></select>
+ <select id="filtroSubcategoria" onchange="aplicarFiltros()" style="flex:1 1 130px;min-width:0;padding:10px; border:1px solid #cbd5e1; border-radius:8px;"><option value="todos">-- Subcategoría --</option></select>
  <button onclick="limpiarFiltros()" style="padding:10px 14px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer;">Limpiar</button>
  </div>
- <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px;"></div>
+ <div id="listaInventario" style="background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 10px; overflow-x:auto;"></div>
  </div>
 
     <!-- BANCOS -->
@@ -1298,7 +1298,7 @@
 <script src="js/core/data.js?v=3"></script>
 
 <script src="js/modules/auth.js?v=3.0"></script>
-<script src="js/modules/inventario.js?v=29"></script>
+<script src="js/modules/inventario.js?v=30"></script>
 <script src="js/modules/toma-inventario.js?v=2"></script>
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/ventas.js?v=4.2"></script>
