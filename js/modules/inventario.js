@@ -1602,12 +1602,20 @@ window.initConsultaInventario = function() {
 
  if (!catSel || !subSel || !stockSel || !pedidoSel) return;
 
- // Llenar filtro de Ubicaciones
+ // 🛡️ CORREGIDO: antes reconstruía las opciones sin conservar el valor ya
+ // elegido -- cada vez que se reentraba a esta pantalla (p.ej. tocando de
+ // nuevo el enlace del menú), el filtro de Ubicación se reseteaba solo a
+ // "todos" en silencio, aunque la pantalla siguiera mostrando el filtro
+ // visualmente marcado hasta ese momento. Mismo patrón que ya usaba bien
+ // el filtro de Proveedor (previoProv), aplicado aquí tambien.
  if (ubiSel) {
+ const previoUbi = ubiSel.value || 'todos';
  const ubicaciones = typeof StorageService !== 'undefined' ? StorageService.get("ubicacionesConfig", []) : [];
  let ubiOpts = '<option value="todos">Todas las ubicaciones</option><option value="sin_asignar">Sin asignar</option>';
  ubicaciones.forEach(u => ubiOpts += `<option value="${u.nombre}">${u.nombre}</option>`);
  ubiSel.innerHTML = ubiOpts;
+ ubiSel.value = previoUbi;
+ if (!ubiSel.value) ubiSel.value = 'todos';
  ubiSel.onchange = renderConsultaInventario;
  }
 
@@ -1621,6 +1629,15 @@ window.initConsultaInventario = function() {
  provSel.onchange = renderConsultaInventario;
  }
 
+ // 🛡️ CORREGIDO: mismo bug que Ubicación -- categoria y subcategoria se
+ // reconstruían siempre a "todos" al reentrar a la pantalla. Ahora se
+ // conserva la categoria elegida, y la subcategoria se reconstruye con las
+ // opciones de ESA categoria pero intentando mantener la subcategoria
+ // previa si sigue existiendo en la nueva lista (si ya no aplica, cae a
+ // "todos" porque no hay opcion equivalente que conservar).
+ const previoCat = catSel.value || 'todos';
+ const previoSub = subSel.value || 'todos';
+
  const productosActivos = (window.productos || []).filter(_invProductoActivo);
  let cats = [...new Set(productosActivos.map(p=>p.categoria).filter(Boolean))];
  // Ordenar categorias por posicion
@@ -1631,13 +1648,14 @@ window.initConsultaInventario = function() {
  const catsOrdenadas = [...categoriasOrdenadas, ...cats.filter(c => !categoriasOrdenadas.includes(c)).sort()];
  
  catSel.innerHTML = '<option value="todos">Todas las categorias</option>' + catsOrdenadas.map(c=>`<option value="${c}">${c}</option>`).join('');
- 
- catSel.onchange = function() {
- const cat = catSel.value;
+ catSel.value = previoCat;
+ if (!catSel.value) catSel.value = 'todos';
+
+ // Reconstruye subSel para la categoria ya restaurada (no para 'todos'
+ // a fuerza), intentando conservar la subcategoria previa.
+ function _civReconstruirSubcategorias(cat, subPreservar) {
  let subs = productosActivos.filter(p=>cat==='todos'||p.categoria===cat).map(p=>p.subcategoria).filter(Boolean);
  subs = [...new Set(subs)];
- 
- // Ordenar subcategorias por posicion
  const catData = (window.categoriasData || []).find(c => c.nombre === cat);
  const subsOrdenadas = catData && catData.subcategorias 
  ? catData.subcategorias
@@ -1646,16 +1664,19 @@ window.initConsultaInventario = function() {
  .map(s => s.nombre)
  : [];
  const subsFinales = [...subsOrdenadas, ...subs.filter(s => !subsOrdenadas.includes(s)).sort()];
- 
  subSel.innerHTML = '<option value="todos">Todas las subcategorias</option>' + subsFinales.map(s=>`<option value="${s}">${s}</option>`).join('');
- subSel.value = 'todos';
+ subSel.value = subsFinales.includes(subPreservar) ? subPreservar : 'todos';
+ }
+ _civReconstruirSubcategorias(previoCat, previoSub);
+
+ catSel.onchange = function() {
+ _civReconstruirSubcategorias(catSel.value, 'todos');
  renderConsultaInventario();
  };
  
  subSel.onchange = renderConsultaInventario;
  stockSel.onchange = renderConsultaInventario;
  pedidoSel.onchange = renderConsultaInventario;
- catSel.onchange();
  renderConsultaInventario();
 }
 // Solo cuenta cuantos productos tienen IDs duplicados (sin corregir)
@@ -2048,6 +2069,15 @@ function _gpToggleActivoRapido(id, activo) {
  const lista = StorageService.get('productos', []);
  const p = lista.find(x => String(x.id) === String(id));
  if (!p) return;
+ // 🛡️ No se puede desactivar un producto con existencia > 0 -- mismo
+ // candado que eliminar. El interruptor ya se marcó visualmente en el DOM
+ // antes de disparar este evento, así que si se bloquea hay que volver a
+ // dibujar la tabla para que regrese a su estado real.
+ if (!activo && (Number(p.stock) || 0) > 0) {
+ alert(`⚠️ No se puede desactivar "${p.nombre}": todavía tiene ${Number(p.stock) || 0} en existencia.\n\nSi ya no lo vas a resurtir pero quieres que se siga vendiendo hasta agotarse, márcalo como "Compra única" desde el formulario de edición.`);
+ renderInventario();
+ return;
+ }
  p.activo = activo;
  if (!StorageService.set('productos', lista)) { alert('⚠️ Error guardando el cambio. Intenta de nuevo.'); renderInventario(); return; }
  window.productos = lista;
@@ -2084,12 +2114,26 @@ function _gpAccionLote(accion) {
  const seleccionados = window._gpSeleccionados || new Set();
  if (seleccionados.size === 0) return;
  const lista = StorageService.get('productos', []);
- const afectados = lista.filter(p => seleccionados.has(String(p.id)));
+ let afectados = lista.filter(p => seleccionados.has(String(p.id)));
  if (afectados.length === 0) return;
+
+ // 🛡️ Mismo candado que eliminar/desactivar individual: ningún producto
+ // con existencia > 0 se desactiva en lote. Se excluyen de la tanda y se
+ // avisa cuántos se saltaron, en vez de fallar todo el lote.
+ let omitidosPorStock = 0;
+ if (accion === 'desactivar') {
+ const conStock = afectados.filter(p => (Number(p.stock) || 0) > 0);
+ omitidosPorStock = conStock.length;
+ afectados = afectados.filter(p => (Number(p.stock) || 0) <= 0);
+ if (afectados.length === 0) {
+ alert(`⚠️ Ninguno se desactivó: los ${omitidosPorStock} producto(s) seleccionados todavía tienen existencia. Usa "Marcar compra única" si quieres que se vendan hasta agotarse.`);
+ return;
+ }
+ }
 
  const textos = {
  activar: `¿Activar ${afectados.length} producto(s)? Volveran a aparecer en catalogo y ventas.`,
- desactivar: `¿Desactivar ${afectados.length} producto(s)? Dejaran de aparecer en catalogo y ventas (no se borran, se pueden reactivar despues).`,
+ desactivar: `¿Desactivar ${afectados.length} producto(s)${omitidosPorStock > 0 ? ` (se omiten ${omitidosPorStock} con existencia)` : ''}? Dejaran de aparecer en catalogo y ventas (no se borran, se pueden reactivar despues).`,
  unica: `¿Marcar ${afectados.length} producto(s) como compra unica (no resurtible)? Se desactivaran solos en automatico al agotarse su existencia.`,
  quitar_unica: `¿Quitar la marca de compra unica a ${afectados.length} producto(s)? Volveran a tratarse como resurtibles normales.`
  };
@@ -2106,6 +2150,7 @@ function _gpAccionLote(accion) {
  window.productos = lista;
  window._gpSeleccionados = new Set();
  renderConsultaInventario();
+ if (omitidosPorStock > 0) alert(`Listo. ${omitidosPorStock} producto(s) se omitieron por tener existencia.`);
 }
 
 // 🛡️ Herramienta "Proveedor descontinuado": separa los productos de un
@@ -2374,10 +2419,14 @@ function renderResumenCategorias() {
 
  productosSub.slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(p => {
  granProd++;
+ // 📋 Clic abre el Visor Maestro de ese producto -- la misma ficha
+ // completa que ya existe (imagen, características, stock por
+ // ubicación/bodega, margen, y el historial completo de compras,
+ // ventas y movimientos), en vez de duplicar esa vista aquí.
  filasHtml += `
- <tr style="border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background='#f8fafc';" onmouseout="this.style.background='white';">
+ <tr style="border-bottom:1px solid #f1f5f9; cursor:pointer;" onclick="abrirVisorMaestro('${String(p.id)}', 'consulta-inventario')" onmouseover="this.style.background='#f8fafc';" onmouseout="this.style.background='white';" title="Ver ficha completa">
  <td style="padding:9px 12px 9px 56px; color:#334155;">
- ${p.nombre}${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}${p.activo ? '' : ' <span style="font-size:10px;color:#991b1b;font-weight:bold;">(inactivo)</span>'}
+ <span style="text-decoration:underline; text-decoration-color:#cbd5e1;">${p.nombre}</span>${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}${p.activo ? '' : ' <span style="font-size:10px;color:#991b1b;font-weight:bold;">(inactivo)</span>'}
  </td>
  <td style="padding:9px;text-align:center;color:${p.stock <= 0 ? '#dc2626' : '#0f172a'};font-weight:bold;">${p.stock}</td>
  <td style="padding:9px;text-align:right;">${money(p.costo)}</td>
@@ -2430,6 +2479,17 @@ function confirmarEliminarProducto(id) {
  const producto = window.productos.find(p => String(p.id) === String(id));
  if (!producto) {
  alert("Producto no encontrado.");
+ return;
+ }
+
+ // 🛡️ No se puede eliminar un producto con existencia -- borrarlo no
+ // ajusta ni explica a dónde se fue ese stock (a diferencia de una venta,
+ // una merma o un ajuste, que sí quedan registrados). Si ya no se va a
+ // resurtir pero aún queda mercancía, la ruta correcta es "compra única"
+ // (se sigue vendiendo hasta agotarse y se desactiva solo), no borrarlo.
+ const stockActual = Number(producto.stock) || 0;
+ if (stockActual > 0) {
+ alert(`⚠️ No se puede eliminar "${producto.nombre}": todavía tiene ${stockActual} en existencia.\n\nPrimero vende, transfiere o ajusta ese stock a 0. Si ya no lo vas a resurtir pero quieres que se siga vendiendo hasta agotarse, márcalo como "Compra única" en vez de eliminarlo.`);
  return;
  }
 
@@ -2716,6 +2776,14 @@ window.marcarReservaConsumida = marcarReservaConsumida;
 
 function eliminarProducto(id) {
  if (!_invRequireAdmin('Eliminar producto')) return;
+ // 🛡️ Candado real (no solo en confirmarEliminarProducto): nunca se
+ // elimina un producto con existencia > 0, sin importar desde dónde se
+ // llame esta función.
+ const productoAEliminar = (window.productos || []).find(p => String(p.id) === String(id));
+ if (productoAEliminar && (Number(productoAEliminar.stock) || 0) > 0) {
+ alert(`⚠️ No se puede eliminar "${productoAEliminar.nombre}": todavía tiene existencia. Primero baja el stock a 0.`);
+ return;
+ }
  window.productos = window.productos.filter(p => String(p.id) !== String(id));
  if (!StorageService.set("productos", window.productos)) {
  console.error("Error eliminando producto");
@@ -3551,6 +3619,14 @@ window.volverDesdeVisorProducto = function() {
  navA(destino);
  if (destino === 'kardex-inventario' && typeof renderKardexInventario === 'function') renderKardexInventario();
  if (destino === 'inventario' && typeof renderInventario === 'function') renderInventario();
+ if (destino === 'consulta-inventario') {
+ if (typeof window.initConsultaInventario === 'function') window.initConsultaInventario();
+ // Si se entró desde "Resumen por categoría", esta pestaña vuelve a
+ // quedar activa (y no la de Detalle) al regresar de la ficha.
+ if (window._gpExpandido && document.getElementById('civVistaResumen') && !document.getElementById('civVistaResumen').classList.contains('oculto')) {
+ if (typeof renderResumenCategorias === 'function') renderResumenCategorias();
+ }
+ }
 };
 
 
