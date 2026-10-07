@@ -576,6 +576,14 @@ const StorageService = {
     async _marcarCambioRemoto(tabla, ts = Date.now()) {
         if (!window._firebaseActivo || !window._db) return;
         try {
+            // Recordamos los timestamps que escribimos NOSOTROS desde esta pestaña: cuando el
+            // listener de _syncStatus nos devuelva ese mismo cambio, sabremos que no hace falta
+            // volver a descargar la tabla (los datos locales ya son los más recientes).
+            this._tsPropiosSync = this._tsPropiosSync || new Set();
+            this._tsPropiosSync.add(Number(ts));
+            if (this._tsPropiosSync.size > 200) {
+                this._tsPropiosSync = new Set(Array.from(this._tsPropiosSync).slice(-100));
+            }
             await window._db.collection('posData').doc('_syncStatus').set({
                 _updatedAt: ts,
                 tabla: tabla || '',
@@ -708,6 +716,36 @@ const StorageService = {
             this._tablasForzarProximoSync = null;
             this.sincronizarCambiosRemotos(motivo, tablasForzar).catch(e => console.warn('Sync remoto fallido:', e));
         }, delay);
+    },
+
+    // Verificación BARATA para focus / visibility / online / intervalo: en lugar de forzar la
+    // re-descarga de TODAS las tablas (miles de lecturas), lee UN solo documento (_syncStatus)
+    // y solo si hay un cambio que este dispositivo no ha visto dispara la sincronización de
+    // esa tabla. Máximo una verificación por minuto.
+    async verificarCambiosRemotosLigero(motivo = 'ligero') {
+        if (!window._firebaseActivo || !window._db || !window._auth?.currentUser) return;
+        const ahora = Date.now();
+        if (this._ultimaVerifLigera && ahora - this._ultimaVerifLigera < 60000) return;
+        this._ultimaVerifLigera = ahora;
+
+        try {
+            const doc = await window._db.collection('posData').doc('_syncStatus').get({ source: 'server' });
+            if (!doc.exists) return;
+            const data = doc.data() || {};
+            const ts = Number(data._updatedAt || 0);
+            const visto = Number(this._cache._syncStatusVisto || 0);
+            if (!ts || ts <= visto) return;
+
+            this._cache._syncStatusVisto = ts;
+            try { localStorage.setItem('_syncStatusVisto', String(ts)); } catch (e) {}
+
+            // Cambio hecho por esta misma pestaña: los datos locales ya están al día.
+            if (this._tsPropiosSync && this._tsPropiosSync.has(ts)) return;
+
+            this.solicitarSyncRemoto(`${motivo}: cambio remoto ${data.tabla || ''}`.trim(), 500, data.tabla || null);
+        } catch (e) {
+            console.warn('No se pudo verificar cambios remotos (ligero):', e);
+        }
     },
 
     // Guarda localmente sin volver a disparar sincronización Firebase
@@ -1900,6 +1938,11 @@ const StorageService = {
             this._cache._syncStatusVisto = ts;
             try { localStorage.setItem('_syncStatusVisto', String(ts)); } catch(e) {}
 
+            // Eco de una escritura hecha por ESTA pestaña: no hay nada nuevo que descargar.
+            // (Chrome y la PWA abiertos a la vez son contextos distintos, así que el otro
+            // contexto sí sigue sincronizando el cambio.)
+            if (this._tsPropiosSync && this._tsPropiosSync.has(ts)) return;
+
             // Tambien verificamos en el mismo dispositivo: puede haber Chrome y PWA abiertos a la vez.
             // Pasamos la tabla que realmente cambió para no forzar la re-descarga completa de las
             // demás (ver comentario en solicitarSyncRemoto).
@@ -1908,10 +1951,10 @@ const StorageService = {
             console.warn('No se pudo escuchar cambios remotos de Firebase:', err);
         });
 
-        window.addEventListener('focus', () => this.solicitarSyncRemoto('focus', 3000));
+        window.addEventListener('focus', () => this.verificarCambiosRemotosLigero('focus'));
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
-                this.solicitarSyncRemoto('visibility', 1500);
+                this.verificarCambiosRemotosLigero('visibility');
             } else {
                 // 🛡️ La pestaña se va a segundo plano (o el usuario cambió de
                 // app en el celular) -- es el momento más confiable para
@@ -1931,8 +1974,15 @@ const StorageService = {
         // ya se disparó por visibilitychange simplemente no encuentra nada
         // que hacer aquí.
         window.addEventListener('pagehide', () => this._flushSyncPendiente());
-        window.addEventListener('online', () => this.solicitarSyncRemoto('online', 1000));
-        setInterval(() => this.solicitarSyncRemoto('intervalo', 1000), 60000);
+        window.addEventListener('online', () => this.verificarCambiosRemotosLigero('online'));
+        // Red de seguridad: cada 2 min (y solo con la pestaña visible) se lee UN documento.
+        // Antes era una descarga completa de todas las tablas cada 60 segundos. La diferencia
+        // de costo entre 2 y 10 minutos es insignificante (lectura de 1 documento), así que se
+        // deja en 2 min para acotar al máximo la ventana de desfase ante un aviso en tiempo
+        // real perdido, sin impacto real en el consumo de Firebase.
+        setInterval(() => {
+            if (!document.hidden) this.verificarCambiosRemotosLigero('intervalo');
+        }, 2 * 60 * 1000);
     }
 };
 
