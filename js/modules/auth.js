@@ -274,7 +274,16 @@ async function _sincronizarFirebaseDespuesDeLogin() {
                 await StorageService.syncAll({ forzarDescarga: true, source: 'server' });
             } else {
                 console.warn('Verificando cambios remotos de Firebase despues de login.');
-                await StorageService.syncAll({ source: 'server', forzarDescarga: true });
+                // Descarga completa forzada como maximo UNA vez cada 24 h por dispositivo
+                // (red de seguridad). El resto de los logins solo comparan fechas y bajan
+                // las tablas que realmente cambiaron.
+                let _ultimoCompleto = 0;
+                try { _ultimoCompleto = Number(localStorage.getItem('_ultimoSyncCompleto') || 0); } catch (e) {}
+                const _forzarCompleto = (Date.now() - _ultimoCompleto) > 24 * 60 * 60 * 1000;
+                await StorageService.syncAll({ source: 'server', forzarDescarga: _forzarCompleto });
+                if (_forzarCompleto) {
+                    try { localStorage.setItem('_ultimoSyncCompleto', String(Date.now())); } catch (e) {}
+                }
             }
 
             if (typeof StorageService.normalizarListasLocales === 'function') {
