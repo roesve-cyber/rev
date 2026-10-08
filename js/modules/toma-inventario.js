@@ -344,8 +344,16 @@
             const final = valorFinal(l);
             const diferencia = final === null ? null : final - num(l.teorico);
             const colorDif = diferencia === null ? '#94a3b8' : diferencia === 0 ? '#047857' : '#b45309';
+            // 🔒 Piezas prometidas a apartados activos en esta ubicación/color: siguen físicamente
+            // en la bodega (el conteo debe incluirlas), pero si cuentas menos de las reservadas el
+            // apartado ya no se podrá entregar. Se oculta en conteo ciego para no sesgar al contador.
+            const reservadoLinea = (mostrarComparacion && typeof window.invReservadoEn === 'function')
+                ? num(window.invReservadoEn(l.productoId, l.color, toma.ubicacion)) : 0;
+            const reservaHtml = reservadoLinea > 0
+                ? `<br><small style="color:${final !== null && final < reservadoLinea ? '#b91c1c' : '#1d4ed8'};font-weight:700;">🔒 ${reservadoLinea} reservada${reservadoLinea === 1 ? '' : 's'} para apartado${final !== null && final < reservadoLinea ? ' · ⚠️ conteo menor a lo reservado' : ' (cuéntalas, siguen en bodega)'}</small>`
+                : '';
             return `<tr style="border-bottom:1px solid #e2e8f0;background:${mostrarComparacion && diferencia !== null && diferencia !== 0 ? '#fffbeb' : 'white'};">
-                <td style="padding:9px;min-width:240px;"><b>${esc(l.productoNombre)}</b>${l.inactivo ? ' <span style="color:#991b1b;font-size:10px;font-weight:900;">INACTIVO</span>' : ''}<br><small style="color:#64748b;">${esc([l.categoria, l.subcategoria].filter(Boolean).join(' / ') || '-')}</small></td>
+                <td style="padding:9px;min-width:240px;"><b>${esc(l.productoNombre)}</b>${l.inactivo ? ' <span style="color:#991b1b;font-size:10px;font-weight:900;">INACTIVO</span>' : ''}<br><small style="color:#64748b;">${esc([l.categoria, l.subcategoria].filter(Boolean).join(' / ') || '-')}</small>${reservaHtml}</td>
                 <td style="padding:9px;min-width:110px;"><b>${esc(l.color || 'General')}</b></td>
                 <td style="padding:9px;text-align:center;font-size:${mostrarComparacion ? '16px' : '12px'};font-weight:900;color:${mostrarComparacion ? '#334155' : '#64748b'};">${mostrarComparacion ? num(l.teorico) : 'OCULTO'}</td>
                 <td style="padding:7px;text-align:center;">
@@ -552,6 +560,18 @@
 
         if (errores.length) {
             return alert(`No se aplico ningun ajuste.\n\nHay conflictos con movimientos posteriores:\n- ${errores.join('\n- ')}\n\nRevisa o recontea esos productos antes de cerrar.`);
+        }
+
+        // 🔒 Antes de aplicar: ¿algún renglón quedaría con menos piezas físicas que reservadas?
+        if (typeof window.invReservadoEn === 'function') {
+            const bajoReserva = [];
+            toma.lineas.forEach(l => {
+                const final = valorFinal(l);
+                if (final === null) return;
+                const res = num(window.invReservadoEn(l.productoId, l.color, toma.ubicacion));
+                if (res > 0 && final < res) bajoReserva.push(`${l.productoNombre} / ${l.color || 'General'}: contaste ${final}, reservadas ${res}`);
+            });
+            if (bajoReserva.length && !confirm(`⚠️ RESERVAS EN RIESGO\n\nEstos renglones quedarían con menos piezas físicas que las prometidas a apartados:\n- ${bajoReserva.join('\n- ')}\n\nEsos apartados no se podrán entregar hasta resolverlo (¿pieza mal contada, vendida sin descontar o apartado a cancelar?).\n\n¿Cerrar la toma de todos modos?`)) return;
         }
 
         const fechaCierre = ahora();

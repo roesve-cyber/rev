@@ -6149,7 +6149,8 @@ function _cancelAbrirModalDevolucion(folioOFolios, candidatos, callback) {
             </div>
             <div style="margin-top:8px;">
                 <select id="devDestino_${i}" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;">
-                    <option value="segunda" selected>🏷️ Reingresa como Segunda</option>
+                    <option value="" selected>— Elige: ¿en qué estado regresa la pieza? —</option>
+                    <option value="segunda">🏷️ Reingresa como Segunda (dañada, usada o incompleta)</option>
                     <option value="nuevo">✨ Reingresa como Nuevo (perfecto estado, sin abrir/usar)</option>
                 </select>
             </div>
@@ -6211,8 +6212,11 @@ function _cancelDevolucionArticulosMarcados() {
         const chk = document.getElementById(`devChk_${i}`);
         if (!chk || !chk.checked) continue;
         const cantidad = Math.max(1, Math.min(Number(document.getElementById(`devCant_${i}`)?.value) || candidatos[i].cantidad, candidatos[i].cantidad));
-        const destino = document.getElementById(`devDestino_${i}`)?.value === 'nuevo' ? 'nuevo' : 'segunda';
-        const estadoDevolucion = destino === 'nuevo' ? 'Nuevo (cancelación)' : 'Segunda (cancelación)';
+        // Sin opción preseleccionada: si no se elige, destino queda vacío y la confirmación se bloquea
+        // (antes "Segunda" venía marcada y una pieza nueva podía reingresar como segunda por descuido).
+        const destinoSel = document.getElementById(`devDestino_${i}`)?.value;
+        const destino = destinoSel === 'nuevo' ? 'nuevo' : (destinoSel === 'segunda' ? 'segunda' : '');
+        const estadoDevolucion = destino === 'nuevo' ? 'Nuevo (cancelación)' : (destino === 'segunda' ? 'Segunda (cancelación)' : '');
         resultado.push({ ...candidatos[i], cantidad, destino, estadoDevolucion, notaDevolucion: nota });
     }
     return resultado;
@@ -6220,6 +6224,10 @@ function _cancelDevolucionArticulosMarcados() {
 
 window._cancelDevolucionConfirmarArticulos = function() {
     const resultado = _cancelDevolucionArticulosMarcados();
+    const sinDestino = resultado.filter(a => !a.destino);
+    if (sinDestino.length) {
+        return alert(`Elige en qué estado regresa cada pieza marcada (Nuevo o Segunda):\n\n- ${sinDestino.map(a => a.nombre).join('\n- ')}`);
+    }
     const callback = window._cancelDevolucionCallback;
     document.querySelector('[data-modal="cancel-devolucion"]')?.remove();
     window._cancelDevolucionCallback = null;
@@ -6234,6 +6242,7 @@ window._cancelDevolucionConfirmarArticulos = function() {
 window._cancelDevolucionEmitirActa = function() {
     const resultado = _cancelDevolucionArticulosMarcados();
     if (resultado.length === 0) return alert('Marca al menos un artículo para emitir el acta.');
+    if (resultado.some(a => !a.destino)) return alert('Elige en qué estado regresa cada pieza (Nuevo o Segunda) antes de emitir el acta.');
 
     const folioOFolios = window._cancelDevolucionFolios;
     const folios = Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios];
