@@ -1070,6 +1070,33 @@
                 <select id="pProveedorId"><option value="">-- Sin proveedor fijo / vario (ej. MercadoLibre, Walmart) --</option></select>
                 <small style="display:block; margin-top:4px; color:#64748b;">Déjalo en "Sin proveedor fijo" si lo compras en varios lados. Selecciónalo solo si es exclusivo de ese proveedor.</small>
             </div>
+            <div class="campo" style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:8px; padding:14px;">
+                <label style="font-weight:bold; color:#7e22ce; margin:0;">🎨 Colores bajo pedido (catálogo)</label>
+                <small style="display:block; margin:4px 0 10px; color:#6b21a8;">Si este mueble se puede pintar en otros colores, el catálogo recolorea la misma foto sin subir otra. 1) Carga la foto. 2) Toca la madera/pintura para marcar su color real. 3) Agrega los colores disponibles.</small>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <button type="button" style="padding:8px 12px; border:1px solid #d8b4fe; background:#fff; color:#6b21a8; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;" onclick="_invRecolorCargar()">🖼️ Cargar foto</button>
+                    <button type="button" id="pRecolorBtnColor" style="padding:8px 12px; border:1px solid #d8b4fe; background:#fff; color:#6b21a8; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;" onclick="_invRecolorModo('color')">🎯 Marcar color base</button>
+                    <button type="button" id="pRecolorBtnZona" style="padding:8px 12px; border:1px solid #d8b4fe; background:#fff; color:#6b21a8; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;" onclick="_invRecolorModo('zona')">▭ Marcar zona</button>
+                    <button type="button" style="padding:8px 12px; border:1px solid #d8b4fe; background:#fff; color:#6b21a8; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;" onclick="_invRecolorQuitarZona()">✖ Quitar zona</button>
+                </div>
+                <div id="pRecolorLienzo" style="display:none; position:relative; max-width:440px; touch-action:none; cursor:crosshair; margin-bottom:8px;">
+                    <img id="pRecolorPreview" alt="" draggable="false" style="width:100%; display:block; border-radius:8px; user-select:none; -webkit-user-drag:none;">
+                    <div id="pRecolorZonaBox" style="position:absolute; display:none; border:2px dashed #7e22ce; background:rgba(126,34,206,0.14); pointer-events:none;"></div>
+                </div>
+                <div id="pRecolorMsg" style="font-size:12px; font-weight:600; margin-bottom:8px; color:#6b21a8;"></div>
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <label style="margin:0; font-size:13px;">Color base (el de la foto)</label>
+                    <input type="color" id="pRecolorBase" value="#8b5a2b" onchange="_invRecolorBaseCambio()" style="width:44px; height:34px; padding:0; border:1px solid #d8b4fe; border-radius:6px;">
+                    <span id="pRecolorBaseHex" style="font-size:12px; color:#6b7280;"></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <label style="margin:0; font-size:13px;">Tolerancia</label>
+                    <input type="range" id="pRecolorTol" min="5" max="100" value="50" oninput="_invRecolorRefrescar(true)" style="flex:1; max-width:220px;">
+                    <small style="color:#6b7280;">Sube si quedan zonas sin cambiar; baja si cambia paredes/sábanas.</small>
+                </div>
+                <div id="pRecolorLista"></div>
+                <button type="button" onclick="_invRecolorAgregar()" style="margin-top:6px; padding:8px 12px; border:1px solid #d8b4fe; background:#fff; color:#6b21a8; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;">+ Agregar color</button>
+            </div>
 <div class="campo">
   <label>Margen (%)</label>
   <input type="number" id="pMargenManual" placeholder="Ej: 30" min="0" max="99" step="0.1">
@@ -1299,7 +1326,8 @@
 <script src="js/core/data.js?v=3"></script>
 
 <script src="js/modules/auth.js?v=3.2"></script>
-<script src="js/modules/inventario.js?v=32"></script>
+<script src="js/services/recolor.js?v=1"></script>
+<script src="js/modules/inventario.js?v=33"></script>
 <script src="js/modules/toma-inventario.js?v=3"></script>
 <script src="js/modules/reservas-inv.js?v=1"></script>
 <script src="js/modules/tienda.js?v=8"></script>
