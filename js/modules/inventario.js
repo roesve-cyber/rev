@@ -2809,6 +2809,231 @@ function actualizarSelectorCategorias() {
  select.innerHTML = options || "<option>Crea una categoria primero</option>";
 }
 
+// ===== 🎨 COLORES BAJO PEDIDO (admin) =====
+// Conecta los botones del formulario de producto con RecolorService
+// (js/services/recolor.js): marcar el color real de la foto (clic),
+// marcar una zona a excluir/incluir (arrastre), y armar la lista de
+// colores que el catálogo público va a ofrecer. El resultado se guarda
+// en datosProducto.recolor al guardar el producto (_invRecolorSerializar,
+// ver guardarProductoDB) con la forma exacta que espera catalogo.html:
+// { base, tolerancia, zona, colores:[{nombre,hex}] }.
+window._recolorEstado = { base: '#8b5a2b', tolerancia: 50, zona: null, colores: [] };
+window._recolorImgActual = null; // Image cargada con CORS, para muestrear color
+window._recolorModoActual = 'color'; // 'color' | 'zona'
+window._recolorArrastrando = null; // {x,y} normalizados mientras se arrastra la zona
+
+function _invRecolorReset(recolorGuardado) {
+ window._recolorEstado = recolorGuardado
+ ? { base: recolorGuardado.base || '#8b5a2b', tolerancia: recolorGuardado.tolerancia || 50, zona: recolorGuardado.zona || null, colores: Array.isArray(recolorGuardado.colores) ? recolorGuardado.colores.slice() : [] }
+ : { base: '#8b5a2b', tolerancia: 50, zona: null, colores: [] };
+ window._recolorImgActual = null;
+ window._recolorModoActual = 'color';
+ window._recolorArrastrando = null;
+
+ const lienzo = document.getElementById('pRecolorLienzo');
+ const msg = document.getElementById('pRecolorMsg');
+ const baseInput = document.getElementById('pRecolorBase');
+ const baseHex = document.getElementById('pRecolorBaseHex');
+ const tolInput = document.getElementById('pRecolorTol');
+ if (lienzo) lienzo.style.display = 'none';
+ if (msg) msg.textContent = recolorGuardado ? 'Este producto ya tiene colores configurados. Toca "Cargar foto" para revisarlos o agregar más.' : '';
+ if (baseInput) baseInput.value = window._recolorEstado.base;
+ if (baseHex) baseHex.textContent = window._recolorEstado.base;
+ if (tolInput) tolInput.value = window._recolorEstado.tolerancia;
+ _invRecolorDibujarZona();
+ _invRecolorPintarLista();
+ _invRecolorMarcarModoBotones();
+}
+
+// 🛡️ Sin colores agregados = sin función de recolor para este producto
+// (el catálogo público revisa exactamente esto -- configRecolor en
+// catalogo.html -- para decidir si ofrece el selector o no).
+function _invRecolorSerializar() {
+ const e = window._recolorEstado;
+ if (!e || !Array.isArray(e.colores) || !e.colores.length) return null;
+ return { base: e.base, tolerancia: Number(e.tolerancia) || 50, zona: e.zona || null, colores: e.colores.slice() };
+}
+
+function _invRecolorMarcarModoBotones() {
+ const btnColor = document.getElementById('pRecolorBtnColor');
+ const btnZona = document.getElementById('pRecolorBtnZona');
+ if (btnColor) { btnColor.style.background = window._recolorModoActual === 'color' ? '#7e22ce' : '#fff'; btnColor.style.color = window._recolorModoActual === 'color' ? '#fff' : '#6b21a8'; }
+ if (btnZona) { btnZona.style.background = window._recolorModoActual === 'zona' ? '#7e22ce' : '#fff'; btnZona.style.color = window._recolorModoActual === 'zona' ? '#fff' : '#6b21a8'; }
+}
+
+window._invRecolorModo = function (modo) {
+ window._recolorModoActual = modo;
+ _invRecolorMarcarModoBotones();
+ const msg = document.getElementById('pRecolorMsg');
+ if (msg) msg.textContent = modo === 'color'
+ ? 'Toca la foto sobre la madera/pintura para marcar su color real.'
+ : 'Arrastra sobre la foto para marcar una zona (opcional -- solo si hay partes que NO se deben pintar, como el colchón o los cojines).';
+};
+
+window._invRecolorCargar = function () {
+ const url = (document.getElementById('pImagen')?.value || '').trim();
+ const msg = document.getElementById('pRecolorMsg');
+ if (!url) { if (msg) msg.textContent = '⚠️ Primero captura la URL de la foto, arriba en el formulario.'; return; }
+ if (!window.RecolorService) { if (msg) msg.textContent = '⚠️ No se cargó el motor de colores (recolor.js).'; return; }
+ if (msg) msg.textContent = 'Cargando foto...';
+ RecolorService.cargarImagen(url).then(img => {
+ window._recolorImgActual = img;
+ const preview = document.getElementById('pRecolorPreview');
+ const lienzo = document.getElementById('pRecolorLienzo');
+ if (preview) preview.src = url;
+ if (lienzo) lienzo.style.display = 'block';
+ if (msg) msg.textContent = 'Toca la foto sobre la madera/pintura para marcar su color real.';
+ _invRecolorDibujarZona();
+ }).catch(err => {
+ window._recolorImgActual = null;
+ if (msg) msg.textContent = (err && err.code === 'cors')
+ ? '⚠️ Esta foto no se puede leer para recolorear (el servidor de esa imagen no permite CORS). Sube la foto a tu propio repositorio/Firebase Storage para poder usar esta función con ella.'
+ : '⚠️ No se pudo cargar la foto. Revisa que la URL sea correcta.';
+ });
+};
+
+function _invRecolorCoordNormalizada(ev, el) {
+ const r = el.getBoundingClientRect();
+ const cx = (ev.touches && ev.touches[0]) ? ev.touches[0].clientX : ev.clientX;
+ const cy = (ev.touches && ev.touches[0]) ? ev.touches[0].clientY : ev.clientY;
+ return { x: Math.min(1, Math.max(0, (cx - r.left) / r.width)), y: Math.min(1, Math.max(0, (cy - r.top) / r.height)) };
+}
+
+function _invRecolorDibujarZona() {
+ const box = document.getElementById('pRecolorZonaBox');
+ if (!box) return;
+ const z = window._recolorEstado.zona;
+ if (!z) { box.style.display = 'none'; return; }
+ box.style.display = 'block';
+ box.style.left = (z.x * 100) + '%';
+ box.style.top = (z.y * 100) + '%';
+ box.style.width = (z.w * 100) + '%';
+ box.style.height = (z.h * 100) + '%';
+}
+
+window._invRecolorQuitarZona = function () {
+ window._recolorEstado.zona = null;
+ _invRecolorDibujarZona();
+ _invRecolorRefrescar();
+};
+
+window._invRecolorBaseCambio = function () {
+ const v = document.getElementById('pRecolorBase')?.value;
+ if (!v) return;
+ window._recolorEstado.base = v;
+ const hex = document.getElementById('pRecolorBaseHex');
+ if (hex) hex.textContent = v;
+ _invRecolorRefrescar();
+};
+
+// Vista rápida con un color de prueba, solo para que el admin vea si la
+// tolerancia está atrapando bien la madera (ni muy poco ni paredes/tela de
+// más) -- usa recolorPixeles() devolviendo el % de cobertura, tal como lo
+// describe el propio recolor.js para este fin.
+window._invRecolorRefrescar = function (desdeSlider) {
+ if (desdeSlider) {
+ window._recolorEstado.tolerancia = Number(document.getElementById('pRecolorTol')?.value) || 50;
+ }
+ const msg = document.getElementById('pRecolorMsg');
+ if (!window._recolorImgActual || !window.RecolorService || !msg) return;
+ try {
+ const destinoPrueba = (window._recolorEstado.colores[0] && window._recolorEstado.colores[0].hex) || '#2563eb';
+ const out = RecolorService.recolorear(window._recolorImgActual, {
+ base: window._recolorEstado.base,
+ destino: destinoPrueba,
+ tolerancia: window._recolorEstado.tolerancia,
+ zona: window._recolorEstado.zona
+ });
+ const preview = document.getElementById('pRecolorPreview');
+ if (preview) preview.src = out.dataUrl;
+ const pct = Math.round((out.cobertura || 0) * 100);
+ if (pct < 8) msg.textContent = `⚠️ Solo se detectó ${pct}% de la foto como mueble -- sube la tolerancia o vuelve a marcar el color.`;
+ else if (pct > 70) msg.textContent = `⚠️ Se detectó ${pct}% de la foto como mueble -- parece que también está pintando paredes/tela. Baja la tolerancia o marca una zona.`;
+ else msg.textContent = `✅ ${pct}% de la foto detectada como mueble (vista de prueba con un color de referencia).`;
+ } catch (e) { /* una falla aquí no debe trabar el formulario */ }
+};
+
+window._invRecolorAgregar = function () {
+ const nombre = (prompt('Nombre del color (ej. "Nogal", "Blanco", "Gris Ceniza"):') || '').trim();
+ if (!nombre) return;
+ const hex = (prompt('Código de color en hex (ej. #8b5a2b) -- puedes tomarlo de cualquier selector de color en internet:', window._recolorEstado.base) || '').trim();
+ if (!/^#[0-9a-fA-F]{6}$/.test(hex)) { alert('Color inválido. Debe ser un código hex de 6 dígitos, ej. #8b5a2b.'); return; }
+ window._recolorEstado.colores.push({ nombre, hex });
+ _invRecolorPintarLista();
+};
+
+window._invRecolorQuitarColor = function (idx) {
+ window._recolorEstado.colores.splice(idx, 1);
+ _invRecolorPintarLista();
+};
+
+function _invRecolorPintarLista() {
+ const cont = document.getElementById('pRecolorLista');
+ if (!cont) return;
+ const colores = window._recolorEstado.colores || [];
+ if (!colores.length) { cont.innerHTML = '<div style="font-size:12px;color:#9ca3af;">Sin colores agregados todavía.</div>'; return; }
+ cont.innerHTML = colores.map((c, i) => `
+ <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f3e8ff;">
+ <span style="width:20px;height:20px;border-radius:50%;background:${_kardexEsc(c.hex)};border:1px solid #d1d5db;flex-shrink:0;"></span>
+ <span style="flex:1;font-size:13px;">${_kardexEsc(c.nombre)} <small style="color:#9ca3af;">${_kardexEsc(c.hex)}</small></span>
+ <button type="button" onclick="_invRecolorQuitarColor(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;">✕</button>
+ </div>`).join('');
+}
+
+// Interacción del lienzo (un solo juego de listeners, delegado por
+// _recolorModoActual): clic para muestrear color, arrastrar para marcar
+// zona. El div es estático en el HTML del modal (no se recrea al abrir/
+// cerrar el formulario), así que basta con engancharlo una sola vez.
+(function _invRecolorInitListeners() {
+ function attach() {
+ const lienzo = document.getElementById('pRecolorLienzo');
+ if (!lienzo || lienzo._recolorListenersAttached) return;
+ lienzo._recolorListenersAttached = true;
+
+ const iniciar = (ev) => {
+ if (!window._recolorImgActual) return;
+ if (window._recolorModoActual === 'color') {
+ const { x, y } = _invRecolorCoordNormalizada(ev, lienzo);
+ try {
+ const hex = RecolorService.muestrearColor(window._recolorImgActual, x, y, 8);
+ window._recolorEstado.base = hex;
+ const baseInput = document.getElementById('pRecolorBase');
+ const baseHex = document.getElementById('pRecolorBaseHex');
+ if (baseInput) baseInput.value = hex;
+ if (baseHex) baseHex.textContent = hex;
+ _invRecolorRefrescar();
+ } catch (e) {}
+ } else {
+ window._recolorArrastrando = _invRecolorCoordNormalizada(ev, lienzo);
+ }
+ ev.preventDefault();
+ };
+ const mover = (ev) => {
+ if (window._recolorModoActual !== 'zona' || !window._recolorArrastrando) return;
+ const actual = _invRecolorCoordNormalizada(ev, lienzo);
+ const x0 = window._recolorArrastrando;
+ window._recolorEstado.zona = {
+ x: Math.min(x0.x, actual.x), y: Math.min(x0.y, actual.y),
+ w: Math.abs(actual.x - x0.x), h: Math.abs(actual.y - x0.y)
+ };
+ _invRecolorDibujarZona();
+ ev.preventDefault();
+ };
+ const soltar = () => {
+ if (window._recolorModoActual === 'zona' && window._recolorArrastrando) _invRecolorRefrescar();
+ window._recolorArrastrando = null;
+ };
+ lienzo.addEventListener('mousedown', iniciar);
+ lienzo.addEventListener('touchstart', iniciar, { passive: false });
+ lienzo.addEventListener('mousemove', mover);
+ lienzo.addEventListener('touchmove', mover, { passive: false });
+ window.addEventListener('mouseup', soltar);
+ window.addEventListener('touchend', soltar);
+ }
+ if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
+ else attach();
+})();
+
 function abrirProductoForm(id = null, prefill = null) {
  actualizarSelectorCategorias();
  const modal = document.getElementById("modalProductoForm");
@@ -2902,7 +3127,11 @@ function abrirProductoForm(id = null, prefill = null) {
  toggleConfigCreditoProd();
  _dibujarPlazosProd();
  }
- 
+
+ // 🎨 Colores bajo pedido: carga la configuración ya guardada del producto
+ // (si la tiene) o arranca en blanco para uno nuevo.
+ if (typeof _invRecolorReset === 'function') _invRecolorReset(id && p ? p.recolor : null);
+
  modal.classList.remove("oculto");
  modal.style.display = 'flex';
 }
@@ -2966,6 +3195,7 @@ function guardarProductoDB() {
  destacadoCatalogo,
  ordenDestacadoCatalogo,
  configCredito, // <----- ESTA ES LA LINEA MAGICA
+ recolor: (typeof _invRecolorSerializar === 'function') ? _invRecolorSerializar() : (productoEditando ? (window.productos.find(p => String(p.id) === String(productoEditando))?.recolor || null) : null),
  variantes: productoEditando ? (window.productos.find(p => String(p.id) === String(productoEditando))?.variantes || []) : []
  };
 
