@@ -3868,7 +3868,9 @@ function renderReimprimirVenta() {
         if (total < montoMin) return false;
         if (montoMax !== Infinity && total > montoMax) return false;
         return true;
-    }).sort((a, b) => new Date(a.fechaVenta || a.fechaIso || a.fechaEmision || 0) - new Date(b.fechaVenta || b.fechaIso || b.fechaEmision || 0));
+    // 📅 Más reciente primero -- es más fácil encontrar un ticket de hoy/
+    // esta semana para reimprimir que uno de hace meses.
+    }).sort((a, b) => new Date(b.fechaVenta || b.fechaIso || b.fechaEmision || 0) - new Date(a.fechaVenta || a.fechaIso || a.fechaEmision || 0));
 
     const foliosUnicos = new Set();
     filtrados = filtrados.filter(t => {
@@ -6242,7 +6244,6 @@ window._cancelDevolucionConfirmarArticulos = function() {
 window._cancelDevolucionEmitirActa = function() {
     const resultado = _cancelDevolucionArticulosMarcados();
     if (resultado.length === 0) return alert('Marca al menos un artículo para emitir el acta.');
-    if (resultado.some(a => !a.destino)) return alert('Elige en qué estado regresa cada pieza (Nuevo o Segunda) antes de emitir el acta.');
 
     const folioOFolios = window._cancelDevolucionFolios;
     const folios = Array.isArray(folioOFolios) ? folioOFolios : [folioOFolios];
@@ -6353,6 +6354,7 @@ function _cancelReingresarInventarioPorVenta(folioOFolios, motivo, condicionesAr
         // completas (productoId/cantidad/color/ubicacion/destino='segunda'),
         // así que se usan tal cual, sin adivinar nada de documentosEntrega
         // ni de kardex.
+        if (condicionesArticulos.some(a => !a.destino)) return alert('Elige en qué estado regresa cada pieza (Nuevo o Segunda) antes de emitir el acta.');
         articulos = condicionesArticulos;
     } else if (condicionesArticulos && condicionesArticulos.tipo === 'sin-devolucion') {
         // 🛡️ Confirmado explícitamente: el cliente NO regresa el producto.
@@ -6725,7 +6727,9 @@ function _renderCancelacionesVentas(filtro) {
             return !filtro || txt.includes(filtro);
         })
         .slice()
-        .sort((a,b) => new Date(a.fechaVenta || a.fechaIso || 0) - new Date(b.fechaVenta || b.fechaIso || 0));
+        // 📅 Más reciente primero -- lo normal es cancelar algo que se
+        // acaba de registrar, no algo de hace tiempo.
+        .sort((a,b) => new Date(b.fechaVenta || b.fechaIso || 0) - new Date(a.fechaVenta || a.fechaIso || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin ventas para cancelar.</div>';
     return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Tipo</th><th>Total</th><th>Origen</th><th>Acción</th></tr></thead><tbody>${filas.map(v => `
         <tr>
@@ -6750,7 +6754,8 @@ function _renderCancelacionesAbonos(filtro) {
         if (String(a.estado || '').toLowerCase().includes('cancel') || ab.cancelado || ab.canceladoPorVenta || ab.canceladoPorApartado) return;
         filas.push({ origen: 'apartado', folio: a.folio, cliente: a.clienteNombre, articulos: a.articulos, fecha: ab.fechaAbono || ab.fecha, monto: ab.monto, cuenta: ab.etiquetaCuenta || ab.cuentaId, idx });
     }));
-    const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(a.fecha || 0) - new Date(b.fecha || 0));
+    // 📅 Más reciente primero, mismo criterio que el resto de cancelaciones.
+    const filtradas = filas.filter(a => !filtro || `${a.folio} ${a.cliente}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
     if (!filtradas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin abonos para cancelar.</div>';
     return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Origen</th><th>Fecha</th><th>Monto</th><th>Cuenta</th><th>Acción</th></tr></thead><tbody>${filtradas.map(a => `
         <tr>
@@ -6766,7 +6771,8 @@ function _renderCancelacionesAbonos(filtro) {
 
 function _renderCancelacionesApartados(filtro) {
     const apartados = StorageService.get("apartados", []).filter(a => a.estado !== 'Cancelado');
-    const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(a.fechaApartado || 0) - new Date(b.fechaApartado || 0));
+    // 📅 Más reciente primero, mismo criterio que el resto de cancelaciones.
+    const filas = apartados.filter(a => !filtro || `${a.folio} ${a.clienteNombre}`.toLowerCase().includes(filtro)).sort((a,b) => new Date(b.fechaApartado || 0) - new Date(a.fechaApartado || 0));
     if (!filas.length) return '<div style="padding:22px;text-align:center;color:#64748b;background:#f8fafc;border-radius:8px;">Sin apartados para cancelar.</div>';
     return `<div style="overflow-x:auto;"><table class="tabla-admin"><thead><tr><th>Cliente</th><th>Producto(s)</th><th>Total</th><th>Pagado</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${filas.map(a => {
         const pagado = Number(a.enganche || 0) + (a.abonos || []).reduce((s, ab) => s + Number(ab.monto || 0), 0);

@@ -193,7 +193,11 @@ window.obtenerKardexNormalizado = function(filtros = {}) {
  if (f.hasta && d > f.hasta) return false;
  return true;
  });
- return rows.sort((a, b) => _kardexDateValue(a.fecha) - _kardexDateValue(b.fecha));
+ // 📅 Más reciente primero -- ninguno de los consumidores de esta función
+ // depende de orden cronológico ascendente (los que promedian/suman no
+ // les importa el orden; el historial del Visor Maestro ya se reordena
+ // aparte), así que se corrige en la fuente en vez de en cada pantalla.
+ return rows.sort((a, b) => _kardexDateValue(b.fecha) - _kardexDateValue(a.fecha));
 };
 
 function _invDinero(valor) {
@@ -1465,7 +1469,6 @@ window.renderConsultaInventario = function() {
  <td style="padding:12px; text-align:center;">
  <span style="font-size:18px; font-weight:bold; color:${stockGeneral>0?'#16a34a':'#dc2626'}">${stockGeneral}</span>
  ${stockConsignacionProd > 0 ? `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:bold;color:#854d0e;background:#fef3c7;padding:2px 7px;border-radius:10px;">${stockConsignacionProd} en consignacion</span></div>` : ''}
- ${typeof invBadgesReservaSegunda === 'function' ? invBadgesReservaSegunda(p) : ''}
  </td>
  <td style="padding:12px;">${desgloseHtml}</td>
  <td style="padding:12px; text-align:right;">
@@ -2900,246 +2903,8 @@ function abrirProductoForm(id = null, prefill = null) {
  _dibujarPlazosProd();
  }
  
- _invRecolorCargarDesde(id && p ? p.recolor : null);
-
  modal.classList.remove("oculto");
  modal.style.display = 'flex';
-}
-
-// ===== 🎨 COLORES BAJO PEDIDO (recolor de la foto en el catálogo) =====
-// El producto guarda `recolor: { base, tolerancia, zona, colores:[{nombre,hex}] }`.
-// El catálogo público (catalogo.html) usa RecolorService para pintar la MISMA
-// foto en cada color, sin subir otra imagen. Aquí se captura: el color real de
-// la foto (se toca la madera/pintura), una zona opcional (para que no cambie
-// pared/sábanas) y la lista de colores disponibles, con vista previa en vivo.
-// El campo viaja al catálogo por _CAMPOS_CATALOGO_PUBLICO (storage2.js).
-window._invRecolor = { img: null, url: '', modo: 'color', zona: null, zonaTemp: null, selRow: null, timer: null, ptr: null, eventos: false };
-
-const _INV_RC_BTN_ON = 'background:#7e22ce;color:#fff;border-color:#7e22ce;';
-const _INV_RC_BTN_OFF = 'background:#fff;color:#6b21a8;border-color:#d8b4fe;';
-
-function _invRecolorCargarDesde(rec) {
- const st = window._invRecolor;
- const baseEl = document.getElementById('pRecolorBase');
- if (!baseEl) return; // formulario sin la sección (versión vieja de index.html)
- clearTimeout(st.timer);
- st.img = null; st.url = ''; st.selRow = null; st.zonaTemp = null; st.ptr = null;
- st.zona = (rec && rec.zona && Number.isFinite(rec.zona.x)) ? { x: rec.zona.x, y: rec.zona.y, w: rec.zona.w, h: rec.zona.h } : null;
- const marcado = !!(rec && /^#[0-9a-f]{6}$/i.test(rec.base || ''));
- baseEl.value = marcado ? rec.base : '#8b5a2b';
- baseEl.dataset.marcado = marcado ? '1' : '';
- document.getElementById('pRecolorBaseHex').textContent = marcado ? rec.base : 'sin marcar';
- document.getElementById('pRecolorTol').value = (rec && rec.tolerancia) ? rec.tolerancia : 50;
- document.getElementById('pRecolorLista').innerHTML = '';
- ((rec && rec.colores) || []).forEach(c => _invRecolorAgregar(c.nombre, c.hex));
- document.getElementById('pRecolorLienzo').style.display = 'none';
- document.getElementById('pRecolorMsg').textContent = '';
- _invRecolorPintarZona();
- _invRecolorModo('color');
-}
-
-function _invRecolorAgregar(nombre, hex) {
- const lista = document.getElementById('pRecolorLista');
- if (!lista) return;
- const row = document.createElement('div');
- row.className = 'rc-row';
- row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:2px;border-radius:8px;';
- row.innerHTML =
-  '<input type="text" class="rc-nombre" placeholder="Ej: Encino Polar" style="flex:1;min-width:0;padding:8px;border:1px solid #d8b4fe;border-radius:6px;">' +
-  '<input type="color" class="rc-hex" style="width:44px;height:34px;padding:0;border:1px solid #d8b4fe;border-radius:6px;">' +
-  '<button type="button" class="rc-ver" title="Ver en la foto" style="padding:7px 10px;border:1px solid #d8b4fe;background:#fff;border-radius:6px;cursor:pointer;">👁</button>' +
-  '<button type="button" class="rc-del" title="Quitar" style="padding:7px 10px;border:1px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:6px;cursor:pointer;">✕</button>';
- row.querySelector('.rc-nombre').value = nombre || '';
- row.querySelector('.rc-hex').value = /^#[0-9a-f]{6}$/i.test(hex || '') ? hex : '#d8d2c4';
- row.querySelector('.rc-ver').onclick = () => _invRecolorVer(row);
- row.querySelector('.rc-hex').onchange = () => _invRecolorVer(row);
- row.querySelector('.rc-del').onclick = () => {
-  const st = window._invRecolor;
-  if (st.selRow === row) st.selRow = null;
-  row.remove();
-  _invRecolorRefrescar();
- };
- lista.appendChild(row);
-}
-
-function _invRecolorVer(row) {
- const st = window._invRecolor;
- document.querySelectorAll('#pRecolorLista .rc-row').forEach(r => { r.style.background = ''; });
- st.selRow = row;
- if (row) row.style.background = '#f3e8ff';
- if (st.img) return _invRecolorRefrescar();
- _invRecolorCargar(); // aún no se había cargado la foto: la carga y luego refresca
-}
-
-function _invRecolorModo(modo) {
- window._invRecolor.modo = modo;
- const bc = document.getElementById('pRecolorBtnColor'), bz = document.getElementById('pRecolorBtnZona');
- const base = 'padding:8px 12px;border:1px solid;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;';
- if (bc) bc.style.cssText = base + (modo === 'color' ? _INV_RC_BTN_ON : _INV_RC_BTN_OFF);
- if (bz) bz.style.cssText = base + (modo === 'zona' ? _INV_RC_BTN_ON : _INV_RC_BTN_OFF);
-}
-
-function _invRecolorCargar() {
- const st = window._invRecolor;
- const url = (document.getElementById('pImagen')?.value || '').trim();
- const msg = document.getElementById('pRecolorMsg');
- const lienzo = document.getElementById('pRecolorLienzo');
- const prev = document.getElementById('pRecolorPreview');
- if (!url) { msg.style.color = '#b91c1c'; msg.textContent = 'Primero captura la URL de la imagen arriba.'; return; }
- if (typeof RecolorService === 'undefined') { msg.style.color = '#b91c1c'; msg.textContent = 'Falta cargar js/services/recolor.js.'; return; }
- msg.style.color = '#6b21a8'; msg.textContent = 'Cargando foto…';
- lienzo.style.display = 'block';
- prev.src = url;
- _invRecolorEventos();
- RecolorService.cargarImagen(url).then(img => {
-  st.img = img; st.url = url;
-  msg.style.color = '#6b21a8';
-  msg.textContent = document.getElementById('pRecolorBase').dataset.marcado === '1'
-   ? 'Foto lista. Toca 👁 en un color para ver cómo queda.'
-   : '🎯 Toca la madera/pintura de la foto para marcar su color real.';
-  _invRecolorRefrescar();
- }).catch(() => {
-  st.img = null;
-  msg.style.color = '#b91c1c';
-  msg.textContent = '⚠️ Esta imagen no se puede recolorear: su servidor no permite leer los pixeles (CORS). Usa una foto del mismo sitio, de Firebase Storage o de raw.githubusercontent.com.';
- });
-}
-
-function _invRecolorEventos() {
- const st = window._invRecolor;
- if (st.eventos) return;
- const lienzo = document.getElementById('pRecolorLienzo');
- if (!lienzo) return;
- st.eventos = true;
- const norm = (e) => {
-  const r = lienzo.getBoundingClientRect();
-  return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
- };
- const rect = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) });
- lienzo.addEventListener('pointerdown', (e) => {
-  if (!st.img) return;
-  const p = norm(e);
-  st.ptr = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, moved: false };
-  try { lienzo.setPointerCapture(e.pointerId); } catch (_) {}
- });
- lienzo.addEventListener('pointermove', (e) => {
-  if (!st.ptr || st.modo !== 'zona') return;
-  const p = norm(e);
-  st.ptr.x1 = p.x; st.ptr.y1 = p.y;
-  if (Math.abs(p.x - st.ptr.x0) > 0.01 || Math.abs(p.y - st.ptr.y0) > 0.01) st.ptr.moved = true;
-  st.zonaTemp = rect({ x: st.ptr.x0, y: st.ptr.y0 }, p);
-  _invRecolorPintarZona();
- });
- lienzo.addEventListener('pointerup', (e) => {
-  if (!st.ptr) return;
-  const q = st.ptr; st.ptr = null; st.zonaTemp = null;
-  if (st.modo === 'color') {
-   const hex = RecolorService.muestrearColor(st.img, q.x0, q.y0, 6);
-   const baseEl = document.getElementById('pRecolorBase');
-   baseEl.value = hex; baseEl.dataset.marcado = '1';
-   document.getElementById('pRecolorBaseHex').textContent = hex;
-   _invRecolorRefrescar();
-  } else {
-   const z = rect({ x: q.x0, y: q.y0 }, { x: q.x1, y: q.y1 });
-   if (q.moved && z.w > 0.04 && z.h > 0.04) st.zona = z;
-   _invRecolorPintarZona();
-   _invRecolorRefrescar();
-  }
- });
- lienzo.addEventListener('pointercancel', () => { st.ptr = null; st.zonaTemp = null; _invRecolorPintarZona(); });
-}
-
-function _invRecolorBaseCambio() {
- const baseEl = document.getElementById('pRecolorBase');
- baseEl.dataset.marcado = '1';
- document.getElementById('pRecolorBaseHex').textContent = baseEl.value;
- _invRecolorRefrescar();
-}
-
-function _invRecolorQuitarZona() {
- window._invRecolor.zona = null;
- _invRecolorPintarZona();
- _invRecolorRefrescar();
-}
-
-function _invRecolorPintarZona() {
- const st = window._invRecolor;
- const box = document.getElementById('pRecolorZonaBox');
- if (!box) return;
- const z = st.zonaTemp || st.zona;
- if (!z) { box.style.display = 'none'; return; }
- box.style.display = 'block';
- box.style.left = (z.x * 100) + '%'; box.style.top = (z.y * 100) + '%';
- box.style.width = (z.w * 100) + '%'; box.style.height = (z.h * 100) + '%';
-}
-
-function _invRecolorRefrescar(conRetraso) {
- const st = window._invRecolor;
- clearTimeout(st.timer);
- const correr = () => {
-  const prev = document.getElementById('pRecolorPreview');
-  const msg = document.getElementById('pRecolorMsg');
-  if (!prev || !st.img) return;
-  const baseEl = document.getElementById('pRecolorBase');
-  const marcado = baseEl.dataset.marcado === '1';
-  if (st.selRow && !document.body.contains(st.selRow)) st.selRow = null;
-  if (!st.selRow || !marcado) {
-   prev.src = st.url;
-   msg.style.color = '#6b21a8';
-   msg.textContent = marcado ? 'Toca 👁 en un color para ver cómo queda.' : '🎯 Toca la madera/pintura de la foto para marcar su color real.';
-   return;
-  }
-  const destino = st.selRow.querySelector('.rc-hex').value;
-  const tolerancia = parseInt(document.getElementById('pRecolorTol').value, 10) || 50;
-  let r;
-  try { r = RecolorService.recolorear(st.img, { base: baseEl.value, destino, tolerancia, zona: st.zona }); }
-  catch (e) { msg.style.color = '#b91c1c'; msg.textContent = '⚠️ No se pudo procesar la imagen.'; return; }
-  prev.src = r.dataUrl;
-  const rgb = RecolorService.hexARgb(baseEl.value) || [0, 0, 0];
-  const mx = Math.max(rgb[0], rgb[1], rgb[2]), mn = Math.min(rgb[0], rgb[1], rgb[2]);
-  const satBase = mx ? (mx - mn) / mx : 0;
-  const pct = Math.round(r.cobertura * 100);
-  if (r.cobertura < 0.03) {
-   msg.style.color = '#b45309'; msg.textContent = '⚠️ Casi no se detectó mueble con ese color base. Vuelve a tocar la madera o sube la tolerancia.';
-  } else if (r.cobertura > 0.55 && !st.zona) {
-   msg.style.color = '#b45309'; msg.textContent = '⚠️ Se está cambiando más de la mitad de la foto (¿pared o piso?). Baja la tolerancia o marca una zona.';
-  } else if (satBase < 0.18) {
-   msg.style.color = '#b45309'; msg.textContent = '⚠️ El color base es muy claro/grisáceo y se confunde con paredes y sábanas (' + pct + '% de la foto cambia). Lo ideal es usar como foto maestra la versión más oscura o saturada, o marcar una zona.';
-  } else {
-   msg.style.color = '#15803d'; msg.textContent = '✅ Se está recoloreando ~' + pct + '% de la foto. Revisa que solo cambie el mueble.';
-  }
- };
- if (conRetraso) st.timer = setTimeout(correr, 140); else correr();
-}
-
-function _invRecolorValidar() {
- const baseEl = document.getElementById('pRecolorBase');
- if (!baseEl) return '';
- const hayColores = [...document.querySelectorAll('#pRecolorLista .rc-nombre')].some(i => i.value.trim());
- if (hayColores && baseEl.dataset.marcado !== '1') {
-  return 'Hay colores bajo pedido pero falta marcar el color base de la foto (botón 🎯: toca la madera/pintura en la foto).';
- }
- if (hayColores && !(document.getElementById('pImagen')?.value || '').trim()) {
-  return 'Los colores bajo pedido necesitan la URL de la imagen del producto.';
- }
- return '';
-}
-
-function _invRecolorLeer() {
- const baseEl = document.getElementById('pRecolorBase');
- if (!baseEl || baseEl.dataset.marcado !== '1') return null;
- const colores = [...document.querySelectorAll('#pRecolorLista .rc-row')]
-  .map(r => ({ nombre: r.querySelector('.rc-nombre').value.trim(), hex: r.querySelector('.rc-hex').value }))
-  .filter(c => c.nombre);
- if (!colores.length) return null;
- const z = window._invRecolor.zona;
- const r4 = (n) => Math.round(n * 1000) / 1000;
- return {
-  base: baseEl.value,
-  tolerancia: parseInt(document.getElementById('pRecolorTol').value, 10) || 50,
-  zona: z ? { x: r4(z.x), y: r4(z.y), w: r4(z.w), h: r4(z.h) } : null,
-  colores
- };
 }
 
 // ===== NUEVA LAGICA DE VARIANTES (COLOR Y UBICACIAN) =====
@@ -3172,10 +2937,6 @@ function guardarProductoDB() {
  const validacion = ValidatorService.validarProducto({ nombre, costo, precio: precioManual });
  if (!validacion.valid) return alert("" + validacion.errores.join("\n"));
 
- const errRecolor = _invRecolorValidar();
- if (errRecolor) return alert(errRecolor);
- const recolor = _invRecolorLeer(); // null si no hay colores bajo pedido (también limpia los que ya tenía)
-
  let categoriaPadre = '';
  categoriasData.forEach(cat => {
  if (cat.subcategorias.find(s => s.nombre === subcatNombre)) categoriaPadre = cat.nombre;
@@ -3205,7 +2966,6 @@ function guardarProductoDB() {
  destacadoCatalogo,
  ordenDestacadoCatalogo,
  configCredito, // <----- ESTA ES LA LINEA MAGICA
- recolor, // colores bajo pedido para el catálogo (ver _invRecolorLeer)
  variantes: productoEditando ? (window.productos.find(p => String(p.id) === String(productoEditando))?.variantes || []) : []
  };
 
