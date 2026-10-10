@@ -1000,7 +1000,8 @@ const StorageService = {
     _CAMPOS_CATALOGO_PUBLICO: [
         'id', 'nombre', 'precio', 'categoria', 'subcategoria', 'marca', 'modelo',
         'color', 'imagen', 'stock', 'Activo', 'activo', 'destacadoCatalogo',
-        'caracteristicas', 'configCredito', 'ubicacion'
+        'caracteristicas', 'configCredito', 'ubicacion',
+        'recolor' // colores bajo pedido: { base, tolerancia, zona, colores:[{nombre,hex}] } -- ver recolor.js
     ],
 
     _sanearProductoParaCatalogoPublico(p) {
