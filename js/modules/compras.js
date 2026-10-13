@@ -2306,6 +2306,11 @@ function guardarOrdenCompra() {
     
     // Ahora el anticipo ya sabe quién es provNombre
     const anticipo = parseFloat(document.getElementById('ocAnticipo')?.value || '0');
+    // 🛡️ Un anticipo SOLO cuenta si salió de una caja/banco: sin cuenta no hay egreso y la OC quedaría
+    // con un pago que nunca aparece en movimientos de caja.
+    if (anticipo > 0 && !cuentaOrigen) {
+        return alert('⚠️ Capturaste un anticipo pero no hay cuenta de origen. Elige de qué caja o banco sale el dinero (o deja el anticipo en 0).');
+    }
     const ocId = Date.now();
     const fechaAnticipo = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
     const anticipoRef = `ANTICIPO-OC-${ocId}`;
@@ -2338,6 +2343,8 @@ function guardarOrdenCompra() {
             origen: 'ordenCompra'
         });
     }
+    // Anticipo realmente aplicado: si el egreso de caja falló, la OC NO debe quedar con ese pago.
+    const anticipoAplicado = (anticipo > 0 && cuentaOrigen && _anticipoOkOC) ? anticipo : 0;
     const meses = document.getElementById('ocMeses')?.value || '';
     const total = arts.reduce((s, a) => s + a.subtotal, 0);
     
@@ -2371,9 +2378,9 @@ function guardarOrdenCompra() {
             cuentaOrigen: cuentaOrigen || null,
             meses: meses || 0
         },
-        anticipo_pagado: parseFloat(anticipo) || 0,
-        saldoPendiente: Math.max(0, parseFloat(total) - (parseFloat(anticipo) || 0)),
-        pagos: (anticipo > 0) ? [{ fecha: fechaAnticipo, monto: parseFloat(anticipo), cuenta: cuentaOrigen, referencia: anticipoRef }] : [],
+        anticipo_pagado: anticipoAplicado,
+        saldoPendiente: Math.max(0, parseFloat(total) - anticipoAplicado),
+        pagos: (anticipoAplicado > 0) ? [{ fecha: fechaAnticipo, monto: anticipoAplicado, cuenta: cuentaOrigen, referencia: anticipoRef, idOperacion: anticipoRef }] : [],
         esConsignacion: metodoPago === 'consignacion'
     };
     
@@ -3536,6 +3543,7 @@ function renderListaOrdenesCompra() {
                     <td style="padding:10px;text-align:right;">
                         <strong style="color:#1e40af;">${dinero(oc.total)}</strong><br>
                         <span style="font-size:11px;color:#dc2626;">Saldo: ${dinero(saldoPendiente)}</span>
+                        <br><span style="font-size:11px;color:#16a34a;">Pagado ${oc.total > 0 ? Math.max(0, Math.min(100, Math.round(((oc.total - saldoPendiente) / oc.total) * 100))) : 0}%</span>
                     </td>
                     <td style="padding:10px;text-align:center;">
                         <span style="background:${color}20;color:${color};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:bold;">${oc.estado}</span>
@@ -3543,6 +3551,7 @@ function renderListaOrdenesCompra() {
                     <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
                             <button onclick="imprimirOrdenCompra(${oc.id})" title="Imprimir OC" style="background:none;border:none;cursor:pointer;font-size:17px;">🖨️</button>
+                            <button onclick="verPagosOC(${oc.id})" title="Pagos y avance (compartir con proveedor)" style="background:none;border:none;cursor:pointer;font-size:17px;">💳</button>
                             <button onclick="abrirModalAbonoOC(${oc.id})" title="Abonar a OC" style="background:none;border:none;cursor:pointer;font-size:17px; opacity:${saldoPendiente <= 0 ? '0.3' : '1'};" ${saldoPendiente <= 0 ? 'disabled' : ''}>💰</button>
                             ${esActiva ? `<button onclick="recibirOrdenCompra(${oc.id})" title="Recibir mercancía" style="background:none;border:none;cursor:pointer;font-size:17px;">📦</button>` : ''}
                             ${oc.estado === 'Borrador' ? `<button onclick="formalizarOrdenCompra(${oc.id})" title="Formalizar (pasar a Enviada)" style="background:none;border:none;cursor:pointer;font-size:17px;">✅</button>` : ''}
@@ -4920,13 +4929,14 @@ window.confirmarAbonoOC = function(idOC) {
     if (monto <= 0 || monto > saldoPendiente) return alert("⚠️ Monto inválido. Verifica el saldo pendiente.");
 
     // 1. Registrar el egreso en el flujo de caja — confirmamos éxito primero.
+    const _opIdAbonoOC = `ABONO-OC-${ordenes[idx].id}-${Date.now()}`;
     const _egresoOkAbonoOC = window._egresarCuenta({
         monto: monto,
         cuentaId: cuentaId,
         etiqueta: cuentaNombre,
         concepto: `Abono a Orden de Compra ${ordenes[idx].folio}`,
         referencia: ordenes[idx].folio,
-        idOperacion: `ABONO-OC-${ordenes[idx].id}-${Date.now()}`,
+        idOperacion: _opIdAbonoOC,
         fecha: fechaPagoFinal // <-- SE INYECTA AQUÍ
     });
     if (!_egresoOkAbonoOC) {
@@ -4957,7 +4967,7 @@ window.confirmarAbonoOC = function(idOC) {
 
     // 2. Actualizar la OC
     ordenes[idx].pagos = ordenes[idx].pagos || [];
-    ordenes[idx].pagos.push({ fecha: fechaPagoFinal, monto: monto, cuenta: cuentaNombre });
+    ordenes[idx].pagos.push({ fecha: fechaPagoFinal, monto: monto, cuenta: cuentaNombre, referencia: _opIdAbonoOC, idOperacion: _opIdAbonoOC });
     ordenes[idx].saldoPendiente = saldoPendiente - monto;
     ordenes[idx].anticipo_pagado = anticipoPrevio + monto; 
 
