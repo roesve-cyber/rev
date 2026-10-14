@@ -575,6 +575,22 @@ function eliminarProveedor(id) {
 
 // ===== HELPERS FINANCIEROS (ENCHUFE UNIVERSAL) =====
 
+// Valor con el que TODAS las pantallas (Mis Cuentas, Estado de Cuenta, Corte de Caja)
+// reconocen una cuenta: nombre del banco para débito, id para cajas de efectivo.
+// Nunca el id interno `debito_N_BANCO`: ninguna pantalla lo reconoce.
+window._valorCuentaSelector = function(c) {
+    return String((c && (c.banco || c.id)) || '');
+};
+
+// Etiqueta limpia de la <option> elegida: usa data-etiqueta; si no existe, le quita
+// el " — $saldo" que algunos selectores agregan al texto (el saldo no va en el movimiento).
+window._etiquetaCuentaDeOption = function(sel) {
+    const opt = sel && sel.options ? sel.options[sel.selectedIndex] : null;
+    if (!opt) return '';
+    if (opt.dataset && opt.dataset.etiqueta) return opt.dataset.etiqueta;
+    return String(opt.text || '').replace(/\s+—\s+[-−$\d,.\s]*\d[-−$\d,.\s]*$/, '').trim();
+};
+
 window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     const cajas = soloDebito ? [] : StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
     
@@ -636,12 +652,18 @@ function _resolverCuentaMovimiento(cuentaId) {
             idx = 0;
             cuentaRealId = cuentas[0].id;
         }
-        return { ok: idx !== -1, tipo: 'efectivo', cuentaRealId, cuentas, idx, medioPago: 'efectivo' };
+        return { ok: idx !== -1, tipo: 'efectivo', cuentaRealId, cuentas, idx, medioPago: 'efectivo',
+                 idCuenta: idx !== -1 ? cuentas[idx].id : null, cuentaMovimiento: cuentaRealId };
     }
 
     const cuentas = StorageService.get('cuentas-bancarias', []);
     const idx = cuentas.findIndex(x => String(x.id) === String(cuentaRealId) || String(x.banco) === String(cuentaRealId));
-    return { ok: idx !== -1, tipo: 'banco', cuentaRealId, cuentas, idx, medioPago: 'transferencia' };
+    // idCuenta = id real del registro (para persistir el saldo con actualizarAtomo, que busca por id).
+    // cuentaMovimiento = lo que se guarda en movimiento.cuenta: el nombre del banco, que es lo que
+    // reconocen las pantallas, aunque quien llame haya pasado el id interno `debito_N_BANCO`.
+    return { ok: idx !== -1, tipo: 'banco', cuentaRealId, cuentas, idx, medioPago: 'transferencia',
+             idCuenta: idx !== -1 ? cuentas[idx].id : null,
+             cuentaMovimiento: idx !== -1 ? String(cuentas[idx].banco || cuentas[idx].id) : cuentaRealId };
 }
 
 function _validarMontoMovimientoCuenta(monto, concepto) {
@@ -704,7 +726,7 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
     // mismo tiempo.
     const tablaCuentaEgreso = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
     if (typeof StorageService.actualizarAtomo === 'function') {
-        StorageService.actualizarAtomo(tablaCuentaEgreso, cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
+        StorageService.actualizarAtomo(tablaCuentaEgreso, cuenta.idCuenta || cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
     } else {
         StorageService.set(tablaCuentaEgreso, cuenta.cuentas);
     }
@@ -715,8 +737,8 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
         concepto,
         monto: montoNum,
         fecha: _normalizarFechaMovimientoCuenta(fecha),
-        cuenta: cuenta.cuentaRealId,
-        etiquetaCuenta: etiqueta || cuenta.cuentaRealId,
+        cuenta: cuenta.cuentaMovimiento || cuenta.cuentaRealId,
+        etiquetaCuenta: etiqueta || cuenta.cuentaMovimiento || cuenta.cuentaRealId,
         medioPago: cuenta.medioPago,
         referencia,
         idOperacion: idOperacion || null
@@ -743,7 +765,7 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
             accion: 'EGRESO_CUENTA',
             modulo: 'Finanzas',
             entidad: cuenta.tipo,
-            entidadId: cuenta.cuentaRealId,
+            entidadId: cuenta.idCuenta || cuenta.cuentaRealId,
             detalle: concepto,
             monto: montoNum,
             severidad: 'riesgo',
@@ -773,7 +795,7 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
     // mismo tiempo.
     const tablaCuentaIngreso = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
     if (typeof StorageService.actualizarAtomo === 'function') {
-        StorageService.actualizarAtomo(tablaCuentaIngreso, cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
+        StorageService.actualizarAtomo(tablaCuentaIngreso, cuenta.idCuenta || cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
     } else {
         StorageService.set(tablaCuentaIngreso, cuenta.cuentas);
     }
@@ -784,8 +806,8 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
         concepto,
         monto: montoNum,
         fecha: _normalizarFechaMovimientoCuenta(fecha),
-        cuenta: cuenta.cuentaRealId,
-        etiquetaCuenta: etiqueta || cuenta.cuentaRealId,
+        cuenta: cuenta.cuentaMovimiento || cuenta.cuentaRealId,
+        etiquetaCuenta: etiqueta || cuenta.cuentaMovimiento || cuenta.cuentaRealId,
         medioPago: cuenta.medioPago,
         referencia,
         idOperacion: idOperacion || null,
@@ -810,7 +832,7 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
             accion: 'INGRESO_CUENTA',
             modulo: 'Finanzas',
             entidad: cuenta.tipo,
-            entidadId: cuenta.cuentaRealId,
+            entidadId: cuenta.idCuenta || cuenta.cuentaRealId,
             detalle: concepto,
             monto: montoNum,
             severidad: 'info',
@@ -870,7 +892,9 @@ function _poblarCuentasOrigen(targetId = "compraCuentaOrigen") {
     
     // 4. Unimos ambos y llenamos el selector
     const todas = [...efectivo, ...debito];
-    sel.innerHTML = todas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+    // 🛡️ value = el que reconocen las pantallas (banco para débito, id para cajas), no el
+    // id interno `debito_N_BANCO`. El texto visible sigue siendo el nombre de la cuenta.
+    sel.innerHTML = todas.map(c => `<option value="${window._esc(window._valorCuentaSelector(c))}" data-etiqueta="${window._esc(c.nombre || '')}">${c.nombre}</option>`).join('');
 }
 
 function actualizarSelectBancos() {
@@ -2867,17 +2891,26 @@ function recibirOrdenCompra(id) {
         if (divC) divC.style.display = (metodo !== 'no') ? 'block' : 'none';
         if (divM) divM.style.display = (metodo !== 'no') ? 'block' : 'none';
         // filtrar cuentas según tipo
+        // 🛡️ El value es el que reconocen las pantallas (banco / id de caja), la etiqueta
+        // guardada va LIMPIA (data-etiqueta, sin el saldo) y se arranca sin cuenta elegida
+        // para no pagar de la primera de la lista sin darse cuenta.
+        const _optRec = (c) => {
+            const valor = window._valorCuentaSelector(c);
+            const nombre = c.nombre || valor;
+            return `<option value="${window._esc(valor)}" data-etiqueta="${window._esc(nombre)}">${window._esc(nombre)}${c.saldo !== undefined ? ' — ' + dinero(c.saldo) : ''}</option>`;
+        };
+        const _phRec = '<option value="">— Selecciona la cuenta —</option>';
         if (metodo === 'debito') {
             const sel = document.getElementById('recCuentaPago');
             if (sel) {
                 const cban = StorageService.get('cuentas-bancarias', []).filter(c => c.tipo && c.tipo.toLowerCase().includes('debito'));
-                sel.innerHTML = cban.map(c => `<option value="${c.id}">${c.nombre}${c.saldo !== undefined ? ' — ' + dinero(c.saldo) : ''}</option>`).join('');
+                sel.innerHTML = _phRec + cban.map(_optRec).join('');
             }
         } else if (metodo === 'contado') {
             const sel = document.getElementById('recCuentaPago');
             if (sel) {
                 const cef = StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo', saldo: 0 }]);
-                sel.innerHTML = cef.map(c => `<option value="${c.id}">${c.nombre}${c.saldo !== undefined ? ' — ' + dinero(c.saldo) : ''}</option>`).join('');
+                sel.innerHTML = _phRec + cef.map(_optRec).join('');
             }
         }
     };
@@ -3023,7 +3056,7 @@ function confirmarRecepcionOC(ocId) {
         // Validación: obligar cuenta seleccionada
         if (!cuentaEl || !cuentaEl.value) return alert('⚠️ Selecciona la cuenta de pago.');
         cuentaPagoId = cuentaEl.value;
-        cuentaPagoEtiqueta = cuentaEl.options[cuentaEl.selectedIndex]?.text || 'Efectivo';
+        cuentaPagoEtiqueta = window._etiquetaCuentaDeOption(cuentaEl) || 'Efectivo';
         // Validación: advertir si pago + anticipo supera el total
         if ((montoPagado + anticipoAplicadoRecepcion) > totalRecibido + 0.01) {
             if (!confirm(`⚠️ El pago (${dinero(montoPagado)}) más el anticipo aplicado a esta recepcion (${dinero(anticipoAplicadoRecepcion)}) supera el total recibido (${dinero(totalRecibido)}). ¿Deseas continuar?`)) return;
@@ -3302,6 +3335,24 @@ movimientosInventario = kardex;   // ✅ sincronizar global
     // ── 5. Actualizar estado OC ────────────────────────────────
     lista[idx].estado          = itemsBackOrder.length > 0 ? 'Recibida Parcial' : 'Recibida';
     lista[idx].anticipo_pagado = anticipoAplicadoRecepcion + montoPagado;
+    // El pago hecho al recibir también va al detalle de pagos[] (igual que los abonos); si no,
+    // el estado de pagos de la OC lo muestra como "Pagado sin detalle". Solo si el egreso de caja
+    // sí se registró (montoPagado queda en 0 cuando la caja lo rechazó).
+    if (montoPagado > 0.01) {
+        const _refPagoRec = `OC-REC-${oc.id}`;
+        lista[idx].pagos = Array.isArray(lista[idx].pagos) ? lista[idx].pagos : [];
+        if (!lista[idx].pagos.some(p => p && (p.idOperacion === _refPagoRec || p.referencia === _refPagoRec))) {
+            lista[idx].pagos.push({
+                fecha: window.localISO ? window.localISO(fechaRec) : fechaRec.toISOString(),
+                monto: montoPagado,
+                cuenta: cuentaPagoEtiqueta || 'Pago recepcion OC',
+                cuentaId: cuentaPagoId || null,
+                referencia: _refPagoRec,
+                idOperacion: _refPagoRec,
+                origen: 'recepcionOC'
+            });
+        }
+    }
     lista[idx].anticipoTransferidoBackOrder = anticipoDisponibleBackOrder;
     lista[idx].fechaRecepcion  = window.localISO(fechaRec);
     if (boId) lista[idx].backOrderId = boId;
