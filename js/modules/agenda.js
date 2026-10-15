@@ -16,7 +16,8 @@ function renderAgendaCobros() {
 
     // Agrupar pagarés por día del mes
     const porDia = {};
-    pagares.filter(p => p.estado !== 'Pagado').forEach(p => {
+    const _foliosIncobrables = new Set(StorageService.get('cuentasPorCobrar', []).filter(c => c.incobrable === true).map(c => c.folio));
+    pagares.filter(p => p.estado !== 'Pagado' && !_foliosIncobrables.has(p.folio)).forEach(p => {
         const fv = new Date(p.fechaVencimiento);
         if (fv.getFullYear() === año && fv.getMonth() === mes) {
             const d = fv.getDate();
@@ -87,7 +88,8 @@ function abrirDiaAgenda(fechaStr) {
         return fv.getFullYear() === fecha.getFullYear() &&
                fv.getMonth() === fecha.getMonth() &&
                fv.getDate() === fecha.getDate() &&
-               p.estado !== 'Pagado';
+               p.estado !== 'Pagado' &&
+               !cxc.some(c => c.folio === p.folio && c.incobrable === true);
     });
     if (lista.length === 0) return;
     const rows = lista.map(p => {

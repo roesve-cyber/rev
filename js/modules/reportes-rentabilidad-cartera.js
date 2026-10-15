@@ -401,7 +401,7 @@ window.obtenerResumenRentabilidadCartera = function() {
         productos: _rrcArr('productos'),
         comisiones: _rrcArr('comisionesRegistradas')
     };
-    const cuentas = _rrcArr('cuentasPorCobrar').filter(c => String(c.estado || '').toLowerCase() !== 'cancelado');
+    const cuentas = _rrcArr('cuentasPorCobrar').filter(c => String(c.estado || '').toLowerCase() !== 'cancelado' && c.incobrable !== true);
 
     const filas = cuentas.map(c => window.obtenerRentabilidadCuenta(c, ctx));
 

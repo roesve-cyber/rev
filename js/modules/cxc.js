@@ -1534,6 +1534,7 @@ function aplicarMoratorioManual(folio) {
     document.querySelector('[data-modal="moratorio-manual"]')?.remove();
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
     alert("Moratorio aplicado al saldo de la cuenta.");
 }
 
@@ -1568,6 +1569,7 @@ function exentarMoratorio(folio) {
 
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
     alert("Moratorio exentado para el periodo pendiente.");
 }
 
@@ -2356,6 +2358,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
     document.querySelector('[data-modal="abono-avanzado"]')?.remove();
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (!procesoOk) return;
     if (!ticketEmitido) {
@@ -3694,6 +3697,7 @@ window.eliminarAbonoAuditoriaCxC = function(folio, abonoIndex) {
     if (typeof renderAuditoriaAbonos === 'function') renderAuditoriaAbonos();
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
     if (document.querySelector('[data-modal="auditoria-cxc"]') && window._auditCuentaActual?.folio === folio && typeof buscarVentaAuditoria === 'function') {
         const inputAudit = document.getElementById('auditFolioInput');
         if (inputAudit) inputAudit.value = folio;
@@ -4754,6 +4758,7 @@ window.guardarPromesaPago = function(folio) {
     // render función ya se sale sola si su contenedor no existe en el DOM).
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
 };
 
 window.filtrarCuentasCobranza = function() {
@@ -5492,6 +5497,7 @@ window.marcarIncobrable = function(folio) {
         });
         alert('Cuenta reactivada. Ya aparecerá en proyecciones.');
         if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
         _cxcRefrescarVistaArcActiva();
         renderCuentasIncobrables();
         return;
@@ -5517,6 +5523,7 @@ window.marcarIncobrable = function(folio) {
     // Refrescar vistas
     if (typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
     if (typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
     _cxcRefrescarVistaArcActiva();
     renderCuentasIncobrables();
 };
@@ -5572,7 +5579,9 @@ window.renderCuentasIncobrables = function() {
 
     cuentas.forEach(c => {
         const est = window._calcularEstadoCuenta?.(c.folio);
-        const saldo = _cxcDinero(est?.saldoTotal || c.saldoActual || 0);
+        const saldoNum = Number(est?.saldoTotal ?? c.saldoActual ?? 0);
+        const liquidada = saldoNum <= 0.01;
+        const saldo = _cxcDinero(saldoNum);
         const fecha = c.incobrableFecha ? new Date(c.incobrableFecha).toLocaleDateString('es-MX') : '-';
         html += `<tr>
             <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(c))}</strong><br>
@@ -5585,6 +5594,10 @@ window.renderCuentasIncobrables = function() {
                 <button onclick="abrirEstadoCuenta('${_cxcEscHTML(c.folio)}')"
                     style="padding:6px 9px; background:#1e40af; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700; margin-right:4px;">
                     👁 Ver</button>
+                ${liquidada ? `<span style="padding:6px 9px; background:#dcfce7; color:#166534; border-radius:4px; font-size:12px; font-weight:700; margin-right:4px;">✅ Liquidada</span>` : `<button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(c.folio)}', {modo:'directo'})"
+                    title="Aplicar un pago a esta cuenta aunque esté como incobrable"
+                    style="padding:6px 9px; background:#16a34a; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700; margin-right:4px;">
+                    💵 Abonar</button>`}
                 <button onclick="marcarIncobrable('${_cxcEscHTML(c.folio)}')"
                     style="padding:6px 9px; background:#059669; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;">
                     ↩ Reactivar</button>

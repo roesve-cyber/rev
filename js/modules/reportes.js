@@ -784,11 +784,9 @@ window.renderReporteCompromisos = function() {
     cxc.filter(c => c.estado !== 'Saldado' && !String(c.estado || '').toLowerCase().includes('cancel')).forEach(cuenta => {
         const saldo = Number(cuenta.saldoActual || 0);
         if (saldo <= 0) return;
+        // Cuentas marcadas incobrables: fuera del reporte (ni cartera total ni cartera muerta).
+        if (cuenta.incobrable) return;
         carteraTotal += saldo;
-
-        if (cuenta.incobrable) {
-            carteraMuerta += saldo; return;
-        }
 
         const abonos = (cuenta.abonos || []).filter(a => !a.cancelado).map(a => ({
             monto: Number(a.monto || a.montoAbonado || 0),
