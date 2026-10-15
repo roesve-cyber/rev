@@ -67,19 +67,12 @@ var categoriasData = StorageService.get("categoriasData", [
     { nombre: "Salas", subcategorias: [{ nombre: "Sofás", margen: 40 }], posicion: 2 }
 ]);
 
-var tarjetasConfig = StorageService.get("tarjetasConfig", [
-    { banco: "BBVA", diaCorte: 15, diaLimite: 5 },
-    { banco: "BANAMEX", diaCorte: 1, diaLimite: 20 }
-]);
-
-// Si tarjetasConfig está vacío, inicializalo con valores por defecto
-if (!tarjetasConfig || tarjetasConfig.length === 0) {
-    tarjetasConfig = [
-        { banco: "BBVA", diaCorte: 15, diaLimite: 5 },
-        { banco: "BANAMEX", diaCorte: 1, diaLimite: 20 }
-    ];
-    StorageService.set("tarjetasConfig", tarjetasConfig);
-    console.log("✅ tarjetasConfig inicializado con valores por defecto");
+// Los bancos los da de alta el usuario: NUNCA se siembran bancos por defecto.
+var tarjetasConfig = StorageService.get("tarjetasConfig", []);
+if (!Array.isArray(tarjetasConfig)) tarjetasConfig = [];
+// Identidad permanente (idCuenta) de cada banco; ver validator.js
+if (typeof window.asegurarIdsBancos === 'function' && window.asegurarIdsBancos()) {
+    tarjetasConfig = StorageService.get("tarjetasConfig", []);
 }
 
 var productos = StorageService.get("productos", []);
