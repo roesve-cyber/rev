@@ -18,13 +18,9 @@ function _recargarRAMInicial() {
         ];
     }
 
+    // Los bancos los da de alta el usuario: NUNCA se siembran bancos por defecto.
+    if (typeof window.asegurarIdsBancos === 'function') window.asegurarIdsBancos();
     window.tarjetasConfig = StorageService.get("tarjetasConfig", []) || [];
-    if (window.tarjetasConfig.length === 0) {
-        window.tarjetasConfig = [
-            { banco: "BBVA", diaCorte: 15, diaLimite: 5 },
-            { banco: "BANAMEX", diaCorte: 1, diaLimite: 20 }
-        ];
-    }
 
     window.productos = StorageService.get("productos", []) || [];
     window.clientes = StorageService.get("clientes", []) || [];
