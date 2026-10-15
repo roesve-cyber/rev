@@ -3396,9 +3396,10 @@ function _cxcOpcionesCuentasReceptoras(seleccionId = '', seleccionEtiqueta = '')
 
     if (bancarias.length < debitoMaestro.length) {
         const reconstruidas = debitoMaestro.map((t, idx) => {
-            const previa = bancarias.find(c => String(c.banco || c.id) === String(t.banco));
+            const previa = bancarias.find(c => (t.idCuenta && c.idCuenta === t.idCuenta) || String(c.banco || c.id) === String(t.banco));
             return {
-                id: previa?.id || `debito_${idx}_${t.banco}`,
+                id: previa?.id || t.idCuenta || `debito_${idx}_${t.banco}`,
+                idCuenta: t.idCuenta,
                 nombre: previa?.nombre || `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`,
                 tipo: 'debito',
                 banco: t.banco,
@@ -3417,9 +3418,9 @@ function _cxcOpcionesCuentasReceptoras(seleccionId = '', seleccionEtiqueta = '')
     const esSel = (value, label, extra = '') => {
         const v = normal(value);
         const l = normal(label);
-        const e = normal(extra);
-        return !!seleccionado && (seleccionado === v || seleccionado === e || seleccionado === l)
-            || !!etiquetaSel && (etiquetaSel === l || etiquetaSel === e || etiquetaSel.includes(l) || l.includes(etiquetaSel));
+        const extras = (Array.isArray(extra) ? extra : [extra]).map(normal).filter(Boolean);
+        return !!seleccionado && (seleccionado === v || extras.includes(seleccionado) || seleccionado === l)
+            || !!etiquetaSel && (etiquetaSel === l || extras.includes(etiquetaSel) || etiquetaSel.includes(l) || l.includes(etiquetaSel));
     };
 
     const optsCajas = cajas.map(c => {
@@ -3431,9 +3432,10 @@ function _cxcOpcionesCuentasReceptoras(seleccionId = '', seleccionEtiqueta = '')
     const optsDebito = bancarias
         .filter(c => String(c.tipo || '').toLowerCase().includes('debito') || c.banco)
         .map(c => {
-            const value = c.banco || c.id;
+            const value = window._valorCuentaSelector ? window._valorCuentaSelector(c) : (c.banco || c.id);
             const label = c.nombre || `🏦 ${c.banco || c.id}`;
-            return `<option value="${esc(value)}" data-nombre="${esc(label)}" ${esSel(value, label, c.id) ? 'selected' : ''}>${esc(label)}</option>`;
+            const alias = [c.id, c.banco].concat(window.aliasesExtraBanco ? window.aliasesExtraBanco(c) : []);
+            return `<option value="${esc(value)}" data-nombre="${esc(label)}" ${esSel(value, label, alias) ? 'selected' : ''}>${esc(label)}</option>`;
         });
 
     return [...optsCajas, ...optsDebito].join('') || '<option value="efectivo" data-nombre="Efectivo Principal">Efectivo Principal</option>';

@@ -62,7 +62,7 @@ function _obtenerCuentasLiquidezECB() {
 function _perteneceCuentaECB(mov, cuentaInfo, cajaDefaultId) {
     const aliases = cuentaInfo.tipo === 'caja'
         ? [cuentaInfo.clave, cuentaInfo.nombre, String(cuentaInfo.clave) === String(cajaDefaultId) ? 'efectivo' : '', String(cuentaInfo.clave) === String(cajaDefaultId) ? 'caja' : ''].filter(Boolean)
-        : [cuentaInfo.clave, cuentaInfo.nombre].filter(Boolean);
+        : [cuentaInfo.clave, cuentaInfo.nombre].concat(window.aliasesExtraBanco ? window.aliasesExtraBanco({ banco: cuentaInfo.clave }) : []).filter(Boolean);
     return window.movimientoPerteneceACuenta(mov, aliases);
 }
 

@@ -422,7 +422,7 @@ function guardarEdicionGasto(id) {
             r.cuentas[r.idx].saldo = (Number(r.cuentas[r.idx].saldo) || 0) + deltas[cid];
             const tabla = r.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
             if (typeof StorageService.actualizarAtomo === 'function') {
-                StorageService.actualizarAtomo(tabla, r.cuentaRealId, { saldo: r.cuentas[r.idx].saldo });
+                StorageService.actualizarAtomo(tabla, r.idRegistro || r.cuentaRealId, { saldo: r.cuentas[r.idx].saldo });
             } else {
                 StorageService.set(tabla, r.cuentas);
             }
@@ -432,7 +432,7 @@ function guardarEdicionGasto(id) {
         const fechaIsoMov = window.localISO ? window.localISO(new Date(fecha + 'T12:00:00')) : new Date(fecha + 'T12:00:00').toISOString();
         const cambiosMov = {
             monto: monto,
-            cuenta: rDestino.cuentaRealId,
+            cuenta: rDestino.cuentaMovimiento || rDestino.cuentaRealId,
             etiquetaCuenta: etiqueta,
             medioPago: rDestino.medioPago,
             fecha: fechaIsoMov,
@@ -735,7 +735,7 @@ function _ejecutarEliminarGasto(id) {
     cuenta.cuentas[cuenta.idx].saldo = nuevoSaldo;
     const tabla = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
     if (typeof StorageService.actualizarAtomo === 'function') {
-        StorageService.actualizarAtomo(tabla, cuenta.cuentaRealId, { saldo: nuevoSaldo });
+        StorageService.actualizarAtomo(tabla, cuenta.idRegistro || cuenta.cuentaRealId, { saldo: nuevoSaldo });
     } else {
         StorageService.set(tabla, cuenta.cuentas);
     }

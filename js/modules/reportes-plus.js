@@ -1294,7 +1294,7 @@
         arr('movimientosCaja').forEach(m => {
             const type = String(m.tipo || '').toLowerCase();
             const amount = Number(m.monto || 0) || 0;
-            const rawAccount = String(m.cuenta || m.cuentaId || '');
+            const rawAccount = String(window.claveBancoVisible ? window.claveBancoVisible(m.cuenta || m.cuentaId || '') : (m.cuenta || m.cuentaId || ''));
             const account = (rawAccount === 'efectivo' || rawAccount === 'caja' || !rawAccount) ? defaultCashId : rawAccount;
             if (balances[account] !== undefined) balances[account] += type === 'ingreso' ? amount : -amount;
         });

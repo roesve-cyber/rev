@@ -475,7 +475,7 @@ function guardarEdicionMontoPrestamo(prestamoId) {
             } else {
                 const coleccion = c.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
                 const lista = StorageService.get(coleccion, []);
-                const idxCta = lista.findIndex(x => String(x.id) === String(c.cuentaRealId) || String(x.banco) === String(c.cuentaRealId));
+                const idxCta = lista.findIndex(x => String(x.id) === String(c.idRegistro || c.cuentaRealId) || String(x.banco) === String(c.cuentaRealId));
                 if (idxCta === -1) {
                     alert(`⚠️ No se encontró la cuenta "${p.cuentaEtiqueta || p.cuentaId}" en el storage. Se corrigió solo el registro del préstamo — el saldo de caja NO se ajustó.`);
                 } else {

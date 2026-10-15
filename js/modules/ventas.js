@@ -5949,7 +5949,7 @@ function _cancelMarcarMovimientosOrigen({ folio, referenciaBase, motivo, tipoCan
         if (tipoCancelacion === 'abono' && !idObjetivo) {
             if (montoObjetivo > 0 && Math.abs(Number(m.monto || 0) - montoObjetivo) > 0.01) return m;
             if (fechaObjetivo && _cancelFechaKey(m.fecha || m.fechaISO || m.createdAt) !== fechaObjetivo) return m;
-            if (cuentaObjetivo && String(m.cuenta || m.cuentaId || '') !== cuentaObjetivo) return m;
+            if (cuentaObjetivo && String(window.claveBancoVisible ? window.claveBancoVisible(m.cuenta || m.cuentaId || '') : (m.cuenta || m.cuentaId || '')) !== String(window.claveBancoVisible ? window.claveBancoVisible(cuentaObjetivo) : cuentaObjetivo)) return m;
             if (marcados > 0) return m;
         }
         marcados++;

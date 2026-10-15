@@ -575,11 +575,14 @@ function eliminarProveedor(id) {
 
 // ===== HELPERS FINANCIEROS (ENCHUFE UNIVERSAL) =====
 
-// Valor con el que TODAS las pantallas (Mis Cuentas, Estado de Cuenta, Corte de Caja)
-// reconocen una cuenta: nombre del banco para débito, id para cajas de efectivo.
-// Nunca el id interno `debito_N_BANCO`: ninguna pantalla lo reconoce.
+// Valor con el que se identifica una cuenta en selectores y movimientos: idCuenta permanente
+// para débito, id para cajas de efectivo. Nunca el id posicional `debito_N_BANCO`.
 window._valorCuentaSelector = function(c) {
-    return String((c && (c.banco || c.id)) || '');
+    if (!c) return '';
+    // Banco: su idCuenta PERMANENTE (no cambia al renombrar/borrar/reordenar bancos).
+    // Caja de efectivo: su id.
+    if (c.banco) return String((window.idPermanenteBanco && window.idPermanenteBanco(c)) || c.banco);
+    return String(c.id || '');
 };
 
 // Etiqueta limpia de la <option> elegida: usa data-etiqueta; si no existe, le quita
@@ -595,6 +598,7 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     const cajas = soloDebito ? [] : StorageService.get('cuentasEfectivo', [{ id: 'efectivo', nombre: '💵 Efectivo Principal', saldo: 0 }]);
     
     // 1. LEER FUENTE MAESTRA (Esta nunca se borra ni se desfasa con los respaldos)
+    if (typeof window.asegurarIdsBancos === 'function') window.asegurarIdsBancos();
     const tarjetas = StorageService.get('tarjetasConfig', []);
     const debito = tarjetas.filter(t => t.tipo === "debito");
 
@@ -604,7 +608,8 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     let bancarias = StorageService.get("cuentas-bancarias", []);
     if (bancarias.length < debito.length) {
         const reconstruccion = debito.map((t, idx) => ({
-            id: `debito_${idx}_${t.banco}`,
+            id: t.idCuenta || `debito_${idx}_${t.banco}`,
+            idCuenta: t.idCuenta,
             nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`,
             tipo: t.tipo,
             banco: t.banco,
@@ -613,10 +618,10 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
             saldo: 0
         }));
         
-        // Rescatamos los saldos de las que sí hayan sobrevivido
+        // Rescatamos los saldos (y el id del registro) de las que sí hayan sobrevivido
         bancarias.forEach(cb => {
-            const match = reconstruccion.find(r => r.banco === cb.banco);
-            if (match) match.saldo = cb.saldo || 0;
+            const match = reconstruccion.find(r => (r.idCuenta && cb.idCuenta === r.idCuenta) || r.banco === cb.banco);
+            if (match) { match.saldo = cb.saldo || 0; if (cb.id) match.id = cb.id; }
         });
         
         StorageService.set("cuentas-bancarias", reconstruccion);
@@ -626,9 +631,9 @@ window._buildSelectorCuentas = function(idSelect, soloDebito = false) {
     // 3. ARMAR EL SELECTOR
     const todas = [...cajas, ...bancarias];
     
-    // IMPORTANTE: Extraemos directamente el nombre puro del banco (c.banco) 
-    // para que haga match perfecto con las reglas de egreso.
-    const opts = todas.map(c => `<option value="${c.banco || c.id}">${c.nombre}</option>`).join('');
+    // value = identidad permanente de la cuenta (idCuenta del banco / id de la caja); el
+    // texto visible es el nombre actual, así que renombrar un banco no rompe nada.
+    const opts = todas.map(c => `<option value="${window._valorCuentaSelector(c)}">${c.nombre}</option>`).join('');
     
     return `<select id="${idSelect}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">${opts}</select>`;
 };
@@ -653,17 +658,28 @@ function _resolverCuentaMovimiento(cuentaId) {
             cuentaRealId = cuentas[0].id;
         }
         return { ok: idx !== -1, tipo: 'efectivo', cuentaRealId, cuentas, idx, medioPago: 'efectivo',
-                 idCuenta: idx !== -1 ? cuentas[idx].id : null, cuentaMovimiento: cuentaRealId };
+                 idRegistro: idx !== -1 ? cuentas[idx].id : null, cuentaMovimiento: cuentaRealId };
     }
 
+    if (typeof window.asegurarIdsBancos === 'function') window.asegurarIdsBancos();
     const cuentas = StorageService.get('cuentas-bancarias', []);
-    const idx = cuentas.findIndex(x => String(x.id) === String(cuentaRealId) || String(x.banco) === String(cuentaRealId));
-    // idCuenta = id real del registro (para persistir el saldo con actualizarAtomo, que busca por id).
-    // cuentaMovimiento = lo que se guarda en movimiento.cuenta: el nombre del banco, que es lo que
-    // reconocen las pantallas, aunque quien llame haya pasado el id interno `debito_N_BANCO`.
+    // Acepta CUALQUIER forma con la que alguien conozca la cuenta: id del registro, idCuenta
+    // permanente, nombre del banco o un nombre que tuvo antes.
+    let idx = cuentas.findIndex(x => String(x.id) === String(cuentaRealId)
+        || (x.idCuenta && String(x.idCuenta) === String(cuentaRealId))
+        || String(x.banco) === String(cuentaRealId));
+    if (idx === -1 && typeof window.buscarBancoPorValor === 'function') {
+        const e = window.buscarBancoPorValor(cuentaRealId, 'debito');
+        if (e) idx = cuentas.findIndex(x => (e.idCuenta && String(x.idCuenta || '') === String(e.idCuenta)) || String(x.banco) === String(e.banco));
+    }
+    const reg = idx !== -1 ? cuentas[idx] : null;
+    const idPerm = reg && window.idPermanenteBanco ? window.idPermanenteBanco(reg) : null;
+    // idRegistro = id real del registro (para persistir el saldo con actualizarAtomo, que busca por id).
+    // cuentaMovimiento = lo que se guarda en movimiento.cuenta: el idCuenta PERMANENTE del banco,
+    // aunque quien llame haya pasado el nombre, un nombre anterior o el id interno.
     return { ok: idx !== -1, tipo: 'banco', cuentaRealId, cuentas, idx, medioPago: 'transferencia',
-             idCuenta: idx !== -1 ? cuentas[idx].id : null,
-             cuentaMovimiento: idx !== -1 ? String(cuentas[idx].banco || cuentas[idx].id) : cuentaRealId };
+             idRegistro: reg ? reg.id : null,
+             cuentaMovimiento: reg ? String(idPerm || reg.banco || reg.id) : cuentaRealId };
 }
 
 function _validarMontoMovimientoCuenta(monto, concepto) {
@@ -726,7 +742,7 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
     // mismo tiempo.
     const tablaCuentaEgreso = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
     if (typeof StorageService.actualizarAtomo === 'function') {
-        StorageService.actualizarAtomo(tablaCuentaEgreso, cuenta.idCuenta || cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
+        StorageService.actualizarAtomo(tablaCuentaEgreso, cuenta.idRegistro || cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
     } else {
         StorageService.set(tablaCuentaEgreso, cuenta.cuentas);
     }
@@ -765,7 +781,7 @@ window._egresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referenc
             accion: 'EGRESO_CUENTA',
             modulo: 'Finanzas',
             entidad: cuenta.tipo,
-            entidadId: cuenta.idCuenta || cuenta.cuentaRealId,
+            entidadId: cuenta.idRegistro || cuenta.cuentaRealId,
             detalle: concepto,
             monto: montoNum,
             severidad: 'riesgo',
@@ -795,7 +811,7 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
     // mismo tiempo.
     const tablaCuentaIngreso = cuenta.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias';
     if (typeof StorageService.actualizarAtomo === 'function') {
-        StorageService.actualizarAtomo(tablaCuentaIngreso, cuenta.idCuenta || cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
+        StorageService.actualizarAtomo(tablaCuentaIngreso, cuenta.idRegistro || cuenta.cuentaRealId, { saldo: cuenta.cuentas[cuenta.idx].saldo });
     } else {
         StorageService.set(tablaCuentaIngreso, cuenta.cuentas);
     }
@@ -832,7 +848,7 @@ window._ingresarCuenta = function({ monto, cuentaId, etiqueta, concepto, referen
             accion: 'INGRESO_CUENTA',
             modulo: 'Finanzas',
             entidad: cuenta.tipo,
-            entidadId: cuenta.idCuenta || cuenta.cuentaRealId,
+            entidadId: cuenta.idRegistro || cuenta.cuentaRealId,
             detalle: concepto,
             monto: montoNum,
             severidad: 'info',

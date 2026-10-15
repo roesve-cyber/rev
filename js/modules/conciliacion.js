@@ -1,14 +1,5 @@
 // ===== MÓDULO EXCLUSIVO DE CONCILIACIÓN MSI POR FECHA DE CORTE =====
 
-// 1. Diccionario de respaldo (Restaurado de tu versión original)
-const CONFIG_CORTES = {
-    "MERCADOPAGO": 5,
-    "BANAMEX SIMPLI": 19,
-    "SANTANDER LIKEU": 10,
-    "HSBC": 10,
-    "DEFAULT": 15
-};
-
 function renderConciliacionMSI() {
     const cont = document.getElementById('contenedorConciliacion');
     if (!cont) return;
@@ -30,12 +21,15 @@ function renderConciliacionMSI() {
     const anioReferencia = window._filtroMSIAnio || new Date().getFullYear();
 
     // 2. Cálculo Inteligente del Periodo Bancario
-    const infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSeleccionado);
-    
-    // Prioriza la DB, si no existe usa el diccionario, si no, usa 15
-    const diaCorte = (infoTarjeta && infoTarjeta.diaCorte) 
-                     ? parseInt(infoTarjeta.diaCorte) 
-                     : (CONFIG_CORTES[bancoSeleccionado] || CONFIG_CORTES.DEFAULT);
+    const infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSeleccionado)
+        || (window.buscarBancoPorValor ? window.buscarBancoPorValor(bancoSeleccionado) : null);
+
+    // El día de corte sale SIEMPRE del banco configurado: no se inventa uno.
+    const diaCorte = (infoTarjeta && parseInt(infoTarjeta.diaCorte) > 0) ? parseInt(infoTarjeta.diaCorte) : 0;
+    if (!diaCorte) {
+        cont.innerHTML = `<div style="padding:16px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;color:#78350f;">⚠️ ${bancoSeleccionado ? `El banco "${bancoSeleccionado}" no tiene día de corte configurado.` : 'No hay banco seleccionado.'} Captúralo en la configuración de Bancos y vuelve a abrir esta pantalla.</div>`;
+        return;
+    }
     
     // Matemáticas de fecha exactas (Si el corte es el 12: del 11 del mes pasado al 12 actual)
     const fechaInicio = new Date(anioReferencia, mesReferencia - 1, diaCorte - 1, 0, 0, 0);
@@ -317,14 +311,9 @@ window.abrirModalReasignarBanco = function(cuentaId) {
     let tarjetasConfig = StorageService.get("tarjetasConfig", []);
     let opcionesBancos = tarjetasConfig.map(t => `<option value="${t.banco}">${t.banco}</option>`).join('');
     
-    // Respaldo de seguridad por si el catálogo viene vacío
+    // Sin bancos configurados no se inventan opciones
     if (!opcionesBancos) {
-        opcionesBancos = `
-            <option value="BANAMEX SIMPLI">BANAMEX SIMPLI</option>
-            <option value="SANTANDER LIKEU">SANTANDER LIKEU</option>
-            <option value="HSBC">HSBC</option>
-            <option value="MERCADOPAGO">MERCADOPAGO</option>
-        `;
+        opcionesBancos = `<option value="" disabled selected>— Sin bancos configurados —</option>`;
     }
 
     let concepto = cuenta.concepto || cuenta.producto || "Compra MSI";

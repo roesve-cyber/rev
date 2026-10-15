@@ -158,23 +158,45 @@ function eliminarBanco(index) {
     }
 }
 
+// Reconstruye cuentas-bancarias desde tarjetasConfig conservando la identidad de cada
+// banco: el `id` del registro previo (o el idCuenta permanente si es nuevo), nunca una
+// posición, y el idCuenta en cada registro. Reordenar, borrar o renombrar bancos ya no
+// cambia la identidad de los demás.
+function sincronizarCuentasBancariasDesdeTarjetas() {
+    if (typeof window.asegurarIdsBancos === 'function') window.asegurarIdsBancos();
+    const tarjetas = StorageService.get("tarjetasConfig", []);
+    const previas = StorageService.get("cuentas-bancarias", []);
+    const listaPrevias = Array.isArray(previas) ? previas : [];
+    const cuentas = tarjetas
+        .filter(t => t.tipo === "debito")
+        .map((t, idx) => {
+            const anteriores = Array.isArray(t.nombresAnteriores) ? t.nombresAnteriores.map(String) : [];
+            const previa = listaPrevias.find(c => (t.idCuenta && c.idCuenta === t.idCuenta))
+                || listaPrevias.find(c => String(c.banco) === String(t.banco))
+                || listaPrevias.find(c => anteriores.includes(String(c.banco)));
+            const reg = {
+                id: (previa && previa.id) || t.idCuenta || `debito_${idx}_${t.banco}`,
+                idCuenta: t.idCuenta,
+                nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`,
+                tipo: t.tipo,
+                banco: t.banco,
+                ultimos4: t.ultimos4,
+                saldoInicial: t.saldoInicial
+            };
+            if (previa && typeof previa.saldo === 'number') reg.saldo = previa.saldo;
+            return reg;
+        });
+    StorageService.set("cuentas-bancarias", cuentas);
+    return cuentas;
+}
+
 function actualizarYRefrescarBancos() {
     if (!StorageService.set("tarjetasConfig", tarjetasConfig)) {
         console.error("❌ Error guardando bancos");
         return;
     }
     // Sincroniza cuentas de débito a cuentas-bancarias para el resto del sistema
-    const cuentasBancarias = tarjetasConfig
-        .filter(t => t.tipo === "debito")
-        .map((t, idx) => ({
-            id: `debito_${idx}_${t.banco}`,
-            nombre: `🏦 ${t.banco}${t.ultimos4 ? ' ••••' + t.ultimos4 : ''}`,
-            tipo: t.tipo,
-            banco: t.banco,
-            ultimos4: t.ultimos4,
-            saldoInicial: t.saldoInicial
-        }));
-    StorageService.set("cuentas-bancarias", cuentasBancarias);
+    sincronizarCuentasBancariasDesdeTarjetas();
     
     renderBancosConfig();
     
@@ -1154,7 +1176,8 @@ function _bancosAliasesCaja(c, index) {
 }
 
 function _bancosAliasesDebito(t) {
-    return [t.banco, t.id, t.nombre].filter(Boolean);
+    // Lo que ya reconocía + el idCuenta permanente y los nombres anteriores del banco
+    return [t.banco, t.id, t.nombre].concat(window.aliasesExtraBanco ? window.aliasesExtraBanco(t) : []).filter(Boolean);
 }
 
 function _bancosCalcularSaldosDesdeMovimientos() {
@@ -1287,7 +1310,7 @@ function _bancosAgruparTransferenciasConciliacion(lista) {
             return;
         }
 
-        const cuenta = String(m.cuenta || m.cuentaId || 'efectivo');
+        const cuenta = String(window.claveBancoVisible ? window.claveBancoVisible(m.cuenta || m.cuentaId || 'efectivo') : (m.cuenta || m.cuentaId || 'efectivo'));
         const fechaKey = _bancosFechaKeyMovimiento(m.fecha || m.fechaISO || m.createdAt);
         const clave = `${cuenta}|${fechaKey}|${grupo}`;
         if (!grupos[clave]) {
@@ -1582,8 +1605,10 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
     // 1. Filtro por Cuenta
     if (window._filtroCuentaLiquidez !== 'Todos') {
         const cajaDefaultId = cajas[0]?.id || "efectivo";
+        const _vis = (v) => (window.claveBancoVisible ? window.claveBancoVisible(v) : v);
+        const _filtroVis = _vis(window._filtroCuentaLiquidez);
         movimientosFiltrados = movimientosFiltrados.filter(m => {
-            if (m.cuenta === window._filtroCuentaLiquidez) return true;
+            if (_vis(m.cuenta) === _filtroVis) return true;
             if (window._filtroCuentaLiquidez === cajaDefaultId && (m.cuenta === 'efectivo' || m.cuenta === 'caja')) return true;
             return false;
         });
@@ -2350,10 +2375,29 @@ window.confirmarGuardadoBanco = function(tipo, index) {
         datos.ultimos4 = ""; datos.saldoInicial = 0;
     }
 
-    if (index === null) tarjetas.push(datos);
-    else tarjetas[index] = datos;
+    // El NOMBRE es lo que se muestra; la identidad real es idCuenta. Aun así, dos bancos del
+    // mismo tipo con el mismo nombre harían ambiguo el reconocimiento por nombre.
+    const choque = tarjetas.some((t, i) => i !== index && String(t.banco || '').toUpperCase() === nombre && String(t.tipo || '') === tipo);
+    if (choque) return alert(`⚠️ Ya existe un banco "${nombre}" de este tipo.`);
+
+    const previo = (index !== null && tarjetas[index]) ? tarjetas[index] : null;
+    // 🔑 idCuenta se crea UNA vez y nunca cambia al editar o renombrar. Si se renombra, el
+    // nombre anterior se guarda para seguir reconociendo los movimientos viejos (sin tocarlos).
+    const usados = new Set(tarjetas.map(t => t && t.idCuenta).filter(Boolean));
+    let idCuenta = previo && previo.idCuenta;
+    if (!idCuenta) {
+        do { idCuenta = window.generarIdCuentaBanco(nombre, false); } while (usados.has(idCuenta));
+    }
+    const anteriores = new Set(Array.isArray(previo && previo.nombresAnteriores) ? previo.nombresAnteriores.map(String) : []);
+    if (previo && previo.banco && String(previo.banco) !== nombre) anteriores.add(String(previo.banco));
+    anteriores.delete(nombre);
+    const final = Object.assign({}, previo || {}, datos, { idCuenta, nombresAnteriores: Array.from(anteriores) });
+
+    if (index === null) tarjetas.push(final);
+    else tarjetas[index] = final;
 
     StorageService.set("tarjetasConfig", tarjetas);
+    sincronizarCuentasBancariasDesdeTarjetas();
     location.reload();
 };
 
@@ -2736,7 +2780,7 @@ window.guardarEdicionTransferencia = function(idOperacion) {
         movsDirectos.forEach(m => {
             if (m.id === egresoAnterior.id) {
                 m.monto = nuevoMonto;
-                m.cuenta = rOrigen.cuentaRealId;
+                m.cuenta = rOrigen.cuentaMovimiento || rOrigen.cuentaRealId;
                 m.etiquetaCuenta = nombreOrigenFull;
                 m.medioPago = rOrigen.medioPago;
                 m.fecha = fechaIso;
@@ -2748,7 +2792,7 @@ window.guardarEdicionTransferencia = function(idOperacion) {
                 m.tipoMovimiento = 'transferencia_interna';
             } else if (m.id === ingresoAnterior.id) {
                 m.monto = nuevoMonto;
-                m.cuenta = rDestino.cuentaRealId;
+                m.cuenta = rDestino.cuentaMovimiento || rDestino.cuentaRealId;
                 m.etiquetaCuenta = nombreDestinoFull;
                 m.medioPago = rDestino.medioPago;
                 m.fecha = fechaIso;

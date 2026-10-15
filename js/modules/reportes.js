@@ -1069,7 +1069,7 @@ window.renderReporteLiquidezCortoPlazo = function() {
     StorageService.get("movimientosCaja", []).forEach(m => {
         const esIng = String(m.tipo || '').toLowerCase() === "ingreso";
         const amt = parseFloat(m.monto) || 0;
-        const cuentaMov = String(m.cuenta || m.cuentaId || '');
+        const cuentaMov = String(window.claveBancoVisible ? window.claveBancoVisible(m.cuenta || m.cuentaId || '') : (m.cuenta || m.cuentaId || ''));
         const cta = (cuentaMov === "efectivo" || cuentaMov === "caja" || !cuentaMov) ? cajaDefaultLiquidezId : cuentaMov;
         if (saldos[cta] !== undefined) saldos[cta] += (esIng ? amt : -amt);
     });
@@ -1307,7 +1307,8 @@ window.renderReporteFlujo = function() {
         if (cajaPorNombre) return String(cajaPorNombre.id || c);
 
         // Mantener nombres reales de cuentas: Caja Principal, Caja Chica, etc.
-        return c;
+        // Un banco guardado por idCuenta o por un nombre anterior se agrupa bajo su nombre actual.
+        return String(window.claveBancoVisible ? window.claveBancoVisible(c) : c);
     };
 
             const nombreCuenta = (id) => {

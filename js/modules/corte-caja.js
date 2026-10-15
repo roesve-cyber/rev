@@ -129,6 +129,7 @@
     // ===== (Pendientes de corte y captura rápida removidos: los movimientos se registran en su modulo correspondiente) =====
 
     function asegurarCuentasBancarias() {
+        if (typeof window.asegurarIdsBancos === 'function') window.asegurarIdsBancos();
         let bancarias = StorageService.get('cuentas-bancarias', []);
         const tarjetas = StorageService.get('tarjetasConfig', []);
         const debito = tarjetas.filter(t => String(t.tipo || '').toLowerCase() === 'debito');
@@ -136,9 +137,10 @@
         if (!Array.isArray(bancarias)) bancarias = [];
         if (bancarias.length < debito.length) {
             const reconstruidas = debito.map((t, idx) => {
-                const previa = bancarias.find(c => String(c.banco || c.nombre || '').toLowerCase() === String(t.banco || '').toLowerCase());
+                const previa = bancarias.find(c => (t.idCuenta && c.idCuenta === t.idCuenta) || String(c.banco || c.nombre || '').toLowerCase() === String(t.banco || '').toLowerCase());
                 return {
-                    id: previa?.id || `debito_${idx}_${t.banco}`,
+                    id: previa?.id || t.idCuenta || `debito_${idx}_${t.banco}`,
+                    idCuenta: t.idCuenta,
                     nombre: previa?.nombre || `Banco ${t.banco}${t.ultimos4 ? ' ****' + t.ultimos4 : ''}`,
                     tipo: 'debito',
                     banco: t.banco,
@@ -184,7 +186,7 @@
 
         const bancarias = asegurarCuentasBancarias();
         const bancos = bancarias.map((c, index) => {
-            const aliases = [c.id, c.banco, c.nombre].filter(Boolean);
+            const aliases = [c.id, c.banco, c.nombre].concat(window.aliasesExtraBanco ? window.aliasesExtraBanco(c) : []).filter(Boolean);
             // El saldo recien calculado a partir de movimientosCaja (con la misma
             // función de identidad de cuenta que usa todo el sistema) es siempre la
             // fuente confiable; el campo "saldo" guardado puede haber quedado
