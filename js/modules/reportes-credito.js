@@ -563,6 +563,45 @@ window.renderARCTablaExcel = function() {
         });
     }
 
+    // ── Riesgo continuo (verde → rojo) y bloques de "cero pagos" ─────────────
+    // Días de riesgo de una fila = días desde su último abono; si nunca ha
+    // pagado, días desde la venta (así un cliente que compró hace 8 días NO
+    // pesa igual que uno que lleva 2 meses sin pagar). En filas agrupadas por
+    // cliente se toma la cuenta más atrasada.
+    const diasRiesgoFila = (c) => {
+        const lista = c.agrupadoPorCliente ? c.cuentasGrupo : [c];
+        let max = 0;
+        lista.forEach(x => {
+            let d = Number(x.sne.diasSinPagar);
+            if (!(d >= 0 && d < 9999)) {
+                const fv = _rc.parseFecha(x.fechaVenta || x.fechaIso || x.fecha);
+                d = fv ? Math.max(0, Math.floor((hoy - fv) / 86400000)) : 0;
+            }
+            if (d > max) max = d;
+        });
+        return max;
+    };
+
+    // 0 días = verde, 120 días = rojo; pasando de 120 el rojo se oscurece.
+    const colorRiesgoDias = (dias) => {
+        const t = Math.min(Math.max(dias, 0), 120) / 120;
+        const hue = Math.round(125 * (1 - t));
+        const extra = Math.min(Math.max(dias - 120, 0), 120) / 120;
+        const light = Math.round(48 - 18 * extra);
+        return {
+            bg: `hsl(${hue}, 78%, ${light}%)`,
+            soft: `hsl(${hue}, 70%, 92%)`,
+            fg: hue < 35 ? '#ffffff' : '#000000'
+        };
+    };
+
+    const _sinPago = c => !c.sne.ultimaFechaAbono;
+    const MAX_BLOQUE_MESES = 6;
+    const bloqueMes = c => Math.min(MAX_BLOQUE_MESES, Math.floor(diasRiesgoFila(c) / 30));
+    const bloqueMesLabel = m => m === 0 ? 'menos de 1 mes'
+        : m >= MAX_BLOQUE_MESES ? `${MAX_BLOQUE_MESES} meses o más`
+        : `${m} a ${m + 1} meses`;
+
     // 2. Ordenamiento Vertical Dinámico
     const sortDir = window._arcExSortDir === 'desc' ? -1 : 1;
     cuentasActivas.sort((a, b) => {
@@ -571,7 +610,11 @@ window.renderARCTablaExcel = function() {
             const riskOrder = { 'Alerta total': 1, 'CRÍTICO': 1, 'INCOBRABLE': 1, 'Alto riesgo': 2, 'EN MORA': 2, 'Riesgo': 3, 'MODERADO': 3, 'Bajo riesgo': 4, 'LEVE': 4, 'AL CORRIENTE': 5 };
             valA = riskOrder[a.sne.nivelRiesgo] || 99;
             valB = riskOrder[b.sne.nivelRiesgo] || 99;
-            if (valA === valB) return sortDir * (b.sne.saldoActual - a.sne.saldoActual); // Desempate por saldo
+            if (valA === valB) {
+                const dd = diasRiesgoFila(b) - diasRiesgoFila(a); // Más días sin pagar = más arriba
+                if (dd !== 0) return sortDir * dd;
+                return sortDir * (b.sne.saldoActual - a.sne.saldoActual); // Desempate por saldo
+            }
             return sortDir * (valA - valB);
         }
         if (window._arcExSort === 'fecha') {
@@ -623,6 +666,23 @@ window.renderARCTablaExcel = function() {
         return 0;
     });
 
+    // 2.5 Clientes con CERO pagos → bloques por meses transcurridos desde la compra.
+    // Dentro de cada bloque se respeta el orden elegido por el usuario; los
+    // bloques van del más atrasado al más reciente. Con "Sin abono / más
+    // antiguo arriba" el área de cero pagos va arriba, en cualquier otro caso abajo.
+    {
+        const conPago = cuentasActivas.filter(c => !_sinPago(c));
+        const sinPago = cuentasActivas.filter(_sinPago);
+        sinPago.sort((a, b) => bloqueMes(b) - bloqueMes(a)); // sort estable: conserva orden interno
+        const sinPagoPrimero = window._arcExSort === 'ultimoPago' && window._arcExSortDir === 'asc';
+        cuentasActivas = sinPagoPrimero ? [...sinPago, ...conPago] : [...conPago, ...sinPago];
+    }
+    const hayCeroPagos = cuentasActivas.some(_sinPago);
+    const conteoBloques = {};
+    cuentasActivas.forEach(c => { if (_sinPago(c)) { const m = bloqueMes(c); conteoBloques[m] = (conteoBloques[m] || 0) + 1; } });
+    const totalConPago = cuentasActivas.filter(c => !_sinPago(c)).length;
+    let _bloqueActual = null;
+
     // 3. Extraer columnas únicas de Abonos Reales
     const groupSet = new Set();
     cuentasActivas.forEach(c => {
@@ -647,13 +707,30 @@ window.renderARCTablaExcel = function() {
     const filasHtml = cuentasActivas.map((c, i) => {
         const s = c.sne;
         
-        let bgStatus, colorText;
-        if (s.nivelRiesgo === 'AL CORRIENTE') {
-            bgStatus = '#22c55e'; colorText = '#000000'; 
-        } else if (s.nivelRiesgo === 'LEVE' || s.nivelRiesgo === 'MODERADO') {
-            bgStatus = '#facc15'; colorText = '#000000'; 
-        } else {
-            bgStatus = '#b91c1c'; colorText = '#ffffff'; 
+        const diasRiesgo = diasRiesgoFila(c);
+        const colRiesgo = colorRiesgoDias(diasRiesgo);
+        const bgStatus = colRiesgo.bg;
+        const colorText = colRiesgo.fg;
+        const sinPagoFila = _sinPago(c);
+        const tituloRiesgo = `${s.nivelRiesgo} · ${sinPagoFila ? 'sin ningún pago, ' + diasRiesgo + ' días desde la compra' : diasRiesgo + ' días sin pagar'}`;
+
+        // Encabezado de bloque (solo si existe al menos un cliente con cero pagos)
+        let encabezadoBloque = '';
+        if (hayCeroPagos) {
+            const claveBloque = sinPagoFila ? ('m' + bloqueMes(c)) : 'pagos';
+            if (claveBloque !== _bloqueActual) {
+                _bloqueActual = claveBloque;
+                let textoBloque, cBloque;
+                if (sinPagoFila) {
+                    const m = bloqueMes(c);
+                    cBloque = colorRiesgoDias(m * 30 + 15);
+                    textoBloque = `⛔ SIN NINGÚN PAGO · compra de hace ${bloqueMesLabel(m)} <span style="font-weight:600;opacity:.8;">(${conteoBloques[m]} ${conteoBloques[m] === 1 ? 'cliente' : 'clientes'})</span>`;
+                } else {
+                    cBloque = { bg: '#64748b', soft: '#f1f5f9' };
+                    textoBloque = `💳 CON PAGOS REGISTRADOS <span style="font-weight:600;opacity:.8;">(${totalConPago})</span>`;
+                }
+                encabezadoBloque = `<tr class="ex-bloque"><td colspan="${9 + uniqueGroups.length}" style="padding:0; background:${cBloque.soft}; border-top:2px solid ${cBloque.bg}; border-left:6px solid ${cBloque.bg};"><div style="position:sticky; left:0; display:inline-block; padding:6px 12px; font-size:11px; font-weight:900; color:#0f172a; white-space:nowrap;">${textoBloque}</div></td></tr>`;
+            }
         }
 
         const desc = c.agrupadoPorCliente
@@ -678,8 +755,8 @@ window.renderARCTablaExcel = function() {
         sumImporte += importeReal;
         sumRestante += saldoRestante;
 
-        let row = `<tr style="font-size:11px; background:#ffffff; border-bottom:1px solid #e2e8f0;">
-            <td class="ex-stky ex-col-1" style="background:${bgStatus}; color:${colorText};" title="${s.nivelRiesgo}">
+        let row = encabezadoBloque + `<tr style="font-size:11px; background:#ffffff; border-bottom:1px solid #e2e8f0;">
+            <td class="ex-stky ex-col-1" style="background:${bgStatus}; color:${colorText};" title="${tituloRiesgo}">
                 <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                     <input type="checkbox" class="chk-cobrador" value="${i}" style="width:13px; height:13px; margin:0; cursor:pointer;">
                     ${s.emojiRiesgo}
@@ -839,6 +916,12 @@ window.renderARCTablaExcel = function() {
                     <option value="asc" ${window._arcExSort==='ultimoPago'&&window._arcExSortDir==='asc'?'selected':''}>Sin abono / mas antiguo arriba</option>
                     <option value="desc" ${window._arcExSort==='ultimoPago'&&window._arcExSortDir==='desc'?'selected':''}>Mas reciente arriba</option>
                 </select>
+            </div>
+            <div style="width:1px;height:24px;background:#e2e8f0;"></div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;font-weight:bold;color:#64748b;" title="Días desde el último pago (o desde la compra si nunca ha pagado)">
+                RIESGO <span>0d</span>
+                <span style="display:inline-block;width:90px;height:10px;border-radius:5px;background:linear-gradient(90deg,hsl(125,78%,48%),hsl(62,78%,48%),hsl(31,78%,48%),hsl(0,78%,48%),hsl(0,78%,30%));"></span>
+                <span>120d+</span>
             </div>
             <div style="width:1px;height:24px;background:#e2e8f0;"></div>
             <div>
