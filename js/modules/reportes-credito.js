@@ -760,7 +760,9 @@ window.renderARCTablaExcel = function() {
                 <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                     <input type="checkbox" class="chk-cobrador" value="${i}" style="width:13px; height:13px; margin:0; cursor:pointer;">
                     ${s.emojiRiesgo}
-                    ${!c.agrupadoPorCliente ? `<span onclick="marcarIncobrable('${c.folio}')" title="Marcar como incobrable" style="cursor:pointer; font-size:11px; line-height:1; background:#ffffff; border:1px solid #0f172a; border-radius:50%; width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.4);">⚫</span>` : ''}
+                    ${c.agrupadoPorCliente
+                        ? `<span onclick="marcarIncobrableDesdeMatriz(${i})" title="Marcar como incobrable" style="cursor:pointer; font-size:11px; line-height:1; background:#ffffff; border:1px solid #0f172a; border-radius:50%; width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.4);">⚫</span>`
+                        : `<span onclick="marcarIncobrable('${c.folio}')" title="Marcar como incobrable" style="cursor:pointer; font-size:11px; line-height:1; background:#ffffff; border:1px solid #0f172a; border-radius:50%; width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.4);">⚫</span>`}
                 </div>
             </td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
@@ -982,6 +984,24 @@ window.renderARCTablaExcel = function() {
             input.setSelectionRange(input.value.length, input.value.length);
         }
     }, 0);
+};
+
+// Botón ⚫ de la Matriz cuando las filas están agrupadas por cliente:
+// con 1 cuenta marca directo; con varias, pide elegir cuál (cada una pide su motivo).
+window.marcarIncobrableDesdeMatriz = function(idx) {
+    const fila = (window._filasParaCobranza || [])[idx];
+    if (!fila) return;
+    const cuentas = fila.cuentasGrupo || [fila];
+    if (cuentas.length === 1) return window.marcarIncobrable(cuentas[0].folio);
+    const lista = cuentas.map((c, n) => {
+        const prod = (c.articulos || []).map(a => a.nombre).join(', ') || 'Venta General';
+        return `${n + 1}) ${c.folio} · ${prod} · saldo $${Number(c.sne?.saldoActual || c.saldoActual || 0).toLocaleString('en-US')}`;
+    }).join('\n');
+    const r = prompt(`${fila.nombre} tiene ${cuentas.length} cuentas.\n¿Cuál marcar como incobrable? Escribe el número:\n\n${lista}`);
+    if (r === null) return;
+    const sel = cuentas[parseInt(r, 10) - 1];
+    if (!sel) return alert('Número no válido.');
+    window.marcarIncobrable(sel.folio);
 };
 
 // ================================================================
