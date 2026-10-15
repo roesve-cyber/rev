@@ -147,6 +147,102 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
     return candidatos.some(c => listaAlias.includes(c));
 };
 
+// ============================================================================
+// 🏦 IDENTIDAD PERMANENTE DE LOS BANCOS (idCuenta)
+// ----------------------------------------------------------------------------
+// Antes un banco se identificaba por su NOMBRE (se pierde al renombrarlo) o por un
+// id posicional `debito_N_BANCO` (cambia al borrar/reordenar bancos). Ahora cada
+// entrada de tarjetasConfig tiene un `idCuenta` que se crea UNA vez y nunca cambia,
+// y `nombresAnteriores` (los nombres que tuvo) para seguir reconociendo movimientos
+// viejos guardados con el nombre de antes. Nada de esto toca movimientos históricos.
+//
+// Para bancos ya existentes el id es DETERMINISTA (`bnk_<nombre>`): si dos
+// dispositivos migran a la vez generan el MISMO id y no se pisan. Los bancos nuevos
+// llevan un sufijo aleatorio.
+// ============================================================================
+(function () {
+    const norm = (v) => window.normalizarIdCuenta(v);
+    const slug = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'banco';
+    const leerTarjetas = () => {
+        const l = StorageService.get('tarjetasConfig', []);
+        return Array.isArray(l) ? l : [];
+    };
+
+    window.generarIdCuentaBanco = function (nombre, determinista) {
+        const base = 'bnk_' + slug(nombre);
+        return determinista ? base : base + '_' + Math.random().toString(36).slice(2, 7);
+    };
+
+    // Busca la entrada de tarjetasConfig por idCuenta, nombre actual o nombre anterior.
+    // tipo (opcional): 'debito' | 'credito' — solo filtra las búsquedas por NOMBRE.
+    window.buscarBancoPorValor = function (valor, tipo) {
+        const v = norm(valor);
+        if (!v) return null;
+        const lista = leerTarjetas().filter((e) => e && typeof e === 'object');
+        const esTipo = (e) => !tipo || String(e.tipo || '').toLowerCase() === tipo;
+        return lista.find((e) => e.idCuenta && norm(e.idCuenta) === v)
+            || lista.find((e) => esTipo(e) && norm(e.banco) === v)
+            || lista.find((e) => esTipo(e) && Array.isArray(e.nombresAnteriores) && e.nombresAnteriores.some((n) => norm(n) === v))
+            || null;
+    };
+
+    // Idempotente: marca con idCuenta a los bancos que aún no lo tienen y copia el
+    // idCuenta a los registros derivados de cuentas-bancarias. Devuelve true si cambió algo.
+    window.asegurarIdsBancos = function () {
+        const tarjetas = leerTarjetas();
+        let cambio = false;
+        const usados = new Set(tarjetas.map((e) => e && e.idCuenta).filter(Boolean).map(String));
+        tarjetas.forEach((e) => {
+            if (!e || typeof e !== 'object' || e.idCuenta) return;
+            let id = window.generarIdCuentaBanco(e.banco, true);
+            if (usados.has(id)) id = window.generarIdCuentaBanco(e.banco, false);
+            e.idCuenta = id;
+            usados.add(id);
+            cambio = true;
+        });
+        if (cambio) StorageService.set('tarjetasConfig', tarjetas);
+        const cb = StorageService.get('cuentas-bancarias', []);
+        let cambioCb = false;
+        if (Array.isArray(cb)) {
+            cb.forEach((c) => {
+                if (!c || c.idCuenta) return;
+                const e = window.buscarBancoPorValor(c.banco || c.id || c.nombre, 'debito');
+                if (e && e.idCuenta) { c.idCuenta = e.idCuenta; cambioCb = true; }
+            });
+            if (cambioCb) StorageService.set('cuentas-bancarias', cb);
+        }
+        return cambio || cambioCb;
+    };
+
+    // idCuenta permanente de un registro de cuentas-bancarias / entrada de tarjetasConfig
+    window.idPermanenteBanco = function (ref) {
+        if (!ref) return null;
+        if (ref.idCuenta) return String(ref.idCuenta);
+        const e = window.buscarBancoPorValor(ref.banco || ref.id || ref.nombre, 'debito');
+        return e && e.idCuenta ? String(e.idCuenta) : null;
+    };
+
+    // Identificadores EXTRA con los que hay que reconocer un banco (idCuenta + nombres
+    // anteriores). Se SUMAN a los alias que cada pantalla ya usaba: nunca reemplazan.
+    window.aliasesExtraBanco = function (ref) {
+        if (!ref) return [];
+        const e = (ref.idCuenta && window.buscarBancoPorValor(ref.idCuenta))
+            || window.buscarBancoPorValor(ref.banco || ref.id || ref.nombre, 'debito');
+        if (!e) return [];
+        return [e.idCuenta].concat(Array.isArray(e.nombresAnteriores) ? e.nombresAnteriores : []).filter(Boolean).map(String);
+    };
+
+    // Para lectores que agrupan por NOMBRE de banco: convierte idCuenta / nombre anterior
+    // al nombre actual del banco. Cajas y valores desconocidos se devuelven tal cual.
+    window.claveBancoVisible = function (valor) {
+        // Los movimientos de caja solo pertenecen a cuentas de DÉBITO: un banco con débito y
+        // crédito del mismo nombre no debe confundirse con la tarjeta de crédito.
+        const e = window.buscarBancoPorValor(valor, 'debito');
+        return e && e.banco ? String(e.banco) : valor;
+    };
+})();
+
 // Función de escape global para limpiar texto
 window._esc = function(estu) {
     if (!estu) return "";
