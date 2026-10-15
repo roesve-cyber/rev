@@ -760,7 +760,7 @@ window.renderARCTablaExcel = function() {
                 <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                     <input type="checkbox" class="chk-cobrador" value="${i}" style="width:13px; height:13px; margin:0; cursor:pointer;">
                     ${s.emojiRiesgo}
-                    ${!c.agrupadoPorCliente ? `<span onclick="marcarIncobrable('${c.folio}')" title="Marcar incobrable" style="cursor:pointer; font-size:10px; line-height:1;">⚫</span>` : ''}
+                    ${!c.agrupadoPorCliente ? `<span onclick="marcarIncobrable('${c.folio}')" title="Marcar como incobrable" style="cursor:pointer; font-size:11px; line-height:1; background:#ffffff; border:1px solid #0f172a; border-radius:50%; width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.4);">⚫</span>` : ''}
                 </div>
             </td>
             <td class="ex-stky ex-col-2" style="background:${bgStatus}; color:${colorText}; font-weight:bold; border-right:1px solid rgba(0,0,0,0.1);">${fechaVentaStr}</td>
