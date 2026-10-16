@@ -4149,6 +4149,13 @@ function _cxcEstadoCuentaModelo(folio) {
             Number(estadoCta.saldoTotal || 0)
         );
     const totalAbonos = abonos.reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
+    // 🛡️ Condonaciones de política de pago anticipado ligadas a este folio
+    // (_cxcRegistrarCondonacionPolitica). Sin esto, totalCredito - totalAbonos
+    // no coincide con el saldo real cuando parte del saldo se perdonó en vez
+    // de cobrarse -- el estado de cuenta debe dejarlo explícito, no solo
+    // "absorberlo" en silencio al topar el saldo en $0.
+    const condonaciones = StorageService.get('condonacionesPolitica', []).filter(c => c.folioOrigen === folio);
+    const totalCondonado = condonaciones.reduce((s, c) => s + Number(c.monto || 0), 0);
     const totalPagadoCliente = enganche + totalAbonos;
     const periodicidad = cuenta.periodicidad || plan.periodicidad || 'semanal';
     const pagosPlan = Number(plan.pagos || plan.plazo || plan.semanas || pagaresContrato.length || 0);
@@ -4171,6 +4178,8 @@ function _cxcEstadoCuentaModelo(folio) {
         cuenta,
         estadoCta,
         abonos,
+        condonaciones,
+        totalCondonado,
         articulos,
         precioContado,
         totalCredito,
@@ -4277,22 +4286,59 @@ function _cxcEstadoCuentaAbonosRows(m) {
         ? `<tr style="background:#f8fafc;"><td>—</td><td>${_cxcEstadoCuentaFecha(m.fechaVenta)}</td><td><strong>Enganche (al momento de la compra)</strong></td><td class="mmp-edo-right mmp-edo-total">${_cxcDinero(enganche)}</td><td class="mmp-edo-right mmp-edo-saldo">${_cxcDinero(Number(m.totalCredito || 0))}</td></tr>`
         : '';
 
-    if (!m.abonos.length) {
+    const eventos = _cxcEstadoCuentaEventos(m);
+    if (!eventos.length) {
         return filaEnganche || `<tr><td colspan="5" class="mmp-edo-center mmp-edo-muted">Sin abonos registrados.</td></tr>`;
     }
-    // El saldo corrido de los abonos se calcula en orden cronológico real
-    // (m.abonos viene ascendente desde _cxcEstadoCuentaAbonos) para que
-    // cada fila muestre el saldo correcto justo después de ESE abono.
-    // Recién calculado se invierte el arreglo para presentarlo más
-    // reciente primero, igual que el resto de los documentos de cobranza
-    // -- el enganche, al ser fijo arriba, queda fuera de ese orden.
+    // 🛡️ Este documento va del más antiguo al más reciente (como un estado
+    // de cuenta bancario), a diferencia de otros listados del sistema. El
+    // saldo corrido está anclado al enganche (fijo arriba): si se mostrara
+    // más-reciente-primero, el saldo brincaría de forma ilógica al leer de
+    // arriba a abajo (baja a $0 y luego "sube"). Así SIEMPRE baja leyendo
+    // hacia abajo. Los eventos (abonos + condonaciones intercaladas por
+    // fecha) ya vienen ascendentes de _cxcEstadoCuentaEventos.
+    //
+    // 🛡️ Las condonaciones (saldo perdonado por política de pago
+    // anticipado) NO son un pago del cliente: no llevan número de abono,
+    // pero SÍ reducen el saldo en su punto de la línea de tiempo. Sin esto,
+    // totalCredito menos la suma de abonos no cuadraba con el saldo real.
     let saldo = Number(m.totalCredito || 0);
-    const filas = m.abonos.map((a, idx) => {
-        const monto = Number(a.monto || a.montoAbonado || 0);
-        saldo = Math.max(0, saldo - monto);
-        return `<tr><td>${idx + 1}</td><td>${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(a))}</td><td>${_cxcEscHTML(a.etiquetaCuenta || a.medioPago || a.cuentaId || 'Efectivo')}</td><td class="mmp-edo-right mmp-edo-total">${_cxcDinero(monto)}</td><td class="mmp-edo-right mmp-edo-saldo">${_cxcDinero(saldo)}</td></tr>`;
+    const filas = eventos.map(ev => {
+        saldo = Math.max(0, saldo - ev.monto);
+        if (ev.tipo === 'condonacion') {
+            return `<tr style="background:#fef2f2;"><td>—</td><td>${_cxcEstadoCuentaFecha(ev.fecha)}</td><td><strong>Condonado</strong> -- ${_cxcEscHTML(ev.medio)}</td><td class="mmp-edo-right mmp-edo-total" style="color:#b91c1c;">${_cxcDinero(ev.monto)}</td><td class="mmp-edo-right mmp-edo-saldo">${_cxcDinero(saldo)}</td></tr>`;
+        }
+        return `<tr><td>${ev.num}</td><td>${_cxcEstadoCuentaFecha(ev.fecha)}</td><td>${_cxcEscHTML(ev.medio)}</td><td class="mmp-edo-right mmp-edo-total">${_cxcDinero(ev.monto)}</td><td class="mmp-edo-right mmp-edo-saldo">${_cxcDinero(saldo)}</td></tr>`;
     });
-    return filaEnganche + filas.slice().reverse().join('');
+    return filaEnganche + filas.join('');
+}
+
+// 🛡️ Línea de tiempo del estado de cuenta: abonos (en el orden en que ya
+// vienen del modelo, ascendente) con las condonaciones de política
+// intercaladas por fecha real. Cada abono lleva su número cronológico
+// (`num`); las condonaciones no. Ante fecha igual, el abono va primero.
+function _cxcEstadoCuentaEventos(m) {
+    const ms = (f) => {
+        const d = (window.parseFechaMX ? window.parseFechaMX(f) : new Date(f || 0));
+        const t = d instanceof Date ? d.getTime() : Number(d);
+        return Number.isFinite(t) ? t : 0;
+    };
+    let num = 0;
+    const abonos = (Array.isArray(m.abonos) ? m.abonos : []).map(a => {
+        const fecha = _cxcFechaAbonoBase(a);
+        return { tipo: 'abono', num: ++num, fecha, ms: ms(fecha), monto: Number(a.monto || a.montoAbonado || 0), medio: a.etiquetaCuenta || a.medioPago || a.cuentaId || 'Efectivo' };
+    });
+    const conds = (Array.isArray(m.condonaciones) ? m.condonaciones : [])
+        .map(c => ({ tipo: 'condonacion', fecha: c.fecha, ms: ms(c.fecha), monto: Number(c.monto || 0), medio: c.motivo || 'Condonación por política de pago anticipado' }))
+        .sort((x, y) => x.ms - y.ms);
+    const out = [];
+    let ci = 0;
+    abonos.forEach(ev => {
+        while (ci < conds.length && conds[ci].ms < ev.ms) out.push(conds[ci++]);
+        out.push(ev);
+    });
+    while (ci < conds.length) out.push(conds[ci++]);
+    return out;
 }
 
 function _cxcEstadoCuentaHtml(m, opts = {}) {
@@ -4321,12 +4367,13 @@ function _cxcEstadoCuentaHtml(m, opts = {}) {
                 <div class="mmp-edo-metric primary"><div class="mmp-edo-label">Total credito</div><strong>${_cxcDinero(m.totalCredito)}</strong></div>
                 <div class="mmp-edo-metric"><div class="mmp-edo-label">Enganche</div><strong>${_cxcDinero(m.enganche)}</strong></div>
                 <div class="mmp-edo-metric green"><div class="mmp-edo-label">Abonos recibidos</div><strong>${_cxcDinero(m.totalAbonos)}</strong></div>
+                ${m.totalCondonado > 0.01 ? `<div class="mmp-edo-metric" style="background:#fef2f2;"><div class="mmp-edo-label" style="color:#b91c1c;">Condonado</div><strong style="color:#b91c1c;">${_cxcDinero(m.totalCondonado)}</strong></div>` : ''}
                 <div class="mmp-edo-metric ${m.saldoActual > 0 ? 'red' : 'green'}"><div class="mmp-edo-label">Saldo actual</div><strong>${_cxcDinero(m.saldoActual)}</strong></div>
             </div>
 
             <div class="mmp-edo-row">
                 <div class="mmp-edo-box"><div class="mmp-edo-label">Condiciones de credito</div><div class="mmp-edo-value">${m.pagosPlan || '-'} pago(s) ${_cxcEscHTML(m.periodicidad)}</div><div class="mmp-edo-muted">Abono por periodo: ${m.abonoPeriodo ? _cxcDinero(m.abonoPeriodo) : '-'}</div></div>
-                <div class="mmp-edo-box"><div class="mmp-edo-label">Total pagado por cliente</div><div class="mmp-edo-value">${_cxcDinero(m.totalPagadoCliente)}</div><div class="mmp-edo-muted">Enganche + abonos autorizados</div></div>
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Total pagado por cliente</div><div class="mmp-edo-value">${_cxcDinero(m.totalPagadoCliente)}</div><div class="mmp-edo-muted">Enganche + abonos autorizados${m.totalCondonado > 0.01 ? ` (más ${_cxcDinero(m.totalCondonado)} condonado)` : ''}</div></div>
             </div>
             ${alerta}
 
@@ -4343,15 +4390,20 @@ function _cxcEstadoCuentaTicketBody(m) {
     const productos = m.articulos.length
         ? m.articulos.map(a => `${a.nombre || a.productoNombre || 'Producto'} x${a.cantidad || 1}\n  ${_cxcDinero(Number(a.precioContado || a.precio || 0))}`).join('\n')
         : 'Sin detalle de productos';
-    // 📅 Más reciente primero (mismo criterio que la tabla del documento
-    // de pagarés): se numera en orden cronológico real y luego se
-    // invierte solo para mostrarlo. El enganche va fijo arriba, igual que
-    // en el documento completo (_cxcEstadoCuentaAbonosRows).
+    // 📅 Más antiguo primero (igual que la tabla del documento de
+    // pagarés -- ver nota en _cxcEstadoCuentaAbonosRows): el enganche va
+    // fijo arriba y los abonos lo siguen en orden cronológico real, para
+    // que lea como una sola línea de tiempo.
     const engancheLinea = Number(m.enganche || 0) > 0.01
         ? `Enganche. ${_cxcEstadoCuentaFecha(m.fechaVenta)}  ${_cxcDinero(m.enganche)}\n`
         : '';
-    const abonos = m.abonos.length
-        ? engancheLinea + m.abonos.map((a, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(a))}  ${_cxcDinero(a.monto || a.montoAbonado || 0)}`).slice().reverse().join('\n')
+    // Condonaciones intercaladas por fecha con los abonos (ver
+    // _cxcEstadoCuentaEventos).
+    const eventosTicket = _cxcEstadoCuentaEventos(m);
+    const abonos = eventosTicket.length
+        ? engancheLinea + eventosTicket.map(ev => ev.tipo === 'condonacion'
+            ? `Condonado. ${_cxcEstadoCuentaFecha(ev.fecha)}  ${_cxcDinero(ev.monto)}`
+            : `${ev.num}. ${_cxcEstadoCuentaFecha(ev.fecha)}  ${_cxcDinero(ev.monto)}`).join('\n')
         : (engancheLinea || 'Sin abonos registrados');
     return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.25;color:#000;">
         <div style="text-align:center;"><img src="img/Logo.svg" alt="Mi Pueblito" style="width:48px;height:48px;object-fit:contain;" onerror="this.style.display='none'"></div>
@@ -4441,12 +4493,13 @@ function _cxcEstadoCuentaHtmlAntiguedad(m, opts = {}) {
                 <div class="mmp-edo-metric primary"><div class="mmp-edo-label">Total credito</div><strong>${_cxcDinero(m.totalCredito)}</strong></div>
                 <div class="mmp-edo-metric"><div class="mmp-edo-label">Enganche</div><strong>${_cxcDinero(m.enganche)}</strong></div>
                 <div class="mmp-edo-metric green"><div class="mmp-edo-label">Abonos recibidos</div><strong>${_cxcDinero(m.totalAbonos)}</strong></div>
+                ${m.totalCondonado > 0.01 ? `<div class="mmp-edo-metric" style="background:#fef2f2;"><div class="mmp-edo-label" style="color:#b91c1c;">Condonado</div><strong style="color:#b91c1c;">${_cxcDinero(m.totalCondonado)}</strong></div>` : ''}
                 <div class="mmp-edo-metric ${m.saldoActual > 0 ? 'red' : 'green'}"><div class="mmp-edo-label">Saldo actual</div><strong>${_cxcDinero(m.saldoActual)}</strong></div>
             </div>
 
             <div class="mmp-edo-row">
                 <div class="mmp-edo-box"><div class="mmp-edo-label">Condiciones de credito</div><div class="mmp-edo-value">${m.pagosPlan || '-'} pago(s) ${_cxcEscHTML(m.periodicidad)}</div><div class="mmp-edo-muted">Abono por periodo: ${m.abonoPeriodo ? _cxcDinero(m.abonoPeriodo) : '-'}</div></div>
-                <div class="mmp-edo-box"><div class="mmp-edo-label">Total pagado por cliente</div><div class="mmp-edo-value">${_cxcDinero(m.totalPagadoCliente)}</div><div class="mmp-edo-muted">Enganche + abonos autorizados</div></div>
+                <div class="mmp-edo-box"><div class="mmp-edo-label">Total pagado por cliente</div><div class="mmp-edo-value">${_cxcDinero(m.totalPagadoCliente)}</div><div class="mmp-edo-muted">Enganche + abonos autorizados${m.totalCondonado > 0.01 ? ` (más ${_cxcDinero(m.totalCondonado)} condonado)` : ''}</div></div>
             </div>
             ${alerta}
 
@@ -4464,13 +4517,16 @@ function _cxcEstadoCuentaTicketBodyAntiguedad(m) {
     const productos = m.articulos.length
         ? m.articulos.map(art => `${art.nombre || art.productoNombre || 'Producto'} x${art.cantidad || 1}\n  ${_cxcDinero(Number(art.precioContado || art.precio || 0))}`).join('\n')
         : 'Sin detalle de productos';
-    // 📅 Más reciente primero, mismo criterio que la versión por pagarés.
-    // El enganche va fijo arriba, igual que en las demás variantes.
+    // 📅 Más antiguo primero, mismo criterio que la versión por pagarés
+    // (ver nota en _cxcEstadoCuentaAbonosRows). El enganche va fijo arriba.
     const engancheLinea = Number(m.enganche || 0) > 0.01
         ? `Enganche. ${_cxcEstadoCuentaFecha(m.fechaVenta)}  ${_cxcDinero(m.enganche)}\n`
         : '';
-    const abonos = m.abonos.length
-        ? engancheLinea + m.abonos.map((ab, idx) => `${idx + 1}. ${_cxcEstadoCuentaFecha(_cxcFechaAbonoBase(ab))}  ${_cxcDinero(ab.monto || ab.montoAbonado || 0)}`).slice().reverse().join('\n')
+    const eventosTicket = _cxcEstadoCuentaEventos(m);
+    const abonos = eventosTicket.length
+        ? engancheLinea + eventosTicket.map(ev => ev.tipo === 'condonacion'
+            ? `Condonado. ${_cxcEstadoCuentaFecha(ev.fecha)}  ${_cxcDinero(ev.monto)}`
+            : `${ev.num}. ${_cxcEstadoCuentaFecha(ev.fecha)}  ${_cxcDinero(ev.monto)}`).join('\n')
         : (engancheLinea || 'Sin abonos registrados');
     return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.25;color:#000;">
         <div style="text-align:center;"><img src="img/Logo.svg" alt="Mi Pueblito" style="width:48px;height:48px;object-fit:contain;" onerror="this.style.display='none'"></div>
