@@ -193,10 +193,26 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
         const tarjetas = leerTarjetas();
         let cambio = false;
         const usados = new Set(tarjetas.map((e) => e && e.idCuenta).filter(Boolean).map(String));
+        // 🛡️ Si un banco de débito perdió su idCuenta en tarjetasConfig pero su registro
+        // derivado en cuentas-bancarias aún lo conserva, se RECUPERA ese mismo id (así lo que
+        // ya se guardó con él sigue reconociéndose y ambas tablas no divergen).
+        const cbPrevias = StorageService.get('cuentas-bancarias', []);
         tarjetas.forEach((e) => {
             if (!e || typeof e !== 'object' || e.idCuenta) return;
-            let id = window.generarIdCuentaBanco(e.banco, true);
-            if (usados.has(id)) id = window.generarIdCuentaBanco(e.banco, false);
+            let id = null;
+            if (String(e.tipo || '').toLowerCase() === 'debito' && Array.isArray(cbPrevias)) {
+                const previo = cbPrevias.find((c) => c && c.idCuenta && norm(c.banco) === norm(e.banco));
+                if (previo && !usados.has(String(previo.idCuenta))) id = String(previo.idCuenta);
+            }
+            if (!id) {
+                // Determinista: dos dispositivos que migren a la vez generan el MISMO id.
+                // Si el nombre ya lo usa otro banco (p. ej. el mismo banco como crédito Y como
+                // débito), se distingue con el TIPO -- también determinista -- y solo si aún así
+                // choca se recurre al sufijo aleatorio.
+                id = window.generarIdCuentaBanco(e.banco, true);
+                if (usados.has(id)) id = id + '_' + slug(e.tipo || 'tarjeta');
+                if (usados.has(id)) id = window.generarIdCuentaBanco(e.banco, false);
+            }
             e.idCuenta = id;
             usados.add(id);
             cambio = true;
