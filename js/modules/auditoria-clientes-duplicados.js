@@ -127,13 +127,17 @@
         });
 
         const grupos = [];
-        ramas.forEach((miembros) => {
+        ramas.forEach((miembrosOrig) => {
+            let miembros = miembrosOrig;
             if (miembros.length < 2) return;
             // pares ya marcados como distintos
             const distintos = (a, b) => (Array.isArray(a.distintoDe) && a.distintoDe.map(String).includes(String(b.id)))
                 || (Array.isArray(b.distintoDe) && b.distintoDe.map(String).includes(String(a.id)));
-            const pendiente = miembros.some((a, i) => miembros.slice(i + 1).some((b) => !distintos(a, b)));
-            if (!pendiente) return;
+            // Solo se muestran los miembros que aún tienen algún par sin resolver; el que ya
+            // se marcó como "distinto" de todos los demás sale del grupo.
+            const activos = miembros.filter((a) => miembros.some((b) => b !== a && !distintos(a, b)));
+            if (activos.length < 2) return;
+            miembros = activos;
             const info = miembros.map((c) => Object.assign({ cliente: c }, uso.get(String(c.id)) || { total: 0, porTabla: {}, cuentas: 0, saldo: 0 }));
             info.sort((x, y) => (y.cuentas - x.cuentas) || (y.total - x.total) || (Number(x.cliente.id) - Number(y.cliente.id)));
             const todosExactos = info.every((m) => exactos.has(String(m.cliente.id))) && new Set(info.map((m) => claveNombre(m.cliente.nombre))).size === 1;

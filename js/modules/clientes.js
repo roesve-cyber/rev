@@ -360,14 +360,31 @@ function guardarCliente() {
         }
         window.clienteEditandoId = null;
     } else {
-        clientesBD.push(_clienteConBusqueda({
+        const dup = _clienteBuscarDuplicado(clientesBD, nombre, telefono);
+        let decision = null;
+        if (dup) {
+            decision = _clienteDecidirDuplicado(dup);
+            if (decision === 'cancelar') return;
+            if (decision === 'usar') {
+                nombreInput.value   = "";
+                direccionInput.value = "";
+                telefonoInput.value = "";
+                referenciaInput.value = "";
+                alert('No se creó un cliente nuevo: se conserva el existente.');
+                renderClientes();
+                return;
+            }
+        }
+        const nuevoCli = _clienteConBusqueda({
             id: Date.now(),
             nombre,
             direccion,
             telefono,
             referencia,
             fechaRegistro: window.formatearFechaCortaMX(new Date())
-        }));
+        });
+        if (dup && decision === 'crear') _clienteMarcarDistintos(clientesBD, nuevoCli, dup.todos);
+        clientesBD.push(nuevoCli);
     }
 
     if (!StorageService.set("clientes", clientesBD)) {
@@ -422,11 +439,52 @@ function renderClientes() {
     cont.innerHTML = html + "</tbody></table>";
 }
 
-function eliminarCliente(id) {
+// 🛡️ Cuenta cuántos registros de TODO el sistema apuntan a este cliente
+// (cualquier tabla con clienteId o cliente.id). Se usa para impedir borrar un
+// cliente con historial: borrarlo dejaba ventas, cuentas y pagarés apuntando a
+// un ID que ya no existe (ID huérfano) y aparecían como "otro cliente" en la
+// Matriz de Cobranza y los estados de cuenta.
+async function _clienteContarReferencias(id) {
+    const objetivo = String(id);
+    const nombres = await StorageService.getTablasDinamicas();
+    if (!Array.isArray(nombres)) throw new Error('No se pudo listar las tablas');
+    const porTabla = {};
+    let total = 0;
+    nombres.forEach((t) => {
+        if (t === 'clientes' || t === 'bitacoraAuditoria') return;
+        const arr = StorageService.get(t, []);
+        if (!Array.isArray(arr)) return;
+        let n = 0;
+        arr.forEach((r) => {
+            if (!r || typeof r !== 'object') return;
+            const rid = (r.clienteId !== undefined && r.clienteId !== null && r.clienteId !== '')
+                ? r.clienteId
+                : (r.cliente && typeof r.cliente === 'object' ? r.cliente.id : null);
+            if (rid !== null && rid !== undefined && String(rid) === objetivo) n++;
+        });
+        if (n) { porTabla[t] = n; total += n; }
+    });
+    return { total, porTabla };
+}
+
+async function eliminarCliente(id) {
     if (!_clienteRequireAdmin('Eliminar cliente')) return;
-    if (confirm("¿Eliminar este cliente definitivamente?")) {
+    let refs;
+    try {
+        refs = await _clienteContarReferencias(id);
+    } catch (e) {
+        console.error('❌ No se pudo verificar los registros del cliente:', e);
+        alert('⚠️ No se pudo verificar si este cliente tiene historial, así que NO se eliminó. Intenta de nuevo.');
+        return;
+    }
+    if (refs.total > 0) {
+        const detalle = Object.keys(refs.porTabla).slice(0, 6).map(t => `• ${t}: ${refs.porTabla[t]}`).join('\n');
+        alert(`⛔ No se puede eliminar este cliente: tiene ${refs.total} registro(s) asociados (ventas, cuentas, pagarés, etc.).\n\n${detalle}\n\nBorrarlo dejaría ese historial apuntando a un cliente que ya no existe.\nSi es un duplicado, usa Auditoría → 🧩 Fusionar clientes duplicados para pasar su historial a otro cliente.`);
+        return;
+    }
+    if (confirm("¿Eliminar este cliente definitivamente?\n\n(No tiene registros asociados.)")) {
         let clientesBD = StorageService.get("clientes", []);
-        clientesBD = clientesBD.filter(c => c.id !== id);
+        clientesBD = clientesBD.filter(c => String(c.id) !== String(id));
         if (!StorageService.set("clientes", clientesBD)) {
             console.error("❌ Error eliminando cliente");
             return;
@@ -752,6 +810,46 @@ function abrirModalNuevoCliente(opciones = {}) {
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
+// 🛡️ Busca un cliente existente con el mismo teléfono o el mismo nombre exacto.
+function _clienteBuscarDuplicado(clientesBD, nombre, telefono) {
+    const nombreNorm = _clienteNormalizarBusqueda(nombre);
+    const telefonoNorm = String(telefono || '').replace(/\D/g, '');
+    const todos = [];
+    let primero = null;
+    for (const c of clientesBD) {
+        const telC = String(c.telefono || '').replace(/\D/g, '');
+        let motivo = null;
+        if (telefonoNorm && telC && telefonoNorm === telC) motivo = 'el mismo teléfono';
+        else if (nombreNorm && _clienteNormalizarBusqueda(c.nombre) === nombreNorm) motivo = 'el mismo nombre';
+        if (!motivo) continue;
+        todos.push(c);
+        if (!primero) primero = { cliente: c, motivo };
+    }
+    return primero ? Object.assign(primero, { todos }) : null;
+}
+
+// Devuelve 'usar' (se queda con el existente), 'crear' (es otra persona) o 'cancelar'.
+// Antes bastaba un solo "OK" para duplicar; ahora lo normal es reutilizar el existente
+// y crear uno nuevo exige confirmar explícitamente que es una persona distinta.
+function _clienteDecidirDuplicado(dup) {
+    const c = dup.cliente;
+    const ficha = `${c.nombre || 'Cliente'}${c.telefono ? ' - ' + c.telefono : ''}${c.referencia ? ' (' + c.referencia + ')' : ''}`;
+    if (confirm(`Ya existe un cliente con ${dup.motivo}:\n\n${ficha}\n\nAceptar = USAR el cliente existente (recomendado)\nCancelar = no usarlo`)) return 'usar';
+    if (confirm(`¿Es una PERSONA DISTINTA a:\n\n${ficha}\n\nAceptar = crear un cliente nuevo de todos modos\nCancelar = no guardar nada`)) return 'crear';
+    return 'cancelar';
+}
+
+// Si el usuario confirma que es otra persona, se anota en ambos para que la
+// auditoría de duplicados no vuelva a señalarlos.
+function _clienteMarcarDistintos(clientesBD, nuevo, coincidencias) {
+    const lista = Array.isArray(coincidencias) ? coincidencias : [coincidencias];
+    nuevo.distintoDe = lista.map(x => String(x.id));
+    lista.forEach(ex => {
+        const e = clientesBD.find(x => String(x.id) === String(ex.id));
+        if (e) e.distintoDe = Array.from(new Set((Array.isArray(e.distintoDe) ? e.distintoDe : []).map(String).concat(String(nuevo.id))));
+    });
+}
+
 function guardarClienteDesdeModal() {
     const nombre = document.getElementById("nuevoCliNombre").value.trim();
     const direccion = document.getElementById("nuevoCliDireccion").value.trim();
@@ -764,17 +862,33 @@ function guardarClienteDesdeModal() {
         return;
     }
     let clientesBD = StorageService.get("clientes", []);
-    const nombreNorm = _clienteNormalizarBusqueda(nombre);
-    const telefonoNorm = String(telefono || '').replace(/\D/g, '');
-    const posibleDuplicado = clientesBD.find(c => {
-        const telC = String(c.telefono || '').replace(/\D/g, '');
-        if (telefonoNorm && telC && telefonoNorm === telC) return true;
-        return nombreNorm && _clienteNormalizarBusqueda(c.nombre) === nombreNorm;
-    });
-    if (posibleDuplicado && !confirm(`Posible cliente duplicado:\n\n${posibleDuplicado.nombre || 'Cliente'} ${posibleDuplicado.telefono ? '- ' + posibleDuplicado.telefono : ''}\n\nDeseas guardar un cliente nuevo de todos modos?`)) {
-        return;
+    const dup = _clienteBuscarDuplicado(clientesBD, nombre, telefono);
+    let decision = null;
+    if (dup) {
+        decision = _clienteDecidirDuplicado(dup);
+        if (decision === 'cancelar') return;
+        if (decision === 'usar') {
+            // No se crea nada: se usa el cliente que ya existe.
+            const seleccionarVentaExistente = document.getElementById("nuevoCliSeleccionarVenta")?.value === '1';
+            const autoSeleccionarExistente = document.getElementById("nuevoCliAutoSeleccionar")?.checked !== false;
+            document.querySelector('[data-modal="nuevo-cliente"]')?.remove();
+            if (seleccionarVentaExistente && autoSeleccionarExistente) {
+                window.clienteSeleccionado = dup.cliente;
+                if (typeof window._actualizarPanelClienteCarrito === 'function') {
+                    window._actualizarPanelClienteCarrito();
+                } else {
+                    renderSeleccionClienteVenta();
+                    renderResumenVentaCliente();
+                    mostrarInfoCliente();
+                }
+            } else {
+                cargarClientesSelect();
+            }
+            return;
+        }
     }
     const nuevo = _clienteConBusqueda({ id: Date.now(), nombre, direccion, telefono, referencia, fechaRegistro: window.formatearFechaCortaMX(new Date()) });
+    if (dup && decision === 'crear') _clienteMarcarDistintos(clientesBD, nuevo, dup.todos);
     clientesBD.push(nuevo);
     window.clientes = clientesBD;
     if (!StorageService.set("clientes", clientesBD)) return alert("❌ Error guardando cliente");
