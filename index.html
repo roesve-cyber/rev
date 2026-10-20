@@ -101,7 +101,6 @@
                 <button onclick="navA('entregas')">🚚 Entregas</button>
                 <div class="submenu-grupo">Clientes y crédito</div>
                 <button onclick="navA('cuentasxcobrar')">💰 Aplicar abonos cliente</button>
-                <button onclick="abrirCotizarLiquidacion()" style="color:#0f766e; font-weight:bold;">🧮 Cotizar liquidación</button>
                 <button onclick="navA('estadoCuentaCliente')">📊 Estado de Cuenta Cliente</button>
                 <button onclick="navA('gestion-datos-cliente'); if(typeof renderGestionDatosCliente === 'function') renderGestionDatosCliente();">&#128100; Datos de Cliente</button>
                 <button onclick="navA('reporte-abonos-enganches'); renderReporteAbonEnganches();">💵 Reporte de Abonos y Enganches</button>
@@ -118,6 +117,7 @@
         <button onclick="navA('arc-v3'); renderARC_v3();">📊 ARC v3 (Análisis de Riesgo)</button>
         <button onclick="navA('reporte-rentabilidad-cartera'); if(typeof renderReporteRentabilidadCartera === 'function') renderReporteRentabilidadCartera();">💹 Rentabilidad de Cartera</button>
         <button onclick="navA('simulador-tasa-pronto-pago'); if(typeof renderSimuladorTasaProntoPago === 'function') renderSimuladorTasaProntoPago();">🧮 Simulador de Tasa y Pronto Pago</button>
+        <button onclick="abrirCotizarLiquidacion()" style="color:#0f766e; font-weight:bold;">🧾 Cotizar Liquidación / Ampliar Plazo</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
         <button onclick="abrirModalPromoContadoVencida()" style="color: #9333ea; font-weight: bold;">
             🔎 Promo de Contado (plazo vencido)
@@ -1344,7 +1344,7 @@
 <script src="js/modules/ventas.js?v=4.5"></script>
 <script src="js/modules/clientes.js?v=6"></script>
 <script src="js/modules/cxc.js?v=63"></script>
-<script src="js/modules/cxc-cotizar-liquidacion.js?v=1"></script>
+<script src="js/modules/cxc-cotizar-liquidacion.js?v=2"></script>
 <script src="js/modules/apartados.js?v=9"></script>
 <script src="js/modules/compras.js?v=60"></script>
 <script src="js/modules/oc-pagos.js?v=1"></script>
@@ -1362,7 +1362,7 @@
 <script src="js/modules/gastos.js?v=4"></script>
 <script src="js/modules/finanzas-estados.js?v=8"></script>
 <script src="js/modules/condonar-deuda.js?v=2"></script>
-<script src="js/modules/reestructura-plazo.js?v=1"></script>
+<script src="js/modules/reestructura-plazo.js?v=2"></script>
 <script src="js/modules/prestamos.js?v=1"></script>
 <script src="js/modules/garantias.js"></script>
 <script src="js/modules/producto-picker.js?v=5"></script>
