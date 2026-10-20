@@ -33,6 +33,15 @@
 // Solo Admin (_esAdmin()) puede abrir y confirmar esta acción.
 // ================================================================
 
+// 🔐 Predicado de administrador. OJO: `_esAdmin` NO existe en ningún archivo del sistema (el
+// predicado real es esAdmin() de auth.js); con la comprobación anterior, esta pantalla le
+// negaba el acceso a TODOS, también a los administradores.
+function _reestructuraEsAdmin() {
+    if (typeof esAdmin === 'function') return !!esAdmin();
+    if (typeof _esAdmin === 'function') return !!_esAdmin();
+    return false;
+}
+
 // Total pagado hasta hoy hacia el capital financiado (enganche NO
 // cuenta aquí porque ya se restó del capital). Misma regla que
 // _cxcTotalPagadoPolitica: máximo entre lo que reflejan los pagarés
@@ -123,7 +132,7 @@ function renderReestructuraPlazo(filtroCliente = "") {
     const contenedor = document.getElementById("tablaReestructuraPlazo");
     if (!contenedor) return;
 
-    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
+    if (!(_reestructuraEsAdmin())) {
         contenedor.innerHTML = `<div style="background:#fee2e2; color:#991b1b; padding:20px; border-radius:10px; text-align:center; font-weight:bold;">Solo un administrador puede modificar el plazo pactado de una cuenta.</div>`;
         return;
     }
@@ -180,7 +189,7 @@ function renderReestructuraPlazo(filtroCliente = "") {
 window.renderReestructuraPlazo = renderReestructuraPlazo;
 
 window.abrirModalReestructurarPlazo = function (folio) {
-    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
+    if (!(_reestructuraEsAdmin())) {
         return alert("Solo un administrador puede modificar el plazo pactado de una cuenta.");
     }
     const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -320,24 +329,11 @@ window._reestructuraCalcularSimulacion = function (totalPagado) {
         </div>`;
 };
 
-window.confirmarReestructurarPlazo = async function (folio) {
-    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
-        return alert("Solo un administrador puede modificar el plazo pactado de una cuenta.");
-    }
-    const idx = document.getElementById("reestrPlazoSelect")?.value;
-    const periodicidad = document.getElementById("reestrPeriodicidadSelect")?.value || window._reestrPeriodicidad || "semanal";
-    const planElegido = (window._reestrPlanesDisponibles || [])[idx];
-    if (!planElegido) return alert("Selecciona un plazo válido.");
-
-    const capitalVista = window._reestrCapital || 0;
-
-    if (!confirm(`⚠️ MODIFICAR PLAZO PACTADO\n\nFolio: ${folio}\nCapital original: ${_cxcDinero(capitalVista)}\nNuevo plazo: ${planElegido.meses} meses\nNuevo total (capital + interés): ${_cxcDinero(planElegido.total)}\n\nSe recalculará la tabla completa del nuevo plazo, se le aplicará lo ya pagado, y se reemplazarán los pagarés pendientes/parciales actuales por los que resulten. Esta acción queda registrada en auditoría.\n\n¿Confirmas?`)) {
-        return;
-    }
-
-    const btn = document.querySelector('#modalReestructurarPlazo button[onclick^="confirmarReestructurarPlazo"]');
-    if (btn) { btn.disabled = true; btn.textContent = 'Procesando…'; btn.style.opacity = '0.6'; btn.style.cursor = 'not-allowed'; }
-
+// 🔧 Ejecuta la reestructura (transacción atómica + auditoría) SIN interfaz: la usan tanto el
+// modal de este módulo como el cotizador de liquidación (cxc-cotizar-liquidacion.js), para que
+// ambos cambien el plazo exactamente igual. Devuelve { ok:true, saldoRestante, pagosGenerados,
+// saldado } o { ok:false, motivo:'error'|'cambio' }. `planElegido` es { meses, pagos, abono, total }.
+window._reestructuraEjecutar = async function (folio, planElegido, periodicidad, capitalVista) {
     const idsPagaresCandidatos = StorageService.get("pagaresSistema", [])
         .filter(p => p.folio === folio)
         .map(p => p.id);
@@ -352,10 +348,6 @@ window.confirmarReestructurarPlazo = async function (folio) {
         { tabla: 'cuentasPorCobrar', clave: folio },
         ...idsPagaresCandidatos.map(id => ({ tabla: 'pagaresSistema', clave: id }))
     ];
-
-    const reactivarBoton = () => {
-        if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar Nuevo Plazo'; btn.style.opacity = ''; btn.style.cursor = 'pointer'; }
-    };
 
     let resultadoTx;
     try {
@@ -386,10 +378,22 @@ window.confirmarReestructurarPlazo = async function (folio) {
             // Genera solo los pagarés que quedan por cobrar bajo la tabla nueva
             const pendientesTeoricos = sim.montosTeoricos.slice(sim.indiceInicio);
             const fechaPago = new Date(fechaObj);
+            // 🛡️ IDs ÚNICOS garantizados. Antes: Date.now() + i + 1 + random(0..999); como todos los
+            // pagarés se crean en el mismo instante, dos podían caer en el MISMO id (≈14% con 18
+            // pagarés, ≈24% con 24) y la escritura sobrescribía uno: la cuenta quedaba con un pagaré
+            // menos y saldo ≠ suma de pagarés. Ahora el id avanza siempre y se salta los ya usados.
+            const idsUsados = new Set(StorageService.get('pagaresSistema', []).map(p => String(p.id)));
+            let idCursor = Date.now();
+            const siguienteIdPagare = () => {
+                idCursor += 1 + Math.floor(Math.random() * 50);
+                while (idsUsados.has(String(idCursor))) idCursor++;
+                idsUsados.add(String(idCursor));
+                return idCursor;
+            };
             const pagaresNuevos = pendientesTeoricos.map((monto, i) => {
                 fechaPago.setDate(fechaPago.getDate() + diasIntervalo);
                 const esPrimeraYParcial = i === 0 && sim.proximaEsParcial;
-                const idNuevo = Date.now() + i + 1 + Math.floor(Math.random() * 1000);
+                const idNuevo = siguienteIdPagare();
                 return {
                     id: idNuevo, folio,
                     numeroPagere: `${folio}-R${sim.indiceInicio + i + 1}/${sim.montosTeoricos.length}`,
@@ -431,15 +435,11 @@ window.confirmarReestructurarPlazo = async function (folio) {
         });
     } catch (e) {
         console.error('[reestructura-plazo] transacción falló:', e);
-        alert("No se pudo modificar el plazo: error al escribir los cambios. Nada quedó a medias; intenta de nuevo.");
-        reactivarBoton();
-        return;
+        return { ok: false, motivo: 'error' };
     }
 
     if (!resultadoTx || !resultadoTx.ok) {
-        alert("No se pudo modificar el plazo: la cuenta fue cancelada o cambió justo antes de confirmar. Refresca la pantalla e intenta de nuevo.");
-        reactivarBoton();
-        return;
+        return { ok: false, motivo: 'cambio' };
     }
 
     if (window.AuditService?.log) {
@@ -460,6 +460,39 @@ window.confirmarReestructurarPlazo = async function (folio) {
                 pagosGenerados: resultadoTx.pagosGenerados
             }
         });
+    }
+    return resultadoTx;
+};
+
+window.confirmarReestructurarPlazo = async function (folio) {
+    if (!(_reestructuraEsAdmin())) {
+        return alert("Solo un administrador puede modificar el plazo pactado de una cuenta.");
+    }
+    const idx = document.getElementById("reestrPlazoSelect")?.value;
+    const periodicidad = document.getElementById("reestrPeriodicidadSelect")?.value || window._reestrPeriodicidad || "semanal";
+    const planElegido = (window._reestrPlanesDisponibles || [])[idx];
+    if (!planElegido) return alert("Selecciona un plazo válido.");
+
+    const capitalVista = window._reestrCapital || 0;
+
+    if (!confirm(`⚠️ MODIFICAR PLAZO PACTADO\n\nFolio: ${folio}\nCapital original: ${_cxcDinero(capitalVista)}\nNuevo plazo: ${planElegido.meses} meses\nNuevo total (capital + interés): ${_cxcDinero(planElegido.total)}\n\nSe recalculará la tabla completa del nuevo plazo, se le aplicará lo ya pagado, y se reemplazarán los pagarés pendientes/parciales actuales por los que resulten. Esta acción queda registrada en auditoría.\n\n¿Confirmas?`)) {
+        return;
+    }
+
+    const btn = document.querySelector('#modalReestructurarPlazo button[onclick^="confirmarReestructurarPlazo"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Procesando…'; btn.style.opacity = '0.6'; btn.style.cursor = 'not-allowed'; }
+
+    const reactivarBoton = () => {
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar Nuevo Plazo'; btn.style.opacity = ''; btn.style.cursor = 'pointer'; }
+    };
+
+    const resultadoTx = await window._reestructuraEjecutar(folio, planElegido, periodicidad, capitalVista);
+    if (!resultadoTx.ok) {
+        alert(resultadoTx.motivo === 'error'
+            ? "No se pudo modificar el plazo: error al escribir los cambios. Nada quedó a medias; intenta de nuevo."
+            : "No se pudo modificar el plazo: la cuenta fue cancelada o cambió justo antes de confirmar. Refresca la pantalla e intenta de nuevo.");
+        reactivarBoton();
+        return;
     }
 
     document.getElementById('modalReestructurarPlazo')?.remove();

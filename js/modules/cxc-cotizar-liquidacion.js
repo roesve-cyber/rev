@@ -15,8 +15,16 @@
 //    que usa Cobranza al cobrar): paga el saldo nominal completo y recibe
 //    un cupón. Liquidar antes NO descuenta; por eso el plazo es el pactado.
 //
-// Solo lectura: no registra ni modifica cuentas. Lo único que guarda es
-// la fecha de inicio de cupones (requiere admin).
+// Segundo modo, "Ampliar plazo": si el cliente quiere MÁS plazo, muestra cuánto
+// queda (nuevo total, restante, pagos y monto por pago) y permite confirmar el
+// cambio ahí mismo (solo admin). El cambio lo ejecuta _reestructuraEjecutar,
+// la misma transacción atómica de "Reestructurar Plazo" (cancela los pagarés
+// pendientes, genera los nuevos, deja historial y bitácora). Tarifa: venta
+// ANTERIOR a cupones → escalera guardada en la cuenta; POSTERIOR → tarifa vigente
+// (igual que Reestructurar Plazo).
+//
+// El modo "Liquidar antes" es solo lectura. Lo único que se guarda desde aquí,
+// además del cambio de plazo confirmado, es la fecha de inicio de cupones (admin).
 // =====================================================================
 (function () {
     'use strict';
@@ -160,8 +168,84 @@
         return out;
     }
 
+    // ── Ampliar plazo ─────────────────────────────────────────────────
+    // Plan { meses, semanas, pagos, abono, total } a partir de un total de la escalera guardada.
+    // Mismo molde que CalculatorService: semanas = meses×4, total = abonoSemanal×semanas.
+    function planDesdeEscalera(meses, total, periodicidad) {
+        const semanas = meses * 4;
+        const mult = periodicidad === 'quincenal' ? 2 : periodicidad === 'mensual' ? 4 : 1;
+        const abonoSemanal = total / semanas;
+        return { meses, semanas, pagos: Math.round(semanas / mult), abono: Number((abonoSemanal * mult).toFixed(2)), total };
+    }
+
+    function elegibleParaPlazo(cuenta) {
+        const est = String(cuenta.estado || '').toLowerCase();
+        if (g('_cxcCuentaCancelada') && g('_cxcCuentaCancelada')(cuenta)) return false;
+        return est !== 'saldado' && cuenta.metodo !== 'apartado' && !cuenta.incobrable;
+    }
+
+    // Planes MAYORES al pactado, con la tarifa que corresponde a la venta
+    function planesAmpliacion(a) {
+        const fCap = g('_reestructuraCapitalCuenta');
+        const capital = fCap ? fCap(a.cuenta) : a.capitalContado;
+        const avisos = [];
+        let planes = [], origen = null;
+        if (!a.posterior && a.escalera.origen === 'cuenta') {
+            planes = a.escalera.planes.map((p) => planDesdeEscalera(p.meses, p.total, a.periodicidad));
+            origen = 'cuenta';
+        } else if (typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad && capital > 0) {
+            const cfg = leer('configCreditoGlobal', null);
+            planes = CalculatorService.calcularCreditoConPeriodicidad(capital, a.periodicidad, cfg);
+            origen = 'actual';
+            if (!a.posterior) avisos.push('Esta cuenta no tiene escalera propia confiable; el plazo mayor se calculó con las tarifas ACTUALES. Verifícalo antes de prometer el monto.');
+        }
+        return { planes: planes.filter((p) => p.meses > a.mesesPlan), origen, capital, avisos };
+    }
+
+    function simularAmpliacion(a, plan) {
+        const sim = g('_reestructuraSimular');
+        const pagares = leer('pagaresSistema', []).filter((p) => p.folio === a.folio);
+        const totalPagado = g('_reestructuraTotalPagado') ? g('_reestructuraTotalPagado')(pagares, a.cuenta) : a.abonos;
+        if (!sim) return null;
+        const r = sim(plan, totalPagado);
+        return Object.assign({ totalPagado }, r, { totalFinal: a.enganche + plan.total, incremento: plan.total - a.totalPlan });
+    }
+
+    function panelAmpliar(a) {
+        if (!elegibleParaPlazo(a.cuenta)) return '<p style="margin-top:12px;color:#b45309;">Esta cuenta no admite cambio de plazo (cancelada, saldada, apartado o incobrable).</p>';
+        if (!g('_reestructuraSimular') || !g('_reestructuraEjecutar')) return '<p style="margin-top:12px;color:#b91c1c;">Falta el módulo de reestructura de plazo; no se puede ampliar desde aquí.</p>';
+        const amp = planesAmpliacion(a);
+        let h = '';
+        amp.avisos.forEach((m) => { h += `<div style="margin-top:8px;font-size:12px;color:#b45309;background:#fffbeb;border-radius:8px;padding:8px 10px;">⚠️ ${esc(m)}</div>`; });
+        if (!amp.planes.length) return h + '<p style="margin-top:12px;color:#b45309;">No hay un plazo mayor disponible para esta cuenta.</p>';
+        if (!amp.planes.some((p) => p.meses === Number(S.mesesAmp))) S.mesesAmp = amp.planes[0].meses;
+        const plan = amp.planes.find((p) => p.meses === Number(S.mesesAmp));
+        const r = simularAmpliacion(a, plan);
+        h += `<div style="margin-top:8px;font-size:12px;color:#475569;background:#f1f5f9;border-radius:8px;padding:8px 10px;">${amp.origen === 'cuenta' ? '📜 Tarifa de su venta (anterior a cupones, guardada en la cuenta).' : '💱 Tarifa vigente.'} El calendario de pagos se reinicia desde hoy sobre el capital original.</div>`;
+        h += `<label style="display:block;margin-top:12px;font-size:12px;color:#475569;">Ampliar a</label>
+            <select onchange="_cqlElegirPlazoAmp(this.value)" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;">` +
+            amp.planes.map((p) => `<option value="${p.meses}" ${p.meses === Number(S.mesesAmp) ? 'selected' : ''}>${p.meses} meses · ${p.pagos} pagos de ${esc(dinero(p.abono))} · total ${esc(dinero(p.total))}</option>`).join('') + '</select>';
+        const fila = (k, v, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed #e2e8f0;"><span style="color:#475569;">${k}</span><span style="${extra || 'font-weight:bold;'}">${v}</span></div>`;
+        const proximo = r.pagosRestantes ? (r.proximaEsParcial ? `parcial: faltan ${esc(dinero(r.proximoFaltante))} de ${esc(dinero(r.proximoMonto))}` : esc(dinero(r.proximoMonto))) : '-';
+        h += `<div style="margin-top:12px;border:2px solid #7c3aed;border-radius:12px;padding:14px;">
+            ${fila('Total del plan a ' + plan.meses + ' meses', esc(dinero(plan.total)))}
+            ${fila('Total actual (' + a.mesesPlan + ' meses)', esc(dinero(a.totalPlan)), 'font-weight:normal;')}
+            ${fila('Costo adicional por ampliar', esc(dinero(r.incremento)), 'font-weight:bold;color:#b45309;')}
+            ${fila('Enganche recibido', esc(dinero(a.enganche)), 'font-weight:normal;')}
+            ${fila('Abonos recibidos', esc(dinero(r.totalPagado)), 'font-weight:normal;')}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 4px;"><span style="font-size:15px;color:#0f172a;">Importe restante a cubrir</span><span style="font-size:24px;font-weight:800;color:#7c3aed;">${esc(dinero(r.saldoRestante))}</span></div>
+            ${a.moratorios > 0.01 ? fila('+ Moratorios pendientes (no cambian)', esc(dinero(a.moratorios)), 'font-weight:normal;color:#b45309;') : ''}
+            ${fila('Total final de la compra (enganche + plan)', esc(dinero(r.totalFinal)))}
+            ${fila(r.pagosRestantes + ' pago(s) ' + ({ semanal: 'semanales', quincenal: 'quincenales', mensual: 'mensuales' }[a.periodicidad] || ''), 'próximo ' + proximo, 'font-weight:bold;')}
+            <div style="margin-top:8px;font-size:12px;color:#64748b;">Se cancelan los pagarés pendientes y se generan los nuevos; lo pagado y el historial se conservan. La política de pago anticipado sigue anclada a la venta original.</div>
+            <button onclick="_cqlConfirmarAmpliacion()" id="cqlBtnAmpliar" style="margin-top:12px;width:100%;padding:13px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">✅ Confirmar ampliación a ${plan.meses} meses</button>
+            <div style="margin-top:6px;font-size:11px;color:#94a3b8;text-align:center;">Cambiar el plazo es acción de administrador: si no lo eres, te pedirá las credenciales de uno.</div>
+        </div>`;
+        return h;
+    }
+
     // ── Interfaz ──────────────────────────────────────────────────────
-    const S = { cliente: null, folio: null, meses: null };
+    const S = { cliente: null, folio: null, meses: null, modo: 'liquidar', mesesAmp: null, aviso: '' };
 
     function abrir(folioInicial) {
         document.querySelector('[data-modal="cotizar-liquidacion"]')?.remove();
@@ -175,7 +259,7 @@
                 <div id="cqlCuerpo" style="margin-top:14px;"></div>
             </div>
         </div>`);
-        S.cliente = null; S.folio = null; S.meses = null;
+        S.cliente = null; S.folio = null; S.meses = null; S.modo = 'liquidar'; S.mesesAmp = null; S.aviso = '';
         if (folioInicial) {
             const c = leer('cuentasPorCobrar', []).find((x) => x.folio === folioInicial);
             if (c) { S.folio = folioInicial; S.cliente = { id: c.clienteId, nombre: nombreCliente(c) }; }
@@ -218,6 +302,10 @@
         const q = S.meses ? cotizar(a, Number(S.meses)) : null;
 
         html += resumenCuenta(a);
+        if (S.aviso) html += `<div style="margin-top:8px;font-size:13px;color:#166534;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;">${esc(S.aviso)}</div>`;
+        const tab = (m, txt) => `<button onclick="_cqlModo('${m}')" style="flex:1;padding:10px;border:none;border-radius:8px;font-weight:bold;cursor:pointer;background:${S.modo === m ? '#0f766e' : '#e2e8f0'};color:${S.modo === m ? 'white' : '#475569'};">${txt}</button>`;
+        html += `<div style="display:flex;gap:8px;margin-top:12px;">${tab('liquidar', '⏩ Liquidar antes')}${tab('ampliar', '⏪ Ampliar plazo')}</div>`;
+        if (S.modo === 'ampliar') { cont.innerHTML = html + panelAmpliar(a); return; }
         if (a.posterior) html += `<div style="margin-top:8px;font-size:12px;color:#7e22ce;background:#faf5ff;border-radius:8px;padding:8px 10px;">🎟️ Venta posterior al inicio de cupones (${esc(fmtFecha(a.inicio))}): aplica la regla vigente con cupón.</div>`;
         else html += `<div style="margin-top:8px;font-size:12px;color:#475569;background:#f1f5f9;border-radius:8px;padding:8px 10px;">📜 Venta anterior a cupones (${esc(fmtFecha(a.inicio))}): se cotiza con la escalera de tarifas que tenía esta venta${a.escalera.origen === 'cuenta' ? ' (guardada en la cuenta)' : ''}. No genera cupón.</div>`;
         (q ? q.avisos : a.escalera.avisos).forEach((m) => { html += `<div style="margin-top:8px;font-size:12px;color:#b45309;background:#fffbeb;border-radius:8px;padding:8px 10px;">⚠️ ${esc(m)}</div>`; });
@@ -286,6 +374,39 @@
     };
     window._cqlElegirCuenta = function (folio) { S.folio = folio || null; S.meses = null; render(); };
     window._cqlElegirPlazo = function (m) { S.meses = Number(m) || null; render(); };
+    window._cqlModo = function (m) { S.modo = m === 'ampliar' ? 'ampliar' : 'liquidar'; S.aviso = ''; render(); };
+    window._cqlElegirPlazoAmp = function (m) { S.mesesAmp = Number(m) || null; render(); };
+    window._cqlConfirmarAmpliacion = function () {
+        // Cambiar el plazo es una acción de administrador: si la sesión no lo es, se piden credenciales de uno.
+        if (typeof esAdmin === 'function' && esAdmin()) { ejecutarAmpliacion(); return; }
+        if (typeof window.requireAdmin === 'function') { window.requireAdmin(ejecutarAmpliacion); return; }
+        alert('Solo un administrador puede modificar el plazo pactado de una cuenta.');
+    };
+    async function ejecutarAmpliacion() {
+        if (!S.folio) return;
+        const a = analizar(S.folio); if (!a) return;
+        const amp = planesAmpliacion(a);
+        const plan = amp.planes.find((p) => p.meses === Number(S.mesesAmp));
+        if (!plan) { alert('Selecciona un plazo válido.'); return; }
+        const r = simularAmpliacion(a, plan);
+        if (!confirm(`⚠️ AMPLIAR PLAZO PACTADO\n\nCliente: ${S.cliente.nombre}\nFolio: ${a.folio}\nPlazo: ${a.mesesPlan} → ${plan.meses} meses\nNuevo total del plan: ${dinero(plan.total)} (antes ${dinero(a.totalPlan)})\nImporte restante a cubrir: ${dinero(r.saldoRestante)}\nPagos nuevos: ${r.pagosRestantes}\n\nSe cancelan los pagarés pendientes y se generan los nuevos. Queda en auditoría.\n\n¿Confirmas?`)) return;
+        const btn = document.getElementById('cqlBtnAmpliar');
+        if (btn) { btn.disabled = true; btn.textContent = 'Procesando…'; btn.style.opacity = '0.6'; }
+        const res = await window._reestructuraEjecutar(a.folio, plan, a.cuenta.periodicidad || 'semanal', amp.capital);
+        if (!res.ok) {
+            alert(res.motivo === 'error' ? 'No se pudo modificar el plazo: error al escribir los cambios. Nada quedó a medias; intenta de nuevo.' : 'No se pudo modificar el plazo: la cuenta fue cancelada o cambió justo antes de confirmar. Vuelve a abrir la cotización.');
+            render(); return;
+        }
+        S.aviso = res.saldado
+            ? `✅ Plazo ampliado a ${plan.meses} meses. Con lo ya pagado la cuenta quedó SALDADA.`
+            : `✅ Plazo ampliado a ${plan.meses} meses. Saldo pendiente ${dinero(res.saldoRestante)}; se generaron ${res.pagosGenerados} pagaré(s) nuevo(s).`;
+        S.modo = 'liquidar'; S.meses = null; S.mesesAmp = null;
+        // Refrescar las pantallas de fondo; si alguna falla, el cambio ya quedó guardado y no debe romper este flujo.
+        ['renderCuentasXCobrar', 'renderAbonosDirectos', 'renderReestructuraPlazo'].forEach((fn) => {
+            try { if (typeof window[fn] === 'function') window[fn](); } catch (e) { console.warn('[cotizar-liquidacion] no se pudo refrescar ' + fn, e); }
+        });
+        render();
+    }
     window._cqlGuardarFecha = function () {
         const v = (document.getElementById('cqlFechaInicio') || {}).value;
         if (!v) { alert('Elige la fecha.'); return; }
@@ -306,5 +427,5 @@
     };
 
     window.abrirCotizarLiquidacion = function (folio) { abrir(folio); };
-    window._cqlAnalizar = analizar; window._cqlPlazos = plazosPosibles; window._cqlCotizar = cotizar; // pruebas / consola
+    window._cqlAnalizar = analizar; window._cqlPlazos = plazosPosibles; window._cqlCotizar = cotizar; window._cqlPlanesAmp = planesAmpliacion; window._cqlSimAmp = simularAmpliacion; // pruebas / consola
 })();
