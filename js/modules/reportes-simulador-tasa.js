@@ -542,12 +542,18 @@ window._stpCambiarTasaNueva = function(meses, valor) {
 };
 
 window._stpGuardarTasasNuevas = function() {
-    const plazos = (window._stpPlazos || []).map(p => ({
-        meses: p.meses,
-        tasa: Number(window._stpTasasNuevas[p.meses] ?? p.tasa)
-    }));
-    if (!confirm(`¿Reemplazar la configuración de crédito de la tienda con estas tasas?\n\n${plazos.map(p => `${p.meses} meses al ${p.tasa}%`).join('\n')}\n\nAplica de inmediato a nuevas ventas.`)) return;
-    StorageService.set('configCreditoGlobal', { plazos });
+    // 🛡️ Solo se cambian las TASAS NORMALES. Todo lo demás de la configuración se conserva:
+    // la tasa base de cupón de cada plazo (tasaBaseCupon) y los ajustes globales de cupones
+    // (redondeoCuponMultiplo/Direccion, porcentajeCuponProntoPago). Antes este guardado
+    // reemplazaba el objeto completo por { plazos } y los borraba sin avisar.
+    const configActual = StorageService.get('configCreditoGlobal', null) || {};
+    const plazosPrevios = Array.isArray(configActual.plazos) ? configActual.plazos : [];
+    const plazos = (window._stpPlazos || []).map(p => {
+        const previo = plazosPrevios.find(x => Number(x.meses) === Number(p.meses)) || p;
+        return { ...previo, meses: p.meses, tasa: Number(window._stpTasasNuevas[p.meses] ?? p.tasa) };
+    });
+    if (!confirm(`¿Cambiar las tasas de crédito de la tienda?\n\n${plazos.map(p => `${p.meses} meses al ${p.tasa}%`).join('\n')}\n\nAplica de inmediato a nuevas ventas. La tasa base de cupón y el redondeo de cupones NO se modifican.`)) return;
+    StorageService.set('configCreditoGlobal', { ...configActual, plazos });
     alert('✅ Tasas actualizadas. El descuento por pronto pago se sigue aplicando a mano al cobrar — no cambia el ticket automáticamente.');
     if (typeof renderConfiguracion === 'function') renderConfiguracion();
     renderSimuladorTasaProntoPago();
