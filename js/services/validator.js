@@ -130,6 +130,16 @@ window.normalizarIdCuenta = function(valor) {
 window.candidatosCuentaMovimiento = function(mov) {
     if (!mov) return ['efectivo'];
     const identidad = [mov.etiquetaCuenta, mov.cuenta, mov.cuentaId, mov.origen].filter(Boolean);
+    // 🛡️ Transferencias internas: ambas patas guardan cuentaOrigen/cuentaDestino (el valor
+    // exacto elegido en el modal). Si 'cuenta' trae un id que ya no calza con los alias de la
+    // cuenta (p. ej. un idCuenta desfasado en cuentas-bancarias), estos campos siguen
+    // identificando a qué cuenta pertenece cada pata: el EGRESO es de la cuenta origen y el
+    // INGRESO de la cuenta destino. Se agregan al final, solo como candidatos extra.
+    if (String(mov.tipoMovimiento || '') === 'transferencia_interna') {
+        const esIngreso = String(mov.tipo || '').toLowerCase() === 'ingreso';
+        const extra = esIngreso ? mov.cuentaDestino : mov.cuentaOrigen;
+        if (extra) identidad.push(extra);
+    }
     if (identidad.length) return identidad;
     // Último recurso: campos que describen la FORMA de pago, no la cuenta.
     // Solo se usan si el movimiento no trae ningún dato de identidad real.
@@ -245,8 +255,12 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
         if (!ref) return [];
         const e = (ref.idCuenta && window.buscarBancoPorValor(ref.idCuenta))
             || window.buscarBancoPorValor(ref.banco || ref.id || ref.nombre, 'debito');
-        if (!e) return [];
-        return [e.idCuenta].concat(Array.isArray(e.nombresAnteriores) ? e.nombresAnteriores : []).filter(Boolean).map(String);
+        // 🛡️ El idCuenta del PROPIO registro (cuentas-bancarias) también es alias válido: es el
+        // que _resolverCuentaMovimiento guarda en movimiento.cuenta. Si difiere del de
+        // tarjetasConfig (o no hay entrada allí), antes ese movimiento quedaba "sin cuenta".
+        const propio = ref.idCuenta ? [String(ref.idCuenta)] : [];
+        if (!e) return propio;
+        return propio.concat([e.idCuenta]).concat(Array.isArray(e.nombresAnteriores) ? e.nombresAnteriores : []).filter(Boolean).map(String);
     };
 
     // Para lectores que agrupan por NOMBRE de banco: convierte idCuenta / nombre anterior
