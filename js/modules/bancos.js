@@ -1607,7 +1607,21 @@ function renderCuentasBancarias(cuentaSeleccionada = null) {
         const cajaDefaultId = cajas[0]?.id || "efectivo";
         const _vis = (v) => (window.claveBancoVisible ? window.claveBancoVisible(v) : v);
         const _filtroVis = _vis(window._filtroCuentaLiquidez);
+        // 🛡️ Misma regla de pertenencia que usan los saldos de la izquierda y el Corte de Caja
+        // (window.movimientoPerteneceACuenta + aliases de la cuenta). Antes la lista solo
+        // comparaba m.cuenta con el nombre del banco, y un movimiento guardado con un idCuenta
+        // distinto al de tarjetasConfig (p. ej. 'bnk_mercadopago_al3im') sumaba al saldo pero
+        // no aparecía en la lista.
+        let _aliasesSel = null;
+        const _idxCaja = cajas.findIndex(c => String(c.id) === String(window._filtroCuentaLiquidez));
+        if (_idxCaja !== -1) {
+            _aliasesSel = _bancosAliasesCaja(cajas[_idxCaja], _idxCaja);
+        } else {
+            const _tSel = cuentasDebito.find(t => String(t.banco) === String(window._filtroCuentaLiquidez));
+            if (_tSel) _aliasesSel = _bancosAliasesDebito(_tSel);
+        }
         movimientosFiltrados = movimientosFiltrados.filter(m => {
+            if (_aliasesSel && window.movimientoPerteneceACuenta(m, _aliasesSel)) return true;
             if (_vis(m.cuenta) === _filtroVis) return true;
             if (window._filtroCuentaLiquidez === cajaDefaultId && (m.cuenta === 'efectivo' || m.cuenta === 'caja')) return true;
             return false;
