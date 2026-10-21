@@ -3379,7 +3379,15 @@ function _cxcAjustarSaldoCuentaPorCorreccion(cuentaId, delta) {
     }
 
     const cuentasBanco = StorageService.get('cuentas-bancarias', []);
-    const idx = cuentasBanco.findIndex(c => String(c.id) === String(cuentaRealId) || String(c.banco) === String(cuentaRealId));
+    // 🛡️ Acepta cualquier forma de identificar el banco: id del registro, idCuenta permanente
+    // (lo que se guarda en movimiento.cuenta), nombre actual o un nombre anterior.
+    let idx = cuentasBanco.findIndex(c => String(c.id) === String(cuentaRealId)
+        || (c.idCuenta && String(c.idCuenta) === String(cuentaRealId))
+        || String(c.banco) === String(cuentaRealId));
+    if (idx === -1 && typeof window.buscarBancoPorValor === 'function') {
+        const e = window.buscarBancoPorValor(cuentaRealId, 'debito');
+        if (e) idx = cuentasBanco.findIndex(c => (e.idCuenta && String(c.idCuenta || '') === String(e.idCuenta)) || String(c.banco) === String(e.banco));
+    }
     if (idx === -1) return false;
 
     cuentasBanco[idx].saldo = (Number(cuentasBanco[idx].saldo) || 0) + monto;

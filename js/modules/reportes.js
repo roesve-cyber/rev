@@ -1067,9 +1067,9 @@ window.renderReporteLiquidezCortoPlazo = function() {
     StorageService.get("movimientosCaja", []).forEach(m => {
         const esIng = String(m.tipo || '').toLowerCase() === "ingreso";
         const amt = parseFloat(m.monto) || 0;
-        const cuentaMov = String(window.claveBancoVisible ? window.claveBancoVisible(m.cuenta || m.cuentaId || '') : (m.cuenta || m.cuentaId || ''));
-        const cta = (cuentaMov === "efectivo" || cuentaMov === "caja" || !cuentaMov) ? cajaDefaultLiquidezId : cuentaMov;
-        if (saldos[cta] !== undefined) saldos[cta] += (esIng ? amt : -amt);
+        // 🛡️ Regla compartida con Bancos/Corte de Caja (movimientoPerteneceACuenta + aliases).
+        const cta = window.claveLiquidezMovimiento(m, cajasLiquidez, debitoLiquidez);
+        if (cta !== null && saldos[cta] !== undefined) saldos[cta] += (esIng ? amt : -amt);
     });
     const liquidezTotalInicial = Object.values(saldos).reduce((a, b) => a + b, 0);
 

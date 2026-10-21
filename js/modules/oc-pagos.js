@@ -40,7 +40,14 @@
     function nombreCuenta(c) {
         if (!c) return '';
         var todas = (StorageService.get('cuentasEfectivo', []) || []).concat(StorageService.get('cuentas-bancarias', []) || []);
-        var m = todas.find(function (x) { return String(x.id) === String(c) || String(x.banco) === String(c); });
+        var m = todas.find(function (x) {
+            return String(x.id) === String(c) || String(x.banco) === String(c) ||
+                (x.idCuenta && String(x.idCuenta) === String(c));
+        });
+        if (!m && typeof window.buscarBancoPorValor === 'function') {
+            var e = window.buscarBancoPorValor(c, 'debito');
+            if (e) m = todas.find(function (x) { return String(x.banco) === String(e.banco); });
+        }
         return m ? (m.nombre || c) : c;
     }
     function nombreEmpresa() {
@@ -189,8 +196,11 @@
         try {
             var sel = document.getElementById('cuentaRegPagoOC');
             var buscada = String(p.cuenta || '').toLowerCase();
+            // Un banco puede venir guardado por su idCuenta: se traduce al nombre actual del banco.
+            var buscadaBanco = String(window.claveBancoVisible ? window.claveBancoVisible(p.cuenta || '') : '').toLowerCase();
             Array.prototype.forEach.call(sel.options, function (o) {
-                if (o.value.toLowerCase() === buscada || o.text.toLowerCase() === buscada) sel.value = o.value;
+                var ov = o.value.toLowerCase();
+                if (ov === buscada || o.text.toLowerCase() === buscada || (buscadaBanco && ov === buscadaBanco)) sel.value = o.value;
             });
         } catch (e) { }
     }

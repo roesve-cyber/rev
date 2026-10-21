@@ -27,10 +27,11 @@ function renderProyeccionFlujo() {
     movimientosCaja.forEach(m => {
         const esIngreso = String(m.tipo || '').toLowerCase() === "ingreso";
         const monto = parseFloat(m.monto) || 0;
-        const cuentaMov = String(m.cuenta || m.cuentaId || '');
-        const cuenta = (cuentaMov === "efectivo" || cuentaMov === "caja" || !cuentaMov) ? cajaDefaultId : cuentaMov;
+        // 🛡️ Misma regla que Bancos/Corte de Caja (antes comparaba m.cuenta a mano y dejaba fuera
+        // los movimientos guardados con el idCuenta del banco, p. ej. 'bnk_mercadopago_al3im').
+        const cuenta = window.claveLiquidezMovimiento(m, cajas, cuentasDebito);
 
-        if (saldosLiquidez[cuenta] !== undefined) {
+        if (cuenta !== null && saldosLiquidez[cuenta] !== undefined) {
             saldosLiquidez[cuenta] += esIngreso ? monto : -monto;
         }
     });

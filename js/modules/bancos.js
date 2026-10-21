@@ -2664,9 +2664,28 @@ function _renderModalEditarTransferencia(idOperacion) {
     setTimeout(() => {
         const selO = document.getElementById('editTransfOrigen');
         const selD = document.getElementById('editTransfDestino');
-        if (selO && [...selO.options].some(o => o.value === egreso.cuenta)) selO.value = egreso.cuenta;
-        if (selD && [...selD.options].some(o => o.value === ingreso.cuenta)) selD.value = ingreso.cuenta;
+        // 🛡️ Antes se comparaba option.value === movimiento.cuenta: para un banco el movimiento
+        // guarda su idCuenta ('bnk_...') y la opción vale el nombre del banco, así que no calzaban
+        // y el selector se quedaba en la primera opción (se podía cambiar la cuenta sin querer).
+        const vO = _bancosValorSelectorDeMovimiento(selO, egreso);
+        const vD = _bancosValorSelectorDeMovimiento(selD, ingreso);
+        if (vO !== null) selO.value = vO;
+        if (vD !== null) selD.value = vD;
     }, 0);
+}
+
+// Devuelve el value de la <option> del selector que corresponde a la cuenta de un movimiento,
+// usando la regla compartida (movimientoPerteneceACuenta + aliases del banco). null si ninguna.
+function _bancosValorSelectorDeMovimiento(sel, mov) {
+    if (!sel || !mov) return null;
+    for (const o of [...sel.options]) {
+        if (!o.value) continue;
+        const e = window.buscarBancoPorValor ? window.buscarBancoPorValor(o.value, 'debito') : null;
+        const aliases = [o.value];
+        if (e) aliases.push(e.banco, e.idCuenta, ...(Array.isArray(e.nombresAnteriores) ? e.nombresAnteriores : []));
+        if (window.movimientoPerteneceACuenta(mov, aliases.filter(Boolean))) return o.value;
+    }
+    return null;
 }
 
 // 🔎 Ayudantes para la corrección de transferencias (opción C: edición
@@ -2717,7 +2736,11 @@ window.guardarEdicionTransferencia = function(idOperacion) {
     if (isNaN(nuevoMonto) || nuevoMonto <= 0) return alert("❌ Ingresa un monto válido mayor a cero.");
     if (!fechaRaw) return alert("❌ Selecciona una fecha válida.");
 
-    const sinCambios = nuevoOrigen === egresoAnterior.cuenta && nuevoDestino === ingresoAnterior.cuenta &&
+    // Valor (como lo ve el selector) de la cuenta original de cada pata; si no se reconoce,
+    // se cae al id crudo guardado en el movimiento.
+    const origenAnteriorVal = _bancosValorSelectorDeMovimiento(selO, egresoAnterior) ?? egresoAnterior.cuenta;
+    const destinoAnteriorVal = _bancosValorSelectorDeMovimiento(selD, ingresoAnterior) ?? ingresoAnterior.cuenta;
+    const sinCambios = nuevoOrigen === origenAnteriorVal && nuevoDestino === destinoAnteriorVal &&
         nuevoMonto === Number(egresoAnterior.monto) && fechaRaw === String(egresoAnterior.fecha).split('T')[0];
     if (sinCambios) return alert('No hay cambios que guardar.');
 
@@ -2726,7 +2749,9 @@ window.guardarEdicionTransferencia = function(idOperacion) {
     // porque ya existe un corte de caja cerrado que se vería descuadrado.
     const fechaOriginalSolo = _bancosFechaSolo(egresoAnterior.fecha);
     const fechaLimiteSolo = (fechaOriginalSolo && fechaOriginalSolo < fechaRaw) ? fechaOriginalSolo : fechaRaw;
-    const cuentasAfectadas = [...new Set([egresoAnterior.cuenta, ingresoAnterior.cuenta, nuevoOrigen, nuevoDestino])];
+    // 🛡️ Los cortes guardan cuentaId = id de caja o NOMBRE del banco, no el idCuenta del movimiento:
+    // se usa el valor del selector para que un corte cerrado de un banco sí se detecte.
+    const cuentasAfectadas = [...new Set([origenAnteriorVal, destinoAnteriorVal, nuevoOrigen, nuevoDestino])];
     // Si no hay fecha original confiable, no podemos garantizar que sea
     // seguro editar en sitio -- por seguridad, se fuerza el camino de 4
     // movimientos (igual que si hubiera un corte cerrado de por medio).
@@ -2763,8 +2788,18 @@ window.guardarEdicionTransferencia = function(idOperacion) {
 
         // Ajuste neto por cuenta (una misma cuenta puede recibir más de
         // un ajuste si origen o destino no cambiaron).
+        // 🛡️ Se agrupa por la cuenta REAL (tipo + id de registro), no por el texto con que se
+        // nombró: 'bnk_x' y 'X' son la misma cuenta y sus ajustes deben sumarse en uno solo.
         const deltas = {};
-        const acumular = (cid, delta) => { deltas[cid] = (deltas[cid] || 0) + delta; };
+        const refPorClave = {};
+        const claveDe = {};
+        const acumular = (cid, delta) => {
+            const rr = _resolverCuentaMovimiento(cid);
+            const k = rr.ok ? `${rr.tipo}|${rr.idRegistro || rr.cuentaRealId}` : `?|${cid}`;
+            claveDe[cid] = k;
+            if (!refPorClave[k]) refPorClave[k] = cid;
+            deltas[k] = (deltas[k] || 0) + delta;
+        };
         acumular(egresoAnterior.cuenta, +Number(egresoAnterior.monto));   // deshace el egreso viejo
         acumular(ingresoAnterior.cuenta, -Number(ingresoAnterior.monto)); // deshace el ingreso viejo
         acumular(nuevoOrigen, -nuevoMonto);                                // aplica el egreso nuevo
@@ -2773,24 +2808,28 @@ window.guardarEdicionTransferencia = function(idOperacion) {
         // Validar que TODAS las cuentas involucradas existan antes de
         // tocar cualquier saldo o movimiento.
         const resueltas = {};
-        for (const cid of Object.keys(deltas)) {
+        for (const k of Object.keys(deltas)) {
+            const cid = refPorClave[k];
             const r = _resolverCuentaMovimiento(cid);
             if (!r.ok) return alert(`❌ No se pudo corregir: la cuenta "${cid}" no existe. Nada se guardó.`);
-            resueltas[cid] = r;
+            resueltas[k] = r;
         }
 
-        // Aplicar los deltas de saldo.
-        Object.keys(deltas).forEach(cid => {
-            const r = resueltas[cid];
-            if (Math.abs(deltas[cid]) < 0.005) return; // nada que ajustar en esta cuenta
-            r.cuentas[r.idx].saldo = (Number(r.cuentas[r.idx].saldo) || 0) + deltas[cid];
+        // Aplicar los deltas de saldo. Se vuelve a resolver (relee storage) en cada cuenta: así
+        // dos cuentas de la misma colección (p. ej. dos bancos) no se pisan el saldo una a otra
+        // escribiendo una copia vieja de la lista.
+        Object.keys(deltas).forEach(k => {
+            if (Math.abs(deltas[k]) < 0.005) return; // nada que ajustar en esta cuenta
+            const r = _resolverCuentaMovimiento(refPorClave[k]);
+            if (!r.ok) return;
+            r.cuentas[r.idx].saldo = (Number(r.cuentas[r.idx].saldo) || 0) + deltas[k];
             StorageService.set(r.tipo === 'efectivo' ? 'cuentasEfectivo' : 'cuentas-bancarias', r.cuentas);
         });
 
         // Editar los 2 movimientos originales en sitio -- no se crea nada nuevo.
         const movsDirectos = StorageService.get('movimientosCaja', []);
-        const rOrigen = resueltas[nuevoOrigen];
-        const rDestino = resueltas[nuevoDestino];
+        const rOrigen = resueltas[claveDe[nuevoOrigen]];
+        const rDestino = resueltas[claveDe[nuevoDestino]];
         movsDirectos.forEach(m => {
             if (m.id === egresoAnterior.id) {
                 m.monto = nuevoMonto;

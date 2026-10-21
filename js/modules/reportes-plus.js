@@ -1294,9 +1294,9 @@
         arr('movimientosCaja').forEach(m => {
             const type = String(m.tipo || '').toLowerCase();
             const amount = Number(m.monto || 0) || 0;
-            const rawAccount = String(window.claveBancoVisible ? window.claveBancoVisible(m.cuenta || m.cuentaId || '') : (m.cuenta || m.cuentaId || ''));
-            const account = (rawAccount === 'efectivo' || rawAccount === 'caja' || !rawAccount) ? defaultCashId : rawAccount;
-            if (balances[account] !== undefined) balances[account] += type === 'ingreso' ? amount : -amount;
+            // 🛡️ Regla compartida con Bancos/Corte de Caja (movimientoPerteneceACuenta + aliases).
+            const account = window.claveLiquidezMovimiento(m, cashList, debitAccounts);
+            if (account !== null && balances[account] !== undefined) balances[account] += type === 'ingreso' ? amount : -amount;
         });
 
         const initialLiquidity = Object.values(balances).reduce((s, v) => s + (Number(v) || 0), 0);
