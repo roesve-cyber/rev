@@ -1060,11 +1060,25 @@ function _actualizarEstadosCotizaciones(lista) {
     // documentos formales para clientes grandes que el usuario puede querer
     // conservar o imprimir de nuevo; se siguen pudiendo borrar a mano con el
     // botón "🧹 Eliminar vencidas".
+    //
+    // 🛡️ CORREGIDO: si se junta un backlog grande de vencidas (p.ej. no se
+    // abrió esta pantalla en un tiempo), intentar borrarlas TODAS de un
+    // golpe puede superar el ~30% que el circuit-breaker de storage2.js
+    // tolera de una sola vez, y bloquea la sincronización por completo
+    // ("se iban a borrar X de Y registros de golpe"). En vez de tocar ese
+    // freno de seguridad, aquí se depuran en tandas chicas: cada vez que se
+    // abre la lista se borran como máximo MAX_BORRADOS_POR_CORRIDA, y el
+    // resto se queda para la siguiente apertura, hasta vaciarse.
+    const MAX_BORRADOS_POR_CORRIDA = 6;
+    let borradosEstaCorrida = 0;
     const listaFiltrada = lista.filter(c => {
         if (c.estado === 'Convertida' || c.modalidad === 'mayoreo') return true;
         const yaVencio = new Date(c.fechaVencimiento) < hoy;
-        if (yaVencio) cambios = true;
-        return !yaVencio;
+        if (!yaVencio) return true;
+        if (borradosEstaCorrida >= MAX_BORRADOS_POR_CORRIDA) return true; // se queda para la próxima corrida
+        borradosEstaCorrida++;
+        cambios = true;
+        return false;
     });
 
     listaFiltrada.forEach(c => {
