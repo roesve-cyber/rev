@@ -407,6 +407,7 @@ window.renderEstadoCuentaClienteSelector = function() {
                 <button onclick="imprimirTicketEstadoCuentaCliente()" style="padding:12px 18px; background:#3b82f6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">🖨️ Ticket Térmico</button>
                 <button onclick="imprimirPdfEstadoCuentaCliente()" style="padding:12px 18px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📄 PDF / A4</button>
                 <button id="btnImgECC" onclick="descargarImagenEstadoCuentaCliente()" style="padding:12px 18px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📷 Guardar Imagen</button>
+                <button id="btnImgCelECC" onclick="descargarImagenCelularEstadoCuentaCliente()" style="padding:12px 18px; background:#16a34a; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📱 Celular (WhatsApp)</button>
             </div>
         </div>
     </div>
@@ -1319,6 +1320,174 @@ window.descargarImagenEstadoCuentaCliente = function() {
             wrap.remove();
             btn.innerHTML = txtOriginal;
             btn.disabled = false;
+        });
+    });
+};
+
+// ============================================================================
+// 📱 IMAGEN PARA CELULAR / WHATSAPP
+// ----------------------------------------------------------------------------
+// Una sola columna de 390 px (el ancho de una pantalla de celular), sin tablas,
+// letra de 14 a 36 px y cada folio como tarjeta con sus abonos apilados. Se
+// renderiza a doble resolución (scale 3) para que se vea nítida al abrirla en
+// WhatsApp. NO reemplaza la imagen tablet, el PDF carta ni el ticket.
+// ============================================================================
+function _eccCelAbonosHtml(c) {
+    const filas = [];
+    if (Number(c.enganche || 0) > 0.01) {
+        filas.push({ fecha: c.fechaVentaCorta, medio: 'Enganche inicial', monto: Number(c.enganche), saldo: null });
+    }
+    (c.abonosDetalle || []).forEach(a => filas.push({ fecha: a.fecha, medio: a.medio, monto: a.monto, saldo: a.saldoDespues }));
+    if (!filas.length) {
+        return '<div style="font-size:15px; color:#94a3b8; padding:6px 0;">Sin abonos registrados</div>';
+    }
+    return filas.map(f => `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:9px 0; border-top:1px solid #f1f5f9;">
+            <div style="min-width:0;">
+                <div style="font-size:15px; font-weight:bold; color:#0f172a;">${_escCuenta(f.fecha)}</div>
+                <div style="font-size:14px; color:#64748b; word-break:break-word;">${_escCuenta(f.medio)}</div>
+            </div>
+            <div style="text-align:right; white-space:nowrap;">
+                <div style="font-size:18px; font-weight:900; color:#059669;">${_dinéroCuenta(f.monto)}</div>
+                ${f.saldo !== null ? `<div style="font-size:14px; color:#64748b;">Saldo ${_dinéroCuenta(f.saldo)}</div>` : ''}
+            </div>
+        </div>`).join('');
+}
+
+function _eccCelTarjetaFolio(c) {
+    const badge = _eccBadgeColores(c.estado);
+    const producto = (c.articulosDetalle || []).length
+        ? c.articulosDetalle.map(a => a.cantidad > 1 ? `${a.nombre} x${a.cantidad}` : a.nombre).join(' + ')
+        : 'Producto no especificado';
+    const dato = (label, valor, color = '#1e293b') => `
+        <div style="display:flex; justify-content:space-between; align-items:baseline; padding:6px 0;">
+            <span style="font-size:15px; color:#64748b;">${label}</span>
+            <span style="font-size:17px; font-weight:bold; color:${color}; text-align:right;">${valor}</span>
+        </div>`;
+    return `
+    <div style="background:white; border:1px solid #e2e8f0; border-radius:16px; padding:16px; margin-bottom:14px;">
+        <div style="font-size:18px; font-weight:bold; color:#1e40af; line-height:1.25; word-break:break-word;">🛋️ ${_escCuenta(producto)}</div>
+        <div style="margin:8px 0 6px 0;"><span style="background:${badge.bg}; color:${badge.color}; padding:5px 12px; border-radius:20px; font-weight:bold; font-size:14px;">${c.estado}</span></div>
+        ${dato('Fecha de venta', _escCuenta(c.fechaVentaCorta))}
+        ${dato('Total de la venta', _dinéroCuenta(c.totalVenta))}
+        ${dato('Saldo actual', _dinéroCuenta(c.saldo), c.saldo > 0.01 ? '#b91c1c' : '#059669')}
+        <div style="margin-top:8px; font-size:14px; font-weight:bold; color:#475569; text-transform:uppercase; letter-spacing:.03em;">Pagos</div>
+        ${_eccCelAbonosHtml(c)}
+    </div>`;
+}
+
+function _eccConstruirHtmlImagenCelular(estado, cuentasImprimir) {
+    const pct = Math.max(0, Math.min(100, Number(estado.porcentajePago) || 0));
+    const detalleAbonos = window._eccVistaActiva === 'detalleAbonos';
+
+    let cuerpo;
+    if (detalleAbonos) {
+        const movs = _eccMovimientosClienteCombinados(estado);
+        cuerpo = `
+        <div style="font-size:18px; font-weight:bold; color:#1e293b; margin:0 0 10px 2px;">🧾 Todos los pagos</div>
+        ${movs.length ? movs.map(m => `
+            <div style="background:white; border:1px solid #e2e8f0; border-radius:14px; padding:13px 14px; margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                    <div style="min-width:0;">
+                        <div style="font-size:15px; font-weight:bold; color:#0f172a;">${_escCuenta(m.fecha)}</div>
+                        <div style="font-size:14px; color:#64748b; word-break:break-word;">${_escCuenta(m.medio)}</div>
+                    </div>
+                    <div style="font-size:18px; font-weight:900; color:#059669; white-space:nowrap;">${_dinéroCuenta(m.monto)}</div>
+                </div>
+                <div style="margin-top:6px; font-size:14px; color:#475569; word-break:break-word;">${m.producto}</div>
+            </div>`).join('') : '<p style="font-size:15px; color:#94a3b8;">Este cliente no tiene abonos registrados.</p>'}`;
+    } else {
+        cuerpo = `
+        <div style="font-size:18px; font-weight:bold; color:#1e293b; margin:0 0 10px 2px;">📋 Detalle por compra</div>
+        ${cuentasImprimir.length ? cuentasImprimir.map(_eccCelTarjetaFolio).join('') : '<p style="font-size:15px; color:#94a3b8;">No hay folios para este filtro.</p>'}`;
+    }
+
+    return `
+    <div style="width:390px; background:#f1f5f9; padding:14px; font-family:Arial, Helvetica, sans-serif; box-sizing:border-box;">
+        <div style="text-align:center; padding:6px 0 14px 0;">
+            <img src="img/Logo.svg" alt="Mi Pueblito" style="width:46px; height:46px; object-fit:contain;" onerror="this.style.display='none'">
+            <div style="font-size:15px; font-weight:bold; color:#475569; margin-top:4px;">Mueblería Mi Pueblito</div>
+            <div style="font-size:22px; font-weight:900; color:#0f172a; margin-top:2px;">Estado de cuenta</div>
+            <div style="font-size:14px; color:#64748b; margin-top:2px;">Emitido: ${_fechaCortaCuenta(new Date())}</div>
+        </div>
+
+        <div style="background:white; border-radius:16px; padding:16px; margin-bottom:14px;">
+            <div style="font-size:14px; font-weight:bold; color:#0284c7; text-transform:uppercase;">Cliente</div>
+            <div style="font-size:22px; font-weight:900; color:#0c4a6e; line-height:1.2; margin-top:2px; word-break:break-word;">${_escCuenta(estado.clienteNombre)}</div>
+            <div style="margin-top:8px;"><span style="display:inline-block; background:${estado.colorEstatus}; color:white; padding:5px 14px; border-radius:20px; font-weight:bold; font-size:14px;">${estado.estadoEstatus}</span></div>
+        </div>
+
+        <div style="background:#fef2f2; border:2px solid #dc2626; border-radius:16px; padding:16px; margin-bottom:14px; text-align:center;">
+            <div style="font-size:14px; font-weight:bold; color:#dc2626; text-transform:uppercase;">Saldo pendiente</div>
+            <div style="font-size:36px; font-weight:900; color:#7f1d1d; margin-top:2px;">${_dinéroCuenta(estado.totalSaldo)}</div>
+            <div style="height:12px; background:#fecaca; border-radius:8px; overflow:hidden; margin:12px 0 6px 0;"><div style="height:12px; width:${pct}%; background:#16a34a;"></div></div>
+            <div style="font-size:15px; color:#475569;">Pagado ${pct}% · ${_dinéroCuenta(estado.totalAbonado)} de ${_dinéroCuenta(estado.totalVendido)}</div>
+        </div>
+
+        ${cuerpo}
+
+        <div style="text-align:center; margin-top:10px; font-size:13px; color:#94a3b8;">Documento informativo de saldo</div>
+    </div>`;
+}
+
+window.descargarImagenCelularEstadoCuentaCliente = function() {
+    if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
+    const estado = window._estadoClienteActual;
+    const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
+
+    const btn = document.getElementById('btnImgCelECC');
+    const txtOriginal = btn ? btn.innerHTML : '';
+    const restaurar = () => { if (btn) { btn.innerHTML = txtOriginal; btn.disabled = false; } };
+    if (btn) { btn.innerHTML = '⏳ Generando...'; btn.disabled = true; }
+
+    const loadScript = (cb) => {
+        if (typeof html2canvas !== 'undefined') return cb();
+        const sc = document.createElement('script');
+        sc.src = new URL('js/vendor/html2canvas.min.js', document.baseURI).href;
+        sc.onload = cb;
+        sc.onerror = () => { alert('Error al cargar motor de imágenes.'); restaurar(); };
+        document.head.appendChild(sc);
+    };
+
+    loadScript(() => {
+        const wrap = document.createElement('div');
+        wrap.style.position = 'absolute';
+        wrap.style.left = '-9999px';
+        wrap.style.top = '0';
+        wrap.innerHTML = _eccConstruirHtmlImagenCelular(estado, cuentasImprimir);
+        document.body.appendChild(wrap);
+
+        const nombreArchivo = `Estado_Cuenta_${String(estado.clienteNombre || 'cliente').replace(/\s+/g, '_')}.png`;
+        const descargar = (canvas) => {
+            const link = document.createElement('a');
+            link.download = nombreArchivo;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        };
+
+        html2canvas(wrap.firstElementChild, { scale: 3, backgroundColor: '#f1f5f9', useCORS: true }).then(canvas => {
+            // En celular se abre directo el menú de compartir (WhatsApp). Si el navegador no
+            // soporta compartir archivos, o el usuario lo cancela/bloquea, se descarga la imagen.
+            canvas.toBlob(async (blob) => {
+                try {
+                    const archivo = blob ? new File([blob], nombreArchivo, { type: 'image/png' }) : null;
+                    if (archivo && navigator.canShare && navigator.canShare({ files: [archivo] })) {
+                        await navigator.share({ files: [archivo], title: 'Estado de cuenta', text: `Estado de cuenta - ${estado.clienteNombre}` });
+                    } else {
+                        descargar(canvas);
+                    }
+                } catch (e) {
+                    if (e && e.name !== 'AbortError') descargar(canvas); // cancelar el menú no descarga
+                } finally {
+                    wrap.remove();
+                    restaurar();
+                }
+            }, 'image/png');
+        }).catch(e => {
+            console.error('Error html2canvas (celular):', e);
+            alert('Hubo un error al generar la imagen.');
+            wrap.remove();
+            restaurar();
         });
     });
 };
