@@ -23,6 +23,11 @@
 // ANTERIOR a cupones → escalera guardada en la cuenta; POSTERIOR → tarifa vigente
 // (igual que Reestructurar Plazo).
 //
+// Ambos modos muestran lo que el cliente necesita para decidir (producto, fecha de venta,
+// fecha límite del monto cotizado / nueva fecha límite de pago, comparativo contra su plan
+// actual) y se pueden emitir en los formatos de la tienda (PDF / Ticket / Imagen) siempre con
+// el logo del negocio. La emisión no escribe nada; solo lee.
+//
 // El modo "Liquidar antes" es solo lectura. Lo único que se guarda desde aquí,
 // además del cambio de plazo confirmado, es la fecha de inicio de cupones (admin).
 // =====================================================================
@@ -60,6 +65,42 @@
     }
     const fmtFecha = (d) => (d && !isNaN(d.getTime())) ? d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
     const isoDia = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const PERIODOS = { semanal: 'semanales', quincenal: 'quincenales', mensual: 'mensuales' };
+
+    // Producto(s) de la venta: es lo que identifica la compra ante el cliente (el folio queda como referencia).
+    const productosCuenta = (cuenta) => (Array.isArray(cuenta.articulos) ? cuenta.articulos : [])
+        .map((x) => ({ nombre: String(x.nombre || x.productoNombre || '').trim(), cantidad: Number(x.cantidad || 1) || 1 }))
+        .filter((x) => x.nombre);
+    const textoProductos = (lista, max) => {
+        if (!lista.length) return 'Venta general';
+        const t = lista.map((x) => x.nombre + (x.cantidad > 1 ? ' x' + x.cantidad : '')).join(', ');
+        return max && t.length > max ? t.slice(0, max - 1) + '…' : t;
+    };
+
+    // ── Datos del negocio y logo ──────────────────────────────────────
+    function datosEmpresa() {
+        const cfg = leer('configEmpresa', {}) || {};
+        return { nombre: cfg.nombre || 'Mueblería Mi Pueblito', direccion: cfg.direccion || '', telefono: cfg.telefono || '' };
+    }
+    // El logo se incrusta como data URI para que salga SIEMPRE igual en la ventana de impresión,
+    // en el PDF y en la imagen (el service worker no guarda img/ para uso sin conexión).
+    let LOGO_DATA = null, LOGO_PROMESA = null;
+    function urlADataUri(url) {
+        return fetch(url, { cache: 'force-cache' })
+            .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+            .then((b) => new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(b); }));
+    }
+    function cargarLogo() {
+        if (LOGO_DATA) return Promise.resolve(LOGO_DATA);
+        if (!LOGO_PROMESA) {
+            const url = (f) => new URL(f, document.baseURI).href;
+            LOGO_PROMESA = urlADataUri(url('img/Logo.png'))
+                .catch(() => urlADataUri(url('img/Logo.svg')))
+                .then((d) => { LOGO_DATA = d; return d; })
+                .catch(() => { LOGO_PROMESA = null; return null; });
+        }
+        return LOGO_PROMESA;
+    }
 
     // ── Fecha de inicio de cupones ────────────────────────────────────
     function fechaInicioCupones() {
@@ -125,8 +166,11 @@
         const inicio = fechaInicioCupones();
         const posterior = !!inicio && fVenta >= inicio;
         const esc_ = escalera(cuenta, capitalContado, periodicidad);
+        const pagaresPend = leer('pagaresSistema', []).filter((p) => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'));
+        const montoVencido = Number(estado && estado.montoVencido || 0);
         return { cuenta, folio, estado, moratorios, saldoNominal, enganche, contado, capitalContado, mesesPlan, totalPlan, periodicidad,
-            fVenta, dias, mesPostContado, enPlazo, fVence, abonos, cubierto, ajustes, inicio, posterior, escalera: esc_ };
+            fVenta, dias, mesPostContado, enPlazo, fVence, abonos, cubierto, ajustes, inicio, posterior, escalera: esc_,
+            productos: productosCuenta(cuenta), pagaresPend, montoVencido };
     }
 
     // Plazos a los que puede aspirar HOY
@@ -166,6 +210,44 @@
         else if (meses === a.mesesPlan) out.mensaje = 'Es su plazo pactado: paga el saldo vigente completo.';
         else out.mensaje = `Liquidando a ${meses} mes(es) paga el total de ese plazo en la escalera con que se vendió.`;
         return out;
+    }
+
+    // ── Fechas útiles para decidir ────────────────────────────────────
+    function fechaPagare(p) {
+        const v = p && p.fechaVencimiento;
+        if (v === undefined || v === null || v === '') return null;
+        const d = typeof v === 'number' ? new Date(v) : parseFecha(v);
+        return d && !isNaN(d.getTime()) ? d : null;
+    }
+
+    // Hasta cuándo aplica el monto cotizado al liquidar.
+    //  · Venta anterior a cupones: el precio de cada peldaño de la escalera rige mientras el cliente siga
+    //    dentro de ese mes (mismo criterio de `mesPostContado` en analizar: 30 días + N meses). Pasada esa
+    //    fecha cae al siguiente peldaño. El plazo pactado rige hasta que vence.
+    //  · Venta posterior a cupones: paga el saldo completo; la referencia es el vencimiento del plazo pactado.
+    //  · Plazo ya vencido: no hay fecha límite; la cotización es solo de hoy.
+    function fechaLimiteLiquidar(a, meses) {
+        if (!a.enPlazo) return null;
+        if (a.posterior || Number(meses) >= a.mesesPlan) return { fecha: a.fVence, tipo: 'vence' };
+        const ultimoDia = Math.ceil(30 + Number(meses) * DIAS_MES) - 1;
+        return { fecha: new Date(a.fVenta.getTime() + ultimoDia * 86400000), tipo: 'escalon' };
+    }
+
+    // Cómo va si NO hace nada: pagarés pendientes reales (o estimación si la cuenta no los tiene)
+    function planActual(a) {
+        const pend = a.pagaresPend || [];
+        const abonoPlan = Number((a.cuenta.plan && a.cuenta.plan.abono) || 0);
+        let pagos = null, ultima = null;
+        if (pend.length) {
+            pagos = pend.length;
+            const fs = pend.map(fechaPagare).filter(Boolean).sort((x, y) => x - y);
+            if (fs.length) ultima = fs[fs.length - 1];
+        } else {
+            pagos = abonoPlan > 0 ? Math.ceil(a.saldoNominal / abonoPlan - 0.001) : null;
+            ultima = a.enPlazo ? a.fVence : null;
+        }
+        const monto = abonoPlan || (pend[0] ? Number(pend[0].monto || 0) : 0);
+        return { pagos, monto, ultima, saldo: a.saldoNominal };
     }
 
     // ── Ampliar plazo ─────────────────────────────────────────────────
@@ -211,6 +293,20 @@
         return Object.assign({ totalPagado }, r, { totalFinal: a.enganche + plan.total, incremento: plan.total - a.totalPlan });
     }
 
+    // Fechas del calendario nuevo: _reestructuraEjecutar fecha el primer pagaré a (hoy + intervalo) y
+    // cada uno siguiente a +intervalo; el último pagaré es la nueva fecha límite de pago.
+    function fechasAmpliacion(a, r, hoy) {
+        const paso = a.periodicidad === 'quincenal' ? 14 : a.periodicidad === 'mensual' ? 30 : 7;
+        const f = new Date(hoy);
+        let primera = null, ultima = null;
+        for (let i = 0; i < r.pagosRestantes; i++) {
+            f.setDate(f.getDate() + paso);
+            if (i === 0) primera = new Date(f);
+            ultima = new Date(f);
+        }
+        return { primera, ultima };
+    }
+
     function panelAmpliar(a) {
         if (!elegibleParaPlazo(a.cuenta)) return '<p style="margin-top:12px;color:#b45309;">Esta cuenta no admite cambio de plazo (cancelada, saldada, apartado o incobrable).</p>';
         if (!g('_reestructuraSimular') || !g('_reestructuraEjecutar')) return '<p style="margin-top:12px;color:#b91c1c;">Falta el módulo de reestructura de plazo; no se puede ampliar desde aquí.</p>';
@@ -226,6 +322,7 @@
             <select onchange="_cqlElegirPlazoAmp(this.value)" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;">` +
             amp.planes.map((p) => `<option value="${p.meses}" ${p.meses === Number(S.mesesAmp) ? 'selected' : ''}>${p.meses} meses · ${p.pagos} pagos de ${esc(dinero(p.abono))} · total ${esc(dinero(p.total))}</option>`).join('') + '</select>';
         const fila = (k, v, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed #e2e8f0;"><span style="color:#475569;">${k}</span><span style="${extra || 'font-weight:bold;'}">${v}</span></div>`;
+        const fe = fechasAmpliacion(a, r, new Date());
         const proximo = r.pagosRestantes ? (r.proximaEsParcial ? `parcial: faltan ${esc(dinero(r.proximoFaltante))} de ${esc(dinero(r.proximoMonto))}` : esc(dinero(r.proximoMonto))) : '-';
         h += `<div style="margin-top:12px;border:2px solid #7c3aed;border-radius:12px;padding:14px;">
             ${fila('Total del plan a ' + plan.meses + ' meses', esc(dinero(plan.total)))}
@@ -236,8 +333,15 @@
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 4px;"><span style="font-size:15px;color:#0f172a;">Importe restante a cubrir</span><span style="font-size:24px;font-weight:800;color:#7c3aed;">${esc(dinero(r.saldoRestante))}</span></div>
             ${a.moratorios > 0.01 ? fila('+ Moratorios pendientes (no cambian)', esc(dinero(a.moratorios)), 'font-weight:normal;color:#b45309;') : ''}
             ${fila('Total final de la compra (enganche + plan)', esc(dinero(r.totalFinal)))}
-            ${fila(r.pagosRestantes + ' pago(s) ' + ({ semanal: 'semanales', quincenal: 'quincenales', mensual: 'mensuales' }[a.periodicidad] || ''), 'próximo ' + proximo, 'font-weight:bold;')}
+            ${fila(r.pagosRestantes + ' pago(s) ' + (PERIODOS[a.periodicidad] || ''), 'próximo ' + proximo, 'font-weight:bold;')}
+            ${fe.primera ? fila('Primer pago', esc(fmtFecha(fe.primera)), 'font-weight:normal;') : ''}
+            ${fe.ultima ? fila('Nueva fecha límite de pago (último pago)', esc(fmtFecha(fe.ultima)), 'font-weight:800;color:#7c3aed;') : ''}
+            <div style="margin-top:6px;font-size:11px;color:#94a3b8;">Las fechas del calendario nuevo suponen que el cambio se confirma hoy.</div>
             <div style="margin-top:8px;font-size:12px;color:#64748b;">Se cancelan los pagarés pendientes y se generan los nuevos; lo pagado y el historial se conservan. La política de pago anticipado sigue anclada a la venta original.</div>
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                <button onclick="_cqlEmitir()" style="flex:1;min-width:150px;padding:10px 14px;border:1px solid #7c3aed;background:white;color:#7c3aed;border-radius:8px;cursor:pointer;font-weight:bold;">🖨️ Imprimir / enviar al cliente</button>
+                <button onclick="_cqlCopiar()" style="padding:10px 14px;border:1px solid #cbd5e1;background:white;border-radius:8px;cursor:pointer;font-weight:bold;">📋 Copiar resumen</button>
+            </div>
             <button onclick="_cqlConfirmarAmpliacion()" id="cqlBtnAmpliar" style="margin-top:12px;width:100%;padding:13px;background:#7c3aed;color:white;border:none;border-radius:8px;font-weight:bold;font-size:14px;cursor:pointer;">✅ Confirmar ampliación a ${plan.meses} meses</button>
             <div style="margin-top:6px;font-size:11px;color:#94a3b8;text-align:center;">Cambiar el plazo es acción de administrador: si no lo eres, te pedirá las credenciales de uno.</div>
         </div>`;
@@ -260,6 +364,7 @@
             </div>
         </div>`);
         S.cliente = null; S.folio = null; S.meses = null; S.modo = 'liquidar'; S.mesesAmp = null; S.aviso = '';
+        cargarLogo(); // precarga el logo para que la emisión sea inmediata
         if (folioInicial) {
             const c = leer('cuentasPorCobrar', []).find((x) => x.folio === folioInicial);
             if (c) { S.folio = folioInicial; S.cliente = { id: c.clienteId, nombre: nombreCliente(c) }; }
@@ -288,7 +393,7 @@
         const cuentas = cuentasDelCliente(S.cliente.id);
         if (S.folio && !cuentas.some((c) => c.folio === S.folio)) S.folio = null;
         if (!S.folio && cuentas.length === 1) S.folio = cuentas[0].folio;
-        const opcionesCuenta = cuentas.map((c) => `<option value="${esc(c.folio)}" ${c.folio === S.folio ? 'selected' : ''}>${esc(c.folio.length > 26 ? c.folio.slice(0, 26) + '…' : c.folio)} · ${esc(fmtFecha(fechaVenta(c)))} · ${esc((c.plan && c.plan.meses) || '?')} m · saldo ${esc(dinero(c.saldoActual))}</option>`).join('');
+        const opcionesCuenta = cuentas.map((c) => `<option value="${esc(c.folio)}" ${c.folio === S.folio ? 'selected' : ''}>${esc(textoProductos(productosCuenta(c), 34))} · ${esc(fmtFecha(fechaVenta(c)))} · ${esc((c.plan && c.plan.meses) || '?')} m · saldo ${esc(dinero(c.saldoActual))} · ref. ${esc(c.folio.length > 14 ? c.folio.slice(0, 14) + '…' : c.folio)}</option>`).join('');
         let html = btnCliente + `<div style="margin-top:12px;font-size:15px;"><strong>${esc(S.cliente.nombre)}</strong></div>`;
         if (!cuentas.length) { cont.innerHTML = html + '<p style="color:#b45309;background:#fffbeb;border-radius:8px;padding:10px;margin-top:8px;">Este cliente no tiene cuentas a crédito con saldo pendiente.</p>'; return; }
         html += `<label style="display:block;margin-top:10px;font-size:12px;color:#475569;">Cuenta</label>
@@ -327,9 +432,11 @@
     function resumenCuenta(a) {
         const fila = (k, v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;"><span style="color:#64748b;">${k}</span><strong>${v}</strong></div>`;
         return `<div style="margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;font-size:13px;">
+            ${fila('Producto', esc(textoProductos(a.productos)))}
             ${fila('Venta', esc(fmtFecha(a.fVenta)) + ' · plan ' + esc(a.mesesPlan) + ' meses ' + esc(a.periodicidad))}
             ${fila('Va en', 'día ' + a.dias + (a.mesesPlan ? (a.enPlazo ? ' · plazo vence ' + esc(fmtFecha(a.fVence)) : ' · plazo vencido el ' + esc(fmtFecha(a.fVence))) : ''))}
             ${fila('Saldo vigente (sin moratorios)', esc(dinero(a.saldoNominal)))}
+            <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Ref. ${esc(a.folio)}</div>
         </div>`;
     }
 
@@ -344,6 +451,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 4px;"><span style="font-size:15px;color:#0f172a;">Importe restante a cubrir</span><span style="font-size:24px;font-weight:800;color:#0f766e;">${esc(dinero(q.restante))}</span></div>
             ${a.moratorios > 0.01 ? fila('+ Moratorios pendientes (se cobran aparte)', esc(dinero(a.moratorios)), 'font-weight:normal;color:#b45309;') + fila('A pagar hoy con moratorios', esc(dinero(q.restante + a.moratorios))) : ''}
             ${fila('Total final de la compra (enganche + plan)', esc(dinero(q.totalFinal)))}
+            ${(() => { const l = fechaLimiteLiquidar(a, q.meses); return l ? fila('Fecha límite para este monto', esc(fmtFecha(l.fecha)), 'font-weight:800;color:#0f766e;') : fila('Vigencia de esta cotización', 'solo hoy · ' + esc(fmtFecha(new Date())), 'font-weight:normal;'); })()}
             ${(!a.posterior && a.saldoNominal - q.restante > 0.01) ? fila('Ahorro contra su saldo vigente', esc(dinero(a.saldoNominal - q.restante)), 'font-weight:bold;color:#15803d;') : ''}`;
         if (a.posterior) {
             h += q.cupon
@@ -351,7 +459,10 @@
                 : `<div style="margin-top:10px;font-size:13px;color:#64748b;">🎟️ Sin cupón en este caso.</div>`;
         }
         h += `<div style="margin-top:10px;font-size:12px;color:#64748b;">${esc(q.mensaje)}</div></div>
-            <button onclick="_cqlCopiar()" style="margin-top:10px;padding:9px 14px;border:1px solid #cbd5e1;background:white;border-radius:8px;cursor:pointer;font-weight:bold;">📋 Copiar resumen para el cliente</button>`;
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                <button onclick="_cqlEmitir()" style="flex:1;min-width:150px;padding:10px 14px;border:1px solid #0f766e;background:white;color:#0f766e;border-radius:8px;cursor:pointer;font-weight:bold;">🖨️ Imprimir / enviar al cliente</button>
+                <button onclick="_cqlCopiar()" style="padding:10px 14px;border:1px solid #cbd5e1;background:white;border-radius:8px;cursor:pointer;font-weight:bold;">📋 Copiar resumen</button>
+            </div>`;
         return h;
     }
 
@@ -389,7 +500,8 @@
         const plan = amp.planes.find((p) => p.meses === Number(S.mesesAmp));
         if (!plan) { alert('Selecciona un plazo válido.'); return; }
         const r = simularAmpliacion(a, plan);
-        if (!confirm(`⚠️ AMPLIAR PLAZO PACTADO\n\nCliente: ${S.cliente.nombre}\nFolio: ${a.folio}\nPlazo: ${a.mesesPlan} → ${plan.meses} meses\nNuevo total del plan: ${dinero(plan.total)} (antes ${dinero(a.totalPlan)})\nImporte restante a cubrir: ${dinero(r.saldoRestante)}\nPagos nuevos: ${r.pagosRestantes}\n\nSe cancelan los pagarés pendientes y se generan los nuevos. Queda en auditoría.\n\n¿Confirmas?`)) return;
+        const feConf = fechasAmpliacion(a, r, new Date());
+        if (!confirm(`⚠️ AMPLIAR PLAZO PACTADO\n\nCliente: ${S.cliente.nombre}\nProducto: ${textoProductos(a.productos, 60)}\nRef.: ${a.folio}\nPlazo: ${a.mesesPlan} → ${plan.meses} meses\nNuevo total del plan: ${dinero(plan.total)} (antes ${dinero(a.totalPlan)})\nImporte restante a cubrir: ${dinero(r.saldoRestante)}\nPagos nuevos: ${r.pagosRestantes}${feConf.ultima ? `\nNueva fecha límite de pago: ${fmtFecha(feConf.ultima)}` : ''}\n\nSe cancelan los pagarés pendientes y se generan los nuevos. Queda en auditoría.\n\n¿Confirmas?`)) return;
         const btn = document.getElementById('cqlBtnAmpliar');
         if (btn) { btn.disabled = true; btn.textContent = 'Procesando…'; btn.style.opacity = '0.6'; }
         const res = await window._reestructuraEjecutar(a.folio, plan, a.cuenta.periodicidad || 'semanal', amp.capital);
@@ -413,19 +525,324 @@
         const guardar = () => { StorageService.set(CFG_KEY, { fechaInicio: v }); render(); };
         if (typeof window.requireAdmin === 'function') window.requireAdmin(guardar); else guardar();
     };
+    // ── Cotización lista para el cliente ──────────────────────────────
+    // Una sola fuente de datos (`bloques`) alimenta el documento (PDF/Imagen), el ticket y el texto copiado,
+    // para que los tres digan exactamente lo mismo que la pantalla.
+    function contexto() {
+        if (!S.folio || !S.cliente) return null;
+        const a = analizar(S.folio);
+        if (!a) return null;
+        const hoy = new Date();
+        const base = { a, hoy, modo: S.modo === 'ampliar' ? 'ampliar' : 'liquidar', cliente: S.cliente.nombre };
+        if (base.modo === 'ampliar') {
+            if (!elegibleParaPlazo(a.cuenta) || !g('_reestructuraSimular')) return null;
+            const amp = planesAmpliacion(a);
+            const plan = amp.planes.find((p) => p.meses === Number(S.mesesAmp)) || amp.planes[0];
+            if (!plan) return null;
+            const r = simularAmpliacion(a, plan);
+            if (!r) return null;
+            return Object.assign(base, { amp, plan, r, fechas: fechasAmpliacion(a, r, hoy), avisos: amp.avisos });
+        }
+        const plazos = plazosPosibles(a);
+        const meses = plazos.includes(Number(S.meses)) ? Number(S.meses) : plazos[0];
+        if (!meses) return null;
+        const q = cotizar(a, meses);
+        if (!q || q.restante === undefined) return null;
+        return Object.assign(base, { q, limite: fechaLimiteLiquidar(a, q.meses), avisos: q.avisos });
+    }
+
+    // Filas [etiqueta, valor, 'fuerte'?] por sección, ya formateadas como texto.
+    function bloques(ctx) {
+        const a = ctx.a;
+        const per = PERIODOS[a.periodicidad] || a.periodicidad;
+        const act = planActual(a);
+        const compra = [
+            ['Fecha de venta', fmtFecha(a.fVenta)],
+            ['Plazo contratado', `${a.mesesPlan || '-'} meses · pagos ${per}`],
+            [a.enPlazo ? 'Su plazo vence' : 'Su plazo venció', a.mesesPlan ? fmtFecha(a.fVence) : '-']
+        ];
+        const cuenta = [
+            ['Total del plan actual', dinero(a.totalPlan)],
+            ['Enganche recibido', dinero(a.enganche)],
+            ['Abonos recibidos', dinero(a.abonos)]
+        ];
+        if (Math.abs(a.ajustes) > 0.01) cuenta.push(['Otros ajustes aplicados (condonaciones, etc.)', dinero(a.ajustes)]);
+        cuenta.push(['Saldo vigente (sin moratorios)', dinero(a.saldoNominal), 'fuerte']);
+        if (a.moratorios > 0.01) cuenta.push(['Moratorios pendientes', dinero(a.moratorios)]);
+        if (a.montoVencido > 0.01) cuenta.push(['Pagos vencidos a la fecha', dinero(a.montoVencido)]);
+
+        const actualCol = {
+            pagos: act.pagos ? `${act.pagos} pago(s) ${per}` : '-',
+            monto: act.monto ? dinero(act.monto) : '-',
+            termina: act.ultima ? fmtFecha(act.ultima) : '-',
+            total: dinero(act.saldo)
+        };
+
+        if (ctx.modo === 'ampliar') {
+            const { plan, r, fechas } = ctx;
+            const opcion = [
+                ['Plazo actual → nuevo plazo', `${a.mesesPlan} → ${plan.meses} meses`],
+                [`Total del plan a ${plan.meses} meses`, dinero(plan.total)],
+                [`Total actual (${a.mesesPlan} meses)`, dinero(a.totalPlan)],
+                ['Costo adicional por ampliar', dinero(r.incremento), 'fuerte'],
+                ['Pagos nuevos', r.pagosRestantes ? `${r.pagosRestantes} pago(s) ${per} de ${dinero(plan.abono)}` : 'Sin pagos pendientes']
+            ];
+            if (fechas.primera) opcion.push(['Primer pago', fmtFecha(fechas.primera) + (r.proximaEsParcial ? ` (parcial: faltan ${dinero(r.proximoFaltante)})` : '')]);
+            if (fechas.ultima) opcion.push(['Nueva fecha límite de pago (último pago)', fmtFecha(fechas.ultima), 'fuerte']);
+            if (a.moratorios > 0.01) opcion.push(['Moratorios pendientes (no cambian)', dinero(a.moratorios)]);
+            opcion.push(['Total final de la compra (enganche + plan)', dinero(r.totalFinal)]);
+            return {
+                titulo: 'Cotización de ampliación de plazo', subtitulo: 'Ampliación de plazo', color: '#7c3aed', fondo: '#f5f3ff',
+                tituloOpcion: `Si amplía su plazo a ${plan.meses} meses`,
+                hero: { etiqueta: 'Importe restante a cubrir', valor: dinero(r.saldoRestante) },
+                compra, cuenta, opcion, colOpcion: `Ampliar a ${plan.meses} meses`,
+                comparativo: [
+                    ['Pagos que le faltan', actualCol.pagos, r.pagosRestantes ? `${r.pagosRestantes} pago(s) ${per}` : '-'],
+                    ['Monto por pago', actualCol.monto, r.pagosRestantes ? dinero(plan.abono) : '-'],
+                    ['Termina de pagar', actualCol.termina, fechas.ultima ? fmtFecha(fechas.ultima) : (r.saldoRestante <= 0.01 ? 'Cuenta saldada' : '-')],
+                    ['Total que pagará de aquí en adelante', actualCol.total, dinero(r.saldoRestante)]
+                ],
+                notas: [
+                    'Si acepta, se cancelan sus pagarés pendientes y se genera un calendario nuevo a partir de la fecha en que se confirma el cambio; lo ya pagado se conserva.',
+                    'Las fechas de pago de esta cotización suponen que el cambio se confirma el día en que se emite.',
+                    'Los moratorios pendientes no cambian con la ampliación y se cobran aparte.'
+                ].concat(ctx.avisos.length ? ['Tarifa estimada con precios vigentes; sujeta a validación en tienda.'] : [])
+            };
+        }
+
+        const { q, limite } = ctx;
+        const opcion = [
+            ['Liquidando a', `${q.meses} mes(es)${q.meses === a.mesesPlan ? ' (plazo pactado)' : ''}`],
+            [`Total del plan a ${q.meses} mes(es)`, dinero(q.totalPlazo)],
+            ['Total final de la compra (enganche + plan)', dinero(q.totalFinal)]
+        ];
+        if (!a.posterior && a.saldoNominal - q.restante > 0.01) opcion.push(['Ahorro contra su saldo vigente', dinero(a.saldoNominal - q.restante), 'fuerte']);
+        if (a.moratorios > 0.01) {
+            opcion.push(['Moratorios pendientes (se cobran aparte)', dinero(a.moratorios)]);
+            opcion.push(['A pagar hoy con moratorios', dinero(q.restante + a.moratorios), 'fuerte']);
+        }
+        if (a.posterior) opcion.push(['Cupón al liquidar', q.cupon ? `${dinero(q.cupon.monto)} (${q.cupon.pct}% del total financiado)` : 'Sin cupón en este caso']);
+        opcion.push(limite
+            ? ['Fecha límite para este monto', fmtFecha(limite.fecha), 'fuerte']
+            : ['Vigencia de esta cotización', 'Solo hoy · ' + fmtFecha(ctx.hoy)]);
+        const notas = [q.mensaje].filter(Boolean);
+        if (limite && limite.tipo === 'escalon') notas.push('Pasada esa fecha, aplica el siguiente plazo de la escalera con la que se vendió.');
+        notas.push('Cotización informativa; los moratorios y el saldo pueden cambiar con los pagos que se registren.');
+        return {
+            titulo: 'Cotización de liquidación', subtitulo: 'Liquidación anticipada', color: '#0f766e', fondo: '#ecfdf5',
+            tituloOpcion: `Si liquida a ${q.meses} mes(es)`,
+            hero: { etiqueta: 'Importe restante a cubrir', valor: dinero(q.restante) },
+            compra, cuenta, opcion, colOpcion: 'Liquidar',
+            comparativo: [
+                ['Pagos que le faltan', actualCol.pagos, '1 solo pago'],
+                ['Monto por pago', actualCol.monto, dinero(q.restante)],
+                ['Termina de pagar', actualCol.termina, limite ? `Al liquidar (hasta ${fmtFecha(limite.fecha)})` : 'Al liquidar'],
+                ['Total que pagará de aquí en adelante', actualCol.total, dinero(q.restante)]
+            ],
+            notas: notas.concat(ctx.avisos.length ? ['Tarifa estimada con precios vigentes; sujeta a validación en caja.'] : [])
+        };
+    }
+
+    // ── Texto plano (copiar) ──────────────────────────────────────────
+    function lineasResumen(ctx) {
+        const b = bloques(ctx);
+        const l = [`${b.titulo} — ${ctx.cliente}`, `Producto: ${textoProductos(ctx.a.productos)}`];
+        b.compra.forEach(([k, v]) => l.push(`${k}: ${v}`));
+        l.push(`${b.hero.etiqueta}: ${b.hero.valor}`);
+        b.opcion.forEach(([k, v]) => l.push(`${k}: ${v}`));
+        l.push(`(Cotización al ${fmtFecha(ctx.hoy)}; sujeta a validación en caja)`);
+        return l;
+    }
+
+    // ── Documento (PDF / Imagen) ──────────────────────────────────────
+    function docCss(color, fondo) {
+        return `<style>
+        .cql-wrap{font-family:Arial,Helvetica,sans-serif;color:#172033;background:#fff;max-width:720px;margin:0 auto;line-height:1.35;font-size:13px;}
+        .cql-head{background:#0f172a;color:#fff;padding:20px 24px;border-radius:14px 14px 0 0;display:flex;justify-content:space-between;gap:16px;align-items:flex-start;}
+        .cql-brand{display:flex;align-items:center;gap:13px;}
+        .cql-logo{width:62px;height:62px;object-fit:contain;background:#fff;border-radius:8px;padding:5px;flex:0 0 62px;}
+        .cql-name{font-size:20px;font-weight:900;letter-spacing:.03em;text-transform:uppercase;}
+        .cql-sub{font-size:12px;color:#cbd5e1;margin-top:3px;}
+        .cql-contact{font-size:11px;color:#94a3b8;margin-top:3px;}
+        .cql-fecha{text-align:right;font-size:11px;color:#cbd5e1;white-space:nowrap;}
+        .cql-fecha b{display:block;color:#fff;font-size:15px;margin-top:3px;}
+        .cql-body{border:1px solid #dbe2ea;border-top:0;border-radius:0 0 14px 14px;padding:20px 24px;}
+        .cql-box{border:1px solid #dbe2ea;background:#f8fafc;border-radius:10px;padding:12px 14px;}
+        .cql-label{font-size:10px;text-transform:uppercase;color:#64748b;font-weight:900;letter-spacing:.04em;margin-bottom:4px;}
+        .cql-cliente{font-size:17px;font-weight:900;color:#0f172a;}
+        .cql-h{font-size:13px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:.03em;border-bottom:2px solid #0f172a;padding-bottom:6px;margin:20px 0 6px;}
+        .cql-tbl{width:100%;border-collapse:collapse;font-size:13px;}
+        .cql-tbl th{background:#f1f5f9;color:#475569;text-align:left;padding:7px 8px;border-bottom:1px solid #cbd5e1;text-transform:uppercase;font-size:10px;}
+        .cql-tbl td{padding:7px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top;}
+        .cql-tbl td.v{text-align:right;font-weight:700;}
+        .cql-tbl tr.fuerte td{font-weight:900;color:${color};}
+        .cql-tbl td.c{text-align:center;}
+        .cql-prod{font-size:15px;font-weight:900;color:#0f172a;}
+        .cql-hero{margin-top:10px;border-radius:12px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;background:${fondo};border:2px solid ${color};}
+        .cql-hero .e{font-size:14px;font-weight:700;color:#0f172a;}
+        .cql-hero .n{font-size:28px;font-weight:900;color:${color};white-space:nowrap;}
+        .cql-comp th.o{background:${fondo};color:${color};}
+        .cql-comp td.o{background:${fondo};font-weight:900;}
+        .cql-notas{margin-top:18px;background:#f8fafc;border:1px solid #dbe2ea;border-radius:10px;padding:12px 16px;font-size:11px;color:#334155;}
+        .cql-notas ul{margin:0;padding-left:16px;}.cql-notas li{margin:4px 0;}
+        .cql-foot{margin-top:16px;text-align:center;font-size:11px;color:#64748b;}
+        .cql-ref{margin-top:8px;font-size:10px;color:#94a3b8;}
+        .cql-sec{break-inside:avoid;page-break-inside:avoid;}
+        </style>`;
+    }
+
+    function docHtml(ctx, logo) {
+        const b = bloques(ctx);
+        const a = ctx.a;
+        const emp = datosEmpresa();
+        const filas = (rows) => `<table class="cql-tbl">${rows.map((r) => `<tr class="${r[2] === 'fuerte' ? 'fuerte' : ''}"><td>${esc(r[0])}</td><td class="v">${esc(r[1])}</td></tr>`).join('')}</table>`;
+        const prods = a.productos.length ? a.productos : [{ nombre: 'Venta general', cantidad: 1 }];
+        const contacto = [emp.direccion, emp.telefono ? 'Tel: ' + emp.telefono : ''].filter(Boolean).join(' · ');
+        return `${docCss(b.color, b.fondo)}
+        <div class="cql-wrap">
+            <header class="cql-head">
+                <div class="cql-brand">
+                    <img class="cql-logo" src="${logo}" alt="${esc(emp.nombre)}">
+                    <div>
+                        <div class="cql-name">${esc(emp.nombre)}</div>
+                        <div class="cql-sub">${esc(b.titulo)}</div>
+                        ${contacto ? `<div class="cql-contact">${esc(contacto)}</div>` : ''}
+                    </div>
+                </div>
+                <div class="cql-fecha">Cotización del<b>${esc(fmtFecha(ctx.hoy))}</b></div>
+            </header>
+            <section class="cql-body">
+                <div class="cql-box"><div class="cql-label">Cliente</div><div class="cql-cliente">${esc(ctx.cliente)}</div></div>
+
+                <div class="cql-sec"><div class="cql-h">Su compra</div>
+                    <table class="cql-tbl"><thead><tr><th>Producto</th><th style="text-align:center;">Cant.</th></tr></thead><tbody>
+                        ${prods.map((x) => `<tr><td class="cql-prod">${esc(x.nombre)}</td><td class="c">${esc(x.cantidad)}</td></tr>`).join('')}
+                    </tbody></table>
+                    ${filas(b.compra)}
+                </div>
+
+                <div class="cql-sec"><div class="cql-h">Estado de su cuenta al ${esc(fmtFecha(ctx.hoy))}</div>${filas(b.cuenta)}</div>
+
+                <div class="cql-sec"><div class="cql-h">${esc(b.tituloOpcion)}</div>
+                    <div class="cql-hero"><span class="e">${esc(b.hero.etiqueta)}</span><span class="n">${esc(b.hero.valor)}</span></div>
+                    ${filas(b.opcion)}
+                </div>
+
+                <div class="cql-sec"><div class="cql-h">Para decidir: su plan actual contra esta opción</div>
+                    <table class="cql-tbl cql-comp"><thead><tr><th></th><th>Seguir con su plan actual</th><th class="o">${esc(b.colOpcion)}</th></tr></thead><tbody>
+                        ${b.comparativo.map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="o">${esc(r[2])}</td></tr>`).join('')}
+                    </tbody></table>
+                </div>
+
+                <div class="cql-notas cql-sec"><ul>${b.notas.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>
+                <div class="cql-foot">Gracias por su preferencia · ${esc(emp.nombre)}</div>
+                <div class="cql-ref" style="text-align:center;">Ref. ${esc(a.folio)}</div>
+            </section>
+        </div>`;
+    }
+
+    // ── Ticket (80 mm) ────────────────────────────────────────────────
+    function ticketHtml(ctx, logo) {
+        const b = bloques(ctx);
+        const a = ctx.a;
+        const emp = datosEmpresa();
+        const linea = '<div>--------------------------------</div>';
+        // Etiqueta y valor en una línea; si no caben en 80 mm, el valor baja a su propia línea.
+        const fila = (r) => {
+            const negr = r[2] === 'fuerte' ? 'font-weight:bold;' : '';
+            if (String(r[0]).length + String(r[1]).length > 30) return `<div style="${negr}margin-top:2px;">${esc(r[0])}</div><div style="${negr}text-align:right;">${esc(r[1])}</div>`;
+            return `<div style="display:flex;justify-content:space-between;gap:6px;${negr}"><span>${esc(r[0])}</span><span style="text-align:right;">${esc(r[1])}</span></div>`;
+        };
+        const prods = (a.productos.length ? a.productos : [{ nombre: 'Venta general', cantidad: 1 }])
+            .map((x) => `<div style="font-weight:bold;">${esc(x.nombre)}${x.cantidad > 1 ? ' x' + esc(x.cantidad) : ''}</div>`).join('');
+        return `<div style="font-family:'Courier New',monospace;font-size:11px;line-height:1.3;color:#000;">
+            <div style="text-align:center;"><img src="${logo}" alt="${esc(emp.nombre)}" style="width:56px;height:56px;object-fit:contain;"></div>
+            <div style="text-align:center;font-weight:bold;">${esc(emp.nombre.toUpperCase())}</div>
+            ${emp.telefono ? `<div style="text-align:center;">Tel: ${esc(emp.telefono)}</div>` : ''}
+            <div style="text-align:center;font-weight:bold;margin-top:2px;">${esc(b.titulo.toUpperCase())}</div>
+            ${linea}
+            <div>Fecha: ${esc(fmtFecha(ctx.hoy))}</div>
+            <div>Cliente: ${esc(ctx.cliente)}</div>
+            ${linea}
+            <div><b>PRODUCTO</b></div>
+            ${prods}
+            ${b.compra.map(fila).join('')}
+            ${linea}
+            <div><b>SU CUENTA</b></div>
+            ${b.cuenta.map(fila).join('')}
+            ${linea}
+            <div><b>${esc(b.tituloOpcion.toUpperCase())}</b></div>
+            <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:13px;margin:3px 0;"><span>${esc(b.hero.etiqueta)}</span><span>${esc(b.hero.valor)}</span></div>
+            ${b.opcion.map(fila).join('')}
+            ${linea}
+            <div><b>PLAN ACTUAL VS ${esc(b.colOpcion.toUpperCase())}</b></div>
+            ${b.comparativo.map((r) => `<div style="margin-top:2px;">${esc(r[0])}</div><div style="display:flex;justify-content:space-between;gap:6px;"><span>Actual: ${esc(r[1])}</span><span style="font-weight:bold;">${esc(r[2])}</span></div>`).join('')}
+            ${linea}
+            ${b.notas.map((n) => `<div style="font-size:10px;margin-top:2px;">* ${esc(n)}</div>`).join('')}
+            <div style="text-align:center;margin-top:6px;">Gracias por su preferencia</div>
+            <div style="text-align:center;font-size:9px;color:#555;">Ref. ${esc(a.folio)}</div>
+        </div>`;
+    }
+
+    // ── Emisión: PDF / Ticket / Imagen (los mismos que el Estado de Cuenta) ──
+    async function emitir(formato) {
+        const ctx = contexto();
+        if (!ctx) { alert('Primero elige una cuenta y una opción para cotizar.'); return; }
+        const logo = await cargarLogo();
+        if (!logo) { alert('No se pudo cargar el logo del negocio (img/Logo.png), y la cotización no se emite sin él. Revisa tu conexión e inténtalo de nuevo.'); return; }
+        const TS = window.TicketService;
+        const tipo = ctx.modo === 'ampliar' ? 'ampliacion' : 'liquidacion';
+        const titulo = ctx.modo === 'ampliar' ? 'Cotización de ampliación de plazo' : 'Cotización de liquidación';
+        const archivo = `cotizacion_${tipo}_${TS && TS.safeName ? TS.safeName(ctx.cliente) : 'cliente'}_${isoDia(ctx.hoy)}`;
+        if (formato === 'ticket') {
+            const body = ticketHtml(ctx, logo);
+            if (TS && TS.openThermal) { TS.openThermal({ title: titulo, filename: archivo, body }); return; }
+            const w = window.open('', '_blank');
+            if (!w) { alert('Habilita las ventanas emergentes para imprimir el ticket.'); return; }
+            w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(titulo)}</title></head><body>${body}</body></html>`);
+            w.document.close(); w.focus();
+            return;
+        }
+        const html = docHtml(ctx, logo);
+        const opts = { title: titulo, filename: archivo, pageSize: 'letter' };
+        if (TS && TS.openDocument) {
+            TS.openDocument(html, formato === 'imagen' ? Object.assign({ autoImage: true }, opts) : Object.assign({ autoPrint: true }, opts));
+            return;
+        }
+        if (formato === 'imagen') { alert('El servicio de documentos no está disponible. Usa PDF o recarga la página.'); return; }
+        const w = window.open('', '_blank');
+        if (!w) { alert('Habilita las ventanas emergentes para generar el PDF.'); return; }
+        w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>@page{size:letter portrait;margin:12mm}body{margin:0;padding:18px;background:#fff}</style></head><body>${html}<script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print();},450);});<\/script></body></html>`);
+        w.document.close(); w.focus();
+    }
+
+    window._cqlEmitir = function () {
+        if (!contexto()) { alert('Primero elige una cuenta y una opción para cotizar.'); return; }
+        cargarLogo(); // por si aún no terminó de precargarse
+        document.querySelector('[data-modal="cql-emitir"]')?.remove();
+        const btn = (f, txt, bg) => `<button onclick="_cqlFormato('${f}')" style="padding:16px 8px;border:0;border-radius:7px;background:${bg};color:white;font-weight:900;cursor:pointer;">${txt}</button>`;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div data-modal="cql-emitir" style="position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:9500;display:flex;align-items:center;justify-content:center;padding:18px;">
+                <div style="width:100%;max-width:520px;background:white;border-radius:8px;padding:24px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
+                    <h3 style="margin:0;color:#0f172a;">Emitir cotización</h3>
+                    <p style="margin:6px 0 20px;color:#64748b;font-size:13px;">${esc(S.cliente.nombre)} · ${S.modo === 'ampliar' ? 'Ampliación de plazo' : 'Liquidación'}</p>
+                    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">${btn('pdf', 'PDF', '#1e40af')}${btn('ticket', 'Ticket', '#7c3aed')}${btn('imagen', 'Imagen', '#047857')}</div>
+                    <button onclick="document.querySelector('[data-modal=&quot;cql-emitir&quot;]')?.remove()" style="width:100%;margin-top:12px;padding:10px;border:0;border-radius:7px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cancelar</button>
+                </div>
+            </div>`);
+    };
+    window._cqlFormato = function (formato) {
+        document.querySelector('[data-modal="cql-emitir"]')?.remove();
+        return emitir(formato);
+    };
     window._cqlCopiar = function () {
-        if (!S.folio) return;
-        const a = analizar(S.folio); if (!a) return;
-        const q = cotizar(a, Number(S.meses)); if (!q || q.restante === undefined) return;
-        const lineas = [`Cotización de liquidación — ${S.cliente.nombre}`, `Plazo: ${q.meses} mes(es)`, `Importe restante a cubrir: ${dinero(q.restante)}`];
-        if (a.moratorios > 0.01) lineas.push(`Moratorios pendientes: ${dinero(a.moratorios)}`);
-        lineas.push(`Total final de la compra: ${dinero(q.totalFinal)}`);
-        if (a.posterior && q.cupon) lineas.push(`Cupón al liquidar: ${dinero(q.cupon.monto)}`);
-        lineas.push(`(Cotización al ${fmtFecha(new Date())}; sujeta a validación en caja)`);
-        const texto = lineas.join('\n');
+        const ctx = contexto();
+        if (!ctx) return;
+        const texto = lineasResumen(ctx).join('\n');
         (navigator.clipboard ? navigator.clipboard.writeText(texto) : Promise.reject()).then(() => alert('Resumen copiado.')).catch(() => prompt('Copia el resumen:', texto));
     };
 
     window.abrirCotizarLiquidacion = function (folio) { abrir(folio); };
     window._cqlAnalizar = analizar; window._cqlPlazos = plazosPosibles; window._cqlCotizar = cotizar; window._cqlPlanesAmp = planesAmpliacion; window._cqlSimAmp = simularAmpliacion; // pruebas / consola
+    window._cqlDocs = { S, contexto, bloques, docHtml, ticketHtml, lineasResumen, fechaLimiteLiquidar, planActual, fechasAmpliacion, cargarLogo }; // pruebas / consola
 })();
