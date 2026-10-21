@@ -6,7 +6,7 @@ try {
   console.warn('No se pudieron cargar scripts de Firebase Messaging:', err);
 }
 
-var CACHE_NAME = 'mmp-pos-v66';
+var CACHE_NAME = 'mmp-pos-v67';
 var ASSETS = [
   '/',
   '/index.html',
@@ -32,8 +32,8 @@ try {
     var url = (payload.data && payload.data.url) || '/?view=autorizaciones';
     self.registration.showNotification(title, {
       body: body,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/img/icon-192.png',
+      badge: '/img/badge-96.png',
       tag: 'boveda-autorizaciones',
       data: { url: url }
     });
