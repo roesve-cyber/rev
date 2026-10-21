@@ -24,6 +24,22 @@
             .slice(0, 80) || 'ticket';
     }
 
+    // 📁 Guarda en la carpeta elegida (CarpetaRaizService) si está activa;
+    // si no, o si falla, ejecuta la descarga normal (fallback).
+    async function guardarEnCarpetaOFallback(blob, nombreArchivo, titulo, fallback) {
+        try {
+            const svc = window.CarpetaRaizService;
+            if (svc && blob) {
+                const r = await svc.guardarArchivo(blob, nombreArchivo, titulo);
+                if (r && r.guardado) return true;
+            }
+        } catch (e) {
+            console.warn('CarpetaRaiz: se usa descarga normal', e);
+        }
+        fallback();
+        return false;
+    }
+
     function baseHref() {
         return window.location.href.split('?')[0].split('#')[0];
     }
@@ -100,6 +116,15 @@ p { margin: 3px 0 !important; }
         const file = safeName(filename);
         return `
 <script>
+function mmpGuardarConCarpeta(blob, nombre, fallback){
+    try {
+        var svc = window.opener && !window.opener.closed && window.opener.CarpetaRaizService;
+        if (!svc || !blob) return fallback();
+        svc.guardarArchivo(blob, nombre, document.title).then(function(r){
+            if (!r || !r.guardado) fallback();
+        }).catch(function(){ fallback(); });
+    } catch (e) { fallback(); }
+}
 function mmpCargarHtml2Canvas(cb){
     if (typeof html2canvas !== 'undefined') return cb();
     var existente = document.getElementById('mmp-html2canvas-loader');
@@ -118,10 +143,13 @@ function mmpGuardarTicketImagen(){
         var old = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
         html2canvas(node, { scale: 3, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false }).then(function(canvas){
-            var a = document.createElement('a');
-            a.download = '${file}.png';
-            a.href = canvas.toDataURL('image/png');
-            a.click();
+            var descargar = function(){
+                var a = document.createElement('a');
+                a.download = '${file}.png';
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            canvas.toBlob(function(blob){ mmpGuardarConCarpeta(blob, '${file}.png', descargar); }, 'image/png');
         }).catch(function(err){
             console.error(err);
             alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
@@ -152,7 +180,7 @@ function mmpGuardarTicketPdf(){
                 var imgHeight = canvas.height * imgWidth / canvas.width;
                 var pdf = new window.jspdf.jsPDF({ unit:'pt', format:[width, Math.max(300, imgHeight + margin * 2)], orientation:'portrait' });
                 pdf.addImage(canvas.toDataURL('image/jpeg', .94), 'JPEG', margin, margin, imgWidth, imgHeight, undefined, 'FAST');
-                pdf.save('${file}.pdf');
+                mmpGuardarConCarpeta(pdf.output('blob'), '${file}.pdf', function(){ pdf.save('${file}.pdf'); });
             }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
         });
     });
@@ -258,6 +286,15 @@ img { max-width: 100%; }
         const file = safeName(filename || 'documento');
         return `
 <script>
+function mmpGuardarConCarpeta(blob, nombre, fallback){
+    try {
+        var svc = window.opener && !window.opener.closed && window.opener.CarpetaRaizService;
+        if (!svc || !blob) return fallback();
+        svc.guardarArchivo(blob, nombre, document.title).then(function(r){
+            if (!r || !r.guardado) fallback();
+        }).catch(function(){ fallback(); });
+    } catch (e) { fallback(); }
+}
 function mmpCargarHtml2CanvasDocumento(cb){
     if (typeof html2canvas !== 'undefined') return cb();
     var existente = document.getElementById('mmp-html2canvas-loader');
@@ -284,10 +321,13 @@ function mmpGuardarDocumentoImagen(){
         node.style.maxWidth = '720px';
         node.style.width = '720px';
         html2canvas(node, { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false, windowWidth: node.scrollWidth, windowHeight: node.scrollHeight }).then(function(canvas){
-            var a = document.createElement('a');
-            a.download = '${file}.png';
-            a.href = canvas.toDataURL('image/png');
-            a.click();
+            var descargar = function(){
+                var a = document.createElement('a');
+                a.download = '${file}.png';
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            canvas.toBlob(function(blob){ mmpGuardarConCarpeta(blob, '${file}.png', descargar); }, 'image/png');
         }).catch(function(err){
             console.error(err);
             alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
@@ -404,7 +444,7 @@ function mmpGuardarDocumentoPdf(){
                             pdf.text('Pagina ' + p + ' de ' + totalPaginas, pageWidth - margin, pageHeight - 10, { align: 'right' });
                         }
                     }
-                    pdf.save('${file}.pdf');
+                    mmpGuardarConCarpeta(pdf.output('blob'), '${file}.pdf', function(){ pdf.save('${file}.pdf'); });
                 }).catch(function(err){ console.error(err); alert('No se pudo generar el PDF.'); });
             }
 
@@ -681,10 +721,15 @@ function documentToolbar(options = {}) {
         mostrarGenerando('Generando imagen...');
         try {
             const canvas = await prepararCanvasDocumento(html, options);
-            const a = document.createElement('a');
-            a.download = `${safeName(options.filename || options.title || 'documento')}.png`;
-            a.href = canvas.toDataURL('image/png');
-            a.click();
+            const nombrePng = `${safeName(options.filename || options.title || 'documento')}.png`;
+            const descargarPng = () => {
+                const a = document.createElement('a');
+                a.download = nombrePng;
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            const blobPng = await new Promise(res => canvas.toBlob(res, 'image/png'));
+            await guardarEnCarpetaOFallback(blobPng, nombrePng, options.title || options.filename, descargarPng);
             return true;
         } catch (err) {
             console.error('No se pudo generar la imagen:', err);
@@ -766,7 +811,8 @@ function documentToolbar(options = {}) {
                 }
             }
 
-            pdf.save(`${safeName(options.filename || options.title || 'documento')}.pdf`);
+            const nombrePdf = `${safeName(options.filename || options.title || 'documento')}.pdf`;
+            await guardarEnCarpetaOFallback(pdf.output('blob'), nombrePdf, options.title || options.filename, () => pdf.save(nombrePdf));
             return true;
         } catch (err) {
             console.error('No se pudo generar el PDF:', err);
