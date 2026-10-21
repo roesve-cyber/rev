@@ -601,12 +601,7 @@
                     ['Monto por pago', actualCol.monto, r.pagosRestantes ? dinero(plan.abono) : '-'],
                     ['Termina de pagar', actualCol.termina, fechas.ultima ? fmtFecha(fechas.ultima) : (r.saldoRestante <= 0.01 ? 'Cuenta saldada' : '-')],
                     ['Total que pagará de aquí en adelante', actualCol.total, dinero(r.saldoRestante)]
-                ],
-                notas: [
-                    'Si acepta, se cancelan sus pagarés pendientes y se genera un calendario nuevo a partir de la fecha en que se confirma el cambio; lo ya pagado se conserva.',
-                    'Las fechas de pago de esta cotización suponen que el cambio se confirma el día en que se emite.',
-                    'Los moratorios pendientes no cambian con la ampliación y se cobran aparte.'
-                ].concat(ctx.avisos.length ? ['Tarifa estimada con precios vigentes; sujeta a validación en tienda.'] : [])
+                ]
             };
         }
 
@@ -625,9 +620,6 @@
         opcion.push(limite
             ? ['Fecha límite para este monto', fmtFecha(limite.fecha), 'fuerte']
             : ['Vigencia de esta cotización', 'Solo hoy · ' + fmtFecha(ctx.hoy)]);
-        const notas = [q.mensaje].filter(Boolean);
-        if (limite && limite.tipo === 'escalon') notas.push('Pasada esa fecha, aplica el siguiente plazo de la escalera con la que se vendió.');
-        notas.push('Cotización informativa; los moratorios y el saldo pueden cambiar con los pagos que se registren.');
         return {
             titulo: 'Cotización de liquidación', subtitulo: 'Liquidación anticipada', color: '#0f766e', fondo: '#ecfdf5',
             tituloOpcion: `Si liquida a ${q.meses} mes(es)`,
@@ -638,8 +630,7 @@
                 ['Monto por pago', actualCol.monto, dinero(q.restante)],
                 ['Termina de pagar', actualCol.termina, limite ? `Al liquidar (hasta ${fmtFecha(limite.fecha)})` : 'Al liquidar'],
                 ['Total que pagará de aquí en adelante', actualCol.total, dinero(q.restante)]
-            ],
-            notas: notas.concat(ctx.avisos.length ? ['Tarifa estimada con precios vigentes; sujeta a validación en caja.'] : [])
+            ]
         };
     }
 
@@ -683,21 +674,81 @@
         .cql-hero .n{font-size:28px;font-weight:900;color:${color};white-space:nowrap;}
         .cql-comp th.o{background:${fondo};color:${color};}
         .cql-comp td.o{background:${fondo};font-weight:900;}
-        .cql-notas{margin-top:18px;background:#f8fafc;border:1px solid #dbe2ea;border-radius:10px;padding:12px 16px;font-size:11px;color:#334155;}
-        .cql-notas ul{margin:0;padding-left:16px;}.cql-notas li{margin:4px 0;}
         .cql-foot{margin-top:16px;text-align:center;font-size:11px;color:#64748b;}
         .cql-ref{margin-top:8px;font-size:10px;color:#94a3b8;}
         .cql-sec{break-inside:avoid;page-break-inside:avoid;}
         </style>`;
     }
 
-    function docHtml(ctx, logo) {
+
+    // Versión angosta para la IMAGEN (se ve en el celular): ~440 px de ancho en vez de 720,
+    // así el texto sale más grande al verla en pantalla, con menos filas y menos espacios.
+    function docCssCompacto(color, fondo) {
+        return `<style>
+        .mmp-document-body{max-width:440px !important;padding:0 !important;}
+        .cql-wrap{max-width:440px;font-size:13px;line-height:1.3;}
+        .cql-head{padding:12px 14px;border-radius:0;gap:8px;}
+        .cql-brand{gap:9px;}
+        .cql-logo{width:42px;height:42px;flex:0 0 42px;padding:3px;}
+        .cql-name{font-size:15px;}
+        .cql-sub{font-size:11px;margin-top:1px;}
+        .cql-contact{display:none;}
+        .cql-fecha{font-size:10px;}.cql-fecha b{font-size:12px;margin-top:1px;}
+        .cql-body{border:0;border-radius:0;padding:10px 14px 12px;}
+        .cql-box{padding:8px 10px;border-radius:8px;}
+        .cql-label{font-size:9px;margin-bottom:2px;}
+        .cql-cliente{font-size:15px;}
+        .cql-prod{font-size:12px;font-weight:700;color:#334155;margin-top:2px;}
+        .cql-h{font-size:11px;margin:12px 0 3px;padding-bottom:3px;}
+        .cql-tbl{font-size:12.5px;}
+        .cql-tbl td{padding:4px 5px;}
+        .cql-tbl td.v{white-space:nowrap;}
+        .cql-hero{margin-top:6px;padding:9px 12px;border-radius:10px;}
+        .cql-hero .e{font-size:12px;}
+        .cql-hero .n{font-size:24px;}
+        .cql-cmp{margin-top:2px;}
+        .cql-cmp .l{font-size:10.5px;color:#64748b;font-weight:700;padding:5px 0 1px;}
+        .cql-cmp .row{display:flex;gap:6px;}
+        .cql-cmp .row div{flex:1;border-radius:6px;padding:4px 7px;font-size:12px;background:#f1f5f9;color:#334155;}
+        .cql-cmp .row.hd div{background:none !important;font-size:10px;font-weight:900;text-transform:uppercase;color:#64748b;padding:2px 7px;}
+        .cql-cmp .row.hd div.o{color:${color} !important;}
+        .cql-cmp .row div.o{background:${fondo};color:${color};font-weight:900;}
+        .cql-foot{margin-top:10px;font-size:10px;}
+        .cql-ref{margin-top:2px;}
+        </style>`;
+    }
+
+    function docHtml(ctx, logo, compacto) {
         const b = bloques(ctx);
         const a = ctx.a;
         const emp = datosEmpresa();
         const filas = (rows) => `<table class="cql-tbl">${rows.map((r) => `<tr class="${r[2] === 'fuerte' ? 'fuerte' : ''}"><td>${esc(r[0])}</td><td class="v">${esc(r[1])}</td></tr>`).join('')}</table>`;
         const prods = a.productos.length ? a.productos : [{ nombre: 'Venta general', cantidad: 1 }];
         const contacto = [emp.direccion, emp.telefono ? 'Tel: ' + emp.telefono : ''].filter(Boolean).join(' · ');
+        if (compacto) {
+            const lista = prods.map((x) => `<div class="cql-prod">${esc(x.nombre)}${Number(x.cantidad) > 1 ? ' × ' + esc(x.cantidad) : ''}</div>`).join('');
+            return `${docCss(b.color, b.fondo)}${docCssCompacto(b.color, b.fondo)}
+        <div class="cql-wrap">
+            <header class="cql-head">
+                <div class="cql-brand">
+                    <img class="cql-logo" src="${logo}" alt="${esc(emp.nombre)}">
+                    <div><div class="cql-name">${esc(emp.nombre)}</div><div class="cql-sub">${esc(b.titulo)}</div></div>
+                </div>
+                <div class="cql-fecha">Cotización del<b>${esc(fmtFecha(ctx.hoy))}</b></div>
+            </header>
+            <section class="cql-body">
+                <div class="cql-box"><div class="cql-label">Cliente</div><div class="cql-cliente">${esc(ctx.cliente)}</div>${lista}</div>
+                <div class="cql-h">Su cuenta al ${esc(fmtFecha(ctx.hoy))}</div>${filas(b.compra.concat(b.cuenta))}
+                <div class="cql-h">${esc(b.tituloOpcion)}</div>
+                <div class="cql-hero"><span class="e">${esc(b.hero.etiqueta)}</span><span class="n">${esc(b.hero.valor)}</span></div>
+                ${filas(b.opcion)}
+                <div class="cql-h">Su plan actual contra esta opción</div>
+                <div class="cql-cmp"><div class="row hd"><div>Plan actual</div><div class="o">${esc(b.colOpcion)}</div></div>${b.comparativo.map((r) => `<div class="l">${esc(r[0])}</div><div class="row"><div>${esc(r[1])}</div><div class="o">${esc(r[2])}</div></div>`).join('')}</div>
+                <div class="cql-foot">Gracias por su preferencia · ${esc(emp.nombre)}</div>
+                <div class="cql-ref" style="text-align:center;">Ref. ${esc(a.folio)}</div>
+            </section>
+        </div>`;
+        }
         return `${docCss(b.color, b.fondo)}
         <div class="cql-wrap">
             <header class="cql-head">
@@ -734,7 +785,6 @@
                     </tbody></table>
                 </div>
 
-                <div class="cql-notas cql-sec"><ul>${b.notas.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>
                 <div class="cql-foot">Gracias por su preferencia · ${esc(emp.nombre)}</div>
                 <div class="cql-ref" style="text-align:center;">Ref. ${esc(a.folio)}</div>
             </section>
@@ -778,7 +828,6 @@
             <div><b>PLAN ACTUAL VS ${esc(b.colOpcion.toUpperCase())}</b></div>
             ${b.comparativo.map((r) => `<div style="margin-top:2px;">${esc(r[0])}</div><div style="display:flex;justify-content:space-between;gap:6px;"><span>Actual: ${esc(r[1])}</span><span style="font-weight:bold;">${esc(r[2])}</span></div>`).join('')}
             ${linea}
-            ${b.notas.map((n) => `<div style="font-size:10px;margin-top:2px;">* ${esc(n)}</div>`).join('')}
             <div style="text-align:center;margin-top:6px;">Gracias por su preferencia</div>
             <div style="text-align:center;font-size:9px;color:#555;">Ref. ${esc(a.folio)}</div>
         </div>`;
@@ -803,7 +852,7 @@
             w.document.close(); w.focus();
             return;
         }
-        const html = docHtml(ctx, logo);
+        const html = docHtml(ctx, logo, formato === 'imagen');
         const opts = { title: titulo, filename: archivo, pageSize: 'letter' };
         if (TS && TS.openDocument) {
             TS.openDocument(html, formato === 'imagen' ? Object.assign({ autoImage: true }, opts) : Object.assign({ autoPrint: true }, opts));
