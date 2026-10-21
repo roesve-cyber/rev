@@ -200,8 +200,8 @@ async function _pushAuthMostrarNotificacionLocal({ title, body, url }) {
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title || 'Boveda de autorizaciones', {
         body: body || 'Tienes una autorizacion pendiente.',
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
+        icon: '/img/icon-192.png',
+        badge: '/img/badge-96.png',
         tag: 'boveda-autorizaciones',
         data: { url: url || _pushAuthUrlBoveda() }
     });
