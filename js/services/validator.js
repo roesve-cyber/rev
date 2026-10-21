@@ -191,10 +191,23 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
         if (!v) return null;
         const lista = leerTarjetas().filter((e) => e && typeof e === 'object');
         const esTipo = (e) => !tipo || String(e.tipo || '').toLowerCase() === tipo;
-        return lista.find((e) => e.idCuenta && norm(e.idCuenta) === v)
+        const directo = lista.find((e) => e.idCuenta && norm(e.idCuenta) === v)
             || lista.find((e) => esTipo(e) && norm(e.banco) === v)
-            || lista.find((e) => esTipo(e) && Array.isArray(e.nombresAnteriores) && e.nombresAnteriores.some((n) => norm(n) === v))
-            || null;
+            || lista.find((e) => esTipo(e) && Array.isArray(e.nombresAnteriores) && e.nombresAnteriores.some((n) => norm(n) === v));
+        if (directo) return directo;
+        // 🛡️ Último recurso: el valor puede ser el idCuenta/id del registro derivado en
+        // cuentas-bancarias (movimiento.cuenta guarda ESE id) y que no coincida con el de
+        // tarjetasConfig. Se resuelve por el banco de ese registro, para que ningún lector
+        // (reportes, proyección, cancelaciones...) deje ese movimiento "sin cuenta".
+        const cb = StorageService.get('cuentas-bancarias', []);
+        const reg = Array.isArray(cb) ? cb.find((c) => c && ((c.idCuenta && norm(c.idCuenta) === v) || (c.id && norm(c.id) === v))) : null;
+        if (reg && reg.banco) {
+            const b = norm(reg.banco);
+            return lista.find((e) => esTipo(e) && norm(e.banco) === b)
+                || lista.find((e) => norm(e.banco) === b)
+                || null;
+        }
+        return null;
     };
 
     // Idempotente: marca con idCuenta a los bancos que aún no lo tienen y copia el
@@ -259,8 +272,16 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
         // que _resolverCuentaMovimiento guarda en movimiento.cuenta. Si difiere del de
         // tarjetasConfig (o no hay entrada allí), antes ese movimiento quedaba "sin cuenta".
         const propio = ref.idCuenta ? [String(ref.idCuenta)] : [];
-        if (!e) return propio;
-        return propio.concat([e.idCuenta]).concat(Array.isArray(e.nombresAnteriores) ? e.nombresAnteriores : []).filter(Boolean).map(String);
+        // 🛡️ Además, los ids (idCuenta e id) de TODOS los registros de cuentas-bancarias del mismo
+        // banco: tarjetasConfig y cuentas-bancarias pueden haber quedado con idCuenta distinto, y
+        // el movimiento guarda el de cuentas-bancarias. Así cualquiera de los dos se reconoce.
+        const nombreBanco = norm((e && e.banco) || ref.banco);
+        const cbLista = StorageService.get('cuentas-bancarias', []);
+        const hermanos = (nombreBanco && Array.isArray(cbLista))
+            ? cbLista.filter((c) => c && norm(c.banco) === nombreBanco).reduce((acc, c) => acc.concat([c.idCuenta, c.id]), [])
+            : [];
+        if (!e) return propio.concat(hermanos).filter(Boolean).map(String);
+        return propio.concat([e.idCuenta]).concat(hermanos).concat(Array.isArray(e.nombresAnteriores) ? e.nombresAnteriores : []).filter(Boolean).map(String);
     };
 
     // Para lectores que agrupan por NOMBRE de banco: convierte idCuenta / nombre anterior
@@ -270,6 +291,28 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
         // crédito del mismo nombre no debe confundirse con la tarjeta de crédito.
         const e = window.buscarBancoPorValor(valor, 'debito');
         return e && e.banco ? String(e.banco) : valor;
+    };
+
+    // ÚNICA forma de decidir a qué cuenta de liquidez (caja de efectivo o banco débito) suma
+    // un movimiento al calcular saldos en reportes/proyecciones. Usa la MISMA regla que
+    // Bancos y Corte de Caja (movimientoPerteneceACuenta + aliases), así un movimiento nunca
+    // cuenta en una pantalla y desaparece en otra. Devuelve la clave de la cuenta
+    // (String(caja.id) o String(tarjeta.banco)) o null si no calza con ninguna.
+    // NUNCA vuelvas a comparar movimiento.cuenta a mano en un reporte: usa esta función.
+    window.claveLiquidezMovimiento = function (mov, cajas, tarjetasDebito) {
+        const listaCajas = Array.isArray(cajas) ? cajas : [];
+        for (let i = 0; i < listaCajas.length; i++) {
+            const c = listaCajas[i];
+            const aliases = [c.id, c.nombre, i === 0 ? 'efectivo' : '', i === 0 ? 'caja' : ''].filter(Boolean);
+            if (window.movimientoPerteneceACuenta(mov, aliases)) return String(c.id || 'efectivo');
+        }
+        const listaDebito = Array.isArray(tarjetasDebito) ? tarjetasDebito : [];
+        for (let i = 0; i < listaDebito.length; i++) {
+            const t = listaDebito[i];
+            const aliases = [t.banco, t.id, t.nombre].concat(window.aliasesExtraBanco ? window.aliasesExtraBanco(t) : []).filter(Boolean);
+            if (window.movimientoPerteneceACuenta(mov, aliases)) return String(t.banco || t.id || '');
+        }
+        return null;
     };
 })();
 
