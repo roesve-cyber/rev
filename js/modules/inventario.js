@@ -2352,9 +2352,14 @@ function _gpConstruirArbolCategorias() {
  id: p.id,
  nombre: p.nombre || '(sin nombre)',
  stock: Number(p.stock) || 0,
+ // 🛡️ Valor del inventario: SOLO piezas con existencia (stock 0 o negativo no suma).
+ stockPos: Math.max(0, Number(p.stock) || 0),
  costo: Number(p.costo) || 0,
  precioContado,
  precio6: _gpPrecio6Meses(precioContado),
+ valorCosto: Math.max(0, Number(p.stock) || 0) * (Number(p.costo) || 0),
+ valorContado: Math.max(0, Number(p.stock) || 0) * precioContado,
+ valor6: Math.max(0, Number(p.stock) || 0) * (Number(_gpPrecio6Meses(precioContado)) || 0),
  piezasVendidas: vp.piezasVendidas,
  importeVenta: vp.importeVenta,
  montoRecuperado: vp.montoRecuperado,
@@ -2373,6 +2378,8 @@ function renderResumenCategorias() {
  window._gpExpandido = window._gpExpandido || new Set();
  const arbol = _gpConstruirArbolCategorias();
  const money = v => typeof dinero === 'function' ? dinero(v) : Number(v || 0).toFixed(2);
+ // Importe de inventario: si no hay existencia (importe 0) no se muestra dinero, solo un guion.
+ const moneyInv = v => (Number(v) > 0.004 ? money(v) : '<span style="color:#cbd5e1;">—</span>');
 
  const fila = (nivel, clave, expandKey, celdas, tieneHijos) => {
  const indent = nivel * 22;
@@ -2396,9 +2403,10 @@ function renderResumenCategorias() {
  const productosCat = Object.values(subcats).flat();
  const keyCat = `c:${cat}`;
  filasHtml += fila(0, `${cat} <span style="font-size:11px;color:#64748b;font-weight:400;">(${productosCat.length} producto${productosCat.length === 1 ? '' : 's'})</span>`, keyCat, `
- <td style="padding:10px;text-align:center;">${_gpSumar(productosCat, 'stock')}</td>
- <td style="padding:10px;text-align:right;">${money(_gpSumar(productosCat, 'costo'))}</td>
- <td style="padding:10px;"></td><td style="padding:10px;"></td>
+ <td style="padding:10px;text-align:center;">${_gpSumar(productosCat, 'stockPos')}</td>
+ <td style="padding:10px;text-align:right;">${moneyInv(_gpSumar(productosCat, 'valorCosto'))}</td>
+ <td style="padding:10px;text-align:right;font-weight:bold;">${moneyInv(_gpSumar(productosCat, 'valorContado'))}</td>
+ <td style="padding:10px;text-align:right;color:#7c3aed;">${moneyInv(_gpSumar(productosCat, 'valor6'))}</td>
  <td style="padding:10px;text-align:center;">${_gpSumar(productosCat, 'piezasVendidas')}</td>
  <td style="padding:10px;text-align:right;color:#1e40af;">${money(_gpSumar(productosCat, 'importeVenta'))}</td>
  <td style="padding:10px;text-align:right;color:#16a34a;">${money(_gpSumar(productosCat, 'montoRecuperado'))}</td>
@@ -2411,9 +2419,10 @@ function renderResumenCategorias() {
  const productosSub = subcats[sub];
  const keySub = `s:${cat}::${sub}`;
  filasHtml += fila(1, `${sub} <span style="font-size:11px;color:#94a3b8;font-weight:400;">(${productosSub.length})</span>`, keySub, `
- <td style="padding:10px;text-align:center;">${_gpSumar(productosSub, 'stock')}</td>
- <td style="padding:10px;text-align:right;">${money(_gpSumar(productosSub, 'costo'))}</td>
- <td style="padding:10px;"></td><td style="padding:10px;"></td>
+ <td style="padding:10px;text-align:center;">${_gpSumar(productosSub, 'stockPos')}</td>
+ <td style="padding:10px;text-align:right;">${moneyInv(_gpSumar(productosSub, 'valorCosto'))}</td>
+ <td style="padding:10px;text-align:right;font-weight:bold;">${moneyInv(_gpSumar(productosSub, 'valorContado'))}</td>
+ <td style="padding:10px;text-align:right;color:#7c3aed;">${moneyInv(_gpSumar(productosSub, 'valor6'))}</td>
  <td style="padding:10px;text-align:center;">${_gpSumar(productosSub, 'piezasVendidas')}</td>
  <td style="padding:10px;text-align:right;color:#1e40af;">${money(_gpSumar(productosSub, 'importeVenta'))}</td>
  <td style="padding:10px;text-align:right;color:#16a34a;">${money(_gpSumar(productosSub, 'montoRecuperado'))}</td>
@@ -2433,9 +2442,9 @@ function renderResumenCategorias() {
  <span style="text-decoration:underline; text-decoration-color:#cbd5e1;">${p.nombre}</span>${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}${p.activo ? '' : ' <span style="font-size:10px;color:#991b1b;font-weight:bold;">(inactivo)</span>'}
  </td>
  <td style="padding:9px;text-align:center;color:${p.stock <= 0 ? '#dc2626' : '#0f172a'};font-weight:bold;">${p.stock}</td>
- <td style="padding:9px;text-align:right;">${money(p.costo)}</td>
- <td style="padding:9px;text-align:right;font-weight:bold;">${money(p.precioContado)}</td>
- <td style="padding:9px;text-align:right;color:#7c3aed;">${p.precio6 != null ? money(p.precio6) : '—'}</td>
+ <td style="padding:9px;text-align:right;">${p.stockPos > 0 ? money(p.valorCosto) + `<div style="font-size:10px;color:#94a3b8;">${money(p.costo)} c/u</div>` : '<span style="color:#cbd5e1;">—</span>'}</td>
+ <td style="padding:9px;text-align:right;font-weight:bold;">${p.stockPos > 0 ? money(p.valorContado) + `<div style="font-size:10px;color:#94a3b8;font-weight:400;">${money(p.precioContado)} c/u</div>` : '<span style="color:#cbd5e1;">—</span>'}</td>
+ <td style="padding:9px;text-align:right;color:#7c3aed;">${p.stockPos > 0 && p.precio6 != null ? money(p.valor6) + `<div style="font-size:10px;color:#94a3b8;">${money(p.precio6)} c/u</div>` : '<span style="color:#cbd5e1;">—</span>'}</td>
  <td style="padding:9px;text-align:center;">${p.piezasVendidas}</td>
  <td style="padding:9px;text-align:right;color:#1e40af;">${money(p.importeVenta)}</td>
  <td style="padding:9px;text-align:right;color:#16a34a;">${money(p.montoRecuperado)}</td>
@@ -2444,13 +2453,26 @@ function renderResumenCategorias() {
  });
  });
 
+ const todosLosProductosGp = Object.values(arbol).flatMap(subs => Object.values(subs).flat());
+ const totalFilaGp = todosLosProductosGp.length ? `
+ <tr style="background:#1e293b; color:white; font-weight:900;">
+ <td style="padding:12px;">TOTAL INVENTARIO (solo productos con existencia)</td>
+ <td style="padding:12px;text-align:center;">${_gpSumar(todosLosProductosGp, 'stockPos')}</td>
+ <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'valorCosto'))}</td>
+ <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'valorContado'))}</td>
+ <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'valor6'))}</td>
+ <td style="padding:12px;text-align:center;">${_gpSumar(todosLosProductosGp, 'piezasVendidas')}</td>
+ <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'importeVenta'))}</td>
+ <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'montoRecuperado'))}</td>
+ </tr>` : '';
+
  if (Object.keys(arbol).length === 0) {
  filasHtml = `<tr><td colspan="8" style="text-align:center;color:gray;padding:20px;">No hay productos en el catálogo.</td></tr>`;
  }
 
  cont.innerHTML = `
  <p style="color:#64748b;font-size:12.5px;margin:0 0 12px;">
- Click en una fila de categoría o subcategoría para expandir. "Precio a 6 meses" se calcula con una tasa fija de ${GP_TASA_MENSUAL_6M}% mensual (interés simple) -- las ventas reales usan la tasa que captures en cada caso. "Monto recuperado" en ventas a crédito con varios artículos es un reparto proporcional del cobro de esa cuenta, no un rastreo peso por peso.
+ Click en una fila de categoría o subcategoría para expandir. Costo, precio contado y precio a 6 meses son el valor de lo que TIENES en existencia (piezas en stock × costo o precio unitario); un producto sin stock no suma. "Precio a 6 meses" se calcula con una tasa fija de ${GP_TASA_MENSUAL_6M}% mensual (interés simple) -- las ventas reales usan la tasa que captures en cada caso. "Monto recuperado" en ventas a crédito con varios artículos es un reparto proporcional del cobro de esa cuenta, no un rastreo peso por peso.
  </p>
  <div style="overflow-x:auto; box-shadow:0 4px 12px rgba(0,0,0,0.08); border-radius:12px;">
  <table style="width:100%; border-collapse:collapse; background:white; font-size:13px;">
@@ -2458,15 +2480,15 @@ function renderResumenCategorias() {
  <tr style="background:#1e293b; color:white;">
  <th style="padding:12px; text-align:left;">Categoría / Subcategoría / Producto</th>
  <th style="padding:12px; text-align:center;">Stock</th>
- <th style="padding:12px; text-align:right;">Costo</th>
- <th style="padding:12px; text-align:right;">Precio contado</th>
- <th style="padding:12px; text-align:right;">Precio a 6 meses</th>
+ <th style="padding:12px; text-align:right;">Costo en inventario</th>
+ <th style="padding:12px; text-align:right;">Precio contado en inventario</th>
+ <th style="padding:12px; text-align:right;">Precio a 6 meses en inventario</th>
  <th style="padding:12px; text-align:center;">Piezas vendidas</th>
  <th style="padding:12px; text-align:right;">Importe de venta</th>
  <th style="padding:12px; text-align:right;">Monto recuperado</th>
  </tr>
  </thead>
- <tbody>${filasHtml}</tbody>
+ <tbody>${filasHtml}${totalFilaGp}</tbody>
  </table>
  </div>`;
 }
