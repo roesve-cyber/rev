@@ -203,6 +203,7 @@ async function _pushAuthMostrarNotificacionLocal({ title, body, url }) {
         icon: '/img/icon-192.png',
         badge: '/img/badge-96.png',
         tag: 'boveda-autorizaciones',
+        renotify: true,
         data: { url: url || _pushAuthUrlBoveda() }
     });
     return true;
@@ -212,12 +213,27 @@ function probarPushAutorizaciones() {
     return window.bloquearBotonDurante('btnProbarPushAutorizaciones', _probarPushAutorizacionesAsync());
 }
 async function _probarPushAutorizacionesAsync() {
-    const mostrado = await _pushAuthMostrarNotificacionLocal({
-        title: 'Prueba Boveda de autorizaciones',
-        body: 'Si ves este aviso, el celular puede mostrar notificaciones.',
-        url: _pushAuthUrlBoveda()
-    });
-    if (!mostrado) alert('No se pudo mostrar la prueba. Revisa permisos de notificacion.');
+    const info = [];
+    try {
+        info.push('Permiso: ' + ('Notification' in window ? Notification.permission : 'no soportado'));
+        if (!('serviceWorker' in navigator)) throw new Error('Este navegador no tiene service worker.');
+        const reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rechazar) => setTimeout(() => rechazar(new Error('El service worker no responde (6 s).')), 6000))
+        ]);
+        info.push('Service worker: ' + (reg.active ? reg.active.state : 'sin activo'));
+        const mostrado = await _pushAuthMostrarNotificacionLocal({
+            title: 'Prueba Boveda de autorizaciones',
+            body: 'Si ves este aviso, el celular puede mostrar notificaciones.',
+            url: _pushAuthUrlBoveda()
+        });
+        if (!mostrado) return alert('No se pudo mostrar la prueba.\n\n' + info.join('\n') + '\n\nRevisa que el permiso de notificaciones este en "granted".');
+        const activas = await reg.getNotifications();
+        info.push('Avisos registrados: ' + activas.length);
+        alert('El aviso se entrego al sistema.\n\n' + info.join('\n') + '\n\nSi no lo ves arriba ni al bajar el panel, Android lo esta bloqueando o silenciando: revisa Ajustes > Apps > esta app > Notificaciones.');
+    } catch (err) {
+        alert('No se pudo mostrar la prueba: ' + (err && err.message ? err.message : err) + '\n\n' + info.join('\n'));
+    }
 }
 
 function diagnosticarPushAutorizaciones() {
