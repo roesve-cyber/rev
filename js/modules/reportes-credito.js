@@ -563,6 +563,36 @@ window.renderARCTablaExcel = function() {
         });
     }
 
+    // ── ENGANCHES (NO son abonos) ─────────────────────────────────────────────
+    // Se muestran en la matriz con fondo fosforescente para distinguirlos de los abonos.
+    // Fuente: el movimiento de caja "Enganche credito" de cada venta (la misma que usa el
+    // reporte de Abonos y Enganches), con su fecha real de cobro. Si una cuenta tiene
+    // enganche pero no movimiento de caja (p. ej. el enganche viene de un apartado
+    // convertido a crédito) se usa engancheRecibido con la fecha de la venta.
+    // No afectan "último pago", % cubierto ni los totales de abonos.
+    const ENG_BG = '#c6ff00';
+    const _engPorFolio = {};
+    (StorageService.get('movimientosCaja', []) || []).forEach(mov => {
+        if (mov.tipo !== 'ingreso' || mov.cancelado || mov.reversadoCancelacion) return;
+        if (!/^Enganche credito/i.test(String(mov.concepto || ''))) return;
+        const ref = String(mov.referencia || '').match(/^VENTA-(.+)$/);
+        if (!ref) return;
+        const f = _rc.parseFecha(mov.fecha);
+        const monto = Number(mov.monto || 0);
+        if (!f || !(monto > 0)) return;
+        (_engPorFolio[ref[1]] = _engPorFolio[ref[1]] || []).push({ fecha: f, monto, folio: ref[1] });
+    });
+    const _enganchesDeCuenta = (cta) => {
+        if (_engPorFolio[cta.folio]) return _engPorFolio[cta.folio];
+        const e = Number(cta.engancheRecibido || 0);
+        const f = _rc.parseFecha(cta.fechaVenta || cta.fechaIso || cta.fecha);
+        return (e > 0 && f) ? [{ fecha: f, monto: e, folio: cta.folio, deApartado: !!cta.origenApartadoFolio }] : [];
+    };
+    cuentasActivas.forEach(c => {
+        const lista = c.agrupadoPorCliente ? c.cuentasGrupo : [c];
+        c._enganches = lista.flatMap(_enganchesDeCuenta);
+    });
+
     // ── Riesgo continuo (verde → rojo) y bloques de "cero pagos" ─────────────
     // Días de riesgo de una fila = días desde su último abono; si nunca ha
     // pagado, días desde la venta (así un cliente que compró hace 8 días NO
@@ -691,6 +721,7 @@ window.renderARCTablaExcel = function() {
             const f = _rc.parseFecha(a.fecha || a.fechaAbono);
             if (f) groupSet.add(formatGroupKey(f));
         });
+        (c._enganches || []).forEach(e => groupSet.add(formatGroupKey(e.fecha)));
     });
     
     let uniqueGroups = Array.from(groupSet).sort();
@@ -701,6 +732,9 @@ window.renderARCTablaExcel = function() {
     let sumRestante = 0;
     let sumAbonosFechas = {};
     uniqueGroups.forEach(key => sumAbonosFechas[key] = 0);
+    let sumEngFechas = {};
+    uniqueGroups.forEach(key => sumEngFechas[key] = 0);
+    const _fmtMonto = n => '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 2});
 
     // 5. Construir Filas
     window._filasParaCobranza = cuentasActivas;
@@ -796,6 +830,17 @@ window.renderARCTablaExcel = function() {
                 }
             }
 
+            // Enganche (NO es abono): fondo fosforescente. Si la celda ya tiene abonos, va como etiqueta debajo.
+            const engGrupo = (c._enganches || []).filter(e => formatGroupKey(e.fecha) === key);
+            const totalEng = engGrupo.reduce((sum, e) => sum + e.monto, 0);
+            if (totalEng > 0) {
+                sumEngFechas[key] += totalEng;
+                const tip = engGrupo.map(e => `Enganche${e.deApartado ? ' (viene de apartado)' : ''}: ${_fmtMonto(e.monto)} · ${e.folio} -- NO es abono`).join('&#10;');
+                const chip = `<span title="${tip}" style="display:inline-block;background:${ENG_BG};color:#000;padding:1px 6px;border-radius:4px;font-weight:900;">ENG ${_fmtMonto(totalEng)}</span>`;
+                if (cellHtml) { cellHtml += '<br>' + chip; }
+                else { cellHtml = chip; cellBg = ENG_BG; cellColor = '#000000'; }
+            }
+
             row += `<td style="padding:6px 8px; border-right:1px solid #cbd5e1; text-align:right; background:${cellBg}; color:${cellColor}; font-weight:bold;">${cellHtml}</td>`;
         });
 
@@ -876,7 +921,7 @@ window.renderARCTablaExcel = function() {
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
                 <div>
                     <h2 style="margin:0;font-size:21px;font-weight:900;">📊 Matriz de Cobranza (Abonos Recibidos)</h2>
-                    <p style="margin:5px 0 0;color:#a7f3d0;font-size:12px;">Desplázate hacia la derecha y hacia abajo libremente. Clic en las cabeceras para ordenar.</p>
+                    <p style="margin:5px 0 0;color:#a7f3d0;font-size:12px;">Desplázate hacia la derecha y hacia abajo libremente. Clic en las cabeceras para ordenar. &nbsp;·&nbsp; <span style="background:${ENG_BG};color:#000;padding:1px 7px;border-radius:4px;font-weight:900;">ENG</span> = enganche (no es abono)</p>
                 </div>
                 <div style="display:flex;gap:10px;">
                     <button onclick="generarListadoCobranza()" style="padding:10px 16px;background:#f59e0b;color:#713f12;border:none;border-radius:8px;font-weight:bold;cursor:pointer;font-size:12px;">📋 Generar Cobranza</button>
@@ -967,7 +1012,8 @@ window.renderARCTablaExcel = function() {
                         <td class="ex-stky ex-col-9" style="border-bottom:none; text-align:right; color:#b91c1c;">$${sumRestante.toLocaleString('en-US', {minimumFractionDigits:2})}</td>
                         ${uniqueGroups.map(key => {
                             const t = sumAbonosFechas[key];
-                            return `<td style="padding:6px 8px; border-right:1px solid #cbd5e1; border-bottom:none; text-align:right; color:#166534; background:#dcfce7;">${t > 0 ? '$'+t.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2}) : ''}</td>`;
+                            const te = sumEngFechas[key];
+                            return `<td style="padding:6px 8px; border-right:1px solid #cbd5e1; border-bottom:none; text-align:right; color:#166534; background:#dcfce7;">${t > 0 ? '$'+t.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:2}) : ''}${te > 0 ? `<div style="margin-top:2px;"><span style="background:${ENG_BG};color:#000;padding:1px 5px;border-radius:4px;font-weight:900;" title="Enganches cobrados en el periodo (no son abonos)">ENG ${_fmtMonto(te)}</span></div>` : ''}</td>`;
                         }).join('')}
                     </tr>
                 </tfoot>
