@@ -167,19 +167,33 @@ async function _activarPushAutorizacionesAsync() {
         return alert('Firebase rechazo el registro del celular: ' + err.message + '\n\nInicia sesion con un usuario Firebase activo y con perfil en Usuarios.');
     }
 
-    if (window._messaging.onMessage) {
-        window._messaging.onMessage((message) => {
-            _pushAuthMostrarNotificacionLocal({
-                title: message.notification?.title || message.data?.title || 'Boveda de autorizaciones',
-                body: message.notification?.body || message.data?.body || 'Tienes una autorizacion pendiente.',
-                url: message.data?.url || _pushAuthUrlBoveda()
-            });
-        });
-    }
+    _pushAuthEscucharPrimerPlano();
 
     renderPushAutorizacionesConfig();
     alert('Este celular quedo registrado para alertas de Boveda.');
 }
+
+// Con la app ABIERTA (en primer plano) FCM no usa el service worker: entrega el mensaje a la
+// página por onMessage. Antes este listener solo se registraba al pulsar "Activar", así que tras
+// recargar la app el push llegaba ("sent") pero no se mostraba nada. Ahora se registra en cada carga.
+let _pushAuthPrimerPlanoListo = false;
+function _pushAuthEscucharPrimerPlano() {
+    if (_pushAuthPrimerPlanoListo || !window._messaging || !window._messaging.onMessage) return;
+    _pushAuthPrimerPlanoListo = true;
+    window._messaging.onMessage((message) => {
+        _pushAuthMostrarNotificacionLocal({
+            title: message.notification?.title || message.data?.title || 'Boveda de autorizaciones',
+            body: message.notification?.body || message.data?.body || 'Tienes una autorizacion pendiente.',
+            url: message.data?.url || _pushAuthUrlBoveda()
+        });
+    });
+}
+(async function _pushAuthIniciarPrimerPlano() {
+    try {
+        if (window._firebaseReady) await window._firebaseReady;
+        if (localStorage.getItem(PUSH_AUTH_TOKEN_KEY) && 'Notification' in window && Notification.permission === 'granted') _pushAuthEscucharPrimerPlano();
+    } catch (e) { /* sin messaging: no pasa nada */ }
+})();
 
 async function _pushAuthMostrarNotificacionLocal({ title, body, url }) {
     if (!('serviceWorker' in navigator) || !('Notification' in window) || Notification.permission !== 'granted') return false;
@@ -260,6 +274,7 @@ async function _diagnosticarPushAutorizacionesAsync() {
             if (!outbox.empty) {
                 const d = outbox.docs[0].data() || {};
                 lineas.push(`Ultimo pushOutbox: ${d.status || 'sin status'} (${outbox.docs[0].id})`);
+                if (d.status === 'sent') lineas.push(`Enviados/fallidos: ${d.successCount || 0} / ${d.failureCount || 0}`);
             } else {
                 lineas.push('Ultimo pushOutbox: ninguno');
             }
