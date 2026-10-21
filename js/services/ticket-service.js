@@ -778,6 +778,65 @@ function documentToolbar(options = {}) {
         }
     }
 
+    // 🛡️ Impresión nativa del navegador (vector real, no captura de pantalla):
+    // a diferencia de descargarPdf/descargarImagen (que renderizan todo con
+    // html2canvas y empujan ese PNG dentro de un PDF/PNG -- texto no
+    // seleccionable, se ve borroso al hacer zoom), esto abre la MISMA
+    // plantilla en un iframe oculto y llama a window.print() nativo del
+    // navegador: el "Guardar como PDF" del propio diálogo de impresión
+    // produce un PDF vectorial real. No reemplaza a los otros dos formatos
+    // (siguen sirviendo para compartir rápido por WhatsApp/redes), es una
+    // tercera opción para cuando el documento se va a imprimir o archivar
+    // formalmente.
+    async function imprimirNativo(html, options = {}) {
+        let iframe = null;
+        try {
+            const iframeEl = document.createElement('iframe');
+            iframeEl.setAttribute('aria-hidden', 'true');
+            iframeEl.style.cssText = 'position:fixed;left:-100000px;top:0;width:900px;height:1200px;border:0;opacity:0;pointer-events:none;';
+            document.body.appendChild(iframeEl);
+            iframe = iframeEl;
+
+            const doc = iframeEl.contentDocument;
+            const contenido = normalizeDocumentHtml(html, { ...options, autoPrint: false, autoImage: false });
+            doc.open();
+            doc.write(contenido);
+            doc.close();
+
+            await new Promise(resolve => {
+                if (doc.readyState === 'complete') resolve();
+                else iframeEl.addEventListener('load', resolve, { once: true });
+            });
+            doc.querySelectorAll('.mmp-document-toolbar,.mmp-print-toolbar,.no-print,script').forEach(el => el.remove());
+            await Promise.all(Array.from(doc.images || []).map(img => img.complete
+                ? Promise.resolve()
+                : new Promise(resolve => {
+                    img.addEventListener('load', resolve, { once: true });
+                    img.addEventListener('error', resolve, { once: true });
+                })));
+            if (doc.fonts?.ready) {
+                try { await doc.fonts.ready; } catch {}
+            }
+
+            // El iframe se queda montado mientras dura el diálogo de impresión
+            // (algunos navegadores lo requieren); se retira después de que el
+            // usuario imprime/cancela, o por un respaldo de tiempo si ese
+            // evento no llega a disparar en algún navegador.
+            const limpiar = () => iframeEl.remove();
+            iframeEl.contentWindow.addEventListener('afterprint', limpiar, { once: true });
+            setTimeout(limpiar, 60000);
+
+            iframeEl.contentWindow.focus();
+            iframeEl.contentWindow.print();
+            return true;
+        } catch (err) {
+            console.error('No se pudo abrir la impresión nativa:', err);
+            alert('No se pudo abrir el diálogo de impresión. Usa PDF o Imagen en su lugar.');
+            iframe?.remove();
+            return false;
+        }
+    }
+
     function elegirFormato({ html = '', title = 'Documento', filename = '', source = 'document', pageSize = 'letter' } = {}) {
         const modalId = `mmp-formato-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const config = { html: String(html || ''), title, filename: filename || title, source, pageSize };
@@ -789,6 +848,10 @@ function documentToolbar(options = {}) {
                 <div style="width:100%;max-width:520px;background:white;border-radius:8px;padding:24px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
                     <h3 style="margin:0;color:#0f172a;">Emitir documento</h3>
                     <p style="margin:6px 0 20px;color:#64748b;font-size:13px;">${esc(title)}</p>
+                    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                        <button onclick="TicketService.abrirFormato('${esc(modalId)}','imprimir')" style="padding:16px 8px;border:0;border-radius:7px;background:#0f172a;color:white;font-weight:900;cursor:pointer;" title="Imprimir o guardar como PDF real (vectorial) usando el navegador">🖨️ Imprimir / PDF real</button>
+                    </div>
+                    <p style="margin:8px 0 4px;color:#94a3b8;font-size:11px;">Para compartir rápido por WhatsApp o redes:</p>
                     <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
                         <button onclick="TicketService.abrirFormato('${esc(modalId)}','pdf')" style="padding:16px 8px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:900;cursor:pointer;">PDF</button>
                         <button onclick="TicketService.abrirFormato('${esc(modalId)}','ticket')" style="padding:16px 8px;border:0;border-radius:7px;background:#7c3aed;color:white;font-weight:900;cursor:pointer;">Ticket</button>
@@ -825,6 +888,8 @@ function documentToolbar(options = {}) {
         }
         if (formato === 'ticket') {
             resultado = openHtml(cfg.html, { title: cfg.title, filename: cfg.filename });
+        } else if (formato === 'imprimir') {
+            resultado = imprimirNativo(cfg.html, cfg);
         } else if (formato === 'pdf') {
             resultado = descargarPdf(cfg.html, cfg);
         } else if (formato === 'imagen') {
@@ -935,6 +1000,7 @@ function documentToolbar(options = {}) {
         openThermal,
         descargarPdf,
         descargarImagen,
+        imprimirNativo,
         elegirFormato,
         abrirFormato,
         cerrarSelectorFormato,
