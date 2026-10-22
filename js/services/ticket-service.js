@@ -103,6 +103,29 @@ p { margin: 3px 0 !important; }
 }
 .mmp-btn-print { background: #1e40af !important; color: #fff !important; }
 .mmp-btn-image { background: #047857 !important; color: #fff !important; }
+.mmp-wa-bar {
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 10 !important;
+    margin: 10px 0 0 !important;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    background: #f1f5f9 !important;
+    border-top: 1px solid #cbd5e1 !important;
+}
+.mmp-wa-bar button.mmp-btn-wa {
+    width: 100% !important;
+    max-width: 420px !important;
+    min-height: 58px !important;
+    padding: 14px 18px !important;
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    border: 0 !important;
+    border-radius: 14px !important;
+    background: #16a34a !important;
+    color: #fff !important;
+    cursor: pointer !important;
+}
+.mmp-wa-bar button.mmp-btn-wa:disabled { opacity: .7 !important; }
 .mmp-cut { border-top: 1px dashed #000 !important; margin: 8px 0 !important; }
 @media print {
     html, body { width: 80mm !important; margin: 0 !important; background: #fff !important; }
@@ -125,6 +148,17 @@ function mmpGuardarConCarpeta(blob, nombre, fallback){
         }).catch(function(){ fallback(); });
     } catch (e) { fallback(); }
 }
+(function(){
+    var ua = navigator.userAgent || '';
+    var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (movil) return;
+    window.addEventListener('DOMContentLoaded', function(){
+        ['mmp-btn-imagen', 'mmp-doc-btn-imagen'].forEach(function(id){
+            var b = document.getElementById(id);
+            if (b) b.textContent = '📷 Guardar imagen';
+        });
+    });
+})();
 function mmpEntregarImagen(blob, nombre, fallback){
     var ua = navigator.userAgent || '';
     var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
@@ -226,7 +260,15 @@ function mmpImprimirBluetooth(){
     <button class="mmp-btn-print" onclick="window.print()">Imprimir ticket</button>
     <button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button>
     <button class="mmp-btn-print" onclick="mmpGuardarTicketPdf()">Descargar PDF</button>
-    <button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button>
+</div>`;
+    }
+
+    // 📲 Botón principal para enviar la imagen por WhatsApp (abajo, grande).
+    // En escritorio el mismo botón dice "Guardar imagen" (lo cambia el script de la ventana).
+    function whatsappBar(id, onclick) {
+        return `
+<div class="mmp-wa-bar no-print">
+    <button id="${id}" class="mmp-btn-wa" onclick="${onclick}">📲 Enviar por WhatsApp</button>
 </div>`;
     }
 
@@ -282,6 +324,30 @@ body { box-sizing: border-box; }
 }
 .mmp-btn-print { background: #1e40af; color: #fff; }
 .mmp-btn-image { background: #047857; color: #fff; }
+.mmp-wa-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    justify-content: center;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: #e2e8f0;
+    border-top: 1px solid #cbd5e1;
+}
+.mmp-wa-bar button.mmp-btn-wa {
+    width: 100%;
+    max-width: 420px;
+    min-height: 58px;
+    padding: 14px 18px;
+    font-size: 18px;
+    font-weight: 800;
+    border: 0;
+    border-radius: 14px;
+    background: #16a34a;
+    color: #fff;
+    cursor: pointer;
+}
+.mmp-wa-bar button.mmp-btn-wa:disabled { opacity: .7; }
 .mmp-document-body .no-print,
 .mmp-document-body .controles,
 .mmp-document-body button[onclick="window.print()"],
@@ -311,6 +377,17 @@ function mmpGuardarConCarpeta(blob, nombre, fallback){
         }).catch(function(){ fallback(); });
     } catch (e) { fallback(); }
 }
+(function(){
+    var ua = navigator.userAgent || '';
+    var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (movil) return;
+    window.addEventListener('DOMContentLoaded', function(){
+        ['mmp-btn-imagen', 'mmp-doc-btn-imagen'].forEach(function(id){
+            var b = document.getElementById(id);
+            if (b) b.textContent = '📷 Guardar imagen';
+        });
+    });
+})();
 function mmpEntregarImagen(blob, nombre, fallback){
     var ua = navigator.userAgent || '';
     var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
@@ -505,6 +582,8 @@ function mmpGuardarDocumentoPdf(){
     });
 }
 
+var VENDOR_HTML2CANVAS = ${JSON.stringify(VENDOR_HTML2CANVAS)};
+var VENDOR_JSPDF = ${JSON.stringify(VENDOR_JSPDF)};
 function mmpAbrirDocumentoTermico(){
     var source = document.querySelector('.mmp-document-body') || document.body;
     var clone = source.cloneNode(true);
@@ -514,7 +593,7 @@ function mmpAbrirDocumentoTermico(){
     var file = '${file}_termico';
     var script = '<script>' +
         'function mmpCargarHtml2Canvas(cb){if(typeof html2canvas!==\"undefined\")return cb();var s=document.createElement(\"script\");s.src=\"' + VENDOR_HTML2CANVAS + '\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor de imagen. Usa Imprimir / Guardar como PDF.\");};document.head.appendChild(s);}' +
-        'function mmpGuardarTicketImagen(){mmpCargarHtml2Canvas(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var a=document.createElement(\"a\");a.download=\"' + file + '.png\";a.href=canvas.toDataURL(\"image/png\");a.click();}).catch(function(){alert(\"No se pudo generar la imagen. Intenta imprimirlo a PDF.\");});});}' +
+        'function mmpGuardarTicketImagen(){mmpCargarHtml2Canvas(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var nombre=\"' + file + '.png\";var descargar=function(){var a=document.createElement(\"a\");a.download=nombre;a.href=canvas.toDataURL(\"image/png\");a.click();};canvas.toBlob(function(blob){var ua=navigator.userAgent||\"\";var movil=/Android|iPhone|iPad|iPod/i.test(ua)||(/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1);try{if(movil&&blob&&navigator.canShare&&navigator.share){var f=new File([blob],nombre,{type:\"image/png\"});if(navigator.canShare({files:[f]})){navigator.share({files:[f],title:document.title}).catch(function(e){if(!e||e.name!==\"AbortError\")descargar();});return;}}var svc=window.opener&&!window.opener.closed&&window.opener.CarpetaRaizService;if(svc&&blob){svc.guardarArchivo(blob,nombre,document.title).then(function(r){if(!r||!r.guardado)descargar();}).catch(function(){descargar();});return;}}catch(e){}descargar();},\"image/png\");}).catch(function(){alert(\"No se pudo generar la imagen. Intenta imprimirlo a PDF.\");});});}' +
         'function mmpCargarJsPdf(cb){if(window.jspdf&&window.jspdf.jsPDF)return cb();var s=document.createElement(\"script\");s.src=\"' + VENDOR_JSPDF + '\";s.onload=cb;s.onerror=function(){alert(\"No se pudo cargar el motor PDF.\");};document.head.appendChild(s);}' +
         'function mmpGuardarTicketPdf(){mmpCargarHtml2Canvas(function(){mmpCargarJsPdf(function(){var node=document.getElementById(\"ticket-contenido\")||document.body;html2canvas(node,{scale:3,useCORS:true,allowTaint:false,backgroundColor:\"#ffffff\",logging:false}).then(function(canvas){var w=226.77,m=8,iw=w-m*2,ih=canvas.height*iw/canvas.width;var pdf=new window.jspdf.jsPDF({unit:\"pt\",format:[w,Math.max(300,ih+m*2)],orientation:\"portrait\"});pdf.addImage(canvas.toDataURL(\"image/jpeg\",.94),\"JPEG\",m,m,iw,ih,undefined,\"FAST\");pdf.save(\"' + file + '.pdf\");}).catch(function(){alert(\"No se pudo generar el PDF.\");});});});}' +
         'function mmpBase64Url(text){var utf8=unescape(encodeURIComponent(text||\"\"));return btoa(utf8).replace(/\\\\+/g,\"-\").replace(/\\\\//g,\"_\").replace(/=+$/g,\"\");}' +
@@ -523,7 +602,7 @@ function mmpAbrirDocumentoTermico(){
         '<\\/script>';
     var win = window.open('', '_blank');
     if (!win) { alert('Habilita las ventanas emergentes para abrir el ticket termico.'); return; }
-    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' termico</title>' + css + script + '</head><body><div class="mmp-print-toolbar no-print"><button class="mmp-btn-print" onclick="window.print()">Imprimir ticket</button><button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button><button class="mmp-btn-print" onclick="mmpGuardarTicketPdf()">Descargar PDF</button><button id="mmp-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarTicketImagen()">Guardar imagen</button></div><div id="ticket-contenido" class="mmp-ticket-body">' + clone.innerHTML + '</div></body></html>');
+    win.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>' + titulo + ' termico</title>' + css + script + '</head><body><div class="mmp-print-toolbar no-print"><button class="mmp-btn-print" onclick="window.print()">Imprimir ticket</button><button class="mmp-btn-print" onclick="mmpImprimirBluetooth()">Imprimir Bluetooth</button><button class="mmp-btn-print" onclick="mmpGuardarTicketPdf()">Descargar PDF</button></div><div id="ticket-contenido" class="mmp-ticket-body">' + clone.innerHTML + '</div><div class="mmp-wa-bar no-print"><button id="mmp-btn-imagen" class="mmp-btn-wa" onclick="mmpGuardarTicketImagen()">📲 Enviar por WhatsApp</button></div></body></html>');
     win.document.close();
     win.focus();
 }
@@ -531,7 +610,7 @@ function mmpAbrirDocumentoTermico(){
     }
 
 function documentToolbar(options = {}) {
-        const imageButton = options.image === false ? '' : `<button id="mmp-doc-btn-imagen" class="mmp-btn-image" onclick="mmpGuardarDocumentoImagen()">Guardar imagen</button>`;
+        const imageButton = '';
         const thermalButton = options.thermal === false ? '' : `<button class="mmp-btn-print" onclick="mmpAbrirDocumentoTermico()">Ticket termico</button>`;
         return `
 <div class="mmp-document-toolbar no-print">
@@ -1030,11 +1109,21 @@ function documentToolbar(options = {}) {
         if (!/<title>/i.test(out)) {
             out = out.replace(/<head[^>]*>/i, match => `${match}\n<title>${title}</title>`);
         }
-        if (!/mmp-thermal-80-style/.test(out)) {
-            out = out.replace(/<\/head>/i, `${thermalCss()}\n${imageScript(filename)}\n</head>`);
-        }
+        // 🛡️ Primero se inserta en el <body> y AL FINAL en el <head>: el script que se
+        // inyecta en el head trae cadenas con "<body>" y "</head>" que harían coincidir
+        // estas búsquedas en el lugar equivocado.
+        const faltanEstilosTicket = !/mmp-thermal-80-style/.test(out);
         if (!/class=["'][^"']*\bmmp-print-toolbar\b/i.test(out)) {
             out = out.replace(/<body[^>]*>/i, match => `${match}\n${toolbar()}`);
+        }
+        // El único botón de imagen es el de WhatsApp de abajo.
+        if (!/class=["\'][^"\']*\bmmp-wa-bar\b/i.test(out)) {
+            const barra = whatsappBar('mmp-btn-imagen', 'mmpGuardarTicketImagen()');
+            const i = out.toLowerCase().lastIndexOf('</body>');
+            out = i >= 0 ? out.slice(0, i) + barra + '\n' + out.slice(i) : out + barra;
+        }
+        if (faltanEstilosTicket) {
+            out = out.replace(/<\/head>/i, () => `${thermalCss()}\n${imageScript(filename)}\n</head>`);
         }
         return out;
     }
@@ -1066,9 +1155,8 @@ function documentToolbar(options = {}) {
         if (!/<title>/i.test(out)) {
             out = out.replace(/<head[^>]*>/i, match => `${match}\n<title>${title}</title>`);
         }
-        if (!/mmp-document-print-style/.test(out)) {
-            out = out.replace(/<\/head>/i, `${documentCss(options)}\n${documentImageScript(filename, options.token)}\n</head>`);
-        }
+        // 🛡️ Mismo orden que en normalizeHtml: body primero, head al final.
+        const faltanEstilosDoc = !/mmp-document-print-style/.test(out);
         if (!/mmp-document-body/.test(out)) {
             out = out.replace(/<body([^>]*)>/i, '<body$1><div class="mmp-document-body">')
                      .replace(/<\/body>/i, '</div></body>');
@@ -1076,11 +1164,19 @@ function documentToolbar(options = {}) {
         if (!/class=["'][^"']*\bmmp-document-toolbar\b/i.test(out)) {
             out = out.replace(/<body[^>]*>/i, match => `${match}\n${documentToolbar(options)}`);
         }
+        if (options.image !== false && !/class=["\'][^"\']*\bmmp-wa-bar\b/i.test(out)) {
+            const barraDoc = whatsappBar('mmp-doc-btn-imagen', 'mmpGuardarDocumentoImagen()');
+            const j = out.toLowerCase().lastIndexOf('</body>');
+            out = j >= 0 ? out.slice(0, j) + barraDoc + '\n' + out.slice(j) : out + barraDoc;
+        }
         if (options.autoPrint && !/mmp-auto-print/.test(out)) {
             out = out.replace(/<\/body>/i, `<script id="mmp-auto-print">window.addEventListener('load',function(){setTimeout(function(){if(typeof mmpGuardarDocumentoPdf==='function')mmpGuardarDocumentoPdf();},650);});<\/script></body>`);
         }
         if (options.autoImage && !/mmp-auto-image/.test(out)) {
             out = out.replace(/<\/body>/i, `<script id="mmp-auto-image">window.addEventListener('load',function(){setTimeout(function(){if(typeof mmpGuardarDocumentoImagen==='function')mmpGuardarDocumentoImagen();},650);});<\/script></body>`);
+        }
+        if (faltanEstilosDoc) {
+            out = out.replace(/<\/head>/i, () => `${documentCss(options)}\n${documentImageScript(filename, options.token)}\n</head>`);
         }
         return out;
     }
