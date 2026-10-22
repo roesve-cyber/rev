@@ -3064,7 +3064,6 @@ function exportarCobranzaEsperada() {
 
 function renderClientesMorosos() { renderCuentasXCobrar('', 'Atrasado'); }
 function exportarMorososCSV() { exportarCobranzaEsperada(); }
-function abrirHistorialAbonos(folio) { abrirEstadoCuentaFolio(folio); }
 
 function reimprimirTicketAbono(folio, indexAbono) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -5457,7 +5456,6 @@ window.abrirDetalleCobranza = abrirDetalleCobranza;
 window.exportarCobranzaEsperada = exportarCobranzaEsperada;
 window.exportarMorososCSV = exportarMorososCSV;
 window.renderClientesMorosos = renderClientesMorosos;
-window.abrirHistorialAbonos = abrirHistorialAbonos;
 window.reimprimirTicketAbono = reimprimirTicketAbono;
 window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
 window.emitirEstadoCuentaFolioTicket = emitirEstadoCuentaFolioTicket;

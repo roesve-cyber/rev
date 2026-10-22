@@ -1159,32 +1159,6 @@ function _invEstadoPedidoPorProducto() {
  return estadoPedidoPorProd;
 }
 
-function _invConsignacionPendientePorProducto() {
- const consignacionesActivasInv = typeof StorageService !== 'undefined' ? StorageService.get("consignacionesActivas", []) : [];
- const consignacionPendientePorProd = {};
- (consignacionesActivasInv || []).forEach(c => {
- if (!c || !c.productoId) return;
- const pend = Number(c.cantidadPendiente || 0);
- if (pend <= 0) return;
- consignacionPendientePorProd[c.productoId] = (consignacionPendientePorProd[c.productoId] || 0) + pend;
- });
- return consignacionPendientePorProd;
-}
-
-// Costo promedio de un producto en base a sus entradas de Kardex, con fallback
-// al costo declarado en la ficha / costo historico de compras.
-function _invCostoPromedioProducto(p, kardex) {
- const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipoBase === 'entrada');
- let totalCosto = 0, totalCantidadEntrada = 0;
- entradas.forEach(mov => {
- const cantidadEntrada = Number(mov.cantidad || 0);
- totalCosto += Number(mov.costoUnitario || 0) * cantidadEntrada;
- totalCantidadEntrada += cantidadEntrada;
- });
- const costoBase = Number(p.costo || p.precioCompra || _invCostoHistoricoProducto(p.id) || 0);
- return totalCantidadEntrada > 0 && totalCosto > 0 ? (totalCosto / totalCantidadEntrada) : costoBase;
-}
-
 // Desglose compacto de ubicaciones (suma por ubicacion, sin desglosar color) para
 // pintar pastillas cortas en tablas donde no cabe el detalle completo por color.
 function _invUbicacionesResumenProducto(p) {
@@ -1893,21 +1867,6 @@ function actualizarCombosFiltros() {
 }
 
 // ===== INVENTARIO =====
-function _gpBadgeUbicaciones(p) {
- const filas = _invUbicacionesResumenProducto(p);
- if (filas.length === 0) return '<span style="color:#94a3b8; font-style:italic; font-size:11px;">Sin ubicacion</span>';
- const MAX_VISIBLES = 2;
- const visibles = filas.slice(0, MAX_VISIBLES);
- const resto = filas.slice(MAX_VISIBLES);
- const pill = (f) => `<span style="display:inline-block; background:${f.sinAsignar ? '#fffbeb' : '#f0f9ff'}; border:1px solid ${f.sinAsignar ? '#fde68a' : '#bae6fd'}; color:${f.sinAsignar ? '#b45309' : '#0369a1'}; padding:2px 7px; border-radius:7px; margin:1px 3px 1px 0; font-size:11px; white-space:nowrap;">${_kardexEsc(f.ubicacion)} <b>${f.stock}</b></span>`;
- let html = visibles.map(pill).join('');
- if (resto.length > 0) {
- const tooltip = resto.map(f => `${f.ubicacion}: ${f.stock}`).join(' | ');
- html += `<span title="${_kardexEsc(tooltip)}" style="display:inline-block; background:#f1f5f9; color:#475569; padding:2px 7px; border-radius:7px; font-size:11px; font-weight:bold; cursor:default;">+${resto.length} mas</span>`;
- }
- return html;
-}
-
 function _gpOrdenarFilas(filas) {
  const { campo, dir } = window._gpOrden || {};
  if (!campo) return filas;

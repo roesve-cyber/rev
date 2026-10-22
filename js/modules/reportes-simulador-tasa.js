@@ -22,10 +22,6 @@
 //      esquema, usando tu mezcla real de a-tiempo / atrasados.
 // ============================================================
 
-function _stpEsc(v) {
-    return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
-}
-
 function _stpMesesEntre(fechaIni, fechaFin) {
     // 🛡️ parseFechaMX interpreta correctamente "DD-MM-YYYY"/"DD/MM/YYYY" (antes
     // new Date() los invertía a MES-DÍA-AÑO, dañando el cálculo de meses reales).
