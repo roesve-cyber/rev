@@ -2863,10 +2863,38 @@ function generarTicketAbonoTermico(datosAbono) {
                 backgroundColor: '#ffffff',
                 logging: false
             }).then(canvas => {
-                const link = document.createElement('a');
-                link.download = 'Abono_${esc(folio)}.png';
-                link.href = canvas.toDataURL('image/png');
-                link.click();
+                var nombre = 'Abono_${esc(folio)}.png';
+                var descargar = function() {
+                    var link = document.createElement('a');
+                    link.download = nombre;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                };
+                // 📱 Celular/tablet: menú de compartir (WhatsApp). Escritorio: carpeta
+                // de documentos si está activa. Si nada aplica: descarga normal.
+                canvas.toBlob(function(blob) {
+                    var ua = navigator.userAgent || '';
+                    var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+                    try {
+                        if (movil && blob && navigator.canShare && navigator.share) {
+                            var f = new File([blob], nombre, { type: 'image/png' });
+                            if (navigator.canShare({ files: [f] })) {
+                                navigator.share({ files: [f], title: document.title }).catch(function(e) {
+                                    if (!e || e.name !== 'AbortError') descargar();
+                                });
+                                return;
+                            }
+                        }
+                        var svc = window.opener && !window.opener.closed && window.opener.CarpetaRaizService;
+                        if (svc && blob) {
+                            svc.guardarArchivo(blob, nombre, document.title).then(function(r) {
+                                if (!r || !r.guardado) descargar();
+                            }).catch(function() { descargar(); });
+                            return;
+                        }
+                    } catch (e) { /* se descarga normal */ }
+                    descargar();
+                }, 'image/png');
                 btn.innerHTML = textoOriginal;
                 btn.disabled = false;
             }).catch(err => {
@@ -4704,6 +4732,29 @@ function descargarImagenEstadoCuentaFolio(folio) {
     if (btn) {
         btn.disabled = true;
         btn.textContent = 'Generando...';
+    }
+
+    // 📱 Motor único (ImagenService): mismo documento que el PDF, reacomodado a
+    // una columna de 390px y entregado por WhatsApp / carpeta / descarga.
+    if (window.ImagenService) {
+        const vistaImg = window._cxcEstadoCuentaVistaActiva || 'pagares';
+        const modeloImg = vistaImg === 'antiguedad' ? _cxcEstadoCuentaModeloAntiguedad(folio) : _cxcEstadoCuentaModelo(folio);
+        if (modeloImg) {
+            const htmlImg = vistaImg === 'antiguedad' ? _cxcEstadoCuentaHtmlAntiguedad(modeloImg) : _cxcEstadoCuentaHtml(modeloImg);
+            window.ImagenService.renderDocumento(htmlImg, { titulo: `Estado de Cuenta ${folio}` })
+                .then(lienzo => window.ImagenService.entregar(lienzo, `estado_cuenta_${safeFolio}`, {
+                    titulo: `Estado de Cuenta ${folio}`,
+                    categoria: 'Estado de cuenta'
+                }))
+                .catch(err => {
+                    console.error('Error generando imagen estado de cuenta folio:', err);
+                    alert('No se pudo generar la imagen. Intenta con PDF / A4.');
+                })
+                .finally(() => {
+                    if (btn) { btn.disabled = false; btn.textContent = textoOriginal || 'Guardar imagen'; }
+                });
+            return;
+        }
     }
 
     _cxcCargarHtml2CanvasEstadoFolio(() => {

@@ -2518,6 +2518,63 @@ function imprimirOrdenCompra(id) {
     _generarBloqueBodegaQR(oc, (bloqueBodegaHtml) => _imprimirOrdenCompraConBodega(oc, bloqueBodegaHtml));
 }
 
+// 📱 Tarjeta de la Orden de Compra para enviar por WhatsApp (solo presentación;
+// los datos son los mismos de la OC). Devuelve '' si ImagenService no cargó,
+// y TicketService usa entonces el reacomodo automático del documento.
+function _ocTarjetaImagen(oc, { empresa, esConsignacionOC, bloqueBodegaHtml, estadoColor }) {
+    const U = window.ImagenService && window.ImagenService.ui;
+    if (!U) return '';
+    const fecha = f => (window.formatearFechaCortaMX ? window.formatearFechaCortaMX(f) : String(f || ''));
+    const articulos = oc.articulos || [];
+    const totalPiezas = articulos.reduce((t, a) => t + (Number(a.cantidad) || 0), 0);
+    const cc = oc.condicionesComerciales || {};
+    const formaPago = cc.metodoPago === 'contado' ? 'Contado'
+        : cc.metodoPago === 'credito' ? 'Crédito proveedor'
+        : cc.metodoPago === 'msi' ? `${cc.meses || ''} meses sin intereses`
+        : (cc.metodoPago || '');
+
+    const items = articulos.map(a => U.item({
+        titulo: a.nombre,
+        detalle: a.caracteristicas || '',
+        marca: a.productoId ? '' : '⏳ Pendiente de catálogo',
+        izquierda: `${a.cantidad} × ${U.dinero(a.costo)}`,
+        derecha: U.dinero(a.subtotal)
+    })).join('');
+
+    const cuerpo = [
+        U.cabecera({
+            empresa,
+            tipo: 'Orden de compra',
+            folio: oc.folio,
+            badge: { texto: oc.estado, bg: estadoColor.bg, fg: estadoColor.fg }
+        }),
+        oc.estado === 'Borrador'
+            ? U.nota({ titulo: 'BORRADOR', texto: 'Documento de trabajo: aún no está autorizada ni es un compromiso con el proveedor.', tono: 'ambar' })
+            : '',
+        esConsignacionOC
+            ? U.nota({ titulo: 'A CONSIGNACIÓN', texto: 'La mercancía queda en resguardo; el proveedor solo cobra lo que se venda.', tono: 'violeta' })
+            : '',
+        U.hero({
+            etiqueta: 'Total de la orden',
+            valor: U.dinero(oc.total),
+            nota: `${articulos.length} artículo${articulos.length === 1 ? '' : 's'} · ${totalPiezas} pieza${totalPiezas === 1 ? '' : 's'}`
+        }),
+        U.filas([
+            ['Proveedor', { texto: oc.proveedorNombre, fuerte: true }],
+            ['Emisión', fecha(oc.fechaEmision)],
+            ['Entrega estimada', oc.fechaEntregaEstimada ? fecha(oc.fechaEntregaEstimada) : ''],
+            esConsignacionOC ? null : ['Forma de pago', formaPago],
+            esConsignacionOC ? null : ['Cuenta origen', cc.cuentaOrigen || '']
+        ]),
+        bloqueBodegaHtml ? `<div style="margin-top:14px;">${U.bloque(bloqueBodegaHtml)}</div>` : '',
+        U.seccion('Artículos'),
+        items,
+        oc.notas ? U.nota({ titulo: 'NOTAS', texto: oc.notas, tono: 'ambar' }) : '',
+        U.pie(`${empresa} · ${fecha(new Date())}`)
+    ].join('');
+    return U.envolver(cuerpo, `OC ${oc.folio}`);
+}
+
 function _imprimirOrdenCompraConBodega(oc, bloqueBodegaHtml) {
     const cfg = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
@@ -2649,10 +2706,14 @@ function _imprimirOrdenCompraConBodega(oc, bloqueBodegaHtml) {
       <button onclick="window.print()" style="padding:10px 24px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
+    // 📱 Versión IMAGEN (WhatsApp): tarjeta vertical de 390px, total grande,
+    // artículos como tarjetas. El PDF y el ticket siguen usando ocHTML.
+    const imageHtml = _ocTarjetaImagen(oc, { empresa, esConsignacionOC, bloqueBodegaHtml, estadoColor });
     if (window.TicketService?.elegirFormato) {
         const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC && !bloqueBodegaHtml && oc.estado !== 'Borrador' ? 'half-letter' : 'letter';
         window.TicketService.elegirFormato({
             html: ocHTML,
+            imageHtml,
             title: `Orden de Compra ${oc.folio}`,
             filename: `oc_${oc.folio}`,
             pageSize
@@ -2661,7 +2722,7 @@ function _imprimirOrdenCompraConBodega(oc, bloqueBodegaHtml) {
     }
     if (window.TicketService?.openDocument) {
         const pageSize = (oc.articulos || []).length <= 3 && !oc.notas && !esConsignacionOC && !bloqueBodegaHtml && oc.estado !== 'Borrador' ? 'half-letter' : 'letter';
-        window.TicketService.openDocument(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}`, pageSize });
+        window.TicketService.openDocument(ocHTML, { title: `Orden de Compra ${oc.folio}`, filename: `oc_${oc.folio}`, pageSize, imageHtml });
         return;
     }
     const w = window.open('', '_blank', 'width=750,height=900');
@@ -3409,6 +3470,70 @@ movimientosInventario = kardex;   // ✅ sincronizar global
     });
 }
 
+// 📱 Tarjeta de la Recepción de compra para WhatsApp (solo presentación; los
+// montos vienen ya calculados por imprimirRecepcionCompra).
+function _recepcionTarjetaImagen(oc, compra, backorder, d) {
+    const U = window.ImagenService && window.ImagenService.ui;
+    if (!U) return '';
+    const saldo = d.saldoRestante;
+    const articulosRec = compra.articulos || [];
+    const piezasRec = articulosRec.reduce((t, a) => t + (Number(a.cantidadRec ?? a.cantidad) || 0), 0);
+    const ocPadreFolio = oc.ocPadre ? ((_getOrdenesCompra().find(x => x.id === oc.ocPadre) || {}).folio || '') : '';
+    const sinPago = d.metodoPago === 'no';
+    const etiquetaMetodo = (d.metodosLabel[d.metodoPago] || '').replace(/^[^\wÁÉÍÓÚáéíóúñÑ]+/, '').trim();
+
+    const recibidos = articulosRec.map(a => {
+        const cant = a.cantidadRec ?? a.cantidad;
+        return U.item({
+            titulo: a.nombre,
+            izquierda: `${cant} × ${U.dinero(a.costo)}`,
+            derecha: U.dinero(cant * a.costo)
+        });
+    }).join('');
+
+    const pendientes = (backorder || []).map(a => U.item({
+        titulo: a.nombre,
+        marca: 'Pendiente de recibir',
+        izquierda: `${a.cantidad} × ${U.dinero(a.costo)}`,
+        derecha: U.dinero(a.subtotal)
+    })).join('');
+
+    const cuerpo = [
+        U.cabecera({
+            empresa: d.empresa,
+            tipo: 'Recepción de mercancía',
+            folio: compra.folio,
+            badge: oc.estado === 'Recibida'
+                ? { texto: 'OC ' + oc.estado, bg: '#dcfce7', fg: '#166534' }
+                : { texto: 'OC ' + oc.estado, bg: '#fef3c7', fg: '#92400e' }
+        }),
+        U.hero({
+            etiqueta: 'Total recibido',
+            valor: U.dinero(d.totalRecibido),
+            nota: `${articulosRec.length} artículo${articulosRec.length === 1 ? '' : 's'} · ${piezasRec} pieza${piezasRec === 1 ? '' : 's'}`
+        }),
+        U.filas([
+            ['Proveedor', { texto: oc.proveedorNombre, fuerte: true }],
+            ['Fecha', d.fechaStr],
+            ['Orden de compra', oc.folio],
+            ocPadreFolio ? ['Back order de', ocPadreFolio] : null,
+            oc.backOrderId ? ['Back order', `${oc.folio}-BO`] : null
+        ]),
+        U.seccion('Estado del pago'),
+        U.filas([
+            d.anticipoAplicado > 0 ? ['Anticipo aplicado', { texto: U.dinero(d.anticipoAplicado), color: '#2563eb' }] : null,
+            [sinPago ? 'Pagado hoy' : `Pagado hoy (${etiquetaMetodo})`, { texto: U.dinero(d.montoPagado), color: d.montoPagado > 0 ? '#16a34a' : '#64748b' }],
+            ['Saldo pendiente', { texto: U.dinero(saldo), fuerte: true, color: saldo > 0 ? '#dc2626' : '#16a34a' }]
+        ]),
+        U.seccion('Artículos recibidos'),
+        recibidos,
+        pendientes ? U.seccion('Back order · pendiente de recibir') + pendientes : '',
+        d.notas ? U.nota({ titulo: 'OBSERVACIONES', texto: d.notas, tono: 'gris' }) : '',
+        U.pie(`${d.empresa} · Recepción ${compra.folio}`)
+    ].join('');
+    return U.envolver(cuerpo, `Recepción ${compra.folio}`);
+}
+
 function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     const cfg     = StorageService.get('configEmpresa', {});
     const empresa = cfg.nombre || 'Mueblería Mi Pueblito';
@@ -3553,10 +3678,16 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
         <button onclick="window.print()" style="padding:11px 28px;background:#1e40af;color:white;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:bold;">🖨️ Imprimir</button>
     </div>
     </body></html>`;
+    // 📱 Versión IMAGEN (WhatsApp): tarjeta vertical; PDF y ticket siguen con recepcionHTML.
+    const imageHtml = _recepcionTarjetaImagen(oc, compra, backorder, {
+        empresa, fechaStr, montoPagado, metodoPago, saldoRestante: saldoPendienteRecepcion,
+        totalRecibido, anticipoAplicado, notas, metodosLabel
+    });
     if (window.TicketService?.elegirFormato) {
         const pageSize = ((compra.articulos || []).length + (backorder || []).length) <= 4 && !notas ? 'half-letter' : 'letter';
         window.TicketService.elegirFormato({
             html: recepcionHTML,
+            imageHtml,
             title: `Recepcion ${compra.folio}`,
             filename: `recepcion_${compra.folio}`,
             pageSize
@@ -3565,7 +3696,7 @@ function imprimirRecepcionCompra(oc, compra, backorder, pagoDatos) {
     }
     if (window.TicketService?.openDocument) {
         const pageSize = ((compra.articulos || []).length + (backorder || []).length) <= 4 && !notas ? 'half-letter' : 'letter';
-        window.TicketService.openDocument(recepcionHTML, { title: `Recepcion ${compra.folio}`, filename: `recepcion_${compra.folio}`, pageSize });
+        window.TicketService.openDocument(recepcionHTML, { title: `Recepcion ${compra.folio}`, filename: `recepcion_${compra.folio}`, pageSize, imageHtml });
         return;
     }
     const w = window.open('', '_blank', 'width=780,height=960');
@@ -7058,6 +7189,25 @@ window.descargarImagenEstadoCuentaConsignacion = function(scope = 'actual', key 
     const btn = document.getElementById(`btn-img-consig-${safeDomId}`);
     const textoOriginal = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Generando...'; }
+
+    // 📱 Motor único (ImagenService): una columna de 390px + compartir / carpeta / descarga.
+    if (window.ImagenService) {
+        const copia = origen.cloneNode(true);
+        copia.querySelectorAll('button, script, .no-print').forEach(el => el.remove());
+        copia.removeAttribute('id');
+        const nombreImg = `estado_consignacion_${scope}_${String(key || 'general').replace(/[^\w-]+/g, '_')}`;
+        window.ImagenService.renderDocumento(copia.outerHTML, { titulo: 'Estado de consignación' })
+            .then(lienzo => window.ImagenService.entregar(lienzo, nombreImg, {
+                titulo: 'Estado de consignación',
+                categoria: 'Estado de cuenta consignación'
+            }))
+            .catch(err => {
+                console.error('Error imagen consignación:', err);
+                alert('No se pudo generar la imagen. Intenta con PDF / ticket.');
+            })
+            .finally(() => { if (btn) { btn.disabled = false; btn.textContent = textoOriginal || 'Guardar imagen'; } });
+        return;
+    }
 
     _cargarHtml2CanvasEstadoProveedor(() => {
         const clone = origen.cloneNode(true);

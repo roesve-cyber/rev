@@ -274,6 +274,49 @@
             '<div style="font-size:11px;color:#94a3b8;margin-top:16px;">Documento informativo generado el ' + esc(fechaCorta(new Date())) + '. Cualquier aclaración, con ' + esc(nombreEmpresa()) + '.</div></div>';
     }
 
+    // 📱 Tarjeta del estado de pagos para WhatsApp (la misma información que
+    // htmlEstadoProveedor, en vertical a 390px con el saldo como dato principal).
+    function tarjetaEstadoProveedor(oc) {
+        var U = window.ImagenService && window.ImagenService.ui;
+        if (!U) return '';
+        var r = resumen(oc);
+        var pagos = pagosDe(oc);
+        var badge = r.liquidada
+            ? { texto: 'LIQUIDADA', bg: '#dcfce7', fg: '#166534' }
+            : (r.pagado > 0 ? { texto: 'PAGO PARCIAL', bg: '#fef3c7', fg: '#92400e' } : { texto: 'SIN PAGOS', bg: '#e2e8f0', fg: '#475569' });
+        var barra = '<div style="background:#e2e8f0;border-radius:999px;height:14px;overflow:hidden;margin:10px 4px 2px;">' +
+            '<div style="width:' + r.pct + '%;height:100%;background:' + (r.liquidada ? '#16a34a' : '#2563eb') + ';"></div></div>';
+        var lista = pagos.length ? pagos.map(function (p, i) {
+            return U.item({
+                titulo: p.sinDetalle ? 'Pagos anteriores' : fechaCorta(p.fecha),
+                detalle: p.sinDetalle ? '' : formaPago(p.cuenta),
+                izquierda: 'Pago ' + (i + 1),
+                derecha: money(p.monto)
+            });
+        }).join('') : U.nota({ texto: 'Aún no se registran pagos.', tono: 'gris' });
+        var cuerpo = [
+            U.cabecera({ empresa: nombreEmpresa(), tipo: 'Estado de pagos · Orden de compra', folio: oc.folio, badge: badge }),
+            U.hero({
+                etiqueta: r.liquidada ? 'Orden liquidada' : 'Saldo pendiente',
+                valor: money(r.saldo),
+                nota: 'Pagado ' + money(r.pagado) + ' de ' + money(r.total),
+                tono: r.liquidada ? 'verde' : 'rojo'
+            }),
+            U.bloque(barra),
+            '<div style="font-size:13.5px;font-weight:700;color:#475569;margin:4px 4px 8px;text-align:center;">Avance de pago: ' + r.pct + '%</div>',
+            U.filas([
+                ['Proveedor', { texto: oc.proveedorNombre || '-', fuerte: true }],
+                ['Fecha de la orden', fechaCorta(oc.fechaEmision)],
+                ['Entrega estimada', oc.fechaEntregaEstimada ? fechaCorta(oc.fechaEntregaEstimada) : ''],
+                ['Total de la orden', money(r.total)]
+            ]),
+            U.seccion('Pagos registrados'),
+            lista,
+            U.pie('Documento informativo · ' + fechaCorta(new Date()) + ' · Aclaraciones con ' + nombreEmpresa())
+        ].join('');
+        return U.envolver(cuerpo, 'Estado de pagos ' + oc.folio);
+    }
+
     function textoResumen(oc) {
         var r = resumen(oc), pagos = pagosDe(oc);
         var lineas = [
@@ -313,7 +356,7 @@
         var oc = ordenPorId(id);
         if (!oc) return;
         var doc = htmlEstadoProveedor(oc);
-        var opts = { html: doc, title: 'Estado de pagos ' + oc.folio, filename: 'estado_pagos_' + oc.folio, pageSize: 'letter' };
+        var opts = { html: doc, imageHtml: tarjetaEstadoProveedor(oc), title: 'Estado de pagos ' + oc.folio, filename: 'estado_pagos_' + oc.folio, pageSize: 'letter' };
         if (window.TicketService && window.TicketService.elegirFormato) return window.TicketService.elegirFormato(opts);
         if (window.TicketService && window.TicketService.openDocument) return window.TicketService.openDocument(doc, { title: opts.title, filename: opts.filename, pageSize: 'letter', autoPrint: true });
         var w = window.open('', '_blank', 'width=800,height=900');
@@ -336,6 +379,20 @@
         var oc = ordenPorId(id);
         var nodo = document.getElementById('ocPagosDoc');
         if (!oc || !nodo) return;
+        var IS = window.ImagenService;
+        var tarjeta = IS ? tarjetaEstadoProveedor(oc) : '';
+        if (IS && tarjeta) {
+            IS.renderDocumento(tarjeta, { tarjeta: true, titulo: 'Estado de pagos ' + oc.folio })
+                .then(function (lienzo) {
+                    return IS.entregar(lienzo, 'estado_pagos_' + oc.folio, {
+                        titulo: 'Estado de pagos ' + oc.folio,
+                        texto: textoResumen(oc),
+                        categoria: 'Estado de pagos orden de compra'
+                    });
+                })
+                .catch(function (e) { console.error(e); alert('No se pudo generar la imagen. Usa Imprimir / PDF.'); });
+            return;
+        }
         cargarHtml2Canvas(function () {
             html2canvas(nodo, { backgroundColor: '#ffffff', scale: 2, useCORS: true }).then(function (canvas) {
                 canvas.toBlob(function (blob) {

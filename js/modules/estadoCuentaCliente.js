@@ -406,8 +406,7 @@ window.renderEstadoCuentaClienteSelector = function() {
             <div id="btnGroupImpresionECC" style="display:none; gap:10px; flex-wrap:wrap;">
                 <button onclick="imprimirTicketEstadoCuentaCliente()" style="padding:12px 18px; background:#3b82f6; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">🖨️ Ticket Térmico</button>
                 <button onclick="imprimirPdfEstadoCuentaCliente()" style="padding:12px 18px; background:#059669; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📄 PDF / A4</button>
-                <button id="btnImgECC" onclick="descargarImagenEstadoCuentaCliente()" style="padding:12px 18px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📷 Guardar Imagen</button>
-                <button id="btnImgCelECC" onclick="descargarImagenCelularEstadoCuentaCliente()" style="padding:12px 18px; background:#16a34a; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📱 Celular (WhatsApp)</button>
+                <button id="btnImgECC" onclick="descargarImagenEstadoCuentaCliente()" style="padding:12px 18px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:14px;">📱 Imagen (WhatsApp)</button>
             </div>
         </div>
     </div>
@@ -1275,7 +1274,9 @@ function _eccConstruirHtmlImagenTablet(estado, cuentasImprimir) {
     </div>`;
 }
 
-window.descargarImagenEstadoCuentaCliente = function() {
+// 🛡️ Versión tablet (720px) anterior: ya no se usa; "Guardar Imagen" genera la
+// tarjeta de celular (390px) y la comparte. Se conserva por si se necesita revertir.
+window._eccImagenTabletAnterior = function() {
     if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
     const estado = window._estadoClienteActual;
     const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
@@ -1430,15 +1431,35 @@ function _eccConstruirHtmlImagenCelular(estado, cuentasImprimir) {
     </div>`;
 }
 
+window.descargarImagenEstadoCuentaCliente = function() {
+    return window.descargarImagenCelularEstadoCuentaCliente();
+};
+
 window.descargarImagenCelularEstadoCuentaCliente = function() {
     if (!window._estadoClienteActual) return alert('⚠️ Genera un reporte primero.');
     const estado = window._estadoClienteActual;
     const cuentasImprimir = _eccFiltrarCuentasPorSaldo(estado.cuentas, _eccObtenerFiltroSaldo());
 
-    const btn = document.getElementById('btnImgCelECC');
+    const btn = document.getElementById('btnImgECC') || document.getElementById('btnImgCelECC');
     const txtOriginal = btn ? btn.innerHTML : '';
     const restaurar = () => { if (btn) { btn.innerHTML = txtOriginal; btn.disabled = false; } };
     if (btn) { btn.innerHTML = '⏳ Generando...'; btn.disabled = true; }
+
+    // 📱 Motor único (ImagenService): render 390px + compartir / carpeta / descarga.
+    if (window.ImagenService) {
+        const nombreBase = `Estado_Cuenta_${String(estado.clienteNombre || 'cliente').replace(/\s+/g, '_')}`;
+        window.ImagenService.renderDocumento(_eccConstruirHtmlImagenCelular(estado, cuentasImprimir), {
+            raizPropia: true, pulir: false, titulo: 'Estado de cuenta'
+        }).then(lienzo => window.ImagenService.entregar(lienzo, nombreBase, {
+            titulo: 'Estado de cuenta',
+            texto: `Estado de cuenta - ${estado.clienteNombre}`,
+            categoria: 'Estado de cuenta'
+        })).catch(e => {
+            console.error('Error imagen estado de cuenta (celular):', e);
+            alert('Hubo un error al generar la imagen.');
+        }).finally(restaurar);
+        return;
+    }
 
     const loadScript = (cb) => {
         if (typeof html2canvas !== 'undefined') return cb();
