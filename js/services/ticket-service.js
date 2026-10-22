@@ -125,6 +125,22 @@ function mmpGuardarConCarpeta(blob, nombre, fallback){
         }).catch(function(){ fallback(); });
     } catch (e) { fallback(); }
 }
+function mmpEntregarImagen(blob, nombre, fallback){
+    var ua = navigator.userAgent || '';
+    var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (movil && blob && navigator.canShare && navigator.share) {
+        try {
+            var f = new File([blob], nombre, { type: 'image/png' });
+            if (navigator.canShare({ files: [f] })) {
+                navigator.share({ files: [f], title: document.title }).catch(function(e){
+                    if (!e || e.name !== 'AbortError') mmpGuardarConCarpeta(blob, nombre, fallback);
+                });
+                return;
+            }
+        } catch (e) { /* se sigue con carpeta/descarga */ }
+    }
+    mmpGuardarConCarpeta(blob, nombre, fallback);
+}
 function mmpCargarHtml2Canvas(cb){
     if (typeof html2canvas !== 'undefined') return cb();
     var existente = document.getElementById('mmp-html2canvas-loader');
@@ -149,7 +165,7 @@ function mmpGuardarTicketImagen(){
                 a.href = canvas.toDataURL('image/png');
                 a.click();
             };
-            canvas.toBlob(function(blob){ mmpGuardarConCarpeta(blob, '${file}.png', descargar); }, 'image/png');
+            canvas.toBlob(function(blob){ mmpEntregarImagen(blob, '${file}.png', descargar); }, 'image/png');
         }).catch(function(err){
             console.error(err);
             alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
@@ -282,7 +298,7 @@ img { max-width: 100%; }
 </style>`;
     }
 
-    function documentImageScript(filename) {
+    function documentImageScript(filename, token) {
         const file = safeName(filename || 'documento');
         return `
 <script>
@@ -294,6 +310,22 @@ function mmpGuardarConCarpeta(blob, nombre, fallback){
             if (!r || !r.guardado) fallback();
         }).catch(function(){ fallback(); });
     } catch (e) { fallback(); }
+}
+function mmpEntregarImagen(blob, nombre, fallback){
+    var ua = navigator.userAgent || '';
+    var movil = /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (movil && blob && navigator.canShare && navigator.share) {
+        try {
+            var f = new File([blob], nombre, { type: 'image/png' });
+            if (navigator.canShare({ files: [f] })) {
+                navigator.share({ files: [f], title: document.title }).catch(function(e){
+                    if (!e || e.name !== 'AbortError') mmpGuardarConCarpeta(blob, nombre, fallback);
+                });
+                return;
+            }
+        } catch (e) { /* se sigue con carpeta/descarga */ }
+    }
+    mmpGuardarConCarpeta(blob, nombre, fallback);
 }
 function mmpCargarHtml2CanvasDocumento(cb){
     if (typeof html2canvas !== 'undefined') return cb();
@@ -307,6 +339,18 @@ function mmpCargarHtml2CanvasDocumento(cb){
     document.head.appendChild(s);
 }
 function mmpGuardarDocumentoImagen(){
+    try {
+        var op = window.opener;
+        if ('${token || ''}' && op && !op.closed && op.TicketService && op.TicketService.imagenDesdeToken) {
+            var b0 = document.getElementById('mmp-doc-btn-imagen');
+            var t0 = b0 ? b0.textContent : '';
+            if (b0) { b0.disabled = true; b0.textContent = 'Generando...'; }
+            Promise.resolve(op.TicketService.imagenDesdeToken('${token || ''}', window)).then(function(){}, function(){}).then(function(){
+                if (b0) { b0.disabled = false; b0.textContent = t0 || 'Guardar imagen'; }
+            });
+            return;
+        }
+    } catch (e) { /* se usa el método incluido en esta ventana */ }
     mmpCargarHtml2CanvasDocumento(function(){
         var node = document.querySelector('.mmp-document-body') || document.body;
         var btn = document.getElementById('mmp-doc-btn-imagen');
@@ -327,7 +371,7 @@ function mmpGuardarDocumentoImagen(){
                 a.href = canvas.toDataURL('image/png');
                 a.click();
             };
-            canvas.toBlob(function(blob){ mmpGuardarConCarpeta(blob, '${file}.png', descargar); }, 'image/png');
+            canvas.toBlob(function(blob){ mmpEntregarImagen(blob, '${file}.png', descargar); }, 'image/png');
         }).catch(function(err){
             console.error(err);
             alert('No se pudo generar la imagen. Intenta imprimirlo a PDF.');
@@ -720,6 +764,32 @@ function documentToolbar(options = {}) {
     async function descargarImagen(html, options = {}) {
         mostrarGenerando('Generando imagen...');
         try {
+            // 📱 Motor único de imágenes (formato celular 390px + compartir por
+            // WhatsApp / carpeta / descarga). Si el documento trae `imageHtml`
+            // (tarjeta diseñada para celular) se usa tal cual; si no, el
+            // documento de hoja se reacomoda solo. Si ImagenService no cargó o
+            // falla, se usa el método anterior (720px) como respaldo.
+            const IS = window.ImagenService;
+            if (IS) {
+                let lienzo = null;
+                try {
+                    lienzo = await IS.renderDocumento(options.imageHtml || html, {
+                        tarjeta: !!options.imageHtml,
+                        titulo: options.title
+                    });
+                } catch (errRender) {
+                    console.warn('ImagenService: no se pudo reacomodar, se usa el método anterior', errRender);
+                }
+                if (lienzo) {
+                    ocultarGenerando();
+                    await IS.entregar(lienzo, options.filename || options.title || 'documento', {
+                        titulo: options.title,
+                        categoria: options.title || options.filename,
+                        ventana: options.ventana
+                    });
+                    return true;
+                }
+            }
             const canvas = await prepararCanvasDocumento(html, options);
             const nombrePng = `${safeName(options.filename || options.title || 'documento')}.png`;
             const descargarPng = () => {
@@ -883,9 +953,9 @@ function documentToolbar(options = {}) {
         }
     }
 
-    function elegirFormato({ html = '', title = 'Documento', filename = '', source = 'document', pageSize = 'letter' } = {}) {
+    function elegirFormato({ html = '', imageHtml = '', title = 'Documento', filename = '', source = 'document', pageSize = 'letter' } = {}) {
         const modalId = `mmp-formato-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const config = { html: String(html || ''), title, filename: filename || title, source, pageSize };
+        const config = { html: String(html || ''), imageHtml: String(imageHtml || ''), title, filename: filename || title, source, pageSize };
         window._mmpDocumentosPendientes = window._mmpDocumentosPendientes || {};
         window._mmpDocumentosPendientes[modalId] = config;
         document.querySelector('[data-modal="mmp-formato-documento"]')?.remove();
@@ -997,7 +1067,7 @@ function documentToolbar(options = {}) {
             out = out.replace(/<head[^>]*>/i, match => `${match}\n<title>${title}</title>`);
         }
         if (!/mmp-document-print-style/.test(out)) {
-            out = out.replace(/<\/head>/i, `${documentCss(options)}\n${documentImageScript(filename)}\n</head>`);
+            out = out.replace(/<\/head>/i, `${documentCss(options)}\n${documentImageScript(filename, options.token)}\n</head>`);
         }
         if (!/mmp-document-body/.test(out)) {
             out = out.replace(/<body([^>]*)>/i, '<body$1><div class="mmp-document-body">')
@@ -1027,10 +1097,21 @@ function documentToolbar(options = {}) {
             alert('Habilita las ventanas emergentes para imprimir el documento.');
             return false;
         }
-        w.document.write(normalizeDocumentHtml(html, options));
+        // El botón "Guardar imagen" de la ventana pide la imagen a esta ventana
+        // (motor único) usando un token; así comparte y respeta imageHtml.
+        const token = 'doc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        window._mmpDocsPopup = window._mmpDocsPopup || {};
+        window._mmpDocsPopup[token] = { html, options };
+        w.document.write(normalizeDocumentHtml(html, { ...options, token }));
         w.document.close();
         w.focus();
         return true;
+    }
+
+    function imagenDesdeToken(token, ventana) {
+        const reg = window._mmpDocsPopup && window._mmpDocsPopup[token];
+        if (!reg) return Promise.resolve(false);
+        return descargarImagen(reg.html, { ...reg.options, ventana });
     }
 
     function openThermal({ title = 'Ticket', filename = '', body = '' } = {}) {
@@ -1047,6 +1128,7 @@ function documentToolbar(options = {}) {
         descargarPdf,
         descargarImagen,
         imprimirNativo,
+        imagenDesdeToken,
         elegirFormato,
         abrirFormato,
         cerrarSelectorFormato,
