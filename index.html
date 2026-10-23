@@ -401,19 +401,6 @@
  </div>
 
 
-    <!-- COBRANZA ESPERADA -->
-    <div id="cobranzaesperada" class="vista oculto">
- <div class="vista-header">
- <h2>Cobranza Esperada - Proyeccion de Pagos</h2>
- <p>Escalera mensual de pagares vencidos y proyectados.</p>
- </div>
- <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px;">
- <button onclick="renderCobranzaEsperada()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
- <button onclick="exportarCobranzaEsperada()" style="padding:10px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">Exportar CSV</button>
- </div>
- <div id="escaleraCobranza"></div>
- </div>
-
     <!-- CONTENEDOR DE REPORTES EJECUTIVOS -->
     <div id="reportes" class="vista oculto">
     <div id="contenidoReporte"></div>
@@ -1294,9 +1281,9 @@
 <script src="js/modules/toma-inventario.js?v=3"></script>
 <script src="js/modules/reservas-inv.js?v=1"></script>
 <script src="js/modules/tienda.js?v=8"></script>
-<script src="js/modules/ventas.js?v=4.7"></script>
+<script src="js/modules/ventas.js?v=4.8"></script>
 <script src="js/modules/clientes.js?v=7"></script>
-<script src="js/modules/cxc.js?v=69"></script>
+<script src="js/modules/cxc.js?v=70"></script>
 <script src="js/modules/cxc-cotizar-liquidacion.js?v=3"></script>
 <script src="js/modules/apartados.js?v=9"></script>
 <script src="js/modules/compras.js?v=63"></script>
@@ -1317,7 +1304,7 @@
 <script src="js/modules/condonar-deuda.js?v=2"></script>
 <script src="js/modules/reestructura-plazo.js?v=2"></script>
 <script src="js/modules/prestamos.js?v=1"></script>
-<script src="js/modules/garantias.js"></script>
+<script src="js/modules/garantias.js?v=1"></script>
 <script src="js/modules/producto-picker.js?v=5"></script>
 <script src="js/modules/cliente-picker.js?v=2"></script>
 <script src="js/modules/notificaciones.js?v=8"></script>
@@ -1335,7 +1322,7 @@
 <script src="js/modules/auditoria-clientes-id.js?v=1"></script>
 <script src="js/modules/auditoria-clientes-duplicados.js?v=1"></script>
 <script src="js/services/calculadora-rapida.js?v=1"></script>
-<script src="js/core/navigation.js?v=12"></script>
+<script src="js/core/navigation.js?v=13"></script>
 <script src="js/init.js?v=9"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
