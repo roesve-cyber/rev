@@ -100,29 +100,6 @@ function renderBancosConfig() {
 }
 
 // Lógica para crear Cajas de Efectivo
-function abrirModalEdicionCaja(index = null) {
-    document.querySelector('[data-modal="edicion-caja"]')?.remove();
-    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
-    let nombreCaja = "";
-    if (index !== null) nombreCaja = cajas[index].nombre.replace("💵 ", "");
-
-    const modalHTML = `
-        <div data-modal="edicion-caja" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:7000; display:flex; justify-content:center; align-items:center;">
-            <div style="background:white; padding:30px; border-radius:12px; width:90%; max-width:400px;">
-                <h2 style="margin-top:0; color:#065f46;">${index !== null ? '✏️ Editar Caja' : '💵 Nueva Caja'}</h2>
-                <input type="hidden" id="modalCajaIndex" value="${index !== null ? index : ''}">
-                <div style="margin-bottom:20px;">
-                    <label style="font-weight:bold; font-size:13px; color:#374151; display:block; margin-bottom:5px;">Nombre de la Caja (Ej: Caja Chica)</label>
-                    <input type="text" id="modalCajaNombre" value="${nombreCaja}" placeholder="Ej: Caja Fuerte" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box;">
-                </div>
-                <div style="display:flex; gap:10px;">
-                    <button onclick="guardarCajaModal()" style="flex:1; padding:12px; background:#10b981; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✅ Guardar</button>
-                    <button onclick="document.querySelector('[data-modal=&quot;edicion-caja&quot;]')?.remove()" style="flex:1; padding:12px; background:#e5e7eb; color:#4b5563; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">✕ Cancelar</button>
-                </div>
-            </div>
-        </div>`;
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-}
 
 function guardarCajaModal() {
     const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);

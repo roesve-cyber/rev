@@ -3813,114 +3813,6 @@ function aplicarSalidaPendienteVentas(idSalida) {
 
 window.aplicarSalidaPendienteVentas = aplicarSalidaPendienteVentas;
 
-function renderReimprimirVenta() {
-    const contenedor = document.getElementById("contenidoReimprimirVenta");
-    if (!contenedor) return;
-
-    const folioFiltro = (document.getElementById("rvFolio")?.value || "").trim().toLowerCase();
-    const clienteFiltro = (document.getElementById("rvCliente")?.value || "").trim().toLowerCase();
-    const fechaDesde = document.getElementById("rvFechaDesde")?.value || "";
-    const fechaHasta = document.getElementById("rvFechaHasta")?.value || "";
-    const montoMin = parseFloat(document.getElementById("rvMontoMin")?.value) || 0;
-    const montoMax = parseFloat(document.getElementById("rvMontoMax")?.value) || Infinity;
-
-    const ventasNuevas = StorageService.get("ventasRegistradas", []);
-    const ticketsViejos = StorageService.get("registroTickets", []);
-    
-    let registrosCombinados = [...ventasNuevas];
-    
-    // Concatenar registros históricos que no existan en la tabla nueva para preservar el pasado
-    ticketsViejos.forEach(tv => {
-        if (!registrosCombinados.find(v => v.folio === tv.folio)) {
-            registrosCombinados.push({
-                folio: tv.folio,
-                fechaVenta: tv.fechaEmision,
-                fecha: tv.fechaEmision ? window.formatearFechaCortaMX(tv.fechaEmision) : '',
-                clienteNombre: tv.cliente?.nombre || '',
-                total: tv.venta?.total || 0,
-                metodoPago: tv.venta?.metodoPago || 'contado'
-            });
-        }
-    });
-
-    if (registrosCombinados.length === 0) {
-        contenedor.innerHTML = `<div style="background:#fef3c7; padding:30px; border-radius:10px; text-align:center; color:#92400e;">
-            <p style="font-size:16px;">No hay transacciones registradas en el sistema.</p>
-        </div>`;
-        return;
-    }
-
-    let filtrados = registrosCombinados.filter(t => {
-        const nombreCliente = (t.clienteNombre || t.cliente?.nombre || "").toLowerCase();
-        const folio = (t.folio || "").toLowerCase();
-        const fe = t.fechaVenta || t.fechaIso || t.fechaEmision;
-        const fecha = fe
-            ? (typeof fe === 'number'
-                ? window.localISO(new Date(fe)).substring(0, 10)
-                : String(fe).substring(0, 10))
-            : "";
-        const total = t.total || t.venta?.total || 0;
-
-        if (folioFiltro && !folio.includes(folioFiltro)) return false;
-        if (clienteFiltro && !nombreCliente.includes(clienteFiltro)) return false;
-        if (fechaDesde && fecha < fechaDesde) return false;
-        if (fechaHasta && fecha > fechaHasta) return false;
-        if (total < montoMin) return false;
-        if (montoMax !== Infinity && total > montoMax) return false;
-        return true;
-    // 📅 Más reciente primero -- es más fácil encontrar un ticket de hoy/
-    // esta semana para reimprimir que uno de hace meses.
-    }).sort((a, b) => new Date(b.fechaVenta || b.fechaIso || b.fechaEmision || 0) - new Date(a.fechaVenta || a.fechaIso || a.fechaEmision || 0));
-
-    const foliosUnicos = new Set();
-    filtrados = filtrados.filter(t => {
-        if (foliosUnicos.has(t.folio)) return false;
-        foliosUnicos.add(t.folio);
-        return true;
-    });
-
-    if (filtrados.length === 0) {
-        contenedor.innerHTML = `<div style="background:#f3f4f6; padding:30px; border-radius:10px; text-align:center; color:#6b7280;">
-            <p style="font-size:16px;">Sin resultados para los filtros aplicados.</p>
-        </div>`;
-        return;
-    }
-
-    let html = `<div style="overflow-x:auto;"><table class="tabla-admin">
-        <thead><tr>
-            <th>Folio</th>
-            <th>Cliente</th>
-            <th>Fecha</th>
-            <th>Total</th>
-            <th>Método</th>
-            <th style="text-align:center;">Acciones</th>
-        </tr></thead>
-        <tbody>`;
-
-    filtrados.forEach(t => {
-        const fecha = t.fechaVenta ? window.formatearFechaCortaMX(t.fechaVenta) : (t.fecha || '');
-        const total = t.total || t.venta?.total || 0;
-        const metodo = t.metodoPago || t.venta?.metodoPago || '';
-        const folioEsc = (t.folio || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        html += `<tr>
-            <td><strong style="color:#1d4ed8;">${t.folio || ''}</strong></td>
-            <td>${t.clienteNombre || t.cliente?.nombre || ''}</td>
-            <td>${fecha}</td>
-            <td><strong>${dinero(total)}</strong></td>
-            <td style="text-transform: uppercase;">${metodo}</td>
-            <td style="text-align:center;">
-                <button onclick="reimprimirTicketVenta('${folioEsc}')"
-                        style="padding:6px 12px; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">
-                    Reimprimir
-                </button>
-            </td>
-        </tr>`;
-    });
-
-    html += `</tbody></table></div>`;
-    contenedor.innerHTML = html;
-}
-
 function reimprimirTicketVenta(folio) {
     const ventas = StorageService.get("ventasRegistradas", []);
     let ticket = ventas.find(t => t.folio === folio);
@@ -3981,16 +3873,6 @@ function reimprimirTicketVenta(folio) {
     }
 
     generarTicketMediaHoja(datosVenta);
-}
-
-function limpiarFiltrosReimpresion() {
-    ['rvFolio','rvCliente','rvFechaDesde','rvFechaHasta','rvMontoMin','rvMontoMax'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
-    const tipoDoc = document.getElementById('rvTipoDoc');
-    if (tipoDoc) tipoDoc.value = 'todos';
-    renderReimprimirVenta();
 }
 
 // =====================================================================
