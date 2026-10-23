@@ -119,9 +119,6 @@
         <button onclick="navA('simulador-tasa-pronto-pago'); if(typeof renderSimuladorTasaProntoPago === 'function') renderSimuladorTasaProntoPago();">🧮 Simulador de Tasa y Pronto Pago</button>
         <button onclick="abrirCotizarLiquidacion()" style="color:#0f766e; font-weight:bold;">🧾 Cotizar Liquidación / Ampliar Plazo</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
-        <button onclick="abrirModalPromoContadoVencida()" style="color: #9333ea; font-weight: bold;">
-            🔎 Promo de Contado (plazo vencido)
-        </button>
         <button onclick="navA('clientes'); renderClientes(); if(typeof renderGestionClientesCobranza === 'function') renderGestionClientesCobranza();">👥 Gestionar Clientes</button>
         <button onclick="abrirModalNuevoCliente()">➕ Nuevo Cliente</button>
     </div>
@@ -230,15 +227,6 @@
 
 <!-- ===== OVERLAY ===== -->
 <div id="overlay" class="overlay" onclick="toggleMenu()"></div>
-
-<!-- ===== PANEL LATERAL DE CLIENTES ===== -->
-<div id="panelClientes" class="panel-clientes-sidebar">
-    <div class="panel-clientes-header">
-        <h3>👥 Clientes</h3>
-        <button class="btn-cerrar-panel" onclick="togglePanelClientes()">✕</button>
-    </div>
-    <div id="contenidoPanelClientes" style="flex:1; overflow-y:auto; padding:15px;"></div>
-</div>
 
 <!-- ===== CONTENIDO PRINCIPAL ===== -->
 <main id="app-container" class="full-width">
@@ -1344,7 +1332,7 @@
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/ventas.js?v=4.6"></script>
 <script src="js/modules/clientes.js?v=6"></script>
-<script src="js/modules/cxc.js?v=65"></script>
+<script src="js/modules/cxc.js?v=66"></script>
 <script src="js/modules/cxc-cotizar-liquidacion.js?v=3"></script>
 <script src="js/modules/apartados.js?v=9"></script>
 <script src="js/modules/compras.js?v=61"></script>
