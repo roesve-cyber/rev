@@ -131,6 +131,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'inventario' && typeof renderInventario === 'function') renderInventario();
         if (vistaId === 'toma-inventario' && typeof renderTomaInventario === 'function') renderTomaInventario();
         if (vistaId === 'kardex-inventario' && typeof renderKardexInventario === 'function') renderKardexInventario();
+        if (vistaId === 'auditoria-productos' && typeof renderHistorialCostosAuditoria === 'function') renderHistorialCostosAuditoria();
         if (vistaId === 'productos-visor' && window._visorProductoIdActual && typeof mostrarDetalleProductoMaestro === 'function') mostrarDetalleProductoMaestro(window._visorProductoIdActual);
         if (vistaId === 'tienda' && typeof mostrarProductos === 'function') mostrarProductos();
         else if (vistaId === 'tienda' && typeof renderTienda === 'function') renderTienda();
