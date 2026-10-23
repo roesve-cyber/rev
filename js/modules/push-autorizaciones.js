@@ -202,8 +202,15 @@ async function _pushAuthMostrarNotificacionLocal({ title, body, url }) {
         body: body || 'Tienes una autorizacion pendiente.',
         icon: '/img/icon-192.png',
         badge: '/img/badge-96.png',
-        tag: 'boveda-autorizaciones',
+        // Mismo aviso "fuerte" que el service worker (sw.js): se queda en pantalla,
+        // vibra fuerte y un tag distinto por aviso evita que uno nuevo reemplace
+        // en silencio al anterior.
+        tag: 'boveda-' + Date.now(),
         renotify: true,
+        requireInteraction: true,
+        vibrate: [400, 150, 400, 150, 800],
+        timestamp: Date.now(),
+        actions: [{ action: 'abrir', title: 'Abrir Bóveda' }],
         data: { url: url || _pushAuthUrlBoveda() }
     });
     return true;
