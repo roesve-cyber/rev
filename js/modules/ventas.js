@@ -3113,6 +3113,33 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
         });
     }
 
+    // 🛡️ GARANTÍAS: al autorizar la venta se registra la garantía de cada producto
+    // NUEVO (12 meses). Los de segunda no llevan garantía de fábrica y los
+    // apartados no se registran aquí (la garantía corre desde la entrega/venta
+    // real, no desde el apartado). Va en try/catch: un fallo de garantías nunca
+    // debe frenar la autorización de la venta. No duplica por folio + producto.
+    if (metodoPago !== "apartado" && typeof window.registrarGarantia === 'function') {
+        try {
+            (datosVentaP.articulos || []).forEach(art => {
+                if (art.esSegunda === true) return;
+                const idProdGarantia = art.productoId ?? art.id;
+                if (idProdGarantia === null || idProdGarantia === undefined) return;
+                const yaRegistrada = StorageService.get('garantiasProductos', [])
+                    .some(g => String(g.folio) === String(folioVenta) && String(g.productoId) === String(idProdGarantia));
+                if (yaRegistrada) return;
+                window.registrarGarantia({
+                    folio: folioVenta,
+                    productoId: idProdGarantia,
+                    clienteId: datosVentaP.cliente?.id || null,
+                    mesesGarantia: 12,
+                    fechaCompra: fechaVentaIso
+                });
+            });
+        } catch (errGarantia) {
+            console.warn('[Ventas] No se pudo registrar la garantía de ' + folioVenta + ':', errGarantia);
+        }
+    }
+
     if (typeof window.acumularPuntosCliente === "function" && montoIngresoHoy > 0) {
         window.acumularPuntosCliente(datosVentaP.cliente.id, montoIngresoHoy);
     }

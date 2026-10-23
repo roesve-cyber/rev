@@ -19,16 +19,22 @@ function _garantiasBuscarVenta(folioUpper) {
         || null;
 }
 
-function registrarGarantia({ folio, productoId, clienteId, mesesGarantia }) {
+function registrarGarantia({ folio, productoId, clienteId, mesesGarantia, fechaCompra }) {
     const venta = _garantiasBuscarVenta((folio || '').toUpperCase());
-    const fecha = venta ? (venta.fecha || venta.fechaVenta || window.localISO(new Date())) : window.localISO(new Date());
+    // fechaCompra (opcional) la manda ventas.js al autorizar: es la fecha real de la
+    // venta (incluida la personalizada). Sin ella se busca la venta por folio.
+    const fecha = fechaCompra || (venta ? (venta.fecha || venta.fechaVenta || window.localISO(new Date())) : window.localISO(new Date()));
     const fechaVenc = new Date(fecha);
     fechaVenc.setMonth(fechaVenc.getMonth() + (mesesGarantia || 12));
     const prods = StorageService.get('productos', []);
     const prod = prods.find(p => String(p.id) === String(productoId));
     const garantias = StorageService.get('garantiasProductos', []);
+    // id único: varias garantías de una misma venta se crean en el mismo milisegundo
+    // y marcarGarantiaReclamacion(id) busca por id.
+    let idGarantia = Date.now();
+    while (garantias.some(g => g.id === idGarantia)) idGarantia++;
     garantias.push({
-        id: Date.now(),
+        id: idGarantia,
         folio,
         productoId,
         productoNombre: prod ? prod.nombre : 'Desconocido',
