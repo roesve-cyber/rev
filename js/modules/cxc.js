@@ -917,6 +917,16 @@ window._cxcAplicarSaltoPlazo = function(idPendiente) {
     const pendiente = pendientes.find(p => p.id === idPendiente);
     if (!pendiente) return alert("No se encontro ese salto de plazo pendiente.");
     if (pendiente.estado !== 'Pendiente') return alert(`Este salto ya fue ${pendiente.estado.toLowerCase()}.`);
+    const motivoObsoleto = _cxcSaltoPendienteObsoleto(pendiente);
+    if (motivoObsoleto) {
+        pendiente.estado = 'Obsoleto';
+        pendiente.motivoObsoleto = motivoObsoleto;
+        pendiente.fechaResolucion = new Date().toISOString();
+        StorageService.set("saltosPlazoPendientes", pendientes);
+        alert(`No se aplicó: ${motivoObsoleto}. El pendiente se cerró como obsoleto.`);
+        if (typeof renderSaltosPlazoPendientes === 'function') renderSaltosPlazoPendientes();
+        return;
+    }
 
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const cuenta = cuentas.find(c => c.folio === pendiente.folio);
@@ -994,7 +1004,8 @@ window._cxcAplicarSaltoPlazo = function(idPendiente) {
     }
 
     alert(`Listo. Folio ${cuenta.folio} ahora a ${pendiente.mesesNuevo} meses. Se agrego un pagare por ${_cxcDinero(pendiente.diferencia)}.${moratoriosCancelados > 0 ? `\n\nSe cancelaron ${moratoriosCancelados} moratorio(s) pendiente(s) por ${_cxcDinero(montoMoratoriosCancelados)} (absorbidos por el nuevo plazo).` : ''}`);
-    if (typeof _cxcRefrescarVistaArcActiva === 'function') _cxcRefrescarVistaArcActiva();
+    if (typeof renderSaltosPlazoPendientes === 'function' && document.getElementById('contenidoReporte')?.innerText.includes('Saltos de plazo pendientes')) renderSaltosPlazoPendientes();
+    else if (typeof _cxcRefrescarVistaArcActiva === 'function') _cxcRefrescarVistaArcActiva();
 };
 
 window._cxcRechazarSaltoPlazo = function(idPendiente, motivo = '') {
@@ -1006,15 +1017,48 @@ window._cxcRechazarSaltoPlazo = function(idPendiente, motivo = '') {
     pendiente.motivoRechazo = motivo || '';
     StorageService.set("saltosPlazoPendientes", pendientes);
     alert(`Salto de plazo del folio ${pendiente.folio} marcado como rechazado.`);
+    if (typeof renderSaltosPlazoPendientes === 'function' && document.getElementById('contenidoReporte')?.innerText.includes('Saltos de plazo pendientes')) renderSaltosPlazoPendientes();
 };
 
+// Un salto pendiente deja de tener sentido si la cuenta ya se liquidó/canceló
+// (o ya está en el plazo propuesto) después de detectarse. Se detecta aquí y
+// se cierra como 'Obsoleto' sin tocar ningún peso.
+function _cxcSaltoPendienteObsoleto(p) {
+    const cuenta = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === p.folio);
+    if (!cuenta) return 'La cuenta ya no existe';
+    if (cuenta.estado === 'Cancelado' || cuenta.incobrable) return 'La cuenta fue cancelada o marcada incobrable';
+    const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(cuenta.folio) : null;
+    const moratorios = Number(estado?.saldoMoratorios || 0);
+    const saldo = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0) - moratorios;
+    if (cuenta.estado === 'Saldado' || saldo <= 0.01) return 'La cuenta ya fue liquidada';
+    if (Number(cuenta?.plan?.meses || 0) >= Number(p.mesesNuevo || 0)) return 'La cuenta ya está en el plazo propuesto';
+    return null;
+}
+function _cxcLimpiarSaltosObsoletos() {
+    const todos = StorageService.get("saltosPlazoPendientes", []);
+    let cambios = 0;
+    todos.forEach(p => {
+        if (p.estado !== 'Pendiente') return;
+        const motivo = _cxcSaltoPendienteObsoleto(p);
+        if (!motivo) return;
+        p.estado = 'Obsoleto';
+        p.motivoObsoleto = motivo;
+        p.fechaResolucion = new Date().toISOString();
+        cambios++;
+    });
+    if (cambios) StorageService.set("saltosPlazoPendientes", todos);
+    return cambios;
+}
+window._cxcLimpiarSaltosObsoletos = _cxcLimpiarSaltosObsoletos;
+
 function renderSaltosPlazoPendientes() {
+    _cxcLimpiarSaltosObsoletos();
     const pendientes = StorageService.get("saltosPlazoPendientes", []).filter(p => p.estado === 'Pendiente');
     const cont = document.getElementById('contenidoReporte') || document.getElementById('reportes');
     if (!cont) return;
     cont.innerHTML = `
         <div style="padding:20px;max-width:900px;margin:0 auto;">
-            <button onclick="renderARC_v3()" style="margin-bottom:12px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">⬅️ Volver</button>
+            <button onclick="navA('arc-v3'); renderARC_v3();" style="margin-bottom:12px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;font-size:12px;">⬅️ Volver</button>
             <h2 style="margin:0 0 16px;">📆 Saltos de plazo pendientes</h2>
             <button onclick="_cxcEscanearSaltosPlazoPendientes(); renderSaltosPlazoPendientes();" style="margin-bottom:16px;padding:8px 16px;border-radius:8px;border:1px solid #cbd5e1;background:white;cursor:pointer;">🔍 Buscar nuevos</button>
             ${pendientes.length === 0 ? '<p style="color:#64748b;">No hay saltos de plazo pendientes de revisión.</p>' : pendientes.map(p => `
