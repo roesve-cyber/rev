@@ -35,7 +35,7 @@ function renderGestionVendedores() {
         return `<tr>
           <td style="padding:10px;">${v.nombre}</td>
           <td style="padding:10px;text-align:center;">${v.telefono || '-'}</td>
-          <td style="padding:10px;text-align:center;">${v.porcentajeComision || 0}%</td>
+          <td style="padding:10px;text-align:center;">${v.porcentajeComision || 0}%${Number(v.porcentajeComisionAbono) > 0 ? `<br><small style="color:#7c3aed;font-weight:bold;">+ ${Number(v.porcentajeComisionAbono)}% por abono</small>` : ''}</td>
           <td style="padding:10px;text-align:center;font-size:12px;color:#7c3aed;">${baseLabel}</td>
           <td style="padding:10px;text-align:right;">${dinero(pendVend)}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${v.activo ? '#16a34a' : '#9ca3af'};font-weight:bold;">${v.activo ? '✅ Activo' : '⛔ Inactivo'}</span></td>
@@ -90,6 +90,7 @@ function renderGestionVendedores() {
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button id="tabComision_pendientes" onclick="_cambiarTabComisiones('pendientes')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📌 Ventas no pagadas</button>
             <button id="tabComision_anticipos" onclick="_cambiarTabComisiones('anticipos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">💵 Anticipos</button>
+            <button id="tabComision_abonos" onclick="_cambiarTabComisiones('abonos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📥 Por abono</button>
             <button id="tabComision_historial" onclick="_cambiarTabComisiones('historial')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🕓 Historial</button>
             ${(typeof _esAdmin === 'function' && _esAdmin()) ? `<button onclick="_ejecutarCorreccionPisoUtilidadUI()" title="Sube al piso del 10% de utilidad las comisiones PENDIENTES que quedaron por debajo (registradas antes de esta regla). Lo Pagado no se toca." style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;background:#fef3c7;color:#92400e;">🛠️ Corregir piso 10%</button>` : ''}
           </div>
@@ -108,6 +109,10 @@ function renderGestionVendedores() {
             <button onclick="_abrirAnticipoDesdeSelector()" style="padding:8px 14px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">➕ Nuevo Anticipo</button>
           </div>
           <div id="anticiposComisionArea"></div>
+        </div>
+
+        <div id="panelComision_abonos" style="display:none;">
+          <div id="comisionesAbonoArea"></div>
         </div>
 
         <div id="panelComision_historial" style="display:none;">
@@ -134,7 +139,7 @@ function _cambiarTabComisiones(tab) {
 
 function _renderTabComisionActiva() {
     const tab = window._comisionesVendedoresState.tabActiva || 'pendientes';
-    ['pendientes', 'anticipos', 'historial'].forEach(t => {
+    ['pendientes', 'anticipos', 'abonos', 'historial'].forEach(t => {
         const btn = document.getElementById('tabComision_' + t);
         const panel = document.getElementById('panelComision_' + t);
         const activo = t === tab;
@@ -143,6 +148,7 @@ function _renderTabComisionActiva() {
     });
     if (tab === 'pendientes') renderComisionesPendientes();
     else if (tab === 'anticipos') renderAnticiposComision();
+    else if (tab === 'abonos') renderComisionesAbono();
     else renderHistorialComisiones();
 }
 
@@ -504,6 +510,11 @@ function abrirFormVendedor(id) {
             <label style="font-size:12px;font-weight:bold;color:#374151;">% Comisión apartado</label>
             <input type="number" id="vndComisionApartado" value="${comisionApartado}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
+          <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px;">
+            <label style="font-size:12px;font-weight:bold;color:#5b21b6;">% Comisión por ABONO (aparte de la de venta)</label>
+            <input type="number" id="vndComisionAbono" value="${v ? (v.porcentajeComisionAbono ?? 0) : 0}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+            <small style="color:#6b7280;">Se paga sobre cada abono de crédito que cobre este vendedor en sus cuentas. 0 = sin comisión por abono.</small>
+          </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">BASE DE CÁLCULO DE COMISIÓN</label>
             <select id="vndBaseComision" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
@@ -533,6 +544,7 @@ function guardarVendedor() {
     const porcentajeComisionContado = parseFloat(document.getElementById('vndComisionContado')?.value) || 0;
     const porcentajeComisionCredito = parseFloat(document.getElementById('vndComisionCredito')?.value) || 0;
     const porcentajeComisionApartado = parseFloat(document.getElementById('vndComisionApartado')?.value) || 0;
+    const porcentajeComisionAbono = Math.min(100, Math.max(0, parseFloat(document.getElementById('vndComisionAbono')?.value) || 0));
     const baseComision = document.getElementById('vndBaseComision')?.value || 'precio_base';
     const activo = document.getElementById('vndActivo')?.checked ?? true;
     if (!nombre) return alert('⚠️ El nombre es obligatorio.');
@@ -547,6 +559,7 @@ function guardarVendedor() {
           porcentajeComisionContado,
           porcentajeComisionCredito,
           porcentajeComisionApartado,
+          porcentajeComisionAbono,
           baseComision,
           activo
         };
@@ -559,6 +572,7 @@ function guardarVendedor() {
         porcentajeComisionContado,
         porcentajeComisionCredito,
         porcentajeComisionApartado,
+        porcentajeComisionAbono,
         baseComision,
         activo
       });
@@ -1293,6 +1307,347 @@ window.calcularComisionesVendedor = calcularComisionesVendedor;
 window.calcularLiquidacionVendedor = calcularLiquidacionVendedor;
 window._cambiarTabComisiones = _cambiarTabComisiones;
 window._abrirAnticipoDesdeSelector = _abrirAnticipoDesdeSelector;
+
+// ============================================================================
+// 📥 COMISIÓN POR ABONO — separada de la comisión de venta
+//
+// Una comisión por cada ABONO de crédito cobrado, para el vendedor que hizo la
+// venta (cuenta.vendedorId). Vive en su PROPIA tabla (comisionesAbono) y se
+// liquida por separado: no se mezcla con comisionesRegistradas, no se netea con
+// anticipos de comisión y tiene su propia pestaña en Comisiones.
+//
+// - El % es por vendedor (porcentajeComisionAbono, se edita en el formulario del
+//   vendedor). 0 = no genera comisión.
+// - Base: el monto del abono cobrado (el enganche no cuenta: no es abono).
+// - Se registra desde cxc.js justo después de aplicar el abono (idempotente:
+//   un mismo abono nunca genera dos comisiones) y se anula/ajusta si el abono
+//   se elimina o se corrige en Auditoría.
+// ============================================================================
+function _comAbonoPct(v) {
+    const n = Number(v && v.porcentajeComisionAbono);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function _comAbonoLista() {
+    const l = StorageService.get('comisionesAbono', []);
+    return Array.isArray(l) ? l : [];
+}
+
+function _comAbonoFechaISO(valor) {
+    const t = valor ? String(valor) : '';
+    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+    return (window.localISO ? window.localISO(new Date()) : new Date().toISOString()).slice(0, 10);
+}
+
+function _comAbonoFechaCorta(iso) {
+    const t = String(iso || '').slice(0, 10).split('-');
+    return t.length === 3 ? `${t[2]}/${t[1]}/${t[0]}` : '-';
+}
+
+window.registrarComisionAbono = function (folioCXC, montoAbonado, vendedorId, extra) {
+    try {
+        const datos = extra || {};
+        const monto = Number(montoAbonado) || 0;
+        if (monto <= 0 || !folioCXC || vendedorId == null || vendedorId === '') return null;
+        const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+        if (!v) return null;
+        const pct = _comAbonoPct(v);
+        if (pct <= 0) return null;
+        const montoComision = Math.round(monto * pct) / 100;   // a centavos
+        if (montoComision <= 0) return null;
+
+        const idOperacion = String(datos.idOperacion || '');
+        const claveUnica = `${folioCXC}|${idOperacion || ('sinid-' + monto + '-' + _comAbonoFechaISO(datos.fechaIso))}`;
+        const lista = _comAbonoLista();
+        if (lista.some(c => c.claveUnica === claveUnica)) return null;   // ya se registró este abono
+
+        const registro = {
+            id: `CA-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            claveUnica,
+            tipo: 'abono',
+            folioCXC,
+            idOperacion,
+            vendedorId: v.id,
+            vendedorNombre: v.nombre,
+            clienteNombre: datos.clienteNombre || '',
+            fecha: _comAbonoFechaISO(datos.fechaIso),
+            montoAbono: monto,
+            porcentaje: pct,
+            montoComision,
+            estado: 'Pendiente'
+        };
+        lista.push(registro);
+        StorageService.set('comisionesAbono', lista);
+        return registro;
+    } catch (e) {
+        // Nunca debe estorbar el cobro del abono: el dinero ya entró a caja.
+        console.error('No se pudo registrar la comisión por abono:', e);
+        return null;
+    }
+};
+
+// Abono eliminado en Auditoría: si su comisión sigue pendiente se anula; si ya
+// se había pagado se conserva y se marca para revisión (no se reescribe historia).
+window.anularComisionAbono = function (folioCXC, idOperacion, motivo) {
+    try {
+        if (!folioCXC || !idOperacion) return 0;
+        const lista = _comAbonoLista();
+        let n = 0;
+        const hoy = _comAbonoFechaISO('');
+        const nueva = lista.map(c => {
+            if (c.estado === 'Anulada' || c.abonoAnulado) return c;
+            if (String(c.folioCXC) !== String(folioCXC) || String(c.idOperacion) !== String(idOperacion)) return c;
+            n++;
+            if (c.estado === 'Pagada') {
+                return { ...c, abonoAnulado: true, notaRevision: `El abono se eliminó después de pagar esta comisión. ${motivo || ''}`.trim() };
+            }
+            return { ...c, estado: 'Anulada', fechaAnulacion: hoy, motivoAnulacion: motivo || 'Abono eliminado' };
+        });
+        if (n > 0) {
+            StorageService.set('comisionesAbono', nueva);
+            if (window.AuditService?.log) {
+                window.AuditService.log({
+                    accion: 'COMISION_ABONO_ANULADA', modulo: 'Vendedores', entidad: 'comisionesAbono',
+                    entidadId: folioCXC, detalle: `Comisión por abono anulada/revisar (folio ${folioCXC}). ${motivo || ''}`.trim(),
+                    severidad: 'riesgo', datos: { folioCXC, idOperacion, motivo }
+                });
+            }
+        }
+        return n;
+    } catch (e) {
+        console.error('No se pudo anular la comisión por abono:', e);
+        return 0;
+    }
+};
+
+// Abono corregido (monto/fecha): si la comisión sigue pendiente se recalcula con
+// el MISMO % con que se generó; si ya se pagó, se deja y se marca para revisión.
+window.ajustarComisionAbono = function (folioCXC, idOperacion, nuevoMonto, nuevaFechaIso) {
+    try {
+        if (!folioCXC || !idOperacion) return 0;
+        const monto = Number(nuevoMonto) || 0;
+        if (monto <= 0) return 0;
+        const lista = _comAbonoLista();
+        let n = 0;
+        const nueva = lista.map(c => {
+            if (c.estado === 'Anulada' || c.abonoAnulado) return c;
+            if (String(c.folioCXC) !== String(folioCXC) || String(c.idOperacion) !== String(idOperacion)) return c;
+            const nuevaComision = Math.round(monto * Number(c.porcentaje || 0)) / 100;
+            if (Math.abs(monto - c.montoAbono) < 0.005 && Math.abs(nuevaComision - c.montoComision) < 0.005) return c;
+            n++;
+            if (c.estado === 'Pagada') {
+                return { ...c, notaRevision: `El abono se corrigió de ${dinero(c.montoAbono)} a ${dinero(monto)} después de pagar la comisión (diferencia en comisión: ${dinero(nuevaComision - c.montoComision)}).` };
+            }
+            return { ...c, montoAbono: monto, montoComision: nuevaComision, fecha: nuevaFechaIso ? _comAbonoFechaISO(nuevaFechaIso) : c.fecha };
+        });
+        if (n > 0) {
+            StorageService.set('comisionesAbono', nueva);
+            if (window.AuditService?.log) {
+                window.AuditService.log({
+                    accion: 'COMISION_ABONO_AJUSTADA', modulo: 'Vendedores', entidad: 'comisionesAbono',
+                    entidadId: folioCXC, detalle: `Comisión por abono recalculada por corrección del abono (folio ${folioCXC}).`,
+                    severidad: 'info', datos: { folioCXC, idOperacion, nuevoMonto: monto }
+                });
+            }
+        }
+        return n;
+    } catch (e) {
+        console.error('No se pudo ajustar la comisión por abono:', e);
+        return 0;
+    }
+};
+
+function calcularLiquidacionComisionAbono(vendedorId, hastaISO) {
+    const pendientes = _comAbonoLista().filter(c =>
+        String(c.vendedorId) === String(vendedorId) &&
+        c.estado === 'Pendiente' && !c.abonoAnulado &&
+        (!hastaISO || String(c.fecha).slice(0, 10) <= hastaISO));
+    const total = pendientes.reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+    return { pendientes, total: Math.round(total * 100) / 100, n: pendientes.length };
+}
+
+function _comAbonoSetFiltro(campo, valor) {
+    const st = window._comisionesVendedoresState;
+    st.abonoFiltros = { ...(st.abonoFiltros || {}), [campo]: valor };
+    renderComisionesAbono();
+}
+
+function renderComisionesAbono() {
+    const cont = document.getElementById('comisionesAbonoArea');
+    if (!cont) return;
+    const st = window._comisionesVendedoresState;
+    const f = st.abonoFiltros || {};
+    const fEstado = f.estado || 'Pendiente';
+    const fVend = f.vendedor || '';
+    const corte = f.corte || '';
+    const vendedores = StorageService.get('vendedores', []);
+    const lista = _comAbonoLista();
+
+    const pendTotal = lista.filter(c => c.estado === 'Pendiente' && !c.abonoAnulado).reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+    const pagadoTotal = lista.filter(c => c.estado === 'Pagada').reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+    const porRevisar = lista.filter(c => c.notaRevision).length;
+
+    const filas = vendedores.map(v => {
+        const liq = calcularLiquidacionComisionAbono(v.id, corte || null);
+        const pct = _comAbonoPct(v);
+        if (pct <= 0 && liq.n === 0) return '';
+        return `<tr>
+          <td style="padding:10px;">${_vendEsc(v.nombre)}</td>
+          <td style="padding:10px;text-align:center;">${pct > 0 ? pct + '%' : '<span style="color:#9ca3af;">sin %</span>'}</td>
+          <td style="padding:10px;text-align:center;">${liq.n}</td>
+          <td style="padding:10px;text-align:right;font-weight:bold;color:${liq.total > 0 ? '#7c3aed' : '#16a34a'};">${dinero(liq.total)}</td>
+          <td style="padding:10px;text-align:center;">
+            ${liq.total > 0 ? `<button onclick="abrirModalLiquidacionComisionAbono(${v.id}, '${_vendEsc(corte)}')" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🧮 Liquidar</button>` : '<span style="color:#9ca3af;font-size:12px;">al día</span>'}
+          </td>
+        </tr>`;
+    }).filter(Boolean).join('');
+
+    const hay = vendedores.some(v => _comAbonoPct(v) > 0);
+
+    const historial = lista
+        .filter(c => (fEstado === 'todas' || (fEstado === 'Revisar' ? !!c.notaRevision : c.estado === fEstado)) &&
+                     (!fVend || String(c.vendedorId) === String(fVend)))
+        .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+        .slice(0, 200);
+    const colorEstado = { Pendiente: '#d97706', Pagada: '#16a34a', Anulada: '#9ca3af' };
+    const filasHist = historial.map(c => `<tr style="border-bottom:1px solid #f3f4f6;">
+        <td style="padding:8px;">${_comAbonoFechaCorta(c.fecha)}</td>
+        <td style="padding:8px;">${_vendEsc(c.vendedorNombre)}</td>
+        <td style="padding:8px;">${_vendEsc(c.folioCXC)}<br><small style="color:#6b7280;">${_vendEsc(c.clienteNombre)}</small></td>
+        <td style="padding:8px;text-align:right;">${dinero(c.montoAbono)}</td>
+        <td style="padding:8px;text-align:center;">${Number(c.porcentaje)}%</td>
+        <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(c.montoComision)}</td>
+        <td style="padding:8px;text-align:center;color:${colorEstado[c.estado] || '#374151'};font-weight:bold;">${_vendEsc(c.estado)}${c.fechaPago ? `<br><small style="font-weight:normal;">${_comAbonoFechaCorta(c.fechaPago)}</small>` : ''}${c.notaRevision ? `<br><small title="${_vendEsc(c.notaRevision)}" style="color:#dc2626;cursor:help;">⚠ revisar</small>` : ''}</td>
+      </tr>`).join('');
+
+    cont.innerHTML = `
+      <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Comisión que se genera por cada <strong>abono de crédito</strong> cobrado en las cuentas de cada vendedor. Se maneja <strong>aparte</strong> de la comisión de venta: tiene su propio saldo, su propia liquidación y no se compensa con anticipos. El % se define por vendedor (✏️ Editar vendedor).</p>
+      ${hay ? '' : '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;">Ningún vendedor tiene % por abono. Entra a <strong>✏️ Editar</strong> en la tabla de vendedores y captura el <strong>% Comisión por ABONO</strong>: desde ese momento cada abono nuevo genera su comisión.</div>'}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;">
+        <div style="background:#f5f3ff;padding:14px;border-radius:10px;text-align:center;"><small style="color:#5b21b6;">POR PAGAR (ABONOS)</small><br><strong style="font-size:22px;color:#5b21b6;">${dinero(pendTotal)}</strong></div>
+        <div style="background:#f0fdf4;padding:14px;border-radius:10px;text-align:center;"><small style="color:#16a34a;">PAGADO (ABONOS)</small><br><strong style="font-size:22px;color:#16a34a;">${dinero(pagadoTotal)}</strong></div>
+        ${porRevisar ? `<div style="background:#fef2f2;padding:14px;border-radius:10px;text-align:center;"><small style="color:#dc2626;">POR REVISAR</small><br><strong style="font-size:22px;color:#dc2626;">${porRevisar}</strong></div>` : ''}
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;">
+        <div>
+          <label style="font-size:12px;font-weight:bold;color:#374151;">CORTE HASTA (opcional)</label><br>
+          <input type="date" value="${_vendEsc(corte)}" onchange="_comAbonoSetFiltro('corte', this.value)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
+        </div>
+      </div>
+      <div style="overflow-x:auto;margin-bottom:22px;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead><tr style="background:#f3f4f6;">
+            <th style="padding:10px;text-align:left;">Vendedor</th>
+            <th style="padding:10px;text-align:center;">% por abono</th>
+            <th style="padding:10px;text-align:center;">Abonos sin pagar</th>
+            <th style="padding:10px;text-align:right;">Comisión por pagar</th>
+            <th style="padding:10px;text-align:center;">Acción</th>
+          </tr></thead>
+          <tbody>${filas || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#9ca3af;">Sin comisiones por abono pendientes.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <h4 style="margin:0 0 10px;color:#0f172a;">Detalle por abono</h4>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <select onchange="_comAbonoSetFiltro('estado', this.value)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+          ${[['Pendiente', 'Pendientes'], ['Pagada', 'Pagadas'], ['Anulada', 'Anuladas'], ['Revisar', 'Por revisar'], ['todas', 'Todas']].map(([val, et]) => `<option value="${val}" ${fEstado === val ? 'selected' : ''}>${et}</option>`).join('')}
+        </select>
+        <select onchange="_comAbonoSetFiltro('vendedor', this.value)" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+          <option value="">Todos los vendedores</option>
+          ${vendedores.map(v => `<option value="${v.id}" ${String(fVend) === String(v.id) ? 'selected' : ''}>${_vendEsc(v.nombre)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:#f3f4f6;">
+            <th style="padding:8px;text-align:left;">Fecha</th>
+            <th style="padding:8px;text-align:left;">Vendedor</th>
+            <th style="padding:8px;text-align:left;">Cuenta / Cliente</th>
+            <th style="padding:8px;text-align:right;">Abono</th>
+            <th style="padding:8px;text-align:center;">%</th>
+            <th style="padding:8px;text-align:right;">Comisión</th>
+            <th style="padding:8px;text-align:center;">Estado</th>
+          </tr></thead>
+          <tbody>${filasHist || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">No hay registros con este filtro.</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${historial.length === 200 ? '<p style="font-size:12px;color:#9ca3af;margin:8px 0 0;">Se muestran los 200 más recientes.</p>' : ''}`;
+}
+
+function abrirModalLiquidacionComisionAbono(vendedorId, hastaISO) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    if (!v) return alert('Vendedor no encontrado.');
+    const liq = calcularLiquidacionComisionAbono(vendedorId, hastaISO || null);
+    if (liq.total <= 0) return alert('⚠️ No hay comisiones por abono pendientes para este vendedor.');
+    const html = `
+    <div data-modal="liquidacion-comision-abono" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;padding:20px;">
+      <div style="background:white;padding:30px;border-radius:12px;width:100%;max-width:440px;">
+        <h2 style="margin-top:0;color:#7c3aed;">🧮 Liquidar comisión por abono</h2>
+        <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(v.nombre)}</strong>${hastaISO ? `<br><span style="font-size:12px;color:#9ca3af;">Abonos hasta ${_comAbonoFechaCorta(hastaISO)}</span>` : ''}</p>
+        <div style="background:#f9fafb;border-radius:8px;padding:14px;margin-bottom:16px;font-size:14px;">
+          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Abonos sin pagar</span><strong>${liq.n}</strong></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 0 0;border-top:1px solid #e5e7eb;margin-top:6px;"><span style="font-weight:bold;">Comisión por pagar</span><strong style="color:#7c3aed;font-size:17px;">${dinero(liq.total)}</strong></div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO A DESEMBOLSAR</label>
+          <input type="number" id="liqComAbonoMonto" min="0" step="0.01" value="${liq.total.toFixed(2)}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+          <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Se marcan como pagados todos los abonos de la lista. Puedes ajustar el monto si acordaste pagar otra cantidad.</p>
+        </div>
+        <div style="margin-bottom:20px;">
+          <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿DE QUÉ CAJA/CUENTA SALE?</label>
+          ${window._buildSelectorCuentas('liqComAbonoCuenta', false)}
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="ejecutarLiquidacionComisionAbono(${v.id}, '${_vendEsc(hastaISO || '')}')" style="flex:1;padding:12px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar pago</button>
+          <button onclick="document.querySelector('[data-modal=&quot;liquidacion-comision-abono&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;">Cancelar</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function ejecutarLiquidacionComisionAbono(vendedorId, hastaISO) {
+    const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
+    if (!v) return alert('Vendedor no encontrado.');
+    const hasta = hastaISO && hastaISO !== 'null' ? hastaISO : null;
+    const liq = calcularLiquidacionComisionAbono(vendedorId, hasta);
+    if (liq.total <= 0) return alert('⚠️ No hay nada que liquidar.');
+
+    const monto = Math.max(0, Number(document.getElementById('liqComAbonoMonto')?.value) || 0);
+    const sel = document.getElementById('liqComAbonoCuenta');
+    if (monto > 0) {
+        if (!sel) return alert('No se pudo leer la cuenta seleccionada.');
+        if (typeof window._egresarCuenta !== 'function') return alert('No se pudo registrar el pago: el módulo de caja no está disponible. Nada se aplicó.');
+        const cuentaId = sel.value;
+        const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
+        // El egreso de caja se confirma ANTES de marcar nada como pagado.
+        const ok = window._egresarCuenta({
+            monto, cuentaId, etiqueta,
+            concepto: `Comisión por abonos - ${v.nombre}`,
+            referencia: `LIQ-COMISION-ABONO-${v.id}-${Date.now()}`
+        });
+        if (!ok) return alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}". La liquidación NO se aplicó.`);
+    }
+
+    const ids = new Set(liq.pendientes.map(c => c.id));
+    const hoy = _comAbonoFechaISO('');
+    const nueva = _comAbonoLista().map(c => ids.has(c.id) ? { ...c, estado: 'Pagada', fechaPago: hoy } : c);
+    StorageService.set('comisionesAbono', nueva);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'COMISIONES_ABONO_LIQUIDADAS', modulo: 'Vendedores', entidad: 'comisionesAbono',
+            entidadId: vendedorId, detalle: `Liquidación de comisión por abonos - ${v.nombre}`,
+            monto, severidad: 'info',
+            datos: { abonos: liq.n, comisionPorPagar: liq.total, montoPagado: monto, hasta }
+        });
+    }
+    document.querySelector('[data-modal="liquidacion-comision-abono"]')?.remove();
+    alert(`✅ Comisión por abonos liquidada para ${v.nombre}.\n\nAbonos: ${liq.n}\nComisión: ${dinero(liq.total)}\nDesembolsado: ${dinero(monto)}`);
+    renderGestionVendedores();
+    window._comisionesVendedoresState.tabActiva = 'abonos';
+    _renderTabComisionActiva();
+}
+
 window.renderComisionesPendientes = renderComisionesPendientes;
 window._actualizarFiltroHistorialComisiones = _actualizarFiltroHistorialComisiones;
 window._limpiarFiltroHistorialComisiones = _limpiarFiltroHistorialComisiones;
@@ -1310,3 +1665,8 @@ window.liquidarAnticipoComision = liquidarAnticipoComision;
 window.abrirModalEditarMontoAnticipo = abrirModalEditarMontoAnticipo;
 window.guardarEdicionMontoAnticipo = guardarEdicionMontoAnticipo;
 window.renderAnticiposComision = renderAnticiposComision;
+window.calcularLiquidacionComisionAbono = calcularLiquidacionComisionAbono;
+window.renderComisionesAbono = renderComisionesAbono;
+window.abrirModalLiquidacionComisionAbono = abrirModalLiquidacionComisionAbono;
+window.ejecutarLiquidacionComisionAbono = ejecutarLiquidacionComisionAbono;
+window._comAbonoSetFiltro = _comAbonoSetFiltro;

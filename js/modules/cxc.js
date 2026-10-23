@@ -2666,7 +2666,12 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
     }
 
     if (typeof window.registrarComisionAbono === 'function' && a.vendedorId) {
-        window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId);
+        // 📥 Comisión por abono (vendedores.js): tabla propia, aparte de la comisión de venta.
+        window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId, {
+            idOperacion: _idOperacionAbono,
+            fechaIso: a.fechaAbonoIso,
+            clienteNombre: a.clienteNombre
+        });
     }
 
     // 🆕 Registrar la condonación (si la hay) SOLO ahora que el abono ya se
@@ -3570,6 +3575,10 @@ window.eliminarAbonoAuditoriaCxC = function(folio, abonoIndex) {
     const movimientosPrevios = _cxcMovimientosAbonoFolio(folio);
     const saldosPrevios = _cxcSnapshotSaldosAbonos(cuenta, movimientosPrevios);
     const abonoEliminado = cuenta.abonos.splice(abonoIndex, 1)[0];
+    // 📥 La comisión por abono de este abono se anula (o se marca para revisión si ya se pagó).
+    if (typeof window.anularComisionAbono === 'function') {
+        window.anularComisionAbono(folio, abonoEliminado.idOperacion, `Abono eliminado: ${String(motivo).trim()}`);
+    }
     cuenta.abonosEliminados = cuenta.abonosEliminados || [];
     cuenta.abonosEliminados.push({
         ...abonoEliminado,
@@ -3672,6 +3681,11 @@ window.procesarCorreccionAbono = function(folio, abonoIndex) {
     cuenta.abonos[abonoIndex].cuentaId = cuentaId;
     cuenta.abonos[abonoIndex].medioPago = medioPago;
     cuenta.abonos[abonoIndex].etiquetaCuenta = etiqueta;
+
+    // 📥 Si el abono cambió de monto/fecha, su comisión por abono pendiente se recalcula.
+    if (typeof window.ajustarComisionAbono === 'function') {
+        window.ajustarComisionAbono(folio, abonoAnterior.idOperacion, nuevoMonto, nuevaFechaIso);
+    }
 
     // 🎟️ Si este abono había emitido un cupón, cualquier corrección a su
     // fecha/monto invalida la base de ese cupón -- se anula. Si de verdad

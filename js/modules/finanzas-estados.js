@@ -586,9 +586,14 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
         ventas.filter(v => v.estado === 'Cancelada' || v.estatus === 'Cancelada').map(v => String(v.folio))
     );
     const comisionesRegistradas = StorageService.get('comisionesRegistradas', []);
+    // 📥 Comisión por abono (comisionesAbono, vendedores.js): se devenga con la
+    // fecha del abono; las anuladas no cuentan.
+    const totalComisionesAbono = StorageService.get('comisionesAbono', [])
+        .filter(c => c.estado !== 'Anulada' && !c.abonoAnulado && _efEnRango(c.fecha, desde, hasta))
+        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
     const totalComisiones = comisionesRegistradas
         .filter(c => _efEnRango(c.fecha, desde, hasta) && !foliosCancelados.has(String(c.folio)))
-        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0) + totalComisionesAbono;
 
     const ingresosNetos = ingresosVentas - totalDevoluciones;
     const utilidadBruta = ingresosNetos - costoVentasFinal;
@@ -838,7 +843,11 @@ function _efCalcularBalanceGeneral(hastaStr) {
     const comisionesRegistradasParaPasivo = StorageService.get('comisionesRegistradas', []);
     const totalComisionesPorPagar = comisionesRegistradasParaPasivo
         .filter(c => c.estado === 'Pendiente')
-        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0)
+        // 📥 más las comisiones por abono aún sin pagar (tabla propia)
+        + StorageService.get('comisionesAbono', [])
+            .filter(c => c.estado === 'Pendiente' && !c.abonoAnulado)
+            .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
 
     const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario + totalSaldoFavorProveedores + totalAnticiposComisionPorCobrar;
     const totalPasivo = totalCxP + totalDeudaMSI + totalCuponesPorCanjear + totalComisionesPorPagar;
