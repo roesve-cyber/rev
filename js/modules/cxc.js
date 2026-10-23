@@ -5605,7 +5605,7 @@ window.renderCuentasIncobrables = function() {
             <td style="font-size:12px;">${fecha}</td>
             <td style="font-size:12px;">${_cxcEscHTML(c.incobrablePor || '-')}</td>
             <td style="text-align:right;">
-                <button onclick="abrirEstadoCuenta('${_cxcEscHTML(c.folio)}')"
+                <button onclick="abrirEstadoCuentaFolio('${_cxcEscHTML(c.folio)}')"
                     style="padding:6px 9px; background:#1e40af; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700; margin-right:4px;">
                     👁 Ver</button>
                 ${liquidada ? `<span style="padding:6px 9px; background:#dcfce7; color:#166534; border-radius:4px; font-size:12px; font-weight:700; margin-right:4px;">✅ Liquidada</span>` : `<button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(c.folio)}', {modo:'directo'})"
