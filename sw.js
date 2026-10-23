@@ -30,11 +30,20 @@ try {
     var title = (payload.notification && payload.notification.title) || (payload.data && payload.data.title) || 'Boveda de autorizaciones';
     var body = (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || 'Tienes un pendiente por revisar.';
     var url = (payload.data && payload.data.url) || '/?view=autorizaciones';
+    var pushId = (payload.data && payload.data.pushId) || String(Date.now());
+    // Aviso "fuerte": se queda en pantalla hasta que lo atiendas, vibra fuerte
+    // y suena de nuevo aunque ya haya otro de la Bóveda. Un tag distinto por
+    // aviso evita que uno nuevo REEMPLACE en silencio al anterior.
     self.registration.showNotification(title, {
       body: body,
       icon: '/img/icon-192.png',
       badge: '/img/badge-96.png',
-      tag: 'boveda-autorizaciones',
+      tag: 'boveda-' + pushId,
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [400, 150, 400, 150, 800],
+      timestamp: Date.now(),
+      actions: [{ action: 'abrir', title: 'Abrir Bóveda' }],
       data: { url: url }
     });
   });
