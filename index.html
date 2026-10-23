@@ -747,17 +747,6 @@
 
     <div id="reporte-cubo-ventas" class="vista oculto"></div>
 
-    <div id="reporte-rentabilidad" class="vista oculto">
- <div style="background:white;border:1px solid #e2e8f0;border-radius:10px;padding:28px;max-width:900px;margin:0 auto;">
- <h2 style="margin:0 0 8px;color:#0f172a;">Rentabilidad integrada</h2>
- <p style="color:#64748b;margin:0 0 18px;">La utilidad estimada ya vive en Reporte de Ventas. Para revisar dinero real, usa Flujo Real.</p>
- <div style="display:flex;gap:10px;flex-wrap:wrap;">
- <button onclick="navA('reporte-ventas')" style="padding:10px 16px;background:#2563eb;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Ir a Ventas</button>
- <button onclick="navA('reporte-flujo');renderReporteFlujo();" style="padding:10px 16px;background:#0f766e;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Ir a Flujo Real</button>
- </div>
- </div>
- </div>
-
     <!-- REIMPRIMIR TICKET DE VENTA -->
     <div id="reimprimir-venta" class="vista oculto">
  <div class="vista-header">
@@ -900,24 +889,6 @@
  <div id="contenidoEstadosFinancieros"></div>
  </div>
 
-    <!-- PROYECCIÓN DE FLUJO -->
-    <div id="proyeccion" class="vista oculto">
- <div class="vista-header">
- <h2>Proyeccion de Flujo</h2>
- <p>Ingresos esperados vs gastos programados a futuro.</p>
- </div>
- <div id="contenidoProyeccion"></div>
- </div>
-
-    <!-- CLIENTES MOROSOS -->
-    <div id="clientesmorosos" class="vista oculto">
- <div class="vista-header">
- <h2>Clientes Morosos</h2>
- <p>Ranking de clientes con mayor deuda y dias de atraso.</p>
- </div>
- <div id="contenidoMorosos"></div>
- </div>
-
     <!-- CANCELACIONES -->
     <div id="cancelaciones" class="vista oculto">
  <div class="vista-header">
@@ -956,15 +927,6 @@
  <p>Genera OC a proveedores y da seguimiento a su estado.</p>
  </div>
  <div id="contenidoOrdenesCompra"></div>
- </div>
-
-    <!-- AGENDA DE COBROS -->
-    <div id="agendacobros" class="vista oculto">
- <div class="vista-header">
- <h2>Agenda de Cobros</h2>
- <p>Calendario visual con pagares que vencen cada dia.</p>
- </div>
- <div id="contenidoAgenda"></div>
  </div>
 
     <!-- USUARIOS -->
@@ -1337,9 +1299,9 @@
 <script src="js/modules/cxc.js?v=67"></script>
 <script src="js/modules/cxc-cotizar-liquidacion.js?v=3"></script>
 <script src="js/modules/apartados.js?v=9"></script>
-<script src="js/modules/compras.js?v=62"></script>
+<script src="js/modules/compras.js?v=63"></script>
 <script src="js/modules/oc-pagos.js?v=2"></script>
-<script src="js/modules/bancos.js?v=27"></script>
+<script src="js/modules/bancos.js?v=28"></script>
 <script src="js/modules/reportes.js?v=24"></script>
 <script src="js/modules/reportes-plus.js?v=11"></script>
 <script src="js/modules/radar-compras.js?v=1"></script>
