@@ -1020,6 +1020,16 @@ window._cxcRechazarSaltoPlazo = function(idPendiente, motivo = '') {
     if (typeof renderSaltosPlazoPendientes === 'function' && document.getElementById('contenidoReporte')?.innerText.includes('Saltos de plazo pendientes')) renderSaltosPlazoPendientes();
 };
 
+// Un abono de abonosPendientes solo está "en autorización" mientras su estado
+// siga siendo Pendiente. Los Aprobados ya viven en cuenta.abonos y los
+// Rechazados nunca se aplicaron: ambos se quedan en la tabla como historial.
+function _cxcAbonoEnAutorizacion(a) {
+    if (typeof window._esSolicitudBovedaPendiente === 'function') return window._esSolicitudBovedaPendiente(a);
+    const e = String(a?.estado ?? a?.status ?? a?.estatus ?? '').trim().toLowerCase();
+    return !e || ['pendiente','pending','en boveda','en_boveda','en cuarentena','en_cuarentena','provisional','activo','activa','en espera','espera'].includes(e);
+}
+window._cxcAbonoBovedaPendiente = window._cxcAbonoBovedaPendiente || _cxcAbonoEnAutorizacion;
+
 // Un salto pendiente deja de tener sentido si la cuenta ya se liquidó/canceló
 // (o ya está en el plazo propuesto) después de detectarse. Se detecta aquí y
 // se cierra como 'Obsoleto' sin tocar ningún peso.
@@ -1812,7 +1822,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const abonosRegistrados = Array.isArray(cuenta.abonos) ? cuenta.abonos : [];
     const totalAbonosLista = abonosRegistrados.reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
     const abonosPendientesFolio = StorageService.get("abonosPendientes", [])
-        .filter(a => (a.folioCXC || a.folioApartado) === folio);
+        .filter(a => (a.folioCXC || a.folioApartado) === folio && _cxcAbonoEnAutorizacion(a));
     const totalPendienteAutorizar = abonosPendientesFolio.reduce((s, a) => s + Number(a.montoAbonado || a.monto || 0), 0);
     const pagaresCubiertos = todosPagares.filter(p => p.estado === 'Pagado' || p.estado === 'Cancelado').length;
     const pagaresPendientes = todosPagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').length;
@@ -2135,6 +2145,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         _cxcFechaClave(ab.fecha || ab.fechaAbono || ab.fechaAbonoIso) === fechaClaveAbono
     );
     const abonosPendientesDia = StorageService.get("abonosPendientes", []).filter(ab =>
+        _cxcAbonoEnAutorizacion(ab) &&
         (ab.folioCXC || ab.folioApartado) === folio &&
         _cxcFechaClave(ab.fechaAbonoRaw || ab.fechaAbonoIso || ab.fechaAbonoStr || ab.fecha) === fechaClaveAbono
     );
@@ -4686,7 +4697,7 @@ window.abrirModalConvertirApartado = function(folioApartado) {
     if (estadoApartado.includes('conversion') || estadoApartado.includes('migrado')) return alert("Este apartado ya esta en proceso de conversion o ya fue migrado a credito.");
 
     const abonosPendientesApartado = StorageService.get("abonosPendientes", []).filter(a =>
-        !String(a.estado || '').toLowerCase().includes('cancel') &&
+        _cxcAbonoEnAutorizacion(a) &&
         (a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado) &&
         String(a.folioApartado || a.folioCXC || '') === String(folioApartado)
     );
