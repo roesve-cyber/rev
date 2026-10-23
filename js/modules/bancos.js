@@ -101,24 +101,6 @@ function renderBancosConfig() {
 
 // Lógica para crear Cajas de Efectivo
 
-function guardarCajaModal() {
-    const cajas = StorageService.get("cuentasEfectivo", [{ id: "efectivo", nombre: "💵 Efectivo Principal", saldo: 0 }]);
-    const indexStr = document.getElementById("modalCajaIndex").value;
-    const nombre = document.getElementById("modalCajaNombre").value.trim();
-    if (!nombre) return alert("El nombre es obligatorio.");
-
-    const nombreFormateado = nombre.startsWith("💵") ? nombre : `💵 ${nombre}`;
-
-    if (indexStr === "") {
-        cajas.push({ id: "caja_" + Date.now(), nombre: nombreFormateado, saldo: 0 });
-    } else {
-        cajas[parseInt(indexStr)].nombre = nombreFormateado;
-    }
-    StorageService.set("cuentasEfectivo", cajas);
-    document.querySelector('[data-modal="edicion-caja"]').remove();
-    renderBancosConfig();
-}
-
 function eliminarCaja(index) {
     if (confirm("⚠️ ¿Eliminar esta caja?")) {
         const cajas = StorageService.get("cuentasEfectivo", []);

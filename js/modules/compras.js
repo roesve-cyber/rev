@@ -42,10 +42,6 @@ function _consigPagos(c) {
     return _consigAbonos(c).reduce((s, a) => s + Number(a.monto || 0), 0);
 }
 
-function _consigSaldo(c) {
-    return Math.max(0, _consigImporte(c) - _consigPagos(c));
-}
-
 function _comprasEscHTML(valor) {
     return String(valor ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -933,211 +929,6 @@ function gestionarCamposPago() {
     if (divMeses)  divMeses.style.display  = (metodo === 'tarjeta_msi') ? 'block' : 'none';
 
     actualizarSelectBancos();
-}
-
-// Función principal de registro de compras actualizada
-function registrarCompra() {
-    const productoId  = parseInt(document.getElementById("compraProducto").value);
-    const proveedorId = parseInt(document.getElementById("compraProveedor").value);
-    const cantidad    = parseInt(document.getElementById("compraCantidad").value);
-    const costoNuevo  = parseFloat(document.getElementById("compraCosto").value);
-    const comboPago   = document.getElementById("compraMetodoPago");
-    const metodo      = comboPago.value;
-    const formaPagoTexto = comboPago.options[comboPago.selectedIndex].text;
-    const ingresoInmediato = document.getElementById("compraIngresoInmediato")?.checked ?? true;
-
-    // 👇 1. LEEMOS EL COLOR Y LA UBICACIÓN 👇
-    const colorNuevo = document.getElementById("compraColor")?.value.trim() || 'General';
-    const ubicacionNueva = document.getElementById("compraUbicacion")?.value || 'General';
-
-    if (!proveedorId || !productoId || isNaN(cantidad) || isNaN(costoNuevo) || cantidad <= 0) {
-        alert("⚠️ Por favor completa todos los campos correctamente.");
-        return;
-    }
-
-    const prov    = proveedores.find(p => p.id == proveedorId);
-    const producto = productos.find(p => String(p.id) === String(productoId));
-    if (!prov || !producto) return alert("⚠️ Proveedor o producto no encontrado.");
-
-    const bancoSel = document.getElementById("compraBancoSeleccionado")?.value || "";
-    const cuentaOrigenId = document.getElementById("compraCuentaOrigen")?.value || "efectivo";
-    const cuentaOrigenNombre = document.getElementById("compraCuentaOrigen")?.options[document.getElementById("compraCuentaOrigen")?.selectedIndex]?.text || "Efectivo";
-    const fechaHoyISO  = window.getFechaLocalMX();
-    const fechaHoyStr  = fechaHoyISO.split('-').reverse().join('/');
-    const fechaPagoMensaje = (metodo === "contado") ? "Hoy (Contado)" : calcularFechaPago(fechaHoyStr, bancoSel);
-
-    const mensajeConfirmar =
-        `¿Deseas registrar esta compra?\n\n` +
-        `Proveedor: ${prov.nombre}\n` +
-        `Producto: ${producto.nombre} (${colorNuevo})\n` +
-        `Ubicación destino: ${ubicacionNueva}\n` +
-        `Total: ${dinero(cantidad * costoNuevo)}\n` +
-        `Pago Estimado: ${fechaPagoMensaje}`;
-
-    if (!confirm(mensajeConfirmar)) return;
-
-    let avisoActualizacion = "";
-    if (costoNuevo > producto.costo) {
-        const costoAnterior = producto.costo;
-        const precioAnterior = producto.precio;
-        let margenAplicar = 30;
-        categoriasData.forEach(cat => {
-            const sub = cat.subcategorias.find(s => s.nombre === producto.subcategoria);
-            if (sub) margenAplicar = sub.margen;
-        });
-        const nuevoPrecio = CalculatorService.calcularPrecioDesdeMargen(costoNuevo, margenAplicar);
-        producto.costo  = costoNuevo;
-        producto.precio = nuevoPrecio;
-        avisoActualizacion = `\n\n📢 ¡ACTUALIZACIÓN DE PRECIOS!\n` +
-            `Costo: ${dinero(costoAnterior)} ➡️ ${dinero(costoNuevo)}\n` +
-            `Precio: ${dinero(precioAnterior)} ➡️ ${dinero(nuevoPrecio)}\n` +
-            `Margen aplicado: ${margenAplicar}%`;
-    }
-
-    const totalCompra = cantidad * costoNuevo;
-    const caracteristicas = document.getElementById("compraCaracteristicas")?.value || "";
-
-    const nuevaCompra = {
-        id: Date.now() + Math.random(),
-        productoId,
-        productoNombre: producto.nombre,   
-        proveedor: prov.nombre,
-        proveedorId,
-        total: totalCompra,
-        fecha: fechaHoyStr,
-        fechaISO: fechaHoyISO,
-        pagado: metodo === "contado" ? totalCompra : 0,
-        totalPagado: metodo === "contado" ? totalCompra : 0,
-        pago: metodo === "contado" ? { monto: totalCompra, metodo, cuenta: cuentaOrigenId, etiqueta: cuentaOrigenNombre } : null,
-        caracteristicas,
-        color: colorNuevo,           // <-- Guardamos el color en el historial
-        ubicacion: ubicacionNueva    // <-- Guardamos la ubicación en el historial
-    };
-    compras.push(nuevaCompra);
-
-    const caracteristicasInput = document.getElementById("compraCaracteristicas");
-    if (caracteristicasInput) caracteristicasInput.value = "";
-    const colorInput = document.getElementById("compraColor");
-    if (colorInput) colorInput.value = "";
-    const ubicacionInput = document.getElementById("compraUbicacion");
-    if (ubicacionInput) ubicacionInput.value = "General";
-
-    guardarHistorialCosto({
-        productoId,
-        precioCompra: costoNuevo,
-        fecha: fechaHoyStr,
-        cantidad,
-        proveedorId,
-        proveedorNombre: prov.nombre,
-        origen: 'compra directa'
-    });
-
-    const nuevaRecepcion = {
-        id: Date.now() + 1,
-        compraId: nuevaCompra.id,
-        productoId,
-        productoNombre: producto.nombre,
-        cantidadTotal: cantidad,
-        cantidadRecibida: ingresoInmediato ? cantidad : 0,
-        cantidadPendiente: ingresoInmediato ? 0 : cantidad,
-        proveedor: prov.nombre,
-        fechaPedido: nuevaCompra.fecha,
-        metodoPago: formaPagoTexto,
-        estatus: ingresoInmediato ? "Completado" : "Pendiente",
-        costoUnitario: Number(costoNuevo || 0),
-        costo: Number(costoNuevo || 0),
-        color: colorNuevo,           // <-- Sabe de qué color viene
-        ubicacion: ubicacionNueva    // <-- Sabe a qué bodega va
-    };
-    recepciones.push(nuevaRecepcion);
-
-    // 👇 2. DISTRIBUIR EL STOCK EN LAS VARIANTES SI ENTRA INMEDIATAMENTE 👇
-    if (ingresoInmediato) {
-        // Fuente única: suma stock general + variante (color/ubicación) y
-        // reporta cualquier descuadre. `producto` es el mismo objeto dentro
-        // de `productos`, así que queda actualizado por referencia.
-        ajustarStockVariante(productos, productoId, cantidad, {
-            color: colorNuevo,
-            ubicacion: ubicacionNueva,
-            modo: 'entrada',
-            concepto: `Compra a ${prov.nombre}`
-        });
-        registrarMovimiento(productoId, `Compra a ${prov.nombre} (${colorNuevo})`, cantidad, "entrada");
-    }
-
-    if (metodo !== "contado") {
-        const detalleDeuda = {
-            id: Date.now() + 2,
-            compraId: nuevaCompra.id,
-            proveedor: prov.nombre,
-            producto: producto.nombre,
-            cantidad,
-            total: totalCompra,
-            saldoPendiente: totalCompra,
-            metodo,
-            formaPagoTexto,
-            banco: bancoSel,
-            meses: parseInt(document.getElementById("compraMeses")?.value) || 1,
-            fecha: nuevaCompra.fecha,
-            vencimiento: fechaPagoMensaje
-        };
-
-        if (metodo === "credito_proveedor") {
-            let cuentasProv = StorageService.get("cuentasPorPagar", []);
-            cuentasProv.push(detalleDeuda);
-            if (!StorageService.set("cuentasPorPagar", cuentasProv)) {
-                console.error("❌ Error guardando cuentas por pagar");
-            }
-        }
-
-        if (metodo === "tarjeta_msi") {
-            let cuentasBancos = StorageService.get("cuentasMSI", []);
-            const numMeses = parseInt(document.getElementById("compraMeses").value) || 12;
-            cuentasBancos.push({
-                id: Date.now() + 3,
-                compraId: nuevaCompra.id,
-                banco: bancoSel,
-                concepto: `Compra: ${producto.nombre} (Prov: ${prov.nombre})`, // 🔥 INYECCIÓN DE AUDITORÍA
-                producto: producto.nombre,
-                total: totalCompra,
-                meses: numMeses,
-                cuotaMensual: totalCompra / numMeses,
-                fechaCompra: nuevaCompra.fecha,
-                calendario: calcularCalendarioMSI(new Date(), numMeses, bancoSel),
-                pagosRealizados: 0
-            });
-            if (!StorageService.set("cuentasMSI", cuentasBancos)) {
-                console.error("❌ Error guardando cuentas MSI");
-            }
-        }
-    }
-
-    if (!StorageService.set("productos", productos)) {
-        console.error("❌ Error guardando productos");
-    }
-    if (!StorageService.set("compras", compras)) {
-        console.error("❌ Error guardando compras");
-    }
-    if (!StorageService.set("recepciones", recepciones)) {
-        console.error("❌ Error guardando recepciones");
-    }
-
-    if (metodo === "contado") {
-        const _egresoOkContado = window._egresarCuenta({
-            monto: totalCompra, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
-            concepto: `Compra de contado — ${producto.nombre} a ${prov.nombre}`, referencia: `COMPRA-${nuevaCompra.id}`
-        });
-        if (!_egresoOkContado) {
-            alert(`⚠️ La mercancía SÍ se registró en inventario, pero NO se pudo descontar ${dinero(totalCompra)} de "${cuentaOrigenNombre || cuentaOrigenId}" porque esa cuenta no existe.\n\nRegistra el egreso manualmente en Finanzas para que caja cuadre.`);
-        }
-    }
-
-    alert(`✅ Registro Exitoso\nProveedor: ${prov.nombre}${avisoActualizacion}`);
-    
-    // Si la función limpiarFormularioCompra existe, la ejecuta
-    if(typeof limpiarFormularioCompra === 'function') limpiarFormularioCompra();
-    
-    navA('compras');
 }
 
 function limpiarFormularioCompra() {
@@ -5248,53 +5039,6 @@ function ejecutarEliminacionOC(id, montoAFavor) {
     if (typeof renderRequisiciones === 'function') renderRequisiciones();
 }
 
-function cancelarOrdenCompra(id) {
-    const lista = _getOrdenesCompra();
-    const oc = lista.find(x => x.id === id);
-    if (!oc) return;
-    if (oc.estado === 'Cancelada') return alert('Esta orden ya está cancelada.');
-    if (oc.estado === 'Recibida' || oc.estado === 'Recibida Parcial') return alert('No se puede cancelar una orden ya recibida.');
-
-    const pagado = (oc.pagos || []).reduce((s, p) => s + (p.monto || 0), 0);
-    let mensaje = `¿Cancelar la Orden de Compra ${oc.folio}?\n\n`;
-    if (pagado > 0) {
-        mensaje += `⚠️ Esta orden tiene abonos por ${dinero(pagado)}. El monto se registrará como Saldo a Favor del proveedor ${oc.proveedorNombre}.\n\n`;
-    }
-    mensaje += "Las requisiciones vinculadas volverán a estar 'Pendientes'.\n\n¿Deseas continuar?";
-
-    if (!confirm(mensaje)) return;
-
-    // Saldo a favor si hubo pagos
-    if (pagado > 0) {
-        let saldos = StorageService.get('saldosFavorProveedores', []);
-        saldos.push({
-            id: Date.now(),
-            proveedorId: oc.proveedorId,
-            proveedorNombre: oc.proveedorNombre,
-            montoOriginal: pagado,
-            montoDisponible: pagado,
-            fecha: window.obtenerHoyInputMX(),
-            referencia: `Cancelación ${oc.folio}`
-        });
-        StorageService.set('saldosFavorProveedores', saldos);
-    }
-
-    // Revivir requisiciones vinculadas
-    let reqs = StorageService.get('requisicionesCompra', []);
-    reqs.forEach(r => {
-        if (r.estatus === `En OC (${oc.folio})`) r.estatus = 'Pendiente';
-    });
-    StorageService.set('requisicionesCompra', reqs);
-
-    // Marcar como Cancelada
-    const idx = lista.findIndex(x => x.id === id);
-    lista[idx].estado = 'Cancelada';
-    StorageService.set('ordenesCompra', lista);
-
-    alert(`✅ OC ${oc.folio} cancelada.`);
-    if (typeof renderListaOrdenesCompra === 'function') renderListaOrdenesCompra();
-    if (typeof renderRequisiciones === 'function') renderRequisiciones();
-}
 // ============================================================
 // AÑADIR REQUISICIONES A UNA OC EXISTENTE
 // ============================================================
@@ -7993,7 +7737,6 @@ window.eliminarProveedor = eliminarProveedor;
 
 window.prepararVistaCompras = prepararVistaCompras;
 window.gestionarCamposPago = gestionarCamposPago;
-window.registrarCompra = registrarCompra;
 
 window.abrirNuevaOrdenCompra = abrirNuevaOrdenCompra;
 window.agregarArticuloOC = agregarArticuloOC;
@@ -8004,7 +7747,6 @@ window.recibirOrdenCompra = recibirOrdenCompra;
 window.confirmarRecepcionOC = confirmarRecepcionOC;
 window.imprimirRecepcionCompra = imprimirRecepcionCompra;
 window.renderListaOrdenesCompra = renderListaOrdenesCompra;
-window.cancelarOrdenCompra = cancelarOrdenCompra;
 window.editarOrdenCompra = editarOrdenCompra;
 window.agregarArticuloEditOC = agregarArticuloEditOC;
 window._renderEditTablaOC = _renderEditTablaOC;

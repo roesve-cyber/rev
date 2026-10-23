@@ -708,6 +708,7 @@ function _crearPantallaLogin() {
             style="width:100%;padding:13px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:white;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;letter-spacing:1px;">
             🔐 Entrar
           </button>
+          <p style="margin:14px 0 0;"><a href="#" onclick="recuperarContrasena(); return false;" style="color:#6b7280;font-size:12.5px;text-decoration:underline;">¿Olvidaste tu contraseña?</a></p>
           ${_bioSoportado() && _bioObtenerRegistro() ? `<p style="margin:14px 0 0;"><a href="#" onclick="_bioMostrarBotonHuella(); return false;" style="color:#6b7280;font-size:12.5px;text-decoration:underline;">🔒 Usar huella en su lugar</a></p>` : ''}
         </form>
         <p style="color:#9ca3af;font-size:11px;margin:20px 0 0;">v1.0 — Acceso restringido</p>

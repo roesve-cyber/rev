@@ -1984,18 +1984,6 @@ function actualizarAvisoPoliticaAbono(folio) {
     avisoDiv.innerHTML = "";
 }
 
-function evaluarPoliticaLiquidacion(folio, montoAbono) {
-    const politica = _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono);
-    if (!politica || !politica.aplica || !politica.liquidaria) return null;
-    return {
-        aplica: true,
-        montoCorrecto: politica.montoLiquidacion,
-        ahorro: politica.beneficio,
-        plan: politica.plan || null,
-        tipo: politica.tipo
-    };
-}
-
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
 function procesarAbonoAvanzado(folio, montoOriginal, saldoActual, aplicaPoliticaContado, modoAplicacion = 'pendiente') {
     // 🛡️ CANDADO ANTI-DOBLE-TOQUE: en móvil la escritura atómica a Firestore
@@ -3061,9 +3049,6 @@ function exportarCobranzaEsperada() {
     link.setAttribute("download", `cobranza_${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0])}.csv`);
     link.click();
 }
-
-function renderClientesMorosos() { renderCuentasXCobrar('', 'Atrasado'); }
-function exportarMorososCSV() { exportarCobranzaEsperada(); }
 
 function reimprimirTicketAbono(folio, indexAbono) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
@@ -4691,20 +4676,6 @@ function descargarImagenEstadoCuentaFolio(folio) {
     });
 }
 
-function emitirEstadoCuentaFolioProfesional(folio) {
-    emitirEstadoCuentaFolioPdf(folio);
-}
-
-function guardarImagenEstadoCuenta() {
-    const folio = document.querySelector('[data-modal="estado-cuenta-folio"]')?.querySelector('.mmp-edo-folio b')?.textContent?.trim();
-    if (folio) return descargarImagenEstadoCuentaFolio(folio);
-    alert('Abre primero un estado de cuenta.');
-}
-
-function imprimirEstadoCuentaFolio() {
-    window.print();
-}
-
 function abrirEstadoCuentaCliente(clienteId) {
     const cuentas = StorageService.get("cuentasPorCobrar", []);
     const cuenta = cuentas.find(c => (String(c.clienteId) === String(clienteId) || String(c.id) === String(clienteId)) && c.estado !== 'Saldado' && !_cxcCuentaCancelada(c)) ||
@@ -5447,24 +5418,18 @@ window.abrirModalMoratorio = abrirModalMoratorio;
 window.aplicarMoratorioManual = aplicarMoratorioManual;
 window.exentarMoratorio = exentarMoratorio;
 window.actualizarAvisoPoliticaAbono = actualizarAvisoPoliticaAbono;
-window.evaluarPoliticaLiquidacion = evaluarPoliticaLiquidacion;
 window._cxcEvaluarPoliticaPagoAnticipado = _cxcEvaluarPoliticaPagoAnticipado;
 window.procesarAbonoAvanzado = procesarAbonoAvanzado;
 window.generarTicketAbonoTermico = generarTicketAbonoTermico;
 window.renderCobranzaEsperada = renderCobranzaEsperada;
 window.abrirDetalleCobranza = abrirDetalleCobranza;
 window.exportarCobranzaEsperada = exportarCobranzaEsperada;
-window.exportarMorososCSV = exportarMorososCSV;
-window.renderClientesMorosos = renderClientesMorosos;
 window.reimprimirTicketAbono = reimprimirTicketAbono;
 window.abrirEstadoCuentaFolio = abrirEstadoCuentaFolio;
 window.emitirEstadoCuentaFolioTicket = emitirEstadoCuentaFolioTicket;
-window.emitirEstadoCuentaFolioProfesional = emitirEstadoCuentaFolioProfesional;
 window.emitirEstadoCuentaFolioPdf = emitirEstadoCuentaFolioPdf;
 window.descargarImagenEstadoCuentaFolio = descargarImagenEstadoCuentaFolio;
-window.guardarImagenEstadoCuenta = guardarImagenEstadoCuenta;
 window.abrirEstadoCuentaCliente = abrirEstadoCuentaCliente;
-window.imprimirEstadoCuentaFolio = imprimirEstadoCuentaFolio;
 
 
 // ═══════════════════════════════════════════════════════════════════

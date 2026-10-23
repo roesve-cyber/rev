@@ -1422,14 +1422,6 @@ function actualizarColorCarrito(index, color) {
     }
 }
 
-// 4. Guarda la ubicación elegida en el carrito
-function actualizarUbicacionCarrito(index, ubicacion) {
-    if (index >= 0 && index < carrito.length) {
-        carrito[index].ubicacionElegida = ubicacion;
-        StorageService.set("carrito", carrito);
-    }
-}
-
 // Esta es la "libreta" donde anotamos los datos
 function capturarDatosCredito() {
     const inputEnganche = document.getElementById("numEnganche");
@@ -2326,23 +2318,6 @@ function setDecisionInventario(productoId, entregar) {
         }
     }
     _actualizarBotonProcesarInventario();
-}
-
-function cambiarColorInventario(productoId, nuevoColor) {
-    if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
-    decisionesInventario[productoId].color = nuevoColor;
-    decisionesInventario[productoId].ubicacion = ""; 
-
-    const idx = carrito.findIndex(item => String(item.id) === String(productoId));
-    if (idx !== -1) {
-        carrito[idx].colorElegido = nuevoColor;
-        StorageService.set("carrito", carrito);
-    }
-}
-
-function cambiarUbicacionInventario(productoId, nuevaUbicacion) {
-    if (!decisionesInventario[productoId]) decisionesInventario[productoId] = {};
-    decisionesInventario[productoId].ubicacion = nuevaUbicacion;
 }
 
 window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganche, saldoAFinanciar, planElegidoRecibido) {
@@ -7309,7 +7284,6 @@ window.eliminarDelCarrito = eliminarDelCarrito;
 window.actualizarCantidadCarrito = actualizarCantidadCarrito;
 window.cambiarPrecioCarrito = cambiarPrecioCarrito;
 window.actualizarColorCarrito = actualizarColorCarrito;
-window.actualizarUbicacionCarrito = actualizarUbicacionCarrito;
 // ═══════════════════════════════════════════════════════════════════════════
 // RECIBO DE ENGANCHE / ANTICIPO
 // ═══════════════════════════════════════════════════════════════════════════
@@ -7519,8 +7493,6 @@ window.confirmarVentaFinal = confirmarVentaFinal;
 window.cancelarYVolverAlCarrito = cancelarYVolverAlCarrito;
 window.seleccionarOrigenInventario = seleccionarOrigenInventario;
 window.setDecisionInventario = setDecisionInventario;
-window.cambiarColorInventario = cambiarColorInventario;
-window.cambiarUbicacionInventario = cambiarUbicacionInventario;
 window.mostrarDialogoInventario = mostrarDialogoInventario;
 window.abrirDetalleEntrega = abrirDetalleEntrega;
 window.renderEntregas = renderEntregas;

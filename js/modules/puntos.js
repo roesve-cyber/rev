@@ -74,6 +74,9 @@ function renderPanelPuntos() {
     }).join('');
 
     cont.innerHTML = `
+      <div style="background:#fffbeb;border:1px solid #f59e0b;color:#92400e;padding:14px 18px;border-radius:10px;margin-bottom:20px;font-size:14px;">
+        <strong>⚠️ Pendiente de configurar.</strong> El programa de puntos todavía no está terminado: los saldos, el estado y los canjes que ves aquí no son definitivos.
+      </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;">
         <div style="background:#eff6ff;padding:20px;border-radius:10px;text-align:center;">
           <small style="color:#1e40af;">PUNTOS POR CADA $100</small><br>
