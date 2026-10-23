@@ -38,10 +38,6 @@ function _consigImporte(c) {
     return Number(c?.total || 0) || (Number(c?.cantidadTotal || 0) * Number(c?.costoUnitario || 0));
 }
 
-function _consigPagos(c) {
-    return _consigAbonos(c).reduce((s, a) => s + Number(a.monto || 0), 0);
-}
-
 function _comprasEscHTML(valor) {
     return String(valor ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -929,22 +925,6 @@ function gestionarCamposPago() {
     if (divMeses)  divMeses.style.display  = (metodo === 'tarjeta_msi') ? 'block' : 'none';
 
     actualizarSelectBancos();
-}
-
-function limpiarFormularioCompra() {
-    const ids = ["compraCantidad", "compraCosto"];
-    ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
-    // compraProducto es hidden input + display span (picker dinámico)
-    const hidProd     = document.getElementById("compraProducto");
-    const displayProd = document.getElementById("compraProducto-display");
-    if (hidProd)     { hidProd.value = ""; }
-    if (displayProd) { displayProd.textContent = 'Sin seleccionar'; displayProd.style.color = '#6b7280'; }
-    const selProv    = document.getElementById("compraProveedor");
-    const selPago    = document.getElementById("compraMetodoPago");
-    const chkIngreso = document.getElementById("compraIngresoInmediato");
-    if (selProv) selProv.selectedIndex = 0;
-    if (selPago) selPago.selectedIndex = 0;
-    if (chkIngreso) chkIngreso.checked = true;
 }
 
 // ===== RECEPCIONES =====
