@@ -1733,11 +1733,6 @@ window.GP_STOCK_BAJO_UMBRAL = 3; // piezas o menos = "stock bajo"
 window._gpQuickFilter = window._gpQuickFilter || 'todos';
 window._gpOrden = window._gpOrden || { campo: null, dir: 1 };
 
-window._gpSetQuickFilter = function(valor) {
- window._gpQuickFilter = valor;
- aplicarFiltros();
-};
-
 window._gpOrdenarPor = function(campo) {
  const actual = window._gpOrden;
  window._gpOrden = (actual && actual.campo === campo) ? { campo, dir: -actual.dir } : { campo, dir: 1 };
@@ -4595,18 +4590,6 @@ window.abrirModalTransferenciaInv = function() {
  const modal = document.getElementById('modalTransferenciaInv');
  modal.classList.remove('oculto');
  modal.style.display = 'flex';
-};
-
-// Cuando cambia el origen, el carrito armado con la existencia de la bodega
-// anterior deja de ser valido -- se limpia para evitar mover piezas que no
-// estan fisicamente ahi.
-window._transfInvRefrescarUI = function() {
- const origen = document.getElementById('transfOrigen')?.value || '';
- if (window._transfInvItems.length > 0 && origen !== window._transfInvOrigenCarrito) {
- window._transfInvItems = [];
- }
- window._transfInvRenderListado();
- window._transfInvRenderItems();
 };
 
 // Listado de existencia real del origen elegido: aqui es donde se eligen

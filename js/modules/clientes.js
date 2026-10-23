@@ -275,130 +275,6 @@ function _clienteFechaIso() {
     return window.localISO ? window.localISO(new Date()) : new Date().toISOString();
 }
 
-function guardarCliente() {
-    const nombreInput   = document.getElementById("clienteNombre");
-    const direccionInput = document.getElementById("clienteDireccion");
-    const telefonoInput = document.getElementById("clienteTelefono");
-    const referenciaInput = document.getElementById("clienteReferencia");
-    
-    const nombre   = nombreInput.value.trim();
-    const direccion = direccionInput.value.trim();
-    const telefono = telefonoInput.value.trim();
-    const referencia = referenciaInput.value.trim();
-
-    const validacion = ValidatorService.validarCliente({ nombre, telefono });
-    if (!validacion.valid) {
-        alert("⚠️ " + validacion.errores.join("\n"));
-        return;
-    }
-    let clientesBD = StorageService.get("clientes", []);
-
-    if (window.clienteEditandoId) {
-        const index = clientesBD.findIndex(c => c.id === window.clienteEditandoId);
-        if (index !== -1) {
-            if (!_clienteEsAdmin()) {
-                const antes = _clienteCamposBase(clientesBD[index]);
-                const despues = _clienteCamposBase({ nombre, direccion, telefono, referencia });
-                const cambios = _clienteCambios(antes, despues);
-                if (cambios.length === 0) return alert('No hay cambios para enviar a auditoria.');
-                const pendientes = StorageService.get('solicitudesClientesPendientes', []);
-                if (pendientes.some(s => String(s.clienteId) === String(clientesBD[index].id))) {
-                    return alert('Este cliente ya tiene una solicitud pendiente en la boveda.');
-                }
-                const sesion = _clienteSesionActiva() || {};
-                pendientes.unshift({
-                    id: Date.now() + Math.random(),
-                    tipo: 'actualizacion_cliente',
-                    estado: 'Pendiente',
-                    clienteId: clientesBD[index].id,
-                    clienteNombre: clientesBD[index].nombre,
-                    antes,
-                    despues,
-                    cambios,
-                    motivo: 'Edicion solicitada desde Gestionar Clientes',
-                    fechaSolicitud: _clienteFechaIso(),
-                    fechaVisible: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString('es-MX'),
-                    solicitadoPor: sesion.nombre || sesion.usuario || 'Usuario',
-                    solicitadoPorId: sesion.uid || sesion.id || sesion.usuario || null,
-                    rolSolicitante: sesion.rol || ''
-                });
-                StorageService.set('solicitudesClientesPendientes', pendientes);
-                if (typeof window.notificarBovedaAutorizacion === 'function') {
-                    window.notificarBovedaAutorizacion({
-                        tipo: 'cliente',
-                        id: `cliente-${clientesBD[index].id}-${Date.now()}`,
-                        titulo: 'Cambio de cliente pendiente',
-                        cuerpo: `${clientesBD[index].nombre} - ${cambios.join(', ')}`,
-                        clienteId: clientesBD[index].id,
-                        cliente: clientesBD[index].nombre,
-                        cambios
-                    });
-                }
-                window.AuditService?.log?.({
-                    accion: 'CLIENTE_CAMBIO_SOLICITADO',
-                    modulo: 'Clientes',
-                    entidad: clientesBD[index].nombre,
-                    entidadId: clientesBD[index].id,
-                    detalle: `Cambio solicitado: ${cambios.join(', ')}`,
-                    severidad: 'riesgo',
-                    datos: { antes, despues }
-                });
-                window.clienteEditandoId = null;
-                nombreInput.value = "";
-                direccionInput.value = "";
-                telefonoInput.value = "";
-                referenciaInput.value = "";
-                renderClientes();
-                return alert('Solicitud enviada a la Boveda de Autorizaciones.');
-            }
-            clientesBD[index].nombre   = nombre;
-            clientesBD[index].direccion = direccion;
-            clientesBD[index].telefono = telefono;
-            clientesBD[index].referencia = referencia;
-            clientesBD[index] = _clienteConBusqueda(clientesBD[index]);
-            _clientesSincronizarDatosRelacionados(clientesBD[index]);
-        }
-        window.clienteEditandoId = null;
-    } else {
-        const dup = _clienteBuscarDuplicado(clientesBD, nombre, telefono);
-        let decision = null;
-        if (dup) {
-            decision = _clienteDecidirDuplicado(dup);
-            if (decision === 'cancelar') return;
-            if (decision === 'usar') {
-                nombreInput.value   = "";
-                direccionInput.value = "";
-                telefonoInput.value = "";
-                referenciaInput.value = "";
-                alert('No se creó un cliente nuevo: se conserva el existente.');
-                renderClientes();
-                return;
-            }
-        }
-        const nuevoCli = _clienteConBusqueda({
-            id: Date.now(),
-            nombre,
-            direccion,
-            telefono,
-            referencia,
-            fechaRegistro: window.formatearFechaCortaMX(new Date())
-        });
-        if (dup && decision === 'crear') _clienteMarcarDistintos(clientesBD, nuevoCli, dup.todos);
-        clientesBD.push(nuevoCli);
-    }
-
-    if (!StorageService.set("clientes", clientesBD)) {
-        alert("❌ Error guardando cliente");
-        return;
-    }
-
-    nombreInput.value   = "";
-    direccionInput.value = "";
-    telefonoInput.value = "";
-    referenciaInput.value = "";
-    renderClientes();
-}
-
 function renderClientes() {
     const cont = document.getElementById("listaClientes");
     if (!cont) return;
@@ -499,13 +375,6 @@ function prepararEdicionCliente(id) {
     window._clienteGestionCobranzaSeleccionado = c;
     renderGestionClientesCobranza();
     window.scrollTo(0, 0);
-}
-
-function irASeleccionCliente() {
-    if(typeof navA === 'function') navA("seleccionarcliente");
-    renderSeleccionClienteVenta();
-    renderResumenVentaCliente();
-    mostrarInfoCliente();
 }
 
 function mostrarInfoCliente() {
@@ -1380,11 +1249,9 @@ function rechazarSolicitudCliente(index) {
     alert('Solicitud rechazada.');
 }
 
-window.guardarCliente = guardarCliente;
 window.renderClientes = renderClientes;
 window.eliminarCliente = eliminarCliente;
 window.prepararEdicionCliente = prepararEdicionCliente;
-window.irASeleccionCliente = irASeleccionCliente;
 window.mostrarInfoCliente = mostrarInfoCliente;
 window.renderSeleccionClienteVenta = renderSeleccionClienteVenta;
 window.abrirPickerClienteVenta = abrirPickerClienteVenta;
