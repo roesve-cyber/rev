@@ -591,9 +591,18 @@ function _efCalcularEstadoResultados(desdeStr, hastaStr) {
     const totalComisionesAbono = StorageService.get('comisionesAbono', [])
         .filter(c => c.estado !== 'Anulada' && !c.abonoAnulado && _efEnRango(c.fecha, desde, hasta))
         .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+    // 🏁 Bono por cuenta saldada (bonosCuentaSaldada, vendedores.js): igual que la
+    // comisión de venta, se devenga con la fecha de la venta que generó la reserva
+    // (monto vivo: reserva mientras la cuenta está vigente, interés real al saldarse)
+    // y se excluyen anulados y ventas canceladas.
+    const totalBonosCuentaSaldada = (typeof window.bonosCuentaSaldadaVista === 'function' ? window.bonosCuentaSaldadaVista() : [])
+        .filter(b => ['Reservada', 'Pendiente', 'Pagada'].includes(b.estadoVivo)
+            && !foliosCancelados.has(String(b.folioCXC))
+            && _efEnRango(b.fecha || b.fechaPago, desde, hasta))
+        .reduce((s, b) => s + (Number(b.montoVivo) || 0), 0);
     const totalComisiones = comisionesRegistradas
         .filter(c => _efEnRango(c.fecha, desde, hasta) && !foliosCancelados.has(String(c.folio)))
-        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0) + totalComisionesAbono;
+        .reduce((s, c) => s + (Number(c.montoComision) || 0), 0) + totalComisionesAbono + totalBonosCuentaSaldada;
 
     const ingresosNetos = ingresosVentas - totalDevoluciones;
     const utilidadBruta = ingresosNetos - costoVentasFinal;
@@ -847,7 +856,11 @@ function _efCalcularBalanceGeneral(hastaStr) {
         // 📥 más las comisiones por abono aún sin pagar (tabla propia)
         + StorageService.get('comisionesAbono', [])
             .filter(c => c.estado === 'Pendiente' && !c.abonoAnulado)
-            .reduce((s, c) => s + (Number(c.montoComision) || 0), 0);
+            .reduce((s, c) => s + (Number(c.montoComision) || 0), 0)
+        // 🏁 más los bonos por cuenta saldada reservados o por pagar
+        + (typeof window.bonosCuentaSaldadaVista === 'function' ? window.bonosCuentaSaldadaVista() : [])
+            .filter(b => b.estadoVivo === 'Reservada' || b.estadoVivo === 'Pendiente')
+            .reduce((s, b) => s + (Number(b.montoVivo) || 0), 0);
 
     const totalActivo = totalEfectivoBancos + totalCxC + totalPrestamosPorCobrar + totalInventario + totalSaldoFavorProveedores + totalAnticiposComisionPorCobrar;
     const totalPasivo = totalCxP + totalDeudaMSI + totalCuponesPorCanjear + totalComisionesPorPagar;

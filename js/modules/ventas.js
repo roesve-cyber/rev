@@ -2898,6 +2898,11 @@ window.ejecutarVentaAutorizadaReal = async function(metodoPago, totalContado, en
         if (_cxcGuardadoOk?.subioANube === false || _pagaresGuardadoOk?.subioANube === false) {
             console.warn(`⚠️ Venta ${folioVenta}: la cuenta y/o los pagarés no confirmaron subida a Firebase de inmediato (quedan en local para sincronizar después).`, { _cxcGuardadoOk, _pagaresGuardadoOk });
         }
+        // 🏁 Reserva del bono por cuenta saldada (vendedores.js): % del interés pactado,
+        // aparte de la comisión de venta. Nunca debe estorbar la venta.
+        if (typeof window.registrarReservaBonoSaldada === "function") {
+            window.registrarReservaBonoSaldada(cuentasPorCobrar.find(c => c.folio === folioVenta));
+        }
 
     } else if (metodoPago === "apartado") {
         // 🛡️ Se centraliza en registrarApartado() (apartados.js) en vez de
