@@ -1263,6 +1263,7 @@ function renderAnticiposComision() {
           <td style="padding:8px;text-align:right;font-weight:bold;color:${saldo > 0 ? '#dc2626' : '#16a34a'};">${dinero(saldo)}</td>
           <td style="padding:8px;">${a.fecha ? (window.parseFechaMX ? window.parseFechaMX(a.fecha) : new Date(a.fecha)).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' }) : '-'}</td>
           <td style="padding:8px;color:#6b7280;">${_vendEsc(a.cuentaEtiqueta || '-')}</td>
+          <td style="padding:8px;color:#374151;max-width:220px;white-space:normal;word-break:break-word;">${a.nota ? _vendEsc(a.nota) : '<span style="color:#9ca3af;">—</span>'}</td>
           <td style="padding:8px;text-align:center;"><span style="color:${saldo > 0 ? '#d97706' : '#16a34a'};font-weight:bold;">${saldo > 0 ? 'Pendiente' : 'Liquidado'}</span></td>
           <td style="padding:8px;text-align:center;">
             <div style="display:flex;gap:6px;justify-content:center;">
@@ -1286,6 +1287,7 @@ function renderAnticiposComision() {
             <th style="padding:8px;text-align:right;">Saldo</th>
             <th style="padding:8px;text-align:left;">Fecha</th>
             <th style="padding:8px;text-align:left;">Cuenta</th>
+            <th style="padding:8px;text-align:left;">Nota</th>
             <th style="padding:8px;text-align:center;">Estado</th>
             <th style="padding:8px;text-align:center;">Acción</th>
           </tr></thead>
