@@ -26,7 +26,6 @@ function renderGestionVendedores() {
     const vendedores = StorageService.get('vendedores', []);
     const comisiones = StorageService.get('comisionesRegistradas', []);
     const pendTotal = comisiones.filter(c => c.estado === 'Pendiente').reduce((s, c) => s + c.montoComision, 0);
-    const _bonosVista = (typeof _bonoVistaLista === 'function') ? _bonoVistaLista() : [];
 
     const rows = vendedores.map(v => {
         const comisVend = comisiones.filter(c => c.vendedorId === v.id);
@@ -38,7 +37,7 @@ function renderGestionVendedores() {
           <td style="padding:10px;text-align:center;">${v.telefono || '-'}</td>
           <td style="padding:10px;text-align:center;">${v.porcentajeComision || 0}%${Number(v.porcentajeComisionAbono) > 0 ? `<br><small style="color:#7c3aed;font-weight:bold;">+ ${Number(v.porcentajeComisionAbono)}% por abono</small>` : ''}</td>
           <td style="padding:10px;text-align:center;font-size:12px;color:#7c3aed;">${baseLabel}</td>
-          <td style="padding:10px;text-align:right;">${dinero(pendVend)}${(() => { const bp = _bonosVista.filter(x => String(x.vendedorId) === String(v.id) && x.estadoVivo === 'Pendiente').reduce((t, x) => t + x.montoVivo, 0); return bp > 0 ? `<br><small style="color:#7c3aed;font-weight:bold;">+ ${dinero(bp)} bono</small>` : ''; })()}</td>
+          <td style="padding:10px;text-align:right;">${dinero(pendVend)}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${v.activo ? '#16a34a' : '#9ca3af'};font-weight:bold;">${v.activo ? '✅ Activo' : '⛔ Inactivo'}</span></td>
           <td style="padding:10px;text-align:center;display:flex;gap:6px;justify-content:center;">
             <button onclick="abrirModalAnticipoComision(${v.id})" style="background:none;border:none;cursor:pointer;font-size:17px;" title="Registrar anticipo">💵</button>
@@ -84,14 +83,14 @@ function renderGestionVendedores() {
           </table>
         </div>`}
       </div>
-      <div id="sugerenciasRecuperacionArea" style="margin-bottom:20px;"></div>
       <div style="background:white;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.06);margin-bottom:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
           <h3 style="margin:0;color:#0f172a;">💰 Comisiones</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button id="tabComision_pendientes" onclick="_cambiarTabComisiones('pendientes')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📌 Ventas no pagadas</button>
             <button id="tabComision_anticipos" onclick="_cambiarTabComisiones('anticipos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">💵 Anticipos</button>
-            <button id="tabComision_abonos" onclick="_cambiarTabComisiones('abonos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📥 Por abono y bono</button>
+            <button id="tabComision_abonos" onclick="_cambiarTabComisiones('abonos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📥 Por abono</button>
+            <button id="tabComision_bono" onclick="_cambiarTabComisiones('bono')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🏁 Bono saldadas</button>
             <button id="tabComision_historial" onclick="_cambiarTabComisiones('historial')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🕓 Historial</button>
             ${(typeof _esAdmin === 'function' && _esAdmin()) ? `<button onclick="_ejecutarCorreccionPisoUtilidadUI()" title="Sube al piso del 10% de utilidad las comisiones PENDIENTES que quedaron por debajo (registradas antes de esta regla). Lo Pagado no se toca." style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;background:#fef3c7;color:#92400e;">🛠️ Corregir piso 10%</button>` : ''}
           </div>
@@ -116,12 +115,15 @@ function renderGestionVendedores() {
           <div id="comisionesAbonoArea"></div>
         </div>
 
+        <div id="panelComision_bono" style="display:none;">
+          <div id="bonoSaldadaArea"></div>
+        </div>
+
         <div id="panelComision_historial" style="display:none;">
           <div id="historialComisionesFiltros" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;"></div>
           <div id="historialComisionesArea"></div>
         </div>
       </div>`;
-    renderSugerenciasRecuperacionCartera();
     _pintarFiltrosHistorialComisiones();
     _renderTabComisionActiva();
 }
@@ -140,7 +142,7 @@ function _cambiarTabComisiones(tab) {
 
 function _renderTabComisionActiva() {
     const tab = window._comisionesVendedoresState.tabActiva || 'pendientes';
-    ['pendientes', 'anticipos', 'abonos', 'historial'].forEach(t => {
+    ['pendientes', 'anticipos', 'abonos', 'bono', 'historial'].forEach(t => {
         const btn = document.getElementById('tabComision_' + t);
         const panel = document.getElementById('panelComision_' + t);
         const activo = t === tab;
@@ -150,6 +152,7 @@ function _renderTabComisionActiva() {
     if (tab === 'pendientes') renderComisionesPendientes();
     else if (tab === 'anticipos') renderAnticiposComision();
     else if (tab === 'abonos') renderComisionesAbono();
+    else if (tab === 'bono') renderBonoCuentaSaldada();
     else renderHistorialComisiones();
 }
 
@@ -233,8 +236,6 @@ function _pintarFiltrosHistorialComisiones() {
           <option value="" ${!f.estado ? 'selected' : ''}>Todas</option>
           <option value="Pendiente" ${f.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
           <option value="Pagada" ${f.estado === 'Pagada' ? 'selected' : ''}>Pagada</option>
-          <option value="Reservada" ${f.estado === 'Reservada' ? 'selected' : ''}>Reservada (bono)</option>
-          <option value="Anulada" ${f.estado === 'Anulada' ? 'selected' : ''}>Anulada (bono)</option>
         </select>
       </div>
       <div>
@@ -301,7 +302,7 @@ function renderHistorialComisiones() {
     if (!cont) return;
     const comisiones = StorageService.get('comisionesRegistradas', []);
     if (comisiones.length === 0) {
-        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No hay comisiones registradas.</p>' + _bonoHistorialHTML(window._comisionesVendedoresState.historialFiltros || {});
+        cont.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:20px;">No hay comisiones registradas.</p>';
         return;
     }
 
@@ -358,130 +359,8 @@ function renderHistorialComisiones() {
           </tr></thead>
           <tbody>${rows || '<tr><td colspan="11" style="padding:16px;text-align:center;color:#9ca3af;">Sin registros con estos filtros.</td></tr>'}</tbody>
         </table>
-      </div>${_bonoHistorialHTML(f)}`;
-}
-// ===== SUGERENCIAS: RECUPERACIÓN DE CARTERA EN ATRASO =====
-// El vendedor solo cobra comisión por venta (al cierre). Cuando una cuenta que
-// estuvo en atraso termina saldándose, el sistema SUGIERE aquí una posible
-// comisión extra por la gestión de cobranza, pero no la calcula ni la aplica
-// de forma automática: el admin decide si otorgarla y por cuánto.
-function obtenerSugerenciasRecuperacionCartera(diasGracia = 3) {
-    const cuentas = window._conNombreClienteVigente(StorageService.get('cuentasPorCobrar', []));
-    const pagares = StorageService.get('pagaresSistema', []);
-    const comisiones = StorageService.get('comisionesRegistradas', []);
-    const descartadas = StorageService.get('sugerenciasComisionDescartadas', []);
-    const vendedores = StorageService.get('vendedores', []);
-
-    const sugerencias = [];
-    cuentas.forEach(c => {
-        if (String(c.estado || '').toLowerCase() !== 'saldado') return;
-        if (!c.vendedorId) return;
-        const abonos = c.abonos || [];
-        if (abonos.length === 0) return;
-
-        let ultimoAbono = null;
-        let ultimoAbonoMs = 0;
-        abonos.forEach(ab => {
-            const ms = new Date(ab.fechaAbonoIso || ab.fecha || 0).getTime();
-            if (ms > ultimoAbonoMs) { ultimoAbonoMs = ms; ultimoAbono = ab; }
-        });
-        if (!ultimoAbono || !ultimoAbonoMs) return;
-
-        const pagaresCuenta = pagares.filter(p => String(p.folio) === String(c.folio));
-        if (pagaresCuenta.length === 0) return;
-        const ultimoVencimiento = Math.max(...pagaresCuenta.map(p => Number(p.fechaVencimiento || 0)));
-        if (!ultimoVencimiento) return;
-
-        const diasAtraso = Math.floor((ultimoAbonoMs - ultimoVencimiento) / 86400000);
-        if (diasAtraso <= diasGracia) return; // se pagó a tiempo o con poca demora
-
-        if (descartadas.includes(c.folio)) return;
-        if (comisiones.some(cm => cm.tipo === 'recuperacion_cartera' && cm.folio === c.folio)) return;
-
-        const v = vendedores.find(x => String(x.id) === String(c.vendedorId));
-        sugerencias.push({
-            folio: c.folio,
-            clienteNombre: c.nombre || '',
-            articulos: c.articulos,
-            vendedorId: c.vendedorId,
-            vendedorNombre: v ? v.nombre : (c.vendedorNombre || 'Vendedor'),
-            diasAtraso,
-            fechaRecuperacion: ultimoAbono.fecha || ultimoAbono.fechaAbonoIso || ''
-        });
-    });
-    return sugerencias.sort((a, b) => b.diasAtraso - a.diasAtraso);
-}
-
-function renderSugerenciasRecuperacionCartera() {
-    const cont = document.getElementById('sugerenciasRecuperacionArea');
-    if (!cont) return;
-    const sugerencias = obtenerSugerenciasRecuperacionCartera();
-    if (sugerencias.length === 0) { cont.innerHTML = ''; return; }
-
-    const filas = sugerencias.map(s => `
-      <tr>
-        <td style="padding:8px;">${s.vendedorNombre}</td>
-        <td style="padding:8px;">${s.clienteNombre}<br><small style="color:#94a3b8;">${s.folio}</small></td>
-        <td style="padding:8px;max-width:200px;">${window.resumenProductosVenta(s.articulos)}</td>
-        <td style="padding:8px;text-align:center;color:#b45309;font-weight:bold;">${s.diasAtraso} días</td>
-        <td style="padding:8px;">${s.fechaRecuperacion}</td>
-        <td style="padding:8px;text-align:center;display:flex;gap:6px;justify-content:center;">
-          <button onclick="otorgarComisionRecuperacion('${s.folio}', ${s.vendedorId})" style="padding:6px 10px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">➕ Dar comisión</button>
-          <button onclick="descartarSugerenciaRecuperacion('${s.folio}')" style="padding:6px 10px;background:#e5e7eb;color:#4b5563;border:none;border-radius:4px;cursor:pointer;font-size:12px;">🚫 Descartar</button>
-        </td>
-      </tr>`).join('');
-
-    cont.innerHTML = `
-      <div style="background:#fffbeb;border:1px solid #fde68a;padding:20px;border-radius:10px;">
-        <h3 style="margin:0 0 6px;color:#b45309;">💡 Sugerencias: recuperación de cartera en atraso</h3>
-        <p style="margin:0 0 14px;font-size:13px;color:#92400e;">Estas cuentas se saldaron después de estar en atraso. No se otorga comisión automáticamente: revisa y decide si aplica un extra por la gestión de cobranza.</p>
-        <div style="overflow-x:auto;">
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#fef3c7;">
-              <th style="padding:8px;text-align:left;">Vendedor</th>
-              <th style="padding:8px;text-align:left;">Cliente</th>
-              <th style="padding:8px;text-align:left;">Producto(s)</th>
-              <th style="padding:8px;text-align:center;">Días de atraso</th>
-              <th style="padding:8px;text-align:left;">Recuperada el</th>
-              <th style="padding:8px;text-align:center;">Acción</th>
-            </tr></thead>
-            <tbody>${filas}</tbody>
-          </table>
-        </div>
       </div>`;
 }
-
-function otorgarComisionRecuperacion(folio, vendedorId) {
-    const vendedores = StorageService.get('vendedores', []);
-    const v = vendedores.find(x => String(x.id) === String(vendedorId));
-    if (!v) return;
-    const entrada = prompt(`Monto de comisión extra por recuperar la cuenta ${folio} (se redondeará al siguiente 10):`, '');
-    if (entrada === null) return;
-    const monto = _redondearComisionSiguienteDiez(parseFloat(entrada) || 0);
-    if (monto <= 0) return alert('⚠️ Ingresa un monto válido.');
-    const comisiones = StorageService.get('comisionesRegistradas', []);
-    comisiones.push({
-        id: Date.now(),
-        vendedorId: v.id,
-        vendedorNombre: v.nombre,
-        folio,
-        totalVenta: 0,
-        montoComision: monto,
-        fecha: Date.now(),
-        tipo: 'recuperacion_cartera',
-        estado: 'Pendiente'
-    });
-    StorageService.set('comisionesRegistradas', comisiones);
-    renderGestionVendedores();
-}
-
-function descartarSugerenciaRecuperacion(folio) {
-    const descartadas = StorageService.get('sugerenciasComisionDescartadas', []);
-    if (!descartadas.includes(folio)) descartadas.push(folio);
-    StorageService.set('sugerenciasComisionDescartadas', descartadas);
-    renderSugerenciasRecuperacionCartera();
-}
-
 function abrirFormVendedor(id) {
     const vendedores = StorageService.get('vendedores', []);
     const v = id ? vendedores.find(x => x.id === id) : null;
@@ -1526,7 +1405,6 @@ function renderComisionesAbono() {
       </tr>`).join('');
 
     cont.innerHTML = `
-      <div id="bonoSaldadaArea"></div>
       <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Comisión que se genera por cada <strong>abono de crédito</strong> cobrado en las cuentas de cada vendedor. Se maneja <strong>aparte</strong> de la comisión de venta: tiene su propio saldo, su propia liquidación y no se compensa con anticipos. El % se define por vendedor (✏️ Editar vendedor).</p>
       ${hay ? '' : '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;">Ningún vendedor tiene % por abono. Entra a <strong>✏️ Editar</strong> en la tabla de vendedores y captura el <strong>% Comisión por ABONO</strong>: desde ese momento cada abono nuevo genera su comisión.</div>'}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;">
@@ -1577,7 +1455,6 @@ function renderComisionesAbono() {
         </table>
       </div>
       ${historial.length === 200 ? '<p style="font-size:12px;color:#9ca3af;margin:8px 0 0;">Se muestran los 200 más recientes.</p>' : ''}`;
-    renderBonoCuentaSaldada();
 }
 
 function abrirModalLiquidacionComisionAbono(vendedorId, hastaISO) {
@@ -1961,188 +1838,178 @@ function calcularBonosCuentaSaldada(filtros) {
     return { pendientes, reservadas, sinInteres, pct };
 }
 
-function _bonoAnticipoPendiente(vendedorId) {
-    return StorageService.get('anticiposComisionVendedor', [])
-        .filter(a => String(a.vendedorId) === String(vendedorId))
-        .reduce((s, a) => s + _anticipoSaldoPendiente(a), 0);
-}
-
-// Igual que calcularLiquidacionVendedor: bonos por pagar − anticipos sin liquidar.
-function calcularLiquidacionBonoVendedor(vendedorId, filtros) {
-    const r = calcularBonosCuentaSaldada({ ...(filtros || _bonoFiltros()), vendedor: String(vendedorId) });
-    const pendiente = _bonoRound2(r.pendientes.reduce((s, x) => s + x.monto, 0));
-    const anticipoPendiente = _bonoAnticipoPendiente(vendedorId);
-    return {
-        items: r.pendientes, pendiente, anticipoPendiente,
-        anticipoAplicado: Math.min(pendiente, anticipoPendiente),
-        anticipoSobrante: Math.max(0, anticipoPendiente - pendiente),
-        porPagar: Math.max(0, pendiente - anticipoPendiente)
-    };
-}
-
 function _bonoProductosHTML(articulos) {
     if (typeof window.resumenProductosVenta === 'function') return window.resumenProductosVenta(articulos);
     const nombres = (Array.isArray(articulos) ? articulos : []).filter(a => a && a.nombre).map(a => a.nombre);
     return nombres.length ? _vendEsc(nombres.join(', ')) : '<span style="color:#9ca3af;">Sin detalle</span>';
 }
 
+function _bonoSel() {
+    const st = window._comisionesVendedoresState;
+    return st.bonoSel || (st.bonoSel = {});
+}
+
+function _bonoToggleSel(id, on) {
+    const sel = _bonoSel();
+    if (on) sel[id] = true; else delete sel[id];
+    renderBonoCuentaSaldada();
+}
+
+function _bonoSelTodasVendedor(vendedorId, on) {
+    const sel = _bonoSel();
+    calcularBonosCuentaSaldada(_bonoFiltros()).pendientes
+        .filter(x => String(x.vendedorId) === String(vendedorId))
+        .forEach(x => { if (on) sel[x.id] = true; else delete sel[x.id]; });
+    renderBonoCuentaSaldada();
+}
+
+function _bonoSetHistEstado(valor) {
+    window._comisionesVendedoresState.bonoHistEstado = valor;
+    renderBonoCuentaSaldada();
+}
+
+// Cuentas saldadas que hoy se pueden bonificar para ese vendedor, de entre las ids elegidas.
+// Se resuelve sin rango: lo que importa es lo que el usuario seleccionó.
+function _bonoResolverSeleccion(vendedorId, ids) {
+    const set = new Set(ids);
+    return calcularBonosCuentaSaldada({ desde: '', hasta: '', vendedor: String(vendedorId) })
+        .pendientes.filter(x => set.has(x.id));
+}
+
 function renderBonoCuentaSaldada() {
     const cont = document.getElementById('bonoSaldadaArea');
     if (!cont) return;
     sincronizarBonosCuentaSaldada();
+    const st = window._comisionesVendedoresState;
     const f = _bonoFiltros();
     const cfg = _bonoConfig();
     const vendedores = StorageService.get('vendedores', []);
     const r = calcularBonosCuentaSaldada(f);
     const vista = _bonoVistaLista();
-    const totalReservado = _bonoRound2(r.reservadas.reduce((s, x) => s + x.montoVivo, 0));
-    const totalPorPagar = _bonoRound2(r.pendientes.reduce((s, x) => s + x.monto, 0));
-    const totalPagado = _bonoRound2(vista.filter(x => x.estadoVivo === 'Pagada' && (!f.vendedor || String(x.vendedorId) === String(f.vendedor))).reduce((s, x) => s + x.montoVivo, 0));
-    const porRevisar = vista.filter(x => x.notaVivo).length;
+    const enVend = (vid) => !f.vendedor || String(vid) === String(f.vendedor);
     const esAdmin = typeof _esAdmin === 'function' && _esAdmin();
 
-    const ids = new Set([...r.pendientes.map(x => String(x.vendedorId)), ...r.reservadas.map(x => String(x.vendedorId))]);
-    const filasVend = vendedores.filter(v => ids.has(String(v.id))).map(v => {
-        const liq = calcularLiquidacionBonoVendedor(v.id, f);
-        const reservado = _bonoRound2(r.reservadas.filter(x => String(x.vendedorId) === String(v.id)).reduce((s, x) => s + x.montoVivo, 0));
-        return `<tr style="border-bottom:1px solid #f3f4f6;">
-          <td style="padding:10px;">${_vendEsc(v.nombre)}</td>
-          <td style="padding:10px;text-align:right;color:#6b7280;">${dinero(reservado)}</td>
-          <td style="padding:10px;text-align:center;">${liq.items.length}</td>
-          <td style="padding:10px;text-align:right;color:#d97706;">${dinero(liq.pendiente)}</td>
-          <td style="padding:10px;text-align:right;color:#dc2626;">${liq.anticipoPendiente > 0 ? '- ' + dinero(liq.anticipoPendiente) : dinero(0)}</td>
-          <td style="padding:10px;text-align:right;font-weight:bold;color:${liq.porPagar > 0 ? '#7c3aed' : '#16a34a'};">${dinero(liq.porPagar)}</td>
-          <td style="padding:10px;text-align:center;">${liq.items.length ? `<button onclick="abrirModalLiquidacionBonoSaldada(${v.id})" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🧮 Liquidar</button>` : '<span style="color:#9ca3af;font-size:12px;">sin saldadas</span>'}</td>
-        </tr>`;
-    }).join('');
+    // La selección solo conserva cuentas que siguen por pagar en la lista visible.
+    const sel = _bonoSel();
+    const visibles = new Set(r.pendientes.map(x => x.id));
+    Object.keys(sel).forEach(id => { if (!visibles.has(id)) delete sel[id]; });
+
+    const totalReservado = _bonoRound2(r.reservadas.reduce((s, x) => s + x.montoVivo, 0));
+    const totalPorPagar = _bonoRound2(r.pendientes.reduce((s, x) => s + x.monto, 0));
+    const totalPagado = _bonoRound2(vista.filter(x => x.estadoVivo === 'Pagada' && enVend(x.vendedorId)).reduce((s, x) => s + x.montoVivo, 0));
+    const porRevisar = vista.filter(x => x.notaVivo && enVend(x.vendedorId)).length;
 
     const celdaCuenta = (x) => `${_bonoProductosHTML(x.articulos)}<br><small style="color:#6b7280;">${_vendEsc(x.clienteNombre)} · <span style="font-size:10px;">${_vendEsc(x.folioCXC)}</span></small>`;
-    const filasPend = r.pendientes.map(x => `<tr style="border-bottom:1px solid #f3f4f6;">
-        <td style="padding:8px;">${celdaCuenta(x)}${x.sinReserva ? '<br><small style="color:#92400e;">sin reserva previa</small>' : ''}</td>
+    const grupos = {};
+    r.pendientes.forEach(x => { (grupos[String(x.vendedorId)] = grupos[String(x.vendedorId)] || []).push(x); });
+    const bloques = Object.keys(grupos).map(vid => {
+        const items = grupos[vid];
+        const v = vendedores.find(x => String(x.id) === vid);
+        const elegidas = items.filter(x => sel[x.id]);
+        const totalElegido = _bonoRound2(elegidas.reduce((s, x) => s + x.monto, 0));
+        const todas = elegidas.length === items.length;
+        const filas = items.map(x => `<tr style="border-bottom:1px solid #f3f4f6;${sel[x.id] ? 'background:#f5f3ff;' : ''}">
+            <td style="padding:8px;text-align:center;"><input type="checkbox" ${sel[x.id] ? 'checked' : ''} onchange="_bonoToggleSel('${_vendEsc(x.id)}', this.checked)" style="width:18px;height:18px;"></td>
+            <td style="padding:8px;">${celdaCuenta(x)}${x.sinReserva ? '<br><small style="color:#92400e;">sin reserva previa</small>' : ''}</td>
+            <td style="padding:8px;text-align:center;">${_comAbonoFechaCorta(x.fechaSaldada)}</td>
+            <td style="padding:8px;text-align:right;">${dinero(x.interesBase)}</td>
+            <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
+            <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.monto)}</td>
+          </tr>`).join('');
+        return `<div style="background:white;border-radius:10px;padding:14px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            <strong style="color:#0f172a;">${_vendEsc(v ? v.nombre : (items[0].vendedorNombre || 'Vendedor'))} <small style="color:#6b7280;font-weight:normal;">· ${items.length} cuenta(s) saldada(s)</small></strong>
+            <button onclick="_bonoSelTodasVendedor(${Number(vid)}, ${todas ? 'false' : 'true'})" style="padding:5px 10px;background:#ede9fe;color:#5b21b6;border:none;border-radius:6px;cursor:pointer;font-size:12px;">${todas ? 'Quitar selección' : 'Seleccionar todas'}</button>
+          </div>
+          <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;"></th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:right;">Interés cobrado</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th></tr></thead>
+            <tbody>${filas}</tbody></table></div>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+            <button ${elegidas.length ? '' : 'disabled'} onclick="abrirModalLiquidacionBonoSaldada(${Number(vid)})" style="padding:10px 16px;background:${elegidas.length ? '#7c3aed' : '#d1d5db'};color:white;border:none;border-radius:6px;cursor:${elegidas.length ? 'pointer' : 'not-allowed'};font-weight:bold;font-size:13px;">🏁 Dar bono a ${elegidas.length} seleccionada(s) · ${dinero(totalElegido)}</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    const estHist = st.bonoHistEstado || '';
+    const color = { Reservada: '#6b7280', Pendiente: '#d97706', Pagada: '#16a34a', Anulada: '#9ca3af' };
+    const hist = vista.filter(x => enVend(x.vendedorId) && (!estHist || x.estadoVivo === estHist))
+        .sort((a, b) => String(_bonoFechaDe(b.fechaPago || b.fecha)).localeCompare(String(_bonoFechaDe(a.fechaPago || a.fecha)))).slice(0, 200);
+    const filasHist = hist.map(x => `<tr style="border-bottom:1px solid #f3f4f6;">
         <td style="padding:8px;">${_vendEsc(x.vendedorNombre)}</td>
-        <td style="padding:8px;text-align:center;">${_comAbonoFechaCorta(x.fechaSaldada)}</td>
-        <td style="padding:8px;text-align:right;">${dinero(x.capital)}</td>
-        <td style="padding:8px;text-align:right;">${dinero(x.cobrado)}</td>
-        <td style="padding:8px;text-align:right;">${dinero(x.interesBase)}</td>
-        <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
-        <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.monto)}</td>
-      </tr>`).join('');
-    const filasRes = r.reservadas.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))).map(x => `<tr style="border-bottom:1px solid #f3f4f6;">
         <td style="padding:8px;">${celdaCuenta(x)}</td>
-        <td style="padding:8px;">${_vendEsc(x.vendedorNombre)}</td>
-        <td style="padding:8px;text-align:center;">${_comAbonoFechaCorta(x.fecha)}</td>
-        <td style="padding:8px;text-align:right;">${dinero(x.interesVivo)}</td>
+        <td style="padding:8px;text-align:right;">${dinero(x.interesVivo ?? x.interesBase ?? x.interesPactado ?? 0)}</td>
         <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
         <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.montoVivo)}</td>
+        <td style="padding:8px;text-align:center;">${x.fechaSaldada || x.fechaSaldadaVivo ? _comAbonoFechaCorta(x.fechaSaldada || x.fechaSaldadaVivo) : '-'}</td>
+        <td style="padding:8px;text-align:center;color:${color[x.estadoVivo] || '#374151'};font-weight:bold;">${_vendEsc(x.estadoVivo)}${x.fechaPago ? `<br><small style="font-weight:normal;">${_comAbonoFechaCorta(x.fechaPago)}</small>` : ''}${x.notaVivo ? `<br><small title="${_vendEsc(x.notaVivo)}" style="color:#dc2626;cursor:help;font-weight:normal;">⚠ revisar</small>` : ''}${x.estadoVivo === 'Anulada' && (x.motivoAnulacion || x.motivoVivo) ? `<br><small title="${_vendEsc(x.motivoAnulacion || x.motivoVivo)}" style="color:#9ca3af;cursor:help;font-weight:normal;">motivo</small>` : ''}</td>
       </tr>`).join('');
 
     const inp = 'padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;';
     const lbl = 'font-size:12px;font-weight:bold;color:#374151;';
     cont.innerHTML = `
-      <div style="border:2px solid #ddd6fe;background:#faf5ff;border-radius:12px;padding:16px;margin-bottom:24px;">
-        <h4 style="margin:0 0 4px;color:#5b21b6;">🏁 Bono por cuenta saldada</h4>
-        <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Al hacer una venta a crédito se crea una <strong>reserva</strong> (% del interés pactado). Cuando la cuenta se <strong>salda</strong>, el bono queda por pagar con los <strong>intereses realmente cobrados</strong> (el precio del producto no cuenta: ya se pagó como comisión de venta). Se liquida por vendedor, descontando anticipos, igual que la comisión de venta.</p>
-        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">
-          <div><label style="${lbl}">% DE LOS INTERESES</label><br><input type="number" min="0" max="100" step="0.5" value="${cfg.porcentaje}" onchange="_bonoGuardarPct(this.value)" style="width:90px;${inp}"><br><small style="color:#9ca3af;font-size:10px;">aplica a ventas nuevas</small></div>
-          <div><label style="${lbl}">SALDADAS DESDE</label><br><input type="date" value="${_vendEsc(f.desde)}" onchange="_bonoSetFiltro('desde', this.value)" style="${inp}"></div>
-          <div><label style="${lbl}">HASTA</label><br><input type="date" value="${_vendEsc(f.hasta)}" onchange="_bonoSetFiltro('hasta', this.value)" style="${inp}"></div>
-          <div><label style="${lbl}">VENDEDOR</label><br>
-            <select onchange="_bonoSetFiltro('vendedor', this.value)" style="${inp}">
-              <option value="">Todos</option>
-              ${vendedores.map(v => `<option value="${v.id}" ${String(f.vendedor) === String(v.id) ? 'selected' : ''}>${_vendEsc(v.nombre)}</option>`).join('')}
-            </select></div>
-          ${esAdmin ? `<button onclick="generarReservasCarteraVigente()" title="Crea la reserva de las cuentas a crédito vigentes que no la tienen (se devenga con la fecha de hoy)." style="padding:8px 12px;background:#ede9fe;color:#5b21b6;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 Reservar cartera vigente</button>` : ''}
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px;">
-          <div style="background:white;padding:12px;border-radius:10px;text-align:center;"><small style="color:#6b7280;">RESERVADO (CUENTAS VIGENTES)</small><br><strong style="font-size:20px;color:#6b7280;">${dinero(totalReservado)}</strong></div>
-          <div style="background:white;padding:12px;border-radius:10px;text-align:center;"><small style="color:#5b21b6;">POR PAGAR (SALDADAS EN RANGO)</small><br><strong style="font-size:20px;color:#5b21b6;">${dinero(totalPorPagar)}</strong></div>
-          <div style="background:white;padding:12px;border-radius:10px;text-align:center;"><small style="color:#16a34a;">PAGADO (BONOS)</small><br><strong style="font-size:20px;color:#16a34a;">${dinero(totalPagado)}</strong></div>
-          ${porRevisar ? `<div style="background:#fef2f2;padding:12px;border-radius:10px;text-align:center;"><small style="color:#dc2626;">POR REVISAR</small><br><strong style="font-size:20px;color:#dc2626;">${porRevisar}</strong><br><small style="color:#dc2626;">ver en Historial</small></div>` : ''}
-        </div>
-        ${r.sinInteres > 0 ? `<p style="margin:0 0 12px;font-size:12px;color:#92400e;">${r.sinInteres} cuenta(s) saldada(s) en el rango no generan bono porque no se cobraron intereses.</p>` : ''}
-        <div style="overflow-x:auto;margin-bottom:14px;">
-          <table style="width:100%;border-collapse:collapse;font-size:14px;">
-            <thead><tr style="background:#ede9fe;"><th style="padding:10px;text-align:left;">Vendedor</th><th style="padding:10px;text-align:right;">Reservado</th><th style="padding:10px;text-align:center;">Cuentas saldadas</th><th style="padding:10px;text-align:right;">Bono por pagar</th><th style="padding:10px;text-align:right;">Anticipo pendiente</th><th style="padding:10px;text-align:right;">Por pagar (neto)</th><th style="padding:10px;text-align:center;">Acción</th></tr></thead>
-            <tbody>${filasVend || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin reservas ni bonos por pagar en este rango.</td></tr>'}</tbody>
-          </table>
-        </div>
-        ${r.pendientes.length ? `<details style="margin-bottom:10px;"><summary style="cursor:pointer;font-weight:bold;color:#5b21b6;font-size:13px;">Detalle de cuentas saldadas por pagar (${r.pendientes.length})</summary>
-          <div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:left;">Vendedor</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:right;">Capital</th><th style="padding:8px;text-align:right;">Cobrado</th><th style="padding:8px;text-align:right;">Interés</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th></tr></thead>
-            <tbody>${filasPend}</tbody></table></div></details>` : ''}
-        ${r.reservadas.length ? `<details><summary style="cursor:pointer;font-weight:bold;color:#6b7280;font-size:13px;">Reservas de cuentas vigentes (${r.reservadas.length})</summary>
-          <div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:left;">Vendedor</th><th style="padding:8px;text-align:center;">Venta</th><th style="padding:8px;text-align:right;">Interés pactado</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Reserva</th></tr></thead>
-            <tbody>${filasRes}</tbody></table></div></details>` : ''}
-      </div>`;
-}
-
-// Bonos dentro del Historial de comisiones (mismos filtros: vendedor, estado, fechas).
-function _bonoHistorialHTML(f) {
-    const desde = f.desde || '', hasta = f.hasta || '';
-    const lista = _bonoVistaLista().filter(x => {
-        if (f.vendedorId && String(x.vendedorId) !== String(f.vendedorId)) return false;
-        if (f.estado && x.estadoVivo !== f.estado) return false;
-        const fe = _bonoFechaDe(x.fecha || x.fechaPago);
-        if (desde && fe < desde) return false;
-        if (hasta && fe > hasta) return false;
-        return true;
-    }).sort((a, b) => String(_bonoFechaDe(b.fecha || b.fechaPago)).localeCompare(String(_bonoFechaDe(a.fecha || a.fechaPago)))).slice(0, 300);
-    if (!lista.length && !_bonoLista().length) return '';
-    const color = { Reservada: '#6b7280', Pendiente: '#d97706', Pagada: '#16a34a', Anulada: '#9ca3af' };
-    const rows = lista.map(x => `<tr style="border-bottom:1px solid #f3f4f6;">
-        <td style="padding:8px;">${_vendEsc(x.vendedorNombre)}</td>
-        <td style="padding:8px;">${_bonoProductosHTML(x.articulos)}<br><small style="color:#6b7280;">${_vendEsc(x.clienteNombre)} · <span style="font-size:10px;">${_vendEsc(x.folioCXC)}</span></small></td>
-        <td style="padding:8px;text-align:right;">${dinero(x.interesVivo ?? x.interesBase ?? x.interesPactado ?? 0)}</td>
-        <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
-        <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.montoVivo)}</td>
-        <td style="padding:8px;text-align:center;">${_comAbonoFechaCorta(_bonoFechaDe(x.fecha || x.fechaPago))}</td>
-        <td style="padding:8px;text-align:center;">${x.fechaSaldada || x.fechaSaldadaVivo ? _comAbonoFechaCorta(x.fechaSaldada || x.fechaSaldadaVivo) : '-'}</td>
-        <td style="padding:8px;text-align:center;color:${color[x.estadoVivo] || '#374151'};font-weight:bold;">${_vendEsc(x.estadoVivo)}${x.fechaPago ? `<br><small style="font-weight:normal;">${_comAbonoFechaCorta(x.fechaPago)}</small>` : ''}${x.notaVivo ? `<br><small title="${_vendEsc(x.notaVivo)}" style="color:#dc2626;cursor:help;font-weight:normal;">⚠ revisar</small>` : ''}${x.estadoVivo === 'Anulada' && (x.motivoAnulacion || x.motivoVivo) ? `<br><small title="${_vendEsc(x.motivoAnulacion || x.motivoVivo)}" style="color:#9ca3af;cursor:help;font-weight:normal;">motivo</small>` : ''}</td>
-      </tr>`).join('');
-    return `
-      <h4 style="margin:24px 0 8px;color:#5b21b6;">🏁 Bonos por cuenta saldada <small style="font-weight:normal;color:#6b7280;">(${lista.length} registro(s))</small></h4>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-          <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Vendedor</th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:right;">Interés</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th><th style="padding:8px;text-align:center;">Venta</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:center;">Estado</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="8" style="padding:16px;text-align:center;color:#9ca3af;">Sin bonos con estos filtros.</td></tr>'}</tbody>
-        </table>
-      </div>`;
+      <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Bono aparte de la comisión por venta y de la comisión por abono. Al vender a crédito se crea una <strong>reserva</strong> (% del interés pactado); cuando la cuenta se <strong>salda</strong> queda disponible aquí con los <strong>intereses realmente cobrados</strong> (el precio del producto no cuenta: ya se pagó como comisión de venta). Tú eliges qué cuentas saldadas bonificar.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">
+        <div><label style="${lbl}">% DE LOS INTERESES</label><br><input type="number" min="0" max="100" step="0.5" value="${cfg.porcentaje}" onchange="_bonoGuardarPct(this.value)" style="width:90px;${inp}"><br><small style="color:#9ca3af;font-size:10px;">las reservas ya hechas conservan su %</small></div>
+        <div><label style="${lbl}">SALDADAS DESDE</label><br><input type="date" value="${_vendEsc(f.desde)}" onchange="_bonoSetFiltro('desde', this.value)" style="${inp}"></div>
+        <div><label style="${lbl}">HASTA</label><br><input type="date" value="${_vendEsc(f.hasta)}" onchange="_bonoSetFiltro('hasta', this.value)" style="${inp}"></div>
+        <div><label style="${lbl}">VENDEDOR</label><br>
+          <select onchange="_bonoSetFiltro('vendedor', this.value)" style="${inp}">
+            <option value="">Todos</option>
+            ${vendedores.map(v => `<option value="${v.id}" ${String(f.vendedor) === String(v.id) ? 'selected' : ''}>${_vendEsc(v.nombre)}</option>`).join('')}
+          </select></div>
+        ${esAdmin ? `<button onclick="generarReservasCarteraVigente()" title="Crea la reserva de las cuentas a crédito vigentes que no la tienen (se devenga con la fecha de hoy)." style="padding:8px 12px;background:#ede9fe;color:#5b21b6;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 Reservar cartera vigente</button>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;">
+        <div style="background:#f9fafb;padding:12px;border-radius:10px;text-align:center;"><small style="color:#6b7280;">RESERVADO (CUENTAS VIGENTES)</small><br><strong style="font-size:20px;color:#6b7280;">${dinero(totalReservado)}</strong></div>
+        <div style="background:#faf5ff;padding:12px;border-radius:10px;text-align:center;"><small style="color:#5b21b6;">SALDADAS POR BONIFICAR</small><br><strong style="font-size:20px;color:#5b21b6;">${dinero(totalPorPagar)}</strong></div>
+        <div style="background:#f0fdf4;padding:12px;border-radius:10px;text-align:center;"><small style="color:#16a34a;">BONOS PAGADOS</small><br><strong style="font-size:20px;color:#16a34a;">${dinero(totalPagado)}</strong></div>
+        ${porRevisar ? `<div style="background:#fef2f2;padding:12px;border-radius:10px;text-align:center;"><small style="color:#dc2626;">POR REVISAR</small><br><strong style="font-size:20px;color:#dc2626;">${porRevisar}</strong></div>` : ''}
+      </div>
+      ${r.sinInteres > 0 ? `<p style="margin:0 0 12px;font-size:12px;color:#92400e;">${r.sinInteres} cuenta(s) saldada(s) en el rango no generan bono porque no se cobraron intereses.</p>` : ''}
+      <h4 style="margin:0 0 10px;color:#5b21b6;">Ventas saldadas en el rango</h4>
+      ${bloques || '<p style="color:#9ca3af;text-align:center;padding:16px;">No hay ventas saldadas pendientes de bono en este rango.</p>'}
+      <h4 style="margin:24px 0 8px;color:#374151;">Historial de bonos</h4>
+      <div style="margin-bottom:10px;"><select onchange="_bonoSetHistEstado(this.value)" style="${inp}">
+        ${['', 'Reservada', 'Pendiente', 'Pagada', 'Anulada'].map(e => `<option value="${e}" ${estHist === e ? 'selected' : ''}>${e || 'Todos los estados'}</option>`).join('')}
+      </select></div>
+      <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Vendedor</th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:right;">Interés</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:center;">Estado</th></tr></thead>
+        <tbody>${filasHist || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin bonos con este filtro.</td></tr>'}</tbody>
+      </table></div>`;
 }
 
 function abrirModalLiquidacionBonoSaldada(vendedorId) {
     const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
     if (!v) return alert('Vendedor no encontrado.');
     sincronizarBonosCuentaSaldada();
-    const f = { ..._bonoFiltros() };
-    const liq = calcularLiquidacionBonoVendedor(vendedorId, f);
-    if (!liq.items.length || liq.pendiente <= 0) return alert('⚠️ No hay bonos por cuenta saldada pendientes para este vendedor en el rango.');
-    const interes = liq.items.reduce((s, x) => s + x.interesBase, 0);
-    window._bonoLiqSnapshot = { vendedorId: String(vendedorId), desde: f.desde, hasta: f.hasta, n: liq.items.length, pendiente: liq.pendiente };
+    const sel = _bonoSel();
+    const ids = Object.keys(sel);
+    const items = _bonoResolverSeleccion(vendedorId, ids);
+    const total = _bonoRound2(items.reduce((s, x) => s + x.monto, 0));
+    if (!items.length || total <= 0) return alert('⚠️ Selecciona al menos una cuenta saldada de este vendedor.');
+    const interes = items.reduce((s, x) => s + x.interesBase, 0);
+    window._bonoLiqSnapshot = { vendedorId: String(vendedorId), ids: items.map(x => x.id), n: items.length, total };
     const html = `
     <div data-modal="liquidacion-bono-saldada" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;padding:16px;">
-      <div style="background:white;padding:30px;border-radius:12px;width:100%;max-width:440px;">
-        <h2 style="margin-top:0;color:#7c3aed;">🏁 Liquidar bono por cuentas saldadas</h2>
-        <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(v.nombre)}</strong><br><span style="font-size:12px;color:#9ca3af;">Saldadas del ${_comAbonoFechaCorta(f.desde)} al ${_comAbonoFechaCorta(f.hasta)}</span></p>
+      <div style="background:white;padding:30px;border-radius:12px;width:100%;max-width:440px;max-height:92vh;overflow-y:auto;">
+        <h2 style="margin-top:0;color:#7c3aed;">🏁 Dar bono por cuentas saldadas</h2>
+        <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(v.nombre)}</strong></p>
         <div style="background:#f9fafb;border-radius:8px;padding:14px;margin-bottom:16px;font-size:14px;">
-          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Cuentas saldadas</span><strong>${liq.items.length}</strong></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Cuentas seleccionadas</span><strong>${items.length}</strong></div>
           <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Intereses cobrados</span><strong>${dinero(interes)}</strong></div>
-          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Bonos no pagados</span><strong style="color:#d97706;">${dinero(liq.pendiente)}</strong></div>
-          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Anticipos aplicados</span><strong style="color:#dc2626;">- ${dinero(liq.anticipoAplicado)}</strong></div>
-          <div style="display:flex;justify-content:space-between;padding:8px 0 0;border-top:1px solid #e5e7eb;margin-top:6px;"><span style="font-weight:bold;">Por pagar (neto)</span><strong style="color:#7c3aed;font-size:17px;">${dinero(liq.porPagar)}</strong></div>
-          ${liq.anticipoSobrante > 0 ? `<p style="margin:10px 0 0;font-size:12px;color:#6b7280;">El anticipo cubre todo y le sobran ${dinero(liq.anticipoSobrante)}, que quedan como saldo de anticipo.</p>` : ''}
+          <div style="display:flex;justify-content:space-between;padding:8px 0 0;border-top:1px solid #e5e7eb;margin-top:6px;"><span style="font-weight:bold;">Bono total</span><strong style="color:#7c3aed;font-size:17px;">${dinero(total)}</strong></div>
         </div>
         <div style="margin-bottom:14px;">
-          <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO NETO A DESEMBOLSAR</label>
-          <input type="number" id="liqBonoSaldadaMonto" min="0" step="0.01" value="${liq.porPagar.toFixed(2)}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
+          <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">MONTO A DESEMBOLSAR</label>
+          <input type="number" id="liqBonoSaldadaMonto" min="0" step="0.01" value="${total.toFixed(2)}" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;">
           <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Puedes ajustarlo si acordaste pagar un monto distinto.</p>
         </div>
-        ${liq.porPagar > 0 ? `<div style="margin-bottom:20px;">
+        <div style="margin-bottom:20px;">
           <label style="font-weight:bold;font-size:13px;color:#374151;display:block;margin-bottom:5px;">¿DE QUÉ CAJA/CUENTA SALE?</label>
           ${window._buildSelectorCuentas('liqBonoSaldadaCuenta', false)}
-        </div>` : '<p style="margin:0 0 20px;font-size:12px;color:#16a34a;">No hay salida de caja: el anticipo cubre todo lo pendiente.</p>'}
+        </div>
         <div style="display:flex;gap:10px;">
-          <button onclick="ejecutarLiquidacionBonoSaldada()" style="flex:1;padding:12px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar Liquidación</button>
+          <button onclick="ejecutarLiquidacionBonoSaldada()" style="flex:1;padding:12px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✅ Confirmar</button>
           <button onclick="document.querySelector('[data-modal=&quot;liquidacion-bono-saldada&quot;]').remove()" style="flex:1;padding:12px;background:#e5e7eb;color:#4b5563;border:none;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cancelar</button>
         </div>
       </div>
@@ -2150,69 +2017,46 @@ function abrirModalLiquidacionBonoSaldada(vendedorId) {
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
-// Consume anticipos pendientes (FIFO por fecha): compensación interna, no mueve caja.
-function _bonoConsumirAnticiposFIFO(vendedorId, monto) {
-    if (monto <= 0.005) return;
-    const anticipos = StorageService.get('anticiposComisionVendedor', []);
-    let restante = monto;
-    const parse = (x) => (window.parseFechaMX ? window.parseFechaMX(x) : new Date(x));
-    const ordenados = anticipos.map((a, idx) => ({ a, idx }))
-        .filter(x => String(x.a.vendedorId) === String(vendedorId) && _anticipoSaldoPendiente(x.a) > 0)
-        .sort((x, y) => parse(x.a.fecha) - parse(y.a.fecha));
-    for (const { a, idx } of ordenados) {
-        if (restante <= 0.005) break;
-        const saldo = _anticipoSaldoPendiente(a);
-        const aplicar = Math.min(saldo, restante);
-        const nuevoSaldo = Math.max(0, saldo - aplicar);
-        const liquidaciones = Array.isArray(a.liquidaciones) ? a.liquidaciones.slice() : [];
-        liquidaciones.push({ monto: aplicar, metodo: 'aplicado_a_bono_cuenta_saldada', fecha: window.localISO ? window.localISO(new Date()) : new Date().toISOString() });
-        anticipos[idx] = { ...a, saldoPendiente: nuevoSaldo, liquidaciones, estado: nuevoSaldo <= 0.01 ? 'Liquidado' : 'Pendiente' };
-        restante -= aplicar;
-    }
-    StorageService.set('anticiposComisionVendedor', anticipos);
-}
-
 function ejecutarLiquidacionBonoSaldada() {
     const snap = window._bonoLiqSnapshot;
-    if (!snap) return alert('No se pudo leer la liquidación. Cierra y vuelve a abrirla.');
+    if (!snap) return alert('No se pudo leer el pago. Cierra y vuelve a abrirlo.');
     const v = StorageService.get('vendedores', []).find(x => String(x.id) === snap.vendedorId);
     if (!v) return alert('Vendedor no encontrado.');
     sincronizarBonosCuentaSaldada();
 
-    // Se recalcula con los mismos parámetros: si algo cambió desde que se abrió el modal, no se paga.
-    const liq = calcularLiquidacionBonoVendedor(snap.vendedorId, { desde: snap.desde, hasta: snap.hasta });
-    if (!liq.items.length || liq.pendiente <= 0) return alert('⚠️ No hay nada que liquidar.');
-    if (liq.items.length !== snap.n || Math.abs(liq.pendiente - snap.pendiente) > 0.005) {
+    // Se recalcula con lo seleccionado: si algo cambió desde que se abrió el modal, no se paga.
+    const items = _bonoResolverSeleccion(snap.vendedorId, snap.ids);
+    const total = _bonoRound2(items.reduce((s, x) => s + x.monto, 0));
+    if (!items.length || total <= 0) return alert('⚠️ No hay nada que pagar.');
+    if (items.length !== snap.n || Math.abs(total - snap.total) > 0.005) {
         document.querySelector('[data-modal="liquidacion-bono-saldada"]')?.remove();
         renderBonoCuentaSaldada();
-        return alert('Los datos cambiaron desde que abriste la liquidación. Nada se aplicó: revisa los nuevos montos y vuelve a intentar.');
+        return alert('Los datos cambiaron desde que abriste el pago. Nada se aplicó: revisa los nuevos montos y vuelve a intentar.');
     }
 
-    const montoNeto = Math.max(0, Number(document.getElementById('liqBonoSaldadaMonto')?.value) || 0);
+    const montoNeto = _bonoRound2(Number(document.getElementById('liqBonoSaldadaMonto')?.value) || 0);
+    if (montoNeto <= 0) return alert('⚠️ Ingresa un monto a desembolsar mayor a cero.');
+    const sel = document.getElementById('liqBonoSaldadaCuenta');
+    if (!sel) return alert('No se pudo leer la cuenta seleccionada.');
+    if (typeof window._egresarCuenta !== 'function') return alert('No se pudo registrar el pago: el módulo de caja no está disponible. Nada se aplicó.');
+    const cuentaId = sel.value;
+    const etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
     const hoy = _comAbonoFechaISO('');
     const lote = `LIQ-BONO-SALDADA-${v.id}-${Date.now()}`;
-    let cuentaId = '', etiqueta = '';
 
-    // 1. El egreso de caja se confirma ANTES de tocar bonos o anticipos: si falla, nada se aplica.
-    if (montoNeto > 0) {
-        const sel = document.getElementById('liqBonoSaldadaCuenta');
-        if (!sel) return alert('No se pudo leer la cuenta seleccionada.');
-        if (typeof window._egresarCuenta !== 'function') return alert('No se pudo registrar el pago: el módulo de caja no está disponible. Nada se aplicó.');
-        cuentaId = sel.value;
-        etiqueta = sel.options[sel.selectedIndex]?.text || cuentaId;
-        const ok = window._egresarCuenta({
-            monto: montoNeto, cuentaId, etiqueta,
-            concepto: `Bono por cuentas saldadas - ${v.nombre}`,
-            referencia: lote
-        });
-        if (!ok) return alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}". La liquidación NO se aplicó.`);
-    }
+    // 1. El egreso de caja se confirma ANTES de marcar nada: si falla, nada se aplica.
+    const ok = window._egresarCuenta({
+        monto: montoNeto, cuentaId, etiqueta,
+        concepto: `Bono por cuentas saldadas - ${v.nombre}`,
+        referencia: lote
+    });
+    if (!ok) return alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}". El bono NO se aplicó.`);
 
-    // 2. Marcar como pagados los bonos (los "sin reserva" se crean ya pagados).
+    // 2. Marcar como pagados (los "sin reserva" se crean ya pagados).
     try {
         const lista = _bonoLista();
         const idx = new Map(lista.map((b, i) => [b.id, i]));
-        liq.items.forEach(x => {
+        items.forEach(x => {
             const base = idx.has(x.id) ? lista[idx.get(x.id)] : null;
             const pagado = {
                 ...(base || {
@@ -2222,7 +2066,7 @@ function ejecutarLiquidacionBonoSaldada() {
                 }),
                 estado: 'Pagada', fechaSaldada: x.fechaSaldada, fechaPago: hoy,
                 capital: x.capital, cobrado: x.cobrado, interesBase: x.interesBase, porcentaje: x.porcentaje, montoBono: x.monto,
-                lote, cuentaPago: cuentaId, etiquetaCuentaPago: etiqueta
+                lote, montoDesembolsadoLote: montoNeto, cuentaPago: cuentaId, etiquetaCuentaPago: etiqueta
             };
             if (base) lista[idx.get(x.id)] = pagado; else lista.push(pagado);
         });
@@ -2232,23 +2076,19 @@ function ejecutarLiquidacionBonoSaldada() {
         return alert(`⚠️ El egreso de caja SÍ se registró (${dinero(montoNeto)}, ref. ${lote}) pero no se pudieron guardar los bonos. NO repitas el pago: revisa Finanzas.`);
     }
 
-    // 3. Anticipos (FIFO).
-    try { _bonoConsumirAnticiposFIFO(v.id, liq.anticipoAplicado); }
-    catch (e) { console.error('Bono por cuenta saldada: no se pudieron aplicar los anticipos', e); alert('⚠️ El pago y los bonos quedaron registrados, pero falló el descuento de anticipos. Revísalos en Anticipos.'); }
-
     if (window.AuditService?.log) {
         window.AuditService.log({
-            accion: 'BONOS_CUENTA_SALDADA_LIQUIDADOS', modulo: 'Vendedores', entidad: 'bonosCuentaSaldada',
-            entidadId: v.id, detalle: `Liquidación de bono por cuentas saldadas - ${v.nombre}`,
+            accion: 'BONOS_CUENTA_SALDADA_PAGADOS', modulo: 'Vendedores', entidad: 'bonosCuentaSaldada',
+            entidadId: v.id, detalle: `Bono por cuentas saldadas - ${v.nombre}`,
             monto: montoNeto, severidad: 'info',
-            datos: { cuentas: liq.items.map(x => x.folioCXC), bonosNoPagados: liq.pendiente, anticipoAplicado: liq.anticipoAplicado, montoNeto, periodo: { desde: snap.desde, hasta: snap.hasta }, lote }
+            datos: { cuentas: items.map(x => x.folioCXC), bonoCalculado: total, montoDesembolsado: montoNeto, lote }
         });
     }
+    const sel2 = _bonoSel();
+    items.forEach(x => { delete sel2[x.id]; });
     document.querySelector('[data-modal="liquidacion-bono-saldada"]')?.remove();
-    alert(`✅ Liquidación completada para ${v.nombre}.\n\nCuentas: ${liq.items.length}\nBonos no pagados: ${dinero(liq.pendiente)}\nAnticipos aplicados: ${dinero(liq.anticipoAplicado)}\nNeto desembolsado: ${dinero(montoNeto)}`);
-    renderGestionVendedores();
-    window._comisionesVendedoresState.tabActiva = 'abonos';
-    _renderTabComisionActiva();
+    alert(`✅ Bono pagado a ${v.nombre}.\n\nCuentas: ${items.length}\nBono calculado: ${dinero(total)}\nDesembolsado: ${dinero(montoNeto)}`);
+    renderBonoCuentaSaldada();
 }
 
 window.renderComisionesPendientes = renderComisionesPendientes;
@@ -2257,10 +2097,6 @@ window._limpiarFiltroHistorialComisiones = _limpiarFiltroHistorialComisiones;
 window.renderHistorialComisiones = renderHistorialComisiones;
 window.abrirModalLiquidacionComisiones = abrirModalLiquidacionComisiones;
 window.ejecutarLiquidacionComisiones = ejecutarLiquidacionComisiones;
-window.obtenerSugerenciasRecuperacionCartera = obtenerSugerenciasRecuperacionCartera;
-window.renderSugerenciasRecuperacionCartera = renderSugerenciasRecuperacionCartera;
-window.otorgarComisionRecuperacion = otorgarComisionRecuperacion;
-window.descartarSugerenciaRecuperacion = descartarSugerenciaRecuperacion;
 window.abrirModalAnticipoComision = abrirModalAnticipoComision;
 window.registrarAnticipoComision = registrarAnticipoComision;
 window.abrirModalLiquidarAnticipo = abrirModalLiquidarAnticipo;
@@ -2274,7 +2110,6 @@ window.abrirModalLiquidacionComisionAbono = abrirModalLiquidacionComisionAbono;
 window.ejecutarLiquidacionComisionAbono = ejecutarLiquidacionComisionAbono;
 window._comAbonoSetFiltro = _comAbonoSetFiltro;
 window.calcularBonosCuentaSaldada = calcularBonosCuentaSaldada;
-window.calcularLiquidacionBonoVendedor = calcularLiquidacionBonoVendedor;
 window.sincronizarBonosCuentaSaldada = sincronizarBonosCuentaSaldada;
 window.bonosCuentaSaldadaVista = _bonoVistaLista;
 window.generarReservasCarteraVigente = generarReservasCarteraVigente;
@@ -2283,3 +2118,6 @@ window.abrirModalLiquidacionBonoSaldada = abrirModalLiquidacionBonoSaldada;
 window.ejecutarLiquidacionBonoSaldada = ejecutarLiquidacionBonoSaldada;
 window._bonoSetFiltro = _bonoSetFiltro;
 window._bonoGuardarPct = _bonoGuardarPct;
+window._bonoToggleSel = _bonoToggleSel;
+window._bonoSelTodasVendedor = _bonoSelTodasVendedor;
+window._bonoSetHistEstado = _bonoSetHistEstado;
