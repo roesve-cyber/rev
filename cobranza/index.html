@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<!-- La app vive en /cobranza/; <base href="/"> hace que img/, js/ y vendor se resuelvan desde la raíz del sitio. -->
+<base href="/">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Cobranza | Mueblería Mi Pueblito</title>
+<link rel="manifest" href="/cobranza/manifest.json">
+<link rel="icon" type="image/svg+xml" href="img/icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
+<meta name="theme-color" content="#1e40af">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cobranza">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/services/calculator.js"></script>
+<script src="js/services/cobranza-risk-service.js"></script>
+<script src="/cobranza/motor.js"></script>
+<script src="js/services/imagen-whatsapp.js"></script>
+<style>
+:root {
+  --ink: #0f172a; --muted: #64748b; --paper: #eef2f7; --surface: #ffffff; --line: #dbe3ee;
+  --brand: #1e40af; --brand-2: #2563eb; --ok: #16a34a; --warn: #d97706; --danger: #dc2626; --violet: #7c3aed;
+  --r: 14px; --r-lg: 20px; --shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+html { height: 100%; overscroll-behavior-y: none; }
+body { font-family: var(--font); background: var(--paper); color: var(--ink); min-height: 100dvh; -webkit-font-smoothing: antialiased; overflow-x: hidden; user-select: none; -webkit-user-select: none; }
+input, select, textarea { user-select: text; -webkit-user-select: text; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; }
+input, select, textarea { width: 100%; padding: 13px; border: 1.5px solid var(--line); border-radius: 11px; background: var(--surface); font-size: 16px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand-2); }
+.oculto { display: none !important; }
+label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; color: var(--muted); margin: 12px 0 5px; text-transform: uppercase; }
+
+/* ===== LOGIN ===== */
+#pantallaLogin { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 22px; background: linear-gradient(180deg, #1e3a8a, #1e40af 60%, #2563eb); }
+.login-card { width: 100%; max-width: 380px; background: var(--surface); border-radius: var(--r-lg); padding: 26px 22px; box-shadow: var(--shadow); }
+.login-logo { width: 56px; height: 56px; margin: 0 auto 12px; display: block; object-fit: contain; }
+.login-card h1 { font-size: 20px; text-align: center; }
+.login-card p.sub { text-align: center; color: var(--muted); font-size: 13px; margin: 4px 0 18px; }
+#loginError { color: var(--danger); font-size: 13px; text-align: center; min-height: 18px; margin-top: 8px; }
+.btn-primario { width: 100%; padding: 14px; border-radius: 12px; background: var(--brand); color: #fff; font-weight: 800; font-size: 16px; margin-top: 14px; }
+.btn-primario:disabled { opacity: .6; }
+.btn-sec { padding: 12px 14px; border-radius: 12px; background: #e8eefc; color: var(--brand); font-weight: 800; font-size: 14px; }
+.btn-ok { background: var(--ok); color: #fff; }
+.btn-linea { border: 1.5px solid var(--line); background: #fff; color: var(--ink); }
+
+/* ===== APP ===== */
+.appbar { position: sticky; top: 0; z-index: 20; background: var(--brand); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 14px 10px; display: flex; align-items: center; gap: 10px; }
+.appbar h1 { font-size: 17px; flex: 1; line-height: 1.15; }
+.appbar small { display: block; font-size: 11.5px; opacity: .8; font-weight: 500; }
+.appbar button { color: #fff; font-size: 20px; padding: 6px 8px; border-radius: 10px; }
+.appbar button:active { background: rgba(255,255,255,.18); }
+#pantallaApp { padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
+.aviso-offline { background: #fef3c7; color: #92400e; font-size: 12.5px; font-weight: 700; text-align: center; padding: 6px; }
+.estado-datos { font-size: 11.5px; color: var(--muted); padding: 6px 14px 0; display: flex; gap: 8px; align-items: center; }
+.estado-datos button { color: var(--brand-2); font-weight: 800; font-size: 12px; text-decoration: underline; }
+
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px 4px; }
+.kpi { background: var(--surface); border-radius: 13px; padding: 10px 8px; text-align: center; box-shadow: 0 2px 8px rgba(15,23,42,.05); }
+.kpi small { display: block; font-size: 10.5px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.kpi b { font-size: 15px; display: block; margin-top: 2px; white-space: nowrap; }
+.buscador { padding: 8px 14px 4px; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 6px 14px 8px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; padding: 8px 13px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--line); font-size: 13px; font-weight: 800; color: #334155; white-space: nowrap; }
+.chip.activo { background: var(--brand); border-color: var(--brand); color: #fff; }
+.lista { padding: 4px 14px 12px; display: grid; gap: 10px; }
+.vacio { text-align: center; color: var(--muted); padding: 34px 10px; font-size: 14px; }
+
+.cta { background: var(--surface); border-radius: var(--r); padding: 13px 14px; box-shadow: 0 2px 10px rgba(15,23,42,.06); border-left: 6px solid #cbd5e1; cursor: pointer; }
+.cta:active { transform: scale(.99); }
+.cta .l1 { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.cta .nom { font-weight: 800; font-size: 15.5px; line-height: 1.2; word-break: break-word; }
+.cta .fol { font-size: 11.5px; color: var(--muted); margin-top: 2px; word-break: break-all; }
+.cta .saldo { font-weight: 900; font-size: 17px; white-space: nowrap; text-align: right; }
+.cta .l2 { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+.p-verde { background: #dcfce7; color: #166534; } .p-amarillo { background: #fef3c7; color: #92400e; }
+.p-rojo { background: #fee2e2; color: #991b1b; } .p-gris { background: #e2e8f0; color: #475569; }
+.p-azul { background: #dbeafe; color: #1e40af; } .p-violeta { background: #ede9fe; color: #5b21b6; }
+
+/* ===== NAV INFERIOR ===== */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--surface); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -4px 18px rgba(15,23,42,.07); }
+.nav button { padding: 9px 4px 8px; font-size: 11.5px; font-weight: 800; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.nav button span { font-size: 22px; line-height: 1; }
+.nav button.activo { color: var(--brand); }
+
+/* ===== FICHA (pantalla completa) ===== */
+#ficha { position: fixed; inset: 0; z-index: 40; background: var(--paper); overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+.ficha-barra { position: sticky; top: 0; z-index: 3; background: var(--brand); color: #fff; padding: calc(8px + env(safe-area-inset-top)) 8px 10px; display: flex; align-items: center; gap: 4px; }
+.ficha-barra button { color: #fff; font-size: 24px; padding: 4px 12px; border-radius: 10px; }
+.ficha-barra div { flex: 1; min-width: 0; }
+.ficha-barra b { display: block; font-size: 16px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ficha-barra small { font-size: 11.5px; opacity: .85; }
+.bloque { background: var(--surface); margin: 12px 14px 0; border-radius: var(--r); padding: 14px; box-shadow: 0 2px 10px rgba(15,23,42,.05); }
+.bloque h3 { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hero { text-align: center; padding: 8px 0 4px; }
+.hero small { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.hero b { display: block; font-size: 34px; font-weight: 900; line-height: 1.1; margin-top: 2px; }
+.fila { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eef2f7; font-size: 14.5px; }
+.fila:last-child { border-bottom: 0; }
+.fila span:first-child { color: var(--muted); flex-shrink: 0; }
+.fila span:last-child, .fila b { text-align: right; word-break: break-word; }
+.contacto { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+.contacto a { text-align: center; padding: 11px 4px; border-radius: 12px; background: #e8eefc; color: var(--brand); font-weight: 800; font-size: 13px; text-decoration: none; }
+.contacto a.wa { background: #dcfce7; color: #166534; }
+.acciones { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; background: var(--surface); border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; box-shadow: 0 -4px 18px rgba(15,23,42,.1); }
+.acciones button { padding: 13px 6px; border-radius: 13px; font-weight: 800; font-size: 13.5px; }
+.acciones .abono { background: var(--ok); color: #fff; font-size: 15px; }
+.acciones .img { background: #e8eefc; color: var(--brand); }
+
+.visor-tarjeta { border-radius: 14px; padding: 12px 13px; margin-bottom: 10px; }
+.visor-tarjeta .t { font-size: 12px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 4px; }
+.visor-tarjeta .g { font-size: 26px; font-weight: 900; line-height: 1.1; }
+.visor-tarjeta .s { font-size: 13.5px; margin-top: 4px; line-height: 1.35; }
+.v-verde { background: #f0fdf4; color: #166534; } .v-amarillo { background: #fffbeb; color: #92400e; }
+.v-rojo { background: #fef2f2; color: #991b1b; } .v-gris { background: #f1f5f9; color: #334155; }
+.v-azul { background: #eff6ff; color: #1e40af; } .v-violeta { background: #f5f3ff; color: #5b21b6; }
+.escalera { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 4px; }
+.escalera th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; padding: 4px 4px; }
+.escalera td { padding: 8px 4px; border-top: 1px solid #eef2f7; }
+.escalera tr.act td { background: #dbeafe; font-weight: 800; }
+.escalera tr.sig td { background: #fef3c7; }
+.escalera td:last-child, .escalera th:last-child { text-align: right; }
+.escalera td:nth-child(2), .escalera th:nth-child(2) { text-align: right; }
+.item { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eef2f7; font-size: 14px; align-items: center; }
+.item:last-child { border-bottom: 0; }
+.item small { display: block; color: var(--muted); font-size: 12px; }
+.nota-hist { padding: 9px 0; border-bottom: 1px solid #eef2f7; font-size: 14px; line-height: 1.35; }
+.nota-hist small { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+.nota-hist:last-child { border-bottom: 0; }
+.mini-btn { color: var(--brand-2); font-weight: 800; font-size: 13px; text-transform: none; letter-spacing: 0; }
+
+/* ===== HOJAS INFERIORES (sheets) ===== */
+.cortina { position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.55); display: flex; align-items: flex-end; justify-content: center; }
+.hoja { width: 100%; max-width: 520px; max-height: 92dvh; overflow-y: auto; background: var(--surface); border-radius: 22px 22px 0 0; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); }
+.hoja h2 { font-size: 19px; margin-bottom: 2px; }
+.hoja .sub { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.monto-grande { font-size: 30px !important; font-weight: 900; text-align: center; padding: 16px !important; }
+.rapidos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.rapidos button { padding: 9px 12px; border-radius: 999px; background: #e8eefc; color: var(--brand); font-weight: 800; font-size: 13px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.seg button { padding: 12px; border-radius: 12px; border: 2px solid var(--line); font-weight: 800; }
+.seg button.activo { border-color: var(--brand-2); background: #e8eefc; color: var(--brand); }
+.error-caja { background: #fef2f2; color: #991b1b; border-radius: 12px; padding: 11px 12px; font-size: 13.5px; margin-top: 12px; line-height: 1.4; }
+.aviso-caja { background: #fffbeb; color: #92400e; border-radius: 12px; padding: 11px 12px; font-size: 13.5px; margin-top: 12px; line-height: 1.4; }
+.ok-caja { background: #f0fdf4; color: #166534; border-radius: 12px; padding: 12px; font-size: 14px; margin-top: 12px; line-height: 1.4; }
+
+#toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px); background: #0f172a; color: #fff; padding: 11px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; z-index: 90; opacity: 0; pointer-events: none; transition: .2s; max-width: 88vw; text-align: center; }
+#toast.mostrar { opacity: 1; transform: translateX(-50%) translateY(0); }
+#overlayCarga { position: fixed; inset: 0; z-index: 95; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; }
+.spinner-caja { background: var(--surface); border-radius: 14px; padding: 20px 28px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 12px; }
+.spinner { width: 18px; height: 18px; border: 2.5px solid var(--paper); border-top-color: var(--brand); border-radius: 50%; animation: girar .7s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- ======================= LOGIN ======================= -->
+<div id="pantallaLogin">
+  <div class="login-card">
+    <img src="img/Logo.svg" class="login-logo" alt="" onerror="this.style.display='none'">
+    <h1>Cobranza</h1>
+    <p class="sub">Mueblería Mi Pueblito · acceso del personal de cobranza</p>
+    <form id="formLogin" onsubmit="iniciarSesion(); return false;" autocomplete="on">
+      <label class="campo-label" for="loginEmail">Correo</label>
+      <input type="email" id="loginEmail" autocomplete="username" inputmode="email" enterkeyhint="next" placeholder="tucorreo@ejemplo.com">
+      <label class="campo-label" for="loginPass">Contraseña</label>
+      <input type="password" id="loginPass" autocomplete="current-password" enterkeyhint="go" placeholder="••••••••">
+      <button type="submit" class="btn-primario" id="btnLogin">Entrar</button>
+    </form>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<!-- ======================= APP ======================= -->
+<div id="pantallaApp" class="oculto">
+  <div class="appbar">
+    <h1 id="appbarTitulo">Cartera<small id="appbarUsuario"></small></h1>
+    <button onclick="actualizarDatos(true)" aria-label="Actualizar" title="Actualizar datos">🔄</button>
+    <button onclick="cerrarSesionApp()" aria-label="Salir" title="Cerrar sesión">⎋</button>
+  </div>
+  <div id="avisoOffline" class="aviso-offline oculto">Sin conexión: se muestran los últimos datos guardados. No podrás registrar abonos.</div>
+  <div class="estado-datos" id="estadoDatos"></div>
+
+  <section id="vistaCartera">
+    <div class="kpis" id="kpis"></div>
+    <div class="buscador"><input type="search" id="buscador" placeholder="Buscar cliente, folio o producto…" oninput="S.busqueda=this.value; renderLista()" autocomplete="off"></div>
+    <div class="chips" id="chips"></div>
+    <div class="lista" id="lista"></div>
+  </section>
+
+  <section id="vistaRutas" class="oculto">
+    <div class="lista" id="listaRutas"></div>
+  </section>
+
+  <section id="vistaAbonos" class="oculto">
+    <div class="lista" id="listaAbonos"></div>
+  </section>
+
+  <nav class="nav">
+    <button id="navCartera" class="activo" onclick="irVista('Cartera')"><span>📋</span>Cartera</button>
+    <button id="navRutas" onclick="irVista('Rutas')"><span>🗺️</span>Rutas</button>
+    <button id="navAbonos" onclick="irVista('Abonos')"><span>📥</span>Mis abonos</button>
+  </nav>
+</div>
+
+<div id="ficha" class="oculto"></div>
+<div id="toast"></div>
+<div id="overlayCarga" class="oculto"><div class="spinner-caja"><div class="spinner"></div><span id="overlayTexto">Cargando…</span></div></div>
+
+<script>
+// ============================================================================
+// CONFIGURACIÓN — mismo proyecto de Firebase que el resto del sistema
+// ============================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
+  authDomain: "mmpueblito-8fb29.firebaseapp.com",
+  projectId: "mmpueblito-8fb29",
+  storageBucket: "mmpueblito-8fb29.firebasestorage.app",
+  messagingSenderId: "32950655624",
+  appId: "1:32950655624:web:42a8657431319f9a25dd3d"
+};
+
+// Esta app es de CONSULTA. Lo único que escribe en Firestore es el abono que se captura
+// (a la bóveda de autorizaciones), su aviso a administración y su rastro en la bitácora.
+const ROLES_PERMITIDOS = ['admin', 'vendedor', 'cobrador', 'cobranza'];
+const CACHE_MINUTOS = 10;      // antes de este tiempo se usa lo guardado en el celular
+const M = window.CobranzaMotor;
+
+let db, auth;
+let sesion = null;
+const S = {
+  cuentas: [], pagaresPend: [], cfg: null, cajas: [], bancos: [], abonosPend: [], rutas: [], clientes: [],
+  resumenes: [], porFolio: {}, empresa: { nombre: 'Mueblería Mi Pueblito' },
+  filtro: 'todas', busqueda: '', vista: 'Cartera', ts: null, desdeCache: false,
+  ficha: null    // { folio, pagaresFull, historial, cargando }
+};
+
+// ---------------------------------------------------------------- utilidades UI
+const $ = id => document.getElementById(id);
+const esc = M.esc, dinero = M.dinero;
+const dineroCorto = n => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(Number(n) || 0);
+const mesesTxt = n => `${n} ${Number(n) === 1 ? 'mes' : 'meses'}`;
+let _toastTimer = null;
+function toast(t, ms = 2400) { const el = $('toast'); el.textContent = t; el.classList.add('mostrar'); clearTimeout(_toastTimer); _toastTimer = setTimeout(() => el.classList.remove('mostrar'), ms); }
+function cargando(on, texto) { $('overlayCarga').classList.toggle('oculto', !on); if (texto) $('overlayTexto').textContent = texto; }
+function sinAcentos(s) { return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+function getDocData(doc) {
+  if (!doc || !doc.exists) return null;
+  const p = doc.data();
+  return M.restaurarDesdeFirestore(p && Object.prototype.hasOwnProperty.call(p, 'data') ? p.data : p);
+}
+function telefono10(t) { const d = String(t || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : ''; }
+
+// ---------------------------------------------------------------- caché local (IndexedDB)
+const KV = {
+  _abrir() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open('cobranza-movil', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  },
+  async get(k) { try { const db0 = await this._abrir(); return await new Promise(res => { const q = db0.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } },
+  async set(k, v) { try { const db0 = await this._abrir(); await new Promise(res => { const t = db0.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) { /* sin caché local */ } }
+};
+
+// ---------------------------------------------------------------- sesión
+async function initFirebase() {
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth(); db = firebase.firestore();
+  try { await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch (e) { /* no crítico */ }
+}
+function traducirErrorAuth(e) {
+  const c = e && e.code;
+  if (c === 'auth/invalid-email') return 'Correo inválido.';
+  if (c === 'auth/user-not-found' || c === 'auth/wrong-password' || c === 'auth/invalid-credential') return 'Correo o contraseña incorrectos.';
+  if (c === 'auth/too-many-requests') return 'Demasiados intentos. Espera un momento.';
+  if (c === 'auth/network-request-failed') return 'Sin conexión a internet.';
+  return (e && e.message) || 'No se pudo iniciar sesión.';
+}
+async function iniciarSesion() {
+  const email = $('loginEmail').value.trim(), pass = $('loginPass').value, err = $('loginError'), btn = $('btnLogin');
+  err.textContent = '';
+  if (!email || !pass) { err.textContent = 'Completa correo y contraseña.'; return; }
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  try { const cred = await auth.signInWithEmailAndPassword(email, pass); await cargarPerfilYEntrar(cred.user); }
+  catch (e) { err.textContent = traducirErrorAuth(e); }
+  finally { btn.disabled = false; btn.textContent = 'Entrar'; }
+}
+let _entrando = false;
+async function cargarPerfilYEntrar(user) {
+  if (_entrando || sesion) return;
+  _entrando = true;
+  try { await _entrar(user); } finally { _entrando = false; }
+}
+async function _entrar(user) {
+  const err = $('loginError');
+  const snap = await db.collection('usuarios').doc(user.uid).get();
+  if (!snap.exists) { err.textContent = 'Tu usuario no tiene perfil autorizado. Pide a un administrador que lo active.'; await auth.signOut(); return; }
+  const perfil = snap.data() || {};
+  if (perfil.activo === false) { err.textContent = 'Este usuario está desactivado.'; await auth.signOut(); return; }
+  const rol = String(perfil.rol || 'vendedor').toLowerCase();
+  if (!ROLES_PERMITIDOS.includes(rol)) { err.textContent = 'Tu usuario no tiene acceso a Cobranza.'; await auth.signOut(); return; }
+  sesion = { uid: user.uid, nombre: perfil.nombre || user.email, rol, email: user.email };
+  $('appbarUsuario').textContent = sesion.nombre + ' · ' + sesion.rol;
+  $('pantallaLogin').classList.add('oculto');
+  $('pantallaApp').classList.remove('oculto');
+  await actualizarDatos(false);
+}
+function cerrarSesionApp() { if (confirm('¿Cerrar sesión?')) auth.signOut().finally(() => location.reload()); }
+
+// ---------------------------------------------------------------- carga de datos (solo lectura)
+async function leerRegistros(tabla, consulta) {
+  const col = db.collection('posData').doc(tabla).collection('registros');
+  const snap = await (consulta ? consulta(col) : col).get();
+  return snap.docs.map(d => M.restaurarDesdeFirestore(d.data()));
+}
+async function leerLista(tabla) {
+  try { return getDocData(await db.collection('posData').doc(tabla).get()) || []; } catch (e) { console.warn('No se pudo leer', tabla, e); return null; }
+}
+
+function aplicarDatos(d) {
+  S.cuentas = d.cuentas || []; S.pagaresPend = d.pagaresPend || []; S.cfg = d.cfg || null;
+  S.cajas = d.cajas || []; S.bancos = d.bancos || []; S.abonosPend = d.abonosPend || [];
+  S.rutas = d.rutas || []; S.clientes = d.clientes || []; S.ts = d.ts || Date.now();
+  if (d.empresa && d.empresa.nombre) S.empresa = d.empresa;
+  recalcular();
+}
+
+function clientePorId(id) { return id == null ? null : S.clientes.find(c => String(c.id) === String(id)) || null; }
+function datosContacto(c) {
+  const cl = clientePorId(c.clienteId) || {};
+  return { nombre: cl.nombre || M.nombreCliente(c), telefono: cl.telefono || c.telefono || '', direccion: cl.direccion || c.direccion || '' };
+}
+
+function recalcular() {
+  const hoy = new Date();
+  const porFolio = {};
+  S.pagaresPend.forEach(p => { (porFolio[p.folio] = porFolio[p.folio] || []).push(p); });
+  S.resumenes = S.cuentas.filter(M.esActiva).map(c => {
+    const r = M.resumenCuenta(c, porFolio[c.folio] || [], { cfg: S.cfg, hoy, riesgo: window.CobranzaRiskService });
+    r.cuenta = c; r.contacto = datosContacto(c); r.cliente = r.contacto.nombre;
+    return r;
+  }).filter(r => r.saldo > 0.01);
+  S.resumenes.sort((a, b) => {
+    const pa = a.riesgo?.prioridad || 0, pb = b.riesgo?.prioridad || 0;
+    if (pb !== pa) return pb - pa;
+    const da = a.riesgo?.diasSinPago || 0, db_ = b.riesgo?.diasSinPago || 0;
+    if (db_ !== da) return db_ - da;
+    return b.saldo - a.saldo;
+  });
+  S.porFolio = {}; S.resumenes.forEach(r => { S.porFolio[r.folio] = r; });
+  renderTodo();
+}
+
+async function actualizarDatos(forzar) {
+  const el = $('estadoDatos');
+  const cache = await KV.get('datos');
+  const fresco = cache && (Date.now() - cache.ts) < CACHE_MINUTOS * 60000;
+  if (!forzar && fresco) { S.desdeCache = true; aplicarDatos(cache); pintarEstado(); return; }
+  if (!navigator.onLine) {
+    if (cache) { S.desdeCache = true; aplicarDatos(cache); pintarEstado(); } else el.innerHTML = '❌ Sin conexión y sin datos guardados en este celular.';
+    return;
+  }
+  cargando(true, 'Descargando cartera…');
+  try {
+    const [cuentas, pagaresPend, cfg, cajas, bancos, abonosPend, rutas, clientes, empresa] = await Promise.all([
+      leerRegistros('cuentasPorCobrar', c => c.where('estado', 'not-in', ['Saldado', 'Cancelado'])),
+      leerRegistros('pagaresSistema', c => c.where('estado', 'in', ['Pendiente', 'Parcial'])),
+      db.collection('posData').doc('configCreditoGlobal').get().then(getDocData),
+      leerLista('cuentasEfectivo'), leerLista('cuentas-bancarias'), leerLista('abonosPendientes'),
+      leerLista('rutasCobranzaGuardadas'), leerLista('clientes'),
+      db.collection('posData').doc('configEmpresa').get().then(getDocData).catch(() => null)
+    ]);
+    const datos = { ts: Date.now(), cuentas, pagaresPend, cfg, cajas: cajas || (cache?.cajas || []), bancos: bancos || (cache?.bancos || []),
+      abonosPend: abonosPend || (cache?.abonosPend || []), rutas: rutas || (cache?.rutas || []), clientes: clientes || (cache?.clientes || []), empresa };
+    S.desdeCache = false;
+    aplicarDatos(datos);
+    await KV.set('datos', datos);
+    pintarEstado();
+  } catch (e) {
+    console.error('No se pudo leer Firestore:', e);
+    if (cache) { S.desdeCache = true; aplicarDatos(cache); pintarEstado(); toast('No se pudo actualizar; se muestran los datos guardados.'); }
+    else $('estadoDatos').innerHTML = '❌ No se pudo cargar la cartera. <button onclick="actualizarDatos(true)">Reintentar</button>';
+  } finally { cargando(false); }
+}
+function pintarEstado() {
+  const d = new Date(S.ts);
+  const hora = d.toLocaleString('es-MX', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  $('estadoDatos').innerHTML = `${S.desdeCache ? '💾' : '✅'} ${S.resumenes.length} cuentas con saldo · datos de ${hora} <button onclick="actualizarDatos(true)">Actualizar</button>`;
+}
+window.addEventListener('online', () => { $('avisoOffline').classList.add('oculto'); });
+window.addEventListener('offline', () => { $('avisoOffline').classList.remove('oculto'); });
+
+// ---------------------------------------------------------------- navegación
+function irVista(v) {
+  S.vista = v;
+  ['Cartera', 'Rutas', 'Abonos'].forEach(n => { $('vista' + n).classList.toggle('oculto', n !== v); $('nav' + n).classList.toggle('activo', n === v); });
+  $('appbarTitulo').firstChild.textContent = v === 'Cartera' ? 'Cartera' : v === 'Rutas' ? 'Rutas guardadas' : 'Mis abonos';
+  if (v === 'Abonos') refrescarAbonosBoveda();
+  renderTodo();
+  window.scrollTo(0, 0);
+}
+const _pila = [];
+function empujar(nombre) { _pila.push(nombre); history.pushState({ n: nombre }, ''); }
+window.addEventListener('popstate', () => {
+  const top = _pila.pop();
+  if (top === 'hoja') quitarHoja();
+  else if (top === 'ficha') quitarFicha();
+});
+
+// ---------------------------------------------------------------- cartera
+function chipDefs() {
+  const R = S.resumenes;
+  const hoy = new Date();
+  const vencidas = R.filter(r => r.vencido > 0.01);
+  const semana = R.filter(r => r.proximo && !r.proximo.vencido && ((M.parseFecha(r.proximo.fecha) - hoy) / 86400000) <= 7);
+  const promesas = R.filter(r => r.estado.promesaVigente);
+  const plazo = R.filter(r => r.plazo && r.plazo.aunEnPlazo && r.plazo.diasRestantes <= 7);
+  return [
+    { k: 'todas', t: 'Todas', n: R.length, f: () => true },
+    { k: 'vencidas', t: '🔴 Vencidas', n: vencidas.length, f: r => r.vencido > 0.01 },
+    { k: 'semana', t: '📅 Vencen en 7 días', n: semana.length, f: r => semana.includes(r) },
+    { k: 'promesas', t: '📝 Promesas', n: promesas.length, f: r => r.estado.promesaVigente },
+    { k: 'plazo', t: '⏳ Plazo por vencer', n: plazo.length, f: r => plazo.includes(r) }
+  ];
+}
+function renderTodo() {
+  if (S.vista === 'Cartera') { renderKpis(); renderChips(); renderLista(); }
+  if (S.vista === 'Rutas') renderRutas();
+  if (S.vista === 'Abonos') renderAbonos();
+}
+function renderKpis() {
+  const R = S.resumenes;
+  const saldo = R.reduce((s, r) => s + r.saldo, 0), venc = R.reduce((s, r) => s + r.vencido, 0);
+  $('kpis').innerHTML = `
+    <div class="kpi"><small>Cuentas</small><b>${R.length}</b></div>
+    <div class="kpi"><small>Cartera</small><b>${dineroCorto(saldo)}</b></div>
+    <div class="kpi"><small>Vencido</small><b style="color:var(--danger)">${dineroCorto(venc)}</b></div>`;
+}
+function renderChips() {
+  $('chips').innerHTML = chipDefs().map(c => `<button class="chip ${S.filtro === c.k ? 'activo' : ''}" onclick="S.filtro='${c.k}'; renderChips(); renderLista()">${c.t} · ${c.n}</button>`).join('');
+}
+const COLOR_ESTADO = { 'Al corriente': ['p-verde', '#16a34a'], 'Atrasado': ['p-amarillo', '#d97706'], 'Crítico': ['p-rojo', '#dc2626'], 'Promesa': ['p-azul', '#2563eb'] };
+function pillPlazo(r) {
+  const p = r.plazo; if (!p) return '';
+  if (!p.aunEnPlazo) return '<span class="pill p-gris">Pasó su plazo</span>';
+  const cls = { verde: 'p-verde', amarillo: 'p-amarillo', rojo: 'p-rojo' }[p.semaforo] || 'p-gris';
+  return `<span class="pill ${cls}">⏳ ${p.diasRestantes} d de plazo</span>`;
+}
+function tarjetaCuenta(r) {
+  const [cls, borde] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris', '#94a3b8'];
+  const prox = r.proximo ? `<span class="pill ${r.proximo.vencido ? 'p-rojo' : 'p-gris'}">Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</span>` : '';
+  return `<div class="cta" style="border-left-color:${borde}" onclick="abrirFicha('${esc(r.folio).replace(/'/g, '')}')">
+    <div class="l1"><div><div class="nom">${esc(r.cliente)}</div><div class="fol">${esc(r.folio)} · ${esc(r.producto)}</div></div>
+      <div class="saldo">${dinero(r.saldo)}</div></div>
+    <div class="l2"><span class="pill ${cls}">${esc(r.estado.estadoGeneral)}</span>
+      ${r.vencido > 0.01 ? `<span class="pill p-rojo">Vencido ${dinero(r.vencido)} · ${r.diasAtraso} d</span>` : ''}
+      ${prox}${pillPlazo(r)}</div></div>`;
+}
+function renderLista() {
+  const def = chipDefs().find(c => c.k === S.filtro) || chipDefs()[0];
+  const q = sinAcentos(S.busqueda).trim();
+  const lista = S.resumenes.filter(def.f).filter(r => !q ||
+    sinAcentos(r.cliente).includes(q) || sinAcentos(r.folio).includes(q) || sinAcentos(r.producto).includes(q) || telefono10(r.contacto.telefono).includes(q.replace(/\D/g, '') || '§'));
+  $('lista').innerHTML = lista.length ? lista.map(tarjetaCuenta).join('') : '<div class="vacio">No hay cuentas con este filtro.</div>';
+}
+
+// ---------------------------------------------------------------- rutas guardadas y mis abonos
+function renderRutas() {
+  const rutas = (S.rutas || []).slice().sort((a, b) => String(b.fechaGuardada).localeCompare(String(a.fechaGuardada)));
+  if (!rutas.length) { $('listaRutas').innerHTML = '<div class="vacio">Aún no hay rutas guardadas.<br>Las rutas se arman en el sistema principal.</div>'; return; }
+  $('listaRutas').innerHTML = rutas.map(ru => {
+    const rs = (ru.folios || []).map(f => S.porFolio[f]).filter(Boolean);
+    const saldo = rs.reduce((s, r) => s + r.saldo, 0), venc = rs.reduce((s, r) => s + r.vencido, 0);
+    return `<div class="bloque" style="margin:0"><h3>${esc(ru.nombre)} <span class="mini-btn" onclick="S.rutaAbierta=(S.rutaAbierta==='${ru.id}'?null:'${ru.id}'); renderRutas()">${S.rutaAbierta == ru.id ? 'Ocultar' : 'Ver'}</span></h3>
+      <div class="fila"><span>Clientes con saldo</span><b>${rs.length} de ${(ru.folios || []).length}</b></div>
+      <div class="fila"><span>Saldo / Vencido</span><b>${dinero(saldo)} / ${dinero(venc)}</b></div>
+      ${S.rutaAbierta == ru.id ? `<div class="lista" style="padding:10px 0 0">${rs.length ? rs.map(tarjetaCuenta).join('') : '<div class="vacio">Ninguna cuenta de esta ruta tiene saldo.</div>'}</div>` : ''}</div>`;
+  }).join('');
+}
+async function refrescarAbonosBoveda() {
+  if (!navigator.onLine) return;
+  try { const l = await leerLista('abonosPendientes'); if (l) { S.abonosPend = l; renderAbonos(); } } catch (e) { /* se queda lo guardado */ }
+}
+function renderAbonos() {
+  const mios = (S.abonosPend || []).filter(a => a.origen === 'cobranza-movil' && (sesion?.rol === 'admin' || a.capturadoPorUid === sesion?.uid))
+    .sort((a, b) => String(b.fechaCapturaIso).localeCompare(String(a.fechaCapturaIso))).slice(0, 60);
+  const pend = mios.filter(a => String(a.estado) === 'Pendiente');
+  const tot = pend.reduce((s, a) => s + Number(a.montoAbonado || 0), 0);
+  const cab = `<div class="bloque" style="margin:0"><div class="fila"><span>En bóveda por autorizar</span><b>${pend.length} · ${dinero(tot)}</b></div>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:6px">Estos abonos ya fueron enviados. Quedan aplicados cuando administración los autoriza.</p></div>`;
+  const cuerpo = mios.length ? mios.map(a => {
+    const est = String(a.estado), cls = est === 'Pendiente' ? 'p-amarillo' : (/aprob|autoriz/i.test(est) ? 'p-verde' : 'p-rojo');
+    return `<div class="bloque" style="margin:0"><div class="item"><div><b>${esc(a.clienteNombre)}</b><small>${esc(a.folioCXC)} · ${M.fechaVisible(a.fechaAbonoRaw || a.fechaAbonoIso)} · ${esc(a.etiquetaCuenta || '')}</small>
+      ${a.motivoResolucion ? `<small>${esc(a.motivoResolucion)}</small>` : ''}</div><div style="text-align:right"><b>${dinero(a.montoAbonado)}</b><br><span class="pill ${cls}">${esc(est)}</span></div></div></div>`;
+  }).join('') : '<div class="vacio">Aún no has registrado abonos desde esta app.</div>';
+  $('listaAbonos').innerHTML = cab + cuerpo;
+}
+
+// ---------------------------------------------------------------- ficha de cuenta
+function abrirFicha(folio) {
+  const r = S.porFolio[folio]; if (!r) return;
+  S.ficha = { folio, pagaresFull: null, historial: null };
+  $('ficha').classList.remove('oculto'); document.body.style.overflow = 'hidden';
+  empujar('ficha');
+  renderFicha();
+  cargarDetalleFicha(folio);
+}
+function quitarFicha() { $('ficha').classList.add('oculto'); document.body.style.overflow = ''; S.ficha = null; }
+function cerrarFicha() { if (_pila.includes('ficha')) history.back(); else quitarFicha(); }
+async function cargarDetalleFicha(folio) {
+  if (!navigator.onLine) return;
+  try {
+    const [pag, hist, ab] = await Promise.all([
+      leerRegistros('pagaresSistema', c => c.where('folio', '==', folio)),
+      leerRegistros('historialCobranza', c => c.where('folio', '==', folio)).catch(() => []),
+      leerLista('abonosPendientes')
+    ]);
+    if (ab) S.abonosPend = ab;
+    if (S.ficha && S.ficha.folio === folio) { S.ficha.pagaresFull = pag; S.ficha.historial = hist; renderFicha(); }
+  } catch (e) { console.warn('No se pudo cargar el detalle:', e); }
+}
+// Resumen de la ficha: con los pagarés COMPLETOS del folio cuando ya llegaron (para totales y política exactos)
+function resumenFicha() {
+  const f = S.ficha, base = S.porFolio[f.folio];
+  if (!f.pagaresFull) return base;
+  const r = M.resumenCuenta(base.cuenta, f.pagaresFull, { cfg: S.cfg, hoy: new Date(), riesgo: window.CobranzaRiskService });
+  r.cuenta = base.cuenta; r.contacto = base.contacto; r.cliente = base.cliente;
+  return r;
+}
+function boveda(folio) { return (S.abonosPend || []).filter(a => (a.folioCXC || a.folioApartado) === folio && String(a.estado) === 'Pendiente'); }
+
+function bloqueVisor(r) {
+  const c = r.cuenta, P = r.politica, pl = r.plazo, sl = r.salto, hoy = new Date();
+  const partes = [];
+  // 1) Plazo pactado
+  if (pl) {
+    const cls = { verde: 'v-verde', amarillo: 'v-amarillo', rojo: 'v-rojo', gris: 'v-gris' }[pl.semaforo];
+    partes.push(`<div class="visor-tarjeta ${cls}"><div class="t">⏱️ Plazo pactado · ${mesesTxt(pl.mesesPlan)}</div>
+      <div class="g">${pl.aunEnPlazo ? `${pl.diasRestantes} días restantes` : `Venció hace ${Math.abs(pl.diasRestantes)} días`}</div>
+      <div class="s">Fecha límite: <b>${M.fechaVisible(pl.fechaLimite)}</b> (venta del ${M.fechaVisible(M.fechaVentaDate(c))}).</div></div>`);
+  }
+  // 2) Pago adelantado
+  let adel = '';
+  if (P.tipo === 'pronto_pago_flat' && P.cuponDisponible) {
+    adel = `<div class="visor-tarjeta v-verde"><div class="t">💸 Pago adelantado · liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
+      <div class="s">Saldo vigente sin descuento. Además recibe un <b>cupón de ${dinero(P.beneficio)}</b> (${P.porcentajeCupon}% del total financiado) para su próxima compra, con vigencia de 3 meses.${r.moratorios > 0.01 ? `<br>Los moratorios (${dinero(r.moratorios)}) se cobran aparte.` : ''}</div></div>`;
+  } else if (P.tipo === 'contado_1_mes') {
+    adel = `<div class="visor-tarjeta v-verde"><div class="t">💸 Pago adelantado · liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
+      <div class="s">Plan de 1 mes: se cobra el <b>precio de contado real</b>${P.aplica ? `, ${dinero(P.saldoActual - P.montoLiquidacion)} menos que el saldo` : ''}. No genera cupón.</div></div>`;
+  } else if (P.tipo === 'pronto_pago_flat') {
+    adel = `<div class="visor-tarjeta v-gris"><div class="t">💸 Pago adelantado · liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
+      <div class="s">Dentro de su plazo, se liquida con el saldo vigente. Esta venta <b>no genera cupón</b> (es anterior al esquema de cupones).</div></div>`;
+  } else if (P.tipo === 'fuera_de_plazo') {
+    adel = `<div class="visor-tarjeta v-gris"><div class="t">💸 Liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
+      <div class="s">Ya pasó su plazo pactado: se liquida el saldo vigente, sin cupón.${r.moratorios > 0.01 ? `<br>Más moratorios: ${dinero(r.moratorios)}.` : ''}</div></div>`;
+  }
+  partes.push(adel);
+  // 3) Incremento de plazo
+  if (sl) {
+    const est = sl.estimadoDesdeTeorico ? ' (estimado)' : '';
+    if (sl.yaPaso) {
+      partes.push(`<div class="visor-tarjeta v-rojo"><div class="t">📈 Incremento de plazo · ya aplica</div><div class="g">+${dinero(sl.diferencia)}${est}</div>
+        <div class="s">Ya pasó su plazo de ${mesesTxt(sl.mesesActual)}: pasaría a <b>${mesesTxt(sl.mesesNuevo)}</b> (total ${dinero(sl.totalActual)} → ${dinero(sl.totalNuevo)}).
+        Saldo ${dinero(sl.saldoActual)} → <b>${dinero(sl.nuevoSaldoEstimado)}</b>. Administración confirma cada cambio.</div></div>`);
+    } else {
+      partes.push(`<div class="visor-tarjeta v-amarillo"><div class="t">📈 Si no liquida a tiempo</div><div class="g">+${dinero(sl.diferencia)}${est}</div>
+        <div class="s">Después del <b>${M.fechaVisible(pl ? pl.fechaLimite : hoy)}</b> pasaría de ${mesesTxt(sl.mesesActual)} a <b>${mesesTxt(sl.mesesNuevo)}</b>: total ${dinero(sl.totalActual)} → ${dinero(sl.totalNuevo)}, saldo ${dinero(sl.saldoActual)} → ${dinero(sl.nuevoSaldoEstimado)}.</div></div>`);
+    }
+  } else if (M.mesesPlan(c) >= 6) {
+    partes.push('<div class="visor-tarjeta v-gris"><div class="t">📈 Incremento de plazo</div><div class="s">Ya está en el plazo máximo (6 meses): no tiene otro escalón.</div></div>');
+  }
+  // 4) Escalera
+  const esc_ = M.escaleraVisor(c, S.cfg);
+  if (esc_.length) {
+    partes.push(`<table class="escalera"><thead><tr><th>Plazo</th><th>Total del plan</th><th>vs. el suyo</th></tr></thead><tbody>${esc_.map(e =>
+      `<tr class="${e.esActual ? 'act' : e.esSiguiente ? 'sig' : ''}"><td>${e.meses} ${e.meses === 1 ? 'mes' : 'meses'}${e.esActual ? ' · suyo' : e.esSiguiente ? ' · siguiente' : ''}</td><td>${dinero(e.total)}</td><td>${e.esActual ? '—' : (e.diferencia >= 0 ? '+' : '') + dinero(e.diferencia)}</td></tr>`).join('')}</tbody></table>`);
+  }
+  return partes.join('');
+}
+
+function renderFicha() {
+  const f = S.ficha; if (!f) return;
+  const r = resumenFicha(), c = r.cuenta, k = r.contacto, plan = c.plan || {};
+  const tel = telefono10(k.telefono);
+  const [estCls] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris'];
+  const pagares = (f.pagaresFull || r.estado.pagares || []).slice().sort((a, b) => (M.parseFecha(a.fechaVencimiento) || 0) - (M.parseFecha(b.fechaVencimiento) || 0));
+  const pendientes = pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial');
+  const verTodos = f.verTodos;
+  const listaPag = (verTodos ? pagares : pendientes.slice(0, 8));
+  const hoy = new Date();
+  const abonosRecientes = M.abonosValidos(c).slice().sort((a, b) => String(b.fechaAbonoIso || b.fecha || '').localeCompare(String(a.fechaAbonoIso || a.fecha || ''))).slice(0, 8);
+  const bov = boveda(c.folio);
+  const promesa = c.promesaPago && c.promesaPago.fecha;
+
+  $('ficha').innerHTML = `
+    <div class="ficha-barra"><button onclick="cerrarFicha()" aria-label="Volver">‹</button><div><b>${esc(r.cliente)}</b><small>${esc(c.folio)} · ${esc(r.producto)}</small></div></div>
+    <div class="bloque">
+      <div class="hero"><small>Saldo por cobrar</small><b style="color:${r.vencido > 0.01 ? 'var(--danger)' : 'var(--ink)'}">${dinero(r.saldo)}</b>
+        <div style="margin-top:6px"><span class="pill ${estCls}">${esc(r.estado.estadoGeneral)}</span>${promesa ? ` <span class="pill p-azul">Promesa ${M.fechaVisible(promesa)}</span>` : ''}</div></div>
+      ${r.vencido > 0.01 ? `<div class="fila"><span>Vencido</span><b style="color:var(--danger)">${dinero(r.vencido)} · ${r.nVencidos} pago(s) · ${r.diasAtraso} d</b></div>` : ''}
+      ${r.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(r.moratorios)}</b></div>` : ''}
+      ${r.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</b></div>` : ''}
+      <div class="fila"><span>Abono ${esc(c.periodicidad || 'semanal')}</span><b>${dinero(plan.abono)}</b></div>
+      ${bov.length ? `<div class="aviso-caja">⏳ Tiene ${bov.length} abono(s) en bóveda por ${dinero(bov.reduce((s, a) => s + Number(a.montoAbonado || 0), 0))}, pendientes de autorizar.</div>` : ''}
+      <div class="contacto" style="margin-top:10px">
+        ${tel ? `<a href="tel:+52${tel}">📞 Llamar</a><a class="wa" href="https://wa.me/52${tel}" target="_blank" rel="noopener">💬 WhatsApp</a>` : '<a style="opacity:.45;pointer-events:none">📞 Sin teléfono</a><a style="opacity:.45;pointer-events:none">💬 —</a>'}
+        ${k.direccion ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(k.direccion)}" target="_blank" rel="noopener">📍 Mapa</a>` : '<a style="opacity:.45;pointer-events:none">📍 Sin dirección</a>'}
+      </div>
+      ${k.direccion ? `<p style="font-size:12.5px;color:var(--muted);margin-top:8px">${esc(k.direccion)}</p>` : ''}
+    </div>
+
+    <div class="bloque"><h3>🔭 Visor de plazo y pago adelantado</h3>${bloqueVisor(r)}
+      <button class="btn-sec" style="width:100%;margin-top:10px" onclick="compartirImagen('visor')">📤 Enviar opciones por WhatsApp (imagen)</button></div>
+
+    <div class="bloque"><h3>Cuenta</h3>
+      <div class="fila"><span>Venta</span><b>${M.fechaVisible(M.fechaVentaDate(c))}</b></div>
+      <div class="fila"><span>Plan</span><b>${plan.meses ? mesesTxt(plan.meses) : '-'} · ${esc(plan.pagos || '-')} pagos</b></div>
+      <div class="fila"><span>Total del plan</span><b>${dinero(plan.total || plan.totalTeorico || c.saldoOriginal)}</b></div>
+      <div class="fila"><span>Enganche</span><b>${dinero(c.engancheRecibido || 0)}</b></div>
+      <div class="fila"><span>Total abonado</span><b>${dinero(r.estado.totalAbonado)}</b></div>
+      <div class="fila"><span>Vendedor</span><b>${esc(c.vendedorNombre || '-')}</b></div>
+      ${c.observacionCartera ? `<div class="fila"><span>Observación</span><b>${esc(c.observacionCartera)}</b></div>` : ''}
+    </div>
+
+    <div class="bloque"><h3>Pagarés <span class="mini-btn" onclick="S.ficha.verTodos=!S.ficha.verTodos; renderFicha()">${verTodos ? 'Solo pendientes' : 'Ver todos'}</span></h3>
+      ${listaPag.length ? listaPag.map(p => {
+        const rest = p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado || 0)) : p.monto;
+        const fv = M.parseFecha(p.fechaVencimiento);
+        const venc = (p.estado === 'Pendiente' || p.estado === 'Parcial') && fv && fv < hoy;
+        const cls = p.estado === 'Pagado' ? 'p-verde' : venc ? 'p-rojo' : p.estado === 'Parcial' ? 'p-amarillo' : 'p-gris';
+        return `<div class="item"><div>${M.fechaVisible(p.fechaVencimiento)}<small>${esc(p.numeroPagere || '')}</small></div><div style="text-align:right"><b>${dinero(p.estado === 'Pagado' ? p.monto : rest)}</b><br><span class="pill ${cls}">${venc ? 'Vencido' : esc(p.estado)}</span></div></div>`;
+      }).join('') : '<div class="vacio" style="padding:12px">Sin pagarés pendientes.</div>'}
+      ${!verTodos && pendientes.length > 8 ? `<p style="font-size:12.5px;color:var(--muted);margin-top:6px">+ ${pendientes.length - 8} más…</p>` : ''}
+    </div>
+
+    <div class="bloque"><h3>Abonos recientes</h3>
+      ${abonosRecientes.length ? abonosRecientes.map(a => `<div class="item"><div>${M.fechaVisible(a.fechaAbonoIso || a.fecha || a.fechaAbono)}<small>${esc(a.etiquetaCuenta || a.medioPago || '')}</small></div><b>${dinero(a.monto || a.montoAbonado)}</b></div>`).join('') : '<div class="vacio" style="padding:12px">Sin abonos registrados.</div>'}
+    </div>
+
+    <div class="bloque"><h3>Notas de cobranza</h3>
+      ${f.historial === null ? '<div class="vacio" style="padding:12px">Cargando…</div>' :
+        f.historial.length ? f.historial.slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))).slice(0, 12).map(n =>
+          `<div class="nota-hist"><small>${M.fechaVisible(n.fecha)} · ${esc(n.usuario || '')}</small>${esc(n.texto)}</div>`).join('')
+        : '<div class="vacio" style="padding:12px">Sin notas.</div>'}
+    </div>
+
+    <div class="acciones">
+      <button class="abono" onclick="abrirAbono()">💰 Registrar abono</button>
+      <button class="img" onclick="compartirImagen('estado')">📤 Estado de cuenta</button>
+      <button class="img" onclick="compartirImagen('visor')">📤 Opciones</button>
+    </div>`;
+}
+
+// ---------------------------------------------------------------- hoja inferior (abono)
+let _hojaCont = null;
+function abrirHoja(html) {
+  if (_hojaCont) { _hojaCont.firstChild.innerHTML = html; return; }   // reemplaza el contenido de la hoja abierta
+  const d = document.createElement('div'); d.className = 'cortina';
+  d.innerHTML = `<div class="hoja">${html}</div>`;
+  d.addEventListener('click', e => { if (e.target === d) cerrarHoja(); });
+  document.body.appendChild(d); _hojaCont = d; empujar('hoja');
+}
+function quitarHoja() { if (_hojaCont) { _hojaCont.remove(); _hojaCont = null; } }
+function cerrarHoja() { if (_pila.includes('hoja')) history.back(); else quitarHoja(); }
+
+const A = { medio: 'efectivo' };   // estado del formulario de abono
+function opcionesCuenta(medio) {
+  if (medio === 'efectivo') {
+    const cajas = (S.cajas && S.cajas.length) ? S.cajas : [{ id: 'efectivo', nombre: '💵 Efectivo' }];
+    return cajas.map(c => ({ valor: String(c.id), etiqueta: c.nombre }));
+  }
+  return (S.bancos || []).map(b => ({ valor: String(b.idCuenta || b.banco || b.id), etiqueta: b.nombre }));
+}
+function abrirAbono() {
+  if (!navigator.onLine) return toast('Sin conexión: no se puede registrar el abono.');
+  const r = resumenFicha(), plan = r.cuenta.plan || {};
+  A.medio = 'efectivo';
+  const rapidos = [];
+  if (plan.abono > 0) rapidos.push(['Abono ' + dinero(plan.abono), plan.abono]);
+  if (r.proximo && r.proximo.monto > 0 && Math.abs(r.proximo.monto - plan.abono) > 0.01) rapidos.push(['Próximo ' + dinero(r.proximo.monto), r.proximo.monto]);
+  if (r.vencido > 0.01 && r.vencido < r.saldoNominal - 0.01) rapidos.push(['Vencido ' + dinero(r.vencido), r.vencido]);
+  abrirHoja(`
+    <h2>Registrar abono</h2>
+    <p class="sub">${esc(r.cliente)} · ${esc(r.folio)} · saldo ${dinero(r.saldoNominal)}</p>
+    <label class="campo-label">Monto cobrado</label>
+    <input type="number" id="abMonto" class="monto-grande" inputmode="decimal" step="0.01" min="0" placeholder="0.00" autocomplete="off">
+    ${rapidos.length ? `<div class="rapidos">${rapidos.map(([t, v]) => `<button onclick="$('abMonto').value='${Number(v).toFixed(2)}'">${esc(t)}</button>`).join('')}</div>` : ''}
+    <label class="campo-label">Fecha del abono</label>
+    <input type="date" id="abFecha" value="${M.fechaInputHoy()}" max="${M.fechaInputHoy()}">
+    <label class="campo-label">Forma de pago</label>
+    <div class="seg"><button id="segEfectivo" class="activo" onclick="elegirMedio('efectivo')">💵 Efectivo</button><button id="segTransf" onclick="elegirMedio('transferencia')">🏦 Transferencia</button></div>
+    <label class="campo-label">Cuenta donde entra</label>
+    <select id="abCuenta"></select>
+    <div id="abRefWrap" class="oculto"><label class="campo-label">Referencia de la transferencia</label><input type="text" id="abRef" placeholder="Folio / clave de rastreo" autocomplete="off"></div>
+    <div id="abMsg"></div>
+    <button class="btn-primario btn-ok" id="abBtn" onclick="enviarAbono()">Enviar a bóveda</button>
+    <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px">El abono queda pendiente de autorización de administración.</p>`);
+  llenarCuentas();
+  setTimeout(() => $('abMonto') && $('abMonto').focus(), 250);
+}
+function elegirMedio(m) {
+  A.medio = m;
+  $('segEfectivo').classList.toggle('activo', m === 'efectivo'); $('segTransf').classList.toggle('activo', m === 'transferencia');
+  $('abRefWrap').classList.toggle('oculto', m !== 'transferencia');
+  llenarCuentas();
+}
+function llenarCuentas() {
+  const ops = opcionesCuenta(A.medio);
+  $('abCuenta').innerHTML = ops.length ? ops.map(o => `<option value="${esc(o.valor)}">${esc(o.etiqueta)}</option>`).join('') : '<option value="">(sin cuentas)</option>';
+}
+
+async function enviarAbono() {
+  const msg = $('abMsg'), btn = $('abBtn');
+  const error = t => { msg.innerHTML = `<div class="error-caja">${t}</div>`; };
+  msg.innerHTML = '';
+  if (!navigator.onLine) return error('Sin conexión. Conéctate para enviar el abono.');
+  const r = resumenFicha(), c = r.cuenta;
+  const monto = Math.round(parseFloat($('abMonto').value) * 100) / 100;
+  const fechaRaw = $('abFecha').value;
+  if (!(monto > 0)) return error('Captura un monto válido.');
+  if (!fechaRaw) return error('Elige la fecha del abono.');
+  const cuentaSel = $('abCuenta');
+  if (!cuentaSel.value) return error('Elige la cuenta donde entra el dinero.');
+  if (A.medio === 'transferencia' && !$('abRef').value.trim()) return error('Captura la referencia de la transferencia.');
+
+  // Reglas del sistema principal (cxc.js) para no mandar a la bóveda algo que no procede.
+  const hoy = new Date();
+  const pol = M.evaluarPoliticaPagoAnticipado(c, r.estado, r.pagado, S.cfg, hoy, monto);
+  const maximo = Math.max(Number(r.saldoNominal || 0), Number(pol.montoLiquidacion || 0));
+  if (monto > maximo + 0.01) return error(`El abono no puede ser mayor al saldo (${dinero(r.saldoNominal)}). Si el cliente quiere liquidar, usa el monto del visor.`);
+  if (pol.liquidaria || monto >= Number(r.saldoNominal) - 0.01) {
+    return error(`Este pago <b>liquida la cuenta</b>. Las liquidaciones (con su cupón o precio de contado) se registran en el sistema de la oficina para no perder el beneficio del cliente.<br><br>Monto para liquidar hoy: <b>${dinero(pol.montoLiquidacion)}</b>. Avisa a administración y comparte la cotización con el botón <b>📤 Opciones</b>.`);
+  }
+
+  // Candado de abonos del mismo día (igual que el sistema principal)
+  const clave = String(fechaRaw);
+  const mismoDia = M.abonosValidos(c).filter(a => String(M.localISO(M.parseFecha(a.fechaAbonoIso || a.fecha || a.fechaAbono) || new Date(0))).slice(0, 10) === clave)
+    .concat(boveda(c.folio).filter(a => String(a.fechaAbonoRaw || '').slice(0, 10) === clave));
+  if (mismoDia.length) {
+    const tot = mismoDia.reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
+    if (!confirm(`CANDADO DE ABONOS\n\nYa hay ${mismoDia.length} abono(s) de esta cuenta con esa fecha por ${dinero(tot)}.\n\n¿Registrar otro abono el mismo día?`)) return;
+  }
+  if (!confirm(`RESUMEN DE ABONO\n\nCliente: ${r.cliente}\nFolio: ${c.folio}\nMonto: ${dinero(monto)}\nForma: ${A.medio === 'efectivo' ? 'Efectivo' : 'Transferencia'}\nCuenta: ${cuentaSel.options[cuentaSel.selectedIndex].text}\n\n¿Confirmas enviarlo a la bóveda?`)) return;
+
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  const registro = M.construirAbonoBoveda({
+    folio: c.folio, clienteNombre: r.cliente, monto, fechaAbonoRaw: fechaRaw, medioPago: A.medio, referencia: $('abRef') ? $('abRef').value : '',
+    cuentaId: cuentaSel.value, etiquetaCuenta: cuentaSel.options[cuentaSel.selectedIndex].text, vendedorId: c.vendedorId || null, usuario: sesion
+  });
+  try {
+    await escribirEnBoveda(registro, r);
+    S.abonosPend.push(registro);
+    await KV.set('datos', { ...(await KV.get('datos')), abonosPend: S.abonosPend });
+    A.ultimo = { registro, saldoAntes: r.saldoNominal };
+    exitoAbono(registro, r);
+  } catch (e) {
+    console.error('No se pudo enviar el abono:', e);
+    btn.disabled = false; btn.textContent = 'Enviar a bóveda';
+    error('No se pudo enviar el abono a la bóveda: ' + esc(e.message || e) + '<br>Revisa tu conexión e inténtalo de nuevo. <b>Verifica en "Mis abonos" antes de repetirlo</b>, por si sí alcanzó a guardarse.');
+  }
+}
+
+// Escribe EXACTAMENTE como lo hace el sistema principal (pushAtomo + _marcarCambioRemoto + AuditService + pushOutbox)
+async function escribirEnBoveda(reg, r) {
+  const ts = Date.now();
+  const limpio = M.limpiarParaFirestore(reg, true);
+  const ref = db.collection('posData').doc('abonosPendientes');
+  await db.runTransaction(async tx => {
+    const doc = await tx.get(ref);
+    if (!doc.exists) tx.set(ref, { data: [limpio], _updatedAt: ts });
+    else { const data = (doc.data().data || []).slice(); data.push(limpio); tx.update(ref, { data, _updatedAt: ts }); }
+  });
+  // Lo que sigue es "de cortesía": si falla, el abono ya quedó guardado en la bóveda.
+  try { await db.collection('posData').doc('_syncStatus').set({ _updatedAt: ts, tabla: 'abonosPendientes', deviceId: 'cobranza-movil-' + (sesion?.uid || '').slice(0, 8) }, { merge: true }); } catch (e) { console.warn('syncStatus', e); }
+  try {
+    const fila = M.limpiarParaFirestore({
+      id: Date.now() + Math.random(), fecha: new Date().toISOString(), accion: 'BOVEDA_ABONO_PENDIENTE', modulo: 'CxC', entidad: 'abono', entidadId: reg.folioCXC,
+      detalle: 'Abono enviado a la bóveda de autorizaciones (app de cobranza móvil)', monto: reg.montoAbonado, severidad: 'riesgo',
+      usuario: sesion.nombre, usuarioId: sesion.uid, rol: sesion.rol, vendedorId: null, vendedorNombre: null,
+      datos: { clienteNombre: reg.clienteNombre, cuentaId: reg.cuentaId, etiquetaCuenta: reg.etiquetaCuenta, medioPago: reg.medioPago, estatus: 'Pendiente', origen: 'cobranza-movil' }
+    });
+    await db.collection('posData').doc('bitacoraAuditoria').collection('registros').doc(String(fila.id).replace(/\//g, '-').slice(0, 400)).set(fila);
+  } catch (e) { console.warn('bitácora', e); }
+  try {
+    await db.collection('pushOutbox').add({
+      type: 'autorizacion_boveda', title: 'Abono pendiente en Boveda', body: `${reg.clienteNombre} - ${dinero(reg.montoAbonado)} (cobranza móvil)`,
+      url: `${location.origin}/?view=autorizaciones`, targetRoles: ['admin'], status: 'pending', createdAt: Date.now(),
+      payload: { tipo: 'abono', id: `abono-${reg.id}`, titulo: 'Abono pendiente en Boveda', cuerpo: `${reg.clienteNombre} - ${dinero(reg.montoAbonado)}`, folio: reg.folioCXC, cliente: reg.clienteNombre, monto: reg.montoAbonado, origen: 'cobranza-movil' }
+    });
+  } catch (e) { console.warn('pushOutbox', e); }
+}
+
+function exitoAbono(reg, r) {
+  abrirHoja(`
+    <h2>✅ Abono enviado a bóveda</h2>
+    <p class="sub">Queda pendiente de autorización de administración.</p>
+    <div class="ok-caja"><b>${dinero(reg.montoAbonado)}</b> de ${esc(r.cliente)}<br>Folio ${esc(reg.folioCXC)} · ${M.fechaVisible(reg.fechaAbonoRaw)} · ${esc(reg.etiquetaCuenta)}</div>
+    <button class="btn-primario" onclick="compartirImagen('recibo')">📤 Enviar recibo provisional por WhatsApp</button>
+    <button class="btn-primario" style="background:#e2e8f0;color:#0f172a" onclick="cerrarHoja(); renderFicha(); renderTodo()">Listo</button>`);
+  renderTodo();
+}
+
+// ---------------------------------------------------------------- imágenes para WhatsApp
+function colorEstado(r) {
+  const m = { 'Al corriente': ['#dcfce7', '#166534'], 'Atrasado': ['#fef3c7', '#92400e'], 'Crítico': ['#fee2e2', '#991b1b'], 'Promesa': ['#dbeafe', '#1e40af'] }[r.estado.estadoGeneral] || ['#e2e8f0', '#475569'];
+  return { bg: m[0], fg: m[1] };
+}
+function htmlEstadoCuenta(r) {
+  const U = ImagenService.ui, c = r.cuenta, plan = c.plan || {}, hoy = new Date();
+  const pagares = (S.ficha?.pagaresFull || r.estado.pagares || []).slice().sort((a, b) => (M.parseFecha(a.fechaVencimiento) || 0) - (M.parseFecha(b.fechaVencimiento) || 0));
+  const pend = pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').slice(0, 6);
+  const abonos = M.abonosValidos(c).slice().sort((a, b) => String(b.fechaAbonoIso || b.fecha || '').localeCompare(String(a.fechaAbonoIso || a.fecha || ''))).slice(0, 4);
+  const items = pend.map(p => {
+    const rest = p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado || 0)) : p.monto;
+    const fv = M.parseFecha(p.fechaVencimiento), venc = fv && fv < hoy;
+    return U.item({ titulo: M.fechaVisible(p.fechaVencimiento), detalle: p.estado === 'Parcial' ? 'Pago parcial' : '', marca: venc ? 'Vencido' : '', izquierda: p.numeroPagere || '', derecha: dinero(rest) });
+  }).join('');
+  const cuerpo = [
+    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Estado de cuenta', folio: c.folio, badge: { texto: r.estado.estadoGeneral, ...colorEstado(r) } }),
+    U.hero({ etiqueta: 'Saldo por pagar', valor: dinero(r.saldo), nota: r.cliente, tono: r.vencido > 0.01 ? 'rojo' : 'azul' }),
+    U.filas([
+      ['Producto', r.producto], ['Fecha de venta', M.fechaVisible(M.fechaVentaDate(c))],
+      ['Plan', `${plan.meses ? mesesTxt(plan.meses) : '-'} · ${plan.pagos || '-'} pagos ${c.periodicidad || 'semanal'}es`],
+      ['Abono', { texto: dinero(plan.abono), fuerte: true }], ['Total abonado', dinero(r.estado.totalAbonado)],
+      r.vencido > 0.01 ? ['Vencido', { texto: dinero(r.vencido), color: '#dc2626', fuerte: true }] : null,
+      r.moratorios > 0.01 ? ['Moratorios', dinero(r.moratorios)] : null
+    ]),
+    pend.length ? U.seccion('Próximos pagos') + items : '',
+    abonos.length ? U.seccion('Últimos abonos') + U.filas(abonos.map(a => [M.fechaVisible(a.fechaAbonoIso || a.fecha || a.fechaAbono), dinero(a.monto || a.montoAbonado)])) : '',
+    U.nota({ texto: 'Documento informativo con la información de tu cuenta a la fecha de hoy. Para aclaraciones comunícate con la tienda.', tono: 'gris' }),
+    U.pie(`${S.empresa.nombre} · ${M.fechaVisible(hoy)}`)
+  ].join('');
+  return U.envolver(cuerpo, 'Estado de cuenta ' + c.folio);
+}
+function htmlVisor(r) {
+  const U = ImagenService.ui, c = r.cuenta, P = r.politica, pl = r.plazo, sl = r.salto, hoy = new Date();
+  const partes = [U.cabecera({ empresa: S.empresa.nombre, tipo: 'Opciones de tu cuenta', folio: c.folio }),
+    U.hero({ etiqueta: 'Saldo por pagar', valor: dinero(r.saldoNominal), nota: r.cliente, tono: 'azul' })];
+  if (pl) partes.push(U.seccion('Plazo pactado'), U.filas([['Plazo', mesesTxt(pl.mesesPlan)], ['Fecha límite', { texto: M.fechaVisible(pl.fechaLimite), fuerte: true }],
+    [pl.aunEnPlazo ? 'Días restantes' : 'Estado', { texto: pl.aunEnPlazo ? String(pl.diasRestantes) : 'Plazo vencido', color: pl.aunEnPlazo ? '#16a34a' : '#dc2626', fuerte: true }]]));
+  partes.push(U.seccion('Si liquidas hoy'));
+  if (P.tipo === 'pronto_pago_flat' && P.cuponDisponible) partes.push(U.hero({ etiqueta: 'Pagas', valor: dinero(P.montoLiquidacion), nota: `Y recibes un cupón de ${dinero(P.beneficio)} (${P.porcentajeCupon}%) para tu próxima compra`, tono: 'verde' }));
+  else if (P.tipo === 'contado_1_mes') partes.push(U.hero({ etiqueta: 'Pagas (precio de contado)', valor: dinero(P.montoLiquidacion), nota: P.aplica ? `Ahorras ${dinero(P.saldoActual - P.montoLiquidacion)} contra tu saldo` : '', tono: 'verde' }));
+  else partes.push(U.hero({ etiqueta: 'Pagas', valor: dinero(P.montoLiquidacion), nota: P.tipo === 'fuera_de_plazo' ? 'Saldo vigente' : 'Saldo vigente de tu cuenta', tono: 'azul' }));
+  if (r.moratorios > 0.01) partes.push(U.nota({ texto: `Además tienes moratorios por ${dinero(r.moratorios)}.`, tono: 'ambar' }));
+  if (sl) {
+    partes.push(U.seccion(sl.yaPaso ? 'Tu plazo ya venció' : 'Si no liquidas a tiempo'));
+    partes.push(U.nota({ titulo: `De ${mesesTxt(sl.mesesActual)} a ${mesesTxt(sl.mesesNuevo)}`, texto: `El total de tu plan pasaría de ${dinero(sl.totalActual)} a ${dinero(sl.totalNuevo)} (${sl.diferencia >= 0 ? '+' : ''}${dinero(sl.diferencia)}).${sl.yaPaso ? ' Administración confirma este cambio.' : ` Aplica después del ${M.fechaVisible(pl ? pl.fechaLimite : hoy)}.`}`, tono: sl.yaPaso ? 'rojo' : 'ambar' }));
+  }
+  partes.push(U.pie(`${S.empresa.nombre} · ${M.fechaVisible(hoy)}`));
+  return U.envolver(partes.join(''), 'Opciones ' + c.folio);
+}
+function htmlRecibo(reg, r) {
+  const U = ImagenService.ui, saldoDespues = Math.max(0, (A.ultimo?.saldoAntes ?? r.saldoNominal) - reg.montoAbonado);
+  const cuerpo = [
+    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Recibo provisional de abono', folio: c_corto(reg), badge: { texto: 'Pendiente de autorización', bg: '#fef3c7', fg: '#92400e' } }),
+    U.hero({ etiqueta: 'Abono recibido', valor: dinero(reg.montoAbonado), nota: r.cliente, tono: 'verde' }),
+    U.filas([['Cuenta', reg.folioCXC], ['Fecha del abono', M.fechaVisible(reg.fechaAbonoRaw)], ['Forma de pago', reg.medioPago === 'transferencia' ? 'Transferencia' : 'Efectivo'],
+      reg.referenciaBancaria ? ['Referencia', reg.referenciaBancaria] : null, ['Saldo estimado', { texto: dinero(saldoDespues), fuerte: true }], ['Recibió', sesion.nombre]]),
+    U.nota({ titulo: 'RECIBO PROVISIONAL', texto: 'Este comprobante queda sujeto a la autorización de la tienda. El saldo definitivo se actualiza cuando se aplica el abono.', tono: 'ambar' }),
+    U.pie(`${S.empresa.nombre} · ${M.fechaVisible(new Date())}`)
+  ].join('');
+  return U.envolver(cuerpo, 'Recibo provisional');
+}
+function c_corto(reg) { return 'ABN-' + String(Math.floor(reg.id)).slice(-6); }
+
+async function compartirImagen(tipo) {
+  const f = S.ficha; if (!f) return;
+  const r = resumenFicha();
+  cargando(true, 'Generando imagen…');
+  try {
+    let html, nombre, texto;
+    if (tipo === 'estado') { html = htmlEstadoCuenta(r); nombre = `estado_cuenta_${r.folio}`; texto = `Estado de cuenta - ${r.cliente}`; }
+    else if (tipo === 'visor') { html = htmlVisor(r); nombre = `opciones_${r.folio}`; texto = `Opciones de tu cuenta - ${r.cliente}`; }
+    else { html = htmlRecibo(A.ultimo.registro, r); nombre = `recibo_provisional_${r.folio}`; texto = `Recibo provisional - ${r.cliente}`; }
+    const lienzo = await ImagenService.renderDocumento(html, { tarjeta: true, titulo: texto });
+    cargando(false);
+    const res = await ImagenService.entregar(lienzo, nombre, { titulo: texto, texto, categoria: 'Cobranza' });
+    if (res === 'descargado') toast('Imagen descargada. Adjúntala en WhatsApp.');
+    else if (res === 'carpeta') toast('Imagen guardada.');
+  } catch (e) {
+    console.error('Error generando imagen:', e);
+    toast('No se pudo generar la imagen.');
+  } finally { cargando(false); }
+}
+
+// ---------------------------------------------------------------- arranque
+(async function init() {
+  // El service worker va primero: así la app abre desde el celular aunque Firebase tarde o falle.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/cobranza/sw.js', { scope: '/cobranza/' }).catch(e => console.warn('Service worker no disponible:', e));
+  if (!navigator.onLine) $('avisoOffline').classList.remove('oculto');
+  if (typeof firebase === 'undefined') {
+    $('loginError').textContent = 'No se pudo cargar Firebase. Revisa tu conexión y recarga.';
+    return;
+  }
+  await initFirebase();
+  auth.onAuthStateChanged(async user => {
+    if (user && !sesion) { try { await cargarPerfilYEntrar(user); } catch (e) { console.error(e); } }
+  });
+})();
+</script>
+</body>
+</html>
