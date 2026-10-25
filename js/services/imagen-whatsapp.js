@@ -59,7 +59,8 @@
     }
 
     function baseHref() {
-        return window.location.href.split('?')[0].split('#')[0];
+        // document.baseURI respeta <base href> (la app de /cobranza/ lo usa); en el resto es igual a la URL de la página.
+        return (document.baseURI || window.location.href).split('?')[0].split('#')[0];
     }
 
     function cargarHtml2Canvas() {
