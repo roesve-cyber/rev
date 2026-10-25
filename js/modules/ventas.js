@@ -2437,6 +2437,47 @@ window.confirmarDecisionesInventario = function(metodoPago, totalContado, enganc
     );
 };
 
+// 💬 Aviso enfático al vendedor al mandar la venta a la bóveda: reemplaza el alert simple
+// y agrega cuánto le toca de comisión por la venta y de bono al liquidar el cliente.
+function _mostrarResumenVentaCuarentena(folioVenta, proy) {
+    const textoBase = `Folio: ${folioVenta}. La nota fue emitida y el proceso en caja finalizó. Si marcaste mercancía para entrega, también se generó su comprobante operativo. El registro financiero e inventario oficial quedan pendientes de autorización del Administrador.`;
+    try {
+        const din = (n) => (typeof window.dinero === "function" ? window.dinero(n) : "$" + Number(n || 0).toFixed(2));
+        let bloque = "";
+        if (proy && (proy.comisionCierre > 0 || proy.bono > 0)) {
+            const bono = proy.esCredito ? `
+                <div style="background:#f5f3ff;border:3px solid #7c3aed;border-radius:12px;padding:16px;margin-top:12px;text-align:center;">
+                    <div style="font-size:13px;font-weight:bold;color:#5b21b6;letter-spacing:.5px;">🏁 TU BONO CUANDO EL CLIENTE LIQUIDE</div>
+                    <div style="font-size:38px;font-weight:900;color:#5b21b6;line-height:1.2;">${din(proy.bono)}</div>
+                    <div style="font-size:12px;color:#6b21a8;">Se te paga cuando el cliente <strong>salde toda su cuenta</strong>.</div>
+                </div>
+                <div style="margin-top:12px;background:#ecfdf5;border-radius:10px;padding:10px;text-align:center;font-size:14px;color:#065f46;">
+                    Total que puedes ganar con esta venta: <strong style="font-size:20px;">${din(proy.totalComision)}</strong>
+                </div>
+                <p style="margin:10px 0 0;font-size:11px;color:#6b7280;text-align:center;">Si el cliente liquida con descuento o no termina de pagar, el bono baja o no se paga. ${proy.sinCosto ? '<strong style="color:#b45309;">Algún producto no tiene costo capturado: avisa al administrador para poder calcular tu bono.</strong>' : ''}</p>` : "";
+            bloque = `
+                <div style="background:#fffbeb;border:3px solid #f59e0b;border-radius:12px;padding:16px;margin-top:14px;text-align:center;">
+                    <div style="font-size:13px;font-weight:bold;color:#92400e;letter-spacing:.5px;">💰 TU COMISIÓN POR ESTA VENTA</div>
+                    <div style="font-size:38px;font-weight:900;color:#b45309;line-height:1.2;">${din(proy.comisionCierre)}</div>
+                    <div style="font-size:12px;color:#92400e;">Se te paga al cerrarse la venta.</div>
+                </div>${bono}`;
+        }
+        document.querySelectorAll('[data-modal="resumen-venta-cuarentena"]').forEach(m => m.remove());
+        document.body.insertAdjacentHTML("beforeend", `
+            <div data-modal="resumen-venta-cuarentena" style="position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;justify-content:center;align-items:center;padding:16px;">
+                <div style="background:white;border-radius:14px;padding:24px;width:100%;max-width:460px;max-height:94vh;overflow-y:auto;">
+                    <h2 style="margin:0 0 6px;color:#1e3a8a;text-align:center;">⏳ VENTA EN CUARENTENA</h2>
+                    <p style="margin:0;font-size:12px;color:#6b7280;text-align:center;">${textoBase}</p>
+                    ${bloque}
+                    <button onclick="this.closest('[data-modal]').remove()" style="width:100%;margin-top:16px;padding:14px;background:#1e3a8a;color:white;border:none;border-radius:10px;font-weight:bold;font-size:16px;cursor:pointer;">ENTENDIDO</button>
+                </div>
+            </div>`);
+    } catch (e) {
+        console.error("Resumen de venta en cuarentena:", e);
+        alert("⏳ VENTA EN CUARENTENA\n\n" + textoBase);
+    }
+}
+
 // INTERCEPTOR MAKER-CHECKER: Pone la venta en cuarentena y emite ticket provisional
 function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar, planElegido,
                             folioVenta, fechaHoy, fechaVentaIso, productosConStock, productosSinStock) {
@@ -2605,7 +2646,19 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     document.querySelectorAll('[data-modal]').forEach(m => m.remove());
     document.querySelectorAll('.modal').forEach(m => { m.classList.add('oculto'); m.style.display = 'none'; });
 
-    alert(`⏳ VENTA EN CUARENTENA\\n\\nFolio: ${folioVenta}\\nLa nota fue emitida y el proceso en caja finalizó. Si marcaste mercancía para entrega, también se generó su comprobante operativo.\\n\\nEl registro financiero e inventario oficial quedan pendientes de autorización del Administrador.`);
+    // 💬 Se le dice al vendedor, de forma enfática, cuánto le toca de comisión por esta
+    // venta y cuánto de bono cuando el cliente liquide (vendedores.js, mismas fórmulas
+    // que el pago real). Se calcula con el vendedor guardado en la venta, no con el global.
+    let proyComision = null;
+    try {
+        if (typeof window.calcularProyeccionComisionVenta === "function") {
+            proyComision = window.calcularProyeccionComisionVenta({
+                vendedorId: datosVenta.vendedorId, metodoPago, totalContado, enganche,
+                plan: planElegido, articulos: datosVenta.articulos
+            });
+        }
+    } catch (e) { console.error("Proyección de comisión:", e); }
+    _mostrarResumenVentaCuarentena(folioVenta, proyComision);
     navA('tienda');
 }
 

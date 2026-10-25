@@ -35,7 +35,7 @@ function renderGestionVendedores() {
         return `<tr>
           <td style="padding:10px;">${v.nombre}</td>
           <td style="padding:10px;text-align:center;">${v.telefono || '-'}</td>
-          <td style="padding:10px;text-align:center;">${v.porcentajeComision || 0}%${Number(v.porcentajeComisionAbono) > 0 ? `<br><small style="color:#7c3aed;font-weight:bold;">+ ${Number(v.porcentajeComisionAbono)}% por abono</small>` : ''}</td>
+          <td style="padding:10px;text-align:center;">${v.porcentajeComision || 0}%</td>
           <td style="padding:10px;text-align:center;font-size:12px;color:#7c3aed;">${baseLabel}</td>
           <td style="padding:10px;text-align:right;">${dinero(pendVend)}</td>
           <td style="padding:10px;text-align:center;"><span style="color:${v.activo ? '#16a34a' : '#9ca3af'};font-weight:bold;">${v.activo ? '✅ Activo' : '⛔ Inactivo'}</span></td>
@@ -89,7 +89,6 @@ function renderGestionVendedores() {
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button id="tabComision_pendientes" onclick="_cambiarTabComisiones('pendientes')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📌 Ventas no pagadas</button>
             <button id="tabComision_anticipos" onclick="_cambiarTabComisiones('anticipos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">💵 Anticipos</button>
-            <button id="tabComision_abonos" onclick="_cambiarTabComisiones('abonos')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">📥 Por abono</button>
             <button id="tabComision_bono" onclick="_cambiarTabComisiones('bono')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🏁 Bono saldadas</button>
             <button id="tabComision_historial" onclick="_cambiarTabComisiones('historial')" style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">🕓 Historial</button>
             ${(typeof _esAdmin === 'function' && _esAdmin()) ? `<button onclick="_ejecutarCorreccionPisoUtilidadUI()" title="Sube al piso del 10% de utilidad las comisiones PENDIENTES que quedaron por debajo (registradas antes de esta regla). Lo Pagado no se toca." style="padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;background:#fef3c7;color:#92400e;">🛠️ Corregir piso 10%</button>` : ''}
@@ -109,10 +108,6 @@ function renderGestionVendedores() {
             <button onclick="_abrirAnticipoDesdeSelector()" style="padding:8px 14px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:13px;">➕ Nuevo Anticipo</button>
           </div>
           <div id="anticiposComisionArea"></div>
-        </div>
-
-        <div id="panelComision_abonos" style="display:none;">
-          <div id="comisionesAbonoArea"></div>
         </div>
 
         <div id="panelComision_bono" style="display:none;">
@@ -142,7 +137,7 @@ function _cambiarTabComisiones(tab) {
 
 function _renderTabComisionActiva() {
     const tab = window._comisionesVendedoresState.tabActiva || 'pendientes';
-    ['pendientes', 'anticipos', 'abonos', 'bono', 'historial'].forEach(t => {
+    ['pendientes', 'anticipos', 'bono', 'historial'].forEach(t => {
         const btn = document.getElementById('tabComision_' + t);
         const panel = document.getElementById('panelComision_' + t);
         const activo = t === tab;
@@ -151,7 +146,6 @@ function _renderTabComisionActiva() {
     });
     if (tab === 'pendientes') renderComisionesPendientes();
     else if (tab === 'anticipos') renderAnticiposComision();
-    else if (tab === 'abonos') renderComisionesAbono();
     else if (tab === 'bono') renderBonoCuentaSaldada();
     else renderHistorialComisiones();
 }
@@ -392,11 +386,6 @@ function abrirFormVendedor(id) {
             <label style="font-size:12px;font-weight:bold;color:#374151;">% Comisión apartado</label>
             <input type="number" id="vndComisionApartado" value="${comisionApartado}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
           </div>
-          <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px;">
-            <label style="font-size:12px;font-weight:bold;color:#5b21b6;">% Comisión por ABONO (aparte de la de venta)</label>
-            <input type="number" id="vndComisionAbono" value="${v ? (v.porcentajeComisionAbono ?? 0) : 0}" min="0" max="100" step="0.1" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
-            <small style="color:#6b7280;">Se paga sobre cada abono de crédito que cobre este vendedor en sus cuentas. 0 = sin comisión por abono.</small>
-          </div>
           <div>
             <label style="font-size:12px;font-weight:bold;color:#374151;">BASE DE CÁLCULO DE COMISIÓN</label>
             <select id="vndBaseComision" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;">
@@ -426,7 +415,7 @@ function guardarVendedor() {
     const porcentajeComisionContado = parseFloat(document.getElementById('vndComisionContado')?.value) || 0;
     const porcentajeComisionCredito = parseFloat(document.getElementById('vndComisionCredito')?.value) || 0;
     const porcentajeComisionApartado = parseFloat(document.getElementById('vndComisionApartado')?.value) || 0;
-    const porcentajeComisionAbono = Math.min(100, Math.max(0, parseFloat(document.getElementById('vndComisionAbono')?.value) || 0));
+    const porcentajeComisionAbono = 0; // la comisión por abono se eliminó
     const baseComision = document.getElementById('vndBaseComision')?.value || 'precio_base';
     const activo = document.getElementById('vndActivo')?.checked ?? true;
     if (!nombre) return alert('⚠️ El nombre es obligatorio.');
@@ -520,26 +509,16 @@ function _montoBaseComision(v, { totalVenta = 0, totalContado = 0, costoMercanci
     return Number(totalContado) || Number(totalVenta) || 0;
 }
 
-// datos puede ser un número (compatibilidad: totalContado plano) o un objeto:
-// { totalContado, totalVenta, articulos, listaProductos }
-function registrarComisionVenta(folio, datos, vendedorId) {
-    const vendedores = StorageService.get('vendedores', []);
-    const v = vendedores.find(x => String(x.id) === String(vendedorId));
-    if (!v) return;
-
+// Cálculo PURO (no escribe nada) de la comisión de una venta. Lo usan el registro
+// real de la comisión (registrarComisionVenta) y la proyección que se le muestra
+// al vendedor al capturar la venta, para que lo prometido sea lo que se paga.
+function _calcularComisionVentaDetalle(v, datos, tipoVenta) {
     const esObjeto = datos && typeof datos === 'object';
     const totalContado = esObjeto ? Number(datos.totalContado || 0) : Number(datos || 0);
     const totalVenta = esObjeto ? Number(datos.totalVenta || datos.totalContado || 0) : Number(datos || 0);
     const costoMercancia = esObjeto ? calcularCostoMercanciaVenta(datos.articulos, datos.listaProductos) : 0;
     const utilidad = esObjeto ? Math.max(0, totalContado - costoMercancia) : 0;
 
-    // Detectar tipo de venta: contado, transferencia, credito, apartado
-    let tipoVenta = 'contado';
-    if (window._ultimaVentaMetodo) tipoVenta = window._ultimaVentaMetodo;
-    // Si no está definido, buscar en la venta por folio
-    if (!tipoVenta && typeof buscarMetodoPorFolio === 'function') {
-      tipoVenta = buscarMetodoPorFolio(folio);
-    }
     let porcentaje = 0;
     if (tipoVenta === 'credito') {
       porcentaje = v.porcentajeComisionCredito ?? v.porcentajeComision ?? 0;
@@ -569,6 +548,26 @@ function registrarComisionVenta(folio, datos, vendedorId) {
             pisoUtilidadAplicado = true;
         }
     }
+    return { esObjeto, totalContado, totalVenta, costoMercancia, utilidad, porcentaje, montoBase, montoComisionCalculado, montoComision, pisoUtilidadAplicado };
+}
+
+// datos puede ser un número (compatibilidad: totalContado plano) o un objeto:
+// { totalContado, totalVenta, articulos, listaProductos }
+function registrarComisionVenta(folio, datos, vendedorId) {
+    const vendedores = StorageService.get('vendedores', []);
+    const v = vendedores.find(x => String(x.id) === String(vendedorId));
+    if (!v) return;
+
+    // Detectar tipo de venta: contado, transferencia, credito, apartado
+    let tipoVenta = 'contado';
+    if (window._ultimaVentaMetodo) tipoVenta = window._ultimaVentaMetodo;
+    // Si no está definido, buscar en la venta por folio
+    if (!tipoVenta && typeof buscarMetodoPorFolio === 'function') {
+      tipoVenta = buscarMetodoPorFolio(folio);
+    }
+
+    const det = _calcularComisionVentaDetalle(v, datos, tipoVenta);
+    const { esObjeto, totalContado, costoMercancia, utilidad, montoBase, montoComisionCalculado, montoComision, pisoUtilidadAplicado } = det;
 
     if (montoComision <= 0) return;
     // clienteNombre y productos se guardan directo en el registro para que el
@@ -1229,6 +1228,7 @@ function _comAbonoFechaCorta(iso) {
 }
 
 window.registrarComisionAbono = function (folioCXC, montoAbonado, vendedorId, extra) {
+    return null; // 🚫 Comisión por abono eliminada: ya no se genera (solo comisión de venta + bono por cuenta saldada).
     try {
         const datos = extra || {};
         const monto = Number(montoAbonado) || 0;
@@ -1533,40 +1533,42 @@ function ejecutarLiquidacionComisionAbono(vendedorId, hastaISO) {
 }
 
 // ============================================================================
-// 🏁 BONO POR CUENTA SALDADA (pestaña "Por abono") — mismo ciclo que la comisión
-// por venta, pero sobre los INTERESES y pagadero hasta que la cuenta se salda.
+// 🏁 BONO POR CUENTA SALDADA (pestaña "Bono saldadas")
+//
+// La comisión TOTAL de una venta a crédito es el X% (15 de entrada, configurable)
+// de su UTILIDAD (total de la venta con interés − costo de la mercancía),
+// redondeada al siguiente $10 como el resto de comisiones. Al vender se paga la
+// comisión de siempre (registrarComisionVenta) y lo que falta para llegar a ese
+// total es el BONO, que se paga cuando la cuenta se salda:
+//     bono = máx(0, redondeo↑10(X% × utilidad) − comisión de venta ya registrada)
 //
 // Ciclo de cada bono (tabla propia bonosCuentaSaldada, un registro por cuenta,
 // id fijo BONO-<folio>, así una cuenta jamás se bonifica dos veces):
-//   Reservada → al hacer una venta a crédito con vendedor se crea la RESERVA:
-//               % × interés pactado (plan.total − capital). Es un pasivo y se
-//               devenga con la fecha de la venta, como la comisión de venta.
-//               Se mantiene al día si el plan cambia (salto de plazo).
-//   Pendiente → la cuenta se saldó: el monto se fija con el interés realmente
-//               cobrado (abonos sin moratorios − capital, tope = interés
-//               pactado). Una liquidación con descuento/cupón baja el bono.
-//   Pagada    → se liquidó por vendedor: egreso de caja confirmado ANTES de
-//               marcar nada, descuento de anticipos (FIFO) y AuditService.
-//   Anulada   → la venta se canceló, la cuenta es incobrable o se saldó sin
-//               cobrar intereses.
-// - El % se configura aquí (10 de entrada) y queda fijo en cada reserva.
-// - Cuentas saldadas ANTES de existir la reserva se pueden bonificar desde el
-//   rango de fechas ("sin reserva"), con el % vigente.
-// - Un bono pagado cuya cuenta cambia después (abono eliminado/corregido) no se
-//   reescribe: se marca "⚠ revisar".
+//   Reservada → al vender a crédito con vendedor se crea la RESERVA (pasivo, se
+//               devenga con la fecha de la venta). Sigue al plan si este cambia.
+//   Pendiente → la cuenta se saldó: la utilidad se toma sobre lo realmente
+//               cobrado (si se liquidó con descuento/cupón, el bono baja).
+//   Pagada    → lo liquidas tú, eligiendo cuáles cuentas: egreso de caja
+//               confirmado ANTES de marcar nada y AuditService.
+//   Anulada   → venta cancelada, cuenta incobrable o sin bono que pagar.
+// - El % queda fijo en cada reserva; cambiarlo solo aplica a ventas nuevas.
+// - Ventas ANTERIORES: cualquier cuenta saldada que tenga comisión de venta
+//   registrada y aún no tenga bono aparece en el rango de fechas ("sin reserva
+//   previa") y puedes elegir si la bonificas, con el % vigente.
+// - Un bono pagado cuya cuenta cambia después no se reescribe: "⚠ revisar".
 // ============================================================================
-const BONO_SALDADA_PCT_DEFECTO = 10;
+const BONO_SALDADA_PCT_DEFECTO = 15;
 
 function _bonoConfig() {
     const c = StorageService.get('configBonoCuentaSaldada', null);
-    const n = (c && c.porcentaje != null) ? Number(c.porcentaje) : NaN;
+    const n = (c && c.porcentajeUtilidad != null) ? Number(c.porcentajeUtilidad) : NaN;
     return { porcentaje: Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : BONO_SALDADA_PCT_DEFECTO };
 }
 
 function _bonoGuardarPct(valor) {
     const n = parseFloat(valor);
     const pct = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : BONO_SALDADA_PCT_DEFECTO;
-    StorageService.set('configBonoCuentaSaldada', { porcentaje: pct });
+    StorageService.set('configBonoCuentaSaldada', { porcentajeUtilidad: pct });
     renderBonoCuentaSaldada();
 }
 
@@ -1620,12 +1622,10 @@ function _bonoCuentaCancelada(c) {
     return String(c?.estado || c?.estatus || '').toLowerCase().includes('cancel') || c?.incobrable === true;
 }
 
-function _bonoInteresPactado(cuenta) {
-    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
-    const contado = Number(cuenta.totalContadoOriginal || cuenta.totalMercancia || 0);
-    const capital = Math.max(0, contado - enganche);
-    const financiado = Number(cuenta.plan?.total || cuenta.saldoOriginal || 0);
-    return { capital, interesPactado: _bonoRound2(Math.max(0, financiado - capital)) };
+function _bonoCuentasMapa() {
+    const m = {};
+    StorageService.get('cuentasPorCobrar', []).forEach(c => { if (c && c.folio != null) m[String(c.folio)] = c; });
+    return m;
 }
 
 // Dinero aplicado a los pagarés de cada cuenta (capital + interés, sin moratorios).
@@ -1643,92 +1643,139 @@ function _bonoPagadoPagaresMap() {
     return m;
 }
 
-// INTERÉS TOTAL pagado por el cliente en toda la cuenta (no solo el último pago):
-//   pagado total (el mayor entre pagarés y abonos, sin moratorios realmente cobrados)
-//   − capital financiado (contado − enganche), con tope en el interés pactado.
-// Los moratorios CONDONADOS no son dinero cobrado y no se restan.
-function _bonoInteresCobrado(cuenta, pagMap) {
-    const { capital, interesPactado } = _bonoInteresPactado(cuenta);
-    const abonado = (cuenta.abonos || []).filter(_bonoAbonoVigente)
-        .reduce((s, a) => s + (Number(a.monto || a.montoAbonado || 0)), 0);
-    const moratoriosCobrados = (cuenta.cargosMoratorios || [])
-        .filter(m => !m.cancelado && !m.anulado && String(m.tipo || 'cargo') !== 'exencion' && !/condonad/i.test(String(m.nota || '')))
-        .reduce((s, m) => s + Number(m.montoAbonado || 0), 0);
-    const desdeAbonos = Math.max(0, abonado - moratoriosCobrados);
-    const desdePagares = (pagMap || _bonoPagadoPagaresMap())[String(cuenta.folio)] || 0;
-    const cobrado = Math.max(desdePagares, desdeAbonos);
-    return {
-        capital, interesPactado,
-        cobrado: _bonoRound2(cobrado),
-        interesCobrado: _bonoRound2(Math.min(interesPactado, Math.max(0, cobrado - capital)))
-    };
-}
-
-function _bonoCuentasMapa() {
+// Comisión de venta ya registrada por folio (Pendiente o Pagada) y su costo si se guardó.
+function _bonoComisionesMapa() {
     const m = {};
-    StorageService.get('cuentasPorCobrar', []).forEach(c => { if (c && c.folio != null) m[String(c.folio)] = c; });
+    StorageService.get('comisionesRegistradas', []).forEach(c => {
+        if (!c || c.folio == null) return;
+        const k = String(c.folio);
+        const x = m[k] || (m[k] = { monto: 0, costo: 0 });
+        x.monto += Number(c.montoComision) || 0;
+        if (!(x.costo > 0) && Number(c.costoMercancia) > 0) x.costo = Number(c.costoMercancia);
+    });
     return m;
 }
 
+function _bonoProductosCatalogo() {
+    const p = StorageService.get('productos', []);
+    return Array.isArray(p) ? p : [];
+}
+
+function _bonoCtx() {
+    return {
+        mapa: _bonoCuentasMapa(), pag: _bonoPagadoPagaresMap(), com: _bonoComisionesMapa(),
+        productos: _bonoProductosCatalogo(), pct: _bonoConfig().porcentaje
+    };
+}
+
+// Total de la venta con interés = enganche + total del plan (igual que ventasRegistradas.total).
+function _bonoTotalVenta(c) {
+    return Number(c.engancheRecibido || c.enganche || 0) + Number(c.plan?.total || c.saldoOriginal || 0);
+}
+
+// Dinero realmente cobrado de la cuenta: enganche + lo pagado al plan (el mayor entre
+// pagarés y abonos, sin moratorios realmente cobrados; los CONDONADOS no son dinero).
+function _bonoCobradoReal(c, pagMap) {
+    const enganche = Number(c.engancheRecibido || c.enganche || 0);
+    const abonado = (c.abonos || []).filter(_bonoAbonoVigente)
+        .reduce((s, a) => s + (Number(a.monto || a.montoAbonado || 0)), 0);
+    const moratorios = (c.cargosMoratorios || [])
+        .filter(m => !m.cancelado && !m.anulado && String(m.tipo || 'cargo') !== 'exencion' && !/condonad/i.test(String(m.nota || '')))
+        .reduce((s, m) => s + Number(m.montoAbonado || 0), 0);
+    const desdeAbonos = Math.max(0, abonado - moratorios);
+    const desdePagares = (pagMap || {})[String(c.folio)] || 0;
+    return { enganche, plan: Math.max(desdePagares, desdeAbonos) };
+}
+
+// Comisión total = pct% de la utilidad redondeada al siguiente 10; bono = lo que falta
+// sobre lo ya pagado.
+function _bonoCalcular(pct, utilidad, comisionPagada) {
+    const exacto = Math.round(Math.max(0, Number(utilidad) || 0) * (Number(pct) || 0)) / 100;
+    const totalComision = _redondearComisionSiguienteDiez(Math.round(exacto * 1e6) / 1e6);
+    return { totalComision, bono: _bonoRound2(Math.max(0, totalComision - (Number(comisionPagada) || 0))) };
+}
+
+function _bonoCalcularCuenta(c, b, ctx, pct) {
+    const folio = String(c.folio);
+    const cm = ctx.com[folio];
+    const costoReg = Number(b && b.costoMercancia) || 0;
+    const costo = costoReg > 0 ? costoReg
+        : (cm && cm.costo > 0 ? cm.costo : calcularCostoMercanciaVenta(c.articulos, ctx.productos));
+    const totalVenta = _bonoTotalVenta(c);
+    const utilPactada = Math.max(0, totalVenta - costo);
+    const cob = _bonoCobradoReal(c, ctx.pag);
+    const cobrado = cob.enganche + cob.plan;
+    const utilReal = Math.max(0, Math.min(utilPactada, cobrado - costo));
+    const comisionPagada = cm ? cm.monto : (Number(b && b.comisionVenta) || 0);
+    const real = _bonoCalcular(pct, utilReal, comisionPagada);
+    const reserva = _bonoCalcular(pct, utilPactada, comisionPagada);
+    return {
+        costo, totalVenta, utilPactada, utilReal, cobrado: _bonoRound2(cobrado), comisionPagada,
+        totalComisionReal: real.totalComision, bonoReal: real.bono,
+        totalComisionReserva: reserva.totalComision, bonoReserva: reserva.bono
+    };
+}
+
 // Estado "vivo" de un bono según la cuenta de hoy (no escribe nada).
-function _bonoVista(b, mapa, pag) {
-    const pct = Number(b.porcentaje) || 0;
-    const c = mapa[String(b.folioCXC)];
+function _bonoVista(b, ctx) {
     if (b.estado === 'Anulada') return { ...b, estadoVivo: 'Anulada', montoVivo: 0 };
+    const nuevo = b.esquema === 'utilidad';
+    const pct = nuevo ? (Number(b.porcentaje) || 0) : ctx.pct;
+    const c = ctx.mapa[String(b.folioCXC)];
     if (b.estado === 'Pagada') {
         const monto = Number(b.montoBono) || 0;
         let nota = b.notaRevision || '';
-        if (c && !nota) {
+        if (c && nuevo && !nota) {
             if (_bonoCuentaCancelada(c)) nota = 'La cuenta se canceló o quedó incobrable después de pagar este bono.';
             else if (c.estado !== 'Saldado') nota = 'La cuenta ya no está saldada (se eliminó o corrigió un abono) después de pagar este bono.';
             else {
-                const esperado = Math.round(_bonoInteresCobrado(c, pag).interesCobrado * pct) / 100;
-                if (Math.abs(esperado - monto) > 0.01) nota = `El interés cobrado cambió después de pagar: el bono ahora sería ${dinero(esperado)} (se pagó ${dinero(monto)}).`;
+                const k = _bonoCalcularCuenta(c, b, ctx, pct);
+                if (k.costo > 0 && Math.abs(k.bonoReal - monto) > 0.01) nota = `Lo cobrado o la comisión cambiaron después de pagar: el bono ahora sería ${dinero(k.bonoReal)} (se pagó ${dinero(monto)}).`;
             }
         }
         return { ...b, estadoVivo: 'Pagada', montoVivo: monto, notaVivo: nota };
     }
     if (!c) return { ...b, estadoVivo: b.estado, montoVivo: Number(b.montoBono ?? b.montoReserva) || 0 };
     if (_bonoCuentaCancelada(c)) return { ...b, estadoVivo: 'Anulada', montoVivo: 0, motivoVivo: 'La venta se canceló o la cuenta quedó incobrable.' };
+    const k = _bonoCalcularCuenta(c, b, ctx, pct);
+    if (k.costo <= 0) return { ...b, estadoVivo: 'SinCosto', montoVivo: 0 };
+    const comunes = { porcentaje: pct, totalVentaVivo: k.totalVenta, costoVivo: k.costo, comisionPagadaVivo: k.comisionPagada };
     if (c.estado === 'Saldado') {
-        const d = _bonoInteresCobrado(c, pag);
         const fecha = _bonoFechaSaldada(c);
-        const monto = Math.round(d.interesCobrado * pct) / 100;
-        if (monto <= 0.005 || !fecha) return { ...b, estadoVivo: 'Anulada', montoVivo: 0, motivoVivo: 'Cuenta saldada sin intereses cobrados.' };
-        return { ...b, estadoVivo: 'Pendiente', montoVivo: monto, interesVivo: d.interesCobrado, capitalVivo: d.capital, cobradoVivo: d.cobrado, fechaSaldadaVivo: fecha };
+        if (k.bonoReal <= 0.005 || !fecha) return { ...b, estadoVivo: 'Anulada', montoVivo: 0, motivoVivo: 'Cuenta saldada sin bono: la comisión ya pagada cubre el % de la utilidad cobrada.' };
+        return { ...b, ...comunes, estadoVivo: 'Pendiente', montoVivo: k.bonoReal, utilidadVivo: k.utilReal, cobradoVivo: k.cobrado, totalComisionVivo: k.totalComisionReal, fechaSaldadaVivo: fecha };
     }
-    const p = _bonoInteresPactado(c);
-    return { ...b, estadoVivo: 'Reservada', montoVivo: Math.round(p.interesPactado * pct) / 100, interesVivo: p.interesPactado, capitalVivo: p.capital };
+    return { ...b, ...comunes, estadoVivo: 'Reservada', montoVivo: k.bonoReserva, utilidadVivo: k.utilPactada, totalComisionVivo: k.totalComisionReserva };
 }
 
 function _bonoVistaLista() {
-    const mapa = _bonoCuentasMapa();
-    const pag = _bonoPagadoPagaresMap();
-    return _bonoLista().map(b => _bonoVista(b, mapa, pag));
+    const ctx = _bonoCtx();
+    return _bonoLista().map(b => _bonoVista(b, ctx));
 }
 
-// Lleva la tabla al estado vivo: Reservada → Pendiente al saldarse, montos de
-// reserva al día, y Anulada cuando corresponde. Solo escribe si algo cambió.
+// Lleva la tabla al estado vivo: Reservada → Pendiente al saldarse, montos al día,
+// registros del esquema anterior (sobre intereses) migrados, y Anulada cuando
+// corresponde. Solo escribe si algo cambió. Los bonos Pagados no se tocan.
 function sincronizarBonosCuentaSaldada() {
     try {
         const lista = _bonoLista();
         if (!lista.length) return 0;
-        const mapa = _bonoCuentasMapa();
-        const pag = _bonoPagadoPagaresMap();
+        const ctx = _bonoCtx();
         const hoy = _comAbonoFechaISO('');
         let n = 0, anuladas = 0;
+        const dif = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) >= 0.005;
         const nueva = lista.map(b => {
             if (b.estado === 'Pagada' || b.estado === 'Anulada') return b;
-            const x = _bonoVista(b, mapa, pag);
+            const x = _bonoVista(b, ctx);
             if (x.estadoVivo === 'Reservada') {
-                if (b.estado === 'Reservada' && Math.abs((Number(b.montoReserva) || 0) - x.montoVivo) < 0.005) return b;
+                if (b.estado === 'Reservada' && b.esquema === 'utilidad' && !dif(b.montoReserva, x.montoVivo) && !dif(b.costoMercancia, x.costoVivo) && !dif(b.comisionVenta, x.comisionPagadaVivo)) return b;
                 n++;
-                return { ...b, estado: 'Reservada', interesPactado: x.interesVivo, montoReserva: x.montoVivo, montoBono: x.montoVivo, fechaSaldada: '' };
+                return { ...b, esquema: 'utilidad', estado: 'Reservada', porcentaje: x.porcentaje, totalVenta: x.totalVentaVivo, costoMercancia: x.costoVivo, utilidad: x.utilidadVivo, comisionVenta: x.comisionPagadaVivo, montoReserva: x.montoVivo, montoBono: x.montoVivo, fechaSaldada: '' };
             }
             if (x.estadoVivo === 'Pendiente') {
-                if (b.estado === 'Pendiente' && Math.abs((Number(b.montoBono) || 0) - x.montoVivo) < 0.005 && b.fechaSaldada === x.fechaSaldadaVivo) return b;
+                if (b.estado === 'Pendiente' && b.esquema === 'utilidad' && !dif(b.montoBono, x.montoVivo) && b.fechaSaldada === x.fechaSaldadaVivo) return b;
                 n++;
-                return { ...b, estado: 'Pendiente', fechaSaldada: x.fechaSaldadaVivo, capital: x.capitalVivo, cobrado: x.cobradoVivo, interesBase: x.interesVivo, montoBono: x.montoVivo };
+                return { ...b, esquema: 'utilidad', estado: 'Pendiente', porcentaje: x.porcentaje, fechaSaldada: x.fechaSaldadaVivo, totalVenta: x.totalVentaVivo, costoMercancia: x.costoVivo, utilidad: x.utilidadVivo, cobrado: x.cobradoVivo, comisionVenta: x.comisionPagadaVivo, totalComision: x.totalComisionVivo, montoBono: x.montoVivo };
             }
             if (x.estadoVivo === 'Anulada') {
                 n++; anuladas++;
@@ -1741,7 +1788,7 @@ function sincronizarBonosCuentaSaldada() {
             if (anuladas > 0 && window.AuditService?.log) {
                 window.AuditService.log({
                     accion: 'BONOS_CUENTA_SALDADA_ANULADOS', modulo: 'Vendedores', entidad: 'bonosCuentaSaldada',
-                    entidadId: 'sync', detalle: `${anuladas} reserva(s)/bono(s) de cuenta saldada anulados por cancelación, incobrable o sin intereses.`,
+                    entidadId: 'sync', detalle: `${anuladas} reserva(s)/bono(s) de cuenta saldada anulados por cancelación, incobrable o sin bono.`,
                     severidad: 'info', datos: { anuladas }
                 });
             }
@@ -1753,33 +1800,45 @@ function sincronizarBonosCuentaSaldada() {
     }
 }
 
+// Arma (sin guardar) la reserva de una cuenta a crédito.
+function _bonoConstruirReserva(cuenta, extra, aux) {
+    if (!cuenta || cuenta.folio == null || cuenta.vendedorId == null || cuenta.vendedorId === '') return null;
+    const v = aux.vendedores.find(x => String(x.id) === String(cuenta.vendedorId));
+    if (!v || !(aux.pct > 0)) return null;
+    const total = _bonoTotalVenta(cuenta);
+    if (total <= 0) return null;
+    const cm = aux.com[String(cuenta.folio)];
+    const costo = cm && cm.costo > 0 ? cm.costo : calcularCostoMercanciaVenta(cuenta.articulos, aux.productos);
+    if (costo <= 0) return null; // sin costo no se puede calcular la utilidad
+    const comisionVenta = cm ? cm.monto
+        : _calcularComisionVentaDetalle(v, { totalContado: total, totalVenta: total, articulos: cuenta.articulos, listaProductos: aux.productos }, 'credito').montoComision;
+    const utilidad = Math.max(0, total - costo);
+    const k = _bonoCalcular(aux.pct, utilidad, comisionVenta);
+    const o = extra || {};
+    return {
+        id: `BONO-${cuenta.folio}`, tipo: 'cuentaSaldada', esquema: 'utilidad', folioCXC: cuenta.folio,
+        vendedorId: v.id, vendedorNombre: v.nombre,
+        clienteNombre: cuenta.nombre || cuenta.clienteNombre || '',
+        articulos: (cuenta.articulos || []).map(a => ({ nombre: a.nombre, cantidad: a.cantidad })),
+        fecha: o.fecha || _bonoFechaDe(cuenta.fechaVenta) || _comAbonoFechaISO(''),
+        origen: o.origen || 'venta',
+        porcentaje: aux.pct, totalVenta: total, costoMercancia: _bonoRound2(costo), utilidad: _bonoRound2(utilidad),
+        comisionVenta, montoReserva: k.bono, montoBono: k.bono, estado: 'Reservada'
+    };
+}
+
+function _bonoAux() {
+    return { vendedores: StorageService.get('vendedores', []), productos: _bonoProductosCatalogo(), com: _bonoComisionesMapa(), pct: _bonoConfig().porcentaje };
+}
+
 // 🧾 Reserva al hacer una venta a crédito (la llama ventas.js). Idempotente y
 // nunca debe estorbar la venta.
 window.registrarReservaBonoSaldada = function (cuenta, extra) {
     try {
-        if (!cuenta || cuenta.folio == null || cuenta.vendedorId == null || cuenta.vendedorId === '') return null;
-        const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(cuenta.vendedorId));
-        if (!v) return null;
-        const pct = _bonoConfig().porcentaje;
-        if (pct <= 0) return null;
-        const id = `BONO-${cuenta.folio}`;
         const lista = _bonoLista();
-        if (lista.some(b => b.id === id)) return null;
-        const p = _bonoInteresPactado(cuenta);
-        if (p.interesPactado <= 0.005) return null;
-        const monto = Math.round(p.interesPactado * pct) / 100;
-        if (monto <= 0.005) return null;
-        const o = extra || {};
-        const registro = {
-            id, tipo: 'cuentaSaldada', folioCXC: cuenta.folio,
-            vendedorId: v.id, vendedorNombre: v.nombre,
-            clienteNombre: cuenta.nombre || cuenta.clienteNombre || '',
-            articulos: (cuenta.articulos || []).map(a => ({ nombre: a.nombre, cantidad: a.cantidad })),
-            fecha: o.fecha || _bonoFechaDe(cuenta.fechaVenta) || _comAbonoFechaISO(''),
-            origen: o.origen || 'venta',
-            porcentaje: pct, capital: p.capital, interesPactado: p.interesPactado,
-            montoReserva: monto, montoBono: monto, estado: 'Reservada'
-        };
+        if (!cuenta || lista.some(b => b.id === `BONO-${cuenta.folio}`)) return null;
+        const registro = _bonoConstruirReserva(cuenta, extra, _bonoAux());
+        if (!registro) return null;
         lista.push(registro);
         StorageService.set('bonosCuentaSaldada', lista);
         return registro;
@@ -1792,74 +1851,77 @@ window.registrarReservaBonoSaldada = function (cuenta, extra) {
 // 🧾 Reservas para la cartera a crédito que ya estaba vigente antes de existir
 // esta función. Se devengan con la fecha de HOY (no reescribe periodos pasados).
 function generarReservasCarteraVigente() {
-    const pct = _bonoConfig().porcentaje;
-    if (pct <= 0) return alert('El % del bono está en 0: no hay nada que reservar.');
+    const aux = _bonoAux();
+    if (aux.pct <= 0) return alert('El % del bono está en 0: no hay nada que reservar.');
     const existentes = new Set(_bonoLista().map(b => String(b.folioCXC)));
-    const candidatas = StorageService.get('cuentasPorCobrar', []).filter(c =>
-        c && c.estado !== 'Saldado' && !_bonoCuentaCancelada(c) && c.vendedorId != null && c.vendedorId !== '' &&
-        !existentes.has(String(c.folio)) && _bonoInteresPactado(c).interesPactado > 0.005);
-    if (!candidatas.length) return alert('No hay cuentas vigentes sin reserva.');
-    const total = candidatas.reduce((s, c) => s + Math.round(_bonoInteresPactado(c).interesPactado * pct) / 100, 0);
-    if (!confirm(`Se crearán ${candidatas.length} reserva(s) por ${dinero(total)} (${pct}% del interés pactado) para cuentas a crédito vigentes. Se devengan con la fecha de hoy. ¿Continuar?`)) return;
     const hoy = _comAbonoFechaISO('');
-    let creadas = 0;
-    candidatas.forEach(c => { if (window.registrarReservaBonoSaldada(c, { fecha: hoy, origen: 'cartera_vigente' })) creadas++; });
+    const nuevos = StorageService.get('cuentasPorCobrar', [])
+        .filter(c => c && c.estado !== 'Saldado' && !_bonoCuentaCancelada(c) && !existentes.has(String(c.folio)))
+        .map(c => _bonoConstruirReserva(c, { fecha: hoy, origen: 'cartera_vigente' }, aux))
+        .filter(r => r && r.montoReserva > 0.005);
+    if (!nuevos.length) return alert('No hay cuentas vigentes sin reserva (o su comisión ya cubre el % de la utilidad).');
+    const total = _bonoRound2(nuevos.reduce((s, r) => s + r.montoReserva, 0));
+    if (!confirm(`Se crearán ${nuevos.length} reserva(s) por ${dinero(total)} (${aux.pct}% de la utilidad menos la comisión de venta ya registrada) para cuentas a crédito vigentes. Se devengan con la fecha de hoy. ¿Continuar?`)) return;
+    const lista = _bonoLista();
+    nuevos.forEach(r => lista.push(r));
+    StorageService.set('bonosCuentaSaldada', lista);
     if (window.AuditService?.log) {
         window.AuditService.log({
             accion: 'BONOS_CUENTA_SALDADA_RESERVAS_CARTERA', modulo: 'Vendedores', entidad: 'bonosCuentaSaldada',
-            entidadId: 'cartera', detalle: `Reservas creadas para cartera vigente: ${creadas}`, monto: total, severidad: 'info',
-            datos: { creadas, porcentaje: pct }
+            entidadId: 'cartera', detalle: `Reservas creadas para cartera vigente: ${nuevos.length}`, monto: total, severidad: 'info',
+            datos: { creadas: nuevos.length, porcentaje: aux.pct }
         });
     }
-    alert(`✅ ${creadas} reserva(s) creada(s).`);
+    alert(`✅ ${nuevos.length} reserva(s) creada(s).`);
     renderBonoCuentaSaldada();
 }
 
 function calcularBonosCuentaSaldada(filtros) {
     const f = filtros || _bonoFiltros();
-    const pct = _bonoConfig().porcentaje;
-    const mapa = _bonoCuentasMapa();
-    const pag = _bonoPagadoPagaresMap();
+    const ctx = _bonoCtx();
     const lista = _bonoLista();
     const conRegistro = new Set(lista.map(b => String(b.folioCXC)));
     const vendedores = StorageService.get('vendedores', []);
     const enVend = (vid) => !f.vendedor || String(vid) === String(f.vendedor);
     const enRango = (fs) => !!fs && !(f.desde && fs < f.desde) && !(f.hasta && fs > f.hasta);
     const pendientes = [], reservadas = [];
-    let sinInteres = 0;
+    let sinBono = 0, sinCosto = 0, sinComision = 0;
 
-    lista.map(b => _bonoVista(b, mapa, pag)).forEach(x => {
+    lista.map(b => _bonoVista(b, ctx)).forEach(x => {
         if (!enVend(x.vendedorId)) return;
         if (x.estadoVivo === 'Reservada') reservadas.push(x);
+        else if (x.estadoVivo === 'SinCosto') sinCosto++;
         else if (x.estadoVivo === 'Pendiente' && enRango(x.fechaSaldadaVivo)) {
             pendientes.push({
                 id: x.id, folioCXC: x.folioCXC, vendedorId: x.vendedorId, vendedorNombre: x.vendedorNombre,
                 clienteNombre: x.clienteNombre, articulos: x.articulos || [], fechaSaldada: x.fechaSaldadaVivo,
-                capital: x.capitalVivo, cobrado: x.cobradoVivo, interesBase: x.interesVivo,
-                porcentaje: Number(x.porcentaje) || 0, monto: x.montoVivo, sinReserva: false
+                costo: x.costoVivo, utilidad: x.utilidadVivo, cobrado: x.cobradoVivo, comisionPagada: x.comisionPagadaVivo,
+                totalComision: x.totalComisionVivo, porcentaje: Number(x.porcentaje) || 0, monto: x.montoVivo, sinReserva: false
             });
         }
     });
 
-    // Cuentas saldadas antes de que existiera la reserva: se bonifican desde el rango.
-    if (pct > 0) Object.values(mapa).forEach(c => {
+    // Ventas anteriores a la reserva: cuentas saldadas con comisión de venta registrada y sin bono.
+    if (ctx.pct > 0) Object.values(ctx.mapa).forEach(c => {
         if (c.estado !== 'Saldado' || _bonoCuentaCancelada(c) || conRegistro.has(String(c.folio))) return;
         if (c.vendedorId == null || c.vendedorId === '' || !enVend(c.vendedorId)) return;
         const fs = _bonoFechaSaldada(c);
         if (!enRango(fs)) return;
-        const d = _bonoInteresCobrado(c, pag);
-        if (d.interesCobrado <= 0.005) { sinInteres++; return; }
+        if (!ctx.com[String(c.folio)]) { sinComision++; return; }
+        const k = _bonoCalcularCuenta(c, { esquema: 'utilidad', porcentaje: ctx.pct }, ctx, ctx.pct);
+        if (k.costo <= 0) { sinCosto++; return; }
+        if (k.bonoReal <= 0.005) { sinBono++; return; }
         const v = vendedores.find(x => String(x.id) === String(c.vendedorId));
         pendientes.push({
             id: `BONO-${c.folio}`, folioCXC: c.folio, vendedorId: c.vendedorId, vendedorNombre: v ? v.nombre : (c.vendedorNombre || 'Vendedor'),
             clienteNombre: (typeof window._cxcNombreClienteVigente === 'function' ? window._cxcNombreClienteVigente(c) : '') || c.nombre || c.clienteNombre || '',
-            articulos: c.articulos || [], fechaSaldada: fs, capital: d.capital, cobrado: d.cobrado, interesBase: d.interesCobrado,
-            porcentaje: pct, monto: Math.round(d.interesCobrado * pct) / 100, sinReserva: true
+            articulos: c.articulos || [], fechaSaldada: fs, costo: k.costo, utilidad: k.utilReal, cobrado: k.cobrado,
+            comisionPagada: k.comisionPagada, totalComision: k.totalComisionReal, porcentaje: ctx.pct, monto: k.bonoReal, sinReserva: true
         });
     });
 
     pendientes.sort((a, b) => String(b.fechaSaldada).localeCompare(String(a.fechaSaldada)));
-    return { pendientes, reservadas, sinInteres, pct };
+    return { pendientes, reservadas, sinBono, sinCosto, sinComision, pct: ctx.pct };
 }
 
 function _bonoProductosHTML(articulos) {
@@ -1934,12 +1996,12 @@ function renderBonoCuentaSaldada() {
         const todas = elegidas.length === items.length;
         const filas = items.map(x => `<tr style="border-bottom:1px solid #f3f4f6;${sel[x.id] ? 'background:#f5f3ff;' : ''}">
             <td style="padding:8px;text-align:center;"><input type="checkbox" ${sel[x.id] ? 'checked' : ''} onchange="_bonoToggleSel('${_vendEsc(x.id)}', this.checked)" style="width:18px;height:18px;"></td>
-            <td style="padding:8px;">${celdaCuenta(x)}${x.sinReserva ? '<br><small style="color:#92400e;">sin reserva previa</small>' : ''}</td>
+            <td style="padding:8px;">${celdaCuenta(x)}${x.sinReserva ? '<br><small style="color:#92400e;">venta anterior (sin reserva)</small>' : ''}</td>
             <td style="padding:8px;text-align:center;">${_comAbonoFechaCorta(x.fechaSaldada)}</td>
-            <td style="padding:8px;text-align:right;color:#6b7280;">${dinero(x.capital)}</td>
-            <td style="padding:8px;text-align:right;color:#6b7280;">${dinero(x.cobrado)}</td>
-            <td style="padding:8px;text-align:right;">${dinero(x.interesBase)}</td>
-            <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
+            <td style="padding:8px;text-align:right;color:#6b7280;">${dinero(x.costo)}</td>
+            <td style="padding:8px;text-align:right;">${dinero(x.utilidad)}</td>
+            <td style="padding:8px;text-align:right;color:#6b7280;">${dinero(x.comisionPagada)}</td>
+            <td style="padding:8px;text-align:right;">${dinero(x.totalComision)}<br><small style="color:#9ca3af;">${Number(x.porcentaje)}%</small></td>
             <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.monto)}</td>
           </tr>`).join('');
         return `<div style="background:white;border-radius:10px;padding:14px;margin-bottom:14px;">
@@ -1948,7 +2010,7 @@ function renderBonoCuentaSaldada() {
             <button onclick="_bonoSelTodasVendedor(${Number(vid)}, ${todas ? 'false' : 'true'})" style="padding:5px 10px;background:#ede9fe;color:#5b21b6;border:none;border-radius:6px;cursor:pointer;font-size:12px;">${todas ? 'Quitar selección' : 'Seleccionar todas'}</button>
           </div>
           <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;"></th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:right;">Capital</th><th style="padding:8px;text-align:right;">Pagado total</th><th style="padding:8px;text-align:right;">Interés pagado</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th></tr></thead>
+            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;"></th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:right;">Costo</th><th style="padding:8px;text-align:right;">Utilidad</th><th style="padding:8px;text-align:right;">Comisión ya pagada</th><th style="padding:8px;text-align:right;">Comisión total</th><th style="padding:8px;text-align:right;">Bono</th></tr></thead>
             <tbody>${filas}</tbody></table></div>
           <div style="display:flex;justify-content:flex-end;margin-top:10px;">
             <button ${elegidas.length ? '' : 'disabled'} onclick="abrirModalLiquidacionBonoSaldada(${Number(vid)})" style="padding:10px 16px;background:${elegidas.length ? '#7c3aed' : '#d1d5db'};color:white;border:none;border-radius:6px;cursor:${elegidas.length ? 'pointer' : 'not-allowed'};font-weight:bold;font-size:13px;">🏁 Dar bono a ${elegidas.length} seleccionada(s) · ${dinero(totalElegido)}</button>
@@ -1963,19 +2025,25 @@ function renderBonoCuentaSaldada() {
     const filasHist = hist.map(x => `<tr style="border-bottom:1px solid #f3f4f6;">
         <td style="padding:8px;">${_vendEsc(x.vendedorNombre)}</td>
         <td style="padding:8px;">${celdaCuenta(x)}</td>
-        <td style="padding:8px;text-align:right;">${dinero(x.interesVivo ?? x.interesBase ?? x.interesPactado ?? 0)}</td>
+        <td style="padding:8px;text-align:right;">${dinero(x.utilidadVivo ?? x.utilidad ?? 0)}</td>
         <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
         <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.montoVivo)}</td>
         <td style="padding:8px;text-align:center;">${x.fechaSaldada || x.fechaSaldadaVivo ? _comAbonoFechaCorta(x.fechaSaldada || x.fechaSaldadaVivo) : '-'}</td>
         <td style="padding:8px;text-align:center;color:${color[x.estadoVivo] || '#374151'};font-weight:bold;">${_vendEsc(x.estadoVivo)}${x.fechaPago ? `<br><small style="font-weight:normal;">${_comAbonoFechaCorta(x.fechaPago)}</small>` : ''}${x.notaVivo ? `<br><small title="${_vendEsc(x.notaVivo)}" style="color:#dc2626;cursor:help;font-weight:normal;">⚠ revisar</small>` : ''}${x.estadoVivo === 'Anulada' && (x.motivoAnulacion || x.motivoVivo) ? `<br><small title="${_vendEsc(x.motivoAnulacion || x.motivoVivo)}" style="color:#9ca3af;cursor:help;font-weight:normal;">motivo</small>` : ''}</td>
       </tr>`).join('');
 
+    const avisos = [
+        r.sinBono > 0 ? `${r.sinBono} cuenta(s) saldada(s) del rango no dejan bono: la comisión de venta ya cubre el ${cfg.porcentaje}% de la utilidad cobrada.` : '',
+        r.sinCosto > 0 ? `${r.sinCosto} cuenta(s) no se pueden calcular porque sus productos no tienen costo capturado.` : '',
+        r.sinComision > 0 ? `${r.sinComision} cuenta(s) saldada(s) del rango no tienen comisión de venta registrada, por eso no se ofrecen.` : ''
+    ].filter(Boolean).map(t => `<p style="margin:0 0 8px;font-size:12px;color:#92400e;">${t}</p>`).join('');
+
     const inp = 'padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;';
     const lbl = 'font-size:12px;font-weight:bold;color:#374151;';
     cont.innerHTML = `
-      <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">Bono aparte de la comisión por venta y de la comisión por abono. Al vender a crédito se crea una <strong>reserva</strong> (% del interés pactado); cuando la cuenta se <strong>salda</strong> queda disponible aquí con los <strong>intereses realmente cobrados</strong> (el precio del producto no cuenta: ya se pagó como comisión de venta). Tú eliges qué cuentas saldadas bonificar.</p>
+      <p style="margin:0 0 12px;font-size:12px;color:#6b7280;">La comisión <strong>total</strong> de una venta a crédito es el <strong>${cfg.porcentaje}% de su utilidad</strong> (total con interés − costo). Al vender se paga la comisión de siempre y <strong>lo que falta es el bono</strong>, que se paga cuando la cuenta se <strong>salda</strong>. Si el cliente liquida con descuento, la utilidad cobrada baja y el bono también. Tú eliges a qué cuentas saldadas (también ventas anteriores) das el bono.</p>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">
-        <div><label style="${lbl}">% DE LOS INTERESES</label><br><input type="number" min="0" max="100" step="0.5" value="${cfg.porcentaje}" onchange="_bonoGuardarPct(this.value)" style="width:90px;${inp}"><br><small style="color:#9ca3af;font-size:10px;">las reservas ya hechas conservan su %</small></div>
+        <div><label style="${lbl}">% DE LA UTILIDAD (comisión total)</label><br><input type="number" min="0" max="100" step="0.5" value="${cfg.porcentaje}" onchange="_bonoGuardarPct(this.value)" style="width:90px;${inp}"><br><small style="color:#9ca3af;font-size:10px;">las reservas ya hechas conservan su %</small></div>
         <div><label style="${lbl}">SALDADAS DESDE</label><br><input type="date" value="${_vendEsc(f.desde)}" onchange="_bonoSetFiltro('desde', this.value)" style="${inp}"></div>
         <div><label style="${lbl}">HASTA</label><br><input type="date" value="${_vendEsc(f.hasta)}" onchange="_bonoSetFiltro('hasta', this.value)" style="${inp}"></div>
         <div><label style="${lbl}">VENDEDOR</label><br>
@@ -1991,7 +2059,7 @@ function renderBonoCuentaSaldada() {
         <div style="background:#f0fdf4;padding:12px;border-radius:10px;text-align:center;"><small style="color:#16a34a;">BONOS PAGADOS</small><br><strong style="font-size:20px;color:#16a34a;">${dinero(totalPagado)}</strong></div>
         ${porRevisar ? `<div style="background:#fef2f2;padding:12px;border-radius:10px;text-align:center;"><small style="color:#dc2626;">POR REVISAR</small><br><strong style="font-size:20px;color:#dc2626;">${porRevisar}</strong></div>` : ''}
       </div>
-      ${r.sinInteres > 0 ? `<p style="margin:0 0 12px;font-size:12px;color:#92400e;">${r.sinInteres} cuenta(s) saldada(s) en el rango no generan bono porque no se cobraron intereses.</p>` : ''}
+      ${avisos}
       <h4 style="margin:0 0 10px;color:#5b21b6;">Ventas saldadas en el rango</h4>
       ${bloques || '<p style="color:#9ca3af;text-align:center;padding:16px;">No hay ventas saldadas pendientes de bono en este rango.</p>'}
       <h4 style="margin:24px 0 8px;color:#374151;">Historial de bonos</h4>
@@ -1999,7 +2067,7 @@ function renderBonoCuentaSaldada() {
         ${['', 'Reservada', 'Pendiente', 'Pagada', 'Anulada'].map(e => `<option value="${e}" ${estHist === e ? 'selected' : ''}>${e || 'Todos los estados'}</option>`).join('')}
       </select></div>
       <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Vendedor</th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:right;">Interés</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:center;">Estado</th></tr></thead>
+        <thead><tr style="background:#f3f4f6;"><th style="padding:8px;text-align:left;">Vendedor</th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:right;">Utilidad</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:center;">Estado</th></tr></thead>
         <tbody>${filasHist || '<tr><td colspan="7" style="padding:16px;text-align:center;color:#9ca3af;">Sin bonos con este filtro.</td></tr>'}</tbody>
       </table></div>`;
 }
@@ -2008,12 +2076,12 @@ function abrirModalLiquidacionBonoSaldada(vendedorId) {
     const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(vendedorId));
     if (!v) return alert('Vendedor no encontrado.');
     sincronizarBonosCuentaSaldada();
-    const sel = _bonoSel();
-    const ids = Object.keys(sel);
+    const ids = Object.keys(_bonoSel());
     const items = _bonoResolverSeleccion(vendedorId, ids);
     const total = _bonoRound2(items.reduce((s, x) => s + x.monto, 0));
     if (!items.length || total <= 0) return alert('⚠️ Selecciona al menos una cuenta saldada de este vendedor.');
-    const interes = items.reduce((s, x) => s + x.interesBase, 0);
+    const utilidad = items.reduce((s, x) => s + x.utilidad, 0);
+    const yaPagada = items.reduce((s, x) => s + x.comisionPagada, 0);
     window._bonoLiqSnapshot = { vendedorId: String(vendedorId), ids: items.map(x => x.id), n: items.length, total };
     const html = `
     <div data-modal="liquidacion-bono-saldada" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:8000;display:flex;justify-content:center;align-items:center;padding:16px;">
@@ -2022,7 +2090,8 @@ function abrirModalLiquidacionBonoSaldada(vendedorId) {
         <p style="color:#4b5563;margin-bottom:16px;">Vendedor: <strong>${_vendEsc(v.nombre)}</strong></p>
         <div style="background:#f9fafb;border-radius:8px;padding:14px;margin-bottom:16px;font-size:14px;">
           <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Cuentas seleccionadas</span><strong>${items.length}</strong></div>
-          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Intereses cobrados</span><strong>${dinero(interes)}</strong></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Utilidad cobrada</span><strong>${dinero(utilidad)}</strong></div>
+          <div style="display:flex;justify-content:space-between;padding:4px 0;"><span>Comisión de venta ya pagada</span><strong>${dinero(yaPagada)}</strong></div>
           <div style="display:flex;justify-content:space-between;padding:8px 0 0;border-top:1px solid #e5e7eb;margin-top:6px;"><span style="font-weight:bold;">Bono total</span><strong style="color:#7c3aed;font-size:17px;">${dinero(total)}</strong></div>
         </div>
         <div style="margin-bottom:14px;">
@@ -2078,7 +2147,7 @@ function ejecutarLiquidacionBonoSaldada() {
     });
     if (!ok) return alert(`No se pudo registrar el egreso de caja para "${etiqueta || cuentaId}". El bono NO se aplicó.`);
 
-    // 2. Marcar como pagados (los "sin reserva" se crean ya pagados).
+    // 2. Marcar como pagados (las ventas anteriores sin reserva se crean ya pagadas).
     try {
         const lista = _bonoLista();
         const idx = new Map(lista.map((b, i) => [b.id, i]));
@@ -2090,8 +2159,9 @@ function ejecutarLiquidacionBonoSaldada() {
                     clienteNombre: x.clienteNombre, articulos: (x.articulos || []).map(a => ({ nombre: a.nombre, cantidad: a.cantidad })),
                     fecha: hoy, origen: 'sin_reserva', montoReserva: 0
                 }),
-                estado: 'Pagada', fechaSaldada: x.fechaSaldada, fechaPago: hoy,
-                capital: x.capital, cobrado: x.cobrado, interesBase: x.interesBase, porcentaje: x.porcentaje, montoBono: x.monto,
+                esquema: 'utilidad', estado: 'Pagada', fechaSaldada: x.fechaSaldada, fechaPago: hoy,
+                costoMercancia: x.costo, utilidad: x.utilidad, cobrado: x.cobrado, comisionVenta: x.comisionPagada,
+                totalComision: x.totalComision, porcentaje: x.porcentaje, montoBono: x.monto,
                 lote, montoDesembolsadoLote: montoNeto, cuentaPago: cuentaId, etiquetaCuentaPago: etiqueta
             };
             if (base) lista[idx.get(x.id)] = pagado; else lista.push(pagado);
@@ -2116,6 +2186,38 @@ function ejecutarLiquidacionBonoSaldada() {
     alert(`✅ Bono pagado a ${v.nombre}.\n\nCuentas: ${items.length}\nBono calculado: ${dinero(total)}\nDesembolsado: ${dinero(montoNeto)}`);
     renderBonoCuentaSaldada();
 }
+
+// 💬 Lo que se le dice al vendedor al capturar la venta (ventas.js, al mandarla a la
+// bóveda): comisión que se le paga por la venta y bono que recibirá cuando el cliente
+// liquide. Cálculo puro: usa las MISMAS funciones que el registro real de la comisión
+// y que el bono, para que lo prometido sea lo que de verdad se paga.
+window.calcularProyeccionComisionVenta = function (p) {
+    try {
+        const v = StorageService.get('vendedores', []).find(x => String(x.id) === String(p && p.vendedorId));
+        if (!v) return null;
+        const metodo = p.metodoPago;
+        const esCredito = metodo === 'credito';
+        const totalContado = Number(p.totalContado) || 0;
+        const totalVenta = esCredito ? Number(p.enganche || 0) + Number(p.plan?.total || 0) : totalContado;
+        const det = _calcularComisionVentaDetalle(v, { totalContado, totalVenta, articulos: p.articulos, listaProductos: _bonoProductosCatalogo() }, metodo);
+        const pct = _bonoConfig().porcentaje;
+        const sinCosto = det.costoMercancia <= 0;
+        let bono = 0, totalComision = det.montoComision, utilidadCredito = 0;
+        if (esCredito && pct > 0 && !sinCosto) {
+            utilidadCredito = Math.max(0, totalVenta - det.costoMercancia);
+            const k = _bonoCalcular(pct, utilidadCredito, det.montoComision);
+            bono = k.bono;
+            totalComision = det.montoComision + bono;
+        }
+        return {
+            vendedorNombre: v.nombre, esCredito, comisionCierre: det.montoComision, bono, totalComision,
+            porcentajeBono: pct, utilidad: esCredito ? utilidadCredito : det.utilidad, sinCosto
+        };
+    } catch (e) {
+        console.error('No se pudo calcular la proyección de comisión:', e);
+        return null;
+    }
+};
 
 window.renderComisionesPendientes = renderComisionesPendientes;
 window._actualizarFiltroHistorialComisiones = _actualizarFiltroHistorialComisiones;
