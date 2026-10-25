@@ -1628,14 +1628,35 @@ function _bonoInteresPactado(cuenta) {
     return { capital, interesPactado: _bonoRound2(Math.max(0, financiado - capital)) };
 }
 
-function _bonoInteresCobrado(cuenta) {
+// Dinero aplicado a los pagarés de cada cuenta (capital + interés, sin moratorios).
+// Misma lectura que _cxcTotalPagadoPolitica (cxc.js): los pagarés pagan aunque
+// cuenta.abonos quede incompleto.
+function _bonoPagadoPagaresMap() {
+    const m = {};
+    StorageService.get('pagaresSistema', []).forEach(p => {
+        const estado = String(p.estado || '').toLowerCase();
+        let v = 0;
+        if (estado === 'pagado') v = Number(p.montoAbonado || p.monto || 0);
+        else if (estado === 'parcial') v = Number(p.montoAbonado || 0);
+        if (v > 0) m[String(p.folio)] = (m[String(p.folio)] || 0) + v;
+    });
+    return m;
+}
+
+// INTERÉS TOTAL pagado por el cliente en toda la cuenta (no solo el último pago):
+//   pagado total (el mayor entre pagarés y abonos, sin moratorios realmente cobrados)
+//   − capital financiado (contado − enganche), con tope en el interés pactado.
+// Los moratorios CONDONADOS no son dinero cobrado y no se restan.
+function _bonoInteresCobrado(cuenta, pagMap) {
     const { capital, interesPactado } = _bonoInteresPactado(cuenta);
     const abonado = (cuenta.abonos || []).filter(_bonoAbonoVigente)
         .reduce((s, a) => s + (Number(a.monto || a.montoAbonado || 0)), 0);
     const moratoriosCobrados = (cuenta.cargosMoratorios || [])
-        .filter(m => !m.cancelado && !m.anulado && String(m.tipo || 'cargo') !== 'exencion')
+        .filter(m => !m.cancelado && !m.anulado && String(m.tipo || 'cargo') !== 'exencion' && !/condonad/i.test(String(m.nota || '')))
         .reduce((s, m) => s + Number(m.montoAbonado || 0), 0);
-    const cobrado = Math.max(0, abonado - moratoriosCobrados);
+    const desdeAbonos = Math.max(0, abonado - moratoriosCobrados);
+    const desdePagares = (pagMap || _bonoPagadoPagaresMap())[String(cuenta.folio)] || 0;
+    const cobrado = Math.max(desdePagares, desdeAbonos);
     return {
         capital, interesPactado,
         cobrado: _bonoRound2(cobrado),
@@ -1650,7 +1671,7 @@ function _bonoCuentasMapa() {
 }
 
 // Estado "vivo" de un bono según la cuenta de hoy (no escribe nada).
-function _bonoVista(b, mapa) {
+function _bonoVista(b, mapa, pag) {
     const pct = Number(b.porcentaje) || 0;
     const c = mapa[String(b.folioCXC)];
     if (b.estado === 'Anulada') return { ...b, estadoVivo: 'Anulada', montoVivo: 0 };
@@ -1661,7 +1682,7 @@ function _bonoVista(b, mapa) {
             if (_bonoCuentaCancelada(c)) nota = 'La cuenta se canceló o quedó incobrable después de pagar este bono.';
             else if (c.estado !== 'Saldado') nota = 'La cuenta ya no está saldada (se eliminó o corrigió un abono) después de pagar este bono.';
             else {
-                const esperado = Math.round(_bonoInteresCobrado(c).interesCobrado * pct) / 100;
+                const esperado = Math.round(_bonoInteresCobrado(c, pag).interesCobrado * pct) / 100;
                 if (Math.abs(esperado - monto) > 0.01) nota = `El interés cobrado cambió después de pagar: el bono ahora sería ${dinero(esperado)} (se pagó ${dinero(monto)}).`;
             }
         }
@@ -1670,7 +1691,7 @@ function _bonoVista(b, mapa) {
     if (!c) return { ...b, estadoVivo: b.estado, montoVivo: Number(b.montoBono ?? b.montoReserva) || 0 };
     if (_bonoCuentaCancelada(c)) return { ...b, estadoVivo: 'Anulada', montoVivo: 0, motivoVivo: 'La venta se canceló o la cuenta quedó incobrable.' };
     if (c.estado === 'Saldado') {
-        const d = _bonoInteresCobrado(c);
+        const d = _bonoInteresCobrado(c, pag);
         const fecha = _bonoFechaSaldada(c);
         const monto = Math.round(d.interesCobrado * pct) / 100;
         if (monto <= 0.005 || !fecha) return { ...b, estadoVivo: 'Anulada', montoVivo: 0, motivoVivo: 'Cuenta saldada sin intereses cobrados.' };
@@ -1682,7 +1703,8 @@ function _bonoVista(b, mapa) {
 
 function _bonoVistaLista() {
     const mapa = _bonoCuentasMapa();
-    return _bonoLista().map(b => _bonoVista(b, mapa));
+    const pag = _bonoPagadoPagaresMap();
+    return _bonoLista().map(b => _bonoVista(b, mapa, pag));
 }
 
 // Lleva la tabla al estado vivo: Reservada → Pendiente al saldarse, montos de
@@ -1692,11 +1714,12 @@ function sincronizarBonosCuentaSaldada() {
         const lista = _bonoLista();
         if (!lista.length) return 0;
         const mapa = _bonoCuentasMapa();
+        const pag = _bonoPagadoPagaresMap();
         const hoy = _comAbonoFechaISO('');
         let n = 0, anuladas = 0;
         const nueva = lista.map(b => {
             if (b.estado === 'Pagada' || b.estado === 'Anulada') return b;
-            const x = _bonoVista(b, mapa);
+            const x = _bonoVista(b, mapa, pag);
             if (x.estadoVivo === 'Reservada') {
                 if (b.estado === 'Reservada' && Math.abs((Number(b.montoReserva) || 0) - x.montoVivo) < 0.005) return b;
                 n++;
@@ -1796,6 +1819,7 @@ function calcularBonosCuentaSaldada(filtros) {
     const f = filtros || _bonoFiltros();
     const pct = _bonoConfig().porcentaje;
     const mapa = _bonoCuentasMapa();
+    const pag = _bonoPagadoPagaresMap();
     const lista = _bonoLista();
     const conRegistro = new Set(lista.map(b => String(b.folioCXC)));
     const vendedores = StorageService.get('vendedores', []);
@@ -1804,7 +1828,7 @@ function calcularBonosCuentaSaldada(filtros) {
     const pendientes = [], reservadas = [];
     let sinInteres = 0;
 
-    lista.map(b => _bonoVista(b, mapa)).forEach(x => {
+    lista.map(b => _bonoVista(b, mapa, pag)).forEach(x => {
         if (!enVend(x.vendedorId)) return;
         if (x.estadoVivo === 'Reservada') reservadas.push(x);
         else if (x.estadoVivo === 'Pendiente' && enRango(x.fechaSaldadaVivo)) {
@@ -1823,7 +1847,7 @@ function calcularBonosCuentaSaldada(filtros) {
         if (c.vendedorId == null || c.vendedorId === '' || !enVend(c.vendedorId)) return;
         const fs = _bonoFechaSaldada(c);
         if (!enRango(fs)) return;
-        const d = _bonoInteresCobrado(c);
+        const d = _bonoInteresCobrado(c, pag);
         if (d.interesCobrado <= 0.005) { sinInteres++; return; }
         const v = vendedores.find(x => String(x.id) === String(c.vendedorId));
         pendientes.push({
@@ -1912,6 +1936,8 @@ function renderBonoCuentaSaldada() {
             <td style="padding:8px;text-align:center;"><input type="checkbox" ${sel[x.id] ? 'checked' : ''} onchange="_bonoToggleSel('${_vendEsc(x.id)}', this.checked)" style="width:18px;height:18px;"></td>
             <td style="padding:8px;">${celdaCuenta(x)}${x.sinReserva ? '<br><small style="color:#92400e;">sin reserva previa</small>' : ''}</td>
             <td style="padding:8px;text-align:center;">${_comAbonoFechaCorta(x.fechaSaldada)}</td>
+            <td style="padding:8px;text-align:right;color:#6b7280;">${dinero(x.capital)}</td>
+            <td style="padding:8px;text-align:right;color:#6b7280;">${dinero(x.cobrado)}</td>
             <td style="padding:8px;text-align:right;">${dinero(x.interesBase)}</td>
             <td style="padding:8px;text-align:center;">${Number(x.porcentaje)}%</td>
             <td style="padding:8px;text-align:right;font-weight:bold;">${dinero(x.monto)}</td>
@@ -1922,7 +1948,7 @@ function renderBonoCuentaSaldada() {
             <button onclick="_bonoSelTodasVendedor(${Number(vid)}, ${todas ? 'false' : 'true'})" style="padding:5px 10px;background:#ede9fe;color:#5b21b6;border:none;border-radius:6px;cursor:pointer;font-size:12px;">${todas ? 'Quitar selección' : 'Seleccionar todas'}</button>
           </div>
           <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;"></th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:right;">Interés cobrado</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th></tr></thead>
+            <thead><tr style="background:#f3f4f6;"><th style="padding:8px;"></th><th style="padding:8px;text-align:left;">Producto / Cliente</th><th style="padding:8px;text-align:center;">Saldada</th><th style="padding:8px;text-align:right;">Capital</th><th style="padding:8px;text-align:right;">Pagado total</th><th style="padding:8px;text-align:right;">Interés pagado</th><th style="padding:8px;text-align:center;">%</th><th style="padding:8px;text-align:right;">Bono</th></tr></thead>
             <tbody>${filas}</tbody></table></div>
           <div style="display:flex;justify-content:flex-end;margin-top:10px;">
             <button ${elegidas.length ? '' : 'disabled'} onclick="abrirModalLiquidacionBonoSaldada(${Number(vid)})" style="padding:10px 16px;background:${elegidas.length ? '#7c3aed' : '#d1d5db'};color:white;border:none;border-radius:6px;cursor:${elegidas.length ? 'pointer' : 'not-allowed'};font-weight:bold;font-size:13px;">🏁 Dar bono a ${elegidas.length} seleccionada(s) · ${dinero(totalElegido)}</button>
