@@ -98,7 +98,9 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 .nav button.activo { color: var(--brand); }
 
 /* ===== FICHA (pantalla completa) ===== */
-#ficha { position: fixed; inset: 0; z-index: 40; background: var(--paper); overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+#ficha, #clienteVista { position: fixed; inset: 0; z-index: 40; background: var(--paper); overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
+#clienteVista { z-index: 38; }
+.acciones.una { grid-template-columns: 1fr; }
 .ficha-barra { position: sticky; top: 0; z-index: 3; background: var(--brand); color: #fff; padding: calc(8px + env(safe-area-inset-top)) 8px 10px; display: flex; align-items: center; gap: 4px; }
 .ficha-barra button { color: #fff; font-size: 24px; padding: 4px 12px; border-radius: 10px; }
 .ficha-barra div { flex: 1; min-width: 0; }
@@ -227,6 +229,7 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
   </nav>
 </div>
 
+<div id="clienteVista" class="oculto"></div>
 <div id="ficha" class="oculto"></div>
 <div id="toast"></div>
 <div id="overlayCarga" class="oculto"><div class="spinner-caja"><div class="spinner"></div><span id="overlayTexto">Cargando…</span></div></div>
@@ -254,7 +257,7 @@ let db, auth;
 let sesion = null;
 const S = {
   cuentas: [], pagaresPend: [], cfg: null, cajas: [], bancos: [], abonosPend: [], rutas: [], clientes: [],
-  resumenes: [], porFolio: {}, empresa: { nombre: 'Mueblería Mi Pueblito' },
+  resumenes: [], porFolio: {}, grupos: [], mapaGrupos: {}, clienteAbierto: null, empresa: { nombre: 'Mueblería Mi Pueblito' },
   filtro: 'todas', busqueda: '', vista: 'Cartera', ts: null, desdeCache: false,
   ficha: null    // { folio, pagaresFull, historial, cargando }
 };
@@ -376,7 +379,10 @@ function recalcular() {
     return b.saldo - a.saldo;
   });
   S.porFolio = {}; S.resumenes.forEach(r => { S.porFolio[r.folio] = r; });
+  S.grupos = agruparPorCliente(S.resumenes);
+  S.mapaGrupos = {}; S.grupos.forEach(g => { S.mapaGrupos[g.clave] = g; });
   renderTodo();
+  if (S.clienteAbierto) renderCliente();
 }
 
 async function actualizarDatos(forzar) {
@@ -433,22 +439,55 @@ window.addEventListener('popstate', () => {
   const top = _pila.pop();
   if (top === 'hoja') quitarHoja();
   else if (top === 'ficha') quitarFicha();
+  else if (top === 'cliente') quitarCliente();
 });
 
-// ---------------------------------------------------------------- cartera
+// ---------------------------------------------------------------- cartera (agrupada por CLIENTE)
+const PESO_ESTADO = { 'Crítico': 4, 'Atrasado': 3, 'Promesa': 2, 'Al corriente': 1 };
+function claveCliente(r) {
+  const id = r.cuenta.clienteId;
+  return id != null && id !== '' ? 'id:' + id : 'n:' + sinAcentos(r.cliente);
+}
+// Une las cuentas de un mismo cliente (clienteId; si falta, por nombre) y suma lo que importa para cobrar.
+function agruparPorCliente(resumenes) {
+  const mapa = new Map();
+  resumenes.forEach(r => { const k = claveCliente(r); if (!mapa.has(k)) mapa.set(k, []); mapa.get(k).push(r); });
+  const suma = (rs, f) => rs.reduce((t, r) => t + (Number(f(r)) || 0), 0);
+  const grupos = [];
+  mapa.forEach((rs, clave) => {
+    rs.sort((a, b) => (b.vencido - a.vencido) || (b.saldo - a.saldo));
+    const proxs = rs.filter(r => r.proximo).sort((a, b) => (M.parseFecha(a.proximo.fecha) || 0) - (M.parseFecha(b.proximo.fecha) || 0));
+    const enPlazo = rs.filter(r => r.plazo && r.plazo.aunEnPlazo).sort((a, b) => a.plazo.diasRestantes - b.plazo.diasRestantes);
+    const peor = rs.slice().sort((a, b) => (PESO_ESTADO[b.estado.estadoGeneral] || 0) - (PESO_ESTADO[a.estado.estadoGeneral] || 0))[0];
+    grupos.push({
+      clave, nombre: rs[0].cliente, n: rs.length, resumenes: rs,
+      contacto: (rs.map(r => r.contacto).find(c => telefono10(c.telefono)) || rs[0].contacto),
+      saldo: suma(rs, r => r.saldo), saldoNominal: suma(rs, r => r.saldoNominal), moratorios: suma(rs, r => r.moratorios),
+      vencido: suma(rs, r => r.vencido), nVencidos: suma(rs, r => r.nVencidos),
+      diasAtraso: Math.max(0, ...rs.map(r => r.diasAtraso || 0)),
+      prioridad: Math.max(0, ...rs.map(r => r.riesgo?.prioridad || 0)),
+      diasSinPago: Math.max(0, ...rs.map(r => r.riesgo?.diasSinPago || 0)),
+      estadoGeneral: peor.estado.estadoGeneral,
+      promesa: rs.some(r => r.estado.promesaVigente),
+      proximo: proxs[0] ? proxs[0].proximo : null,
+      plazoCercano: enPlazo[0] || null,
+      algunaPasoPlazo: rs.some(r => r.plazo && !r.plazo.aunEnPlazo)
+    });
+  });
+  grupos.sort((a, b) => (b.prioridad - a.prioridad) || (b.diasSinPago - a.diasSinPago) || (b.saldo - a.saldo));
+  return grupos;
+}
 function chipDefs() {
-  const R = S.resumenes;
-  const hoy = new Date();
-  const vencidas = R.filter(r => r.vencido > 0.01);
-  const semana = R.filter(r => r.proximo && !r.proximo.vencido && ((M.parseFecha(r.proximo.fecha) - hoy) / 86400000) <= 7);
-  const promesas = R.filter(r => r.estado.promesaVigente);
-  const plazo = R.filter(r => r.plazo && r.plazo.aunEnPlazo && r.plazo.diasRestantes <= 7);
+  const G = S.grupos, hoy = new Date();
+  const enSemana = g => g.proximo && !g.proximo.vencido && ((M.parseFecha(g.proximo.fecha) - hoy) / 86400000) <= 7;
+  const porVencer = g => g.plazoCercano && g.plazoCercano.plazo.diasRestantes <= 7;
   return [
-    { k: 'todas', t: 'Todas', n: R.length, f: () => true },
-    { k: 'vencidas', t: '🔴 Vencidas', n: vencidas.length, f: r => r.vencido > 0.01 },
-    { k: 'semana', t: '📅 Vencen en 7 días', n: semana.length, f: r => semana.includes(r) },
-    { k: 'promesas', t: '📝 Promesas', n: promesas.length, f: r => r.estado.promesaVigente },
-    { k: 'plazo', t: '⏳ Plazo por vencer', n: plazo.length, f: r => plazo.includes(r) }
+    { k: 'todas', t: 'Todos', n: G.length, f: () => true },
+    { k: 'vencidas', t: '🔴 Vencidos', n: G.filter(g => g.vencido > 0.01).length, f: g => g.vencido > 0.01 },
+    { k: 'semana', t: '📅 Vencen en 7 días', n: G.filter(enSemana).length, f: enSemana },
+    { k: 'promesas', t: '📝 Promesas', n: G.filter(g => g.promesa).length, f: g => g.promesa },
+    { k: 'plazo', t: '⏳ Plazo por vencer', n: G.filter(porVencer).length, f: porVencer },
+    { k: 'multi', t: '👥 Varias cuentas', n: G.filter(g => g.n > 1).length, f: g => g.n > 1 }
   ];
 }
 function renderTodo() {
@@ -460,7 +499,7 @@ function renderKpis() {
   const R = S.resumenes;
   const saldo = R.reduce((s, r) => s + r.saldo, 0), venc = R.reduce((s, r) => s + r.vencido, 0);
   $('kpis').innerHTML = `
-    <div class="kpi"><small>Cuentas</small><b>${R.length}</b></div>
+    <div class="kpi"><small>Clientes</small><b>${S.grupos.length}</b><small style="text-transform:none;font-weight:600">${R.length} cuentas</small></div>
     <div class="kpi"><small>Cartera</small><b>${dineroCorto(saldo)}</b></div>
     <div class="kpi"><small>Vencido</small><b style="color:var(--danger)">${dineroCorto(venc)}</b></div>`;
 }
@@ -468,28 +507,82 @@ function renderChips() {
   $('chips').innerHTML = chipDefs().map(c => `<button class="chip ${S.filtro === c.k ? 'activo' : ''}" onclick="S.filtro='${c.k}'; renderChips(); renderLista()">${c.t} · ${c.n}</button>`).join('');
 }
 const COLOR_ESTADO = { 'Al corriente': ['p-verde', '#16a34a'], 'Atrasado': ['p-amarillo', '#d97706'], 'Crítico': ['p-rojo', '#dc2626'], 'Promesa': ['p-azul', '#2563eb'] };
-function pillPlazo(r) {
-  const p = r.plazo; if (!p) return '';
-  if (!p.aunEnPlazo) return '<span class="pill p-gris">Pasó su plazo</span>';
-  const cls = { verde: 'p-verde', amarillo: 'p-amarillo', rojo: 'p-rojo' }[p.semaforo] || 'p-gris';
-  return `<span class="pill ${cls}">⏳ ${p.diasRestantes} d de plazo</span>`;
+function pillPlazoDe(plazo) {
+  if (!plazo) return '';
+  if (!plazo.aunEnPlazo) return '<span class="pill p-gris">Pasó su plazo</span>';
+  const cls = { verde: 'p-verde', amarillo: 'p-amarillo', rojo: 'p-rojo' }[plazo.semaforo] || 'p-gris';
+  return `<span class="pill ${cls}">⏳ ${plazo.diasRestantes} d de plazo</span>`;
 }
-function tarjetaCuenta(r) {
+function pillPlazo(r) { return pillPlazoDe(r.plazo); }
+// Tarjeta de CUENTA (dentro de la ficha del cliente y en listados de una sola cuenta)
+function tarjetaCuenta(r, opc) {
   const [cls, borde] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris', '#94a3b8'];
   const prox = r.proximo ? `<span class="pill ${r.proximo.vencido ? 'p-rojo' : 'p-gris'}">Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</span>` : '';
+  const titulo = opc && opc.sinNombre ? r.producto : r.cliente;
+  const sub = opc && opc.sinNombre ? r.folio : `${r.folio} · ${r.producto}`;
   return `<div class="cta" style="border-left-color:${borde}" onclick="abrirFicha('${esc(r.folio).replace(/'/g, '')}')">
-    <div class="l1"><div><div class="nom">${esc(r.cliente)}</div><div class="fol">${esc(r.folio)} · ${esc(r.producto)}</div></div>
+    <div class="l1"><div><div class="nom">${esc(titulo)}</div><div class="fol">${esc(sub)}</div></div>
       <div class="saldo">${dinero(r.saldo)}</div></div>
     <div class="l2"><span class="pill ${cls}">${esc(r.estado.estadoGeneral)}</span>
       ${r.vencido > 0.01 ? `<span class="pill p-rojo">Vencido ${dinero(r.vencido)} · ${r.diasAtraso} d</span>` : ''}
       ${prox}${pillPlazo(r)}</div></div>`;
 }
+// Tarjeta de CLIENTE (la unidad de la lista): suma todas sus cuentas
+function tarjetaCliente(g) {
+  const [cls, borde] = COLOR_ESTADO[g.estadoGeneral] || ['p-gris', '#94a3b8'];
+  const unica = g.n === 1 ? g.resumenes[0] : null;
+  const sub = unica ? `${unica.folio} · ${unica.producto}`
+    : `${g.n} cuentas · ${g.resumenes.slice(0, 2).map(r => r.folio).join(', ')}${g.n > 2 ? ' +' + (g.n - 2) : ''}`;
+  const prox = g.proximo ? `<span class="pill ${g.proximo.vencido ? 'p-rojo' : 'p-gris'}">Próx. ${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</span>` : '';
+  const plazo = g.plazoCercano ? pillPlazoDe(g.plazoCercano.plazo) : (g.algunaPasoPlazo ? '<span class="pill p-gris">Pasó su plazo</span>' : '');
+  return `<div class="cta" style="border-left-color:${borde}" data-k="${esc(g.clave)}" onclick="abrirCliente(this.dataset.k)">
+    <div class="l1"><div><div class="nom">${esc(g.nombre)}</div><div class="fol">${esc(sub)}</div></div>
+      <div class="saldo">${dinero(g.saldo)}</div></div>
+    <div class="l2">${g.n > 1 ? `<span class="pill p-violeta">👥 ${g.n} cuentas</span>` : ''}<span class="pill ${cls}">${esc(g.estadoGeneral)}</span>
+      ${g.vencido > 0.01 ? `<span class="pill p-rojo">Vencido ${dinero(g.vencido)} · ${g.diasAtraso} d</span>` : ''}
+      ${prox}${plazo}</div></div>`;
+}
 function renderLista() {
   const def = chipDefs().find(c => c.k === S.filtro) || chipDefs()[0];
-  const q = sinAcentos(S.busqueda).trim();
-  const lista = S.resumenes.filter(def.f).filter(r => !q ||
-    sinAcentos(r.cliente).includes(q) || sinAcentos(r.folio).includes(q) || sinAcentos(r.producto).includes(q) || telefono10(r.contacto.telefono).includes(q.replace(/\D/g, '') || '§'));
-  $('lista').innerHTML = lista.length ? lista.map(tarjetaCuenta).join('') : '<div class="vacio">No hay cuentas con este filtro.</div>';
+  const q = sinAcentos(S.busqueda).trim(), qDig = q.replace(/\D/g, '');
+  const lista = S.grupos.filter(def.f).filter(g => !q ||
+    sinAcentos(g.nombre).includes(q) ||
+    g.resumenes.some(r => sinAcentos(r.folio).includes(q) || sinAcentos(r.producto).includes(q)) ||
+    (qDig.length >= 3 && g.resumenes.some(r => telefono10(r.contacto.telefono).includes(qDig))));
+  $('lista').innerHTML = lista.length ? lista.map(tarjetaCliente).join('') : '<div class="vacio">No hay clientes con este filtro.</div>';
+}
+
+// ---------------------------------------------------------------- ficha del CLIENTE (varias cuentas)
+function abrirCliente(clave) {
+  const g = S.mapaGrupos[clave]; if (!g) return;
+  if (g.n === 1) return abrirFicha(g.resumenes[0].folio);       // una sola cuenta: directo a la cuenta
+  S.clienteAbierto = clave;
+  $('clienteVista').classList.remove('oculto'); document.body.style.overflow = 'hidden';
+  empujar('cliente');
+  renderCliente();
+}
+function quitarCliente() { $('clienteVista').classList.add('oculto'); S.clienteAbierto = null; if (!S.ficha) document.body.style.overflow = ''; }
+function cerrarCliente() { if (_pila.includes('cliente')) history.back(); else quitarCliente(); }
+function renderCliente() {
+  const g = S.mapaGrupos[S.clienteAbierto];
+  if (!g) { quitarCliente(); return; }
+  const tel = telefono10(g.contacto.telefono), [estCls] = COLOR_ESTADO[g.estadoGeneral] || ['p-gris'];
+  $('clienteVista').innerHTML = `
+    <div class="ficha-barra"><button onclick="cerrarCliente()" aria-label="Volver">‹</button><div><b>${esc(g.nombre)}</b><small>${g.n} cuentas con saldo</small></div></div>
+    <div class="bloque">
+      <div class="hero"><small>Saldo total del cliente</small><b style="color:${g.vencido > 0.01 ? 'var(--danger)' : 'var(--ink)'}">${dinero(g.saldo)}</b>
+        <div style="margin-top:6px"><span class="pill ${estCls}">${esc(g.estadoGeneral)}</span></div></div>
+      ${g.vencido > 0.01 ? `<div class="fila"><span>Vencido (todas)</span><b style="color:var(--danger)">${dinero(g.vencido)} · ${g.nVencidos} pago(s) · ${g.diasAtraso} d</b></div>` : ''}
+      ${g.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(g.moratorios)}</b></div>` : ''}
+      ${g.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</b></div>` : ''}
+      <div class="contacto" style="margin-top:10px">
+        ${tel ? `<a href="tel:+52${tel}">📞 Llamar</a><a class="wa" href="https://wa.me/52${tel}" target="_blank" rel="noopener">💬 WhatsApp</a>` : '<a style="opacity:.45;pointer-events:none">📞 Sin teléfono</a><a style="opacity:.45;pointer-events:none">💬 —</a>'}
+        ${g.contacto.direccion ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(g.contacto.direccion)}" target="_blank" rel="noopener">📍 Mapa</a>` : '<a style="opacity:.45;pointer-events:none">📍 Sin dirección</a>'}
+      </div>
+      ${g.contacto.direccion ? `<p style="font-size:12.5px;color:var(--muted);margin-top:8px">${esc(g.contacto.direccion)}</p>` : ''}
+    </div>
+    <div class="bloque"><h3>Cuentas (${g.n})</h3><div class="lista" style="padding:0">${g.resumenes.map(r => tarjetaCuenta(r, { sinNombre: true })).join('')}</div></div>
+    <div class="acciones una"><button class="img" style="font-size:15px" onclick="compartirImagen('cliente')">📤 Enviar estado de cuenta del cliente (imagen)</button></div>`;
 }
 
 // ---------------------------------------------------------------- rutas guardadas y mis abonos
@@ -498,11 +591,12 @@ function renderRutas() {
   if (!rutas.length) { $('listaRutas').innerHTML = '<div class="vacio">Aún no hay rutas guardadas.<br>Las rutas se arman en el sistema principal.</div>'; return; }
   $('listaRutas').innerHTML = rutas.map(ru => {
     const rs = (ru.folios || []).map(f => S.porFolio[f]).filter(Boolean);
+    const claves = [...new Set(rs.map(claveCliente))], gs = claves.map(k => S.mapaGrupos[k]).filter(Boolean);
     const saldo = rs.reduce((s, r) => s + r.saldo, 0), venc = rs.reduce((s, r) => s + r.vencido, 0);
     return `<div class="bloque" style="margin:0"><h3>${esc(ru.nombre)} <span class="mini-btn" onclick="S.rutaAbierta=(S.rutaAbierta==='${ru.id}'?null:'${ru.id}'); renderRutas()">${S.rutaAbierta == ru.id ? 'Ocultar' : 'Ver'}</span></h3>
-      <div class="fila"><span>Clientes con saldo</span><b>${rs.length} de ${(ru.folios || []).length}</b></div>
+      <div class="fila"><span>Clientes con saldo</span><b>${gs.length}${rs.length !== gs.length ? ` (${rs.length} cuentas)` : ''}</b></div>
       <div class="fila"><span>Saldo / Vencido</span><b>${dinero(saldo)} / ${dinero(venc)}</b></div>
-      ${S.rutaAbierta == ru.id ? `<div class="lista" style="padding:10px 0 0">${rs.length ? rs.map(tarjetaCuenta).join('') : '<div class="vacio">Ninguna cuenta de esta ruta tiene saldo.</div>'}</div>` : ''}</div>`;
+      ${S.rutaAbierta == ru.id ? `<div class="lista" style="padding:10px 0 0">${gs.length ? gs.map(tarjetaCliente).join('') : '<div class="vacio">Ningún cliente de esta ruta tiene saldo.</div>'}</div>` : ''}</div>`;
   }).join('');
 }
 async function refrescarAbonosBoveda() {
@@ -533,7 +627,7 @@ function abrirFicha(folio) {
   renderFicha();
   cargarDetalleFicha(folio);
 }
-function quitarFicha() { $('ficha').classList.add('oculto'); document.body.style.overflow = ''; S.ficha = null; }
+function quitarFicha() { $('ficha').classList.add('oculto'); S.ficha = null; document.body.style.overflow = S.clienteAbierto ? 'hidden' : ''; }
 function cerrarFicha() { if (_pila.includes('ficha')) history.back(); else quitarFicha(); }
 async function cargarDetalleFicha(folio) {
   if (!navigator.onLine) return;
@@ -829,10 +923,11 @@ function exitoAbono(reg, r) {
 }
 
 // ---------------------------------------------------------------- imágenes para WhatsApp
-function colorEstado(r) {
-  const m = { 'Al corriente': ['#dcfce7', '#166534'], 'Atrasado': ['#fef3c7', '#92400e'], 'Crítico': ['#fee2e2', '#991b1b'], 'Promesa': ['#dbeafe', '#1e40af'] }[r.estado.estadoGeneral] || ['#e2e8f0', '#475569'];
+function colorEstadoNombre(nombre) {
+  const m = { 'Al corriente': ['#dcfce7', '#166534'], 'Atrasado': ['#fef3c7', '#92400e'], 'Crítico': ['#fee2e2', '#991b1b'], 'Promesa': ['#dbeafe', '#1e40af'] }[nombre] || ['#e2e8f0', '#475569'];
   return { bg: m[0], fg: m[1] };
 }
+function colorEstado(r) { return colorEstadoNombre(r.estado.estadoGeneral); }
 function htmlEstadoCuenta(r) {
   const U = ImagenService.ui, c = r.cuenta, plan = c.plan || {}, hoy = new Date();
   const pagares = (S.ficha?.pagaresFull || r.estado.pagares || []).slice().sort((a, b) => (M.parseFecha(a.fechaVencimiento) || 0) - (M.parseFecha(b.fechaVencimiento) || 0));
@@ -878,6 +973,26 @@ function htmlVisor(r) {
   partes.push(U.pie(`${S.empresa.nombre} · ${M.fechaVisible(hoy)}`));
   return U.envolver(partes.join(''), 'Opciones ' + c.folio);
 }
+function htmlEstadoCliente(g) {
+  const U = ImagenService.ui, hoy = new Date();
+  const items = g.resumenes.map(r => U.item({
+    titulo: r.folio, detalle: r.producto, marca: r.vencido > 0.01 ? `Vencido ${dinero(r.vencido)}` : '',
+    izquierda: r.proximo ? `Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}` : 'Sin pagos pendientes', derecha: dinero(r.saldo)
+  })).join('');
+  const cuerpo = [
+    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Estado de cuenta', folio: g.nombre, badge: { texto: g.estadoGeneral, ...colorEstadoNombre(g.estadoGeneral) } }),
+    U.hero({ etiqueta: 'Saldo total', valor: dinero(g.saldo), nota: `${g.n} cuentas con saldo`, tono: g.vencido > 0.01 ? 'rojo' : 'azul' }),
+    U.filas([
+      g.vencido > 0.01 ? ['Vencido', { texto: dinero(g.vencido), color: '#dc2626', fuerte: true }] : null,
+      g.moratorios > 0.01 ? ['Moratorios', dinero(g.moratorios)] : null,
+      g.proximo ? ['Próximo pago', { texto: `${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}`, fuerte: true }] : null
+    ]),
+    U.seccion('Tus cuentas'), items,
+    U.nota({ texto: 'Documento informativo con la información de tus cuentas a la fecha de hoy. Para aclaraciones comunícate con la tienda.', tono: 'gris' }),
+    U.pie(`${S.empresa.nombre} · ${M.fechaVisible(hoy)}`)
+  ].join('');
+  return U.envolver(cuerpo, 'Estado de cuenta ' + g.nombre);
+}
 function htmlRecibo(reg, r) {
   const U = ImagenService.ui, saldoDespues = Math.max(0, (A.ultimo?.saldoAntes ?? r.saldoNominal) - reg.montoAbonado);
   const cuerpo = [
@@ -893,6 +1008,19 @@ function htmlRecibo(reg, r) {
 function c_corto(reg) { return 'ABN-' + String(Math.floor(reg.id)).slice(-6); }
 
 async function compartirImagen(tipo) {
+  if (tipo === 'cliente') {
+    const g = S.mapaGrupos[S.clienteAbierto]; if (!g) return;
+    cargando(true, 'Generando imagen…');
+    try {
+      const texto = `Estado de cuenta - ${g.nombre}`;
+      const lienzo = await ImagenService.renderDocumento(htmlEstadoCliente(g), { tarjeta: true, titulo: texto });
+      cargando(false);
+      const res = await ImagenService.entregar(lienzo, `estado_cuenta_cliente_${sinAcentos(g.nombre).replace(/[^a-z0-9]+/g, '_').slice(0, 40)}`, { titulo: texto, texto, categoria: 'Cobranza' });
+      if (res === 'descargado') toast('Imagen descargada. Adjúntala en WhatsApp.');
+      else if (res === 'carpeta') toast('Imagen guardada.');
+    } catch (e) { console.error('Error generando imagen:', e); toast('No se pudo generar la imagen.'); } finally { cargando(false); }
+    return;
+  }
   const f = S.ficha; if (!f) return;
   const r = resumenFicha();
   cargando(true, 'Generando imagen…');
