@@ -7,15 +7,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Cobranza | Mueblería Mi Pueblito</title>
 <link rel="manifest" href="/cobranza/manifest.json">
-<link rel="icon" type="image/svg+xml" href="img/icon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
-<link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png">
-<link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/cobranza/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/cobranza/icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/cobranza/icons/apple-touch-180.png">
 <meta name="theme-color" content="#1e40af">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Cobranza">
+<meta name="application-name" content="Cobranza">
 <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <meta name="color-scheme" content="light">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -158,6 +158,13 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 .aviso-caja { background: #fffbeb; color: #92400e; border-radius: 12px; padding: 11px 12px; font-size: 13.5px; margin-top: 12px; line-height: 1.4; }
 .ok-caja { background: #f0fdf4; color: #166534; border-radius: 12px; padding: 12px; font-size: 14px; margin-top: 12px; line-height: 1.4; }
 
+.banner-instalar { display: flex; align-items: center; gap: 10px; margin: 10px 14px 0; padding: 11px 12px; border-radius: 14px; background: #e8eefc; color: #1e3a8a; font-size: 13.5px; line-height: 1.3; }
+.banner-instalar span.ic { font-size: 24px; }
+.banner-instalar div { flex: 1; }
+.banner-instalar .ins { background: var(--brand); color: #fff; font-weight: 800; padding: 9px 13px; border-radius: 10px; font-size: 13px; }
+.banner-instalar .x { color: #64748b; font-size: 18px; padding: 4px 6px; }
+.pasos { margin: 8px 0 4px 20px; line-height: 1.6; font-size: 15px; }
+.pasos li { margin-bottom: 6px; }
 #toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px); background: #0f172a; color: #fff; padding: 11px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; z-index: 90; opacity: 0; pointer-events: none; transition: .2s; max-width: 88vw; text-align: center; }
 #toast.mostrar { opacity: 1; transform: translateX(-50%) translateY(0); }
 #overlayCarga { position: fixed; inset: 0; z-index: 95; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; }
@@ -182,6 +189,7 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
       <button type="submit" class="btn-primario" id="btnLogin">Entrar</button>
     </form>
     <div id="loginError"></div>
+    <button id="btnInstalarLogin" class="btn-sec oculto" style="width:100%;margin-top:14px" onclick="instalarApp()">📲 Instalar app en este celular</button>
   </div>
 </div>
 
@@ -189,10 +197,12 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 <div id="pantallaApp" class="oculto">
   <div class="appbar">
     <h1 id="appbarTitulo">Cartera<small id="appbarUsuario"></small></h1>
+    <button id="btnInstalarBar" class="oculto" onclick="instalarApp()" aria-label="Instalar app" title="Instalar app">📲</button>
     <button onclick="actualizarDatos(true)" aria-label="Actualizar" title="Actualizar datos">🔄</button>
     <button onclick="cerrarSesionApp()" aria-label="Salir" title="Cerrar sesión">⎋</button>
   </div>
   <div id="avisoOffline" class="aviso-offline oculto">Sin conexión: se muestran los últimos datos guardados. No podrás registrar abonos.</div>
+  <div id="bannerInstalar" class="banner-instalar oculto"><span class="ic">📲</span><div><b>Instala Cobranza</b> en tu celular: abre más rápido, a pantalla completa y con poca señal.</div><button class="ins" onclick="instalarApp()">Instalar</button><button class="x" onclick="cerrarBannerInstalar()" aria-label="Cerrar">✕</button></div>
   <div class="estado-datos" id="estadoDatos"></div>
 
   <section id="vistaCartera">
@@ -320,6 +330,8 @@ async function _entrar(user) {
   $('pantallaLogin').classList.add('oculto');
   $('pantallaApp').classList.remove('oculto');
   await actualizarDatos(false);
+  aplicarAtajo();
+  pintarInstalar();
 }
 function cerrarSesionApp() { if (confirm('¿Cerrar sesión?')) auth.signOut().finally(() => location.reload()); }
 
@@ -900,10 +912,60 @@ async function compartirImagen(tipo) {
   } finally { cargando(false); }
 }
 
+
+// ---------------------------------------------------------------- instalación como app (PWA)
+let _eventoInstalar = null;
+const esStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+const esIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const esAndroid = () => /Android/i.test(navigator.userAgent);
+function puedeInstalar() { return !esStandalone() && (!!_eventoInstalar || esIOS() || esAndroid()); }
+function bannerInstalarVisible() {
+  try { const t = Number(localStorage.getItem('cobranza_banner_instalar_cerrado') || 0); if (t && Date.now() - t < 7 * 86400000) return false; } catch (e) { /* sin localStorage */ }
+  return puedeInstalar();
+}
+function pintarInstalar() {
+  const ok = puedeInstalar();
+  $('btnInstalarLogin').classList.toggle('oculto', !ok);
+  $('btnInstalarBar').classList.toggle('oculto', !ok);
+  $('bannerInstalar').classList.toggle('oculto', !bannerInstalarVisible());
+}
+function cerrarBannerInstalar() { try { localStorage.setItem('cobranza_banner_instalar_cerrado', String(Date.now())); } catch (e) { /* ok */ } pintarInstalar(); }
+async function instalarApp() {
+  if (_eventoInstalar) {
+    const ev = _eventoInstalar; _eventoInstalar = null;
+    try { await ev.prompt(); const r = await ev.userChoice; if (r && r.outcome === 'accepted') toast('Instalando…'); } catch (e) { console.warn('Instalación:', e); }
+    pintarInstalar(); return;
+  }
+  abrirHoja(esIOS() ? `
+    <h2>Instalar en iPhone / iPad</h2><p class="sub">Hazlo desde Safari.</p>
+    <ol class="pasos"><li>Toca el botón <b>Compartir</b> <span style="font-size:18px">⬆️</span> (barra de abajo de Safari).</li>
+      <li>Desliza y elige <b>«Agregar a pantalla de inicio»</b>.</li><li>Toca <b>Agregar</b>. Aparecerá el ícono azul de <b>Cobranza</b>.</li></ol>
+    <button class="btn-primario" onclick="cerrarHoja()">Entendido</button>` : `
+    <h2>Instalar la app</h2><p class="sub">Desde Chrome o el navegador de tu celular.</p>
+    <ol class="pasos"><li>Toca el menú <b>⋮</b> del navegador (arriba a la derecha).</li>
+      <li>Elige <b>«Instalar app»</b> o <b>«Agregar a pantalla principal»</b>.</li><li>Confirma. Aparecerá el ícono azul de <b>Cobranza</b>.</li></ol>
+    <button class="btn-primario" onclick="cerrarHoja()">Entendido</button>`);
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); _eventoInstalar = e; pintarInstalar(); });
+window.addEventListener('appinstalled', () => { _eventoInstalar = null; pintarInstalar(); toast('✅ Cobranza instalada en tu celular', 4000); });
+if (window.matchMedia) { try { window.matchMedia('(display-mode: standalone)').addEventListener('change', pintarInstalar); } catch (e) { /* navegador antiguo */ } }
+
+// Atajos de la app instalada (?vista=abonos | rutas)
+function aplicarAtajo() {
+  const v = new URLSearchParams(location.search).get('vista');
+  const mapa = { abonos: 'Abonos', rutas: 'Rutas', cartera: 'Cartera' };
+  if (v && mapa[v]) irVista(mapa[v]);
+}
+
 // ---------------------------------------------------------------- arranque
 (async function init() {
   // El service worker va primero: así la app abre desde el celular aunque Firebase tarde o falle.
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/cobranza/sw.js', { scope: '/cobranza/' }).catch(e => console.warn('Service worker no disponible:', e));
+  if ('serviceWorker' in navigator) {
+    const teniaControl = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (teniaControl) toast('Hay una versión nueva de Cobranza. Cierra y vuelve a abrir la app para usarla.', 7000); });
+    navigator.serviceWorker.register('/cobranza/sw.js', { scope: '/cobranza/' }).catch(e => console.warn('Service worker no disponible:', e));
+  }
+  pintarInstalar();
   if (!navigator.onLine) $('avisoOffline').classList.remove('oculto');
   if (typeof firebase === 'undefined') {
     $('loginError').textContent = 'No se pudo cargar Firebase. Revisa tu conexión y recarga.';
