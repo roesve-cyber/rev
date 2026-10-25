@@ -488,6 +488,15 @@
         const proximoMonto = prox ? (prox.estado === 'Parcial' ? Math.max(0, prox.monto - (prox.montoAbonado || 0)) : prox.monto) : 0;
         const pagado = ctx?.totalPagadoOverride != null ? ctx.totalPagadoOverride : totalPagado(c, pagaresFolio);
         const plazo = estadoPlazoCuenta(c, estado, cfg, hoy);
+        // Importe para REGULARIZAR: lo vencido hoy. El sistema aplica cada abono primero a los
+        // pagarés vencidos (los moratorios se cubren con el excedente), así que pagar este
+        // importe deja la cuenta al corriente. NO es el monto del próximo pagaré.
+        const vencidos = estado.pagaresVencidos;
+        const regularizar = estado.montoVencido > 0.01 ? {
+            monto: estado.montoVencido,
+            desde: vencidos[0] ? vencidos[0].fechaVencimiento : null,   // pagarés ya vienen ordenados por fecha
+            dias: estado.diasMaxAtraso
+        } : null;
         return {
             folio: c.folio,
             cliente: nombreCliente(c),
@@ -497,6 +506,7 @@
             saldoNominal: estado.saldoPagares,
             moratorios: estado.saldoMoratorios,
             vencido: estado.montoVencido,
+            regularizar,
             diasAtraso: estado.diasMaxAtraso,
             nVencidos: estado.pagaresVencidos.length,
             proximo: prox ? { fecha: prox.fechaVencimiento, monto: proximoMonto, vencido: !!(fechaExacta(prox.fechaVencimiento) && fechaExacta(prox.fechaVencimiento) < hoy) } : null,

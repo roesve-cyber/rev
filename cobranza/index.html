@@ -464,6 +464,7 @@ function agruparPorCliente(resumenes) {
       contacto: (rs.map(r => r.contacto).find(c => telefono10(c.telefono)) || rs[0].contacto),
       saldo: suma(rs, r => r.saldo), saldoNominal: suma(rs, r => r.saldoNominal), moratorios: suma(rs, r => r.moratorios),
       vencido: suma(rs, r => r.vencido), nVencidos: suma(rs, r => r.nVencidos),
+      desdeVencido: rs.map(r => r.regularizar && r.regularizar.desde).filter(Boolean).sort((a, b) => (M.parseFecha(a) || 0) - (M.parseFecha(b) || 0))[0] || null,
       diasAtraso: Math.max(0, ...rs.map(r => r.diasAtraso || 0)),
       prioridad: Math.max(0, ...rs.map(r => r.riesgo?.prioridad || 0)),
       diasSinPago: Math.max(0, ...rs.map(r => r.riesgo?.diasSinPago || 0)),
@@ -517,14 +518,14 @@ function pillPlazo(r) { return pillPlazoDe(r.plazo); }
 // Tarjeta de CUENTA (dentro de la ficha del cliente y en listados de una sola cuenta)
 function tarjetaCuenta(r, opc) {
   const [cls, borde] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris', '#94a3b8'];
-  const prox = r.proximo ? `<span class="pill ${r.proximo.vencido ? 'p-rojo' : 'p-gris'}">Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</span>` : '';
+  const prox = r.regularizar ? `<span class="pill p-rojo">Para regularizar ${dinero(r.regularizar.monto)} · ${r.regularizar.dias} d de atraso</span>`
+    : (r.proximo ? `<span class="pill p-gris">Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</span>` : '');
   const titulo = opc && opc.sinNombre ? r.producto : r.cliente;
   const sub = opc && opc.sinNombre ? r.folio : `${r.folio} · ${r.producto}`;
   return `<div class="cta" style="border-left-color:${borde}" onclick="abrirFicha('${esc(r.folio).replace(/'/g, '')}')">
     <div class="l1"><div><div class="nom">${esc(titulo)}</div><div class="fol">${esc(sub)}</div></div>
       <div class="saldo">${dinero(r.saldo)}</div></div>
     <div class="l2"><span class="pill ${cls}">${esc(r.estado.estadoGeneral)}</span>
-      ${r.vencido > 0.01 ? `<span class="pill p-rojo">Vencido ${dinero(r.vencido)} · ${r.diasAtraso} d</span>` : ''}
       ${prox}${pillPlazo(r)}</div></div>`;
 }
 // Tarjeta de CLIENTE (la unidad de la lista): suma todas sus cuentas
@@ -533,13 +534,13 @@ function tarjetaCliente(g) {
   const unica = g.n === 1 ? g.resumenes[0] : null;
   const sub = unica ? `${unica.folio} · ${unica.producto}`
     : `${g.n} cuentas · ${g.resumenes.slice(0, 2).map(r => r.folio).join(', ')}${g.n > 2 ? ' +' + (g.n - 2) : ''}`;
-  const prox = g.proximo ? `<span class="pill ${g.proximo.vencido ? 'p-rojo' : 'p-gris'}">Próx. ${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</span>` : '';
+  const prox = g.vencido > 0.01 ? `<span class="pill p-rojo">Para regularizar ${dinero(g.vencido)} · ${g.diasAtraso} d de atraso</span>`
+    : (g.proximo ? `<span class="pill p-gris">Próx. ${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</span>` : '');
   const plazo = g.plazoCercano ? pillPlazoDe(g.plazoCercano.plazo) : (g.algunaPasoPlazo ? '<span class="pill p-gris">Pasó su plazo</span>' : '');
   return `<div class="cta" style="border-left-color:${borde}" data-k="${esc(g.clave)}" onclick="abrirCliente(this.dataset.k)">
     <div class="l1"><div><div class="nom">${esc(g.nombre)}</div><div class="fol">${esc(sub)}</div></div>
       <div class="saldo">${dinero(g.saldo)}</div></div>
     <div class="l2">${g.n > 1 ? `<span class="pill p-violeta">👥 ${g.n} cuentas</span>` : ''}<span class="pill ${cls}">${esc(g.estadoGeneral)}</span>
-      ${g.vencido > 0.01 ? `<span class="pill p-rojo">Vencido ${dinero(g.vencido)} · ${g.diasAtraso} d</span>` : ''}
       ${prox}${plazo}</div></div>`;
 }
 function renderLista() {
@@ -572,9 +573,10 @@ function renderCliente() {
     <div class="bloque">
       <div class="hero"><small>Saldo total del cliente</small><b style="color:${g.vencido > 0.01 ? 'var(--danger)' : 'var(--ink)'}">${dinero(g.saldo)}</b>
         <div style="margin-top:6px"><span class="pill ${estCls}">${esc(g.estadoGeneral)}</span></div></div>
-      ${g.vencido > 0.01 ? `<div class="fila"><span>Vencido (todas)</span><b style="color:var(--danger)">${dinero(g.vencido)} · ${g.nVencidos} pago(s) · ${g.diasAtraso} d</b></div>` : ''}
+      ${g.vencido > 0.01
+        ? `<div class="fila"><span>Para regularizar<br><small style="color:var(--muted)">todas sus cuentas</small></span><b style="color:var(--danger)">${dinero(g.vencido)}<br><small style="font-weight:600">vencido desde ${M.fechaVisible(g.desdeVencido)} · ${g.diasAtraso} d de atraso</small></b></div>`
+        : (g.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</b></div>` : '')}
       ${g.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(g.moratorios)}</b></div>` : ''}
-      ${g.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</b></div>` : ''}
       <div class="contacto" style="margin-top:10px">
         ${tel ? `<a href="tel:+52${tel}">📞 Llamar</a><a class="wa" href="https://wa.me/52${tel}" target="_blank" rel="noopener">💬 WhatsApp</a>` : '<a style="opacity:.45;pointer-events:none">📞 Sin teléfono</a><a style="opacity:.45;pointer-events:none">💬 —</a>'}
         ${g.contacto.direccion ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(g.contacto.direccion)}" target="_blank" rel="noopener">📍 Mapa</a>` : '<a style="opacity:.45;pointer-events:none">📍 Sin dirección</a>'}
@@ -616,6 +618,14 @@ function renderAbonos() {
       ${a.motivoResolucion ? `<small>${esc(a.motivoResolucion)}</small>` : ''}</div><div style="text-align:right"><b>${dinero(a.montoAbonado)}</b><br><span class="pill ${cls}">${esc(est)}</span></div></div></div>`;
   }).join('') : '<div class="vacio">Aún no has registrado abonos desde esta app.</div>';
   $('listaAbonos').innerHTML = cab + cuerpo;
+}
+
+// ---------------------------------------------------------------- abonos de una cuenta (del más reciente al más antiguo, con su fecha)
+function abonosOrdenados(c) {
+  return M.abonosValidos(c).map(a => {
+    const etq = a.etiquetaCuenta || a.medioPago || '';
+    return { fecha: a.fecha || a.fechaAbonoIso || a.fechaAbono || a.fechaAbonoStr, monto: Number(a.monto || a.montoAbonado || 0), forma: etq, migrado: /migrado/i.test(etq) };
+  }).sort((x, y) => (M.parseFecha(y.fecha) || 0) - (M.parseFecha(x.fecha) || 0));
 }
 
 // ---------------------------------------------------------------- ficha de cuenta
@@ -705,12 +715,9 @@ function renderFicha() {
   const r = resumenFicha(), c = r.cuenta, k = r.contacto, plan = c.plan || {};
   const tel = telefono10(k.telefono);
   const [estCls] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris'];
-  const pagares = (f.pagaresFull || r.estado.pagares || []).slice().sort((a, b) => (M.parseFecha(a.fechaVencimiento) || 0) - (M.parseFecha(b.fechaVencimiento) || 0));
-  const pendientes = pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial');
-  const verTodos = f.verTodos;
-  const listaPag = (verTodos ? pagares : pendientes.slice(0, 8));
-  const hoy = new Date();
-  const abonosRecientes = M.abonosValidos(c).slice().sort((a, b) => String(b.fechaAbonoIso || b.fecha || '').localeCompare(String(a.fechaAbonoIso || a.fecha || ''))).slice(0, 8);
+  const MAX_AB = 10;
+  const abonos = abonosOrdenados(c), totalAb = abonos.reduce((t, a) => t + a.monto, 0);
+  const listaAb = f.verTodosAbonos ? abonos : abonos.slice(0, MAX_AB);
   const bov = boveda(c.folio);
   const promesa = c.promesaPago && c.promesaPago.fecha;
 
@@ -719,9 +726,10 @@ function renderFicha() {
     <div class="bloque">
       <div class="hero"><small>Saldo por cobrar</small><b style="color:${r.vencido > 0.01 ? 'var(--danger)' : 'var(--ink)'}">${dinero(r.saldo)}</b>
         <div style="margin-top:6px"><span class="pill ${estCls}">${esc(r.estado.estadoGeneral)}</span>${promesa ? ` <span class="pill p-azul">Promesa ${M.fechaVisible(promesa)}</span>` : ''}</div></div>
-      ${r.vencido > 0.01 ? `<div class="fila"><span>Vencido</span><b style="color:var(--danger)">${dinero(r.vencido)} · ${r.nVencidos} pago(s) · ${r.diasAtraso} d</b></div>` : ''}
+      ${r.regularizar
+        ? `<div class="fila"><span>Para regularizar</span><b style="color:var(--danger)">${dinero(r.regularizar.monto)}<br><small style="font-weight:600">vencido desde ${M.fechaVisible(r.regularizar.desde)} · ${r.regularizar.dias} d de atraso</small></b></div>`
+        : (r.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</b></div>` : '')}
       ${r.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(r.moratorios)}</b></div>` : ''}
-      ${r.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</b></div>` : ''}
       <div class="fila"><span>Abono ${esc(c.periodicidad || 'semanal')}</span><b>${dinero(plan.abono)}</b></div>
       ${bov.length ? `<div class="aviso-caja">⏳ Tiene ${bov.length} abono(s) en bóveda por ${dinero(bov.reduce((s, a) => s + Number(a.montoAbonado || 0), 0))}, pendientes de autorizar.</div>` : ''}
       <div class="contacto" style="margin-top:10px">
@@ -744,19 +752,11 @@ function renderFicha() {
       ${c.observacionCartera ? `<div class="fila"><span>Observación</span><b>${esc(c.observacionCartera)}</b></div>` : ''}
     </div>
 
-    <div class="bloque"><h3>Pagarés <span class="mini-btn" onclick="S.ficha.verTodos=!S.ficha.verTodos; renderFicha()">${verTodos ? 'Solo pendientes' : 'Ver todos'}</span></h3>
-      ${listaPag.length ? listaPag.map(p => {
-        const rest = p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado || 0)) : p.monto;
-        const fv = M.parseFecha(p.fechaVencimiento);
-        const venc = (p.estado === 'Pendiente' || p.estado === 'Parcial') && fv && fv < hoy;
-        const cls = p.estado === 'Pagado' ? 'p-verde' : venc ? 'p-rojo' : p.estado === 'Parcial' ? 'p-amarillo' : 'p-gris';
-        return `<div class="item"><div>${M.fechaVisible(p.fechaVencimiento)}<small>${esc(p.numeroPagere || '')}</small></div><div style="text-align:right"><b>${dinero(p.estado === 'Pagado' ? p.monto : rest)}</b><br><span class="pill ${cls}">${venc ? 'Vencido' : esc(p.estado)}</span></div></div>`;
-      }).join('') : '<div class="vacio" style="padding:12px">Sin pagarés pendientes.</div>'}
-      ${!verTodos && pendientes.length > 8 ? `<p style="font-size:12.5px;color:var(--muted);margin-top:6px">+ ${pendientes.length - 8} más…</p>` : ''}
-    </div>
-
-    <div class="bloque"><h3>Abonos recientes</h3>
-      ${abonosRecientes.length ? abonosRecientes.map(a => `<div class="item"><div>${M.fechaVisible(a.fechaAbonoIso || a.fecha || a.fechaAbono)}<small>${esc(a.etiquetaCuenta || a.medioPago || '')}</small></div><b>${dinero(a.monto || a.montoAbonado)}</b></div>`).join('') : '<div class="vacio" style="padding:12px">Sin abonos registrados.</div>'}
+    <div class="bloque"><h3>Abonos${abonos.length ? ' · ' + abonos.length : ''}${abonos.length > MAX_AB ? ` <span class="mini-btn" onclick="S.ficha.verTodosAbonos=!S.ficha.verTodosAbonos; renderFicha()">${f.verTodosAbonos ? 'Ver menos' : 'Ver todos'}</span>` : ''}</h3>
+      ${bov.map(a => `<div class="item"><div>${M.fechaVisible(a.fechaAbonoRaw || a.fechaAbonoIso)}<small>⏳ Pendiente de autorizar · ${esc(a.etiquetaCuenta || '')}</small></div><b>${dinero(a.montoAbonado)}</b></div>`).join('')}
+      ${listaAb.map(a => `<div class="item"><div>${M.fechaVisible(a.fecha)}<small>${esc(a.migrado ? 'Historial migrado' : a.forma)}</small></div><b>${dinero(a.monto)}</b></div>`).join('')}
+      ${!abonos.length && !bov.length ? '<div class="vacio" style="padding:12px">Aún no tiene abonos.</div>' : ''}
+      ${abonos.length ? `<div class="fila" style="margin-top:6px"><span>Total abonado</span><b>${dinero(totalAb)}</b></div>` : ''}
     </div>
 
     <div class="bloque"><h3>Notas de cobranza</h3>
@@ -798,9 +798,8 @@ function abrirAbono() {
   const r = resumenFicha(), plan = r.cuenta.plan || {};
   A.medio = 'efectivo';
   const rapidos = [];
+  if (r.regularizar && r.regularizar.monto < r.saldoNominal - 0.01) rapidos.push(['Regularizar ' + dinero(r.regularizar.monto), r.regularizar.monto]);
   if (plan.abono > 0) rapidos.push(['Abono ' + dinero(plan.abono), plan.abono]);
-  if (r.proximo && r.proximo.monto > 0 && Math.abs(r.proximo.monto - plan.abono) > 0.01) rapidos.push(['Próximo ' + dinero(r.proximo.monto), r.proximo.monto]);
-  if (r.vencido > 0.01 && r.vencido < r.saldoNominal - 0.01) rapidos.push(['Vencido ' + dinero(r.vencido), r.vencido]);
   abrirHoja(`
     <h2>Registrar abono</h2>
     <p class="sub">${esc(r.cliente)} · ${esc(r.folio)} · saldo ${dinero(r.saldoNominal)}</p>
@@ -930,14 +929,7 @@ function colorEstadoNombre(nombre) {
 function colorEstado(r) { return colorEstadoNombre(r.estado.estadoGeneral); }
 function htmlEstadoCuenta(r) {
   const U = ImagenService.ui, c = r.cuenta, plan = c.plan || {}, hoy = new Date();
-  const pagares = (S.ficha?.pagaresFull || r.estado.pagares || []).slice().sort((a, b) => (M.parseFecha(a.fechaVencimiento) || 0) - (M.parseFecha(b.fechaVencimiento) || 0));
-  const pend = pagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').slice(0, 6);
-  const abonos = M.abonosValidos(c).slice().sort((a, b) => String(b.fechaAbonoIso || b.fecha || '').localeCompare(String(a.fechaAbonoIso || a.fecha || ''))).slice(0, 4);
-  const items = pend.map(p => {
-    const rest = p.estado === 'Parcial' ? Math.max(0, p.monto - (p.montoAbonado || 0)) : p.monto;
-    const fv = M.parseFecha(p.fechaVencimiento), venc = fv && fv < hoy;
-    return U.item({ titulo: M.fechaVisible(p.fechaVencimiento), detalle: p.estado === 'Parcial' ? 'Pago parcial' : '', marca: venc ? 'Vencido' : '', izquierda: p.numeroPagere || '', derecha: dinero(rest) });
-  }).join('');
+  const MAXI = 12, ab = abonosOrdenados(c), lista = ab.slice(0, MAXI);
   const cuerpo = [
     U.cabecera({ empresa: S.empresa.nombre, tipo: 'Estado de cuenta', folio: c.folio, badge: { texto: r.estado.estadoGeneral, ...colorEstado(r) } }),
     U.hero({ etiqueta: 'Saldo por pagar', valor: dinero(r.saldo), nota: r.cliente, tono: r.vencido > 0.01 ? 'rojo' : 'azul' }),
@@ -945,16 +937,18 @@ function htmlEstadoCuenta(r) {
       ['Producto', r.producto], ['Fecha de venta', M.fechaVisible(M.fechaVentaDate(c))],
       ['Plan', `${plan.meses ? mesesTxt(plan.meses) : '-'} · ${plan.pagos || '-'} pagos ${c.periodicidad || 'semanal'}es`],
       ['Abono', { texto: dinero(plan.abono), fuerte: true }], ['Total abonado', dinero(r.estado.totalAbonado)],
-      r.vencido > 0.01 ? ['Vencido', { texto: dinero(r.vencido), color: '#dc2626', fuerte: true }] : null,
+      r.regularizar ? ['Para regularizar', { texto: dinero(r.regularizar.monto), color: '#dc2626', fuerte: true }] : null,
+      r.regularizar ? ['Vencido desde', `${M.fechaVisible(r.regularizar.desde)} · ${r.regularizar.dias} d`] : null,
       r.moratorios > 0.01 ? ['Moratorios', dinero(r.moratorios)] : null
     ]),
-    pend.length ? U.seccion('Próximos pagos') + items : '',
-    abonos.length ? U.seccion('Últimos abonos') + U.filas(abonos.map(a => [M.fechaVisible(a.fechaAbonoIso || a.fecha || a.fechaAbono), dinero(a.monto || a.montoAbonado)])) : '',
+    ab.length ? U.seccion(`Abonos (${ab.length})`) + U.filas(lista.map(a => [M.fechaVisible(a.fecha), { texto: dinero(a.monto), fuerte: true }])) : '',
+    ab.length > MAXI ? U.nota({ texto: `Y ${ab.length - MAXI} abonos anteriores.`, tono: 'gris' }) : '',
     U.nota({ texto: 'Documento informativo con la información de tu cuenta a la fecha de hoy. Para aclaraciones comunícate con la tienda.', tono: 'gris' }),
     U.pie(`${S.empresa.nombre} · ${M.fechaVisible(hoy)}`)
   ].join('');
   return U.envolver(cuerpo, 'Estado de cuenta ' + c.folio);
 }
+
 function htmlVisor(r) {
   const U = ImagenService.ui, c = r.cuenta, P = r.politica, pl = r.plazo, sl = r.salto, hoy = new Date();
   const partes = [U.cabecera({ empresa: S.empresa.nombre, tipo: 'Opciones de tu cuenta', folio: c.folio }),
@@ -975,17 +969,21 @@ function htmlVisor(r) {
 }
 function htmlEstadoCliente(g) {
   const U = ImagenService.ui, hoy = new Date();
-  const items = g.resumenes.map(r => U.item({
-    titulo: r.folio, detalle: r.producto, marca: r.vencido > 0.01 ? `Vencido ${dinero(r.vencido)}` : '',
-    izquierda: r.proximo ? `Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}` : 'Sin pagos pendientes', derecha: dinero(r.saldo)
-  })).join('');
+  const items = g.resumenes.map(r => {
+    const ab = abonosOrdenados(r.cuenta);
+    return U.item({
+      titulo: r.folio, detalle: r.producto, marca: r.regularizar ? `Atraso de ${r.regularizar.dias} días` : '',
+      izquierda: r.regularizar ? `Para regularizar ${dinero(r.regularizar.monto)}` : (r.proximo ? `Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}` : 'Sin pagos pendientes'), derecha: dinero(r.saldo)
+    }) + (ab.length ? U.filas(ab.slice(0, 3).map(a => ['Abono ' + M.fechaVisible(a.fecha), dinero(a.monto)])) + (ab.length > 3 ? `<div style="font-size:12.5px;color:#94a3b8;padding:4px 2px 0">y ${ab.length - 3} abonos anteriores</div>` : '') : '') + '<div style="height:12px"></div>';
+  }).join('');
   const cuerpo = [
     U.cabecera({ empresa: S.empresa.nombre, tipo: 'Estado de cuenta', folio: g.nombre, badge: { texto: g.estadoGeneral, ...colorEstadoNombre(g.estadoGeneral) } }),
     U.hero({ etiqueta: 'Saldo total', valor: dinero(g.saldo), nota: `${g.n} cuentas con saldo`, tono: g.vencido > 0.01 ? 'rojo' : 'azul' }),
     U.filas([
-      g.vencido > 0.01 ? ['Vencido', { texto: dinero(g.vencido), color: '#dc2626', fuerte: true }] : null,
+      g.vencido > 0.01 ? ['Para regularizar', { texto: dinero(g.vencido), color: '#dc2626', fuerte: true }] : null,
+      g.vencido > 0.01 ? ['Vencido desde', `${M.fechaVisible(g.desdeVencido)} · ${g.diasAtraso} d`] : null,
       g.moratorios > 0.01 ? ['Moratorios', dinero(g.moratorios)] : null,
-      g.proximo ? ['Próximo pago', { texto: `${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}`, fuerte: true }] : null
+      g.vencido <= 0.01 && g.proximo ? ['Próximo pago', { texto: `${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}`, fuerte: true }] : null
     ]),
     U.seccion('Tus cuentas'), items,
     U.nota({ texto: 'Documento informativo con la información de tus cuentas a la fecha de hoy. Para aclaraciones comunícate con la tienda.', tono: 'gris' }),
