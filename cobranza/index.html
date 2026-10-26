@@ -203,9 +203,10 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
     <button onclick="actualizarDatos(true)" aria-label="Actualizar" title="Actualizar datos">🔄</button>
     <button onclick="cerrarSesionApp()" aria-label="Salir" title="Cerrar sesión">⎋</button>
   </div>
-  <div id="avisoOffline" class="aviso-offline oculto">Sin conexión: se muestran los últimos datos guardados. No podrás registrar abonos.</div>
+  <div id="avisoOffline" class="aviso-offline oculto">Sin conexión: se muestran los últimos datos guardados. Los abonos que captures se guardan en este celular y se envían solos cuando haya señal.</div>
   <div id="bannerInstalar" class="banner-instalar oculto"><span class="ic">📲</span><div><b>Instala Cobranza</b> en tu celular: abre más rápido, a pantalla completa y con poca señal.</div><button class="ins" onclick="instalarApp()">Instalar</button><button class="x" onclick="cerrarBannerInstalar()" aria-label="Cerrar">✕</button></div>
   <div class="estado-datos" id="estadoDatos"></div>
+  <div class="aviso-caja oculto" id="barraCola" style="margin:8px 12px"></div>
 
   <section id="vistaCartera">
     <div class="kpis" id="kpis"></div>
@@ -288,7 +289,26 @@ const KV = {
     });
   },
   async get(k) { try { const db0 = await this._abrir(); return await new Promise(res => { const q = db0.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(null); }); } catch (e) { return null; } },
-  async set(k, v) { try { const db0 = await this._abrir(); await new Promise(res => { const t = db0.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) { /* sin caché local */ } }
+  async set(k, v) { try { const db0 = await this._abrir(); await new Promise(res => { const t = db0.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); } catch (e) { /* sin caché local */ } },
+  // Versiones ESTRICTAS (para la cola de abonos): si no se pudo leer/guardar, lanzan error en vez de fallar en silencio
+  async leer(k) { const db0 = await this._abrir(); return await new Promise((res, rej) => { const q = db0.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); },
+  async guardar(k, v) { const db0 = await this._abrir(); await new Promise((res, rej) => { const t = db0.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Escritura cancelada')); }); }
+};
+
+// ---------------------------------------------------------------- cola de abonos sin enviar (captura sin señal)
+// Cada abono se guarda PRIMERO en el celular y de ahí se envía a la bóveda. El id se genera al capturar y la escritura en
+// bóveda es idempotente por ese id: reintentar nunca duplica. Captura y envío usan _mutar para no pisarse entre sí.
+const COLA = {
+  _cand: Promise.resolve(),
+  _mutar(fn) {
+    const p = this._cand.then(async () => { const lista = (await KV.leer('cola')) || []; const nueva = fn(lista.slice()); await KV.guardar('cola', nueva); return nueva; });
+    this._cand = p.catch(() => {});
+    return p;
+  },
+  async lista() { return (await KV.leer('cola')) || []; },
+  agregar(entrada) { return this._mutar(l => { if (!l.some(e => String(e.registro.id) === String(entrada.registro.id))) l.push(entrada); return l; }); },
+  quitar(id) { return this._mutar(l => l.filter(e => String(e.registro.id) !== String(id))); },
+  marcar(id, cambios) { return this._mutar(l => l.map(e => String(e.registro.id) === String(id) ? { ...e, ...cambios } : e)); }
 };
 
 // ---------------------------------------------------------------- sesión
@@ -322,10 +342,28 @@ async function cargarPerfilYEntrar(user) {
 }
 async function _entrar(user) {
   const err = $('loginError');
-  const snap = await db.collection('usuarios').doc(user.uid).get();
-  if (!snap.exists) { err.textContent = 'Tu usuario no tiene perfil autorizado. Pide a un administrador que lo active.'; await auth.signOut(); return; }
-  const perfil = snap.data() || {};
-  if (perfil.activo === false) { err.textContent = 'Este usuario está desactivado.'; await auth.signOut(); return; }
+  // Perfil: se guarda en el celular para poder entrar sin señal. Solo se usa la copia guardada cuando NO se pudo
+  // consultar (sin conexión, o Firestore tarda más de 8 s); si Firestore responde, manda Firestore.
+  const claveP = 'perfil:' + user.uid;
+  let perfil = null;
+  const guardado = await KV.get(claveP);
+  if (!navigator.onLine && guardado) { perfil = guardado; }
+  else {
+    try {
+      const snap = await Promise.race([
+        db.collection('usuarios').doc(user.uid).get(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout perfil')), guardado ? 8000 : 25000))
+      ]);
+      if (!snap.exists) { await KV.set(claveP, null); err.textContent = 'Tu usuario no tiene perfil autorizado. Pide a un administrador que lo active.'; await auth.signOut(); return; }
+      perfil = snap.data() || {};
+      await KV.set(claveP, perfil);
+    } catch (e) {
+      if (!guardado) throw e;
+      console.warn('Perfil: se usa la copia guardada en el celular.', e);
+      perfil = guardado;
+    }
+  }
+  if (perfil.activo === false) { await KV.set(claveP, null); err.textContent = 'Este usuario está desactivado.'; await auth.signOut(); return; }
   const rol = String(perfil.rol || 'vendedor').toLowerCase();
   if (!ROLES_PERMITIDOS.includes(rol)) { err.textContent = 'Tu usuario no tiene acceso a Cobranza.'; await auth.signOut(); return; }
   sesion = { uid: user.uid, nombre: perfil.nombre || user.email, rol, email: user.email };
@@ -335,8 +373,13 @@ async function _entrar(user) {
   await actualizarDatos(false);
   aplicarAtajo();
   pintarInstalar();
+  pintarCola(); sincronizarCola();
 }
-function cerrarSesionApp() { if (confirm('¿Cerrar sesión?')) auth.signOut().finally(() => location.reload()); }
+async function cerrarSesionApp() {
+  let n = 0; try { n = (await COLA.lista()).length; } catch (e) { return alert('No se pudo verificar si tienes abonos sin enviar. Reinténtalo.'); }
+  if (n) return alert(`Tienes ${n} abono(s) guardado(s) en este celular que aún no se envían a la bóveda. Conéctate y envíalos con el botón "Enviar ahora" antes de cerrar sesión.`);
+  if (confirm('¿Cerrar sesión?')) { const uid = sesion && sesion.uid; Promise.resolve(uid ? KV.set('perfil:' + uid, null) : null).then(() => auth.signOut()).finally(() => location.reload()); }
+}
 
 // ---------------------------------------------------------------- carga de datos (solo lectura)
 async function leerRegistros(tabla, consulta) {
@@ -420,8 +463,70 @@ function pintarEstado() {
   const d = new Date(S.ts);
   const hora = d.toLocaleString('es-MX', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   $('estadoDatos').innerHTML = `${S.desdeCache ? '💾' : '✅'} ${S.resumenes.length} cuentas con saldo · datos de ${hora} <button onclick="actualizarDatos(true)">Actualizar</button>`;
+  pintarCola();
 }
-window.addEventListener('online', () => { $('avisoOffline').classList.add('oculto'); });
+// Barra de abonos sin enviar (guardados en este celular)
+async function pintarCola() {
+  const el = $('barraCola'); if (!el) return;
+  let l; try { l = await COLA.lista(); } catch (e) { return; }
+  S.cola = l;
+  if (!l.length) { el.classList.add('oculto'); return; }
+  const tot = l.reduce((t, e) => t + Number(e.registro.montoAbonado || 0), 0);
+  el.innerHTML = `📴 ${l.length} abono(s) sin enviar por ${dinero(tot)}, guardados en este celular. <button class="mini-btn" onclick="sincronizarCola(true)">Enviar ahora</button>`;
+  el.classList.remove('oculto');
+}
+// Total y lista de abonos sin enviar de una cuenta
+function colaDeFolio(folio) { return (S.cola || []).filter(e => e.registro.folioCXC === folio); }
+function avisoColaFicha(folio) {
+  const q = colaDeFolio(folio); if (!q.length) return '';
+  return `<div class="aviso-caja">📴 Tienes ${q.length} abono(s) de esta cuenta por ${dinero(q.reduce((t, e) => t + Number(e.registro.montoAbonado || 0), 0))} guardados en este celular, aún sin enviar a bóveda. El saldo que ves no los descuenta.</div>`;
+}
+
+// Envío de la cola a la bóveda. Se dispara: al volver la señal, al abrir/entrar, al volver a la app, cada minuto y con el botón.
+let _sincronizando = false;
+const conTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor')), ms))]);
+const esErrorDeRed = e => !navigator.onLine || /unavailable|deadline|offline|network|Sin respuesta/i.test(String((e && (e.code || '')) + ' ' + (e && e.message || e)));
+async function sincronizarCola(manual) {
+  if (_sincronizando || !sesion || !db) return;
+  if (!navigator.onLine) { if (manual) toast('Sin conexión: los abonos se enviarán solos cuando haya señal.'); return; }
+  _sincronizando = true;
+  let enviados = 0, fallo = null;
+  const intentados = new Set();
+  try {
+    S.abonosPend = S.abonosPend || [];
+    let lista = await COLA.lista();
+    while (true) {
+      const sig = lista.filter(e => !intentados.has(String(e.registro.id)));
+      if (!sig.length) break;
+      let corta = false;
+      for (const e of sig) {
+        const id = String(e.registro.id); intentados.add(id);
+        try {
+          const reg = { ...e.registro, capturaOffline: !!e.diferido, fechaEnvioIso: M.localISO(new Date()) };
+          await conTimeout(escribirEnBoveda(reg, null), 25000);
+          await COLA.quitar(id);
+          if (!S.abonosPend.some(a => String(a.id) === id)) S.abonosPend.push(reg);
+          enviados++;
+        } catch (err) {
+          fallo = err; console.warn('No se pudo enviar el abono en cola:', err);
+          await COLA.marcar(id, { intentos: (e.intentos || 0) + 1, ultimoError: String(err && err.message || err).slice(0, 160), ultimoIntento: Date.now() }).catch(() => {});
+          if (esErrorDeRed(err)) { corta = true; break; }   // sin señal real: se conserva el orden y se reintenta después
+        }
+      }
+      if (corta) break;
+      lista = await COLA.lista();   // por si se capturó otro abono mientras se enviaba
+    }
+    if (enviados) { try { await KV.set('datos', { ...(await KV.get('datos')), abonosPend: S.abonosPend }); } catch (e) { /* ok */ } }
+  } catch (e) { console.error('Cola de abonos:', e); fallo = fallo || e; }
+  finally { _sincronizando = false; }
+  await pintarCola();
+  if ($('listaAbonos')) renderAbonos();
+  if (S.ficha) renderFicha();
+  if (enviados) toast(`✅ ${enviados} abono(s) enviado(s) a la bóveda`, 4000);
+  else if (manual && fallo) toast('No se pudo enviar todavía. Se reintentará solo.');
+}
+window.addEventListener('online', () => { $('avisoOffline').classList.add('oculto'); sincronizarCola(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && sesion) sincronizarCola(); });
 window.addEventListener('offline', () => { $('avisoOffline').classList.remove('oculto'); });
 
 // ---------------------------------------------------------------- navegación
@@ -612,12 +717,16 @@ function renderAbonos() {
   const tot = pend.reduce((s, a) => s + Number(a.montoAbonado || 0), 0);
   const cab = `<div class="bloque" style="margin:0"><div class="fila"><span>En bóveda por autorizar</span><b>${pend.length} · ${dinero(tot)}</b></div>
     <p style="font-size:12.5px;color:var(--muted);margin-top:6px">Estos abonos ya fueron enviados. Quedan aplicados cuando administración los autoriza.</p></div>`;
+  const encola = (S.cola || []).filter(e => sesion?.rol === 'admin' || e.registro.capturadoPorUid === sesion?.uid);
+  const colaHtml = encola.map(e => { const a = e.registro;
+    return `<div class="bloque" style="margin:0"><div class="item"><div><b>${esc(a.clienteNombre)}</b><small>${esc(a.folioCXC)} · ${M.fechaVisible(a.fechaAbonoRaw)} · ${esc(a.etiquetaCuenta || '')}</small>
+      <small>📴 Guardado en este celular, sin enviar${e.ultimoError ? ' · último intento: ' + esc(e.ultimoError) : ''}</small></div><div style="text-align:right"><b>${dinero(a.montoAbonado)}</b><br><span class="pill p-amarillo">Sin enviar</span></div></div></div>`; }).join('');
   const cuerpo = mios.length ? mios.map(a => {
     const est = String(a.estado), cls = est === 'Pendiente' ? 'p-amarillo' : (/aprob|autoriz/i.test(est) ? 'p-verde' : 'p-rojo');
     return `<div class="bloque" style="margin:0"><div class="item"><div><b>${esc(a.clienteNombre)}</b><small>${esc(a.folioCXC)} · ${M.fechaVisible(a.fechaAbonoRaw || a.fechaAbonoIso)} · ${esc(a.etiquetaCuenta || '')}</small>
       ${a.motivoResolucion ? `<small>${esc(a.motivoResolucion)}</small>` : ''}</div><div style="text-align:right"><b>${dinero(a.montoAbonado)}</b><br><span class="pill ${cls}">${esc(est)}</span></div></div></div>`;
-  }).join('') : '<div class="vacio">Aún no has registrado abonos desde esta app.</div>';
-  $('listaAbonos').innerHTML = cab + cuerpo;
+  }).join('') : (encola.length ? '' : '<div class="vacio">Aún no has registrado abonos desde esta app.</div>');
+  $('listaAbonos').innerHTML = cab + colaHtml + cuerpo;
 }
 
 // ---------------------------------------------------------------- abonos de una cuenta (del más reciente al más antiguo, con su fecha)
@@ -731,6 +840,7 @@ function renderFicha() {
         : (r.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</b></div>` : '')}
       ${r.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(r.moratorios)}</b></div>` : ''}
       <div class="fila"><span>Abono ${esc(c.periodicidad || 'semanal')}</span><b>${dinero(plan.abono)}</b></div>
+      ${avisoColaFicha(c.folio)}
       ${bov.length ? `<div class="aviso-caja">⏳ Tiene ${bov.length} abono(s) en bóveda por ${dinero(bov.reduce((s, a) => s + Number(a.montoAbonado || 0), 0))}, pendientes de autorizar.</div>` : ''}
       <div class="contacto" style="margin-top:10px">
         ${tel ? `<a href="tel:+52${tel}">📞 Llamar</a><a class="wa" href="https://wa.me/52${tel}" target="_blank" rel="noopener">💬 WhatsApp</a>` : '<a style="opacity:.45;pointer-events:none">📞 Sin teléfono</a><a style="opacity:.45;pointer-events:none">💬 —</a>'}
@@ -794,7 +904,6 @@ function opcionesCuenta(medio) {
   return (S.bancos || []).map(b => ({ valor: String(b.idCuenta || b.banco || b.id), etiqueta: b.nombre }));
 }
 function abrirAbono() {
-  if (!navigator.onLine) return toast('Sin conexión: no se puede registrar el abono.');
   const r = resumenFicha(), plan = r.cuenta.plan || {};
   A.medio = 'efectivo';
   const rapidos = [];
@@ -815,7 +924,7 @@ function abrirAbono() {
     <div id="abRefWrap" class="oculto"><label class="campo-label">Referencia de la transferencia</label><input type="text" id="abRef" placeholder="Folio / clave de rastreo" autocomplete="off"></div>
     <div id="abMsg"></div>
     <button class="btn-primario btn-ok" id="abBtn" onclick="enviarAbono()">Enviar a bóveda</button>
-    <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px">El abono queda pendiente de autorización de administración.</p>`);
+    <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px">El abono queda pendiente de autorización de administración. Sin señal se guarda en este celular y se envía solo cuando haya conexión.</p>`);
   llenarCuentas();
   setTimeout(() => $('abMonto') && $('abMonto').focus(), 250);
 }
@@ -834,8 +943,11 @@ async function enviarAbono() {
   const msg = $('abMsg'), btn = $('abBtn');
   const error = t => { msg.innerHTML = `<div class="error-caja">${t}</div>`; };
   msg.innerHTML = '';
-  if (!navigator.onLine) return error('Sin conexión. Conéctate para enviar el abono.');
   const r = resumenFicha(), c = r.cuenta;
+  let enCola;
+  try { enCola = (await COLA.lista()).filter(e => e.registro.folioCXC === c.folio); }
+  catch (e) { return error('No se pudo leer la memoria de este celular, así que no se puede registrar el abono con seguridad. Cierra y vuelve a abrir la app.'); }
+  const totalCola = enCola.reduce((t, e) => t + Number(e.registro.montoAbonado || 0), 0);
   const monto = Math.round(parseFloat($('abMonto').value) * 100) / 100;
   const fechaRaw = $('abFecha').value;
   if (!(monto > 0)) return error('Captura un monto válido.');
@@ -846,39 +958,47 @@ async function enviarAbono() {
 
   // Reglas del sistema principal (cxc.js) para no mandar a la bóveda algo que no procede.
   const hoy = new Date();
-  const pol = M.evaluarPoliticaPagoAnticipado(c, r.estado, r.pagado, S.cfg, hoy, monto);
+  // Los abonos de esta cuenta que siguen sin enviar cuentan como ya cobrados: no se puede exceder el saldo ni liquidar de contrabando.
+  const montoAcum = monto + totalCola;
+  const pol = M.evaluarPoliticaPagoAnticipado(c, r.estado, r.pagado, S.cfg, hoy, montoAcum);
   const maximo = Math.max(Number(r.saldoNominal || 0), Number(pol.montoLiquidacion || 0));
-  if (monto > maximo + 0.01) return error(`El abono no puede ser mayor al saldo (${dinero(r.saldoNominal)}). Si el cliente quiere liquidar, usa el monto del visor.`);
-  if (pol.liquidaria || monto >= Number(r.saldoNominal) - 0.01) {
-    return error(`Este pago <b>liquida la cuenta</b>. Las liquidaciones (con su cupón o precio de contado) se registran en el sistema de la oficina para no perder el beneficio del cliente.<br><br>Monto para liquidar hoy: <b>${dinero(pol.montoLiquidacion)}</b>. Avisa a administración y comparte la cotización con el botón <b>📤 Opciones</b>.`);
+  if (montoAcum > maximo + 0.01) return error(totalCola > 0.01
+    ? `Este abono, sumado a los ${dinero(totalCola)} que ya tienes sin enviar de esta cuenta, supera el saldo (${dinero(r.saldoNominal)}).`
+    : `El abono no puede ser mayor al saldo (${dinero(r.saldoNominal)}). Si el cliente quiere liquidar, usa el monto del visor.`);
+  if (pol.liquidaria || montoAcum >= Number(r.saldoNominal) - 0.01) {
+    return error(`${totalCola > 0.01 ? `Sumado a los ${dinero(totalCola)} que ya tienes sin enviar, este` : 'Este'} pago <b>liquida la cuenta</b>. Las liquidaciones (con su cupón o precio de contado) se registran en el sistema de la oficina para no perder el beneficio del cliente.<br><br>Monto para liquidar hoy: <b>${dinero(pol.montoLiquidacion)}</b>. Avisa a administración y comparte la cotización con el botón <b>📤 Opciones</b>.`);
   }
 
   // Candado de abonos del mismo día (igual que el sistema principal)
   const clave = String(fechaRaw);
   const mismoDia = M.abonosValidos(c).filter(a => String(M.localISO(M.parseFecha(a.fechaAbonoIso || a.fecha || a.fechaAbono) || new Date(0))).slice(0, 10) === clave)
-    .concat(boveda(c.folio).filter(a => String(a.fechaAbonoRaw || '').slice(0, 10) === clave));
+    .concat(boveda(c.folio).filter(a => String(a.fechaAbonoRaw || '').slice(0, 10) === clave))
+    .concat(enCola.map(e => e.registro).filter(a => String(a.fechaAbonoRaw || '').slice(0, 10) === clave));
   if (mismoDia.length) {
     const tot = mismoDia.reduce((s, a) => s + Number(a.monto || a.montoAbonado || 0), 0);
     if (!confirm(`CANDADO DE ABONOS\n\nYa hay ${mismoDia.length} abono(s) de esta cuenta con esa fecha por ${dinero(tot)}.\n\n¿Registrar otro abono el mismo día?`)) return;
   }
-  if (!confirm(`RESUMEN DE ABONO\n\nCliente: ${r.cliente}\nFolio: ${c.folio}\nMonto: ${dinero(monto)}\nForma: ${A.medio === 'efectivo' ? 'Efectivo' : 'Transferencia'}\nCuenta: ${cuentaSel.options[cuentaSel.selectedIndex].text}\n\n¿Confirmas enviarlo a la bóveda?`)) return;
+  if (!confirm(`RESUMEN DE ABONO\n\nCliente: ${r.cliente}\nFolio: ${c.folio}\nMonto: ${dinero(monto)}\nForma: ${A.medio === 'efectivo' ? 'Efectivo' : 'Transferencia'}\nCuenta: ${cuentaSel.options[cuentaSel.selectedIndex].text}${navigator.onLine ? '' : '\n\nSin conexión: se guardará en este celular y se enviará solo cuando haya señal.'}${S.desdeCache && S.ts ? '\n\nSaldo según datos del ' + new Date(S.ts).toLocaleString('es-MX', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + '.' : ''}\n\n¿Confirmas el abono?`)) return;
 
-  btn.disabled = true; btn.textContent = 'Enviando…';
+  btn.disabled = true; btn.textContent = 'Guardando…';
   const registro = M.construirAbonoBoveda({
     folio: c.folio, clienteNombre: r.cliente, monto, fechaAbonoRaw: fechaRaw, medioPago: A.medio, referencia: $('abRef') ? $('abRef').value : '',
     cuentaId: cuentaSel.value, etiquetaCuenta: cuentaSel.options[cuentaSel.selectedIndex].text, vendedorId: c.vendedorId || null, usuario: sesion
   });
   try {
-    await escribirEnBoveda(registro, r);
-    S.abonosPend.push(registro);
-    await KV.set('datos', { ...(await KV.get('datos')), abonosPend: S.abonosPend });
-    A.ultimo = { registro, saldoAntes: r.saldoNominal };
-    exitoAbono(registro, r);
+    await COLA.agregar({ registro, diferido: !navigator.onLine, creada: Date.now(), intentos: 0 });
   } catch (e) {
-    console.error('No se pudo enviar el abono:', e);
+    console.error('No se pudo guardar el abono en el celular:', e);
     btn.disabled = false; btn.textContent = 'Enviar a bóveda';
-    error('No se pudo enviar el abono a la bóveda: ' + esc(e.message || e) + '<br>Revisa tu conexión e inténtalo de nuevo. <b>Verifica en "Mis abonos" antes de repetirlo</b>, por si sí alcanzó a guardarse.');
+    return error('No se pudo guardar el abono en este celular, así que <b>NO quedó registrado</b>. No entregues recibo; revisa el espacio del celular e inténtalo de nuevo.');
   }
+  A.ultimo = { registro, saldoAntes: r.saldoNominal };
+  await pintarCola();
+  if (navigator.onLine) await sincronizarCola();   // con señal sale de inmediato
+  let aunEnCola = false;
+  try { aunEnCola = (await COLA.lista()).some(e => String(e.registro.id) === String(registro.id)); } catch (e) { aunEnCola = true; }
+  if (aunEnCola) await COLA.marcar(registro.id, { diferido: true }).catch(() => {});   // llegará tarde: se marcará "sin señal" en la bóveda
+  exitoAbono(registro, r, aunEnCola);
 }
 
 // Escribe EXACTAMENTE como lo hace el sistema principal (pushAtomo + _marcarCambioRemoto + AuditService + pushOutbox)
@@ -886,35 +1006,40 @@ async function escribirEnBoveda(reg, r) {
   const ts = Date.now();
   const limpio = M.limpiarParaFirestore(reg, true);
   const ref = db.collection('posData').doc('abonosPendientes');
-  await db.runTransaction(async tx => {
+  const insertado = await db.runTransaction(async tx => {
     const doc = await tx.get(ref);
-    if (!doc.exists) tx.set(ref, { data: [limpio], _updatedAt: ts });
-    else { const data = (doc.data().data || []).slice(); data.push(limpio); tx.update(ref, { data, _updatedAt: ts }); }
+    if (!doc.exists) { tx.set(ref, { data: [limpio], _updatedAt: ts }); return true; }
+    const data = (doc.data().data || []).slice();
+    // Idempotencia: si este abono (mismo id) ya llegó en un intento anterior, NO se vuelve a insertar
+    if (data.some(x => x && String(x.id) === String(limpio.id))) return false;
+    data.push(limpio); tx.update(ref, { data, _updatedAt: ts }); return true;
   });
+  if (!insertado) return false;
   // Lo que sigue es "de cortesía": si falla, el abono ya quedó guardado en la bóveda.
   try { await db.collection('posData').doc('_syncStatus').set({ _updatedAt: ts, tabla: 'abonosPendientes', deviceId: 'cobranza-movil-' + (sesion?.uid || '').slice(0, 8) }, { merge: true }); } catch (e) { console.warn('syncStatus', e); }
   try {
     const fila = M.limpiarParaFirestore({
       id: Date.now() + Math.random(), fecha: new Date().toISOString(), accion: 'BOVEDA_ABONO_PENDIENTE', modulo: 'CxC', entidad: 'abono', entidadId: reg.folioCXC,
-      detalle: 'Abono enviado a la bóveda de autorizaciones (app de cobranza móvil)', monto: reg.montoAbonado, severidad: 'riesgo',
-      usuario: sesion.nombre, usuarioId: sesion.uid, rol: sesion.rol, vendedorId: null, vendedorNombre: null,
-      datos: { clienteNombre: reg.clienteNombre, cuentaId: reg.cuentaId, etiquetaCuenta: reg.etiquetaCuenta, medioPago: reg.medioPago, estatus: 'Pendiente', origen: 'cobranza-movil' }
+      detalle: 'Abono enviado a la bóveda de autorizaciones (app de cobranza móvil)' + (reg.capturaOffline ? ' · capturado sin señal' : ''), monto: reg.montoAbonado, severidad: 'riesgo',
+      usuario: reg.capturadoPorNombre || sesion.nombre, usuarioId: reg.capturadoPorUid || sesion.uid, rol: reg.capturadoPorRol || sesion.rol, vendedorId: null, vendedorNombre: null,
+      datos: { clienteNombre: reg.clienteNombre, cuentaId: reg.cuentaId, etiquetaCuenta: reg.etiquetaCuenta, medioPago: reg.medioPago, estatus: 'Pendiente', origen: 'cobranza-movil', capturaOffline: !!reg.capturaOffline }
     });
     await db.collection('posData').doc('bitacoraAuditoria').collection('registros').doc(String(fila.id).replace(/\//g, '-').slice(0, 400)).set(fila);
   } catch (e) { console.warn('bitácora', e); }
   try {
     await db.collection('pushOutbox').add({
-      type: 'autorizacion_boveda', title: 'Abono pendiente en Boveda', body: `${reg.clienteNombre} - ${dinero(reg.montoAbonado)} (cobranza móvil)`,
+      type: 'autorizacion_boveda', title: 'Abono pendiente en Boveda', body: `${reg.clienteNombre} - ${dinero(reg.montoAbonado)} (cobranza móvil${reg.capturaOffline ? ', capturado sin señal' : ''})`,
       url: `${location.origin}/?view=autorizaciones`, targetRoles: ['admin'], status: 'pending', createdAt: Date.now(),
       payload: { tipo: 'abono', id: `abono-${reg.id}`, titulo: 'Abono pendiente en Boveda', cuerpo: `${reg.clienteNombre} - ${dinero(reg.montoAbonado)}`, folio: reg.folioCXC, cliente: reg.clienteNombre, monto: reg.montoAbonado, origen: 'cobranza-movil' }
     });
   } catch (e) { console.warn('pushOutbox', e); }
+  return true;
 }
 
-function exitoAbono(reg, r) {
+function exitoAbono(reg, r, enCola) {
   abrirHoja(`
-    <h2>✅ Abono enviado a bóveda</h2>
-    <p class="sub">Queda pendiente de autorización de administración.</p>
+    <h2>${enCola ? '📴 Abono guardado en este celular' : '✅ Abono enviado a bóveda'}</h2>
+    <p class="sub">${enCola ? 'Se enviará a la bóveda solo en cuanto haya señal. No cierres sesión ni borres los datos de la app hasta que se envíe.' : 'Queda pendiente de autorización de administración.'}</p>
     <div class="ok-caja"><b>${dinero(reg.montoAbonado)}</b> de ${esc(r.cliente)}<br>Folio ${esc(reg.folioCXC)} · ${M.fechaVisible(reg.fechaAbonoRaw)} · ${esc(reg.etiquetaCuenta)}</div>
     <button class="btn-primario" onclick="compartirImagen('recibo')">📤 Enviar recibo provisional por WhatsApp</button>
     <button class="btn-primario" style="background:#e2e8f0;color:#0f172a" onclick="cerrarHoja(); renderFicha(); renderTodo()">Listo</button>`);
@@ -963,6 +1088,25 @@ function htmlVisor(r) {
   if (sl) {
     partes.push(U.seccion(sl.yaPaso ? 'Tu plazo ya venció' : 'Si no liquidas a tiempo'));
     partes.push(U.nota({ titulo: `De ${mesesTxt(sl.mesesActual)} a ${mesesTxt(sl.mesesNuevo)}`, texto: `El total de tu plan pasaría de ${dinero(sl.totalActual)} a ${dinero(sl.totalNuevo)} (${sl.diferencia >= 0 ? '+' : ''}${dinero(sl.diferencia)}).${sl.yaPaso ? ' Administración confirma este cambio.' : ` Aplica después del ${M.fechaVisible(pl ? pl.fechaLimite : hoy)}.`}`, tono: sl.yaPaso ? 'rojo' : 'ambar' }));
+  }
+  else if (M.mesesPlan(c) >= 6) partes.push(U.seccion('Incremento de plazo'), U.nota({ texto: 'Ya estás en el plazo máximo (6 meses): no tienes otro escalón.', tono: 'gris' }));
+  // Escalera de plazos: mismos escenarios que muestra el visor en pantalla
+  // Acotado para la imagen: un plazo menor al suyo ya no se ofrece cuando pasaron 15 días o más
+  // de haberlo rebasado (mismo cálculo de días que el motor: meses × 30.44). El suyo y los siguientes siempre salen.
+  const GRACIA_DIAS = 15;
+  const diasVenta = Math.max(0, Math.floor((hoy - M.fechaVentaDate(c)) / 86400000)), mesesSuyo = M.mesesPlan(c);
+  const esc_ = M.escaleraVisor(c, S.cfg).filter(e => e.esActual || e.meses >= mesesSuyo || diasVenta - e.meses * 30.44 < GRACIA_DIAS);
+  if (esc_.length > 1) {
+    const td = 'padding:8px 6px;border-bottom:1px solid #eef2f7;font-size:14px;';
+    const filasEsc = esc_.map(e => {
+      const marca = e.esActual ? ' · tuyo' : e.esSiguiente ? ' · siguiente' : '';
+      const fondo = e.esActual ? 'background:#dbeafe;font-weight:800;' : e.esSiguiente ? 'background:#fef3c7;' : '';
+      return `<tr style="${fondo}"><td style="${td}">${e.meses} ${e.meses === 1 ? 'mes' : 'meses'}${marca}</td>` +
+        `<td style="${td}text-align:right;white-space:nowrap;">${U.esc(dinero(e.total))}</td>` +
+        `<td style="${td}text-align:right;white-space:nowrap;">${e.esActual ? '—' : (e.diferencia >= 0 ? '+' : '') + U.esc(dinero(e.diferencia))}</td></tr>`;
+    }).join('');
+    const th = 'padding:6px;font-size:11.5px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em;';
+    partes.push(U.seccion('Todos los plazos'), U.bloque(`<table style="width:100%;border-collapse:collapse;"><thead><tr><th style="${th}text-align:left;">Plazo</th><th style="${th}text-align:right;">Total del plan</th><th style="${th}text-align:right;">Vs. el tuyo</th></tr></thead><tbody>${filasEsc}</tbody></table>`));
   }
   partes.push(U.pie(`${S.empresa.nombre} · ${M.fechaVisible(hoy)}`));
   return U.envolver(partes.join(''), 'Opciones ' + c.folio);
@@ -1092,6 +1236,8 @@ function aplicarAtajo() {
     navigator.serviceWorker.register('/cobranza/sw.js', { scope: '/cobranza/' }).catch(e => console.warn('Service worker no disponible:', e));
   }
   pintarInstalar();
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* ok */ }   // evita que el navegador borre la cola de abonos por falta de espacio
+  setInterval(() => { if (sesion && navigator.onLine) COLA.lista().then(l => { if (l.length) sincronizarCola(); }).catch(() => {}); }, 60000);
   if (!navigator.onLine) $('avisoOffline').classList.remove('oculto');
   if (typeof firebase === 'undefined') {
     $('loginError').textContent = 'No se pudo cargar Firebase. Revisa tu conexión y recarga.';
