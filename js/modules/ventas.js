@@ -5025,7 +5025,7 @@ window.renderPanelAutorizaciones = function() {
                         const folioRef = a.folioApartado || a.folioCXC || '-';
                         return `
                     <tr style="border-bottom: 1px solid #f3f4f6;">
-                        <td style="padding: 8px;">${_ventaFechaVisible(a.fechaCapturaIso || a.fechaAbonoIso || a.fechaCaptura || a.fechaAbonoStr)}</td>
+                        <td style="padding: 8px;">${_ventaFechaVisible(a.fechaCapturaIso || a.fechaAbonoIso || a.fechaCaptura || a.fechaAbonoStr)}${a.capturaOffline ? '<br><span style="font-size:11px; background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:999px; font-weight:bold;">📴 Sin señal</span>' : ''}</td>
                         <td style="padding: 8px; color: #475569;"><strong>${folioRef}</strong><br><span style="font-size:11px; color:#64748b;">${esApartado ? 'Apartado' : 'Crédito'}</span></td>
                         <td style="padding: 8px; font-weight: bold; color: #059669;">${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado || 0)}</td>
                         <td style="padding: 8px;">
@@ -7229,6 +7229,7 @@ window.revisarAbonoPendiente = function(index) {
             <p style="font-size:14px; margin: 6px 0;"><strong>Cliente:</strong> ${clienteNombre}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Monto Abono:</strong> ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(a.montoAbonado)}</p>
             <p style="font-size:14px; margin: 6px 0;"><strong>Cuenta Receptora:</strong> ${a.etiquetaCuenta}</p>
+            ${a.capturaOffline ? `<p style="font-size:13px; margin:10px 0; background:#fffbeb; color:#92400e; padding:8px 10px; border-radius:8px; line-height:1.4;">📴 <strong>Capturado sin señal</strong>${a.capturadoPorNombre ? ' por ' + _escapeHtml(a.capturadoPorNombre) : ''} el ${_ventaFechaVisible(a.fechaCapturaIso || a.fechaCaptura)}${a.fechaEnvioIso ? ' · llegó a la bóveda el ' + _ventaFechaVisible(a.fechaEnvioIso) : ''}. Verifica el saldo vigente de la cuenta antes de autorizar.</p>` : ''}
             
             <label style="display:block; margin-top:15px; font-weight:bold; font-size:12px; color:#475569;">Fecha de Ingreso Oficial (Auditoría):</label>
             <input type="date" id="authFechaAbono" value="${fechaCorta}" style="width:100%; padding:10px; border-radius:6px; border:1px solid #cbd5e1; margin-top:5px; box-sizing:border-box;">
