@@ -1052,14 +1052,22 @@ function colorEstadoNombre(nombre) {
   return { bg: m[0], fg: m[1] };
 }
 function colorEstado(r) { return colorEstadoNombre(r.estado.estadoGeneral); }
+// Regla del sistema: ningún documento lleva solo el folio de venta; el identificador principal es el producto vendido
+// y el folio NO aparece en la imagen.
+function bloqueProducto(producto, badge) {
+  const U = ImagenService.ui;
+  return U.bloque(`<div class="mc-folio" style="font-size:22px;line-height:1.2;">${U.esc(producto || 'Producto')}</div>` +
+    (badge && badge.texto ? `<div class="mc-badge-w"><span class="mc-badge" style="background:${badge.bg || '#e2e8f0'};color:${badge.fg || '#334155'};">${U.esc(badge.texto)}</span></div>` : ''));
+}
 function htmlEstadoCuenta(r) {
   const U = ImagenService.ui, c = r.cuenta, plan = c.plan || {}, hoy = new Date();
   const MAXI = 12, ab = abonosOrdenados(c), lista = ab.slice(0, MAXI);
   const cuerpo = [
-    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Estado de cuenta', folio: c.folio, badge: { texto: r.estado.estadoGeneral, ...colorEstado(r) } }),
+    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Estado de cuenta' }),
+    bloqueProducto(r.producto, { texto: r.estado.estadoGeneral, ...colorEstado(r) }),
     U.hero({ etiqueta: 'Saldo por pagar', valor: dinero(r.saldo), nota: r.cliente, tono: r.vencido > 0.01 ? 'rojo' : 'azul' }),
     U.filas([
-      ['Producto', r.producto], ['Fecha de venta', M.fechaVisible(M.fechaVentaDate(c))],
+      ['Fecha de venta', M.fechaVisible(M.fechaVentaDate(c))],
       ['Plan', `${plan.meses ? mesesTxt(plan.meses) : '-'} · ${plan.pagos || '-'} pagos ${c.periodicidad || 'semanal'}es`],
       ['Abono', { texto: dinero(plan.abono), fuerte: true }], ['Total abonado', dinero(r.estado.totalAbonado)],
       r.regularizar ? ['Para regularizar', { texto: dinero(r.regularizar.monto), color: '#dc2626', fuerte: true }] : null,
@@ -1076,14 +1084,16 @@ function htmlEstadoCuenta(r) {
 
 function htmlVisor(r) {
   const U = ImagenService.ui, c = r.cuenta, P = r.politica, pl = r.plazo, sl = r.salto, hoy = new Date();
-  const partes = [U.cabecera({ empresa: S.empresa.nombre, tipo: 'Opciones de tu cuenta', folio: c.folio }),
+  const partes = [U.cabecera({ empresa: S.empresa.nombre, tipo: 'Opciones de tu cuenta' }), bloqueProducto(r.producto),
     U.hero({ etiqueta: 'Saldo por pagar', valor: dinero(r.saldoNominal), nota: r.cliente, tono: 'azul' })];
-  if (pl) partes.push(U.seccion('Plazo pactado'), U.filas([['Plazo', mesesTxt(pl.mesesPlan)], ['Fecha límite', { texto: M.fechaVisible(pl.fechaLimite), fuerte: true }],
-    [pl.aunEnPlazo ? 'Días restantes' : 'Estado', { texto: pl.aunEnPlazo ? String(pl.diasRestantes) : 'Plazo vencido', color: pl.aunEnPlazo ? '#16a34a' : '#dc2626', fuerte: true }]]));
-  partes.push(U.seccion('Si liquidas hoy'));
-  if (P.tipo === 'pronto_pago_flat' && P.cuponDisponible) partes.push(U.hero({ etiqueta: 'Pagas', valor: dinero(P.montoLiquidacion), nota: `Y recibes un cupón de ${dinero(P.beneficio)} (${P.porcentajeCupon}%) para tu próxima compra`, tono: 'verde' }));
-  else if (P.tipo === 'contado_1_mes') partes.push(U.hero({ etiqueta: 'Pagas (precio de contado)', valor: dinero(P.montoLiquidacion), nota: P.aplica ? `Ahorras ${dinero(P.saldoActual - P.montoLiquidacion)} contra tu saldo` : '', tono: 'verde' }));
-  else partes.push(U.hero({ etiqueta: 'Pagas', valor: dinero(P.montoLiquidacion), nota: P.tipo === 'fuera_de_plazo' ? 'Saldo vigente' : 'Saldo vigente de tu cuenta', tono: 'azul' }));
+  // Plazo pactado compacto: una sola línea de tres datos
+  if (pl) {
+    const caja = (et, val, color) => `<div style="flex:1;background:#f8fafc;border-radius:12px;padding:8px 6px;text-align:center;"><div style="font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#64748b;">${U.esc(et)}</div><div style="font-size:14.5px;font-weight:800;margin-top:2px;color:${color || '#0f172a'};">${U.esc(val)}</div></div>`;
+    partes.push(U.bloque(`<div style="display:flex;gap:8px;margin:12px 0 4px;">${caja('Plazo', mesesTxt(pl.mesesPlan))}${caja(pl.aunEnPlazo ? 'Vence' : 'Venció', M.fechaVisible(pl.fechaLimite))}${caja(pl.aunEnPlazo ? 'Faltan' : 'Estado', pl.aunEnPlazo ? pl.diasRestantes + (Math.abs(pl.diasRestantes) === 1 ? ' día' : ' días') : 'Vencido', pl.aunEnPlazo ? '#16a34a' : '#dc2626')}</div>`));
+  }
+  if (P.tipo === 'pronto_pago_flat' && P.cuponDisponible) partes.push(U.hero({ etiqueta: 'Si liquidas hoy pagas', valor: dinero(P.montoLiquidacion), nota: `Y recibes un cupón de ${dinero(P.beneficio)} (${P.porcentajeCupon}%) para tu próxima compra`, tono: 'verde' }));
+  else if (P.tipo === 'contado_1_mes') partes.push(U.hero({ etiqueta: 'Si liquidas hoy pagas (contado)', valor: dinero(P.montoLiquidacion), nota: P.aplica ? `Ahorras ${dinero(P.saldoActual - P.montoLiquidacion)} contra tu saldo` : '', tono: 'verde' }));
+  else partes.push(U.hero({ etiqueta: 'Si liquidas hoy pagas', valor: dinero(P.montoLiquidacion), nota: P.tipo === 'fuera_de_plazo' ? 'Saldo vigente' : 'Saldo vigente de tu cuenta', tono: 'azul' }));
   if (r.moratorios > 0.01) partes.push(U.nota({ texto: `Además tienes moratorios por ${dinero(r.moratorios)}.`, tono: 'ambar' }));
   if (sl) {
     partes.push(U.seccion(sl.yaPaso ? 'Tu plazo ya venció' : 'Si no liquidas a tiempo'));
@@ -1116,7 +1126,7 @@ function htmlEstadoCliente(g) {
   const items = g.resumenes.map(r => {
     const ab = abonosOrdenados(r.cuenta);
     return U.item({
-      titulo: r.folio, detalle: r.producto, marca: r.regularizar ? `Atraso de ${r.regularizar.dias} días` : '',
+      titulo: r.producto, marca: r.regularizar ? `Atraso de ${r.regularizar.dias} días` : '',
       izquierda: r.regularizar ? `Para regularizar ${dinero(r.regularizar.monto)}` : (r.proximo ? `Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}` : 'Sin pagos pendientes'), derecha: dinero(r.saldo)
     }) + (ab.length ? U.filas(ab.slice(0, 3).map(a => ['Abono ' + M.fechaVisible(a.fecha), dinero(a.monto)])) + (ab.length > 3 ? `<div style="font-size:12.5px;color:#94a3b8;padding:4px 2px 0">y ${ab.length - 3} abonos anteriores</div>` : '') : '') + '<div style="height:12px"></div>';
   }).join('');
@@ -1138,9 +1148,10 @@ function htmlEstadoCliente(g) {
 function htmlRecibo(reg, r) {
   const U = ImagenService.ui, saldoDespues = Math.max(0, (A.ultimo?.saldoAntes ?? r.saldoNominal) - reg.montoAbonado);
   const cuerpo = [
-    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Recibo provisional de abono', folio: c_corto(reg), badge: { texto: 'Pendiente de autorización', bg: '#fef3c7', fg: '#92400e' } }),
+    U.cabecera({ empresa: S.empresa.nombre, tipo: 'Recibo provisional de abono' }),
+    bloqueProducto(r.producto, { texto: 'Pendiente de autorización', bg: '#fef3c7', fg: '#92400e' }),
     U.hero({ etiqueta: 'Abono recibido', valor: dinero(reg.montoAbonado), nota: r.cliente, tono: 'verde' }),
-    U.filas([['Cuenta', reg.folioCXC], ['Fecha del abono', M.fechaVisible(reg.fechaAbonoRaw)], ['Forma de pago', reg.medioPago === 'transferencia' ? 'Transferencia' : 'Efectivo'],
+    U.filas([['Fecha del abono', M.fechaVisible(reg.fechaAbonoRaw)], ['Forma de pago', reg.medioPago === 'transferencia' ? 'Transferencia' : 'Efectivo'],
       reg.referenciaBancaria ? ['Referencia', reg.referenciaBancaria] : null, ['Saldo estimado', { texto: dinero(saldoDespues), fuerte: true }], ['Recibió', sesion.nombre]]),
     U.nota({ titulo: 'RECIBO PROVISIONAL', texto: 'Este comprobante queda sujeto a la autorización de la tienda. El saldo definitivo se actualiza cuando se aplica el abono.', tono: 'ambar' }),
     U.pie(`${S.empresa.nombre} · ${M.fechaVisible(new Date())}`)
