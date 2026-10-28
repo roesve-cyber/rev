@@ -1521,6 +1521,17 @@ function volverAEditar() {
 // flex en "wrap", sube cualquier letra menor a 13px y html2canvas 1.4.1 no
 // entiende object-fit. Por eso esta tarjeta se arma con TABLAS (columnas
 // que no se rompen), letras de 13px o más y fotos con tamaño calculado.
+// Disponibilidad de un artículo según el stock del catálogo al momento de
+// cotizar: cuántas piezas son de entrega inmediata y cuántas sobre pedido.
+// Producto libre (no registrado) o sin dato de stock = sobre pedido.
+function disponibilidadArticulo(a) {
+  const cant = Number(a.cantidad) || 1;
+  if (a.esLibre || !a.productoId) return { inmediata: 0, pedido: cant };
+  const prod = productosCache.find(pr => String(pr.id) === String(a.productoId));
+  const stock = prod ? Number(prod.stock) : NaN;
+  const disp = Number.isFinite(stock) ? Math.max(0, Math.min(cant, Math.floor(stock))) : 0;
+  return { inmediata: disp, pedido: cant - disp };
+}
 function m0(n) {
   return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(n) || 0);
 }
@@ -1659,7 +1670,27 @@ function htmlImagenCotizacion({ cot, planes }, medidas) {
   }
   const notaCot = cot.notas ? `<div style="font-size:13px;background:#fffbeb;color:#92400e;border-radius:10px;padding:8px 10px;margin-top:10px;"><b>Notas.</b> ${escapeHtml(cot.notas)}</div>` : '';
 
-  return U.envolver(cabecera + productos + resumen + plan + notaCot +
+  // ---------- Disponibilidad (hasta abajo, antes del pie) ----------
+  const disp = cot.articulos.map(a => ({ a, ...disponibilidadArticulo(a) }));
+  const todoInmediato = disp.every(d => d.pedido === 0);
+  const todoPedido = disp.every(d => d.inmediata === 0);
+  const OK = 'background:#f0fdf4;color:#166534;', PED = 'background:#fffbeb;color:#92400e;';
+  let disponibilidad;
+  if (todoInmediato) {
+    disponibilidad = `<div style="${OK}border-radius:12px;padding:10px 12px;margin-top:14px;text-align:center;"><div style="font-size:16px;font-weight:900;">✅ Entrega inmediata</div><div style="font-size:13px;margin-top:2px;">Producto disponible en tienda.</div></div>`;
+  } else if (todoPedido) {
+    disponibilidad = `<div style="${PED}border-radius:12px;padding:10px 12px;margin-top:14px;text-align:center;"><div style="font-size:16px;font-weight:900;">📦 Sobre pedido</div><div style="font-size:13px;margin-top:2px;">Verificar fecha de entrega.</div></div>`;
+  } else {
+    const filas = disp.map(({ a, inmediata, pedido }) => {
+      const partes = [];
+      if (inmediata > 0) partes.push(`<span style="color:#166534;font-weight:800;">✅ Entrega inmediata${pedido > 0 ? ` (${inmediata} pza${inmediata === 1 ? '' : 's'})` : ''}</span>`);
+      if (pedido > 0) partes.push(`<span style="color:#92400e;font-weight:800;">📦 Sobre pedido${inmediata > 0 ? ` (${pedido} pza${pedido === 1 ? '' : 's'})` : ''} · verificar fecha de entrega</span>`);
+      return `<tr><td style="padding:6px 0;border-bottom:1px solid #e2e8f0;vertical-align:top;"><div style="font-size:13px;font-weight:700;color:#0f172a;line-height:1.25;">${escapeHtml(a.nombre)}</div><div style="font-size:13px;line-height:1.35;">${partes.join('<br>')}</div></td></tr>`;
+    }).join('');
+    disponibilidad = `<div style="background:#f8fafc;border-radius:12px;padding:10px 12px;margin-top:14px;"><div style="font-size:13px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:#475569;">Disponibilidad</div><table style="width:100%;border-collapse:collapse;">${filas}</table></div>`;
+  }
+
+  return U.envolver(cabecera + productos + resumen + plan + notaCot + disponibilidad +
     U.pie(`${empresa} · Válido por ${cot.vigenciaDias} días`), `Cotización ${cot.folio}`);
 }
 async function compartirImagenCotizacion() {
