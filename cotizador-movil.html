@@ -9,414 +9,375 @@
 <link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
-<meta name="theme-color" content="#0e8f6f">
+<meta name="theme-color" content="#1e40af">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Cotizador">
+<meta name="application-name" content="Cotizador">
 <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <meta name="color-scheme" content="light">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="js/services/ticket-service.js"></script>
+<script src="js/services/imagen-whatsapp.js"></script>
 <style>
 :root {
-  --ink: #10221f;
-  --muted: #5c746c;
-  --paper: #eef8f5;
-  --surface: #ffffff;
-  --line: #d7ece3;
-  --brand: #0e8f6f;
-  --brand-2: #17b88a;
-  --teal: #0891b2;
-  --amber: #d97706;
-  --danger: #dc2626;
-  --r: 14px;
-  --r-lg: 20px;
-  --shadow: 0 10px 28px rgba(16, 34, 31, 0.10);
-  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ink: #0f172a; --muted: #64748b; --paper: #eef2f7; --surface: #ffffff; --line: #dbe3ee;
+  --brand: #1e40af; --brand-2: #2563eb; --ok: #16a34a; --warn: #d97706; --danger: #dc2626; --violet: #7c3aed;
+  --r: 14px; --r-lg: 20px; --shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-html { scroll-behavior: smooth; height: 100%; overscroll-behavior-y: none; }
-body {
-  font-family: var(--font);
-  background: linear-gradient(180deg, #f6fdfb 0%, var(--paper) 100%);
-  color: var(--ink);
-  min-height: 100vh;
-  min-height: 100dvh;
-  -webkit-font-smoothing: antialiased;
-  padding-bottom: env(safe-area-inset-bottom);
-  overscroll-behavior-y: none;
-  overflow-x: hidden;
-  user-select: none;
-  -webkit-user-select: none;
-}
-/* El texto de la cotización sí debe poder seleccionarse/copiarse a mano si el
-   copiado automático falla, y los campos de escritura siempre. */
-.resumen-texto, input, textarea { user-select: text; -webkit-user-select: text; }
+html { height: 100%; overscroll-behavior-y: none; }
+body { font-family: var(--font); background: var(--paper); color: var(--ink); min-height: 100dvh; -webkit-font-smoothing: antialiased; overflow-x: hidden; user-select: none; -webkit-user-select: none; }
+input, select, textarea { user-select: text; -webkit-user-select: text; }
 button, input, select, textarea { font: inherit; color: inherit; }
-button { cursor: pointer; -webkit-user-select: none; user-select: none; }
-input, select, textarea {
-  width: 100%; padding: 13px; border: 1.5px solid var(--line);
-  border-radius: 11px; background: var(--surface); font-size: 16px;
-}
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); }
-label.campo-label { display:block; font-size:11.5px; font-weight:700; letter-spacing:.02em; color: var(--muted); margin-bottom: 5px; }
-
+button { cursor: pointer; border: 0; background: none; }
+input, select, textarea { width: 100%; padding: 13px; border: 1.5px solid var(--line); border-radius: 11px; background: var(--surface); font-size: 16px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand-2); }
 .oculto { display: none !important; }
+label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; color: var(--muted); margin: 12px 0 5px; text-transform: uppercase; }
+label.campo-label:first-child { margin-top: 0; }
 
 /* ===== LOGIN ===== */
-#pantallaLogin {
-  min-height: 100dvh; display:flex; align-items:center; justify-content:center; padding: 24px;
-  padding-top: max(24px, env(safe-area-inset-top));
-  padding-bottom: max(24px, env(safe-area-inset-bottom));
-}
-.login-card {
-  width: 100%; max-width: 380px; background: var(--surface); border-radius: var(--r-lg);
-  box-shadow: var(--shadow); padding: 32px 26px; border: 1px solid var(--line);
-}
-.login-logo { width: 56px; height: 56px; margin: 0 auto 14px; display:block; }
-.login-card h1 { font-size: 20px; text-align:center; margin-bottom: 4px; }
-.login-card p.sub { text-align:center; color: var(--muted); font-size: 13px; margin-bottom: 22px; }
-.login-card .campo { margin-bottom: 14px; }
-#loginError { color: var(--danger); font-size: 13px; text-align:center; min-height: 18px; margin-top: 4px; }
-.btn-primario {
-  width:100%; padding: 15px; background: var(--brand); color: white; border:none;
-  border-radius: 11px; font-weight: 700; font-size: 15px; margin-top: 6px; min-height: 48px;
-}
-.btn-primario:active { background: #0b6e56; transform: scale(0.98); }
-.btn-primario:disabled { opacity: .55; }
+#pantallaLogin { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 22px; background: linear-gradient(180deg, #1e3a8a, #1e40af 60%, #2563eb); }
+.login-card { width: 100%; max-width: 380px; background: var(--surface); border-radius: var(--r-lg); padding: 26px 22px; box-shadow: var(--shadow); }
+.login-logo { width: 56px; height: 56px; margin: 0 auto 12px; display: block; object-fit: contain; }
+.login-card h1 { font-size: 20px; text-align: center; }
+.login-card p.sub { text-align: center; color: var(--muted); font-size: 13px; margin: 4px 0 18px; }
+#loginError { color: var(--danger); font-size: 13px; text-align: center; min-height: 18px; margin-top: 8px; }
+.btn-primario { width: 100%; padding: 14px; border-radius: 12px; background: var(--brand); color: #fff; font-weight: 800; font-size: 16px; margin-top: 14px; }
+.btn-primario:active { transform: scale(.98); }
+.btn-primario:disabled { opacity: .6; }
+.btn-sec { padding: 12px 14px; border-radius: 12px; background: #e8eefc; color: var(--brand); font-weight: 800; font-size: 14px; }
+.btn-sec:active { transform: scale(.98); }
+.btn-linea { border: 1.5px solid var(--line); background: #fff; color: var(--ink); }
 
-/* ===== APP HEADER ===== */
-.appbar {
-  position: sticky; top:0; z-index: 40; background: rgba(244,251,249,.96);
-  border-bottom: 1px solid var(--line); padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
-  display:flex; align-items:center; justify-content:space-between; gap:10px;
-}
-.appbar-titulo { display:flex; flex-direction:column; line-height:1.25; min-width:0; }
-.appbar-titulo b { font-size: 15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.appbar-titulo span { font-size: 11.5px; color: var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.btn-icono {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-  width: 42px; height: 42px; min-width:42px; display:flex; align-items:center; justify-content:center; font-size: 17px;
-}
-.btn-icono:active { background: var(--paper); transform: scale(0.94); }
+/* ===== APP ===== */
+.appbar { position: sticky; top: 0; z-index: 20; background: var(--brand); color: #fff; padding: calc(10px + env(safe-area-inset-top)) 14px 10px; display: flex; align-items: center; gap: 10px; }
+.appbar h1 { font-size: 17px; flex: 1; line-height: 1.15; min-width: 0; }
+.appbar small { display: block; font-size: 11.5px; opacity: .8; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appbar button { color: #fff; font-size: 20px; padding: 6px 8px; border-radius: 10px; }
+.appbar button:active { background: rgba(255,255,255,.18); }
+#pantallaApp { padding-bottom: calc(142px + env(safe-area-inset-bottom)); }
+.aviso-offline { background: #fef3c7; color: #92400e; font-size: 12.5px; font-weight: 700; text-align: center; padding: 6px 10px; }
+.estado-datos { font-size: 11.5px; color: var(--muted); padding: 8px 14px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.estado-datos.ok { color: #166534; }
+.estado-datos.error { color: #991b1b; font-weight: 700; }
+.estado-datos button { color: var(--brand-2); font-weight: 800; font-size: 12px; text-decoration: underline; padding: 6px 2px; }
+.vista { padding: 4px 0 8px; }
+.vacio { text-align: center; color: var(--muted); padding: 34px 10px; font-size: 14px; line-height: 1.5; }
+.vacio .gr { font-size: 38px; display: block; margin-bottom: 6px; }
 
-#app { max-width: 560px; margin: 0 auto; padding: 14px 14px 128px; }
+.bloque { background: var(--surface); margin: 12px 14px 0; border-radius: var(--r); padding: 14px; box-shadow: 0 2px 10px rgba(15,23,42,.05); }
+.bloque h3 { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.bloque.ambar { background: #fffbeb; border: 1px solid #fcd34d; }
+.hero { text-align: center; padding: 8px 0 4px; }
+.hero small { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.hero b { display: block; font-size: 34px; font-weight: 900; line-height: 1.1; margin-top: 2px; }
+.fila { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eef2f7; font-size: 14.5px; }
+.fila:last-child { border-bottom: 0; }
+.fila span:first-child { color: var(--muted); flex-shrink: 0; }
+.fila span:last-child, .fila b { text-align: right; word-break: break-word; }
+.btn-agregar { width: 100%; padding: 15px; border-radius: 14px; background: var(--brand); color: #fff; font-weight: 800; font-size: 16px; box-shadow: 0 4px 14px rgba(30,64,175,.28); }
+.btn-agregar:active { transform: scale(.98); }
 
-.tarjeta {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
-  padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow);
-}
-.tarjeta h3 { font-size: 13.5px; text-transform: none; color: var(--ink); margin-bottom: 10px; display:flex; align-items:center; gap:6px; }
+/* ===== ARTÍCULOS (carrito) ===== */
+.art { padding: 12px 0; border-bottom: 1px solid #eef2f7; }
+.art:last-child { border-bottom: 0; padding-bottom: 0; }
+.art:first-child { padding-top: 0; }
+.art-l1 { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.art-l1 b { font-size: 15px; line-height: 1.25; word-break: break-word; }
+.art-l1 .sub { font-weight: 900; font-size: 15.5px; white-space: nowrap; }
+.art small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.art-l2 { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
+.stepper { display: flex; align-items: center; gap: 2px; background: var(--paper); border-radius: 12px; padding: 3px; }
+.stepper button { width: 40px; height: 40px; border-radius: 10px; background: var(--surface); font-weight: 900; font-size: 20px; box-shadow: 0 1px 3px rgba(15,23,42,.1); display: flex; align-items: center; justify-content: center; }
+.stepper button:active { transform: scale(.9); }
+.stepper span { min-width: 30px; text-align: center; font-weight: 800; font-size: 15px; }
+.btn-quitar { color: var(--danger); font-size: 13.5px; font-weight: 800; padding: 10px 12px; border-radius: 10px; }
+.btn-quitar:active { background: #fee2e2; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+.p-ambar { background: #fef3c7; color: #92400e; } .p-violeta { background: #ede9fe; color: #5b21b6; }
+.p-azul { background: #dbeafe; color: #1e40af; } .p-gris { background: #e2e8f0; color: #475569; }
 
-/* estado de datos en vivo */
-.estado-datos {
-  display:flex; align-items:center; gap:8px; font-size: 12px; padding: 10px 12px;
-  border-radius: 10px; margin-bottom: 12px; border: 1px solid;
-}
-.estado-datos.ok { background:#ecfdf5; border-color:#a7f3d0; color:#047857; }
-.estado-datos.espera { background:#f1f5f9; border-color:#e2e8f0; color:#475569; }
-.estado-datos.error { background:#fef2f2; border-color:#fecaca; color:#b91c1c; }
-.estado-datos button { margin-left:auto; background:none; border:none; text-decoration:underline; font-size:12px; font-weight:700; color:inherit; padding: 8px 2px; min-height:32px; }
+/* ===== CONDICIONES ===== */
+.interruptor { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 2px; font-weight: 800; font-size: 15px; }
+.interruptor input { appearance: none; -webkit-appearance: none; width: 52px; height: 30px; padding: 0; border-radius: 999px; border: 0; background: #cbd5e1; position: relative; flex-shrink: 0; transition: background .15s; }
+.interruptor input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.3); transition: transform .15s; }
+.interruptor input:checked { background: var(--ok); }
+.interruptor input:checked::after { transform: translateX(22px); }
+.sugerido { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
-.banner-offline {
-  position: sticky; top: 0; z-index: 45; background: #1f2937; color: white; text-align:center;
-  font-size: 12.5px; font-weight:700; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top));
-}
+/* ===== PLAN ===== */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.seg button { padding: 12px 4px; border-radius: 12px; border: 2px solid var(--line); font-weight: 800; font-size: 14px; background: #fff; }
+.seg button.activo { border-color: var(--brand-2); background: #e8eefc; color: var(--brand); }
+.plan { border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 13px; margin-top: 10px; background: #fff; }
+.plan:first-child { margin-top: 0; }
+.plan.custom { background: #fffbeb; border-color: #fcd34d; }
+.plan-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.plan-top b { font-size: 16px; }
+.plan-top .tot { font-size: 12.5px; color: var(--muted); text-align: right; }
+.plan-top .tot strong { color: var(--ink); font-size: 14px; }
+.plan-pago { margin-top: 6px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.plan-pago .monto { font-size: 25px; font-weight: 900; color: var(--brand); line-height: 1.1; }
+.plan-pago small { color: var(--muted); font-size: 13px; }
+.plan-cupon { margin-top: 8px; }
+.nota-pie { font-size: 12px; color: var(--muted); margin-top: 10px; }
+.visor-tarjeta { border-radius: 14px; padding: 12px 13px; margin-top: 12px; }
+.visor-tarjeta .t { font-size: 12px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 4px; }
+.visor-tarjeta .s { font-size: 13.5px; line-height: 1.4; }
+.v-violeta { background: #f5f3ff; color: #5b21b6; } .v-gris { background: #f1f5f9; color: #334155; }
+.chips-plan { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chip-plan { background: #fde68a; color: #92400e; padding: 8px 8px 8px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 800; display: inline-flex; align-items: center; gap: 4px; }
+.chip-plan button { color: #dc2626; font-size: 16px; font-weight: 900; padding: 2px 8px; }
+.dos-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-/* buscador de productos */
-.buscador-wrap { position: relative; }
-#resultadosBusqueda {
-  position:absolute; left:0; right:0; top: calc(100% + 6px); background: var(--surface);
-  border:1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); max-height: 300px;
-  overflow-y:auto; -webkit-overflow-scrolling: touch; z-index: 30;
-}
-.resultado-item {
-  display:flex; align-items:center; gap:10px; padding: 13px 12px; border-bottom: 1px solid var(--paper); cursor:pointer; min-height:52px;
-}
-.resultado-item:last-child { border-bottom:none; }
-.resultado-item:active { background: var(--paper); }
-.resultado-item .info { flex:1; min-width:0; }
-.resultado-item .info b { display:block; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.resultado-item .info span { font-size: 11.5px; color: var(--muted); }
-.resultado-item .precio { font-weight:800; color: var(--brand); font-size: 13.5px; white-space:nowrap; }
-.sin-resultados { padding: 14px; text-align:center; color: var(--muted); font-size: 13px; }
+/* ===== BARRA DE TOTAL + NAV ===== */
+.barra-total { position: fixed; left: 0; right: 0; bottom: calc(58px + env(safe-area-inset-bottom)); z-index: 30; background: var(--surface); border-top: 1px solid var(--line); padding: 9px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 -4px 18px rgba(15,23,42,.08); }
+.barra-total .t { flex: 1; min-width: 0; }
+.barra-total .t small { display: block; font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.barra-total .t b { font-size: 21px; font-weight: 900; white-space: nowrap; }
+.barra-total .gen { background: var(--ok); color: #fff; font-weight: 900; font-size: 15px; padding: 14px 18px; border-radius: 14px; white-space: nowrap; }
+.barra-total .gen:active { transform: scale(.97); }
+.barra-total .gen:disabled { opacity: .6; }
+.barra-total .vaciar { font-size: 20px; padding: 12px; border-radius: 12px; background: #fee2e2; }
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31; background: var(--surface); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+.nav button { padding: 8px 4px 7px; font-size: 11.5px; font-weight: 800; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
+.nav button span.ic { font-size: 22px; line-height: 1; }
+.nav button.activo { color: var(--brand); }
+.nav .badge { position: absolute; top: 3px; left: calc(50% + 8px); background: var(--danger); color: #fff; font-size: 10.5px; font-weight: 900; min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px; display: flex; align-items: center; justify-content: center; }
 
-.btn-secundario {
-  padding: 12px 14px; background: var(--paper); color: var(--ink); border: 1px solid var(--line);
-  border-radius: 10px; font-weight: 700; font-size: 13px; white-space:nowrap; min-height: 44px;
-}
-.btn-secundario:active { background: var(--line); transform: scale(0.98); }
+/* ===== HOJAS INFERIORES ===== */
+.cortina { position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.55); display: flex; align-items: flex-end; justify-content: center; }
+.hoja { width: 100%; max-width: 560px; max-height: 92dvh; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 22px 22px 0 0; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); }
+.hoja.alta { height: 92dvh; display: flex; flex-direction: column; padding-bottom: 0; overflow: hidden; }
+.hoja-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.hoja h2 { font-size: 19px; }
+.hoja .sub { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.hoja .cerrar { font-weight: 800; color: var(--brand-2); font-size: 15px; padding: 8px 4px; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 10px; scrollbar-width: none; flex-shrink: 0; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; padding: 8px 13px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--line); font-size: 13px; font-weight: 800; color: #334155; white-space: nowrap; }
+.chip.activo { background: var(--brand); border-color: var(--brand); color: #fff; }
+.lista-prod { overflow-y: auto; overscroll-behavior: contain; flex: 1; margin: 0 -16px; padding: 0 16px calc(14px + env(safe-area-inset-bottom)); }
+.prod { display: flex; align-items: center; gap: 10px; padding: 13px 0; border-bottom: 1px solid #eef2f7; cursor: pointer; }
+.prod:active { background: #f1f5f9; }
+.prod .info { flex: 1; min-width: 0; }
+.prod .info b { display: block; font-size: 14.5px; line-height: 1.25; }
+.prod .info small { color: var(--muted); font-size: 12.5px; }
+.prod .precio { font-weight: 900; color: var(--brand); font-size: 15px; white-space: nowrap; text-align: right; }
+.prod .en { display: block; margin-top: 3px; }
+.libre-acceso { margin-top: 10px; flex-shrink: 0; padding-bottom: 12px; }
+.bloqueo { font-size: 12.5px; color: var(--muted); text-align: center; padding: 10px; background: #f1f5f9; border-radius: 12px; }
+.foto-fila { display: flex; gap: 10px; align-items: center; }
+.foto-prev { width: 64px; height: 64px; border: 1.5px dashed var(--line); border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fff; flex-shrink: 0; }
+.foto-prev span { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.2; }
+.foto-prev img { width: 100%; height: 100%; object-fit: cover; }
+.foto-fila label.btn-sec { flex: 1; text-align: center; cursor: pointer; }
+.foto-fila input[type=file] { display: none; }
 
-/* carrito */
-.item-carrito {
-  display:flex; align-items:center; gap:10px; padding: 12px 0; border-bottom: 1px solid var(--paper);
-}
-.item-carrito:last-child { border-bottom:none; }
-.item-carrito .info { flex:1; min-width:0; }
-.item-carrito .info b { display:block; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.item-carrito .info span { font-size:11.5px; color: var(--muted); }
-.stepper { display:flex; align-items:center; gap:2px; background: var(--paper); border-radius: 10px; padding:2px; }
-.stepper button {
-  width: 36px; height: 36px; border-radius: 8px; border: none; background: var(--surface);
-  font-weight:800; font-size:17px; display:flex; align-items:center; justify-content:center; box-shadow: 0 1px 2px rgba(0,0,0,.06);
-}
-.stepper button:active { transform: scale(0.9); }
-.stepper span { min-width: 22px; text-align:center; font-weight:700; font-size:13.5px; }
-.btn-quitar { background:none; border:none; color: var(--danger); font-size:18px; width:38px; height:38px; display:flex; align-items:center; justify-content:center; }
-.btn-quitar:active { background: #fee2e2; border-radius: 8px; }
-.carrito-vacio { text-align:center; color: var(--muted); font-size: 13px; padding: 18px 0; }
+/* ===== RESULTADO (pantalla completa, como la ficha de cobranza) ===== */
+#pantallaResultado { position: fixed; inset: 0; z-index: 40; background: var(--paper); overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+.ficha-barra { position: sticky; top: 0; z-index: 3; background: var(--brand); color: #fff; padding: calc(8px + env(safe-area-inset-top)) 8px 10px; display: flex; align-items: center; gap: 4px; }
+.ficha-barra button { color: #fff; font-size: 24px; padding: 4px 12px; border-radius: 10px; }
+.ficha-barra div { flex: 1; min-width: 0; }
+.ficha-barra b { display: block; font-size: 16px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ficha-barra small { font-size: 11.5px; opacity: .85; }
+.item { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eef2f7; font-size: 14px; align-items: center; }
+.item:last-child { border-bottom: 0; }
+.item small { display: block; color: var(--muted); font-size: 12px; }
+.acciones { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; background: var(--surface); border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 8px; box-shadow: 0 -4px 18px rgba(15,23,42,.1); }
+.acciones button { padding: 13px 6px; border-radius: 13px; font-weight: 800; font-size: 13.5px; }
+.acciones .wa { background: #25D366; color: #fff; font-size: 15px; }
+.acciones .sec { background: #e8eefc; color: var(--brand); }
+.acciones button:active { transform: scale(.97); }
 
-/* tabs periodicidad */
-.tabs { display:flex; gap:6px; background: var(--paper); border-radius: 10px; padding: 4px; }
-.tabs button {
-  flex:1; padding: 11px 0; border:none; border-radius: 8px; background:transparent; font-weight:700; font-size: 13px; color: var(--muted); min-height:42px;
-}
-.tabs button.activo { background: var(--surface); color: var(--brand); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
-
-.fila { display:flex; justify-content:space-between; align-items:center; padding: 5px 0; font-size: 13.5px; }
-.fila.total { font-size: 16px; font-weight: 800; padding-top: 8px; margin-top: 4px; border-top: 1px dashed var(--line); }
-.fila .label { color: var(--muted); }
-
-table.planes { width:100%; border-collapse: collapse; margin-top: 4px; }
-table.planes th { font-size: 10.5px; text-transform:uppercase; letter-spacing:.02em; color: var(--muted); text-align:right; padding: 8px 4px; border-bottom: 1.5px solid var(--line); }
-table.planes th:first-child, table.planes td:first-child { text-align:left; }
-table.planes td { padding: 11px 4px; text-align:right; font-size: 13.5px; border-bottom: 1px solid var(--paper); }
-table.planes td.meses { font-weight: 700; }
-table.planes td.abono { font-weight: 800; color: var(--brand); }
-
-.checkrow { display:flex; align-items:center; gap:10px; font-weight:700; font-size: 13.5px; margin-bottom: 10px; min-height:32px; }
-.checkrow input { width:22px; height:22px; }
-
-.barra-inferior {
-  position: fixed; left:0; right:0; bottom:0; padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
-  background: rgba(244,251,249,.97); border-top: 1px solid var(--line);
-  display:flex; gap:10px; z-index: 35;
-}
-.barra-inferior .btn-primario { margin-top:0; }
-.barra-inferior .btn-secundario { min-width:48px; }
-
-/* resultado final */
-#pantallaResultado { max-width: 560px; margin: 0 auto; padding: 16px 14px 40px; }
-.folio-chip {
-  display:inline-block; background: var(--brand); color:white; font-weight:800; font-size: 13px;
-  padding: 6px 14px; border-radius: 999px; margin-bottom: 12px;
-}
-.resumen-texto {
-  white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
-  background: var(--paper); border-radius: 12px; padding: 14px; border: 1px solid var(--line); line-height: 1.5;
-}
-.acciones-resultado { display:flex; gap:10px; margin-top: 14px; flex-wrap: wrap; }
-.acciones-resultado button { flex:1; min-width: 140px; min-height:48px; }
-.btn-whatsapp { background: #25D366; color:white; border:none; border-radius: 11px; padding: 13px; font-weight:700; font-size:14px; }
-.btn-whatsapp:active { transform: scale(0.98); }
-.btn-copiar { background: var(--teal); color:white; border:none; border-radius: 11px; padding: 13px; font-weight:700; font-size:14px; }
-.btn-copiar:active { transform: scale(0.98); }
-.btn-ticket { background: var(--ink); color:white; border:none; border-radius: 11px; padding: 13px; font-weight:700; font-size:14px; }
-.btn-ticket:active { transform: scale(0.98); }
-
-.overlay-carga {
-  position: fixed; inset:0; background: rgba(16,34,31,.4); display:flex; align-items:center; justify-content:center; z-index: 100;
-}
-.spinner-caja { background: var(--surface); border-radius: 14px; padding: 20px 28px; font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:10px; }
-.spinner { width:18px; height:18px; border:2.5px solid var(--paper); border-top-color: var(--brand); border-radius:50%; animation: girar .7s linear infinite; }
-@keyframes girar { to { transform: rotate(360deg); } }
-
-/* Toast para feedback rapido (copiar, etc.) sin usar alert() nativo cuando no hace falta bloquear */
-#toast {
-  position: fixed; left:50%; bottom: 100px; transform: translateX(-50%) translateY(20px); opacity:0;
-  background: var(--ink); color:white; padding: 12px 20px; border-radius: 999px; font-size: 13px; font-weight:700;
-  z-index: 200; pointer-events:none; transition: opacity .25s ease, transform .25s ease; max-width: 90vw; text-align:center;
-}
+#toast { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px); background: #0f172a; color: #fff; padding: 11px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; z-index: 90; opacity: 0; pointer-events: none; transition: .2s; max-width: 88vw; text-align: center; }
 #toast.mostrar { opacity: 1; transform: translateX(-50%) translateY(0); }
+#overlayCarga { position: fixed; inset: 0; z-index: 95; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; }
+.spinner-caja { background: var(--surface); border-radius: 14px; padding: 20px 28px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 12px; }
+.spinner { width: 18px; height: 18px; border: 2.5px solid var(--paper); border-top-color: var(--brand); border-radius: 50%; animation: girar .7s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
-<div id="bannerOffline" class="banner-offline oculto">📡 Sin conexión a internet — los datos mostrados pueden no ser los más recientes</div>
-
 <div id="toast"></div>
 
-<!-- ===================== LOGIN ===================== -->
+<!-- ======================= LOGIN ======================= -->
 <div id="pantallaLogin">
   <div class="login-card">
     <img src="img/Logo.svg" class="login-logo" alt="" onerror="this.style.display='none'">
-    <h1>Cotizador Móvil</h1>
-    <p class="sub">Mueblería Mi Pueblito &middot; entra con tu usuario del sistema</p>
+    <h1>Cotizador</h1>
+    <p class="sub">Mueblería Mi Pueblito · entra con tu usuario del sistema</p>
     <form id="formLogin" onsubmit="iniciarSesion(); return false;" autocomplete="on">
-      <div class="campo">
-        <label class="campo-label">CORREO</label>
-        <input type="email" id="loginEmail" autocomplete="username" inputmode="email" enterkeyhint="next" placeholder="tucorreo@ejemplo.com">
-      </div>
-      <div class="campo">
-        <label class="campo-label">CONTRASEÑA</label>
-        <input type="password" id="loginPass" autocomplete="current-password" enterkeyhint="go" placeholder="••••••••">
-      </div>
+      <label class="campo-label" for="loginEmail">Correo</label>
+      <input type="email" id="loginEmail" autocomplete="username" inputmode="email" enterkeyhint="next" placeholder="tucorreo@ejemplo.com">
+      <label class="campo-label" for="loginPass">Contraseña</label>
+      <input type="password" id="loginPass" autocomplete="current-password" enterkeyhint="go" placeholder="••••••••">
       <button type="submit" class="btn-primario" id="btnLogin">Entrar</button>
     </form>
     <div id="loginError"></div>
   </div>
 </div>
 
-<!-- ===================== APP ===================== -->
+<!-- ======================= APP ======================= -->
 <div id="pantallaApp" class="oculto">
   <div class="appbar">
-    <div class="appbar-titulo">
-      <b id="appbarTitulo">📄 Nueva Cotización</b>
-      <span id="appbarVendedor">—</span>
-    </div>
-    <div style="display:flex; gap:8px;">
-      <button class="btn-icono" onclick="cerrarSesionApp()" title="Cerrar sesión">⎋</button>
-    </div>
+    <h1 id="appbarTitulo">Artículos<small id="appbarUsuario"></small></h1>
+    <button onclick="cargarDatosVivos()" aria-label="Actualizar precios y tasas" title="Actualizar precios y tasas">🔄</button>
+    <button onclick="cerrarSesionApp()" aria-label="Salir" title="Cerrar sesión">⎋</button>
   </div>
+  <div id="bannerOffline" class="aviso-offline oculto">Sin conexión: los precios y tasas mostrados pueden no ser los más recientes. Para generar la cotización necesitas señal.</div>
+  <div id="estadoDatos" class="estado-datos espera">Cargando precios y tasas de crédito…</div>
 
-  <div id="app">
-
-    <div id="estadoDatos" class="estado-datos espera">Cargando precios y tasas de crédito…</div>
-
-    <!-- Buscar / agregar productos -->
-    <div class="tarjeta">
-      <h3>🔍 Agregar producto</h3>
-      <div class="buscador-wrap">
-        <input type="search" id="buscadorProducto" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Busca por nombre, categoría o modelo..." oninput="renderResultadosBusqueda()" onfocus="renderResultadosBusqueda()">
-        <div id="resultadosBusqueda" class="oculto"></div>
-      </div>
-      <div style="margin-top:10px; display:flex; justify-content:flex-end;">
-        <button class="btn-secundario" onclick="abrirProductoLibre()">✏️ Producto no registrado</button>
-      </div>
-      <div id="productoLibreForm" class="oculto" style="margin-top:12px; background:var(--paper); border-radius:10px; padding:12px;">
-        <div class="campo" style="margin-bottom:8px;">
-          <label class="campo-label">NOMBRE</label>
-          <input type="text" id="libreNombre" enterkeyhint="next" placeholder="Ej: Recámara a pedido">
-        </div>
-        <div id="libreCostoMargenWrap" style="display:flex; gap:8px; margin-bottom:8px;">
-          <div class="campo" style="flex:1;">
-            <label class="campo-label">COSTO DE ADQUISICIÓN ($)</label>
-            <input type="number" id="libreCosto" inputmode="decimal" enterkeyhint="next" min="0" step="0.01" value="0" oninput="sugerirPrecioLibre()">
-          </div>
-          <div class="campo" style="flex:1;">
-            <label class="campo-label">MARGEN DESEADO (%)</label>
-            <input type="number" id="libreMargen" inputmode="decimal" enterkeyhint="next" min="0" max="99" value="30" oninput="sugerirPrecioLibre()">
-          </div>
-        </div>
-        <div id="libreImagenWrap" style="margin-bottom:8px;">
-          <label class="campo-label">FOTO DEL PRODUCTO (OPCIONAL)</label>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
-            <div id="libreImagenPreviewWrap" style="width:48px; height:48px; border:1.5px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:white; flex-shrink:0;">
-              <span id="libreImagenPreviewVacio" style="font-size:8.5px; color:var(--muted); text-align:center; line-height:1.15;">Sin<br>foto</span>
-              <img id="libreImagenPreviewImg" style="display:none; width:100%; height:100%; object-fit:cover;">
-            </div>
-            <input type="file" id="libreImagenArchivo" accept="image/*" onchange="cargarImagenLibre(this.files[0])" style="flex:1; min-width:0; font-size:11.5px; padding:6px;">
-            <button type="button" onclick="quitarImagenLibre()" style="padding:8px 10px; background:#fee2e2; color:var(--danger); border:none; border-radius:8px; font-weight:800; min-height:44px;">✕</button>
-          </div>
-          <div style="font-size:10px; color:var(--muted); margin-top:4px;">La foto se guarda en este celular (no se sube a la nube) y se usa al imprimir el ticket.</div>
-        </div>
-        <div style="display:flex; gap:8px; align-items:end;">
-          <div class="campo" style="flex:1;">
-            <label class="campo-label" id="librePrecioLabel">PRECIO FINAL (editable)</label>
-            <input type="number" id="librePrecio" inputmode="decimal" enterkeyhint="done" min="0" step="0.01" placeholder="0.00">
-          </div>
-          <button class="btn-secundario" onclick="agregarLibreAlCarrito()" style="height:44px;">➕ Agregar</button>
-        </div>
-      </div>
+  <!-- ---------- VISTA: ARTÍCULOS ---------- -->
+  <section id="vistaArticulos" class="vista">
+    <div class="bloque">
+      <button class="btn-agregar" onclick="abrirHojaProductos()">🔍 Agregar producto</button>
     </div>
-
-    <!-- Carrito -->
-    <div class="tarjeta">
-      <h3>🛒 Artículos en la cotización</h3>
-      <div id="listaCarrito"><div class="carrito-vacio">Sin artículos agregados todavía.</div></div>
+    <div class="bloque">
+      <h3>Artículos en la cotización</h3>
+      <div id="listaCarrito"></div>
     </div>
+  </section>
 
-    <!-- Cliente y condiciones -->
-    <div class="tarjeta">
-      <h3>👤 Cliente y condiciones</h3>
-      <div class="campo" style="margin-bottom:10px;">
-        <label class="campo-label">CLIENTE</label>
-        <input type="text" id="campoCliente" enterkeyhint="next" autocapitalize="words" placeholder="Nombre del cliente (opcional)">
-      </div>
-      <div style="display:flex; gap:10px; margin-bottom:10px;">
-        <div class="campo" style="flex:1;">
-          <label class="campo-label">VIGENCIA (DÍAS)</label>
-          <input type="number" id="campoVigencia" inputmode="numeric" enterkeyhint="done" value="15" min="1">
-        </div>
-      </div>
-      <div class="checkrow">
-        <input type="checkbox" id="checkEnganche" onchange="toggleEnganche()">
-        <label for="checkEnganche">¿Aplica enganche?</label>
-      </div>
-      <div id="engancheWrap" class="oculto campo" style="margin-bottom:10px;">
-        <label class="campo-label">MONTO DE ENGANCHE (sugerido: 10%, editable)</label>
+  <!-- ---------- VISTA: CLIENTE Y CONDICIONES ---------- -->
+  <section id="vistaCondiciones" class="vista oculto">
+    <div class="bloque">
+      <h3>Cliente</h3>
+      <label class="campo-label" for="campoCliente">Nombre</label>
+      <input type="text" id="campoCliente" enterkeyhint="next" autocapitalize="words" autocomplete="off" placeholder="Nombre del cliente (opcional)">
+      <label class="campo-label" for="campoVigencia">Vigencia (días)</label>
+      <input type="number" id="campoVigencia" inputmode="numeric" enterkeyhint="done" value="15" min="1">
+    </div>
+    <div class="bloque">
+      <h3>Enganche</h3>
+      <label class="interruptor"><span>¿Aplica enganche?</span><input type="checkbox" id="checkEnganche" onchange="toggleEnganche()"></label>
+      <div id="engancheWrap" class="oculto">
+        <label class="campo-label" for="campoEnganche">Monto de enganche</label>
         <input type="number" id="campoEnganche" inputmode="decimal" enterkeyhint="done" value="0" min="0" oninput="marcarEngancheEditadoManual()">
-      </div>
-      <div class="campo">
-        <label class="campo-label">NOTAS (OPCIONAL)</label>
-        <textarea id="campoNotas" rows="2" enterkeyhint="done" placeholder="Condiciones, observaciones..."></textarea>
+        <div class="sugerido">Sugerido: 10% del subtotal (editable). Se actualiza solo mientras no lo cambies.</div>
       </div>
     </div>
+    <div class="bloque">
+      <h3>Notas</h3>
+      <textarea id="campoNotas" rows="3" enterkeyhint="done" placeholder="Condiciones, observaciones…"></textarea>
+    </div>
+  </section>
 
-    <!-- Totales y plan de crédito -->
-    <div class="tarjeta">
-      <h3>💳 Plan de crédito</h3>
-      <div class="tabs" style="margin-bottom:12px;">
+  <!-- ---------- VISTA: PLAN DE CRÉDITO ---------- -->
+  <section id="vistaPlan" class="vista oculto">
+    <div class="bloque">
+      <div class="hero"><small>Saldo a financiar</small><b id="totSaldo">$0.00</b></div>
+      <div class="fila"><span>Subtotal</span><b id="totSubtotal">$0.00</b></div>
+      <div class="fila" id="filaEngancheResumen" style="display:none;"><span>Enganche</span><b id="totEnganche">$0.00</b></div>
+    </div>
+    <div class="bloque">
+      <h3>Pagos</h3>
+      <div class="seg" id="segPer">
         <button data-per="semanal" class="activo" onclick="setPeriodicidad('semanal')">Semanal</button>
         <button data-per="quincenal" onclick="setPeriodicidad('quincenal')">Quincenal</button>
         <button data-per="mensual" onclick="setPeriodicidad('mensual')">Mensual</button>
       </div>
-
-      <div id="panelPlanesCustom" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:10px; padding:10px; margin-bottom:12px;">
-        <label class="campo-label" style="color:#92400e;">➕ AGREGAR PLAN PERSONALIZADO</label>
-        <div style="display:flex; gap:8px; margin-top:6px; align-items:end;">
-          <div class="campo" style="flex:1;">
-            <label class="campo-label" style="color:#92400e;">PLAZO (MESES)</label>
-            <input type="number" id="customPlazoInput" inputmode="numeric" enterkeyhint="next" min="1" placeholder="Ej: 9">
-          </div>
-          <div class="campo" style="flex:1;">
-            <label class="campo-label" style="color:#92400e;">TASA MENSUAL (%)</label>
-            <input type="number" id="customTasaInput" inputmode="decimal" enterkeyhint="done" min="0" step="0.1" placeholder="Ej: 3">
-          </div>
-          <button class="btn-secundario" onclick="agregarPlanCustom()" style="height:44px; background:#f59e0b; color:white; border:none;">➕</button>
+    </div>
+    <div class="bloque">
+      <h3>Planes de crédito</h3>
+      <div id="tablaPlanesWrap"></div>
+    </div>
+    <div class="bloque ambar">
+      <h3 style="color:#92400e;">➕ Plan personalizado</h3>
+      <div class="dos-col">
+        <div>
+          <label class="campo-label" for="customPlazoInput" style="color:#92400e;">Plazo (meses)</label>
+          <input type="number" id="customPlazoInput" inputmode="numeric" enterkeyhint="next" min="1" placeholder="Ej: 9">
         </div>
-        <div id="listaPlanesCustom" style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;"></div>
+        <div>
+          <label class="campo-label" for="customTasaInput" style="color:#92400e;">Tasa mensual (%)</label>
+          <input type="number" id="customTasaInput" inputmode="decimal" enterkeyhint="done" min="0" step="0.1" placeholder="Ej: 3">
+        </div>
       </div>
-
-      <div class="fila"><span class="label">Subtotal</span><b id="totSubtotal">$0.00</b></div>
-      <div class="fila" id="filaEngancheResumen" style="display:none;"><span class="label">Enganche</span><b id="totEnganche">$0.00</b></div>
-      <div class="fila total"><span class="label">Saldo a financiar</span><b id="totSaldo">$0.00</b></div>
-      <div id="tablaPlanesWrap" style="margin-top:10px;"></div>
+      <button class="btn-sec" style="width:100%;margin-top:10px;background:#f59e0b;color:#fff;" onclick="agregarPlanCustom()">Agregar plan</button>
+      <div id="listaPlanesCustom" class="chips-plan"></div>
     </div>
+  </section>
 
+  <!-- ---------- BARRA DE TOTAL + NAVEGACIÓN ---------- -->
+  <div class="barra-total">
+    <button class="vaciar" onclick="limpiarTodo()" aria-label="Vaciar cotización">🗑️</button>
+    <div class="t"><small id="barraResumen">0 artículos</small><b id="barraTotal">$0.00</b></div>
+    <button class="gen" id="btnGenerar" onclick="generarCotizacionMovil()">✅ Generar</button>
   </div>
+  <nav class="nav">
+    <button data-vista="articulos" class="activo" onclick="irA('articulos')"><span class="ic">🛋️</span>Artículos<span class="badge oculto" id="badgeArticulos">0</span></button>
+    <button data-vista="condiciones" onclick="irA('condiciones')"><span class="ic">👤</span>Cliente</button>
+    <button data-vista="plan" onclick="irA('plan')"><span class="ic">💳</span>Plan</button>
+  </nav>
+</div>
 
-  <div class="barra-inferior">
-    <button class="btn-secundario" onclick="limpiarTodo()" style="flex:0 0 auto;" aria-label="Vaciar cotización">🗑️</button>
-    <button class="btn-primario" id="btnGenerar" onclick="generarCotizacionMovil()">✅ Generar Cotización</button>
+<!-- ======================= HOJA: BUSCAR PRODUCTO ======================= -->
+<div id="hojaProductos" class="cortina oculto" onclick="if(event.target===this) cerrarHojaProductos()">
+  <div class="hoja alta">
+    <div class="hoja-cab"><h2>Agregar producto</h2><button class="cerrar" onclick="cerrarHojaProductos()">Listo</button></div>
+    <input type="search" id="buscadorProducto" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Buscar por nombre, categoría o modelo…" oninput="renderResultadosBusqueda()">
+    <div class="chips" id="chipsCategorias"></div>
+    <div class="lista-prod" id="resultadosBusqueda"></div>
+    <div class="libre-acceso">
+      <button class="btn-sec btn-linea oculto" id="btnLibreAdmin" style="width:100%;" onclick="abrirProductoLibre()">✏️ Producto no registrado</button>
+      <div class="bloqueo oculto" id="avisoLibreBloqueado">🔒 Cotizar productos fuera del catálogo solo lo puede hacer un administrador.</div>
+    </div>
   </div>
 </div>
 
-<!-- ===================== RESULTADO ===================== -->
+<!-- ======================= HOJA: PRODUCTO NO REGISTRADO (solo admin) ======================= -->
+<div id="hojaLibre" class="cortina oculto" onclick="if(event.target===this) cerrarHojaLibre()">
+  <div class="hoja">
+    <div class="hoja-cab"><h2>Producto no registrado</h2><button class="cerrar" onclick="cerrarHojaLibre()">Cancelar</button></div>
+    <label class="campo-label" for="libreNombre">Nombre</label>
+    <input type="text" id="libreNombre" enterkeyhint="next" autocapitalize="sentences" placeholder="Ej: Recámara a pedido">
+    <div class="dos-col">
+      <div>
+        <label class="campo-label" for="libreCosto">Costo de adquisición ($)</label>
+        <input type="number" id="libreCosto" inputmode="decimal" enterkeyhint="next" min="0" step="0.01" value="0" oninput="sugerirPrecioLibre()">
+      </div>
+      <div>
+        <label class="campo-label" for="libreMargen">Margen deseado (%)</label>
+        <input type="number" id="libreMargen" inputmode="decimal" enterkeyhint="next" min="0" max="99" value="30" oninput="sugerirPrecioLibre()">
+      </div>
+    </div>
+    <label class="campo-label" for="librePrecio">Precio final (editable)</label>
+    <input type="number" id="librePrecio" class="monto-grande" inputmode="decimal" enterkeyhint="done" min="0" step="0.01" placeholder="0.00" style="font-size:24px;font-weight:900;text-align:center;">
+    <label class="campo-label">Foto (opcional)</label>
+    <div class="foto-fila">
+      <div class="foto-prev"><span id="libreImagenPreviewVacio">Sin<br>foto</span><img id="libreImagenPreviewImg" style="display:none;" alt=""></div>
+      <label class="btn-sec">📷 Tomar / elegir foto<input type="file" id="libreImagenArchivo" accept="image/*" onchange="cargarImagenLibre(this.files[0])"></label>
+      <button type="button" class="btn-sec" style="background:#fee2e2;color:var(--danger);" onclick="quitarImagenLibre()" aria-label="Quitar foto">✕</button>
+    </div>
+    <div class="sugerido">La foto se guarda solo en este celular (no se sube a la nube) y se usa al imprimir el ticket.</div>
+    <button class="btn-primario" onclick="agregarLibreAlCarrito()">➕ Agregar a la cotización</button>
+  </div>
+</div>
+
+<!-- ======================= RESULTADO ======================= -->
 <div id="pantallaResultado" class="oculto">
-  <div class="appbar">
-    <div class="appbar-titulo"><b>✅ Cotización generada</b><span id="appbarVendedor2">—</span></div>
-    <button class="btn-icono" onclick="cerrarSesionApp()" title="Cerrar sesión">⎋</button>
+  <div class="ficha-barra">
+    <button onclick="volverAEditar()" aria-label="Volver a editar">‹</button>
+    <div><b id="resFolio">COT-…</b><small id="resCliente"></small></div>
   </div>
-  <div style="max-width:560px; margin:0 auto; padding:16px 14px 40px;">
-    <div class="folio-chip" id="folioResultado">COT-...</div>
-    <div class="resumen-texto" id="textoResumenResultado"></div>
-    <div class="acciones-resultado">
-      <button class="btn-whatsapp" onclick="compartirWhatsapp()">📲 Compartir por WhatsApp</button>
-      <button class="btn-copiar" onclick="copiarResumen()">📋 Copiar texto</button>
-      <button class="btn-ticket" onclick="generarTicket()">🖨️ Ticket (PDF / Imagen)</button>
-    </div>
-    <button class="btn-primario" style="margin-top:14px;" onclick="nuevaCotizacionDesdeResultado()">➕ Nueva cotización</button>
+  <div id="resultadoContenido"></div>
+  <div class="bloque"><button class="btn-sec" style="width:100%;" onclick="nuevaCotizacionDesdeResultado()">➕ Nueva cotización</button></div>
+  <div class="acciones">
+    <button class="wa" onclick="compartirImagenCotizacion()">📲 WhatsApp</button>
+    <button class="sec" onclick="generarTicket()">🖨️ Ticket</button>
+    <button class="sec" onclick="copiarResumen()">📋 Texto</button>
   </div>
 </div>
 
-<div id="overlayCarga" class="overlay-carga oculto">
+<div id="overlayCarga" class="oculto">
   <div class="spinner-caja"><div class="spinner"></div><span id="overlayCargaTexto">Guardando...</span></div>
 </div>
 
@@ -446,6 +407,12 @@ const modoAvanzado = true;       // Esta app ya no tiene modo "normal": siempre 
 let planesCustom = [];           // [{ meses, tasa }] — planes de crédito personalizados del Modo Avanzado
 let libreImagenBase64 = null;    // foto del producto libre (Modo Avanzado), pendiente de agregar al carrito
 let engancheEditadoManual = false; // true en cuanto el vendedor toca a mano el campo de enganche
+let categoriaActiva = 'Todas';   // filtro de categoría en la hoja de productos
+let _categoriasLista = [];
+let vistaActual = 'articulos';
+// 🔒 Mismo criterio que _esAdmin() del sistema principal (rol === 'admin').
+// Solo un administrador puede cotizar productos que no están en el catálogo.
+function esAdmin() { return !!(sesion && sesion.rol === 'admin'); }
 
 // ============================================================================
 // FECHA / MONEDA — mismas reglas que el resto del sistema (America/Mexico_City,
@@ -658,6 +625,7 @@ function traducirErrorAuth(e) {
   return e && e.message ? e.message : 'No se pudo iniciar sesión.';
 }
 
+
 async function cargarPerfilYEntrar(user) {
   const err = document.getElementById('loginError');
   const snap = await db.collection('usuarios').doc(user.uid).get();
@@ -673,16 +641,40 @@ async function cargarPerfilYEntrar(user) {
     return;
   }
   sesion = { uid: user.uid, nombre: perfil.nombre || user.email, rol: perfil.rol || 'vendedor' };
-  document.getElementById('appbarVendedor').textContent = sesion.nombre + (sesion.rol ? ' · ' + sesion.rol : '');
-  document.getElementById('appbarVendedor2').textContent = sesion.nombre;
+  document.getElementById('appbarUsuario').textContent = sesion.nombre + (sesion.rol ? ' · ' + sesion.rol : '');
   document.getElementById('pantallaLogin').classList.add('oculto');
   document.getElementById('pantallaApp').classList.remove('oculto');
+  actualizarUIRol();
+  renderCarrito();
+  irA('articulos');
   await cargarDatosVivos();
 }
 
 function cerrarSesionApp() {
   if (!confirm('¿Cerrar sesión?')) return;
   auth.signOut().finally(() => location.reload());
+}
+
+// Muestra u oculta el acceso a "Producto no registrado" según el rol.
+function actualizarUIRol() {
+  const admin = esAdmin();
+  document.getElementById('btnLibreAdmin').classList.toggle('oculto', !admin);
+  document.getElementById('avisoLibreBloqueado').classList.toggle('oculto', admin);
+}
+
+// ============================================================================
+// NAVEGACIÓN (barra inferior: Artículos / Cliente / Plan)
+// ============================================================================
+const _TITULOS_VISTA = { articulos: 'Artículos', condiciones: 'Cliente y condiciones', plan: 'Plan de crédito' };
+function irA(vista) {
+  vistaActual = vista;
+  [['articulos', 'vistaArticulos'], ['condiciones', 'vistaCondiciones'], ['plan', 'vistaPlan']].forEach(([v, id]) => {
+    document.getElementById(id).classList.toggle('oculto', v !== vista);
+  });
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('activo', b.dataset.vista === vista));
+  document.getElementById('appbarTitulo').firstChild.nodeValue = _TITULOS_VISTA[vista] || '';
+  cerrarTeclado();
+  window.scrollTo(0, 0);
 }
 
 // ============================================================================
@@ -753,37 +745,69 @@ function formatoHora(d) {
   return d ? d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '';
 }
 
+
 // ============================================================================
-// BUSCADOR DE PRODUCTOS
+// HOJA DE PRODUCTOS (buscador + categorías)
 // ============================================================================
+function abrirHojaProductos() {
+  document.getElementById('hojaProductos').classList.remove('oculto');
+  document.body.style.overflow = 'hidden';
+  renderCategoriasChips();
+  renderResultadosBusqueda();
+}
+function cerrarHojaProductos() {
+  document.getElementById('hojaProductos').classList.add('oculto');
+  document.body.style.overflow = '';
+  cerrarTeclado();
+}
+function productosActivos() {
+  return productosCache.filter(p => p && p.activo !== false && p.Activo !== false);
+}
+function renderCategoriasChips() {
+  const set = new Set();
+  productosActivos().forEach(p => { if (p.categoria) set.add(String(p.categoria)); });
+  _categoriasLista = ['Todas', ...[...set].sort((a, b) => a.localeCompare(b, 'es'))];
+  if (!_categoriasLista.includes(categoriaActiva)) categoriaActiva = 'Todas';
+  document.getElementById('chipsCategorias').innerHTML = _categoriasLista.map((c, i) =>
+    `<button class="chip${c === categoriaActiva ? ' activo' : ''}" onclick="setCategoria(${i})">${escapeHtml(c)}</button>`
+  ).join('');
+}
+function setCategoria(i) {
+  categoriaActiva = _categoriasLista[i] || 'Todas';
+  renderCategoriasChips();
+  renderResultadosBusqueda();
+}
 function renderResultadosBusqueda() {
   const cont = document.getElementById('resultadosBusqueda');
-  const q = normalizarTexto(document.getElementById('buscadorProducto').value);
-  if (!q) { cont.classList.add('oculto'); cont.innerHTML = ''; return; }
-
-  const activos = productosCache.filter(p => p && p.activo !== false && p.Activo !== false);
-  const filtrados = activos.filter(p => normalizarTexto(`${p.nombre} ${p.categoria} ${p.subcategoria} ${p.marca} ${p.modelo}`).includes(q)).slice(0, 20);
-
-  if (filtrados.length === 0) {
-    cont.innerHTML = `<div class="sin-resultados">Sin resultados para "${escapeHtml(document.getElementById('buscadorProducto').value)}".</div>`;
-  } else {
-    cont.innerHTML = filtrados.map(p => `
-      <div class="resultado-item" onclick='agregarProductoAlCarrito(${JSON.stringify(String(p.id))})'>
-        <div class="info">
-          <b>${escapeHtml(p.nombre)}</b>
-          <span>${escapeHtml(p.categoria || '')}${p.subcategoria ? ' · ' + escapeHtml(p.subcategoria) : ''} · stock: ${Number(p.stock) || 0}</span>
-        </div>
-        <div class="precio">${dinero(p.precio)}</div>
-      </div>
-    `).join('');
+  const crudo = document.getElementById('buscadorProducto').value;
+  const q = normalizarTexto(crudo);
+  let lista = productosActivos();
+  if (lista.length === 0) {
+    cont.innerHTML = `<div class="vacio"><span class="gr">📦</span>No hay productos cargados.<br>Revisa tu conexión y toca 🔄 para actualizar.</div>`;
+    return;
   }
-  cont.classList.remove('oculto');
+  if (categoriaActiva !== 'Todas') lista = lista.filter(p => String(p.categoria || '') === categoriaActiva);
+  if (q) lista = lista.filter(p => normalizarTexto(`${p.nombre} ${p.categoria} ${p.subcategoria} ${p.marca} ${p.modelo}`).includes(q));
+  lista.sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es'));
+  const total = lista.length;
+  const mostrar = lista.slice(0, 60);
+  if (total === 0) {
+    cont.innerHTML = `<div class="vacio"><span class="gr">🔎</span>Sin resultados${crudo ? ` para “${escapeHtml(crudo)}”` : ''}.</div>`;
+    return;
+  }
+  cont.innerHTML = mostrar.map(p => {
+    const it = carrito.find(c => !c.esLibre && String(c.id) === String(p.id));
+    return `
+    <div class="prod" data-id="${escapeHtml(String(p.id))}">
+      <div class="info">
+        <b>${escapeHtml(p.nombre)}</b>
+        <small>${escapeHtml(p.categoria || '')}${p.subcategoria ? ' · ' + escapeHtml(p.subcategoria) : ''} · stock: ${Number(p.stock) || 0}</small>
+        <span class="en">${it ? `<span class="pill p-azul">En cotización ×${it.cantidad}</span>` : ''}</span>
+      </div>
+      <div class="precio">${dinero(p.precio)}</div>
+    </div>`;
+  }).join('') + (total > mostrar.length ? `<div class="vacio" style="padding:14px;">Mostrando ${mostrar.length} de ${total}. Escribe para afinar la búsqueda.</div>` : '');
 }
-document.addEventListener('click', (e) => {
-  const wrap = document.querySelector('.buscador-wrap');
-  if (wrap && !wrap.contains(e.target)) document.getElementById('resultadosBusqueda').classList.add('oculto');
-});
-
 function agregarProductoAlCarrito(idStr) {
   const p = productosCache.find(pr => String(pr.id) === String(idStr));
   if (!p) return;
@@ -793,16 +817,31 @@ function agregarProductoAlCarrito(idStr) {
   } else {
     carrito.push({ id: p.id, nombre: p.nombre, precio: Number(p.precio) || 0, cantidad: 1, esLibre: false });
   }
-  document.getElementById('buscadorProducto').value = '';
-  document.getElementById('resultadosBusqueda').classList.add('oculto');
-  cerrarTeclado();
   mostrarToast(`✅ ${p.nombre} agregado`);
   renderCarrito();
   recalcularTodo();
+  actualizarPillProducto(p.id);
+}
+function actualizarPillProducto(id) {
+  const fila = Array.from(document.querySelectorAll('#resultadosBusqueda .prod')).find(el => el.dataset.id === String(id));
+  if (!fila) return;
+  const it = carrito.find(c => !c.esLibre && String(c.id) === String(id));
+  fila.querySelector('.en').innerHTML = it ? `<span class="pill p-azul">En cotización ×${it.cantidad}</span>` : '';
 }
 
+// ============================================================================
+// PRODUCTO NO REGISTRADO — 🔒 solo administrador
+// ============================================================================
 function abrirProductoLibre() {
-  document.getElementById('productoLibreForm').classList.toggle('oculto');
+  if (!esAdmin()) { mostrarToast('🔒 Solo un administrador puede cotizar productos no registrados'); return; }
+  cerrarHojaProductos();
+  document.getElementById('hojaLibre').classList.remove('oculto');
+  document.body.style.overflow = 'hidden';
+}
+function cerrarHojaLibre() {
+  document.getElementById('hojaLibre').classList.add('oculto');
+  document.body.style.overflow = '';
+  cerrarTeclado();
 }
 // Sugiere precio desde costo+margen para producto libre -- igual que
 // _actualizarPrecioSugerido() en escritorio. Solo aplica en Modo Avanzado.
@@ -815,6 +854,7 @@ function sugerirPrecioLibre() {
   document.getElementById('librePrecio').value = precioSugerido.toFixed(2);
 }
 function agregarLibreAlCarrito() {
+  if (!esAdmin()) { mostrarToast('🔒 Solo un administrador puede cotizar productos no registrados'); return; }
   const nombre = document.getElementById('libreNombre').value.trim();
   const precio = parseFloat(document.getElementById('librePrecio').value);
   if (!nombre) return alert('Escribe el nombre del producto.');
@@ -831,8 +871,7 @@ function agregarLibreAlCarrito() {
   document.getElementById('libreCosto').value = '0';
   document.getElementById('libreMargen').value = '30';
   quitarImagenLibre();
-  document.getElementById('productoLibreForm').classList.add('oculto');
-  cerrarTeclado();
+  cerrarHojaLibre();
   mostrarToast(`✅ ${nombre} agregado`);
   renderCarrito();
   recalcularTodo();
@@ -908,10 +947,7 @@ function eliminarPlanCustom(idx) {
 function renderPlanesCustom() {
   const cont = document.getElementById('listaPlanesCustom');
   cont.innerHTML = planesCustom.map((p, i) => `
-    <span style="background:#fde68a; color:#92400e; padding:6px 12px; border-radius:20px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">
-      ${p.meses}m al ${p.tasa}%
-      <button onclick="eliminarPlanCustom(${i})" style="background:none; border:none; color:#dc2626; cursor:pointer; font-size:14px; font-weight:800;">✕</button>
-    </span>
+    <span class="chip-plan">${p.meses}m al ${p.tasa}%<button onclick="eliminarPlanCustom(${i})" aria-label="Quitar plan">✕</button></span>
   `).join('');
 }
 // Combina los planes estándar (config global) con los personalizados del
@@ -942,13 +978,24 @@ function calcularPlanesCustom(saldo, periodicidad) {
   return resultados;
 }
 
+
 // ============================================================================
 // CARRITO
 // ============================================================================
+function actualizarBarra() {
+  const piezas = carrito.reduce((s, it) => s + it.cantidad, 0);
+  const { total } = totales();
+  document.getElementById('barraResumen').textContent = piezas === 1 ? '1 artículo' : `${piezas} artículos`;
+  document.getElementById('barraTotal').textContent = dinero(total);
+  const badge = document.getElementById('badgeArticulos');
+  badge.textContent = piezas;
+  badge.classList.toggle('oculto', piezas === 0);
+}
 function renderCarrito() {
   const cont = document.getElementById('listaCarrito');
   if (carrito.length === 0) {
-    cont.innerHTML = `<div class="carrito-vacio">Sin artículos agregados todavía.</div>`;
+    cont.innerHTML = `<div class="vacio"><span class="gr">🛋️</span>Aún no hay artículos.<br>Toca “Agregar producto” para empezar.</div>`;
+    actualizarBarra();
     return;
   }
   cont.innerHTML = carrito.map((it, idx) => {
@@ -956,20 +1003,26 @@ function renderCarrito() {
       ? ` · costo ${dinero(it.costo)} (${it.margen || 0}%)` : '';
     const fotoTxt = it._imagenLocal ? ' 📷' : '';
     return `
-    <div class="item-carrito">
-      <div class="info">
-        <b>${escapeHtml(it.nombre)}${it.esLibre ? ' <span style="color:#d97706;">(no registrado)</span>' : ''}${fotoTxt}</b>
-        <span>${dinero(it.precio)} c/u${margenTxt}</span>
+    <div class="art">
+      <div class="art-l1">
+        <div>
+          <b>${escapeHtml(it.nombre)}${fotoTxt}</b>
+          ${it.esLibre ? ' <span class="pill p-ambar">No registrado</span>' : ''}
+          <small>${dinero(it.precio)} c/u${margenTxt}</small>
+        </div>
+        <span class="sub">${dinero(it.precio * it.cantidad)}</span>
       </div>
-      <div class="stepper">
-        <button onclick="cambiarCantidad(${idx}, -1)">−</button>
-        <span>${it.cantidad}</span>
-        <button onclick="cambiarCantidad(${idx}, 1)">+</button>
+      <div class="art-l2">
+        <div class="stepper">
+          <button onclick="cambiarCantidad(${idx}, -1)" aria-label="Menos">−</button>
+          <span>${it.cantidad}</span>
+          <button onclick="cambiarCantidad(${idx}, 1)" aria-label="Más">+</button>
+        </div>
+        <button class="btn-quitar" onclick="quitarDelCarrito(${idx})">Quitar</button>
       </div>
-      <button class="btn-quitar" onclick="quitarDelCarrito(${idx})">✕</button>
-    </div>
-  `;
+    </div>`;
   }).join('');
+  actualizarBarra();
 }
 function cambiarCantidad(idx, delta) {
   const it = carrito[idx];
@@ -983,8 +1036,7 @@ function quitarDelCarrito(idx) {
   renderCarrito();
   recalcularTodo();
 }
-function limpiarTodo() {
-  if (carrito.length > 0 && !confirm('¿Vaciar la cotización actual?')) return;
+function reiniciarFormulario() {
   carrito = [];
   planesCustom = [];
   renderPlanesCustom();
@@ -998,7 +1050,15 @@ function limpiarTodo() {
   renderCarrito();
   recalcularTodo();
 }
+function limpiarTodo() {
+  if (carrito.length > 0 && !confirm('¿Vaciar la cotización actual?')) return;
+  reiniciarFormulario();
+  irA('articulos');
+}
 
+// ============================================================================
+// TOTALES Y PLAN DE CRÉDITO
+// ============================================================================
 // ============================================================================
 // TOTALES Y PLAN DE CRÉDITO
 // ============================================================================
@@ -1025,7 +1085,7 @@ function marcarEngancheEditadoManual() {
 }
 function setPeriodicidad(p) {
   periodicidadActual = p;
-  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('activo', b.dataset.per === p));
+  document.querySelectorAll('#segPer button').forEach(b => b.classList.toggle('activo', b.dataset.per === p));
   recalcularTodo();
 }
 function totales() {
@@ -1033,6 +1093,20 @@ function totales() {
   const enganche = document.getElementById('checkEnganche').checked ? (parseFloat(document.getElementById('campoEnganche').value) || 0) : 0;
   const saldo = Math.max(0, total - enganche);
   return { total, enganche, saldo };
+}
+// Tarjeta de un plan de crédito (misma información que la tabla anterior:
+// plazo, número de pagos, abono, total y cupón de pronto pago).
+function planCardHTML(p, monto, periodicidad) {
+  const unidad = periodicidad === 'semanal' ? 'semana' : periodicidad === 'quincenal' ? 'quincena' : 'mes';
+  return `
+    <div class="plan${p.custom ? ' custom' : ''}">
+      <div class="plan-top">
+        <b>${p.meses} ${Number(p.meses) === 1 ? 'mes' : 'meses'}${p.custom ? ' <span class="pill p-ambar">Personalizado</span>' : ''}</b>
+        <span class="tot">Total<br><strong>${dinero(p.total)}</strong></span>
+      </div>
+      <div class="plan-pago"><span class="monto">${dinero(p.abono)}</span><small>por ${unidad} · ${p.pagos} pago${p.pagos === 1 ? '' : 's'}</small></div>
+      ${monto > 0 ? `<div class="plan-cupon"><span class="pill p-violeta">🎟️ +${dinero(monto)} cupón si liquida a tiempo</span></div>` : ''}
+    </div>`;
 }
 function recalcularTodo() {
   // Mientras el vendedor no haya tocado el campo a mano, el enganche sugerido
@@ -1046,45 +1120,28 @@ function recalcularTodo() {
   document.getElementById('totSubtotal').textContent = dinero(total);
   document.getElementById('totEnganche').textContent = dinero(enganche);
   document.getElementById('totSaldo').textContent = dinero(saldo);
+  actualizarBarra();
 
   const wrap = document.getElementById('tablaPlanesWrap');
   if (saldo <= 0) {
-    wrap.innerHTML = `<div class="sin-resultados">Agrega artículos para ver el plan de crédito.</div>`;
+    wrap.innerHTML = `<div class="vacio"><span class="gr">💳</span>Agrega artículos para ver el plan de crédito.</div>`;
     return;
   }
   let planes = calcularCreditoConPeriodicidad(saldo, periodicidadActual);
-  // Modo Avanzado: se combinan con los planes personalizados, igual que
+  // Planes personalizados: se combinan con los estándar, igual que
   // _actualizarPlanesCot() en escritorio (mismo orden, misma progresividad).
   if (modoAvanzado && planesCustom.length > 0) {
     planes = planes.concat(calcularPlanesCustom(saldo, periodicidadActual)).sort((a, b) => a.meses - b.meses);
   }
   if (planes.length === 0) {
-    wrap.innerHTML = `<div class="sin-resultados">Este saldo no admite crédito según la configuración actual (solo contado).</div>`;
+    wrap.innerHTML = `<div class="vacio">Este saldo no admite crédito según la configuración actual (solo contado).</div>`;
     return;
   }
-  const etiquetaPer = periodicidadActual === 'semanal' ? 'Semanas' : periodicidadActual === 'quincenal' ? 'Quincenas' : 'Meses';
   const cuponesFinales = _cuponesMonotonosPorPlazo(planes, saldo);
   const mejorCupon = Math.max(0, ...cuponesFinales);
-  wrap.innerHTML = `
-    <table class="planes">
-      <thead><tr><th>Plazo</th><th>${etiquetaPer}</th><th>Pago</th><th>Total</th><th style="color:#7e22ce;">🎟️ Cupón</th></tr></thead>
-      <tbody>
-        ${planes.map((p, i) => {
-          const monto = cuponesFinales[i];
-          return `
-          <tr${p.custom ? ' style="background:#fffbeb;"' : ''}>
-            <td class="meses">${p.meses}m${p.custom ? ' <span style="background:#f59e0b;color:white;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:800;">PERSONAL.</span>' : ''}</td>
-            <td>${p.pagos}</td>
-            <td class="abono">${dinero(p.abono)}</td>
-            <td>${dinero(p.total)}</td>
-            <td style="color:${monto > 0 ? '#7e22ce' : 'var(--muted)'};font-weight:${monto > 0 ? '800' : '400'};">${monto > 0 ? '+' + dinero(monto) : '--'}</td>
-          </tr>
-        `;
-        }).join('')}
-      </tbody>
-    </table>
-    <div style="font-size:10.5px; color:var(--muted); margin-top:6px;">* El total no incluye el enganche (ya cubierto aparte).</div>
-    ${mejorCupon > 0.01 ? `<div style="margin-top:8px;background:#faf5ff;border:1px dashed #d8b4fe;border-radius:8px;padding:10px 12px;text-align:center;color:#7e22ce;font-size:13px;font-weight:700;">🎟️ Si liquida dentro de su plazo pactado, recibe hasta ${dinero(mejorCupon)} en cupón de saldo a favor.</div>` : ''}`;
+  wrap.innerHTML = planes.map((p, i) => planCardHTML(p, cuponesFinales[i], periodicidadActual)).join('') + `
+    <div class="nota-pie">* El total no incluye el enganche (ya cubierto aparte).</div>
+    ${mejorCupon > 0.01 ? `<div class="visor-tarjeta v-violeta"><div class="t">🎟️ Cupón de pronto pago</div><div class="s">Si liquida dentro de su plazo pactado, recibe hasta <b>${dinero(mejorCupon)}</b> en cupón de saldo a favor.</div></div>` : ''}`;
 }
 
 // ============================================================================
@@ -1112,6 +1169,7 @@ async function siguienteFolio() {
 
 async function generarCotizacionMovil() {
   if (carrito.length === 0) return alert('Agrega al menos un artículo.');
+  if (carrito.some(it => it.esLibre) && !esAdmin()) return alert('Solo un administrador puede cotizar productos no registrados en el catálogo.');
   if (!navigator.onLine) return alert('Sin conexión a internet. La cotización se guarda directo en el sistema, así que necesitas señal para generarla.');
   const btn = document.getElementById('btnGenerar');
   mostrarCarga('Generando cotización…');
@@ -1390,17 +1448,108 @@ function generarTicket() {
   }
 }
 
+
+function fechaCorta(iso) {
+  return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Mexico_City' });
+}
 function mostrarResultado(datos) {
-  document.getElementById('folioResultado').textContent = datos.cot.folio;
-  document.getElementById('textoResumenResultado').textContent = textoResumenCotizacion(datos);
+  const { cot, planes } = datos;
+  document.getElementById('resFolio').textContent = cot.folio;
+  document.getElementById('resCliente').textContent = cot.clienteNombre;
+
+  const cupones = _cuponesMonotonosPorPlazo(planes, cot.saldoFinanciar);
+  const mejor = Math.max(0, ...cupones);
+  let html = `
+    <div class="bloque">
+      <div class="hero"><small>Total</small><b>${dinero(cot.total)}</b></div>
+      <div class="fila"><span>Cliente</span><span>${escapeHtml(cot.clienteNombre)}</span></div>
+      <div class="fila"><span>Vigente hasta</span><span>${fechaCorta(cot.fechaVencimiento)}</span></div>
+      ${cot.enganche > 0 ? `<div class="fila"><span>Enganche</span><b>${dinero(cot.enganche)}</b></div>` : ''}
+      <div class="fila"><span>Saldo a financiar</span><b>${dinero(cot.saldoFinanciar)}</b></div>
+    </div>
+    <div class="bloque">
+      <h3>Artículos</h3>
+      ${cot.articulos.map(a => `
+        <div class="item"><div>${escapeHtml(a.nombre)}<small>${a.cantidad} × ${dinero(a.precio)}</small></div><b>${dinero(a.subtotal)}</b></div>`).join('')}
+    </div>`;
+  if (planes.length > 0 && cot.saldoFinanciar > 0) {
+    html += `
+    <div class="bloque">
+      <h3>Plan de crédito · ${cot.periodicidad}</h3>
+      ${planes.map((p, i) => planCardHTML(p, cupones[i], cot.periodicidad)).join('')}
+      <div class="nota-pie">* El total no incluye el enganche (ya cubierto aparte).</div>
+      ${mejor > 0.01 ? `<div class="visor-tarjeta v-violeta"><div class="t">🎟️ Cupón de pronto pago</div><div class="s">Si liquida dentro de su plazo pactado, recibe hasta <b>${dinero(mejor)}</b> en cupón de saldo a favor.</div></div>` : ''}
+    </div>`;
+  }
+  if (cot.notas) html += `<div class="bloque"><h3>Notas</h3><div style="font-size:14.5px;line-height:1.4;">${escapeHtml(cot.notas)}</div></div>`;
+
+  document.getElementById('resultadoContenido').innerHTML = html;
   document.getElementById('pantallaApp').classList.add('oculto');
-  document.getElementById('pantallaResultado').classList.remove('oculto');
+  const pantalla = document.getElementById('pantallaResultado');
+  pantalla.classList.remove('oculto');
+  pantalla.scrollTop = 0;
   window.scrollTo(0, 0);
 }
-function compartirWhatsapp() {
+function volverAEditar() {
+  document.getElementById('pantallaResultado').classList.add('oculto');
+  document.getElementById('pantallaApp').classList.remove('oculto');
+  window.scrollTo(0, 0);
+}
+
+// Imagen para WhatsApp: tarjeta vertical de 390px con el mismo motor
+// (ImagenService) que usa la app de cobranza.
+function htmlImagenCotizacion({ cot, planes }) {
+  const U = ImagenService.ui;
+  const empresa = configEmpresa.nombre || 'Mueblería Mi Pueblito';
+  const cupones = _cuponesMonotonosPorPlazo(planes, cot.saldoFinanciar);
+  const mejor = Math.max(0, ...cupones);
+  const per = cot.periodicidad === 'semanal' ? 'semana' : cot.periodicidad === 'quincenal' ? 'quincena' : 'mes';
+  const partes = [
+    U.cabecera({ empresa, tipo: 'COTIZACIÓN', folio: cot.folio }),
+    U.hero({ etiqueta: 'Total', valor: dinero(cot.total), nota: `Vigente hasta ${fechaCorta(cot.fechaVencimiento)}`, tono: 'azul' }),
+    U.filas([
+      ['Cliente', cot.clienteNombre],
+      ['Fecha', fechaCorta(cot.fecha)],
+      cot.enganche > 0 ? ['Enganche', { texto: dinero(cot.enganche), fuerte: true }] : null,
+      ['Saldo a financiar', { texto: dinero(cot.saldoFinanciar), fuerte: true }]
+    ]),
+    U.seccion('Artículos'),
+    cot.articulos.map(a => U.item({ titulo: a.nombre, izquierda: `${a.cantidad} × ${dinero(a.precio)}`, derecha: dinero(a.subtotal) })).join('')
+  ];
+  if (planes.length > 0 && cot.saldoFinanciar > 0) {
+    partes.push(U.seccion(`Plan de crédito · pagos ${cot.periodicidad === 'semanal' ? 'semanales' : cot.periodicidad === 'quincenal' ? 'quincenales' : 'mensuales'}`));
+    partes.push(planes.map((p, i) => U.item({
+      titulo: `${p.meses} ${Number(p.meses) === 1 ? 'mes' : 'meses'}`,
+      detalle: `${p.pagos} pago${p.pagos === 1 ? '' : 's'} de ${dinero(p.abono)} por ${per}` + (cupones[i] > 0 ? ` · 🎟️ +${dinero(cupones[i])} cupón` : ''),
+      marca: p.custom ? 'Personalizado' : '',
+      izquierda: 'Total',
+      derecha: dinero(p.total)
+    })).join(''));
+    partes.push(U.nota({ texto: 'El total no incluye el enganche (ya cubierto aparte).', tono: 'gris' }));
+    if (mejor > 0.01) partes.push(U.nota({ titulo: '🎟️ Cupón de pronto pago. ', texto: `Si liquida dentro de su plazo pactado, recibe hasta ${dinero(mejor)} en cupón de saldo a favor para su próxima compra.`, tono: 'violeta' }));
+  }
+  if (cot.notas) partes.push(U.nota({ titulo: 'Notas. ', texto: cot.notas, tono: 'ambar' }));
+  partes.push(U.pie(`${empresa} · Válido por ${cot.vigenciaDias} días`));
+  return U.envolver(partes.join(''), `Cotización ${cot.folio}`);
+}
+async function compartirImagenCotizacion() {
   if (!ultimaCotizacionGenerada) return;
-  const texto = encodeURIComponent(textoResumenCotizacion(ultimaCotizacionGenerada));
-  window.open(`https://wa.me/?text=${texto}`, '_blank');
+  if (!window.ImagenService) return mostrarToast('El motor de imágenes no cargó. Revisa tu conexión.');
+  const { cot } = ultimaCotizacionGenerada;
+  const texto = `Cotización ${cot.folio} - ${cot.clienteNombre}`;
+  mostrarCarga('Generando imagen…');
+  try {
+    const lienzo = await ImagenService.renderDocumento(htmlImagenCotizacion(ultimaCotizacionGenerada), { tarjeta: true, titulo: texto });
+    ocultarCarga();
+    const res = await ImagenService.entregar(lienzo, `cotizacion_${cot.folio}`, { titulo: texto, texto, categoria: 'Cotizaciones' });
+    if (res === 'descargado') mostrarToast('Imagen descargada. Adjúntala en WhatsApp.', 3500);
+    else if (res === 'carpeta') mostrarToast('Imagen guardada.');
+  } catch (e) {
+    console.error('Error generando imagen:', e);
+    mostrarToast('No se pudo generar la imagen.');
+  } finally {
+    ocultarCarga();
+  }
 }
 async function copiarResumen() {
   if (!ultimaCotizacionGenerada) return;
@@ -1413,22 +1562,18 @@ async function copiarResumen() {
   }
 }
 function nuevaCotizacionDesdeResultado() {
-  carrito = [];
-  planesCustom = [];
-  renderPlanesCustom();
-  quitarImagenLibre();
-  engancheEditadoManual = false;
   ultimaCotizacionGenerada = null;
-  document.getElementById('campoCliente').value = '';
-  document.getElementById('campoNotas').value = '';
-  document.getElementById('checkEnganche').checked = false;
-  toggleEnganche();
-  renderCarrito();
-  recalcularTodo();
+  reiniciarFormulario();
   document.getElementById('pantallaResultado').classList.add('oculto');
   document.getElementById('pantallaApp').classList.remove('oculto');
-  window.scrollTo(0, 0);
+  irA('articulos');
 }
+
+// Un toque en un producto de la hoja lo agrega a la cotización.
+document.getElementById('resultadosBusqueda').addEventListener('click', (e) => {
+  const fila = e.target.closest('.prod');
+  if (fila) agregarProductoAlCarrito(fila.dataset.id);
+});
 
 // ============================================================================
 // ARRANQUE
