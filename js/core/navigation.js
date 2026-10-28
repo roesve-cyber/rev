@@ -87,7 +87,9 @@ window.navA = function(vistaId, isPopState = false) {
         clientesmorosos: { vista: 'reportes', render: 'cartera' },
         flujocaja: { vista: 'reporte-flujo', render: 'flujo' },
         proyeccion: { vista: 'reportes', render: 'compromisos' },
-        'reporte-rentabilidad': { vista: 'reporte-ventas', render: 'ventas' }
+        'reporte-rentabilidad': { vista: 'reporte-ventas', render: 'ventas' },
+        // id anterior de Publicidad: los bloqueadores de anuncios ocultan #publicidad
+        publicidad: { vista: 'mkt-productos' }
     };
     const redireccionRetirada = rutasRetiradas[vistaId] || null;
     if (redireccionRetirada) vistaId = redireccionRetirada.vista;
@@ -179,7 +181,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'usuarios' && typeof renderGestionUsuarios === 'function') renderGestionUsuarios();
         if (vistaId === 'notificaciones-push' && typeof renderPushAutorizacionesConfig === 'function') renderPushAutorizacionesConfig();
         if (vistaId === 'puntos' && typeof renderPanelPuntos === 'function') renderPanelPuntos();
-        if (vistaId === 'publicidad' && typeof renderPublicidad === 'function') renderPublicidad();
+        if (vistaId === 'mkt-productos' && typeof renderPublicidad === 'function') renderPublicidad();
         if (redireccionRetirada?.render === 'compromisos' && typeof renderReporteCompromisos === 'function') renderReporteCompromisos();
         if (redireccionRetirada?.render === 'cartera' && typeof renderARC_v3 === 'function') renderARC_v3();
         if (redireccionRetirada?.render === 'flujo' && typeof renderReporteFlujo === 'function') renderReporteFlujo();
