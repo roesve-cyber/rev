@@ -6,7 +6,7 @@ try {
   console.warn('No se pudieron cargar scripts de Firebase Messaging:', err);
 }
 
-var CACHE_NAME = 'mmp-pos-v67';
+var CACHE_NAME = 'mmp-pos-v68';
 var ASSETS = [
   '/',
   '/index.html',
@@ -30,20 +30,11 @@ try {
     var title = (payload.notification && payload.notification.title) || (payload.data && payload.data.title) || 'Boveda de autorizaciones';
     var body = (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || 'Tienes un pendiente por revisar.';
     var url = (payload.data && payload.data.url) || '/?view=autorizaciones';
-    var pushId = (payload.data && payload.data.pushId) || String(Date.now());
-    // Aviso "fuerte": se queda en pantalla hasta que lo atiendas, vibra fuerte
-    // y suena de nuevo aunque ya haya otro de la Bóveda. Un tag distinto por
-    // aviso evita que uno nuevo REEMPLACE en silencio al anterior.
     self.registration.showNotification(title, {
       body: body,
       icon: '/img/icon-192.png',
       badge: '/img/badge-96.png',
-      tag: 'boveda-' + pushId,
-      renotify: true,
-      requireInteraction: true,
-      vibrate: [400, 150, 400, 150, 800],
-      timestamp: Date.now(),
-      actions: [{ action: 'abrir', title: 'Abrir Bóveda' }],
+      tag: 'boveda-autorizaciones',
       data: { url: url }
     });
   });
@@ -76,7 +67,20 @@ self.addEventListener('fetch', function(e) {
   if (e.request.method !== 'GET') return;
   e.respondWith(
     fetch(e.request).catch(function() {
-      return caches.match(e.request);
+      // Sin red: primero la copia exacta; si no existe y es una página, la pantalla principal guardada.
+      // 🛡️ respondWith() exige SIEMPRE un Response: si no hay nada que devolver se responde 504
+      // (antes devolvía undefined y el navegador marcaba "Failed to convert value to 'Response'").
+      return caches.match(e.request).then(function(copia) {
+        if (copia) return copia;
+        if (e.request.mode === 'navigate') {
+          return caches.match('/index.html').then(function(inicio) {
+            return inicio || caches.match('/');
+          }).then(function(inicio) {
+            return inicio || new Response('Sin conexión. Vuelve a intentarlo cuando regrese el internet.', { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+          });
+        }
+        return new Response('', { status: 504, statusText: 'Gateway Timeout' });
+      });
     })
   );
 });
