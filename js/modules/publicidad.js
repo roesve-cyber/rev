@@ -424,7 +424,7 @@
     function tarjetaFila(p) {
         const ex = existencia(p), on = PUB.sel.has(String(p.id));
         return `<label class="pub-fila"><input type="checkbox" ${on ? 'checked' : ''} onchange="pubToggle('${esc(p.id)}', this.checked)">
-            <img src="${esc(p.imagen || 'img/Logo.svg')}" loading="lazy" alt="" onerror="this.src='img/Logo.svg'">
+            <img src="${esc(p.imagen || 'img/Logo.svg')}" loading="eager" alt="" onerror="this.src='img/Logo.svg'">
             <div class="t"><b>${esc(p.nombre)}</b><small>${esc([p.categoria, p.subcategoria].filter(Boolean).join(' / '))}${p.marca ? ' · ' + esc(p.marca) : ''}</small></div>
             <div style="text-align:right;font-size:13px;white-space:nowrap"><b>${dinero(p.precio)}</b><small style="display:block;color:${ex.ultima ? '#dc2626' : '#64748b'}">${esc(ex.stock > 0 ? ex.stock + ' en inv.' : 'sin existencia')}</small></div></label>`;
     }
