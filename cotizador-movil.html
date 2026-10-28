@@ -1517,70 +1517,150 @@ function volverAEditar() {
 
 // Imagen para WhatsApp: tarjeta vertical de 390px con el mismo motor
 // (ImagenService) que usa la app de cobranza.
-function htmlImagenCotizacion({ cot, planes }) {
-  // Versión compacta: menos alto = se ve completa en la pantalla del cliente.
-  // Se arma con estilos en línea (mismo motor ImagenService) y color guinda.
+// OJO con el motor (imagen-whatsapp.js > adaptarMovil): convierte toda fila
+// flex en "wrap", sube cualquier letra menor a 13px y html2canvas 1.4.1 no
+// entiende object-fit. Por eso esta tarjeta se arma con TABLAS (columnas
+// que no se rompen), letras de 13px o más y fotos con tamaño calculado.
+function m0(n) {
+  return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(n) || 0);
+}
+// Mide las fotos de los artículos (para acomodarlas sin deformarlas).
+function medirImagenesCotizacion(cot) {
+  return Promise.all(cot.articulos.map((a, index) => {
+    const src = imagenDeArticulo(cot, a, index);
+    if (!src) return Promise.resolve(null);
+    return new Promise(resolve => {
+      const im = new Image();
+      const t = setTimeout(() => resolve(null), 4000);
+      im.onload = () => { clearTimeout(t); resolve(im.naturalWidth && im.naturalHeight ? { w: im.naturalWidth, h: im.naturalHeight } : null); };
+      im.onerror = () => { clearTimeout(t); resolve(null); };
+      im.src = src;
+    });
+  }));
+}
+function htmlImagenCotizacion({ cot, planes }, medidas) {
   const U = ImagenService.ui;
+  medidas = medidas || [];
   const empresa = configEmpresa.nombre || 'Mueblería Mi Pueblito';
-  const GUINDA = '#7a1230';
+  const G = '#7a1230', ROSA = '#f9e8ed', LINEA = '#f0dbe2';
   const cupones = _cuponesMonotonosPorPlazo(planes, cot.saldoFinanciar);
   const mejor = Math.max(0, ...cupones);
+  const hayCupon = mejor > 0.01;
   const per = cot.periodicidad === 'semanal' ? 'semana' : cot.periodicidad === 'quincenal' ? 'quincena' : 'mes';
   const perPlural = cot.periodicidad === 'semanal' ? 'semanales' : cot.periodicidad === 'quincenal' ? 'quincenales' : 'mensuales';
+  const perAdj = cot.periodicidad === 'semanal' ? 'semanal' : cot.periodicidad === 'quincenal' ? 'quincenal' : 'mensual';
 
-  // Resumen en un solo bloque: total a la izquierda, datos clave a la derecha.
-  const dato = (et, val, fuerte) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5;"><span style="color:#64748b;">${et}</span><span style="${fuerte ? 'font-weight:800;' : ''}color:#0f172a;text-align:right;">${val}</span></div>`;
-  const resumen = `
-    <div style="display:flex;gap:12px;align-items:center;background:#f9e8ed;border-radius:12px;padding:10px 12px;margin:8px 0;">
-      <div style="flex:0 0 auto;text-align:center;">
-        <div style="font-size:10px;font-weight:800;letter-spacing:.05em;color:${GUINDA};text-transform:uppercase;">Total</div>
-        <div style="font-size:24px;font-weight:900;color:${GUINDA};line-height:1.1;">${dinero(cot.total)}</div>
-        <div style="font-size:10px;color:#64748b;">Vigente hasta ${fechaCorta(cot.fechaVencimiento)}</div>
-      </div>
-      <div style="flex:1;min-width:0;">
-        ${dato('Cliente', escapeHtml(cot.clienteNombre))}
-        ${cot.enganche > 0 ? dato('Enganche', dinero(cot.enganche), true) : ''}
-        ${dato('Saldo a financiar', dinero(cot.saldoFinanciar), true)}
-      </div>
+  // Tamaño de la foto dentro de una caja, sin deformar (máx. 2.5x su tamaño real).
+  const ajustar = (m, bw, bh) => {
+    if (!m) return null;
+    const k = Math.min(bw / m.w, bh / m.h, 2.5);
+    return { w: Math.round(m.w * k), h: Math.round(m.h * k) };
+  };
+  const fotoHTML = (src, m, bw, bh, altoCaja) => {
+    const d = ajustar(m, bw, bh);
+    const alto = altoCaja || (d ? d.h + 12 : bh);
+    const margen = d ? Math.max(0, Math.round((alto - d.h) / 2)) : 6;
+    const dim = d ? `width:${d.w}px;height:${d.h}px;` : `max-width:${bw}px;max-height:${bh}px;`;
+    return `<div style="background:#f8fafc;border-radius:14px;text-align:center;height:${alto}px;overflow:hidden;">` +
+      `<img src="${escapeHtml(src)}" alt="" style="display:inline-block;vertical-align:top;margin-top:${margen}px;${dim}"></div>`;
+  };
+
+  // ---------- Encabezado (logo y folio en guinda) ----------
+  const cabecera = `
+    <div style="text-align:center;">
+      <img src="img/Logo-guinda.svg" alt="" style="width:45px;height:42px;" onerror="this.style.display='none'">
+      <div style="font-size:15px;font-weight:700;color:#475569;margin-top:3px;">${escapeHtml(empresa)}</div>
+      <div style="margin-top:8px;font-size:13px;font-weight:800;letter-spacing:.07em;color:#64748b;">COTIZACIÓN</div>
+      <div style="font-size:24px;font-weight:900;color:${G};line-height:1.15;">${escapeHtml(cot.folio)}</div>
+      <div style="font-size:13px;color:#64748b;margin-top:3px;">${escapeHtml(cot.clienteNombre)} · ${fechaCorta(cot.fecha)}</div>
     </div>`;
 
-  // Artículos: una línea por producto, con foto chica si está en el catálogo.
-  const articulos = cot.articulos.map((a, index) => {
-    const img = imagenDeArticulo(cot, a, index);
-    const foto = img ? `<img src="${escapeHtml(img)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;border:1px solid #e2e8f0;flex:0 0 auto;" alt="">` : '';
-    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #eef2f7;">
-      ${foto}
-      <div style="flex:1;min-width:0;"><div style="font-size:12.5px;font-weight:700;line-height:1.25;color:#0f172a;">${escapeHtml(a.nombre)}</div>
-      <div style="font-size:11px;color:#64748b;">${a.cantidad} × ${dinero(a.precio)}</div></div>
-      <div style="font-size:12.5px;font-weight:800;color:#0f172a;white-space:nowrap;">${dinero(a.subtotal)}</div>
-    </div>`;
-  }).join('');
-
-  const partes = [
-    U.cabecera({ empresa, tipo: 'COTIZACIÓN', folio: cot.folio }),
-    resumen,
-    articulos
-  ];
-
-  // Planes: una línea por plazo.
-  if (planes.length > 0 && cot.saldoFinanciar > 0) {
-    partes.push(`<div style="font-size:10.5px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:${GUINDA};margin:10px 0 3px;">Plan de crédito · pagos ${perPlural}</div>`);
-    partes.push(planes.map((p, i) => `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #eef2f7;">
-        <div style="min-width:0;">
-          <div style="font-size:12.5px;font-weight:800;color:#0f172a;">${p.meses} ${Number(p.meses) === 1 ? 'mes' : 'meses'}${p.custom ? ' · Personalizado' : ''}</div>
-          <div style="font-size:11px;color:#64748b;">${p.pagos} pago${p.pagos === 1 ? '' : 's'} de <b style="color:${GUINDA};">${dinero(p.abono)}</b> por ${per}${cupones[i] > 0 ? ` · 🎟️ +${dinero(cupones[i])}` : ''}</div>
-        </div>
-        <div style="font-size:11px;color:#64748b;text-align:right;white-space:nowrap;">Total<br><b style="color:#0f172a;font-size:12.5px;">${dinero(p.total)}</b></div>
-      </div>`).join(''));
-    // Notas legales en un solo renglón corto.
-    let nota = cot.enganche > 0 ? 'El total no incluye el enganche.' : '';
-    if (mejor > 0.01) nota += `${nota ? ' ' : ''}🎟️ Si liquida a tiempo recibe hasta ${dinero(mejor)} en cupón para su próxima compra.`;
-    if (nota) partes.push(`<div style="font-size:10.5px;color:#64748b;margin-top:6px;line-height:1.35;">${nota}</div>`);
+  // ---------- Productos: la foto es lo que vende ----------
+  const items = cot.articulos.map((a, index) => ({ a, index, src: imagenDeArticulo(cot, a, index), m: medidas[index] || null }));
+  const conFoto = items.filter(x => x.src);
+  const sinFoto = items.filter(x => !x.src);
+  let productos = '';
+  if (conFoto.length === 1) {
+    const { a, src, m } = conFoto[0];
+    productos += `<div style="margin-top:12px;">${fotoHTML(src, m, 340, 260)}
+      <table style="width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed;"><tr>
+        <td style="vertical-align:top;padding:0 8px 0 2px;"><div style="font-size:15px;font-weight:800;line-height:1.25;color:#0f172a;">${escapeHtml(a.nombre)}</div>
+          ${a.cantidad > 1 ? `<div style="font-size:13px;color:#64748b;">${a.cantidad} × ${m0(a.precio)}</div>` : ''}</td>
+        <td style="vertical-align:top;text-align:right;width:104px;padding:0 2px 0 0;font-size:18px;font-weight:900;color:${G};">${m0(a.subtotal)}</td>
+      </tr></table></div>`;
+  } else if (conFoto.length > 1) {
+    const celdas = conFoto.map(({ a, src, m }) => `
+      <td style="width:50%;vertical-align:top;padding:4px;">
+        ${fotoHTML(src, m, 156, 150, 162)}
+        <div style="font-size:14px;font-weight:800;line-height:1.25;color:#0f172a;margin-top:5px;">${escapeHtml(a.nombre)}</div>
+        <div style="font-size:13px;color:#64748b;">${a.cantidad > 1 ? a.cantidad + ' × ' + m0(a.precio) + ' = ' : ''}<b style="color:${G};font-size:15px;">${m0(a.subtotal)}</b></div>
+      </td>`);
+    let filas = '';
+    for (let i = 0; i < celdas.length; i += 2) filas += `<tr>${celdas[i]}${celdas[i + 1] || '<td style="width:50%;"></td>'}</tr>`;
+    productos += `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin:8px 0 0;">${filas}</table>`;
   }
-  if (cot.notas) partes.push(`<div style="font-size:11px;background:#fffbeb;color:#92400e;border-radius:8px;padding:6px 8px;margin-top:6px;"><b>Notas.</b> ${escapeHtml(cot.notas)}</div>`);
-  partes.push(U.pie(`${empresa} · Válido por ${cot.vigenciaDias} días`));
-  return U.envolver(partes.join(''), `Cotización ${cot.folio}`);
+  if (sinFoto.length) {
+    productos += `<table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:8px;">` + sinFoto.map(({ a }) => `
+      <tr><td style="padding:6px 8px 6px 2px;border-bottom:1px solid #eef2f7;vertical-align:top;"><div style="font-size:14px;font-weight:700;line-height:1.25;color:#0f172a;">${escapeHtml(a.nombre)}</div>
+        <div style="font-size:13px;color:#64748b;">${a.cantidad} × ${m0(a.precio)}</div></td>
+      <td style="width:100px;padding:6px 2px;border-bottom:1px solid #eef2f7;text-align:right;vertical-align:top;font-size:15px;font-weight:800;color:#0f172a;">${m0(a.subtotal)}</td></tr>`).join('') + `</table>`;
+  }
+
+  // ---------- Resumen: Total | Enganche | Saldo (columnas fijas) ----------
+  const etq = 'font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b;';
+  let resumen;
+  if (cot.enganche > 0) {
+    const sep = 'border-left:1px solid #e9c3cf;';
+    resumen = `<table style="width:100%;border-collapse:collapse;table-layout:fixed;background:${ROSA};border-radius:14px;margin-top:12px;">
+      <tr>
+        <td style="width:38%;text-align:center;padding:12px 4px 4px;"><div style="${etq}color:${G};">Total</div><div style="font-size:22px;font-weight:900;color:${G};line-height:1.15;">${m0(cot.total)}</div></td>
+        <td style="width:28%;text-align:center;padding:12px 4px 4px;${sep}"><div style="${etq}">Enganche</div><div style="font-size:17px;font-weight:800;color:#0f172a;line-height:1.3;">${m0(cot.enganche)}</div></td>
+        <td style="width:34%;text-align:center;padding:12px 4px 4px;${sep}"><div style="${etq}">A financiar</div><div style="font-size:17px;font-weight:800;color:#0f172a;line-height:1.3;">${m0(cot.saldoFinanciar)}</div></td>
+      </tr>
+      <tr><td colspan="3" style="text-align:center;padding:0 4px 10px;font-size:13px;color:#64748b;">Vigente hasta ${fechaCorta(cot.fechaVencimiento)}</td></tr>
+    </table>`;
+  } else {
+    resumen = `<table style="width:100%;border-collapse:collapse;background:${ROSA};border-radius:14px;margin-top:12px;"><tr>
+      <td style="text-align:center;padding:12px 4px 10px;"><div style="${etq}color:${G};">Total</div><div style="font-size:28px;font-weight:900;color:${G};line-height:1.15;">${m0(cot.total)}</div>
+      <div style="font-size:13px;color:#64748b;">Vigente hasta ${fechaCorta(cot.fechaVencimiento)}</div></td></tr></table>`;
+  }
+
+  // ---------- Tabla de pagos ----------
+  let plan = '';
+  if (planes.length > 0 && cot.saldoFinanciar > 0) {
+    const anchos = hayCupon ? ['27%', '27%', '26%', '20%'] : ['34%', '33%', '33%'];
+    const th = (t, al, pl, pr) => `<td style="padding:8px ${pr}px 8px ${pl}px;font-size:13px;font-weight:800;color:#fff;text-align:${al};line-height:1.2;">${t}</td>`;
+    const cabFix = `<tr style="background:${G};">` +
+      th('Plazo', 'left', 10, 4) +
+      th(`Pago<br>${perAdj}`, 'center', 4, 4) +
+      th('Total<br>a pagar', 'right', 4, hayCupon ? 4 : 10) +
+      (hayCupon ? th('Cupón*', 'right', 4, 10) : '') + '</tr>';
+    const filas = planes.map((p, i) => {
+      const bg = i % 2 ? '#fcf5f7' : '#ffffff';
+      const borde = `border-bottom:1px solid ${LINEA};`;
+      const ultima = !hayCupon;
+      return `<tr style="background:${bg};">
+        <td style="padding:8px 4px 8px 10px;${borde}vertical-align:middle;"><div style="font-size:15px;font-weight:800;color:#0f172a;">${p.meses} ${Number(p.meses) === 1 ? 'mes' : 'meses'}</div>
+          <div style="font-size:13px;color:#64748b;">${p.pagos} pago${p.pagos === 1 ? '' : 's'}${p.custom ? ' · esp.' : ''}</div></td>
+        <td style="padding:8px 4px;${borde}text-align:center;vertical-align:middle;font-size:17px;font-weight:900;color:${G};">${m0(p.abono)}</td>
+        <td style="padding:8px ${ultima ? '10px' : '4px'} 8px 4px;${borde}text-align:right;vertical-align:middle;font-size:14px;font-weight:700;color:#0f172a;">${m0(p.total)}</td>
+        ${hayCupon ? `<td style="padding:8px 10px 8px 4px;${borde}text-align:right;vertical-align:middle;font-size:14px;font-weight:800;color:#5b21b6;">${cupones[i] > 0.01 ? '+' + m0(cupones[i]) : '—'}</td>` : ''}
+      </tr>`;
+    }).join('');
+    plan = `<div style="font-size:13px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:${G};margin:16px 2px 6px;">Tus pagos ${perPlural}</div>
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid ${LINEA};">
+        <colgroup>${anchos.map(w => `<col style="width:${w};">`).join('')}</colgroup>
+        ${cabFix}${filas}
+      </table>`;
+    const notas = [];
+    if (hayCupon) notas.push(`🎟️ <b>*Cupón de pronto pago:</b> si liquida dentro de su plazo, recibe ese monto (hasta ${m0(mejor)}) como saldo a favor en su próxima compra.`);
+    if (cot.enganche > 0) notas.push('El total de cada plan no incluye el enganche.');
+    if (notas.length) plan += `<div style="font-size:13px;line-height:1.4;color:#475569;margin-top:8px;padding:0 2px;">${notas.join('<div style="height:4px;"></div>')}</div>`;
+  }
+  const notaCot = cot.notas ? `<div style="font-size:13px;background:#fffbeb;color:#92400e;border-radius:10px;padding:8px 10px;margin-top:10px;"><b>Notas.</b> ${escapeHtml(cot.notas)}</div>` : '';
+
+  return U.envolver(cabecera + productos + resumen + plan + notaCot +
+    U.pie(`${empresa} · Válido por ${cot.vigenciaDias} días`), `Cotización ${cot.folio}`);
 }
 async function compartirImagenCotizacion() {
   if (!ultimaCotizacionGenerada) return;
@@ -1589,7 +1669,8 @@ async function compartirImagenCotizacion() {
   const texto = `Cotización ${cot.folio} - ${cot.clienteNombre}`;
   mostrarCarga('Generando imagen…');
   try {
-    const lienzo = await ImagenService.renderDocumento(htmlImagenCotizacion(ultimaCotizacionGenerada), { tarjeta: true, titulo: texto });
+    const medidas = await medirImagenesCotizacion(cot);
+    const lienzo = await ImagenService.renderDocumento(htmlImagenCotizacion(ultimaCotizacionGenerada, medidas), { tarjeta: true, titulo: texto });
     ocultarCarga();
     const res = await ImagenService.entregar(lienzo, `cotizacion_${cot.folio}`, { titulo: texto, texto, categoria: 'Cotizaciones' });
     if (res === 'descargado') mostrarToast('Imagen descargada. Adjúntala en WhatsApp.', 3500);
