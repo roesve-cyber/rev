@@ -377,7 +377,7 @@
         const pr = obtener(id); if (!pr) return;
         const ps = productosDe(pr).filter(p => calcular(p, pr));
         if (!ps.length) return alert('Esta promoción no tiene productos con efecto (revisa el alcance o el descuento).');
-        if (typeof navA === 'function') navA('publicidad');
+        if (typeof navA === 'function') navA('mkt-productos');
         if (window.PUB_) {
             PUB_.sel = new Set(ps.map(p => String(p.id))); PUB_.promocionId = String(pr.id); PUB_.tab = 'diseno'; PUB_.activo = String(ps[0].id); PUB_.promo = '';
             PUB_.soloStock = pr.alcance && pr.alcance.soloConStock !== false; PUB_.categoria = ''; PUB_.busqueda = '';
