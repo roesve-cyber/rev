@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Cotizador | Mueblería Mi Pueblito</title>
 <link rel="manifest" href="manifest-cotizador.json">
-<link rel="icon" type="image/svg+xml" href="img/icon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
-<link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png">
-<link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png">
-<meta name="theme-color" content="#1e40af">
+<link rel="icon" type="image/svg+xml" href="img/cotizador-icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="img/cotizador-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="img/cotizador-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="img/cotizador-192.png">
+<meta name="theme-color" content="#7a1230">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -25,7 +25,7 @@
 <style>
 :root {
   --ink: #0f172a; --muted: #64748b; --paper: #eef2f7; --surface: #ffffff; --line: #dbe3ee;
-  --brand: #1e40af; --brand-2: #2563eb; --ok: #16a34a; --warn: #d97706; --danger: #dc2626; --violet: #7c3aed;
+  --brand: #7a1230; --brand-2: #9f1a42; --brand-soft: #f9e8ed; --ok: #16a34a; --warn: #d97706; --danger: #dc2626; --violet: #7c3aed;
   --r: 14px; --r-lg: 20px; --shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
@@ -42,7 +42,7 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 label.campo-label:first-child { margin-top: 0; }
 
 /* ===== LOGIN ===== */
-#pantallaLogin { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 22px; background: linear-gradient(180deg, #1e3a8a, #1e40af 60%, #2563eb); }
+#pantallaLogin { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 22px; background: linear-gradient(180deg, #4f0c20, #7a1230 60%, #9f1a42); }
 .login-card { width: 100%; max-width: 380px; background: var(--surface); border-radius: var(--r-lg); padding: 26px 22px; box-shadow: var(--shadow); }
 .login-logo { width: 56px; height: 56px; margin: 0 auto 12px; display: block; object-fit: contain; }
 .login-card h1 { font-size: 20px; text-align: center; }
@@ -51,7 +51,7 @@ label.campo-label:first-child { margin-top: 0; }
 .btn-primario { width: 100%; padding: 14px; border-radius: 12px; background: var(--brand); color: #fff; font-weight: 800; font-size: 16px; margin-top: 14px; }
 .btn-primario:active { transform: scale(.98); }
 .btn-primario:disabled { opacity: .6; }
-.btn-sec { padding: 12px 14px; border-radius: 12px; background: #e8eefc; color: var(--brand); font-weight: 800; font-size: 14px; }
+.btn-sec { padding: 12px 14px; border-radius: 12px; background: var(--brand-soft); color: var(--brand); font-weight: 800; font-size: 14px; }
 .btn-sec:active { transform: scale(.98); }
 .btn-linea { border: 1.5px solid var(--line); background: #fff; color: var(--ink); }
 
@@ -81,7 +81,7 @@ label.campo-label:first-child { margin-top: 0; }
 .fila:last-child { border-bottom: 0; }
 .fila span:first-child { color: var(--muted); flex-shrink: 0; }
 .fila span:last-child, .fila b { text-align: right; word-break: break-word; }
-.btn-agregar { width: 100%; padding: 15px; border-radius: 14px; background: var(--brand); color: #fff; font-weight: 800; font-size: 16px; box-shadow: 0 4px 14px rgba(30,64,175,.28); }
+.btn-agregar { width: 100%; padding: 15px; border-radius: 14px; background: var(--brand); color: #fff; font-weight: 800; font-size: 16px; box-shadow: 0 4px 14px rgba(122,18,48,.28); }
 .btn-agregar:active { transform: scale(.98); }
 
 /* ===== ARTÍCULOS (carrito) ===== */
@@ -101,7 +101,7 @@ label.campo-label:first-child { margin-top: 0; }
 .btn-quitar:active { background: #fee2e2; }
 .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
 .p-ambar { background: #fef3c7; color: #92400e; } .p-violeta { background: #ede9fe; color: #5b21b6; }
-.p-azul { background: #dbeafe; color: #1e40af; } .p-gris { background: #e2e8f0; color: #475569; }
+.p-azul { background: #f9e8ed; color: #7a1230; } .p-gris { background: #e2e8f0; color: #475569; }
 
 /* ===== CONDICIONES ===== */
 .interruptor { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 2px; font-weight: 800; font-size: 15px; }
@@ -114,7 +114,7 @@ label.campo-label:first-child { margin-top: 0; }
 /* ===== PLAN ===== */
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .seg button { padding: 12px 4px; border-radius: 12px; border: 2px solid var(--line); font-weight: 800; font-size: 14px; background: #fff; }
-.seg button.activo { border-color: var(--brand-2); background: #e8eefc; color: var(--brand); }
+.seg button.activo { border-color: var(--brand-2); background: var(--brand-soft); color: var(--brand); }
 .plan { border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 13px; margin-top: 10px; background: #fff; }
 .plan:first-child { margin-top: 0; }
 .plan.custom { background: #fffbeb; border-color: #fcd34d; }
@@ -173,6 +173,9 @@ label.campo-label:first-child { margin-top: 0; }
 .prod .en { display: block; margin-top: 3px; }
 .libre-acceso { margin-top: 10px; flex-shrink: 0; padding-bottom: 12px; }
 .bloqueo { font-size: 12.5px; color: var(--muted); text-align: center; padding: 10px; background: #f1f5f9; border-radius: 12px; }
+.thumb { width: 44px; height: 44px; border-radius: 9px; object-fit: cover; background: #fff; border: 1px solid var(--line); flex-shrink: 0; }
+.prod .thumb { width: 48px; height: 48px; }
+.art-cab { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
 .foto-fila { display: flex; gap: 10px; align-items: center; }
 .foto-prev { width: 64px; height: 64px; border: 1.5px dashed var(--line); border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fff; flex-shrink: 0; }
 .foto-prev span { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.2; }
@@ -193,7 +196,7 @@ label.campo-label:first-child { margin-top: 0; }
 .acciones { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; background: var(--surface); border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 8px; box-shadow: 0 -4px 18px rgba(15,23,42,.1); }
 .acciones button { padding: 13px 6px; border-radius: 13px; font-weight: 800; font-size: 13.5px; }
 .acciones .wa { background: #25D366; color: #fff; font-size: 15px; }
-.acciones .sec { background: #e8eefc; color: var(--brand); }
+.acciones .sec { background: var(--brand-soft); color: var(--brand); }
 .acciones button:active { transform: scale(.97); }
 
 #toast { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px); background: #0f172a; color: #fff; padding: 11px 18px; border-radius: 999px; font-size: 14px; font-weight: 700; z-index: 90; opacity: 0; pointer-events: none; transition: .2s; max-width: 88vw; text-align: center; }
@@ -257,11 +260,11 @@ label.campo-label:first-child { margin-top: 0; }
     </div>
     <div class="bloque">
       <h3>Enganche</h3>
-      <label class="interruptor"><span>¿Aplica enganche?</span><input type="checkbox" id="checkEnganche" onchange="toggleEnganche()"></label>
-      <div id="engancheWrap" class="oculto">
+      <label class="interruptor"><span>¿Aplica enganche?</span><input type="checkbox" id="checkEnganche" onchange="toggleEnganche()" checked></label>
+      <div id="engancheWrap">
         <label class="campo-label" for="campoEnganche">Monto de enganche</label>
         <input type="number" id="campoEnganche" inputmode="decimal" enterkeyhint="done" value="0" min="0" oninput="marcarEngancheEditadoManual()">
-        <div class="sugerido">Sugerido: 10% del subtotal (editable). Se actualiza solo mientras no lo cambies.</div>
+        <div class="sugerido">Sugerido: 10% del subtotal, redondeado hacia arriba a $50 (editable). Se actualiza solo mientras no lo cambies.</div>
       </div>
     </div>
     <div class="bloque">
@@ -275,7 +278,7 @@ label.campo-label:first-child { margin-top: 0; }
     <div class="bloque">
       <div class="hero"><small>Saldo a financiar</small><b id="totSaldo">$0.00</b></div>
       <div class="fila"><span>Subtotal</span><b id="totSubtotal">$0.00</b></div>
-      <div class="fila" id="filaEngancheResumen" style="display:none;"><span>Enganche</span><b id="totEnganche">$0.00</b></div>
+      <div class="fila" id="filaEngancheResumen" style="display:flex;"><span>Enganche</span><b id="totEnganche">$0.00</b></div>
     </div>
     <div class="bloque">
       <h3>Pagos</h3>
@@ -439,6 +442,15 @@ function dinero(n) {
 }
 function escapeHtml(v) {
   return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+// Imagen de un producto del catálogo (si la tiene). Devuelve '' si no hay.
+function imagenCatalogo(productoId) {
+  if (productoId === null || productoId === undefined) return '';
+  const prod = productosCache.find(pr => String(pr.id) === String(productoId));
+  return (prod && prod.imagen) ? String(prod.imagen) : '';
+}
+function thumbHTML(src) {
+  return src ? `<img class="thumb" src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none'">` : '';
 }
 function normalizarTexto(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -799,6 +811,7 @@ function renderResultadosBusqueda() {
     const it = carrito.find(c => !c.esLibre && String(c.id) === String(p.id));
     return `
     <div class="prod" data-id="${escapeHtml(String(p.id))}">
+      ${thumbHTML(p.imagen)}
       <div class="info">
         <b>${escapeHtml(p.nombre)}</b>
         <small>${escapeHtml(p.categoria || '')}${p.subcategoria ? ' · ' + escapeHtml(p.subcategoria) : ''} · stock: ${Number(p.stock) || 0}</small>
@@ -1001,14 +1014,17 @@ function renderCarrito() {
   cont.innerHTML = carrito.map((it, idx) => {
     const margenTxt = (modoAvanzado && it.esLibre && it.costo > 0)
       ? ` · costo ${dinero(it.costo)} (${it.margen || 0}%)` : '';
-    const fotoTxt = it._imagenLocal ? ' 📷' : '';
+    const fotoSrc = it.esLibre ? (it._imagenLocal || '') : imagenCatalogo(it.id);
     return `
     <div class="art">
       <div class="art-l1">
-        <div>
-          <b>${escapeHtml(it.nombre)}${fotoTxt}</b>
-          ${it.esLibre ? ' <span class="pill p-ambar">No registrado</span>' : ''}
-          <small>${dinero(it.precio)} c/u${margenTxt}</small>
+        <div class="art-cab">
+          ${thumbHTML(fotoSrc)}
+          <div>
+            <b>${escapeHtml(it.nombre)}</b>
+            ${it.esLibre ? ' <span class="pill p-ambar">No registrado</span>' : ''}
+            <small>${dinero(it.precio)} c/u${margenTxt}</small>
+          </div>
         </div>
         <span class="sub">${dinero(it.precio * it.cantidad)}</span>
       </div>
@@ -1044,7 +1060,7 @@ function reiniciarFormulario() {
   engancheEditadoManual = false;
   document.getElementById('campoCliente').value = '';
   document.getElementById('campoNotas').value = '';
-  document.getElementById('checkEnganche').checked = false;
+  document.getElementById('checkEnganche').checked = true;
   document.getElementById('campoEnganche').value = 0;
   toggleEnganche();
   renderCarrito();
@@ -1062,9 +1078,12 @@ function limpiarTodo() {
 // ============================================================================
 // TOTALES Y PLAN DE CRÉDITO
 // ============================================================================
-// Redondea hacia arriba al múltiplo de 10 más cercano (ej. 823 -> 830, 1300 -> 1300).
-function redondearArribaMultiploDe10(n) {
-  return Math.ceil((Number(n) || 0) / 10) * 10;
+// Redondea hacia arriba al múltiplo de 50 más cercano (ej. 823 -> 850, 1300 -> 1300).
+// Se redondea primero a centavos para que errores de punto flotante
+// (p. ej. 13000 * 0.10 = 1300.0000000000002) no suban un escalón de más.
+function redondearArribaMultiploDe50(n) {
+  const limpio = Math.round((Number(n) || 0) * 100) / 100;
+  return Math.ceil(limpio / 50) * 50;
 }
 function toggleEnganche() {
   const activo = document.getElementById('checkEnganche').checked;
@@ -1072,10 +1091,10 @@ function toggleEnganche() {
   document.getElementById('filaEngancheResumen').style.display = activo ? 'flex' : 'none';
   if (activo) {
     // Al activar el enganche, se propone 10% del subtotal redondeado hacia
-    // arriba en múltiplos de 10 -- el vendedor puede editarlo libremente.
+    // arriba en múltiplos de 50 -- el vendedor puede editarlo libremente.
     engancheEditadoManual = false;
     const subtotal = carrito.reduce((s, it) => s + it.precio * it.cantidad, 0);
-    document.getElementById('campoEnganche').value = redondearArribaMultiploDe10(subtotal * 0.10);
+    document.getElementById('campoEnganche').value = redondearArribaMultiploDe50(subtotal * 0.10);
   }
   recalcularTodo();
 }
@@ -1110,11 +1129,11 @@ function planCardHTML(p, monto, periodicidad) {
 }
 function recalcularTodo() {
   // Mientras el vendedor no haya tocado el campo a mano, el enganche sugerido
-  // (10% redondeado hacia arriba en múltiplos de 10) se mantiene al día según
+  // (10% redondeado hacia arriba en múltiplos de 50) se mantiene al día según
   // van cambiando los artículos del carrito.
   if (document.getElementById('checkEnganche').checked && !engancheEditadoManual) {
     const subtotalActual = carrito.reduce((s, it) => s + it.precio * it.cantidad, 0);
-    document.getElementById('campoEnganche').value = redondearArribaMultiploDe10(subtotalActual * 0.10);
+    document.getElementById('campoEnganche').value = redondearArribaMultiploDe50(subtotalActual * 0.10);
   }
   const { total, enganche, saldo } = totales();
   document.getElementById('totSubtotal').textContent = dinero(total);
@@ -1306,6 +1325,17 @@ function textoResumenCotizacion({ cot, planes }) {
 // mismo motor de salida (TicketService, js/services/ticket-service.js) que ya
 // usa todo el sistema: un solo botón, el vendedor elige PDF / Ticket / Imagen.
 // ============================================================================
+function imagenDeArticulo(cot, a, index) {
+  let img = a.imagen;
+  if (!img) {
+    if (a.productoId) {
+      img = imagenCatalogo(a.productoId);
+    } else if (a.esLibre) {
+      try { img = localStorage.getItem(`cot_img_${cot.id}_${index}`) || null; } catch (e) { img = null; }
+    }
+  }
+  return img || '';
+}
 function generarTicketCotizacionHTML(cot, planesUsados) {
   const empresa = configEmpresa.nombre || 'Mueblería Mi Pueblito';
 
@@ -1313,18 +1343,7 @@ function generarTicketCotizacionHTML(cot, planesUsados) {
   // se busca en el catálogo vivo por productoId; si es un producto libre, se
   // busca en localStorage de este celular (mismo esquema de clave que
   // escritorio: cot_img_<id>_<index>).
-  const articulosConImagen = cot.articulos.map((a, index) => {
-    let img = a.imagen;
-    if (!img) {
-      if (a.productoId) {
-        const prod = productosCache.find(p => String(p.id) === String(a.productoId));
-        if (prod) img = prod.imagen;
-      } else if (a.esLibre) {
-        try { img = localStorage.getItem(`cot_img_${cot.id}_${index}`) || null; } catch (e) { img = null; }
-      }
-    }
-    return { ...a, imagen: img };
-  });
+  const articulosConImagen = cot.articulos.map((a, index) => ({ ...a, imagen: imagenDeArticulo(cot, a, index) }));
 
   const rows = articulosConImagen.map(a => {
     const filaTexto = `
@@ -1499,36 +1518,67 @@ function volverAEditar() {
 // Imagen para WhatsApp: tarjeta vertical de 390px con el mismo motor
 // (ImagenService) que usa la app de cobranza.
 function htmlImagenCotizacion({ cot, planes }) {
+  // Versión compacta: menos alto = se ve completa en la pantalla del cliente.
+  // Se arma con estilos en línea (mismo motor ImagenService) y color guinda.
   const U = ImagenService.ui;
   const empresa = configEmpresa.nombre || 'Mueblería Mi Pueblito';
+  const GUINDA = '#7a1230';
   const cupones = _cuponesMonotonosPorPlazo(planes, cot.saldoFinanciar);
   const mejor = Math.max(0, ...cupones);
   const per = cot.periodicidad === 'semanal' ? 'semana' : cot.periodicidad === 'quincenal' ? 'quincena' : 'mes';
+  const perPlural = cot.periodicidad === 'semanal' ? 'semanales' : cot.periodicidad === 'quincenal' ? 'quincenales' : 'mensuales';
+
+  // Resumen en un solo bloque: total a la izquierda, datos clave a la derecha.
+  const dato = (et, val, fuerte) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;line-height:1.5;"><span style="color:#64748b;">${et}</span><span style="${fuerte ? 'font-weight:800;' : ''}color:#0f172a;text-align:right;">${val}</span></div>`;
+  const resumen = `
+    <div style="display:flex;gap:12px;align-items:center;background:#f9e8ed;border-radius:12px;padding:10px 12px;margin:8px 0;">
+      <div style="flex:0 0 auto;text-align:center;">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.05em;color:${GUINDA};text-transform:uppercase;">Total</div>
+        <div style="font-size:24px;font-weight:900;color:${GUINDA};line-height:1.1;">${dinero(cot.total)}</div>
+        <div style="font-size:10px;color:#64748b;">Vigente hasta ${fechaCorta(cot.fechaVencimiento)}</div>
+      </div>
+      <div style="flex:1;min-width:0;">
+        ${dato('Cliente', escapeHtml(cot.clienteNombre))}
+        ${cot.enganche > 0 ? dato('Enganche', dinero(cot.enganche), true) : ''}
+        ${dato('Saldo a financiar', dinero(cot.saldoFinanciar), true)}
+      </div>
+    </div>`;
+
+  // Artículos: una línea por producto, con foto chica si está en el catálogo.
+  const articulos = cot.articulos.map((a, index) => {
+    const img = imagenDeArticulo(cot, a, index);
+    const foto = img ? `<img src="${escapeHtml(img)}" style="width:38px;height:38px;object-fit:cover;border-radius:7px;border:1px solid #e2e8f0;flex:0 0 auto;" alt="">` : '';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #eef2f7;">
+      ${foto}
+      <div style="flex:1;min-width:0;"><div style="font-size:12.5px;font-weight:700;line-height:1.25;color:#0f172a;">${escapeHtml(a.nombre)}</div>
+      <div style="font-size:11px;color:#64748b;">${a.cantidad} × ${dinero(a.precio)}</div></div>
+      <div style="font-size:12.5px;font-weight:800;color:#0f172a;white-space:nowrap;">${dinero(a.subtotal)}</div>
+    </div>`;
+  }).join('');
+
   const partes = [
     U.cabecera({ empresa, tipo: 'COTIZACIÓN', folio: cot.folio }),
-    U.hero({ etiqueta: 'Total', valor: dinero(cot.total), nota: `Vigente hasta ${fechaCorta(cot.fechaVencimiento)}`, tono: 'azul' }),
-    U.filas([
-      ['Cliente', cot.clienteNombre],
-      ['Fecha', fechaCorta(cot.fecha)],
-      cot.enganche > 0 ? ['Enganche', { texto: dinero(cot.enganche), fuerte: true }] : null,
-      ['Saldo a financiar', { texto: dinero(cot.saldoFinanciar), fuerte: true }]
-    ]),
-    U.seccion('Artículos'),
-    cot.articulos.map(a => U.item({ titulo: a.nombre, izquierda: `${a.cantidad} × ${dinero(a.precio)}`, derecha: dinero(a.subtotal) })).join('')
+    resumen,
+    articulos
   ];
+
+  // Planes: una línea por plazo.
   if (planes.length > 0 && cot.saldoFinanciar > 0) {
-    partes.push(U.seccion(`Plan de crédito · pagos ${cot.periodicidad === 'semanal' ? 'semanales' : cot.periodicidad === 'quincenal' ? 'quincenales' : 'mensuales'}`));
-    partes.push(planes.map((p, i) => U.item({
-      titulo: `${p.meses} ${Number(p.meses) === 1 ? 'mes' : 'meses'}`,
-      detalle: `${p.pagos} pago${p.pagos === 1 ? '' : 's'} de ${dinero(p.abono)} por ${per}` + (cupones[i] > 0 ? ` · 🎟️ +${dinero(cupones[i])} cupón` : ''),
-      marca: p.custom ? 'Personalizado' : '',
-      izquierda: 'Total',
-      derecha: dinero(p.total)
-    })).join(''));
-    partes.push(U.nota({ texto: 'El total no incluye el enganche (ya cubierto aparte).', tono: 'gris' }));
-    if (mejor > 0.01) partes.push(U.nota({ titulo: '🎟️ Cupón de pronto pago. ', texto: `Si liquida dentro de su plazo pactado, recibe hasta ${dinero(mejor)} en cupón de saldo a favor para su próxima compra.`, tono: 'violeta' }));
+    partes.push(`<div style="font-size:10.5px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:${GUINDA};margin:10px 0 3px;">Plan de crédito · pagos ${perPlural}</div>`);
+    partes.push(planes.map((p, i) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #eef2f7;">
+        <div style="min-width:0;">
+          <div style="font-size:12.5px;font-weight:800;color:#0f172a;">${p.meses} ${Number(p.meses) === 1 ? 'mes' : 'meses'}${p.custom ? ' · Personalizado' : ''}</div>
+          <div style="font-size:11px;color:#64748b;">${p.pagos} pago${p.pagos === 1 ? '' : 's'} de <b style="color:${GUINDA};">${dinero(p.abono)}</b> por ${per}${cupones[i] > 0 ? ` · 🎟️ +${dinero(cupones[i])}` : ''}</div>
+        </div>
+        <div style="font-size:11px;color:#64748b;text-align:right;white-space:nowrap;">Total<br><b style="color:#0f172a;font-size:12.5px;">${dinero(p.total)}</b></div>
+      </div>`).join(''));
+    // Notas legales en un solo renglón corto.
+    let nota = cot.enganche > 0 ? 'El total no incluye el enganche.' : '';
+    if (mejor > 0.01) nota += `${nota ? ' ' : ''}🎟️ Si liquida a tiempo recibe hasta ${dinero(mejor)} en cupón para su próxima compra.`;
+    if (nota) partes.push(`<div style="font-size:10.5px;color:#64748b;margin-top:6px;line-height:1.35;">${nota}</div>`);
   }
-  if (cot.notas) partes.push(U.nota({ titulo: 'Notas. ', texto: cot.notas, tono: 'ambar' }));
+  if (cot.notas) partes.push(`<div style="font-size:11px;background:#fffbeb;color:#92400e;border-radius:8px;padding:6px 8px;margin-top:6px;"><b>Notas.</b> ${escapeHtml(cot.notas)}</div>`);
   partes.push(U.pie(`${empresa} · Válido por ${cot.vigenciaDias} días`));
   return U.envolver(partes.join(''), `Cotización ${cot.folio}`);
 }
