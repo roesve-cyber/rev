@@ -4219,6 +4219,28 @@ window.ejecutarAjusteInv = function() {
  
  let p = productos[idx];
 
+ // --- Validacion contra la existencia REAL (variantes por ubicacion) ---
+ // La existencia por ubicacion vive en p.variantes (la misma fuente que usan
+ // Ventas, Compras, Transferencias y Toma Fisica). Antes este ajuste solo
+ // movia p.stock y el cache stockPorUbicacion, asi que la tabla "Control de
+ // existencias" no cambiaba y se podia ajustar dos veces la misma pieza.
+ const variantesAj = Array.isArray(p.variantes) ? p.variantes : [];
+ const ubiClaveAj = _transfInvNormClave(ubi);
+ const usaVariantesAj = variantesAj.length > 0 && ubiClaveAj !== 'STOCK GENERAL';
+ const enUbiAj = v => _transfInvNormClave(v.ubicacion || 'General') === ubiClaveAj;
+ if (tipo === 'salida') {
+ const stockTotalAj = parseFloat(p.stock) || 0;
+ if (usaVariantesAj) {
+ const dispUbiAj = variantesAj.filter(enUbiAj).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ if (cant > dispUbiAj) {
+ return alert(`No se puede aplicar la salida: en "${ubi}" hay ${dispUbiAj} pieza(s) y quieres sacar ${cant}.\n\nRevisa la tabla "Control de existencias" del producto.`);
+ }
+ }
+ if (cant > stockTotalAj) {
+ return alert(`No se puede aplicar la salida: el stock del sistema es ${stockTotalAj} y quieres sacar ${cant}.\n\nSi el Visor muestra "Diferencia por asignar", primero hay que regularizar ese producto.`);
+ }
+ }
+
  // --- NUEVO: RESUMEN Y CONFIRMACION ---
  const tipoAjusteStr = tipo === 'salida' ? 'SALIDA (Resta stock)' : 'ENTRADA (Suma stock)';
  const msjConfAjuste = `RESUMEN DE OPERACION - AJUSTAR INVENTARIO?\n\nProducto: ${p.nombre}\nTipo de Ajuste: ${tipoAjusteStr}\nCantidad: ${cant} pieza(s)\nUbicacion: ${ubi}\nMotivo: ${motivo}\n\nEsta accion modificara tu inventario directamente sin una venta o compra. Estas seguro de continuar?`;
@@ -4236,6 +4258,38 @@ window.ejecutarAjusteInv = function() {
  p.stockPorUbicacion[ubi] = (parseFloat(p.stockPorUbicacion[ubi]) || 0) + cant;
  }
 
+ // Misma operacion sobre la fuente de verdad (p.variantes) y el cache se
+ // recalcula desde ella, igual que Transferencias (_transfInv...) y Toma Fisica.
+ let detalleVariantesAj = null;
+ if (usaVariantesAj) {
+ p.variantes = variantesAj;
+ detalleVariantesAj = [];
+ if (tipo === 'salida') {
+ let restante = cant;
+ for (const v of p.variantes.filter(enUbiAj)) {
+ if (restante <= 0) break;
+ const toma = Math.min(Number(v.stock) || 0, restante);
+ if (toma > 0) {
+ v.stock = (Number(v.stock) || 0) - toma;
+ restante -= toma;
+ detalleVariantesAj.push({ color: v.color || 'General', cantidad: toma });
+ }
+ }
+ p.variantes = p.variantes.filter(v => !(enUbiAj(v) && (Number(v.stock) || 0) <= 0));
+ } else {
+ let destino = p.variantes.find(v => enUbiAj(v) && _transfInvNormClave(v.color || 'General') === 'GENERAL')
+ || p.variantes.find(enUbiAj);
+ if (destino) {
+ destino.stock = (Number(destino.stock) || 0) + cant;
+ } else {
+ destino = { ubicacion: ubi, color: 'General', stock: cant };
+ p.variantes.push(destino);
+ }
+ detalleVariantesAj.push({ color: destino.color || 'General', cantidad: cant });
+ }
+ p.stockPorUbicacion[ubi] = p.variantes.filter(enUbiAj).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ }
+
  const sesion = _invSesionActiva() || {};
  const movs = StorageService.get("movimientosInventario", []);
  const referenciaAjuste = `AJUSTE-${Date.now()}`;
@@ -4250,6 +4304,7 @@ window.ejecutarAjusteInv = function() {
  motivo: motivo,
  origen: 'ajusteInventario',
  referencia: referenciaAjuste,
+ ...(detalleVariantesAj ? { detalleVariantes: detalleVariantesAj } : {}),
  usuario: sesion.nombre || sesion.usuario || 'Admin',
  rol: sesion.rol || ''
  });
@@ -4280,6 +4335,122 @@ window.ejecutarAjusteInv = function() {
  if (typeof renderInventario === 'function') renderInventario();
  if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
  if (typeof mostrarDetalleProductoMaestro === 'function' && window._visorProductoIdActual) mostrarDetalleProductoMaestro(window._visorProductoIdActual);
+};
+
+// =========================================================
+// REPARACION: ajuste duplicado hecho antes de que el ajuste actualizara
+// p.variantes. Solo administrador, se corre desde la consola:
+//   repararAjusteDuplicadoInv('AJUSTE-<duplicado>', 'AJUSTE-<valido>')
+// - NO modifica ni borra el movimiento duplicado (historial intacto): lo
+// compensa con un Ingreso (Sobrante/Ajuste) de la misma cantidad, que en
+// Estados Financieros resta de las mermas (finanzas-estados.js).
+// - Descuenta de p.variantes la pieza del ajuste valido (que nunca se
+// habia descontado de la existencia por ubicacion) y recalcula el cache.
+// - Es idempotente: si ya existe REVERSA-<duplicado> no hace nada.
+// =========================================================
+window.repararAjusteDuplicadoInv = function(refDuplicado, refValido) {
+ if (!_invRequireAdmin('Reparar ajuste duplicado de inventario')) return;
+ if (!refDuplicado || !refValido) return alert('Indica la referencia del ajuste duplicado y la del ajuste valido (ej. AJUSTE-1793286541506).');
+
+ const movs = StorageService.get('movimientosInventario', []);
+ const dup = movs.find(m => m.referencia === refDuplicado && m.origen === 'ajusteInventario');
+ const val = movs.find(m => m.referencia === refValido && m.origen === 'ajusteInventario');
+ if (!dup || !val) return alert('No encontre uno de los dos ajustes en el Kardex. Revisa las referencias.');
+ if (movs.some(m => m.reversaDe === refDuplicado)) return alert(`El ajuste ${refDuplicado} ya fue reparado antes. No se hace nada.`);
+ const esEgreso = m => /egreso/i.test(String(m.tipo || ''));
+ if (!esEgreso(dup) || !esEgreso(val)) return alert('Los dos ajustes deben ser Egreso (Merma/Ajuste).');
+ if (String(dup.productoId) !== String(val.productoId)) return alert('Los dos ajustes son de productos distintos.');
+ if (_transfInvNormClave(dup.ubicacion) !== _transfInvNormClave(val.ubicacion)) return alert('Los dos ajustes son de ubicaciones distintas.');
+
+ const productos = StorageService.get('productos', []);
+ const idx = productos.findIndex(p => String(p.id) === String(dup.productoId));
+ if (idx === -1) return alert('Producto no encontrado.');
+ const p = productos[idx];
+ const ubiClave = _transfInvNormClave(dup.ubicacion);
+ const enUbi = v => _transfInvNormClave(v.ubicacion || 'General') === ubiClave;
+ const variantes = Array.isArray(p.variantes) ? p.variantes : [];
+ const cantDup = Number(dup.cantidad) || 0;
+ const cantVal = Number(val.cantidad) || 0;
+ const dispUbi = variantes.filter(enUbi).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ if (dispUbi < cantVal) return alert(`En "${dup.ubicacion}" solo hay ${dispUbi} pieza(s) en variantes y el ajuste valido es de ${cantVal}. No hay nada que regularizar: revisa el producto a mano.`);
+
+ const stockAntes = parseFloat(p.stock) || 0;
+ const asignadoAntes = variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ const stockDespues = stockAntes + cantDup;
+ const asignadoDespues = asignadoAntes - cantVal;
+ if (!confirm(`REPARAR AJUSTE DUPLICADO\n\nProducto: ${p.nombre}\nUbicacion: ${dup.ubicacion}\nDuplicado: ${refDuplicado} (-${cantDup})\nValido: ${refValido} (-${cantVal})\n\nStock sistema: ${stockAntes} -> ${stockDespues}\nAsignado en variantes: ${asignadoAntes} -> ${asignadoDespues}\n\nSe registra un Ingreso (Sobrante/Ajuste) que compensa el duplicado. El historial no se borra. Continuar?`)) return;
+
+ p.stockPorUbicacion = p.stockPorUbicacion || {};
+ p.stock = stockDespues;
+ let restante = cantVal;
+ for (const v of variantes.filter(enUbi)) {
+ if (restante <= 0) break;
+ const toma = Math.min(Number(v.stock) || 0, restante);
+ if (toma > 0) { v.stock = (Number(v.stock) || 0) - toma; restante -= toma; }
+ }
+ p.variantes = variantes.filter(v => !(enUbi(v) && (Number(v.stock) || 0) <= 0));
+ p.stockPorUbicacion[dup.ubicacion] = p.variantes.filter(enUbi).reduce((s, v) => s + (Number(v.stock) || 0), 0);
+
+ const sesion = _invSesionActiva() || {};
+ movs.push({
+ id: Date.now(),
+ fecha: window.localISO(new Date()),
+ tipo: 'Ingreso (Sobrante/Ajuste)',
+ productoId: p.id,
+ productoNombre: p.nombre,
+ cantidad: cantDup,
+ ubicacion: dup.ubicacion,
+ motivo: `Reversa del ajuste duplicado ${refDuplicado}. El ajuste valido es ${refValido}; se corrigio la existencia por ubicacion.`,
+ origen: 'ajusteInventario',
+ referencia: `REVERSA-${refDuplicado}`,
+ reversaDe: refDuplicado,
+ usuario: sesion.nombre || sesion.usuario || 'Admin',
+ rol: sesion.rol || ''
+ });
+
+ productos[idx] = p;
+ StorageService.set('productos', productos);
+ StorageService.set('movimientosInventario', movs);
+ window.productos = productos;
+ window.movimientosInventario = movs;
+ window.AuditService?.log?.({
+ accion: 'INVENTARIO_REPARA_AJUSTE_DUPLICADO',
+ modulo: 'Inventario',
+ entidad: p.nombre,
+ entidadId: p.id,
+ detalle: `Reversa de ${refDuplicado} (+${cantDup}) y regularizacion de variantes por ${refValido} (-${cantVal}) en ${dup.ubicacion}.`,
+ datos: { productoId: p.id, refDuplicado, refValido, stockAntes, stockDespues, asignadoAntes, asignadoDespues, ubicacion: dup.ubicacion }
+ });
+
+ alert('Reparacion aplicada.');
+ if (typeof renderInventario === 'function') renderInventario();
+ if (typeof renderConsultaInventario === 'function') renderConsultaInventario();
+ if (typeof mostrarDetalleProductoMaestro === 'function' && window._visorProductoIdActual) mostrarDetalleProductoMaestro(window._visorProductoIdActual);
+};
+
+// Solo lectura: lista productos con ajustes cuyo stock del sistema no coincide
+// con lo asignado en variantes (mismo caso que "Diferencia por asignar" del Visor).
+window.diagnosticarAjustesInv = function() {
+ const productos = StorageService.get('productos', []);
+ const movs = StorageService.get('movimientosInventario', []);
+ const conAjuste = new Set(movs.filter(m => m.origen === 'ajusteInventario').map(m => String(m.productoId)));
+ const filas = productos
+ .filter(p => conAjuste.has(String(p.id)) && Array.isArray(p.variantes) && p.variantes.length > 0)
+ .map(p => {
+ const stock = parseFloat(p.stock) || 0;
+ const asignado = p.variantes.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+ return {
+ producto: p.nombre,
+ stockSistema: stock,
+ asignadoVariantes: asignado,
+ diferencia: stock - asignado,
+ ajustes: movs.filter(m => m.origen === 'ajusteInventario' && String(m.productoId) === String(p.id))
+ .map(m => `${m.referencia} ${String(m.tipo).split(' ')[0]} ${m.cantidad} ${m.ubicacion || ''}`).join(' | ')
+ };
+ })
+ .filter(f => f.diferencia !== 0);
+ console.table(filas);
+ return filas;
 };
 
 // =========================================================
