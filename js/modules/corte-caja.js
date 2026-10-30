@@ -1232,6 +1232,17 @@
         imprimirCorteGuardado(corte.folio);
     };
 
+    // Tras corregir un corte guardado (agregar/sacar movimientos), su saldo final cambia.
+    // Si es el ultimo corte de la cuenta, ese saldo final ES el saldo inicial vigente del
+    // siguiente corte (se fijo al guardar), asi que hay que actualizarlo tambien.
+    function propagarSaldoFinalCorteCorregido(corte) {
+        const cuentaId = corte && corte.cuentaId;
+        if (!cuentaId || cuentaId === 'todas') return;
+        const ultimo = obtenerUltimoCorteGuardado(cuentaId);
+        if (!ultimo || String(ultimo.folio) !== String(corte.folio)) return;
+        persistirSaldoInicialManual(cuentaId, Number(corte.saldoFinalSistema || 0));
+    }
+
     function recalcularCorteGuardado(corte) {
         const movimientos = Array.isArray(corte.movimientos) ? corte.movimientos : [];
         const ingresos = movimientos
@@ -1254,7 +1265,8 @@
 
         corte.ingresos = Number(ingresos.toFixed(2));
         corte.egresos = Number(egresos.toFixed(2));
-        corte.saldoFinalSistema = Number((ingresos - egresos).toFixed(2));
+        // Saldo Inicial + Ingresos - Egresos (antes omitía el saldo inicial al reconstruir el corte guardado)
+        corte.saldoFinalSistema = Number((Number(corte.saldoInicial || 0) + ingresos - egresos).toFixed(2));
         corte.movimientosMarcados = movimientos.length;
         corte.movimientosDisponibles = Math.max(Number(corte.movimientosDisponibles || 0), movimientos.length);
         corte.movimientosExcluidos = Math.max(0, Number(corte.movimientosDisponibles) - movimientos.length);
@@ -1436,6 +1448,7 @@
                 movimientos: elegidos.map(m => ({ corteId: m._corteId, referencia: m.referencia || '', monto: m._monto, tipo: m._tipo }))
             });
             cortes[idxCorte] = recalcularCorteGuardado(corte);
+        propagarSaldoFinalCorteCorregido(cortes[idxCorte]);
             StorageService.set('cortesCaja', cortes);
             window.AuditService?.log?.({
                 accion: 'MOVIMIENTOS_AGREGADOS_A_CORTE',
@@ -1488,6 +1501,7 @@
         const retirado = movimientos.splice(idx, 1)[0];
         corte.movimientos = movimientos;
         cortes[idxCorte] = recalcularCorteGuardado(corte);
+        propagarSaldoFinalCorteCorregido(cortes[idxCorte]);
         StorageService.set('cortesCaja', cortes);
 
         window.AuditService?.log?.({
@@ -1522,6 +1536,7 @@
         });
         if (!retirados.length) return alert('No se encontraron esas referencias en el corte.');
         cortes[idxCorte] = recalcularCorteGuardado(corte);
+        propagarSaldoFinalCorteCorregido(cortes[idxCorte]);
         StorageService.set('cortesCaja', cortes);
         alert(`Se retiraron ${retirados.length} movimiento(s) del corte ${folio}.`);
         abrirDetalleCorteCaja(folio);
