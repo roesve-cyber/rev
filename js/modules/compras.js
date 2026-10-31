@@ -5553,10 +5553,133 @@ function _consigProductoRows(folio) {
                 ${Number(c.cantidadPendiente) > 0 ? `<button onclick="marcarConsignacionVendida('${String(c.id).replace(/'/g, "\\'")}')" style="width:100%; padding:8px 12px;background:#059669;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">Reportar venta</button>` : ''}
                 ${Number(c.cantidadPendiente) > 0 ? `<button onclick="liquidarConsignacionComoPropia('${String(c.id).replace(/'/g, "\\'")}')" style="width:100%; margin-top:6px; padding:8px 12px;background:#0f172a;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1);">🏠 Ya es mía</button>` : ''}
                 ${btnPago}
+                ${(typeof window.esAdmin === 'function' && window.esAdmin()) ? `<button onclick="corregirCostoConsignacion('${String(c.id).replace(/'/g, "\\'")}')" title="Corregir el costo por pieza de este producto" style="width:100%; margin-top:6px; padding:7px 12px;background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:7px;font-weight:bold;cursor:pointer;">✏️ Corregir costo</button>` : ''}
             </td>
         </tr>`;
     }).join('');
 }
+
+// ===== CORREGIR COSTO POR PIEZA DE UNA CONSIGNACION YA REGISTRADA =====
+// Para cuando se capturó mal el costo de un producto de la consignacion. Corrige, en un solo paso
+// y de forma consistente:
+//   1) la linea de consignacion (costoUnitario y total) -- de ahi salen el saldo con el proveedor,
+//      las devoluciones y el inventario pendiente;
+//   2) cada venta ya reportada de esa linea: su cuenta por pagar (total, articulo, saldo) y el
+//      registro de la venta reportada;
+//   3) el anticipo aplicado a esas ventas: si el nuevo total es menor, la parte de anticipo que
+//      sobraba se libera (vuelve a quedar disponible); si es mayor, la diferencia queda por pagar.
+// NO toca: pagos reales ya hechos desde caja/banco (si el nuevo total quedara por debajo de lo ya
+// pagado en efectivo, se detiene y avisa), stock, ni el costo/precio del producto en el catalogo.
+window.corregirCostoConsignacion = function(idConsig) {
+    if (!_comprasRequireAdmin('Corregir costo de consignacion')) return;
+    const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+    const consigArr = StorageService.get("consignacionesActivas", []) || [];
+    const idx = consigArr.findIndex(c => String(c.id) === String(idConsig));
+    if (idx === -1) return alert("❌ No encontré esa consignación.");
+    const c = consigArr[idx];
+    const costoViejo = r2(c.costoUnitario);
+    const cantTotal = Number(c.cantidadTotal || 0);
+
+    const entrada = prompt(
+        `✏️ Corregir costo de "${c.producto}"\n\n` +
+        `Costo actual por pieza: ${dinero(costoViejo)}\nPiezas en la consignación: ${cantTotal}\n\n` +
+        `Escribe el costo CORRECTO por pieza:`, String(costoViejo));
+    if (entrada === null) return;
+    const costoNuevo = r2(parseFloat(String(entrada).replace(/[$,\s]/g, '')));
+    if (!Number.isFinite(costoNuevo) || costoNuevo < 0) return alert("❌ Costo inválido.");
+    if (Math.abs(costoNuevo - costoViejo) < 0.005) return alert("El costo es el mismo que ya tiene; no hay nada que corregir.");
+
+    const cxps = StorageService.get("cuentasPorPagar", []) || [];
+    const ventas = _comprasAsegurarArray(c.ventasReportadas);
+    const cambios = [];
+    for (const v of ventas) {
+        const cxp = cxps.find(x => x?.origenConsignacion && String(x.consignacionId || '') === String(c.id) && String(x.folioOrigen || '') === String(v.folioReporte || ''));
+        if (!cxp) return alert(`❌ No encontré la cuenta por pagar de la venta reportada ${v.folioReporte || ''}. No se cambió nada.`);
+        const cant = Number(v.cantidad || 0);
+        const totalViejo = r2(cxp.total ?? cxp.monto ?? cant * costoViejo);
+        const totalNuevo = r2(cant * costoNuevo);
+        const abonos = _comprasAsegurarArray(cxp.abonos);
+        const antMonto = r2(abonos.filter(_consigEsAnticipoAplicado).reduce((a, x) => a + Number(x.monto || 0), 0));
+        const real = r2(abonos.filter(a => !_consigEsAnticipoAplicado(a)).reduce((a, x) => a + Number(x.monto || 0), 0));
+        if (real > totalNuevo + 0.01) {
+            return alert(`❌ No se puede aplicar: la venta ${v.folioReporte || ''} ya tiene ${dinero(real)} pagados desde caja/banco y con el costo nuevo valdría ${dinero(totalNuevo)}.\n\nCorrige primero ese pago y vuelve a intentar. No se cambió nada.`);
+        }
+        const antNuevo = Math.min(antMonto, Math.max(0, totalNuevo - real));
+        cambios.push({ v, cxp, cant, totalViejo, totalNuevo, liberado: r2(antMonto - antNuevo), antNuevo: r2(antNuevo), real, saldoNuevo: r2(Math.max(0, totalNuevo - real - antNuevo)), saldoViejo: r2(cxp.saldoPendiente ?? cxp.saldo ?? 0) });
+    }
+
+    const totalLineaNuevo = r2(cantTotal * costoNuevo);
+    const diffLinea = r2(totalLineaNuevo - _consigImporte(c));
+    const lineas = [
+        `Producto: ${c.producto}`,
+        `Costo por pieza: ${dinero(costoViejo)} → ${dinero(costoNuevo)}`,
+        `Importe de la línea: ${dinero(_consigImporte(c))} → ${dinero(totalLineaNuevo)} (${diffLinea >= 0 ? '+' : ''}${dinero(diffLinea)})`
+    ];
+    cambios.forEach(x => {
+        lineas.push(`\nVenta ${x.v.folioReporte || ''} (${x.cant} pza): ${dinero(x.totalViejo)} → ${dinero(x.totalNuevo)}`);
+        if (x.liberado > 0.01) lineas.push(`  • Se libera ${dinero(x.liberado)} del anticipo aplicado (vuelve a quedar disponible)`);
+        lineas.push(`  • Saldo por pagar de esa venta: ${dinero(x.saldoViejo)} → ${dinero(x.saldoNuevo)}`);
+    });
+    if (Number(c.cantidadDevuelta || 0) > 0) lineas.push(`\n⚠️ Esta línea ya tiene ${c.cantidadDevuelta} pza devueltas; esas se recalculan al costo nuevo en los reportes.`);
+    lineas.push('\nNo cambia el stock ni el costo/precio del producto en el catálogo.');
+    if (!confirm(lineas.join('\n') + '\n\n¿Aplicar la corrección?')) return;
+
+    // --- aplicar ---
+    const fechaIso = window.localISO ? window.localISO(new Date()) : new Date().toISOString();
+    let deltaVendido = 0, deltaTransferido = 0, totalLiberado = 0;
+    cambios.forEach(x => {
+        const { v, cxp } = x;
+        let porQuitar = x.liberado;
+        const abonosNuevos = [..._comprasAsegurarArray(cxp.abonos)];
+        for (let i = abonosNuevos.length - 1; i >= 0 && porQuitar > 0.005; i--) {
+            const a = abonosNuevos[i];
+            if (!_consigEsAnticipoAplicado(a)) continue;
+            const m = Number(a.monto || 0);
+            const quita = Math.min(m, porQuitar);
+            porQuitar = r2(porQuitar - quita);
+            const resto = r2(m - quita);
+            if (resto <= 0.005) abonosNuevos.splice(i, 1);
+            else abonosNuevos[i] = { ...a, monto: resto, nota: `${a.nota || ''} (ajustado por corrección de costo)`.trim() };
+        }
+        const estabaLiquidada = _consigCxpLiquidada(cxp);
+        cxp.abonos = abonosNuevos;
+        cxp.total = x.totalNuevo; cxp.monto = x.totalNuevo; cxp.subtotal = x.totalNuevo;
+        if (Array.isArray(cxp.articulos) && cxp.articulos[0]) { cxp.articulos[0].costo = costoNuevo; cxp.articulos[0].subtotal = x.totalNuevo; }
+        cxp.saldoPendiente = x.saldoNuevo; cxp.saldo = x.saldoNuevo;
+        if (x.saldoNuevo <= 0.01) { cxp.estatus = "Liquidado"; cxp.estado = "Liquidado"; cxp.liquidado = true; cxp.pagado = true; }
+        else if (estabaLiquidada) { cxp.estatus = "Pendiente"; cxp.estado = "Pendiente"; cxp.liquidado = false; cxp.pagado = false; }
+
+        const dTotal = r2(x.totalNuevo - x.totalViejo);
+        v.montoTotal = x.totalNuevo;
+        v.anticipoUsado = Math.max(0, r2(Number(v.anticipoUsado || 0) - x.liberado));
+        v.montoEnviadoCxP = Math.max(0, r2(Number(v.montoEnviadoCxP || 0) + dTotal + x.liberado));
+        deltaVendido += dTotal;
+        deltaTransferido += r2(dTotal + x.liberado);
+        totalLiberado += x.liberado;
+    });
+
+    c.costoUnitario = costoNuevo;
+    c.total = totalLineaNuevo;
+    c.montoVendidoReportado = Math.max(0, r2(Number(c.montoVendidoReportado || 0) + deltaVendido));
+    c.montoAbonosAplicados = Math.max(0, r2(Number(c.montoAbonosAplicados || 0) - totalLiberado));
+    c.montoTransferido = Math.max(0, r2(Number(c.montoTransferido || 0) + deltaTransferido));
+    c.correccionesCosto = _comprasAsegurarArray(c.correccionesCosto);
+    c.correccionesCosto.push({ fecha: fechaIso, costoAnterior: costoViejo, costoNuevo, anticipoLiberado: r2(totalLiberado) });
+
+    StorageService.set("cuentasPorPagar", cxps);
+    StorageService.set("consignacionesActivas", consigArr);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'CORRECCION_COSTO_CONSIGNACION', modulo: 'Consignaciones', entidad: 'consignacion', entidadId: c.id,
+            detalle: `${c.producto || 'producto'}: costo por pieza ${dinero(costoViejo)} -> ${dinero(costoNuevo)}`,
+            monto: Math.abs(diffLinea), severidad: 'riesgo',
+            datos: { proveedor: c.proveedor, folioOrigen: c.folioOrigen || '', costoAnterior: costoViejo, costoNuevo, diferenciaLinea: diffLinea, anticipoLiberado: r2(totalLiberado), ventasAjustadas: cambios.map(x => x.v.folioReporte || '') }
+        });
+    }
+    alert(`✅ Costo corregido: ${dinero(costoViejo)} → ${dinero(costoNuevo)} por pieza.` + (totalLiberado > 0.01 ? `\n\nSe liberaron ${dinero(totalLiberado)} de anticipo.` : ''));
+    if (typeof renderCuentasPorPagar === 'function') { try { renderCuentasPorPagar(); } catch (e) {} }
+    if (typeof abrirGestorConsignaciones === 'function') abrirGestorConsignaciones();
+};
 
 // ===== LIQUIDAR PIEZA DE CONSIGNACION COMO INVENTARIO PROPIO =====
 // Para cuando ya se le pagó/liquidó al proveedor (fuera del flujo de "Reportar venta")
