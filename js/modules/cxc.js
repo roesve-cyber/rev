@@ -1365,7 +1365,9 @@ function renderCuentasXCobrar(filtroCliente = "") {
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteCobranza")?.value || "").trim().toLowerCase();
     
-    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c) && !_cxcEsIncobrable(c));
+    // Las incobrables no estorban en la lista normal de cobranza, pero SÍ aparecen cuando se busca
+    // un cliente/folio: así se les puede registrar un abono (al aplicarse, la cuenta sale de incobrable).
+    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c) && (!!filtroCliente || !_cxcEsIncobrable(c)));
 
     if (cuentas.length === 0) {
         contenedor.innerHTML = `<div style="background:#f0fdf4; padding:40px; text-align:center; border-radius:10px;"><p style="font-size:18px; color:#27ae60; font-weight:bold;">✅ ¡No hay cuentas registradas!</p></div>`;
@@ -1392,6 +1394,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
         if(!estadoCta) return;
         if (estadoCta.estadoGeneral === "Saldado") return;
 
+        const esIncob = _cxcEsIncobrable(c);
         let mostrar = false;
         switch (window._pestanaCobranzaActiva) {
             case 'todas': mostrar = estadoCta.estadoGeneral !== "Saldado"; break;
@@ -1400,9 +1403,10 @@ function renderCuentasXCobrar(filtroCliente = "") {
             case 'promesas': mostrar = estadoCta.estadoGeneral === "Promesa"; break;
         }
 
+        if (esIncob) mostrar = true; // solo llega aquí si hay búsqueda por cliente/folio
         if (!mostrar) return;
         const filtroEstado = document.getElementById("filtroEstadoCobranza")?.value || "";
-        if (filtroEstado && estadoCta.estadoGeneral !== filtroEstado) return;
+        if (filtroEstado && (esIncob || estadoCta.estadoGeneral !== filtroEstado)) return;
         const nombreCliente = _cxcNombreClienteVigente(c);
         const stringBusqueda = `${nombreCliente} ${c.folio || ''}`.toLowerCase();
         if (filtroCliente && !stringBusqueda.includes(filtroCliente)) return;
@@ -1415,7 +1419,7 @@ function renderCuentasXCobrar(filtroCliente = "") {
             : (moratorio?.aplica ? `<br><small style="color:#b45309; font-weight:800;">Moratorio sugerido: ${_cxcDinero(moratorio.montoSugerido)}</small>` : '');
 
         htmlTabla += `<tr>
-            <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong><br><small style="color:#94a3b8;">${c.folio}</small></td>
+            <td><strong>${nombreCliente}${window.CxcNotas ? window.CxcNotas.badgeHtml(c.folio) : ''}</strong>${esIncob ? ' <span title="Al aplicarle un abono vuelve a cobranza normal" style="display:inline-block;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:800;">⛔ INCOBRABLE</span>' : ''}<br><small style="color:#94a3b8;">${c.folio}</small></td>
             <td style="max-width:220px;">${window.resumenProductosVenta(c.articulos)}</td>
             <td>${c.fechaVenta ? _cxcFechaVista(c.fechaVenta) : '-'}</td>
             <td>${_cxcDinero(c.totalContadoOriginal ?? 0)}</td>
@@ -1439,7 +1443,8 @@ function renderAbonosDirectos(filtroCliente = "") {
     if (!contenedor) return;
 
     filtroCliente = (filtroCliente || document.getElementById("filtroClienteAbonoDirecto")?.value || "").trim().toLowerCase();
-    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c) && !_cxcEsIncobrable(c));
+    // Igual que en cobranza: las incobrables salen al buscar un cliente/folio para poder abonarles.
+    const cuentas = StorageService.get("cuentasPorCobrar", []).filter(c => !_cxcCuentaCancelada(c) && (!!filtroCliente || !_cxcEsIncobrable(c)));
     const filas = cuentas
         .map(cuenta => ({ cuenta, estado: window._calcularEstadoCuenta(cuenta.folio) }))
         .filter(x => x.estado && x.estado.saldoTotal > 0.01)
@@ -1450,7 +1455,7 @@ function renderAbonosDirectos(filtroCliente = "") {
         .sort((a, b) => _cxcNombreClienteVigente(a.cuenta).localeCompare(_cxcNombreClienteVigente(b.cuenta), 'es'));
 
     contenedor.innerHTML = `
-        ${filas.length === 0 ? `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b; margin-bottom:16px;">Sin cuentas con saldo para abono directo.</div>` : `
+        ${filas.length === 0 ? `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b; margin-bottom:16px;">Sin cuentas con saldo para abono directo.${filtroCliente ? '' : '<br><small>Las cuentas incobrables aparecen al buscar por cliente o folio.</small>'}</div>` : `
         <div style="overflow-x:auto; background:white; border:1px solid #e5e7eb; border-radius:10px; margin-bottom:18px;">
             <table class="tabla-admin" style="margin:0;">
                 <thead>
@@ -1464,6 +1469,7 @@ function renderAbonosDirectos(filtroCliente = "") {
                 </thead>
                 <tbody>
                     ${filas.map(({ cuenta, estado }) => {
+                        const esIncob = _cxcEsIncobrable(cuenta);
                         const moratorio = _cxcEvaluarMoratorio(cuenta, estado);
                         const avisoMoratorio = estado.saldoMoratorios > 0.01
                             ? `<br><small style="display:inline-block; margin-top:4px; color:#7f1d1d; font-weight:800;">Moratorios pendientes: ${_cxcDinero(estado.saldoMoratorios)}</small>`
@@ -1473,15 +1479,15 @@ function renderAbonosDirectos(filtroCliente = "") {
                                     <button onclick="exentarMoratorio('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#64748b; color:white; font-weight:bold; cursor:pointer;">Exentar</button>` : '';
                         return `
                         <tr>
-                            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong><br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
+                            <td><strong>${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</strong>${esIncob ? ' <span title="Al aplicarle un abono vuelve a cobranza normal" style="display:inline-block;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:800;">⛔ INCOBRABLE</span>' : ''}<br><small style="color:#64748b;">${_cxcEscHTML(cuenta.folio)}</small></td>
                             <td style="font-weight:800; color:#dc2626;">${_cxcDinero(estado.saldoTotal)}${avisoMoratorio}</td>
                             <td>${estado.pagaresPendientes.length} pendiente(s)</td>
-                            <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2'}; color:${estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b'}; font-weight:bold; font-size:12px;">${_cxcEscHTML(estado.estadoGeneral)}</span></td>
+                            <td><span style="display:inline-block; padding:4px 9px; border-radius:999px; background:${esIncob ? '#fee2e2' : (estado.estadoGeneral === 'Al corriente' ? '#dcfce7' : '#fee2e2')}; color:${esIncob ? '#991b1b' : (estado.estadoGeneral === 'Al corriente' ? '#166534' : '#991b1b')}; font-weight:bold; font-size:12px;">${esIncob ? 'Incobrable' : _cxcEscHTML(estado.estadoGeneral)}</span></td>
                             <td style="text-align:right;">
                                 <div style="display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;">
-                                    ${accionesMoratorio}
-                                    <button onclick="abrirModalPromesaPago('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#f59e0b; color:white; font-weight:bold; cursor:pointer;" title="Registrar promesa de pago">📝 Promesa</button>
-                                    <button onclick="enviarRecordatorioWhatsApp('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#25D366; color:white; font-weight:bold; cursor:pointer;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>
+                                    ${esIncob ? '' : accionesMoratorio}
+                                    ${esIncob ? '' : `<button onclick="abrirModalPromesaPago('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#f59e0b; color:white; font-weight:bold; cursor:pointer;" title="Registrar promesa de pago">📝 Promesa</button>
+                                    <button onclick="enviarRecordatorioWhatsApp('${_cxcEscHTML(cuenta.folio)}')" style="padding:9px 13px; border:none; border-radius:7px; background:#25D366; color:white; font-weight:bold; cursor:pointer;" title="Enviar recordatorio por WhatsApp">💬 WhatsApp</button>`}
                                     <button onclick="abrirModalAbonoAvanzado('${_cxcEscHTML(cuenta.folio)}', { modo: (typeof _esAdmin === 'function' && _esAdmin()) ? 'directo' : 'pendiente' })" style="padding:9px 13px; border:none; border-radius:7px; background:#0f766e; color:white; font-weight:bold; cursor:pointer;">${(typeof _esAdmin === 'function' && _esAdmin()) ? 'Aplicar' : 'Registrar'}</button>
                                 </div>
                             </td>
@@ -2667,6 +2673,18 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
             cuentaAct.abonos.push({ idOperacion: _idOperacionAbono || null, fecha: a.fechaAbonoStr, fechaAbonoIso: a.fechaAbonoIso, monto: a.montoAbonado, cuentaId: a.cuentaId, medioPago: a.medioPago, etiquetaCuenta: a.etiquetaCuenta, referenciaBancaria: a.referenciaBancaria || '', grupoConciliacion: a.grupoConciliacion || '', vendedorId: a.vendedorId || null, cuponEmitidoId: a.cuponEmitidoId || null });
             _cxcAplicarPagoAMoratorios(cuentaAct, montoRestante);
 
+            // ⛔➡️✅ Un abono aplicado saca la cuenta de "incobrable": vuelve a cobranza normal
+            // (proyecciones, moratorios, recordatorios). Pasa por aquí tanto el abono directo del
+            // admin como el que se autoriza desde la Bóveda, así que cubre a todos los flujos.
+            let infoIncobrable = null;
+            if (cuentaAct.incobrable === true) {
+                infoIncobrable = { motivo: cuentaAct.incobrableMotivo || '', fecha: cuentaAct.incobrableFecha || null, por: cuentaAct.incobrablePor || '' };
+                delete cuentaAct.incobrable;
+                delete cuentaAct.incobrableFecha;
+                delete cuentaAct.incobrableMotivo;
+                delete cuentaAct.incobrablePor;
+            }
+
             // Saldo pendiente tras esta escritura: pagarés que sigan
             // pendientes/parciales DESPUÉS de aplicar los cambios de arriba,
             // más los pagarés del folio que ya venían así y no se tocaron.
@@ -2683,7 +2701,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 
             return {
                 escrituras: [{ tabla: 'cuentasPorCobrar', clave: a.folioCXC, data: cuentaAct }, ...pagaresEscritura],
-                resultado: { yaAplicado: false, cuentaAct }
+                resultado: { yaAplicado: false, cuentaAct, reactivadaDeIncobrable: !!infoIncobrable, infoIncobrable }
             };
         });
     } catch (e) {
@@ -2720,6 +2738,21 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
         return false;
     }
 
+    if (resultadoTx.reactivadaDeIncobrable) {
+        const _inf = resultadoTx.infoIncobrable || {};
+        if (window.AuditService?.log) {
+            window.AuditService.log({
+                accion: 'INCOBRABLE_REVERTIDO', modulo: 'CxC', entidad: 'cuenta', entidadId: a.folioCXC,
+                detalle: `Cuenta ${a.folioCXC} salió de incobrable al aplicarse un abono de ${_cxcDinero(a.montoAbonado)}.`,
+                severidad: 'info', datos: { motivoOriginal: _inf.motivo, marcadaEl: _inf.fecha, marcadaPor: _inf.por, idOperacion: _idOperacionAbono, monto: a.montoAbonado }
+            });
+        }
+        ['renderCuentasIncobrables', 'renderCuentasXCobrar', 'renderAbonosDirectos'].forEach(fn => {
+            try { if (typeof window[fn] === 'function') window[fn](); } catch (e) {}
+        });
+        alert(`ℹ️ La cuenta ${a.folioCXC} estaba marcada como incobrable.\nCon este abono volvió a cobranza normal.`);
+    }
+
     if (typeof window.registrarComisionAbono === 'function' && a.vendedorId) {
         // 📥 Comisión por abono (vendedores.js): tabla propia, aparte de la comisión de venta.
         window.registrarComisionAbono(a.folioCXC, a.montoAbonado, a.vendedorId, {
@@ -2734,7 +2767,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
     // registro huérfano si el abono se llega a rechazar en la Bóveda.
     if (a.liquidacionPorPolitica && Number(a.montoCondonadoPolitica || 0) > 0.01) {
         _cxcRegistrarCondonacionPolitica(
-            resultadoTx.resultado?.cuentaAct || { clienteId: null, clienteNombre: a.clienteNombre },
+            resultadoTx.cuentaAct || resultadoTx.resultado?.cuentaAct || { clienteId: null, clienteNombre: a.clienteNombre },
             a.folioCXC,
             a.montoCondonadoPolitica,
             a.motivoCondonacionPolitica,
