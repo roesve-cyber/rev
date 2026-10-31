@@ -415,7 +415,12 @@ let _categoriasLista = [];
 let vistaActual = 'articulos';
 // 🔒 Mismo criterio que _esAdmin() del sistema principal (rol === 'admin').
 // Solo un administrador puede cotizar productos que no están en el catálogo.
-function esAdmin() { return !!(sesion && sesion.rol === 'admin'); }
+// Acepta las mismas variantes de rol que las reglas de Firestore (admin / Admin /
+// administrador...), para que un perfil guardado con otra mayúscula no pierda el acceso.
+function esAdmin() {
+  const rol = String((sesion && sesion.rol) || '').trim().toLowerCase();
+  return rol === 'admin' || rol === 'administrador';
+}
 
 // ============================================================================
 // FECHA / MONEDA — mismas reglas que el resto del sistema (America/Mexico_City,
@@ -671,7 +676,9 @@ function cerrarSesionApp() {
 function actualizarUIRol() {
   const admin = esAdmin();
   document.getElementById('btnLibreAdmin').classList.toggle('oculto', !admin);
-  document.getElementById('avisoLibreBloqueado').classList.toggle('oculto', admin);
+  const aviso = document.getElementById('avisoLibreBloqueado');
+  aviso.classList.toggle('oculto', admin);
+  if (!admin) aviso.textContent = '🔒 Cotizar productos fuera del catálogo solo lo puede hacer un administrador. Tu sesión actual es «' + ((sesion && sesion.rol) || 'sin rol') + '».';
 }
 
 // ============================================================================
