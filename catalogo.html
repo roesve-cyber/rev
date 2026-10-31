@@ -2,8 +2,13 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Catalogo | Muebleria Mi Pueblito</title>
+<meta name="description" content="Catálogo de Mueblería Mi Pueblito: precios de contado y planes de abono.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="es_MX">
+<meta property="og:title" content="Catálogo | Mueblería Mi Pueblito">
+<meta property="og:description" content="Muebles con precio de contado y planes de abono. Mira el catálogo.">
 <link rel="icon" type="image/svg+xml" href="img/icon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="img/icon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="img/icon-180.png">
@@ -1007,6 +1012,144 @@ img { display: block; }
 .color-chip.active { border-color: var(--brand); background: rgba(14, 143, 111, 0.08); }
 .color-note { margin-top: 8px; font-size: 12px; color: var(--muted); font-weight: 600; line-height: 1.4; }
 .modal-media.recoloring img { opacity: 0.55; transition: opacity 0.15s ease; }
+
+/* ====== Cupones, compartir y ajustes para celular (v2) ====== */
+.modal-scroll { display: contents; }
+html { -webkit-text-size-adjust: 100%; }
+button, a, input, select { -webkit-tap-highlight-color: rgba(14, 143, 111, 0.14); }
+button, a.mini-wa, a.modal-wa, a.wa-top, a.primary-link, select { touch-action: manipulation; }
+
+.search-row { max-width: 1480px; margin: 0 auto; padding: 18px 0 4px; }
+.search-row .search-box { max-width: 520px; flex: none; width: 100%; }
+.search-box svg { flex: 0 0 auto; color: var(--brand); }
+.search-box input { font-size: 16px; min-width: 0; }
+
+.meta-side { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.share-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 18px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--brand);
+  font-size: 14px; font-weight: 800; box-shadow: 0 2px 10px rgba(14, 143, 111, 0.12);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.share-btn:active { transform: scale(0.95); background: rgba(14, 143, 111, 0.08); }
+
+.cupon-pill {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 7px 12px;
+  border-radius: 10px; background: #faf5ff; border: 1px dashed #d8b4fe; color: #7e22ce;
+  font-size: 13px; font-weight: 800; line-height: 1.25;
+}
+.card-cupon {
+  margin-top: 8px; display: flex; align-items: center; gap: 4px; padding: 5px 8px;
+  border-radius: 8px; background: #faf5ff; border: 1px dashed #d8b4fe; color: #7e22ce;
+  font-size: 11px; font-weight: 800; line-height: 1.2;
+}
+.plan-main .plan-cupon {
+  display: inline-block; margin-top: 5px; padding: 3px 9px; border-radius: 999px;
+  background: #faf5ff; border: 1px solid #e9d5ff; color: #7e22ce; font-size: 12px; font-weight: 800;
+}
+.cupon-nota { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #faf5ff; color: #6b21a8; font-size: 12px; font-weight: 700; line-height: 1.45; }
+
+.enganche-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.enganche-chips:empty { display: none; }
+.eng-chip {
+  min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: #fff; color: var(--ink); font-size: 13px; font-weight: 800;
+}
+.eng-chip.active { background: rgba(14, 143, 111, 0.1); border-color: var(--brand); color: var(--brand); }
+.eng-chip:active { transform: scale(0.95); }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 200;
+  transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+  max-width: calc(100vw - 32px); padding: 12px 18px; border-radius: 12px;
+  background: rgba(16, 34, 31, 0.94); color: #fff; font-size: 14px; font-weight: 700; text-align: center;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* En pantallas táctiles no hay "hover": evita efectos pegados y da respuesta al toque */
+@media (hover: none) {
+  .product-card:hover { transform: none; border-color: rgba(244, 221, 192, 0.95); box-shadow: 0 8px 24px rgba(32, 20, 12, 0.07); }
+  .product-card:hover .product-media img { transform: none; }
+  .cat-btn:hover, .sub-btn:hover, .icon-btn:hover, .wa-top:hover, .primary-link:hover,
+  .detail-btn:hover, .mini-wa:hover, .modal-wa:hover, .modal-close:hover, .hero-arrow:hover, .close-btn:hover { transform: none; }
+  .primary-link:hover { box-shadow: 0 16px 30px rgba(14, 143, 111, 0.32); }
+  .icon-btn:hover { box-shadow: 0 2px 10px rgba(14, 143, 111, 0.1); }
+  .product-card:active { transform: scale(0.985); }
+  .cat-btn:active, .sub-btn:active, .detail-btn:active, .mini-wa:active, .modal-wa:active,
+  .modal-close:active, .primary-link:active, .icon-btn:active, .hero-arrow:active { transform: scale(0.95); }
+}
+
+@media (max-width: 900px) {
+  /* El encabezado ya no se queda pegado: solo los filtros, para dejar espacio a los productos */
+  .topbar {
+    position: relative; height: auto; min-height: 56px;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: max(clamp(16px, 3vw, 38px), env(safe-area-inset-left, 0px));
+    padding-right: max(clamp(16px, 3vw, 38px), env(safe-area-inset-right, 0px));
+    backdrop-filter: none; background: rgba(244, 251, 249, 0.98);
+  }
+  .wa-top { display: inline-flex; min-height: 40px; padding: 0 14px; font-size: 13px; box-shadow: 0 6px 16px rgba(37, 211, 102, 0.28); }
+  .controls {
+    top: 0; margin-bottom: 8px; padding: calc(env(safe-area-inset-top, 0px) + 8px) 0 4px;
+    backdrop-filter: none; background: rgba(244, 251, 249, 0.98);
+    box-shadow: 0 6px 12px -10px rgba(16, 34, 31, 0.35);
+  }
+  .category-row, .subcategory-row { -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+  .cat-btn, .sub-btn { scroll-snap-align: start; }
+  .modal { backdrop-filter: none; background: rgba(9, 22, 20, 0.8); }
+  .modal-dialog {
+    display: flex; flex-direction: column; height: 94vh; height: 94dvh; max-height: none;
+    overflow: hidden; grid-template-columns: none;
+  }
+  .modal-scroll {
+    display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+  .modal-media { min-height: 240px; height: 42vh; max-height: 420px; }
+  .modal-info { max-height: none; overflow: visible; padding: 18px 16px 0; }
+  .close-btn { top: 10px; width: 44px; height: 44px; }
+  .modal-actions {
+    position: sticky; bottom: 0; z-index: 3; margin: 16px -16px 0;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    grid-template-columns: 1.7fr 1fr; gap: 8px;
+    background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -8px 18px -12px rgba(16, 34, 31, 0.3);
+  }
+  .modal-wa, .modal-close { min-height: 50px; font-size: 14.5px; }
+  .modal-wa { font-size: 15px; }
+}
+
+@media (max-width: 620px) {
+  .hero { padding: 12px 12px 4px; gap: 12px; }
+  .hero-product { aspect-ratio: 1.22; }
+  .eyebrow, .hero p { display: none; }
+  .hero h1 { font-size: 26px; line-height: 1.06; }
+  .hero-tools { margin-top: 14px; }
+  .primary-link { height: 46px; margin-top: 0; }
+  .search-row { padding-top: 12px; }
+  .search-row .search-box { max-width: none; }
+  .catalog-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .catalog-meta > div:first-child { min-width: 0; flex: 1 1 auto; }
+  .catalog-meta h2 { font-size: 22px; overflow-wrap: anywhere; }
+  .catalog-meta p { margin-top: 3px; font-size: 13px; }
+  .sort-note { display: none; }
+  .share-btn { padding: 0 14px; }
+  .cat-btn { min-height: 42px; font-size: 14px; }
+  .sub-btn { min-height: 38px; font-size: 13px; }
+  .product-card { border-radius: 14px; }
+  .detail-btn, .mini-wa { min-height: 44px; }
+  .card-actions { grid-template-columns: 1fr 44px; }
+  .card-cupon { font-size: 10.5px; padding: 4px 6px; }
+  .pay-head, .down-payment { grid-template-columns: 1fr; }
+  .pay-head select, .down-payment input { min-height: 48px; font-size: 16px; }
+  .color-chip { min-height: 42px; }
+  .catalog-shell { padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition-duration: 0.01ms !important; }
+}
 </style>
 </head>
 <body>
@@ -1157,10 +1300,6 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
     <h1>Muebles que se ven, se sienten y se pagan facil.</h1>
     <p>Explora productos disponibles, precios de contado y planes de abono. Elige una categoria y comparte directo por WhatsApp el mueble que te gusto.</p>
     <div class="hero-tools">
-      <label class="search-box" for="searchInput">
-        <span>Buscar</span>
-        <input id="searchInput" type="search" placeholder="Sala, comedor, ropero..." autocomplete="off" oninput="setBusqueda(this.value)">
-      </label>
       <button class="primary-link" type="button" onclick="scrollToCatalog()">Ver productos</button>
     </div>
   </div>
@@ -1185,6 +1324,12 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
 </section>
 
 <section id="catalogo" class="catalog-shell">
+  <div class="search-row">
+    <label class="search-box" for="searchInput">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2.2"/><path d="M20 20l-3.6-3.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      <input id="searchInput" type="search" inputmode="search" enterkeyhint="search" placeholder="Buscar: sala, comedor, ropero..." autocomplete="off" autocapitalize="off" spellcheck="false" oninput="setBusqueda(this.value)" onkeydown="if(event.key==='Enter')this.blur()">
+    </label>
+  </div>
   <div class="controls">
     <div id="categoriasNav" class="category-row"></div>
     <div id="subnav" class="subcategory-row"></div>
@@ -1194,7 +1339,13 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
       <h2 id="catalogTitle">Todos los productos</h2>
       <p id="catalogCount">Preparando catalogo...</p>
     </div>
-    <div id="sortNote" class="sort-note">Ordenado por tu configuracion de inventario</div>
+    <div class="meta-side">
+      <div id="sortNote" class="sort-note">Ordenado por tu configuracion de inventario</div>
+      <button id="btnCompartir" class="share-btn" type="button" onclick="compartirVista()" aria-label="Compartir esta vista">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="18" cy="5" r="2.6" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="12" r="2.6" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="19" r="2.6" stroke="currentColor" stroke-width="2"/><path d="M8.3 10.8l7.4-4.3M8.3 13.2l7.4 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Compartir</span>
+      </button>
+    </div>
   </div>
   <main id="grid" class="grid"></main>
   <div id="state" class="state" style="display:none;"></div>
@@ -1203,6 +1354,7 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
 <div id="modal" class="modal" onclick="if(event.target === this) cerrarModal()">
   <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <button class="close-btn" type="button" onclick="cerrarModal()" aria-label="Cerrar">&times;</button>
+    <div class="modal-scroll">
     <div id="zoomC" class="modal-media" onmousemove="zoom(event)" onmouseleave="resetZoom()" ontouchmove="zoom(event)">
       <img id="mImg" src="" alt="">
     </div>
@@ -1210,6 +1362,7 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
       <div id="mCategory" class="modal-category"></div>
       <h2 id="modalTitle" class="modal-title"></h2>
       <div id="mPrice" class="modal-price"></div>
+      <div id="mCupon" class="cupon-pill" style="display:none;"></div>
       <div id="mFacts" class="product-facts"></div>
       <div id="mColores" class="color-picker" style="display:none;">
         <div class="color-picker-title"><span>Colores disponibles</span><em id="mColorActual"></em></div>
@@ -1235,7 +1388,8 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
             <label for="inputEnganche">Enganche</label>
             <small id="engancheMinimo"></small>
           </div>
-          <input id="inputEnganche" type="number" min="0" step="10" onchange="actualizarPlazos()">
+          <input id="inputEnganche" type="number" inputmode="numeric" enterkeyhint="done" min="0" step="10" onchange="actualizarPlazos()" onkeydown="if(event.key==='Enter')this.blur()">
+          <div id="engancheChips" class="enganche-chips"></div>
         </div>
         <div id="plazosLista" class="plans"></div>
       </div>
@@ -1245,8 +1399,11 @@ c-3 -5 -11 -10 -16 -10 -6 0 -7 5 -4 10 3 6 11 10 16 10 6 0 7 -4 4 -10z m-83
         <button class="modal-close" type="button" onclick="cerrarModal()">Seguir viendo</button>
       </div>
     </div>
+    </div>
   </div>
 </div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="js/services/recolor.js?v=1"></script>
 <script>
@@ -1362,30 +1519,41 @@ function ordenarProductosCatalogo(lista) {
   });
 }
 
+// configCreditoGlobal ya leído (Firebase, con respaldo en el almacenamiento local).
+let configCredito = null;
+function leerConfigCredito() {
+  if (configCredito) return configCredito;
+  try { configCredito = JSON.parse(localStorage.getItem("configCreditoGlobal") || "null"); } catch (e) {}
+  return configCredito;
+}
+
 const LogicaCredito = {
-  calcularCredito(precioContado, enganchePersonalizado = null) {
+  // Plazos/tasas que aplican (regla global, o la propia del producto si la trae). [] = sin crédito.
+  plazosActivos(producto) {
+    const config = leerConfigCredito();
+    let plazos;
+    if (!config || !Array.isArray(config.plazos) || config.plazos.length === 0) {
+      plazos = [];
+      for (let i = 1; i <= 6; i++) plazos.push({ meses: i, tasa: i <= 3 ? 2 : 2.5 });
+    } else {
+      plazos = config.plazos;
+    }
+    if (producto && producto.configCredito && producto.configCredito.usaReglaGlobal === false) {
+      if (producto.configCredito.permitirCredito === false) return [];
+      plazos = Array.isArray(producto.configCredito.plazos) ? producto.configCredito.plazos : [];
+    }
+    return [...plazos].sort((a, b) => (Number(a.meses) || 0) - (Number(b.meses) || 0));
+  },
+
+  calcularCredito(precioContado, enganchePersonalizado = null, producto = null) {
     const precio = Number(precioContado) || 0;
     const engancheBase = Math.ceil((precio * 0.10) / 10) * 10;
     const enganche = (typeof enganchePersonalizado === "number" && enganchePersonalizado >= engancheBase)
       ? enganchePersonalizado
       : engancheBase;
     const saldoAFinanciar = Math.max(0, precio - enganche);
-    let config = null;
-    try { config = JSON.parse(localStorage.getItem("configCreditoGlobal") || "null"); } catch (e) {}
+    const plazosConfig = this.plazosActivos(producto);
 
-    let plazosConfig = [];
-    if (!config || !Array.isArray(config.plazos) || config.plazos.length === 0) {
-      for (let i = 1; i <= 6; i++) plazosConfig.push({ meses: i, tasa: i <= 3 ? 2 : 2.5 });
-    } else {
-      plazosConfig = config.plazos;
-    }
-
-    if (prodSeleccionado && prodSeleccionado.configCredito && prodSeleccionado.configCredito.usaReglaGlobal === false) {
-      if (prodSeleccionado.configCredito.permitirCredito === false) return [];
-      plazosConfig = Array.isArray(prodSeleccionado.configCredito.plazos) ? prodSeleccionado.configCredito.plazos : [];
-    }
-
-    plazosConfig.sort((a, b) => (Number(a.meses) || 0) - (Number(b.meses) || 0));
     const resultados = [];
     let totalAnterior = 0;
 
@@ -1402,24 +1570,72 @@ const LogicaCredito = {
       }
       if (intentos < 100) {
         totalAnterior = total;
-        resultados.push({ meses, semanas, abono, total, enganche });
+        resultados.push({ meses, semanas, abono, total, enganche, saldo: saldoAFinanciar, totalFinanciado: abono * semanas });
       }
     });
 
     return resultados;
   },
 
-  calcularConPeriodicidad(precio, periodicidad = "semanal", enganchePersonalizado = null) {
-    const planes = this.calcularCredito(precio, enganchePersonalizado);
+  // Total financiado con una tasa dada (misma fórmula de venta, sin escalera de plazos).
+  totalConTasa(capital, meses, tasaPct) {
+    const semanas = meses * 4;
+    const abono = Math.ceil((capital * (1 + (tasaPct / 100) * meses) / semanas) / 10) * 10;
+    return abono * semanas;
+  },
+
+  // 🎟️ Cupón de pronto pago por plan. MISMA regla que el cotizador móvil y cxc.js:
+  // cupón = total financiado (tasa normal del plazo) - total con la "tasa base para cupón"
+  // del mismo plazo, sobre el MISMO capital (precio - enganche). Sin tasa base configurada
+  // cae al % fijo (porcentajeCuponProntoPago). El plan de 1 mes no genera cupón. Se redondea
+  // según la configuración y se topa hacia abajo para que un plazo corto nunca dé más cupón
+  // que uno largo. Devuelve un arreglo de montos alineado con `planes`.
+  cupones(planes, saldo, producto = null) {
+    if (!Array.isArray(planes) || !planes.length) return [];
+    const config = leerConfigCredito() || {};
+    const plazos = this.plazosActivos(producto);
+    const pct = Number(config.porcentajeCuponProntoPago ?? 3);
+    const multiplo = Number(config.redondeoCuponMultiplo || 0);
+    const factor = config.redondeoCuponDireccion === "arriba" ? Math.ceil : Math.floor;
+
+    const crudos = planes.map(pl => {
+      if (Number(pl.meses) === 1) return 0;
+      const pz = plazos.find(x => Number(x.meses) === Number(pl.meses));
+      const base = pz ? pz.tasaBaseCupon : undefined;
+      const tieneBase = base !== undefined && base !== null && base !== "";
+      let monto;
+      if (tieneBase && Number(saldo) > 0) {
+        const totalBase = this.totalConTasa(Number(saldo), Number(pl.meses), Number(base));
+        monto = totalBase > 0 ? Math.max(0, Number(pl.totalFinanciado || 0) - totalBase) : 0;
+      } else {
+        monto = Number(pl.totalFinanciado || 0) * Math.max(0, pct) / 100;
+      }
+      if (multiplo > 1) monto = factor(monto / multiplo) * multiplo;
+      return Math.max(0, monto);
+    });
+
+    const finales = new Array(crudos.length);
+    let techo = Infinity;
+    for (let i = crudos.length - 1; i >= 0; i--) {
+      techo = Math.min(crudos[i], techo);
+      finales[i] = techo;
+    }
+    return finales;
+  },
+
+  calcularConPeriodicidad(precio, periodicidad = "semanal", enganchePersonalizado = null, producto = null) {
+    const planes = this.calcularCredito(precio, enganchePersonalizado, producto);
+    const cupones = this.cupones(planes, planes[0] ? planes[0].saldo : 0, producto);
     let mult = 1;
     if (periodicidad === "quincenal") mult = 2;
     if (periodicidad === "mensual") mult = 4;
-    return planes.map(plan => ({
+    return planes.map((plan, i) => ({
       meses: plan.meses,
       pagos: Math.max(1, Math.round(plan.semanas / mult)),
       abono: plan.abono * mult,
       total: plan.total,
-      enganche: plan.enganche
+      enganche: plan.enganche,
+      cupon: cupones[i] > 0.01 ? cupones[i] : 0
     }));
   }
 };
@@ -1460,6 +1676,7 @@ async function cargarDatos() {
     ? prods.filter(p => p && p.Activo !== 0 && p.Activo !== false && p.activo !== false)
     : [];
   categoriasData = Array.isArray(cats) ? cats : [];
+  if (credito) configCredito = credito;
 
   try {
     localStorage.setItem("categoriasData", JSON.stringify(categoriasData));
@@ -1528,6 +1745,7 @@ function aplicarEstado(estado) {
     });
 
     render();
+    centrarChipActivo();
 
     if (estado.p && productos.find(p => String(p.id) === String(estado.p))) {
       abrirModal(estado.p, true);
@@ -1550,8 +1768,14 @@ async function inicializar() {
     await cargarDatos();
     generarMenuCategorias();
     prepararHero();
-    aplicarEstado(leerEstadoDesdeURL());
+    const estadoInicial = leerEstadoDesdeURL();
+    aplicarEstado(estadoInicial);
     guardarEstado(true);
+    // Si llegó por un enlace compartido (categoría/subcategoría/búsqueda), salta directo a los productos
+    const vieneDeEnlace = (estadoInicial.cat !== "todos" || estadoInicial.sub !== "todos" || estadoInicial.q) && !estadoInicial.p;
+    if (vieneDeEnlace) requestAnimationFrame(() => {
+      document.getElementById("catalogo").scrollIntoView({ behavior: "instant", block: "start" });
+    });
   } catch (error) {
     console.error(error);
     mostrarEstado("No pudimos cargar el catalogo", "Intenta actualizar la pagina o escribirnos por WhatsApp.");
@@ -1635,6 +1859,8 @@ function setCategoria(categoria) {
   actualizarSubnav();
   render();
   guardarEstado(false);
+  centrarChipActivo();
+  volverAlInicioLista();
 }
 
 function actualizarSubnav() {
@@ -1653,6 +1879,30 @@ function setSub(subcategoria) {
   });
   render();
   guardarEstado(false);
+  centrarChipActivo();
+  volverAlInicioLista();
+}
+
+// Deja visible el chip activo (útil cuando se llega por un enlace compartido a una categoría lejana)
+function centrarChipActivo() {
+  ["categoriasNav", "subnav"].forEach(id => {
+    const fila = document.getElementById(id);
+    const activo = fila && fila.querySelector(".active");
+    if (!activo) return;
+    const izq = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+    fila.scrollTo({ left: Math.max(0, izq - (fila.clientWidth - activo.offsetWidth) / 2), behavior: "smooth" });
+  });
+}
+
+// Al cambiar de categoría con la página ya scrolleada, regresa al inicio de la lista nueva
+function volverAlInicioLista() {
+  const meta = document.querySelector(".catalog-meta");
+  const controles = document.querySelector(".controls");
+  const barra = document.querySelector(".topbar");
+  if (!meta) return;
+  const barraFija = barra && getComputedStyle(barra).position === "sticky" ? barra.offsetHeight : 0;
+  const tope = meta.getBoundingClientRect().top + window.scrollY - (controles ? controles.offsetHeight : 0) - barraFija - 8;
+  if (window.scrollY > tope) window.scrollTo({ top: Math.max(0, tope), behavior: "smooth" });
 }
 
 function setBusqueda(valor) {
@@ -1685,6 +1935,9 @@ function render() {
     ? `Orden: ${etiquetaOrden(reglaSubcategoria(catActiva, subActiva))}`
     : "Categorias y subcategorias segun inventario";
 
+  const btnCompartir = document.getElementById("btnCompartir");
+  if (btnCompartir) btnCompartir.setAttribute("aria-label", `Compartir ${nombreVista()}`);
+
   if (!filtrados.length) {
     mostrarEstado("No encontramos productos", "Prueba otra categoria o busca con menos palabras.");
     return;
@@ -1706,8 +1959,9 @@ function etiquetaOrden(regla) {
 }
 
 function tarjetaProducto(p, index) {
-  const planes = LogicaCredito.calcularCredito(Number(p.precio) || 0);
+  const planes = LogicaCredito.calcularCredito(Number(p.precio) || 0, null, p);
   const plan = planes[5] || planes[planes.length - 1] || null;
+  const cuponMax = Math.max(0, ...LogicaCredito.cupones(planes, planes[0] ? planes[0].saldo : 0, p));
   const stock = Number(p.stock) || 0;
   const esUnicaBajaExistencia = p.esUnicaCompra && stock > 0 && stock <= 3;
   const badge = esUnicaBajaExistencia
@@ -1717,16 +1971,17 @@ function tarjetaProducto(p, index) {
   const img = p.imagen || "img/Logo.svg";
   const msg = encodeURIComponent(`Hola, me interesa ${p.nombre || "este producto"} (${fmt(p.precio)}).`);
   return `
-    <article class="product-card">
-      <div class="product-media" onclick="abrirModal('${escapeHtml(p.id)}')">
+    <article class="product-card" onclick="tocarTarjeta(event, '${escapeHtml(p.id)}')">
+      <div class="product-media">
         <span class="badge"${esUnicaBajaExistencia ? ' style="background:#dc2626;"' : ''}>${escapeHtml(badge)}</span>
         <span class="badge order">#${index + 1}</span>
-        <img src="${escapeHtml(img)}" alt="${escapeHtml(p.nombre || "Producto")}" loading="lazy" onerror="this.src='img/Logo.svg'">
+        <img src="${escapeHtml(img)}" alt="${escapeHtml(p.nombre || "Producto")}" loading="lazy" decoding="async" onerror="this.src='img/Logo.svg'">
       </div>
       <div class="product-body">
         <div class="product-kicker">${escapeHtml(p.categoria || "Catalogo")} / ${escapeHtml(p.subcategoria || "General")}</div>
         <h3 class="product-name">${escapeHtml(p.nombre || "Producto sin nombre")}</h3>
         <div class="product-facts">${facts.map(f => `<span>${escapeHtml(f)}</span>`).join("")}</div>
+        ${cuponMax > 0.01 ? `<div class="card-cupon">🎟️ Cupón de hasta ${fmt(cuponMax)}</div>` : ""}
         <div class="price-row">
           <div>
             <div class="price-label">Contado</div>
@@ -1735,12 +1990,18 @@ function tarjetaProducto(p, index) {
           <div class="weekly">${plan ? `${fmt(plan.abono)}<br><span>semanal</span>` : "Pregunta<br><span>plan</span>"}</div>
         </div>
         <div class="card-actions">
-          <button class="detail-btn" type="button" onclick="abrirModal('${escapeHtml(p.id)}')">Ver detalle</button>
+          <button class="detail-btn" type="button">Ver detalle</button>
           <a class="mini-wa" href="https://wa.me/${WHATSAPP}?text=${msg}" target="_blank" rel="noopener" aria-label="Consultar por WhatsApp">WA</a>
         </div>
       </div>
     </article>
   `;
+}
+
+// Toda la tarjeta abre el detalle, salvo el botón de WhatsApp
+function tocarTarjeta(event, id) {
+  if (event.target.closest("a")) return;
+  abrirModal(id);
 }
 
 function prepararHero() {
@@ -1832,7 +2093,7 @@ function abrirModal(id, fromHistory) {
   }
 
   document.getElementById("periodoSelect").value = "semanal";
-  const planes = LogicaCredito.calcularCredito(Number(prodSeleccionado.precio) || 0);
+  const planes = LogicaCredito.calcularCredito(Number(prodSeleccionado.precio) || 0, null, prodSeleccionado);
   const enganche = planes[0] ? planes[0].enganche : Math.ceil(((Number(prodSeleccionado.precio) || 0) * 0.10) / 10) * 10;
   const input = document.getElementById("inputEnganche");
   input.min = enganche;
@@ -1941,19 +2202,50 @@ function actualizarPlazos() {
   if (enganche > precio) enganche = precio;
   document.getElementById("inputEnganche").value = enganche;
   document.getElementById("engancheMinimo").textContent = `Minimo sugerido: ${fmt(base)}`;
+  pintarChipsEnganche(precio, base, enganche);
 
-  const plazos = LogicaCredito.calcularConPeriodicidad(precio, periodicidad, enganche);
+  const plazos = LogicaCredito.calcularConPeriodicidad(precio, periodicidad, enganche, prodSeleccionado);
   const cont = document.getElementById("plazosLista");
+  const pill = document.getElementById("mCupon");
   if (!plazos.length) {
     cont.innerHTML = `<div class="plan-row"><div class="plan-main">Credito no disponible<br><span>Consulta alternativas con tienda.</span></div></div>`;
+    pill.style.display = "none";
     return;
   }
+  const cuponMax = Math.max(0, ...plazos.map(pl => pl.cupon));
   cont.innerHTML = plazos.map(pl => `
     <div class="plan-row">
-      <div class="plan-main">${pl.pagos} pagos de ${fmt(pl.abono)}<br><span>${pl.meses} mes${pl.meses === 1 ? "" : "es"}</span></div>
+      <div class="plan-main">${pl.pagos} pagos de ${fmt(pl.abono)}<br><span>${pl.meses} mes${pl.meses === 1 ? "" : "es"}</span>${pl.cupon > 0 ? `<br><span class="plan-cupon">🎟️ +${fmt(pl.cupon)} cupón</span>` : ""}</div>
       <div class="plan-total">Total<br>${fmt(pl.total)}</div>
     </div>
-  `).join("");
+  `).join("") + (cuponMax > 0
+    ? `<div class="cupon-nota">🎟️ <b>Cupón de pronto pago:</b> si liquidas tu crédito dentro del plazo pactado, recibes ese monto como saldo a favor para tu próxima compra.</div>`
+    : "");
+  if (cuponMax > 0) {
+    pill.style.display = "inline-flex";
+    pill.textContent = `🎟️ Liquida a tiempo y gana hasta ${fmt(cuponMax)} en cupón`;
+  } else {
+    pill.style.display = "none";
+  }
+}
+
+// Atajos de enganche (10/20/30/50 %) para no teclear en el celular
+function pintarChipsEnganche(precio, base, actual) {
+  const cont = document.getElementById("engancheChips");
+  if (!cont) return;
+  const vistos = new Set();
+  const opciones = [10, 20, 30, 50].map(pct => {
+    const monto = Math.min(precio, Math.max(base, Math.ceil((precio * pct / 100) / 10) * 10));
+    return { pct, monto };
+  }).filter(o => o.monto > 0 && !vistos.has(o.monto) && vistos.add(o.monto));
+  cont.innerHTML = opciones.length > 1 ? opciones.map(o =>
+    `<button type="button" class="eng-chip${o.monto === actual ? " active" : ""}" onclick="setEnganche(${o.monto})">${o.pct}% · ${fmt(o.monto)}</button>`
+  ).join("") : "";
+}
+
+function setEnganche(monto) {
+  document.getElementById("inputEnganche").value = monto;
+  actualizarPlazos();
 }
 
 function cerrarModal(fromHistory) {
@@ -1963,6 +2255,7 @@ function cerrarModal(fromHistory) {
   }
   document.getElementById("modal").classList.remove("open");
   document.body.style.overflow = "";
+  prodSeleccionado = null;
   resetZoom();
 }
 
@@ -1985,6 +2278,71 @@ function resetZoom() {
   }
 }
 
+// ---- Compartir la vista actual (categoría / subcategoría) ----
+function nombreVista() {
+  if (subActiva !== "todos") return catActiva !== "todos" ? `${subActiva} (${catActiva})` : subActiva;
+  if (catActiva !== "todos") return catActiva;
+  return "el catalogo";
+}
+
+function urlCompartir() {
+  const params = new URLSearchParams();
+  if (catActiva !== "todos") params.set("cat", catActiva);
+  if (subActiva !== "todos") params.set("sub", subActiva);
+  const qs = params.toString();
+  return window.location.origin + window.location.pathname + (qs ? `?${qs}` : "");
+}
+
+let toastTimer = null;
+function mostrarToast(texto) {
+  const el = document.getElementById("toast");
+  if (!el) return;
+  el.textContent = texto;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2400);
+}
+
+async function copiarTexto(texto) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = texto;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, texto.length);
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function compartirVista() {
+  const url = urlCompartir();
+  const nombre = nombreVista();
+  const titulo = `${nombre === "el catalogo" ? "Catalogo" : nombre} | Muebleria Mi Pueblito`;
+  const texto = `Mira ${nombre} en Muebleria Mi Pueblito:`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: titulo, text: texto, url });
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;   // cerró el menú de compartir
+    }
+  }
+  if (await copiarTexto(`${texto}\n${url}`)) mostrarToast("Enlace copiado");
+  else window.prompt("Copia este enlace:", url);
+}
+
 function scrollToCatalog() {
   document.getElementById("catalogo").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1998,6 +2356,9 @@ window.abrirModal = abrirModal;
 window.cerrarModal = cerrarModal;
 window.actualizarPlazos = actualizarPlazos;
 window.elegirColor = elegirColor;
+window.compartirVista = compartirVista;
+window.tocarTarjeta = tocarTarjeta;
+window.setEnganche = setEnganche;
 
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") cerrarModal();
