@@ -81,6 +81,11 @@ function _navLimpiarFiltrosOperacion() {
 }
 
 window.navA = function(vistaId, isPopState = false) {
+    // 📱 En celular no hay Dashboard: se aterriza en Inicio (ahí está el acceso grande a
+    // "Aplicar abono directo"). Cubre login por correo, login por PIN, hash viejo (#dashboard) y menú.
+    if (vistaId === 'dashboard' && window.matchMedia && window.matchMedia('(max-width: 600px)').matches) {
+        vistaId = 'inicio';
+    }
     const rutasRetiradas = {
         cobranzaesperada: { vista: 'reportes', render: 'compromisos' },
         agendacobros: { vista: 'reportes', render: 'cartera' },
