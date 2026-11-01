@@ -142,6 +142,7 @@ window.navA = function(vistaId, isPopState = false) {
         if (vistaId === 'cuentasxcobrar' && typeof renderCuentasXCobrar === 'function') renderCuentasXCobrar();
         if (vistaId === 'estadoCuentaCliente' && typeof window.renderEstadoCuentaClienteConsolidado === 'function') window.renderEstadoCuentaClienteConsolidado();
         if (vistaId === 'abonosdirectos' && typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+        if (vistaId === 'inicio' && typeof actualizarAccesoAbonoMovil === 'function') actualizarAccesoAbonoMovil();
         if (vistaId === 'visor-creditos' && typeof renderVisorCreditosCobranza === 'function') renderVisorCreditosCobranza();
         if (vistaId === 'listaprecios' && typeof renderListaPrecios === 'function') renderListaPrecios();
         if (vistaId === 'seleccionarcliente' && typeof renderSeleccionClienteVenta === 'function') {
