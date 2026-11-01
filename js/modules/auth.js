@@ -514,6 +514,7 @@ function aplicarRolUI() {
         const menuUsuarios = document.getElementById('menuItemUsuarios');
         if (menuUsuarios) menuUsuarios.style.display = '';
     }
+    if (typeof actualizarAccesoAbonoMovil === 'function') actualizarAccesoAbonoMovil();
 }
 
 // ── pantalla de login ─────────────────────────────────────────────────────────

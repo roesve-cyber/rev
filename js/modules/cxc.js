@@ -1438,6 +1438,83 @@ function renderCuentasXCobrar(filtroCliente = "") {
     contenedor.innerHTML = htmlTabs + (cuentasMostradas === 0 ? `<p style="text-align:center; padding:20px;">Sin resultados.</p>` : htmlTabla + `</tbody></table></div>`);
 }
 
+// ===== 📱 ABONO DIRECTO EN CELULAR =====
+// Celular = pantalla angosta (<= 600px). Tablet y escritorio NO entran aquí y se ven igual que siempre.
+function _cxcEsCelular() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 600px)').matches);
+}
+
+// Acceso grande en la pantalla de inicio: solo celular (por CSS) y solo administrador (aquí).
+function actualizarAccesoAbonoMovil() {
+    const el = document.getElementById('accesoAbonoMovil');
+    if (!el) return;
+    const admin = (typeof _esAdmin === 'function' && _esAdmin()) || (typeof esAdmin === 'function' && esAdmin());
+    el.classList.toggle('visible', !!admin);
+}
+window.actualizarAccesoAbonoMovil = actualizarAccesoAbonoMovil;
+
+// Si se gira el teléfono o cambia el ancho, vuelve a dibujar la lista en el formato correcto.
+if (window.matchMedia) {
+    const _mqCelularAbono = window.matchMedia('(max-width: 600px)');
+    const _alCambiarAncho = () => {
+        const v = document.getElementById('abonosdirectos');
+        if (v && !v.classList.contains('oculto') && typeof renderAbonosDirectos === 'function') renderAbonosDirectos();
+    };
+    if (_mqCelularAbono.addEventListener) _mqCelularAbono.addEventListener('change', _alCambiarAncho);
+}
+
+function _cxcAbonosDirectosCelularHTML(filas, filtroCliente) {
+    const esAdminAct = (typeof _esAdmin === 'function' && _esAdmin());
+    if (!window._abonoDirectoLimite) window._abonoDirectoLimite = 20;
+    const limite = filtroCliente ? filas.length : window._abonoDirectoLimite;
+    const visibles = filas.slice(0, limite);
+
+    if (!filas.length) {
+        return `<div class="abn-vacio">${filtroCliente ? 'No encontré ese cliente o folio.' : 'No hay cuentas con saldo.'}<br><small>Prueba con otra parte del nombre o con el folio.</small></div>`;
+    }
+
+    const tarjetas = visibles.map(({ cuenta, estado }) => {
+        const folio = _cxcEscHTML(cuenta.folio);
+        const esIncob = _cxcEsIncobrable(cuenta);
+        const moratorio = _cxcEvaluarMoratorio(cuenta, estado);
+        const verde = !esIncob && estado.estadoGeneral === 'Al corriente';
+        const chipEstado = `<span class="abn-chip ${verde ? 'ok' : 'mal'}">${esIncob ? '⛔ Incobrable' : _cxcEscHTML(estado.estadoGeneral)}</span>`;
+        const chipPagares = `<span class="abn-chip">${estado.pagaresPendientes.length} pagaré(s)</span>`;
+        const chipMora = estado.saldoMoratorios > 0.01
+            ? `<span class="abn-chip mora">Moratorios ${_cxcDinero(estado.saldoMoratorios)}</span>`
+            : (moratorio?.aplica ? `<span class="abn-chip aviso">Moratorio sugerido ${_cxcDinero(moratorio.montoSugerido)}</span>` : '');
+        const secundarios = esIncob ? '' : `
+            <div class="abn-sec">
+                ${moratorio?.aplica ? `<button type="button" class="abn-btn-sec mora" onclick="abrirModalMoratorio('${folio}')">Moratorio</button>
+                <button type="button" class="abn-btn-sec" onclick="exentarMoratorio('${folio}')">Exentar</button>` : ''}
+                <button type="button" class="abn-btn-sec prom" onclick="abrirModalPromesaPago('${folio}')">📝 Promesa</button>
+                <button type="button" class="abn-btn-sec wa" onclick="enviarRecordatorioWhatsApp('${folio}')">💬 WhatsApp</button>
+            </div>`;
+        return `
+        <div class="abn-card${esIncob ? ' incob' : ''}">
+            <div class="abn-card-top">
+                <div class="abn-card-id">
+                    <div class="abn-nombre">${_cxcEscHTML(_cxcNombreClienteVigente(cuenta))}</div>
+                    <div class="abn-folio">${folio}</div>
+                </div>
+                <div class="abn-saldo-grande">${_cxcDinero(estado.saldoTotal)}<small>saldo</small></div>
+            </div>
+            <div class="abn-chips">${chipEstado}${chipPagares}${chipMora}</div>
+            <button type="button" class="abn-btn-principal" onclick="abrirModalAbonoAvanzado('${folio}', { modo: ${esAdminAct ? "'directo'" : "'pendiente'"} })">${esAdminAct ? '💵 Aplicar abono' : '💵 Registrar abono'}</button>
+            ${secundarios}
+        </div>`;
+    }).join('');
+
+    const faltan = filas.length - visibles.length;
+    const verMas = faltan > 0
+        ? `<button type="button" class="abn-ver-mas" onclick="window._abonoDirectoLimite += 20; renderAbonosDirectos();">Mostrar más (${faltan} restantes)</button>`
+        : '';
+    const resumen = filtroCliente
+        ? `${filas.length} resultado(s)`
+        : `${filas.length} cuenta(s) con saldo · escribe arriba para buscar`;
+    return `<div class="abn-resumen-lista">${resumen}</div>${tarjetas}${verMas}`;
+}
+
 function renderAbonosDirectos(filtroCliente = "") {
     const contenedor = document.getElementById("tablaAbonosDirectos");
     if (!contenedor) return;
@@ -1453,6 +1530,12 @@ function renderAbonosDirectos(filtroCliente = "") {
             return !filtroCliente || texto.includes(filtroCliente);
         })
         .sort((a, b) => _cxcNombreClienteVigente(a.cuenta).localeCompare(_cxcNombreClienteVigente(b.cuenta), 'es'));
+
+    // 📱 En celular se muestra como tarjetas grandes (una por cuenta). Tablet y escritorio siguen con la tabla.
+    if (_cxcEsCelular()) {
+        contenedor.innerHTML = _cxcAbonosDirectosCelularHTML(filas, filtroCliente);
+        return;
+    }
 
     contenedor.innerHTML = `
         ${filas.length === 0 ? `<div style="background:#f8fafc; border:1px solid #e2e8f0; padding:28px; border-radius:10px; text-align:center; color:#64748b; margin-bottom:16px;">Sin cuentas con saldo para abono directo.${filtroCliente ? '' : '<br><small>Las cuentas incobrables aparecen al buscar por cliente o folio.</small>'}</div>` : `
@@ -1787,7 +1870,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const plazoMesesPactado = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
 
     const articulosHTML = (cuenta.articulos || []).length > 0 ? `
-        <div style="margin-bottom:20px;">
+        <div class="abn-detalle" style="margin-bottom:20px;">
             <strong style="color:#374151;">🛒 Artículos:</strong>
             <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:13px;">
                 ${cuenta.articulos.map(a => `<tr><td style="padding:4px; border-bottom:1px solid #eee;">${a.nombre}</td><td style="text-align:right; padding:4px; border-bottom:1px solid #eee;">x${a.cantidad}</td></tr>`).join('')}
@@ -1795,7 +1878,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
         </div>` : '';
 
     const pagaresHTML = todosPagares.length > 0 ? `
-        <div style="margin-bottom:20px;">
+        <div class="abn-detalle" style="margin-bottom:20px;">
             <strong style="color:#374151;">📋 Pagarés:</strong>
             <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:12px;">
                 <thead><tr style="background:#f8fafc;"><th style="padding:5px; text-align:left;">#</th><th>Vencimiento</th><th style="text-align:right;">Saldo</th><th style="text-align:center;">Estado</th></tr></thead>
@@ -1834,7 +1917,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     const pagaresPendientes = todosPagares.filter(p => p.estado === 'Pendiente' || p.estado === 'Parcial').length;
 
     const resumenCobranzaHTML = `
-        <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:16px;">
+        <div class="abn-detalle" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:16px;">
             <div style="background:#ecfdf5; border:1px solid #bbf7d0; border-radius:10px; padding:12px;">
                 <small style="color:#047857; font-weight:800;">Saldo pendiente</small>
                 <div style="font-size:22px; font-weight:900; color:#065f46; margin-top:4px;">${_cxcDinero(saldo)}</div>
@@ -1859,7 +1942,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
             </div>` : ''}`;
 
     const abonosRegistradosHTML = `
-        <div style="margin-bottom:18px;">
+        <div class="abn-detalle" style="margin-bottom:18px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
                 <div style="font-size:12px; font-weight:800; color:#475569; text-transform:uppercase; letter-spacing:.04em;">Historial de abonos</div>
                 <span style="font-size:12px; color:#64748b;">Ultimos registros</span>
@@ -1891,9 +1974,9 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     <h2 style="margin:0;">${esDirecto ? 'Abono Directo' : 'Registrar Abono'} - ${_cxcNombreClienteVigente(cuenta)}</h2>
                     <button onclick="document.querySelector('[data-modal=abono-avanzado]')?.remove()" style="background:none; border:none; font-size:24px; cursor:pointer; color:#9ca3af;">✕</button>
                 </div>
-                <div style="padding:24px;">
+                <div class="abn-contenido" style="padding:24px;">
                 
-                <div style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
+                <div class="abn-saldo" style="background:#f0fdf4; padding:15px; border-radius:8px; margin-bottom:20px;">
                     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; text-align:center;">
                         <div><small style="color:#4b5563;">Saldo Crédito</small><br><strong style="font-size:17px; color:#16a34a;">${_cxcDinero(saldo)}</strong></div>
                         <div><small style="color:#4b5563;">Días Venta</small><br><strong style="font-size:17px; color:#2563eb;">${diasDesdeVenta}</strong></div>
@@ -1909,7 +1992,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     const fondosPorSemaforo = { rojo: '#fef2f2', amarillo: '#fffbeb', verde: '#f0fdf4', gris: '#f8fafc' };
                     const emoji = { rojo: '🔴', amarillo: '🟡', verde: '🟢', gris: '⚪' };
                     return `
-                    <div style="background:${fondosPorSemaforo[estadoPlazo.semaforo]};border:1px solid ${coloresPorSemaforo[estadoPlazo.semaforo]}33;border-left:4px solid ${coloresPorSemaforo[estadoPlazo.semaforo]};border-radius:8px;padding:12px 15px;margin-bottom:16px;">
+                    <div class="abn-plazo" style="background:${fondosPorSemaforo[estadoPlazo.semaforo]};border:1px solid ${coloresPorSemaforo[estadoPlazo.semaforo]}33;border-left:4px solid ${coloresPorSemaforo[estadoPlazo.semaforo]};border-radius:8px;padding:12px 15px;margin-bottom:16px;">
                         <div style="font-weight:bold;color:${coloresPorSemaforo[estadoPlazo.semaforo]};">${emoji[estadoPlazo.semaforo]} ${estadoPlazo.diasRestantes} dia(s) para liquidar dentro de plazo</div>
                         <div style="font-size:13px;color:#374151;margin-top:4px;">${estadoPlazo.esPlan1Mes ? `💵 Plan de 1 mes: no genera cupón -- si liquida a tiempo se respeta el precio de contado.` : (estadoPlazo.ventaEsNueva ? `🎟️ Si liquida hoy: cupón de <b>${_cxcDinero(estadoPlazo.cuponSiLiquidaHoy)}</b> (${estadoPlazo.porcentajeCupon}% del total financiado).` : `Venta vigente (de antes del cambio a cupones) -- no genera cupón al liquidar.`)}${estadoPlazo.mesesNuevoSiBrinca ? ` Si no liquida, brinca a ${estadoPlazo.mesesNuevoSiBrinca} meses.` : ''}</div>
                     </div>`;
@@ -1920,7 +2003,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     const cupones = typeof window._cxcCuponesDisponiblesCliente === 'function' ? window._cxcCuponesDisponiblesCliente(clienteId) : [];
                     if (!cupones.length) return '';
                     return `
-                    <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px 15px;margin-bottom:16px;">
+                    <div class="abn-cupones" style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px 15px;margin-bottom:16px;">
                         <div style="font-weight:bold;color:#7e22ce;font-size:13px;">🎟️ Cupones disponibles de este cliente</div>
                         ${cupones.map(c => `<div style="font-size:12.5px;color:#581c87;margin-top:4px;">${c.codigo} — ${_cxcDinero(c.montoDisponible)} (vence ${new Date(c.fechaVencimiento).toLocaleDateString('es-MX')})</div>`).join('')}
                     </div>`;
@@ -1930,7 +2013,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                 ${articulosHTML}
                 ${abonosRegistradosHTML}
 
-                <div style="background:${esDirecto ? '#ecfdf5' : '#fffbeb'}; padding:14px 15px; border-radius:8px; border-left:5px solid ${esDirecto ? '#10b981' : '#f59e0b'}; margin-bottom:18px;">
+                <div class="abn-nota" style="background:${esDirecto ? '#ecfdf5' : '#fffbeb'}; padding:14px 15px; border-radius:8px; border-left:5px solid ${esDirecto ? '#10b981' : '#f59e0b'}; margin-bottom:18px;">
                     <strong style="color:${esDirecto ? '#065f46' : '#92400e'};">${esDirecto ? 'Aplicacion directa' : 'Pendiente de autorizacion'}</strong>
                     <p style="margin:6px 0 0 0; font-size:13px; color:${esDirecto ? '#047857' : '#78350f'};">
                         ${esDirecto
@@ -1939,7 +2022,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     </p>
                 </div>
 
-                <div style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
+                <div class="abn-captura" style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">📅 Fecha de pago:</label>
                         <input type="date" id="fechaAbonoInput" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0])}" 
@@ -1947,7 +2030,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     </div>
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">Monto a abonar:</label>
-                        <input type="number" id="montoAbono" placeholder="0.00" 
+                        <input type="number" id="montoAbono" placeholder="0.00" inputmode="decimal" step="0.01" enterkeyhint="done" 
                             oninput="actualizarAvisoPoliticaAbono('${folio}')"
                             style="padding:12px; font-size:18px; border:2px solid #3b82f6; border-radius:8px; width:100%; box-sizing:border-box;">
                     </div>
@@ -1955,13 +2038,13 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
 
                 <div id="avisoPoliticaAbono"></div>
 
-                <div style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
+                <div class="abn-cuenta" style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
                     <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">💳 ¿A qué caja/cuenta ingresa el dinero?</label>
                     ${selectorCuentasHTML}
                 </div>
 
                 ${esDirecto ? `
-                <div style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
+                <div class="abn-ref" style="background:#f8fafc; padding:15px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:20px;">
                     <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">Referencia de transferencia / lote</label>
                     <input type="text" id="referenciaTransferenciaAbono" placeholder="Ej. SPEI 123456, deposito 29-may, transferencia cliente X"
                         value="${_cxcEscHTML(window._ultimaReferenciaTransferenciaAbono || '')}"
@@ -1972,7 +2055,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                 </div>
                 ` : ''}
 
-                <div style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
+                <div class="abn-politica" style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
                     <strong style="color:#92400e;">${resumenPoliticaInicial.titulo}</strong>
                     <p style="margin:8px 0 0 0; font-size:14px; color:#78350f; line-height:1.45;">
                         ${resumenPoliticaInicial.detalle}
@@ -1982,7 +2065,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     </p>
                 </div>
 
-                <div style="display:flex; gap:10px;">
+                <div class="abn-botones" style="display:flex; gap:10px;">
                     <button id="btnConfirmarAbonoAvanzado" onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado}, '${modoAplicacion}')" 
                             style="flex:2; padding:15px; background:${esDirecto ? '#0f766e' : '#22c55e'}; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
                         ${esDirecto ? 'Aplicar Abono Directo' : 'Enviar a Autorizacion'}
