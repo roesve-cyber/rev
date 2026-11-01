@@ -254,6 +254,8 @@ function _consigResumenGlobal() {
                 pagadoPorVentas: 0,
                 anticiposAplicados: 0,
                 anticiposAplicadosCxp: 0,
+                liquidadoPropio: 0,
+                liquidadoPropioConAnticipo: 0,
                 anticiposTotal: 0,
                 saldoNeto: 0,
                 folios: []
@@ -284,6 +286,8 @@ function _consigResumenGlobal() {
                 anticiposTotal: 0,
                 anticiposAplicados: 0,
                 anticiposAplicadosCxp: 0,
+                liquidadoPropio: 0,
+                liquidadoPropioConAnticipo: 0,
                 saldoNeto: 0
             });
         }
@@ -306,6 +310,10 @@ function _consigResumenGlobal() {
         g.vendidoReportado += Number(c.montoVendidoReportado || 0);
         g.transferidoCxp += Number(c.montoTransferido || 0);
         g.anticiposAplicados += Number(c.montoAbonosAplicados || 0);
+        // Piezas ya liquidadas al proveedor y que se quedaron como inventario propio.
+        const valorPropio = Number(c.cantidadLiquidadaPropia || 0) * Number(c.costoUnitario || 0);
+        g.liquidadoPropio += valorPropio;
+        f.liquidadoPropio += valorPropio;
 
         f.consignaciones.push(c);
         f.compraOriginal += _consigImporte(c);
@@ -377,15 +385,27 @@ function _consigResumenGlobal() {
         }
     });
 
+    // 🧾 Una pieza "liquidada como propia" ya se pagó al proveedor. Esa liquidación se cubre con los
+    // anticipos entregados, así que consume anticipo disponible igual que una venta reportada. Sin
+    // esto el anticipo seguía apareciendo "a favor disponible" aunque ya se había usado para pagar
+    // esas piezas (y se podía volver a aplicar contra ventas futuras). Se limita a lo que realmente
+    // queda libre; el saldo neto no cambia (ya descontaba el anticipo total).
+    const _consigConsumirPorPropias = (x) => {
+        const base = Math.max(Number(x.anticiposAplicados || 0), Number(x.anticiposAplicadosCxp || 0));
+        const libre = Math.max(0, Number(x.anticiposTotal || 0) - base);
+        x.liquidadoPropioConAnticipo = Math.min(Number(x.liquidadoPropio || 0), libre);
+        x.anticiposAplicados = base + x.liquidadoPropioConAnticipo;
+    };
+
     folios.forEach(f => {
-        f.anticiposAplicados = Math.max(Number(f.anticiposAplicados || 0), Number(f.anticiposAplicadosCxp || 0));
+        _consigConsumirPorPropias(f);
         f.anticiposDisponibles = Math.max(0, Number(f.anticiposTotal || 0) - Number(f.anticiposAplicados || 0));
         f.creditoAnticipos = Math.max(Number(f.anticiposTotal || 0), Number(f.anticiposAplicados || 0));
         f.saldoNeto = Math.max(0, f.compraOriginal - (f.montoDevuelto || 0) - f.pagadoPorVentas - f.creditoAnticipos);
     });
 
     grupos.forEach(g => {
-        g.anticiposAplicados = Math.max(Number(g.anticiposAplicados || 0), Number(g.anticiposAplicadosCxp || 0));
+        _consigConsumirPorPropias(g);
         g.anticiposDisponibles = Math.max(0, Number(g.anticiposTotal || 0) - Number(g.anticiposAplicados || 0));
         g.creditoAnticipos = Math.max(Number(g.anticiposTotal || 0), Number(g.anticiposAplicados || 0));
         g.saldoNeto = Math.max(0, g.compraOriginal - (g.montoDevuelto || 0) - g.pagadoPorVentas - g.creditoAnticipos);
@@ -5220,14 +5240,17 @@ function _consigAnticipoLectura(alcance = {}) {
     const aplicado = Number(alcance.anticiposAplicados || 0);
     const aplicadoDesdeGlobal = Math.max(0, aplicado - entregado);
     const disponibleDirecto = Math.max(0, entregado - aplicado);
-    const lineaGlobal = aplicadoDesdeGlobal > 0.01
+    const propio = Number(alcance.liquidadoPropioConAnticipo || 0);
+    const lineaGlobal = (aplicadoDesdeGlobal > 0.01
         ? `<br><small style="color:#7c3aed;">Desde anticipo global: ${dinero(aplicadoDesdeGlobal)}</small>`
-        : '';
+        : '') + (propio > 0.01
+        ? `<br><small style="color:#0f766e;">Incluye ${dinero(propio)} de piezas liquidadas como propias</small>`
+        : '');
     return { entregado, aplicado, aplicadoDesdeGlobal, disponibleDirecto, lineaGlobal };
 }
 
-function _consigResumenKPIs({ compraOriginal = 0, montoDevuelto = 0, pagadoPorVentas = 0, anticiposTotal = 0, anticiposAplicados = 0, saldoNeto = 0 }) {
-    const anticipo = _consigAnticipoLectura({ anticiposTotal, anticiposAplicados });
+function _consigResumenKPIs({ compraOriginal = 0, montoDevuelto = 0, pagadoPorVentas = 0, anticiposTotal = 0, anticiposAplicados = 0, saldoNeto = 0, liquidadoPropioConAnticipo = 0 }) {
+    const anticipo = _consigAnticipoLectura({ anticiposTotal, anticiposAplicados, liquidadoPropioConAnticipo });
     
     // Cálculos reales para los indicadores
     const valorMercanciaActual = Math.max(0, compraOriginal - montoDevuelto - pagadoPorVentas);
@@ -6113,6 +6136,7 @@ window.abrirGestorConsignaciones = function() {
     const totalPagadoVentas = resumen.grupos.reduce((s, g) => s + g.pagadoPorVentas, 0);
     const totalAnticipos = resumen.grupos.reduce((s, g) => s + g.anticiposTotal, 0);
     const totalAnticiposAplicados = resumen.grupos.reduce((s, g) => s + g.anticiposAplicados, 0);
+    const totalLiquidadoPropio = resumen.grupos.reduce((s, g) => s + (g.liquidadoPropioConAnticipo || 0), 0);
     const totalSaldo = resumen.grupos.reduce((s, g) => s + g.saldoNeto, 0);
     const totalFoliosConcluidos = resumen.grupos.reduce((s, g) => s + g.folios.filter(f => f.concluida).length, 0);
 
@@ -6238,7 +6262,7 @@ window.abrirGestorConsignaciones = function() {
                 <button onclick="abrirGestorConsignaciones()" style="padding:10px 14px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:bold;">Actualizar</button>
             </div>
         </div>
-        ${_consigResumenKPIs({ compraOriginal: totalImporte, montoDevuelto: totalDevuelto, pagadoPorVentas: totalPagadoVentas, anticiposTotal: totalAnticipos, anticiposAplicados: totalAnticiposAplicados, saldoNeto: totalSaldo })}
+        ${_consigResumenKPIs({ compraOriginal: totalImporte, montoDevuelto: totalDevuelto, pagadoPorVentas: totalPagadoVentas, anticiposTotal: totalAnticipos, anticiposAplicados: totalAnticiposAplicados, saldoNeto: totalSaldo, liquidadoPropioConAnticipo: totalLiquidadoPropio })}
         <div style="display:grid;grid-template-columns:minmax(260px,360px) minmax(0,1fr);gap:14px;align-items:start;">
             <section style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:14px;">
                 <div style="font-size:12px;font-weight:900;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Proveedores</div>
