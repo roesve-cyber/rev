@@ -829,3 +829,8 @@ div[style*="background: white"], div[style*="background:white"] { border-radius:
   }
   .abn-botones button { min-height: 56px; font-size: 17px !important; border-radius: 12px !important; }
 }
+
+/* 📱 En celular se quita el Dashboard del menú (no se usa ahí) */
+@media (max-width: 600px) {
+  #sidebar button[onclick^="navA('dashboard')"] { display: none !important; }
+}
