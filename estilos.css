@@ -714,3 +714,118 @@ div[style*="background: white"], div[style*="background:white"] { border-radius:
   :root { --sb-width: 260px; }
   #app-container { padding: calc(var(--header-h) + 14px) 16px 28px; }
 }
+
+/* =====================================================================
+   📱 APLICAR ABONO DIRECTO EN CELULAR
+   Todo esto vive dentro de @media (max-width: 600px): tablet y escritorio
+   no cambian en nada. El acceso grande solo aparece para administrador
+   (lo decide actualizarAccesoAbonoMovil() en cxc.js).
+   ===================================================================== */
+.acceso-abono-movil { display: none; }
+
+@media (max-width: 600px) {
+  /* Acceso grande en la pantalla de inicio */
+  .acceso-abono-movil.visible { display: block; padding: 8px 2px 0; }
+  .acceso-abono-movil.visible ~ div { height: 42vh !important; }
+  .acceso-abono-movil button {
+    width: 100%; min-height: 104px; border: none; border-radius: 22px; cursor: pointer;
+    display: flex; align-items: center; gap: 18px; padding: 18px 22px; text-align: left;
+    background: linear-gradient(135deg, #0f766e, #14b8a6); color: #fff;
+    box-shadow: 0 12px 28px rgba(15, 118, 110, 0.35); -webkit-tap-highlight-color: transparent;
+  }
+  .acceso-abono-movil button:active { transform: scale(0.98); }
+  .acceso-abono-icono { font-size: 46px; line-height: 1; }
+  .acceso-abono-texto { display: flex; flex-direction: column; gap: 4px; }
+  .acceso-abono-texto strong { font-size: 23px; line-height: 1.15; }
+  .acceso-abono-texto small { font-size: 15px; opacity: 0.9; font-weight: 500; }
+
+  /* Pantalla Abonos Directos: buscador fijo arriba y tarjetas */
+  #abonosdirectos .vista-header p { display: none; }
+  #abonosdirectos .vista-header { margin-bottom: 8px; }
+  #barraFiltroAbonoDirecto {
+    position: sticky; top: var(--header-h, 56px); z-index: 20;
+    margin: 0 -10px 12px !important; padding: 10px !important; border-radius: 0 0 16px 16px !important;
+    background: #fff !important; box-shadow: 0 8px 16px -12px rgba(15, 23, 42, 0.45);
+  }
+  #barraFiltroAbonoDirecto input {
+    min-width: 0 !important; width: 100%; min-height: 52px; font-size: 17px !important;
+    padding: 12px 16px !important; border: 2px solid #0f766e !important; border-radius: 14px !important;
+    box-sizing: border-box;
+  }
+  .btn-actualizar-abono { display: none !important; }
+
+  .abn-resumen-lista { font-size: 13px; color: #64748b; margin: 0 2px 10px; font-weight: 600; }
+  .abn-vacio { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px 18px; text-align: center; color: #475569; font-size: 16px; }
+  .abn-vacio small { color: #94a3b8; }
+  .abn-card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 14px;
+    margin-bottom: 12px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  }
+  .abn-card.incob { border-color: #fecaca; background: #fffafa; }
+  .abn-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .abn-card-id { min-width: 0; }
+  .abn-nombre { font-size: 17px; font-weight: 800; color: #0f172a; line-height: 1.25; overflow-wrap: anywhere; }
+  .abn-folio { font-size: 12.5px; color: #64748b; margin-top: 2px; }
+  .abn-saldo-grande { text-align: right; font-size: 21px; font-weight: 900; color: #dc2626; white-space: nowrap; line-height: 1.1; }
+  .abn-saldo-grande small { display: block; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
+  .abn-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+  .abn-chip { padding: 4px 10px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 700; }
+  .abn-chip.ok { background: #dcfce7; color: #166534; }
+  .abn-chip.mal { background: #fee2e2; color: #991b1b; }
+  .abn-chip.mora { background: #fef2f2; color: #7f1d1d; }
+  .abn-chip.aviso { background: #fffbeb; color: #b45309; }
+  .abn-btn-principal {
+    width: 100%; min-height: 54px; border: none; border-radius: 14px; cursor: pointer;
+    background: #0f766e; color: #fff; font-size: 18px; font-weight: 800; letter-spacing: .01em;
+    box-shadow: 0 6px 14px rgba(15, 118, 110, 0.28);
+  }
+  .abn-btn-principal:active { transform: scale(0.98); }
+  .abn-sec { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .abn-btn-sec {
+    flex: 1 1 auto; min-height: 42px; padding: 0 12px; border: none; border-radius: 10px; cursor: pointer;
+    background: #64748b; color: #fff; font-size: 13.5px; font-weight: 700;
+  }
+  .abn-btn-sec.prom { background: #f59e0b; }
+  .abn-btn-sec.wa { background: #25D366; }
+  .abn-btn-sec.mora { background: #7f1d1d; }
+  .abn-ver-mas {
+    width: 100%; min-height: 50px; margin: 4px 0 18px; border: 2px dashed #94a3b8; border-radius: 14px;
+    background: #fff; color: #334155; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+
+  /* Formulario del abono: lo importante primero (monto, cuenta) y botones siempre a la vista */
+  /* (doble atributo = más especificidad que la regla general de modales, que usa :not()) */
+  div[data-modal="abono-avanzado"][data-modal] {
+    padding: 0 !important; align-items: flex-end !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  }
+  div[data-modal="abono-avanzado"][data-modal] > div {
+    padding: 0 !important; margin: 0 !important; max-width: 100% !important; width: 100% !important;
+    max-height: 94vh !important; max-height: 94dvh !important; overflow-y: auto !important;
+    border-radius: 20px 20px 0 0 !important; display: flex; flex-direction: column;
+  }
+  div[data-modal="abono-avanzado"] h2 { font-size: 16px !important; line-height: 1.25; }
+  div[data-modal="abono-avanzado"][data-modal] > div > div:first-child { padding: 14px 16px !important; }
+  .abn-contenido { display: flex !important; flex-direction: column; padding: 14px !important; }
+  .abn-saldo   { order: -10; margin-bottom: 12px !important; padding: 12px !important; }
+  .abn-saldo > div { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .abn-plazo   { order: -9; }
+  .abn-cupones { order: -8; }
+  .abn-captura { order: -7; }
+  #avisoPoliticaAbono { order: -6; }
+  .abn-cuenta  { order: -5; padding: 12px !important; margin-bottom: 12px !important; }
+  .abn-ref     { order: -4; padding: 12px !important; margin-bottom: 12px !important; }
+  .abn-nota    { order: 1; }
+  .abn-politica{ order: 2; }
+  .abn-detalle { order: 6; }
+  .abn-detalle[style*="grid"] { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+  .abn-captura input { min-height: 54px; box-sizing: border-box; }
+  #montoAbono { font-size: 26px !important; font-weight: 800; text-align: right; }
+  #fechaAbonoInput { font-size: 16px !important; }
+  .abn-cuenta select, .abn-ref input { min-height: 50px; font-size: 16px !important; width: 100%; box-sizing: border-box; }
+  .abn-botones {
+    order: 99; position: sticky; bottom: 0; z-index: 5; gap: 8px !important;
+    margin: 8px -14px -14px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    background: #fff; border-top: 1px solid #e5e7eb; box-shadow: 0 -8px 16px -12px rgba(15, 23, 42, 0.35);
+  }
+  .abn-botones button { min-height: 56px; font-size: 17px !important; border-radius: 12px !important; }
+}

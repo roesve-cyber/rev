@@ -326,6 +326,13 @@
 </div>
     <!-- INICIO -->
     <div id="inicio" class="vista">
+ <!-- Acceso grande (solo celular y solo admin) -->
+ <div id="accesoAbonoMovil" class="acceso-abono-movil">
+ <button type="button" onclick="navA('abonosdirectos')">
+ <span class="acceso-abono-icono">💵</span>
+ <span class="acceso-abono-texto"><strong>Aplicar abono directo</strong><small>Buscar cliente y cobrar</small></span>
+ </button>
+ </div>
  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; text-align: center;">
  <img src="img/Logo.svg" style="width: 200px; opacity: 0.1; filter: grayscale(100%);" onerror="this.style.display='none'">
  <h2 style="color: #bdc3c7; font-weight: 300; margin-top: 20px;">ADMINISTRACION</h2>
@@ -389,10 +396,10 @@
  <h2>Abonos Directos</h2>
  <p>Aplica abonos sin pasar por autorizacion y emite el ticket al momento.</p>
  </div>
- <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
- <input type="text" id="filtroClienteAbonoDirecto" placeholder="Buscar cliente o folio..."
- onkeyup="renderAbonosDirectos()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
- <button onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
+ <div id="barraFiltroAbonoDirecto" style="background:#f8f9fa; padding:15px; border-radius:8px; margin-bottom:20px; display:flex; gap:10px; flex-wrap:wrap;">
+ <input type="search" id="filtroClienteAbonoDirecto" placeholder="Buscar cliente o folio..." autocomplete="off" enterkeyhint="search"
+ oninput="window._abonoDirectoLimite = 20; renderAbonosDirectos()" onkeydown="if(event.key==='Enter')this.blur()" style="flex:1; min-width:220px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+ <button class="btn-actualizar-abono" onclick="renderAbonosDirectos()" style="padding:10px 20px; background:#0f766e; color:white; border:none; border-radius:5px; cursor:pointer;">Actualizar</button>
  </div>
  <div id="tablaAbonosDirectos"></div>
  </div>
@@ -1314,7 +1321,7 @@
 <script src="js/services/cxc-notas.js?v=1"></script>
 <script src="js/core/data.js?v=4"></script>
 
-<script src="js/modules/auth.js?v=3.3"></script>
+<script src="js/modules/auth.js?v=3.4"></script>
 <script src="js/services/recolor.js?v=1"></script>
 <script src="js/modules/inventario.js?v=37"></script>
 <script src="js/modules/toma-inventario.js?v=3"></script>
@@ -1324,7 +1331,7 @@
 <script src="js/modules/promociones.js?v=2"></script>
 <script src="js/modules/ventas.js?v=4.7"></script>
 <script src="js/modules/clientes.js?v=7"></script>
-<script src="js/modules/cxc.js?v=69"></script>
+<script src="js/modules/cxc.js?v=70"></script>
 <script src="js/modules/cxc-cotizar-liquidacion.js?v=3"></script>
 <script src="js/modules/apartados.js?v=9"></script>
 <script src="js/modules/compras.js?v=65"></script>
@@ -1363,7 +1370,7 @@
 <script src="js/modules/auditoria-clientes-id.js?v=1"></script>
 <script src="js/modules/auditoria-clientes-duplicados.js?v=1"></script>
 <script src="js/services/calculadora-rapida.js?v=1"></script>
-<script src="js/core/navigation.js?v=14"></script>
+<script src="js/core/navigation.js?v=15"></script>
 <script src="js/init.js?v=9"></script>
  <!-- Eliminado override de navA para evitar ciclo infinito -->
 <script>
