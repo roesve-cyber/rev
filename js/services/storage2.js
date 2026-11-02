@@ -1190,6 +1190,40 @@ const StorageService = {
         }
     },
 
+    // Quita de una tabla crítica TODOS los items que cumplan un criterio (p. ej. registros
+    // incompletos sin id), con la misma sincronización inmediata y transaccional de removeAtomo.
+    // Se usa cuando un item no tiene un id con el cual identificarlo.
+    async removerPorPredicado(key, predicado) {
+        let lista = this.get(key, []);
+        if (!Array.isArray(lista)) lista = [];
+        const nueva = lista.filter(i => !predicado(i));
+        const quitadosLocal = lista.length - nueva.length;
+        await this._guardarLocalDirecto(key, nueva);
+
+        const tsAhora = Date.now();
+        this._cache[`_ts_${key}`] = tsAhora;
+        await localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
+
+        if (window._firebaseActivo && window._db) {
+            const docRef = window._db.collection('posData').doc(key);
+            try {
+                await window._db.runTransaction(async (transaction) => {
+                    const doc = await transaction.get(docRef);
+                    if (!doc.exists) return;
+                    const data = doc.data().data || [];
+                    const filtrado = data.filter(i => !predicado(i));
+                    transaction.update(docRef, { data: filtrado, _updatedAt: tsAhora });
+                });
+                await this._marcarCambioRemoto(key, tsAhora);
+            } catch (e) {
+                console.warn(`⚠️ removerPorPredicado fallo para ${key}, pero datos limpiados localmente:`, e);
+                this._notificarFalloSync(key, e);
+                return { quitados: quitadosLocal, subioANube: false };
+            }
+        }
+        return { quitados: quitadosLocal, subioANube: true };
+    },
+
     // Elimina un item de una tabla crítica con sincronización inmediata a Firebase
     async removeAtomo(key, idValue) {
         // 1. Limpieza local
