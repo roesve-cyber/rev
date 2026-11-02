@@ -4958,6 +4958,81 @@ window.reimprimirFolioUnificado = function(folio, origen) {
 // ===============================================================
 
 // 1. PANEL PRINCIPAL DE LA VISTA (Mantiene tu estructura limpia)
+// Total de pendientes en la Bóveda (ventas + abonos + cambios de cliente). Lo usa el botón de celular.
+window.contarPendientesBoveda = function() {
+    const v = (StorageService.get("ventasPendientes", []) || []).filter(_esSolicitudBovedaPendiente).length;
+    const a = (StorageService.get("abonosPendientes", []) || []).filter(_esSolicitudBovedaPendiente).length;
+    const s = (StorageService.get("solicitudesClientesPendientes", []) || []).length;
+    return v + a + s;
+};
+
+// 📱 Bóveda en celular (<= 600px): tarjetas grandes en lugar de tablas. Mismas acciones de siempre.
+function _authPanelCelularHTML(ventasP, abonosP, solicitudesP) {
+    const money = n => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n || 0);
+    const total = ventasP.length + abonosP.length + solicitudesP.length;
+    const seccion = (titulo, color, cuerpo) => cuerpo ? `<div class="aut-seccion" style="color:${color};">${titulo}</div>${cuerpo}` : '';
+
+    const ventasHTML = ventasP.map(v => `
+        <div class="aut-card">
+            <div class="aut-card-top">
+                <div class="aut-card-id">
+                    <div class="aut-nombre">${_escapeHtml(v.clienteNombre || 'Público General')}</div>
+                    <div class="aut-sub">${_ventaFechaVisible(v.fechaCapturaIso || v.fechaCaptura || v.datosVenta?.fechaIso || v.args?.[7])}</div>
+                </div>
+                <div class="aut-monto venta">${money(v.totalVenta)}</div>
+            </div>
+            <button type="button" class="aut-btn venta" onclick="revisarVentaPendiente(${v._indiceBoveda})">Revisar y autorizar</button>
+        </div>`).join('');
+
+    const abonosHTML = abonosP.map(a => {
+        const esApartado = a.tipo === 'apartado' || a.origen === 'apartados' || a.folioApartado;
+        const folioRef = a.folioApartado || a.folioCXC || '-';
+        return `
+        <div class="aut-card">
+            <div class="aut-card-top">
+                <div class="aut-card-id">
+                    <div class="aut-nombre">${_escapeHtml(a.clienteNombre || `Folio ${folioRef}`)}</div>
+                    <div class="aut-sub">${a.clienteNombre ? `${_escapeHtml(folioRef)} · ` : ''}${esApartado ? 'Apartado' : 'Crédito'}</div>
+                    <div class="aut-sub">${_ventaFechaVisible(a.fechaCapturaIso || a.fechaAbonoIso || a.fechaCaptura || a.fechaAbonoStr)}${a.capturaOffline ? ' <span class="aut-chip">📴 Sin señal</span>' : ''}</div>
+                </div>
+                <div class="aut-monto abono">${money(a.montoAbonado)}</div>
+            </div>
+            <button type="button" class="aut-btn abono" onclick="revisarAbonoPendiente(${a._indiceBoveda})">Revisar y autorizar</button>
+        </div>`;
+    }).join('');
+
+    const solicitudesHTML = solicitudesP.map((s, i) => `
+        <div class="aut-card">
+            <div class="aut-card-top">
+                <div class="aut-card-id">
+                    <div class="aut-nombre">${_escapeHtml(s.clienteNombre || s.antes?.nombre || 'Cliente')}</div>
+                    <div class="aut-sub">${_escapeHtml(s.fechaVisible || s.fechaSolicitud || '-')}</div>
+                    <div class="aut-sub">${_escapeHtml((s.cambios || []).join(', ') || '-')}</div>
+                </div>
+            </div>
+            <button type="button" class="aut-btn cliente" onclick="revisarSolicitudCliente(${i})">Revisar y autorizar</button>
+        </div>`).join('');
+
+    return `
+    <div class="aut-panel">
+        <div class="aut-titulo">🛡️ Bóveda de Autorizaciones</div>
+        <div class="aut-resumen">${total > 0 ? `${total} pendiente(s)` : 'Todo al día ✅'}</div>
+        ${total === 0 ? '<div class="aut-vacio">No hay ventas, abonos ni cambios de cliente por autorizar.</div>' : ''}
+        ${seccion(`Ventas provisionales (${ventasP.length})`, '#d97706', ventasHTML)}
+        ${seccion(`Abonos provisionales (${abonosP.length})`, '#059669', abonosHTML)}
+        ${seccion(`Cambios de cliente (${solicitudesP.length})`, '#7c3aed', solicitudesHTML)}
+    </div>`;
+}
+
+if (window.matchMedia) {
+    const _mqCelularBoveda = window.matchMedia('(max-width: 600px)');
+    const _alCambiarAnchoBoveda = () => {
+        const v = document.getElementById('autorizaciones');
+        if (v && !v.classList.contains('oculto') && typeof window.renderPanelAutorizaciones === 'function') window.renderPanelAutorizaciones();
+    };
+    if (_mqCelularBoveda.addEventListener) _mqCelularBoveda.addEventListener('change', _alCambiarAnchoBoveda);
+}
+
 window.renderPanelAutorizaciones = function() {
     const cont = document.getElementById("autorizaciones"); 
     if (!cont) return;
@@ -4980,6 +5055,11 @@ window.renderPanelAutorizaciones = function() {
         }))
         .filter(_esSolicitudBovedaPendiente);
     const solicitudesClientesP = StorageService.get("solicitudesClientesPendientes", []);
+
+    if (window.matchMedia && window.matchMedia('(max-width: 600px)').matches) {
+        cont.innerHTML = _authPanelCelularHTML(ventasP, abonosP, solicitudesClientesP);
+        return;
+    }
 
     let html = `
     <div style="padding: 20px;">

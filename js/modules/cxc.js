@@ -1450,6 +1450,14 @@ function actualizarAccesoAbonoMovil() {
     if (!el) return;
     const admin = (typeof _esAdmin === 'function' && _esAdmin()) || (typeof esAdmin === 'function' && esAdmin());
     el.classList.toggle('visible', !!admin);
+    // Contador de pendientes en el botón de la Bóveda
+    const badge = document.getElementById('bovedaBadgeMovil');
+    if (badge && admin && typeof window.contarPendientesBoveda === 'function') {
+        let n = 0;
+        try { n = window.contarPendientesBoveda(); } catch (e) {}
+        badge.textContent = n > 0 ? `${n} pendiente${n === 1 ? '' : 's'}` : 'Todo al día';
+        badge.classList.toggle('hay', n > 0);
+    }
 }
 window.actualizarAccesoAbonoMovil = actualizarAccesoAbonoMovil;
 
