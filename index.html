@@ -12,7 +12,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <title>POS Mueblería - Mi Pueblito</title>
-    <link rel="stylesheet" href="/estilos.css?v=2">
+    <link rel="stylesheet" href="/estilos.css?v=3">
 	<link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0f172a">
     <style>/* shake defined in estilos.css */</style>
@@ -331,6 +331,10 @@
  <button type="button" onclick="navA('abonosdirectos')">
  <span class="acceso-abono-icono">💵</span>
  <span class="acceso-abono-texto"><strong>Aplicar abono directo</strong><small>Buscar cliente y cobrar</small></span>
+ </button>
+ <button type="button" class="acceso-boveda" onclick="navA('autorizaciones')">
+ <span class="acceso-abono-icono">🛡️</span>
+ <span class="acceso-abono-texto"><strong>Autorizar pendientes</strong><small>Bóveda de auditoría</small><span id="bovedaBadgeMovil" class="acceso-badge">…</span></span>
  </button>
  </div>
  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; text-align: center;">
@@ -1329,9 +1333,9 @@
 <script src="js/modules/tienda.js?v=8"></script>
 <script src="js/modules/publicidad.js?v=2"></script>
 <script src="js/modules/promociones.js?v=2"></script>
-<script src="js/modules/ventas.js?v=4.7"></script>
+<script src="js/modules/ventas.js?v=4.8"></script>
 <script src="js/modules/clientes.js?v=7"></script>
-<script src="js/modules/cxc.js?v=70"></script>
+<script src="js/modules/cxc.js?v=71"></script>
 <script src="js/modules/cxc-cotizar-liquidacion.js?v=3"></script>
 <script src="js/modules/apartados.js?v=9"></script>
 <script src="js/modules/compras.js?v=65"></script>
