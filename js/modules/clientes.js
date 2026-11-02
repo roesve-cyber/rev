@@ -1131,8 +1131,12 @@ function _clientesSincronizarTodosLosDatosRelacionados() {
 }
 
 function renderSolicitudesClienteAutorizacion() {
-    const solicitudes = StorageService.get('solicitudesClientesPendientes', []);
-    const filas = solicitudes.map((s, i) => `
+    const todas = StorageService.get('solicitudesClientesPendientes', []);
+    // Se apartan los registros truncados (los descarta el admin desde el aviso de la Bóveda); se conserva el índice original.
+    const solicitudes = (Array.isArray(todas) ? todas : [])
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => !(typeof _bovedaEsSolicitudIncompleta === 'function' && _bovedaEsSolicitudIncompleta(s)));
+    const filas = solicitudes.map(({ s, i }) => `
         <tr style="border-bottom:1px solid #e2e8f0;">
             <td style="padding:8px;">${_escapeHtml(s.fechaVisible || s.fechaSolicitud || '-')}</td>
             <td style="padding:8px;"><strong>${_escapeHtml(s.clienteNombre || s.antes?.nombre || 'Cliente')}</strong><br><small style="color:#64748b;">${_escapeHtml(s.solicitadoPor || '-')}</small></td>

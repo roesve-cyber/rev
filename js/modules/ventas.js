@@ -4959,15 +4959,84 @@ window.reimprimirFolioUnificado = function(folio, origen) {
 
 // 1. PANEL PRINCIPAL DE LA VISTA (Mantiene tu estructura limpia)
 // Total de pendientes en la Bóveda (ventas + abonos + cambios de cliente). Lo usa el botón de celular.
+// Registros que quedaron truncados (sin cliente, importe ni folio): no se pueden autorizar y se
+// apartan de los pendientes reales. Se descartan con limpiarRegistrosIncompletosBoveda().
+function _bovedaEsObjetoValido(x) { return !!x && typeof x === 'object' && !Array.isArray(x); }
+function _bovedaEsVentaIncompleta(v) {
+    if (!_bovedaEsObjetoValido(v)) return true;
+    const tieneArgs = Array.isArray(v.args) && v.args.length > 0;
+    return !v.datosVenta && !tieneArgs && !v.clienteNombre && !(Number(v.totalVenta) > 0) && !v.idCuarentena && !v.folio;
+}
+function _bovedaEsAbonoIncompleto(a) {
+    if (!_bovedaEsObjetoValido(a)) return true;
+    return !a.folioCXC && !a.folioApartado && !(Number(a.montoAbonado) > 0) && !a.clienteNombre;
+}
+function _bovedaEsSolicitudIncompleta(s) {
+    if (!_bovedaEsObjetoValido(s)) return true;
+    return !s.clienteId && !s.clienteNombre && !s.antes && !s.despues && !(Array.isArray(s.cambios) && s.cambios.length);
+}
+// Descartables = incompletos Y todavía pendientes (los ya resueltos no se tocan).
+function _bovedaVentaDescartable(v) { return !_bovedaEsObjetoValido(v) || (_bovedaEsVentaIncompleta(v) && _esSolicitudBovedaPendiente(v)); }
+function _bovedaAbonoDescartable(a) { return !_bovedaEsObjetoValido(a) || (_bovedaEsAbonoIncompleto(a) && _esSolicitudBovedaPendiente(a)); }
+
+function _bovedaContarIncompletos() {
+    const lista = k => { const l = StorageService.get(k, []); return Array.isArray(l) ? l : []; };
+    return lista("ventasPendientes").filter(_bovedaVentaDescartable).length
+        + lista("abonosPendientes").filter(_bovedaAbonoDescartable).length
+        + lista("solicitudesClientesPendientes").filter(_bovedaEsSolicitudIncompleta).length;
+}
+
 window.contarPendientesBoveda = function() {
-    const v = (StorageService.get("ventasPendientes", []) || []).filter(_esSolicitudBovedaPendiente).length;
-    const a = (StorageService.get("abonosPendientes", []) || []).filter(_esSolicitudBovedaPendiente).length;
-    const s = (StorageService.get("solicitudesClientesPendientes", []) || []).length;
+    const lista = k => { const l = StorageService.get(k, []); return Array.isArray(l) ? l : []; };
+    const v = lista("ventasPendientes").filter(x => _bovedaEsObjetoValido(x) && _esSolicitudBovedaPendiente(x) && !_bovedaEsVentaIncompleta(x)).length;
+    const a = lista("abonosPendientes").filter(x => _bovedaEsObjetoValido(x) && _esSolicitudBovedaPendiente(x) && !_bovedaEsAbonoIncompleto(x)).length;
+    const s = lista("solicitudesClientesPendientes").filter(x => !_bovedaEsSolicitudIncompleta(x)).length;
     return v + a + s;
 };
 
+function _authAvisoIncompletosHTML(n, celular) {
+    if (!n) return '';
+    const esAdminAct = (typeof _esAdmin === 'function' && _esAdmin());
+    const boton = esAdminAct ? `<button type="button" class="${celular ? 'aut-aviso-btn' : ''}" onclick="limpiarRegistrosIncompletosBoveda()" style="${celular ? '' : 'margin-top:8px;background:#b45309;color:#fff;border:0;padding:8px 14px;border-radius:6px;font-weight:bold;cursor:pointer;'}">🗑️ Descartar registro${n === 1 ? '' : 's'} incompleto${n === 1 ? '' : 's'}</button>` : '';
+    return `<div class="${celular ? 'aut-aviso' : ''}" style="${celular ? '' : 'background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 14px;margin:14px 0;color:#92400e;'}">
+        ⚠️ <b>${n} registro${n === 1 ? '' : 's'} incompleto${n === 1 ? '' : 's'}</b> (sin cliente, importe ni folio; seguramente quedaron truncados). No se pueden autorizar y no cuentan como pendientes.
+        ${boton ? `<div>${boton}</div>` : ''}
+    </div>`;
+}
+
+// Descarta de la Bóveda los registros truncados (local + Firebase) y deja copia en la bitácora.
+window.limpiarRegistrosIncompletosBoveda = async function() {
+    if (!(typeof _esAdmin === 'function' && _esAdmin())) return alert("Solo el administrador puede descartar registros de la Bóveda.");
+    const lista = k => { const l = StorageService.get(k, []); return Array.isArray(l) ? l : []; };
+    const dv = lista("ventasPendientes").filter(_bovedaVentaDescartable);
+    const da = lista("abonosPendientes").filter(_bovedaAbonoDescartable);
+    const ds = lista("solicitudesClientesPendientes").filter(_bovedaEsSolicitudIncompleta);
+    const total = dv.length + da.length + ds.length;
+    if (!total) { alert("No hay registros incompletos por descartar."); return window.renderPanelAutorizaciones && window.renderPanelAutorizaciones(); }
+
+    const detalle = [dv.length ? `• Ventas provisionales: ${dv.length}` : '', da.length ? `• Abonos provisionales: ${da.length}` : '', ds.length ? `• Cambios de cliente: ${ds.length}` : ''].filter(Boolean).join('\n');
+    if (!confirm(`Se descartarán ${total} registro(s) incompleto(s):\n\n${detalle}\n\nNo tienen cliente, importe ni folio, así que no hay nada que autorizar con ellos. Se guarda una copia en la bitácora.\n\n¿Continuar?`)) return;
+
+    const resultados = [];
+    if (dv.length) resultados.push(await StorageService.removerPorPredicado("ventasPendientes", _bovedaVentaDescartable));
+    if (da.length) resultados.push(await StorageService.removerPorPredicado("abonosPendientes", _bovedaAbonoDescartable));
+    if (ds.length) resultados.push(await StorageService.removerPorPredicado("solicitudesClientesPendientes", _bovedaEsSolicitudIncompleta));
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'BOVEDA_INCOMPLETOS_DESCARTADOS', modulo: 'Autorizaciones', entidad: 'boveda', entidadId: 'incompletos',
+            detalle: `Se descartaron ${total} registro(s) incompleto(s) de la Bóveda (ventas ${dv.length}, abonos ${da.length}, cambios de cliente ${ds.length}).`,
+            severidad: 'riesgo', datos: { ventas: dv, abonos: da, solicitudesCliente: ds }
+        });
+    }
+    if (typeof window.renderPanelAutorizaciones === 'function') window.renderPanelAutorizaciones();
+    if (typeof window.actualizarAccesoAbonoMovil === 'function') window.actualizarAccesoAbonoMovil();
+    const sinNube = resultados.some(r => r && r.subioANube === false);
+    alert(`✅ Se descartaron ${total} registro(s) incompleto(s).` + (sinNube ? "\n\n⚠️ No se pudo confirmar en la nube; revisa tu conexión y vuelve a abrir la Bóveda." : ""));
+};
+
 // 📱 Bóveda en celular (<= 600px): tarjetas grandes en lugar de tablas. Mismas acciones de siempre.
-function _authPanelCelularHTML(ventasP, abonosP, solicitudesP) {
+function _authPanelCelularHTML(ventasP, abonosP, solicitudesP, nIncompletos = 0) {
     const money = n => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n || 0);
     const total = ventasP.length + abonosP.length + solicitudesP.length;
     const seccion = (titulo, color, cuerpo) => cuerpo ? `<div class="aut-seccion" style="color:${color};">${titulo}</div>${cuerpo}` : '';
@@ -5001,7 +5070,7 @@ function _authPanelCelularHTML(ventasP, abonosP, solicitudesP) {
         </div>`;
     }).join('');
 
-    const solicitudesHTML = solicitudesP.map((s, i) => `
+    const solicitudesHTML = solicitudesP.map(({ s, i }) => `
         <div class="aut-card">
             <div class="aut-card-top">
                 <div class="aut-card-id">
@@ -5017,7 +5086,8 @@ function _authPanelCelularHTML(ventasP, abonosP, solicitudesP) {
     <div class="aut-panel">
         <div class="aut-titulo">🛡️ Bóveda de Autorizaciones</div>
         <div class="aut-resumen">${total > 0 ? `${total} pendiente(s)` : 'Todo al día ✅'}</div>
-        ${total === 0 ? '<div class="aut-vacio">No hay ventas, abonos ni cambios de cliente por autorizar.</div>' : ''}
+        ${_authAvisoIncompletosHTML(nIncompletos, true)}
+        ${total === 0 && !nIncompletos ? '<div class="aut-vacio">No hay ventas, abonos ni cambios de cliente por autorizar.</div>' : ''}
         ${seccion(`Ventas provisionales (${ventasP.length})`, '#d97706', ventasHTML)}
         ${seccion(`Abonos provisionales (${abonosP.length})`, '#059669', abonosHTML)}
         ${seccion(`Cambios de cliente (${solicitudesP.length})`, '#7c3aed', solicitudesHTML)}
@@ -5045,7 +5115,7 @@ window.renderPanelAutorizaciones = function() {
             _indiceBoveda: index,
             fechaCapturaIso: v.fechaCapturaIso || v.datosVenta?.fechaIso || v.args?.[7] || null
         }))
-        .filter(_esSolicitudBovedaPendiente);
+        .filter(v => _bovedaEsObjetoValido(v) && _esSolicitudBovedaPendiente(v) && !_bovedaEsVentaIncompleta(v));
     const abonosPendientesGlobal = StorageService.get("abonosPendientes", []);
     const abonosP = abonosPendientesGlobal
         .map((a, index) => ({
@@ -5053,17 +5123,22 @@ window.renderPanelAutorizaciones = function() {
             _indiceBoveda: index,
             fechaCapturaIso: a.fechaCapturaIso || a.fechaAbonoIso || null
         }))
-        .filter(_esSolicitudBovedaPendiente);
-    const solicitudesClientesP = StorageService.get("solicitudesClientesPendientes", []);
+        .filter(a => _bovedaEsObjetoValido(a) && _esSolicitudBovedaPendiente(a) && !_bovedaEsAbonoIncompleto(a));
+    const solicitudesTodas = StorageService.get("solicitudesClientesPendientes", []);
+    const solicitudesClientesP = (Array.isArray(solicitudesTodas) ? solicitudesTodas : [])
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => !_bovedaEsSolicitudIncompleta(s));
+    const nIncompletos = _bovedaContarIncompletos();
 
     if (window.matchMedia && window.matchMedia('(max-width: 600px)').matches) {
-        cont.innerHTML = _authPanelCelularHTML(ventasP, abonosP, solicitudesClientesP);
+        cont.innerHTML = _authPanelCelularHTML(ventasP, abonosP, solicitudesClientesP, nIncompletos);
         return;
     }
 
     let html = `
     <div style="padding: 20px;">
         <h2 style="color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; margin-top:0;">Bóveda de Autorizaciones (Pendientes)</h2>
+        ${_authAvisoIncompletosHTML(nIncompletos, false)}
         
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 20px; margin-top: 20px;">
             
