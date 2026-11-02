@@ -874,3 +874,9 @@ div[style*="background: white"], div[style*="background:white"] { border-radius:
   .aut-btn.cliente { background: #7c3aed; box-shadow: 0 6px 14px rgba(124, 58, 237, 0.28); }
   .aut-btn:active { transform: scale(0.98); }
 }
+
+/* ⚠️ Aviso de registros incompletos en la Bóveda (celular) */
+@media (max-width: 600px) {
+  .aut-aviso { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 14px; padding: 14px; margin: 0 0 14px; color: #92400e; font-size: 14px; line-height: 1.4; }
+  .aut-aviso-btn { width: 100%; min-height: 50px; margin-top: 10px; border: none; border-radius: 12px; background: #b45309; color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; }
+}
