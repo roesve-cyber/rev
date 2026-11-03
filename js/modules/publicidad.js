@@ -248,6 +248,71 @@
         return [`✨ ${p.nombre}${datos ? ' — ' + datos : ''}`, '', car, col.length ? `🎨 Colores: ${col.join(', ')}` : '', '', `💰 Contado: ${dinero(p.precio)}`, credito, ex.ultima ? `⚡ ${ex.texto}` : '', '', `📲 Pide informes por WhatsApp: ${telVisible()}`, PUB.cfg.ubicacion ? `📍 ${PUB.cfg.negocio} · ${PUB.cfg.ubicacion}` : '', `🖼️ Catálogo: ${PUB.cfg.catalogo}`, '', hashtags(p)].filter((x, i, a) => x !== '' || (a[i - 1] !== '')).join('\n');
     }
 
+    // ------------------------------------------------------------------ paquete para Claude
+    // Foto: ImgBB da dos enlaces. "ibb.co/AbC123" es una PÁGINA web (no sirve como imagen);
+    // el bueno es el "Enlace directo": https://i.ibb.co/.../foto.jpg
+    function imagenInfo(p) {
+        const u = String(p.imagen || '').trim();
+        if (!u) return { url: '', directa: false, aviso: 'Sin foto' };
+        if (/^https?:\/\/(www\.)?ibb\.co\/[A-Za-z0-9]+\/?$/.test(u)) return { url: u, directa: false, aviso: 'Es la página de ImgBB, no la imagen. En ImgBB copia el "Enlace directo" (empieza con https://i.ibb.co/)' };
+        return { url: u, directa: /^https?:\/\/i\.ibb\.co\//.test(u) || /\.(png|jpe?g|webp|gif|avif)(\?.*)?$/i.test(u), aviso: '' };
+    }
+    function paqueteClaude(lista) {
+        const T = PLANTILLAS[PUB.plantilla];
+        const datos = {
+            negocio: { nombre: PUB.cfg.negocio, ubicacion: PUB.cfg.ubicacion, slogan: PUB.cfg.slogan || null, whatsappVisible: telVisible(), catalogo: PUB.cfg.catalogo },
+            formatos: Object.keys(FORMATOS).map(k => ({ id: k, ancho: FORMATOS[k].w, alto: FORMATOS[k].h })),
+            estiloPedido: PUB.estilo.trim() || null,
+            paleta: { acento: PUB.acento || T.acento, tinta: T.tinta, tenue: T.tenue, fondo: T.fondo },
+            productos: lista.map(p => {
+                const pr = planPrincipal(p), pl = planesCatalogo(p), pm = promoDe(p), ex = existencia(p), im = imagenInfo(p);
+                return {
+                    nombre: p.nombre, marca: p.marca || null, modelo: p.modelo || null, categoria: [p.categoria, p.subcategoria].filter(Boolean).join(' / '),
+                    colores: colores(p), caracteristicas: lineasCaracteristicas(p), precioContado: Number(p.precio) || 0,
+                    credito: pr ? { enganche: pr.enganche, abonoSemanal: pr.abono, pagos: pr.pagos, meses: pr.meses, otrosPlanes: pl.map(x => ({ meses: x.meses, abonoSemanal: x.abono })) } : null,
+                    promocion: pm ? (pm.tipo === 'contado'
+                        ? { nombre: pm.nombre, tipo: 'contado', etiqueta: pm.etiqueta, precioPromo: pm.precioPromo, precioNormal: pm.precioNormal, ahorro: pm.ahorro, porcentaje: pm.pct, vigencia: pm.vigencia || null, condiciones: pm.condiciones || null }
+                        : { nombre: pm.nombre, tipo: 'credito', etiquetas: pm.etiquetas, abonoSemanal: pm.principal.abono, meses: pm.principal.meses, enganche: pm.enganche, totalMSI: pm.msi ? pm.msi.total : null, vigencia: pm.vigencia || null, condiciones: pm.condiciones || null }) : null,
+                    existencia: ex.texto + (ex.stock > 0 ? ` (${ex.stock} pz)` : ''), avisoUltimasPiezas: ex.ultima,
+                    foto: { url: im.url, esEnlaceDirecto: im.directa, aviso: im.aviso || null }, linkWhatsApp: linkWA(p)
+                };
+            })
+        };
+        const instr = [
+            'Eres diseñador publicitario. Con los DATOS (JSON) de abajo arma el anuncio de cada producto como una página HTML autocontenida por formato.',
+            'REGLAS:',
+            '1) Tamaño EXACTO: un <div> raíz con width y height en px del formato pedido (por defecto "cuadrado"), overflow:hidden, todo el CSS inline o en un <style>; nada de scripts.',
+            '2) Usa precios, abonos, enganches, promoción y textos TAL CUAL vienen en el JSON. No recalcules ni inventes descuentos, plazos, garantías ni características.',
+            '3) Foto: <img src="foto.url" crossorigin="anonymous" style="object-fit:contain">. Si foto.esEnlaceDirecto es false, NO la uses y avísame qué enlace corregir.',
+            '4) Sin imágenes, fuentes ni librerías externas (solo fuentes del sistema). Letras grandes legibles en celular y márgenes seguros de 48px.',
+            '5) Incluye nombre del negocio, WhatsApp visible (negocio.whatsappVisible) y, si hay promoción, su nombre, vigencia y letra chica.',
+            'Entrégame el HTML en un bloque de código para pegarlo en el sistema (Publicidad > Diseño > "Pegar diseño de Claude") y dime brevemente qué ajustarías.',
+            '', 'DATOS:'
+        ].join('\n');
+        return instr + '\n```json\n' + JSON.stringify(datos, null, 2) + '\n```';
+    }
+    async function exportarHtmlLibre() {
+        const ta = $('pubHtmlClaude'), crudo = ta ? ta.value.trim() : '';
+        if (!crudo) return toast('Pega primero el HTML de Claude.');
+        if (PUB.generando) return; PUB.generando = true;
+        const btn = $('pubBtnHtml'); const t0 = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+        const F = FORMATOS[PUB.formato], host = document.createElement('div');
+        try {
+            await cargarHtml2Canvas();
+            const doc = new DOMParser().parseFromString(crudo.replace(/^```[a-z]*\s*|\s*```$/gi, ''), 'text/html');
+            doc.querySelectorAll('script,iframe,object,embed,link').forEach(n => n.remove());
+            host.style.cssText = `position:fixed;left:-200000px;top:0;width:${F.w}px;height:${F.h}px;overflow:hidden;pointer-events:none`;
+            host.innerHTML = Array.from(doc.querySelectorAll('style')).map(n => n.outerHTML).join('') + doc.body.innerHTML;
+            document.body.appendChild(host);
+            await Promise.all(Array.from(host.querySelectorAll('img')).map(im => im.complete ? 1 : new Promise(r => { im.onload = im.onerror = r; setTimeout(r, 12000); })));
+            const canvas = await window.html2canvas(host, { scale: 1, width: F.w, height: F.h, useCORS: true, allowTaint: false, backgroundColor: '#ffffff', logging: false });
+            const r = await entregarCanvas(canvas, 'anuncio_claude_' + PUB.formato, 'Anuncio (diseño de Claude)');
+            toast(r === 'cancelado' ? 'Cancelado' : 'Anuncio listo ✔');
+        } catch (e) { console.error('Publicidad:', e); toast('No se pudo convertir ese HTML (revisa que la foto sea enlace directo).'); }
+        finally { host.remove(); PUB.generando = false; if (btn) { btn.disabled = false; btn.textContent = t0; } }
+    }
+
     // ------------------------------------------------------------------ diseño del anuncio (HTML a tamaño real)
     function fuente(p) { return PUB.fotoLocal[String(p.id)] || p.imagen || 'img/Logo.svg'; }
 
@@ -462,6 +527,7 @@
             <label class="pub-lbl">Estilo que quieres (opcional; va dentro del brief)</label>
             <textarea class="pub-in" rows="2" placeholder="Ej.: moderno, fondo claro, colores verdes, estilo catálogo de tienda departamental…" oninput="PUB_.estilo=this.value">${esc(PUB.estilo)}</textarea>
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              <button class="pub-btn p" onclick="pubCopiarPaquete()">🤝 Copiar paquete para Claude (${sel.length})</button>
               <button class="pub-btn mo" onclick="pubCopiarBrief()">🤖 Copiar brief para IA (${sel.length})</button>
               <button class="pub-btn az" onclick="pubCopiarFichas()">📋 Copiar fichas (${sel.length})</button>
               <button class="pub-btn" onclick="pubDescargarTxt()">⬇️ Descargar .txt</button></div></div>`;
@@ -471,7 +537,7 @@
             return `<div class="pub-card" style="margin-bottom:12px"><div class="pub-prod"><img src="${esc(p.imagen || 'img/Logo.svg')}" alt="" onerror="this.src='img/Logo.svg'">
                 <div style="flex:1;min-width:0"><b style="font-size:15px">${esc(p.nombre)}</b>
                 <div style="font-size:12.5px;color:#64748b">${esc([p.categoria, p.subcategoria].filter(Boolean).join(' / '))}${p.marca ? ' · ' + esc(p.marca) : ''}${p.modelo ? ' · ' + esc(p.modelo) : ''}</div>
-                <div class="pub-chips"><span class="pub-chip">Contado ${dinero(p.precio)}</span>${pr ? `<span class="pub-chip">${dinero(pr.abono)} semanal · ${pr.meses} ${pr.meses === 1 ? 'mes' : 'meses'}</span><span class="pub-chip">Enganche ${dinero(pr.enganche)}</span>` : '<span class="pub-chip">Sin plan de crédito</span>'}<span class="pub-chip ${ex.ultima ? 'r' : ''}">${esc(ex.texto)}${ex.stock > 0 ? ' · ' + ex.stock + ' pz' : ''}</span></div></div></div>
+                <div class="pub-chips"><span class="pub-chip">Contado ${dinero(p.precio)}</span>${pr ? `<span class="pub-chip">${dinero(pr.abono)} semanal · ${pr.meses} ${pr.meses === 1 ? 'mes' : 'meses'}</span><span class="pub-chip">Enganche ${dinero(pr.enganche)}</span>` : '<span class="pub-chip">Sin plan de crédito</span>'}<span class="pub-chip ${ex.ultima ? 'r' : ''}">${esc(ex.texto)}${ex.stock > 0 ? ' · ' + ex.stock + ' pz' : ''}</span>${imagenInfo(p).url && !imagenInfo(p).directa ? `<span class="pub-chip r" title="${esc(imagenInfo(p).aviso)}">⚠ Foto: enlace no directo</span>` : ''}</div></div></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pub-btn az" onclick="pubCopiarFicha('${id}')">📋 Ficha</button><button class="pub-btn mo" onclick="pubCopiarBrief('${id}')">🤖 Brief IA</button><button class="pub-btn p" onclick="pubDisenar('${id}')">🎨 Diseñar aquí</button></div>
               <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:800">✍️ Texto para publicar</summary>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><button class="pub-btn" onclick="pubTexto('${id}','wa')">WhatsApp / estado</button><button class="pub-btn" onclick="pubTexto('${id}','fb')">Facebook / Instagram</button><button class="pub-btn" onclick="pubTexto('${id}','urgencia')">Urgencia</button></div>
@@ -506,7 +572,11 @@
               <div><div id="pubPreviewWrap" style="width:${anchoPrev}px;height:${Math.round(F.h * k)}px;overflow:hidden;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.12)"><div id="pubPreview" style="width:${F.w}px;height:${F.h}px;transform:scale(${k});transform-origin:top left">${htmlAnuncio(p, opcionesDiseno(p))}</div></div>
                 <div style="font-size:12px;color:#64748b;margin-top:6px;text-align:center">Vista previa · se descarga a ${F.w}×${F.h}</div></div></div>
             <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="pub-btn p" id="pubBtnDescargar" onclick="pubCrear()">⬇️ Descargar / compartir este anuncio</button>
-              ${sel.length > 1 ? `<button class="pub-btn az" id="pubBtnTodos" onclick="pubCrearTodos()">⬇️ Generar los ${sel.length} seleccionados</button>` : ''}</div></div>`;
+              ${sel.length > 1 ? `<button class="pub-btn az" id="pubBtnTodos" onclick="pubCrearTodos()">⬇️ Generar los ${sel.length} seleccionados</button>` : ''}</div>
+            <details style="margin-top:14px"><summary style="cursor:pointer;font-size:13px;font-weight:800">🤝 Pegar diseño de Claude → PNG (${F.w}×${F.h})</summary>
+              <p style="font-size:12px;color:#64748b;margin:6px 0">Copia el paquete en la pestaña "Información y textos", pégalo en Claude y pega aquí el HTML que te devuelva. Se exporta con el formato elegido arriba.</p>
+              <textarea class="pub-in" id="pubHtmlClaude" rows="6" placeholder="Pega aquí el HTML de Claude…"></textarea>
+              <button class="pub-btn mo" id="pubBtnHtml" style="margin-top:6px" onclick="pubExportarHtml()">⬇️ Convertir a PNG</button></details></div>`;
     }
 
     function selectorPromocion() {
@@ -561,8 +631,10 @@
         const r = new FileReader(); r.onload = () => { PUB.fotoLocal[String(PUB.activo)] = r.result; window.renderPublicidad(true); toast('Foto cargada ✔'); }; r.readAsDataURL(f);
     };
     window.pubCrear = function () { crearAnuncio(PUB.activo); };
+    window.pubCopiarPaquete = function () { const s2 = seleccionados(); if (s2.length) copiar(paqueteClaude(s2), 'Paquete para Claude copiado ✔'); };
+    window.pubExportarHtml = function () { exportarHtmlLibre(); };
     window.pubCrearTodos = function () { crearTodos(); };
 
     // Para pruebas y para reutilizar desde otros módulos
-    window.PublicidadService = { planesCatalogo, planPrincipal, fichaTexto, briefIA, textoPublicacion, htmlAnuncio, renderAnuncio, opcionesDiseno, promoDe, FORMATOS, PLANTILLAS };
+    window.PublicidadService = { paqueteClaude, imagenInfo, planesCatalogo, planPrincipal, fichaTexto, briefIA, textoPublicacion, htmlAnuncio, renderAnuncio, opcionesDiseno, promoDe, FORMATOS, PLANTILLAS };
 })();
