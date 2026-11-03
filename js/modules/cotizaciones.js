@@ -36,14 +36,19 @@ function renderCotizaciones() {
     const btnAvanzada = esAdminActual
         ? `<button onclick="abrirCotizadorAuditoria()" style="padding:10px 20px; background:#d97706; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚙️ Nueva Cotización (Avanzada)</button>`
         : '';
+    // ⚡ Rápida: solo cálculo + texto copiable (maneja costo/margen → solo admin)
+    const btnRapida = esAdminActual
+        ? `<button onclick="abrirCotizadorRapido()" style="padding:10px 20px; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">⚡ Cotización Rápida</button>`
+        : '';
 
     cont.innerHTML = `
         <div class="vista-header">
             <h2>📄 Cotizaciones</h2>
             <p>Genera cotizaciones con vigencia y conviértelas a venta.</p>
-            <div style="display:flex; gap:10px; margin-top:15px;">
+            <div style="display:flex; gap:10px; margin-top:15px; flex-wrap:wrap;">
                 <button onclick="abrirCotizador()" style="padding:10px 20px; background:#3498db; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">➕ Nueva Cotización (Simple)</button>
                 ${btnAvanzada}
+                ${btnRapida}
                 <button onclick="abrirCotizadorMayoreo()" style="padding:10px 20px; background:#0891b2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">🏷️ Nueva Cotización (Mayoreo)</button>
             </div>
         </div>
@@ -87,6 +92,223 @@ function abrirCotizadorMayoreo() {
     window._cotEditandoId = null;
     _renderCotizadorHTML('mayoreo');
 }
+
+// ===== ⚡ COTIZACIÓN RÁPIDA (solo cálculo + texto para copiar) =====
+// Herramienta de uso exclusivo de admin (maneja costo y margen). NO guarda
+// nada, NO genera folio, imagen ni ticket: costo + margen → precio contado
+// (editable) → enganche (10% por default, editable) → pago semanal por plazo.
+// Usa la MISMA función que las cotizaciones normales
+// (CalculatorService.calcularCreditoConPeriodicidad, que lee los plazos y
+// tasas de configCreditoGlobal), así que los pagos coinciden exactamente con
+// lo que el sistema cobraría en una venta a crédito.
+const _COT_RAPIDA_PCT_ENGANCHE = 10;      // % de enganche por default
+const _COT_RAPIDA_PLAZO_TEXTO = 6;        // plazo (meses) que sale en el texto por default
+
+function _cotRapidaFmt(n) {
+    n = Number(n) || 0;
+    const entero = Math.abs(n - Math.round(n)) < 0.005;
+    return '$' + n.toLocaleString('es-MX', {
+        minimumFractionDigits: entero ? 0 : 2,
+        maximumFractionDigits: entero ? 0 : 2
+    });
+}
+
+function abrirCotizadorRapido() {
+    if (!(typeof _esAdmin === 'function' && _esAdmin())) {
+        return alert('⚠️ La cotización rápida maneja costo y margen: solo disponible para administrador.');
+    }
+    document.querySelector('[data-modal="cotizador-rapido"]')?.remove();
+    // engancheManual: true cuando Roberto escribió el monto del enganche a mano
+    // (deja de recalcularse solo al cambiar el precio). sel: plazos (meses)
+    // marcados para el texto; null = aún no inicializado.
+    window._cotRapida = { engancheManual: false, sel: null };
+
+    const inp = 'width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;margin-top:4px;font-size:16px;box-sizing:border-box;';
+    const lbl = 'font-size:11px;font-weight:bold;color:#374151;';
+    const html = `
+    <div data-modal="cotizador-rapido" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px;">
+      <div style="background:white;border-radius:12px;width:100%;max-width:560px;padding:24px;margin:auto;box-sizing:border-box;">
+        <h2 style="margin:0 0 4px;color:#7c3aed;">⚡ Cotización Rápida</h2>
+        <p style="margin:0 0 16px;font-size:12px;color:#6b7280;">Solo calcula y arma el texto. No se guarda ni genera imagen.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div>
+            <label style="${lbl}">COSTO ($)</label>
+            <input type="number" id="crCosto" inputmode="decimal" min="0" step="0.01" placeholder="0" oninput="_cotRapidaRecalcular('costo')" style="${inp}">
+          </div>
+          <div>
+            <label style="${lbl}">MARGEN (%)</label>
+            <input type="number" id="crMargen" inputmode="decimal" min="0" max="99" step="0.1" value="30" oninput="_cotRapidaRecalcular('costo')" style="${inp}">
+          </div>
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="${lbl}">PRECIO CONTADO (editable)</label>
+          <input type="number" id="crPrecio" inputmode="decimal" min="0" step="0.01" placeholder="0" oninput="_cotRapidaRecalcular('precio')" style="${inp}border-color:#7c3aed;font-weight:bold;">
+          <div id="crInfoMargen" style="font-size:11px;color:#6b7280;margin-top:3px;"></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:14px;">
+          <div>
+            <label style="${lbl}">ENGANCHE (%)</label>
+            <input type="number" id="crEnganchePct" inputmode="decimal" min="0" max="100" step="0.1" value="${_COT_RAPIDA_PCT_ENGANCHE}" oninput="_cotRapidaRecalcular('pct')" style="${inp}">
+          </div>
+          <div>
+            <label style="${lbl}">ENGANCHE ($) (editable)</label>
+            <input type="number" id="crEnganche" inputmode="decimal" min="0" step="0.01" placeholder="0" oninput="_cotRapidaRecalcular('enganche')" style="${inp}border-color:#7c3aed;font-weight:bold;">
+          </div>
+        </div>
+
+        <div id="crPlanes" style="margin-bottom:14px;"></div>
+
+        <label style="${lbl}">TEXTO PARA COPIAR</label>
+        <textarea id="crTexto" readonly rows="4" style="${inp}background:#f9fafb;resize:none;font-family:inherit;"></textarea>
+
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <button type="button" id="crBtnCopiar" onclick="_cotRapidaCopiar()" style="flex:1;padding:14px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:bold;font-size:15px;">📋 Copiar texto</button>
+          <button type="button" onclick="document.querySelector('[data-modal=cotizador-rapido]')?.remove()" style="padding:14px 20px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;">✕ Cerrar</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    _cotRapidaRecalcular('costo');
+    setTimeout(() => document.getElementById('crCosto')?.focus(), 50);
+}
+
+// origen: 'costo' (cambió costo/margen → recalcula precio), 'precio' (lo editó
+// a mano), 'pct' (cambió el %), 'enganche' (editó el monto a mano).
+function _cotRapidaRecalcular(origen) {
+    const $ = (id) => document.getElementById(id);
+    const st = window._cotRapida;
+    if (!st || !$('crPrecio')) return;
+    const num = (id) => parseFloat($(id).value) || 0;
+
+    // 1) Precio contado: costo ÷ (1 − margen), redondeado hacia arriba a
+    //    múltiplo de $10 (queda editable). Solo se pisa si cambió costo/margen.
+    if (origen === 'costo') {
+        const costo = num('crCosto'), margen = num('crMargen');
+        let precio = 0;
+        if (costo > 0 && margen >= 0 && margen < 100) {
+            precio = Math.ceil((costo / (1 - margen / 100)) / 10) * 10;
+        }
+        $('crPrecio').value = precio > 0 ? precio : '';
+    }
+    const precio = num('crPrecio');
+
+    // Margen real resultante (informativo; útil si editó el precio a mano)
+    const costo = num('crCosto');
+    const info = $('crInfoMargen');
+    if (info) {
+        info.textContent = (costo > 0 && precio > 0)
+            ? `Margen real con este precio: ${(((precio - costo) / precio) * 100).toFixed(1)}%  ·  Utilidad: ${_cotRapidaFmt(precio - costo)}`
+            : '';
+    }
+
+    // 2) Enganche: % → monto (redondeado hacia arriba a múltiplo de $50),
+    //    salvo que Roberto haya escrito el monto a mano.
+    if (origen === 'enganche') {
+        st.engancheManual = true;
+        if (precio > 0) $('crEnganchePct').value = (Math.round((num('crEnganche') / precio) * 1000) / 10);
+    } else if (origen === 'pct') {
+        st.engancheManual = false;
+    }
+    if (!st.engancheManual) {
+        const pct = num('crEnganchePct');
+        const monto = precio > 0 ? Math.ceil((precio * pct / 100) / 50) * 50 : 0;
+        $('crEnganche').value = monto > 0 ? monto : '';
+    } else if (origen === 'precio' || origen === 'costo') {
+        // monto fijo: solo se actualiza el % mostrado
+        if (precio > 0) $('crEnganchePct').value = (Math.round((num('crEnganche') / precio) * 1000) / 10);
+    }
+    const enganche = Math.min(num('crEnganche'), precio);
+    const saldo = Math.max(0, precio - enganche);
+
+    // 3) Planes semanales (mismos plazos/tasas que el sistema)
+    const cont = $('crPlanes');
+    let planes = [];
+    if (saldo > 0 && typeof CalculatorService !== 'undefined') {
+        planes = CalculatorService.calcularCreditoConPeriodicidad(saldo, 'semanal') || [];
+    }
+    if (!planes.length) {
+        cont.innerHTML = precio > 0
+            ? `<div style="font-size:12px;color:#6b7280;text-align:center;padding:10px;">${saldo <= 0 ? 'El enganche cubre el total: no hay saldo a financiar.' : 'No hay planes de crédito configurados.'}</div>`
+            : '';
+        $('crTexto').value = precio > 0 ? `Precio de contado: ${_cotRapidaFmt(precio)}\nEnganche: ${_cotRapidaFmt(enganche)}` : '';
+        return;
+    }
+
+    // Plazos marcados para el texto: por default el de 6 meses (o el más largo
+    // si no existe). Se conserva la selección mientras el plazo siga existiendo.
+    if (!st.sel) {
+        st.sel = new Set([planes.some(p => p.meses === _COT_RAPIDA_PLAZO_TEXTO)
+            ? _COT_RAPIDA_PLAZO_TEXTO
+            : planes[planes.length - 1].meses]);
+    }
+    const disponibles = new Set(planes.map(p => p.meses));
+    st.sel = new Set([...st.sel].filter(m => disponibles.has(m)));
+    if (!st.sel.size) st.sel.add(planes[planes.length - 1].meses);
+
+    let tabla = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:#f3f4f6;">
+        <th style="padding:8px;text-align:center;" title="Incluir en el texto">Texto</th>
+        <th style="padding:8px;text-align:left;">Plazo</th>
+        <th style="padding:8px;text-align:right;">Pago semanal</th>
+        <th style="padding:8px;text-align:right;">Total</th>
+      </tr></thead><tbody>`;
+    planes.forEach(p => {
+        const marcado = st.sel.has(p.meses);
+        tabla += `<tr style="${marcado ? 'background:#f5f3ff;' : ''}border-bottom:1px solid #f3f4f6;">
+          <td style="padding:8px;text-align:center;"><input type="checkbox" ${marcado ? 'checked' : ''} onchange="_cotRapidaTogglePlazo(${p.meses}, this.checked)" style="width:20px;height:20px;"></td>
+          <td style="padding:8px;">${p.meses} meses <span style="color:#9ca3af;font-size:11px;">(${p.pagos} pagos)</span></td>
+          <td style="padding:8px;text-align:right;font-weight:bold;color:#6d28d9;">${_cotRapidaFmt(p.abono)}</td>
+          <td style="padding:8px;text-align:right;color:#6b7280;">${_cotRapidaFmt(p.total)}</td>
+        </tr>`;
+    });
+    tabla += '</tbody></table>';
+    cont.innerHTML = tabla;
+
+    // 4) Texto copiable
+    let texto = `Precio de contado: ${_cotRapidaFmt(precio)}\nEnganche: ${_cotRapidaFmt(enganche)}`;
+    planes.filter(p => st.sel.has(p.meses)).forEach(p => {
+        texto += `\nPago a ${p.meses} meses: ${_cotRapidaFmt(p.abono)} semanales (${p.pagos} pagos)`;
+    });
+    $('crTexto').value = texto;
+}
+
+function _cotRapidaTogglePlazo(meses, marcado) {
+    const st = window._cotRapida;
+    if (!st || !st.sel) return;
+    if (marcado) st.sel.add(meses); else st.sel.delete(meses);
+    _cotRapidaRecalcular('plazos');
+}
+
+async function _cotRapidaCopiar() {
+    const ta = document.getElementById('crTexto');
+    const btn = document.getElementById('crBtnCopiar');
+    if (!ta || !ta.value.trim()) return;
+    let ok = false;
+    try {
+        await navigator.clipboard.writeText(ta.value);
+        ok = true;
+    } catch (e) {
+        // Respaldo para contextos sin Clipboard API
+        try {
+            ta.focus(); ta.select(); ta.setSelectionRange(0, 99999);
+            ok = document.execCommand('copy');
+        } catch (e2) { ok = false; }
+    }
+    if (!ok) return alert('⚠️ No se pudo copiar automáticamente. Mantén presionado el texto y cópialo.');
+    if (btn) {
+        const original = btn.textContent;
+        btn.textContent = '✅ ¡Copiado!';
+        setTimeout(() => { if (btn.isConnected) btn.textContent = original; }, 1500);
+    }
+}
+
+window.abrirCotizadorRapido = abrirCotizadorRapido;
+window._cotRapidaRecalcular = _cotRapidaRecalcular;
+window._cotRapidaTogglePlazo = _cotRapidaTogglePlazo;
+window._cotRapidaCopiar = _cotRapidaCopiar;
 
 // Abre el cotizador precargado con los datos de una cotización ya existente para modificarla.
 function editarCotizacion(id) {
