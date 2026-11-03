@@ -6,11 +6,11 @@ try {
   console.warn('No se pudieron cargar scripts de Firebase Messaging:', err);
 }
 
-var CACHE_NAME = 'mmp-pos-v72';
+var CACHE_NAME = 'mmp-pos-v73';
 var ASSETS = [
   '/',
   '/index.html',
-  '/estilos.css?v=4',
+  '/estilos.css?v=5',
   '/manifest.json'
 ];
 

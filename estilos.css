@@ -880,3 +880,83 @@ div[style*="background: white"], div[style*="background:white"] { border-radius:
   .aut-aviso { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 14px; padding: 14px; margin: 0 0 14px; color: #92400e; font-size: 14px; line-height: 1.4; }
   .aut-aviso-btn { width: 100%; min-height: 50px; margin-top: 10px; border: none; border-radius: 12px; background: #b45309; color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; }
 }
+
+/* =====================================================================
+   📱 VENTA EN CELULAR (catálogo, detalle del producto, punto de venta y
+   resumen). Solo dentro de @media (max-width: 600px): tablet y escritorio
+   no cambian. La operación es exactamente la misma; solo cambia el formato.
+   ===================================================================== */
+@media (max-width: 600px) {
+  /* --- Catálogo (Tienda): filtros compactos y 2 productos por fila --- */
+  #tienda > div[style*="gradient"] { padding: 12px !important; margin-bottom: 12px !important; border-radius: 14px !important; }
+  #tienda > div[style*="gradient"] > div { grid-template-columns: 1fr 1fr !important; gap: 10px !important; align-items: end !important; }
+  #tienda > div[style*="gradient"] > div > div:first-child,
+  #tienda > div[style*="gradient"] > div > button { grid-column: 1 / -1; }
+  #tienda > div[style*="gradient"] label { font-size: 11px !important; margin-bottom: 4px !important; }
+  #tienda > div[style*="gradient"] input,
+  #tienda > div[style*="gradient"] select { font-size: 16px !important; min-height: 46px; padding: 8px 10px !important; border-radius: 10px !important; }
+  #tienda > div[style*="gradient"] > div > button { min-height: 42px; font-size: 14px !important; }
+
+  #gridProductos { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; padding: 4px 0 !important; }
+  #gridProductos > div > div:first-child { height: 112px !important; }
+  #gridProductos > div > div:last-child { padding: 10px !important; }
+  #gridProductos > div h3 { font-size: 12.5px !important; }
+  #gridProductos > div button { min-height: 42px; font-size: 12px !important; border-radius: 10px !important; }
+
+  /* --- Detalle del producto: imagen arriba, datos abajo, botones siempre visibles --- */
+  #modalProducto { align-items: flex-end !important; padding: 0 !important; }
+  #modalProducto > .modal-content { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; border-radius: 18px 18px 0 0 !important; max-height: none !important; overflow: hidden !important; }
+  #contenidoProducto table { min-width: 0 !important; width: 100% !important; }
+  #contenidoProducto th, #contenidoProducto td { padding: 8px 4px !important; }
+  #contenidoProducto { width: 100%; }
+  #contenidoProducto > div {
+    flex-direction: column !important; height: 94vh !important; height: 94dvh !important; max-height: none !important;
+    width: 100% !important; margin: 0 !important; border-radius: 18px 18px 0 0 !important;
+  }
+  #contenidoProducto #zoomContainer { order: -1; flex: 0 0 30vh !important; min-height: 0; }
+  #contenidoProducto #zoomContainer img { padding: 8px !important; }
+  #contenidoProducto > div > div:first-child { flex: 1 1 auto !important; min-height: 0; border-right: 0 !important; }
+  #contenidoProducto > div > div:first-child > div:first-child { padding: 14px 16px !important; }
+  #contenidoProducto > div > div:first-child > div:last-child {
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)) !important; gap: 8px !important;
+  }
+  #contenidoProducto > div > div:first-child > div:last-child button { min-height: 52px; font-size: 15px !important; border-radius: 12px !important; }
+  #contenidoProducto input[type="number"] { font-size: 16px !important; min-height: 44px; }
+  #contenidoProducto h2 { font-size: 17px !important; }
+
+  /* --- Punto de Venta (carrito): métodos en 2x2 y botón de cobrar siempre a la mano --- */
+  #carrito div[style*="position:sticky"] { position: static !important; }
+  #segMetodoPago { grid-template-columns: 1fr 1fr !important; }
+  #segPeriodicidad { grid-template-columns: repeat(3, 1fr) !important; }
+  #segMetodoPago button, #segPeriodicidad button { min-height: 48px; }
+  #carrito input, #carrito select, #carrito textarea { font-size: 16px !important; }
+  #botonCobrarCarrito {
+    position: sticky; bottom: 0; z-index: 15; background: #fff;
+    margin: 0 -18px -18px; padding: 10px 18px calc(10px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid #e5e7eb; box-shadow: 0 -8px 16px -12px rgba(15, 23, 42, 0.35); border-radius: 0 0 14px 14px;
+  }
+  #botonCobrarCarrito button { min-height: 56px; font-size: 17px !important; border-radius: 14px !important; }
+
+  /* --- Resumen antes de cobrar y confirmaciones de venta: hoja a pantalla casi completa --- */
+  div[data-modal="resumen-venta"][data-modal],
+  div[data-modal="resumen-venta-cuarentena"][data-modal],
+  div[data-modal="dialogo-inventario"][data-modal] {
+    padding: 0 !important; align-items: flex-end !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  }
+  div[data-modal="resumen-venta"][data-modal] > div,
+  div[data-modal="resumen-venta-cuarentena"][data-modal] > div,
+  div[data-modal="dialogo-inventario"][data-modal] > div {
+    width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 16px !important;
+    max-height: 95vh !important; max-height: 95dvh !important; overflow-y: auto !important;
+    border-radius: 20px 20px 0 0 !important; box-sizing: border-box;
+  }
+  div[data-modal="resumen-venta"] h2 { font-size: 18px !important; }
+  div[data-modal="resumen-venta"] table { min-width: 0 !important; width: 100% !important; font-size: 12.5px !important; }
+  div[data-modal="resumen-venta"] th, div[data-modal="resumen-venta"] td { padding: 8px 4px !important; }
+  div[data-modal="resumen-venta"] > div > div:last-child {
+    position: sticky; bottom: -16px; z-index: 5; background: #fff; margin: 0 -16px -16px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -8px 16px -12px rgba(15, 23, 42, 0.35);
+  }
+  div[data-modal="resumen-venta"] > div > div:last-child button { min-height: 56px; }
+}
