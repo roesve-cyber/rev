@@ -19,6 +19,8 @@
         historia: { w: 1080, h: 1920, et: 'Historia 1080×1920 (estados / reels)' }
     };
     const PLANTILLAS = {
+        crema: { et: 'Crema con logo (sencillo)', acento: '#8a1c1c', fondo: '#f3ebe0', tinta: '#1d1d1d', tenue: '#5c4a40', tarjeta: '#ffffff', precio: '#1f7a3d', cta: '#8a1c1c', ctaTxt: '#ffffff' },
+        fichas: { et: 'Azul con datos del producto', acento: '#2f7fe0', fondo: 'linear-gradient(180deg,#2f7fe0 0%,#8fc0ff 60%,#e9f3ff 100%)', tinta: '#111111', tenue: '#334155', tarjeta: '#ffffff', precio: '#111111', cta: '#2f7fe0', ctaTxt: '#ffffff' },
         clasico: { et: 'Clásico (verde)', acento: '#0e8f6f', fondo: 'linear-gradient(160deg,#eef8f5 0%,#ffffff 60%)', tinta: '#10221f', tenue: '#5c746c', tarjeta: '#ffffff', precio: '#0b6e56', cta: '#0e8f6f', ctaTxt: '#ffffff' },
         oferta: { et: 'Oferta (rojo)', acento: '#dc2626', fondo: 'linear-gradient(160deg,#fff1f0 0%,#ffffff 60%)', tinta: '#1f1111', tenue: '#7a5252', tarjeta: '#ffffff', precio: '#b91c1c', cta: '#dc2626', ctaTxt: '#ffffff' },
         oscuro: { et: 'Elegante (oscuro)', acento: '#f5c451', fondo: 'linear-gradient(160deg,#0b1220 0%,#17233b 100%)', tinta: '#ffffff', tenue: '#a9b4c8', tarjeta: '#ffffff', precio: '#f5c451', cta: '#f5c451', ctaTxt: '#0b1220' }
@@ -26,12 +28,12 @@
     const CFG_KEY = 'publicidad_cfg_v1';
     const CFG_DEF = {
         negocio: 'Mueblería Mi Pueblito', whatsapp: '522411081657',
-        catalogo: 'https://rev-tau.vercel.app/catalogo.html', ubicacion: 'Santiago Cuaula, Tlaxcala', slogan: ''
+        catalogo: 'https://rev-tau.vercel.app/catalogo.html', ubicacion: 'Santiago Cuaula, Tlaxcala', slogan: '', titular: '¡ESTRENA HOY MISMO!'
     };
 
     const PUB = {
         sel: new Set(), categoria: '', busqueda: '', soloStock: true, soloFoto: true,
-        tab: 'info', activo: null, formato: 'cuadrado', plantilla: 'clasico', acento: '',
+        tab: 'info', activo: null, formato: 'cuadrado', plantilla: 'crema', acento: '',
         op: { precio: true, abono: true, enganche: true, existencia: true, categoria: true },
         promo: '', promocionId: '', estilo: '', fotoLocal: {}, textos: {}, generando: false,
         cfg: Object.assign({}, CFG_DEF)
@@ -209,7 +211,7 @@
             const car = lineasCaracteristicas(p);
             if (car.length) { l.push('CARACTERÍSTICAS:'); car.forEach(c => l.push('  - ' + c)); }
             const col = colores(p); if (col.length) l.push(`COLORES DISPONIBLES: ${col.join(', ')}`);
-            l.push(`FOTO DEL PRODUCTO: usa la imagen adjunta (original en: ${p.imagen || 'sin foto'})`);
+            l.push('FOTO DEL PRODUCTO: te la adjunto en este mensaje. Úsala tal cual, sin cambiar el producto.');
             l.push('');
         });
         l.push('FORMATOS A ENTREGAR: 1080×1080 (publicación), 1080×1350 (vertical) y 1080×1920 (historia).');
@@ -316,7 +318,68 @@
     // ------------------------------------------------------------------ diseño del anuncio (HTML a tamaño real)
     function fuente(p) { return PUB.fotoLocal[String(p.id)] || p.imagen || 'img/Logo.svg'; }
 
+    // ---- diseños sencillos (crema con logo / azul con datos) ----
+    const tituloBonito = s => { s = norm(s); return s === s.toUpperCase() ? s.toLowerCase().replace(/(^|\s)\S/g, m => m.toUpperCase()) : s; };
+    function datosAnuncio(p, o) {
+        const pr = planPrincipal(p), pm = o.promoCalc || null, ex = existencia(p), mes = n => `${n} ${n === 1 ? 'mes' : 'meses'}`;
+        const d = { contado: dinero(p.precio), antes: '', abono: '', meses: '', enganche: '', ahorro: '', ultima: ex.ultima ? ex.texto : '', vigencia: pm && pm.vigencia ? pm.vigencia : '',
+            letra: [pm && pm.tipo === 'contado' ? 'Precio promocional válido solo de contado.' : '', pm && pm.condiciones ? pm.condiciones : ''].filter(Boolean).join(' ') };
+        if (pm && pm.tipo === 'contado') { d.contado = dinero(pm.precioPromo); d.antes = dinero(pm.precioNormal); d.ahorro = dinero(pm.ahorro); }
+        else if (pm) { d.abono = dinero(pm.principal.abono); d.meses = mes(pm.principal.meses); d.enganche = dinero(pm.enganche); }
+        else if (pr) { d.abono = dinero(pr.abono); d.meses = mes(pr.meses); d.enganche = dinero(pr.enganche); }
+        return d;
+    }
+    function especificaciones(p) {
+        return lineasCaracteristicas(p).map(l => { const i = l.indexOf(':'); return (i > 0 && i < 28) ? { k: l.slice(0, i).trim().toUpperCase(), v: l.slice(i + 1).trim() } : { k: '', v: l }; }).filter(x => x.v).slice(0, 5);
+    }
+    function htmlCrema(p, o) {
+        const F = FORMATOS[o.formato], H = F.h, k = o.formato === 'cuadrado' ? 0.9 : (o.formato === 'vertical' ? 1 : 1.15), n = x => Math.round(x * k);
+        const d = datosAnuncio(p, o), pm = o.promoCalc || null, VINO = o.acento || '#8a1c1c', VERDE = '#1f7a3d', ORO = '#c9a24a', SERIF = "Georgia,'Times New Roman',serif";
+        const titulo = pm ? '🔥 ' + pm.nombre : norm(PUB.cfg.titular), fs = Math.min(82, Math.floor(1700 / Math.max(10, titulo.length)));
+        const verde = (txt, px) => `<div style="font-size:${n(px)}px;font-weight:900;line-height:1.02;color:${VERDE}">${txt}</div>`;
+        let der = '';
+        if (o.op.abono || o.op.enganche || o.op.precio) der += `<div style="font-size:${n(30)}px;font-weight:600;line-height:1.2">Sistema de Apartado y<br>Crédito con Enganche</div>`;
+        if (o.op.precio) der += `<div style="margin-top:${n(22)}px">${d.antes ? `<div style="font-size:${n(30)}px;font-weight:700;color:#6b5b53">antes <s>${d.antes}</s></div>` : ''}${verde('Contado<br>' + d.contado, 60)}</div>`;
+        if (o.op.abono && d.abono) der += `<div style="margin-top:${n(20)}px">${verde(d.abono + ` <span style="font-size:${n(34)}px">semanal</span>`, 64)}<div style="font-size:${n(28)}px;font-weight:700;margin-top:6px">${d.meses}</div></div>`;
+        else if (o.op.abono && d.ahorro) der += `<div style="margin-top:${n(20)}px">${verde('Ahorras ' + d.ahorro, 50)}</div>`;
+        if (o.op.enganche && d.enganche) der += `<div style="font-size:${n(30)}px;font-weight:700;margin-top:${n(14)}px">Enganche desde <b>${d.enganche}</b></div>`;
+        if (o.op.existencia && d.ultima) der += `<div style="font-size:${n(28)}px;font-weight:800;color:${VINO};margin-top:${n(14)}px">⚡ ${esc(d.ultima)}</div>`;
+        const pie = [d.vigencia, d.letra].filter(Boolean).join(' · ');
+        return `<div style="width:${F.w}px;height:${H}px;overflow:hidden;box-sizing:border-box;padding:${n(34)}px 40px ${n(24)}px;background:#f3ebe0;color:#1d1d1d;font-family:${SERIF};display:flex;flex-direction:column;gap:${n(14)}px;text-align:center">
+ <img src="img/Logo.svg" crossorigin="anonymous" alt="" style="height:${n(150)}px;object-fit:contain;align-self:center">
+ ${titulo ? `<div style="font-size:${fs}px;font-weight:700;line-height:1;color:${VINO};white-space:nowrap">${esc(titulo)}</div>` : ''}
+ <div style="font-size:${n(40)}px;font-weight:600">${esc(PUB.cfg.negocio)}${PUB.cfg.ubicacion ? ' - ' + esc(PUB.cfg.ubicacion) : ''}</div>
+ <div style="flex:1 1 0;min-height:0;display:flex;align-items:center;gap:10px;background:#fff;border:4px solid ${ORO};border-radius:6px;padding:16px 28px;box-sizing:border-box">
+  <div style="flex:1 1 0;height:100%;min-width:0;display:flex;align-items:center;justify-content:center"><img src="${esc(fuente(p)).replace(/'/g, '%27')}" crossorigin="anonymous" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div>
+  <div style="width:440px;text-align:left;font-family:Arial,Helvetica,sans-serif">${der}</div></div>
+ <div style="font-size:${n(52)}px;font-weight:600;line-height:1.05;max-height:${n(112)}px;overflow:hidden">${esc(tituloBonito(p.nombre))}</div>
+ <div style="font-family:Arial,Helvetica,sans-serif;font-size:${n(38)}px;font-weight:800;color:${VINO}">📲 Pide informes por WhatsApp ${esc(telVisible())}</div>
+ ${pie ? `<div style="font-family:Arial,Helvetica,sans-serif;font-size:${n(22)}px;color:#5c4a40">${esc(pie)}</div>` : ''}</div>`;
+    }
+    function htmlFichas(p, o) {
+        const F = FORMATOS[o.formato], H = F.h, k = o.formato === 'cuadrado' ? 0.9 : (o.formato === 'vertical' ? 1 : 1.15), n = x => Math.round(x * k);
+        const d = datosAnuncio(p, o), pm = o.promoCalc || null, AZ = o.acento || '#2f7fe0', sp = especificaciones(p), nom = norm(p.nombre).toUpperCase();
+        const caja = x => `<div style="background:#fff;border:3px solid #111;border-radius:12px;overflow:hidden;text-align:center"><div style="background:#e5e7eb;font-size:${n(24)}px;font-weight:800;padding:${n(5)}px 8px">${esc(x.k || 'DATO')}</div><div style="font-size:${n(38)}px;font-weight:900;padding:${n(7)}px 8px;line-height:1.1">${esc(x.v)}</div></div>`;
+        const cols = [];
+        if (o.op.precio) cols.push([d.antes ? 'AHORA DE CONTADO:' : 'PRECIO DE CONTADO:', d.contado, d.antes ? `antes <s>${d.antes}</s>` : '']);
+        if (o.op.enganche && d.enganche) cols.push(['ENGANCHE DESDE:', d.enganche, '']);
+        if (o.op.abono && d.abono) cols.push(['ABONO SEMANAL:', d.abono, d.meses]);
+        else if (o.op.abono && d.ahorro) cols.push(['TÚ AHORRAS:', d.ahorro, '']);
+        const barra = cols.map((c, i) => `<div style="flex:1;text-align:center;${i ? 'border-left:3px solid #111;' : ''}padding:0 8px"><div style="font-size:${n(26)}px;font-weight:800">${c[0]}</div><div style="font-size:${n(58)}px;font-weight:900;line-height:1.05">${c[1]}</div>${c[2] ? `<div style="font-size:${n(26)}px;font-weight:700">${c[2]}</div>` : ''}</div>`).join('');
+        const pie = [pm ? pm.nombre : '', d.vigencia, d.letra].filter(Boolean).join(' · ');
+        return `<div style="width:${F.w}px;height:${H}px;overflow:hidden;box-sizing:border-box;background:linear-gradient(180deg,${AZ} 0%,#8fc0ff 60%,#e9f3ff 100%);font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#111;display:flex;flex-direction:column">
+ <div style="background:#fff;display:flex;align-items:center;gap:20px;padding:${n(12)}px 36px"><img src="img/Logo.svg" crossorigin="anonymous" alt="" style="height:${n(100)}px;object-fit:contain"><div style="font-size:${n(32)}px;font-weight:700">${esc(PUB.cfg.negocio)}${PUB.cfg.ubicacion ? ' · ' + esc(PUB.cfg.ubicacion) : ''}</div></div>
+ <div style="padding:${n(18)}px 36px 0;text-align:center"><div style="font-size:${Math.min(n(78), Math.floor(1500 / Math.max(14, nom.length)))}px;font-weight:900;line-height:1.05;color:#fff;text-shadow:0 3px 8px rgba(0,0,0,.55)">${esc(nom)}</div>${pm ? `<div style="display:inline-block;margin-top:8px;background:#dc2626;color:#fff;font-weight:900;font-size:${n(30)}px;padding:6px 22px;border-radius:999px">🔥 ${esc(pm.tipo === 'contado' ? pm.etiqueta : pm.etiquetas.join(' + '))}</div>` : ''}</div>
+ <div style="flex:1 1 0;min-height:0;display:flex;gap:18px;padding:${n(18)}px 36px;box-sizing:border-box">
+  <div style="flex:1 1 0;min-width:0;background:#fff;border-radius:22px;display:flex;align-items:center;justify-content:center;padding:14px;box-shadow:0 10px 26px rgba(0,0,0,.25)"><img src="${esc(fuente(p)).replace(/'/g, '%27')}" crossorigin="anonymous" alt="" style="max-width:100%;max-height:100%;object-fit:contain"></div>
+  ${sp.length ? `<div style="width:${n(400)}px;display:flex;flex-direction:column;justify-content:center;gap:${n(12)}px">${sp.map(caja).join('')}</div>` : ''}</div>
+ ${barra ? `<div style="margin:0 36px;display:flex;align-items:center;background:#fff;border:3px solid #111;border-radius:20px;padding:${n(14)}px 10px">${barra}</div>` : ''}
+ <div style="text-align:center;padding:${n(16)}px 20px ${n(20)}px;font-size:${n(40)}px;font-weight:900">Pide informes por WhatsApp 📲 ${esc(telVisible())}${pie ? `<div style="font-size:${n(22)}px;font-weight:600;margin-top:6px">${esc(pie)}</div>` : ''}</div></div>`;
+    }
+
     function htmlAnuncio(p, o) {
+        if (o.plantilla === 'crema') return htmlCrema(p, o);
+        if (o.plantilla === 'fichas') return htmlFichas(p, o);
         const F = FORMATOS[o.formato], T = Object.assign({}, PLANTILLAS[o.plantilla]);
         if (o.acento) { T.acento = o.acento; if (o.plantilla !== 'oscuro') { T.cta = o.acento; T.precio = o.acento; } }
         const W = F.w, H = F.h, u = W / 1080;
@@ -527,7 +590,7 @@
             <label class="pub-lbl">¿Cómo quieres que se vea el anuncio? (opcional)</label>
             <textarea class="pub-in" rows="2" placeholder="Ej.: en una calle, ambiente agradable, colores verdes…" oninput="PUB_.estilo=this.value">${esc(PUB.estilo)}</textarea>
             <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="pub-btn mo" onclick="pubCopiarBrief()">🤖 Copiar pedido para la IA (${sel.length})</button></div>
-            <p style="font-size:12px;color:#64748b;margin:6px 0 0">Pega ese pedido en tu IA (ChatGPT, Gemini, Claude…) y adjunta la foto del producto.</p>
+            <p style="font-size:12px;color:#64748b;margin:6px 0 0">El pedido solo copia texto, la foto no viaja con él. Pégalo en tu IA y adjunta la foto que bajas con el botón 📷 Descargar foto de cada producto.</p>
             <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:800">Más opciones</summary>
               <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="pub-btn az" onclick="pubCopiarFichas()">📋 Copiar datos de los productos</button><button class="pub-btn" onclick="pubDescargarTxt()">⬇️ Guardar en un archivo</button><button class="pub-btn" onclick="pubCopiarPaquete()">🤝 Copiar datos para Claude</button></div></details></div>`;
         const cards = sel.map(p => {
@@ -537,7 +600,7 @@
                 <div style="flex:1;min-width:0"><b style="font-size:15px">${esc(p.nombre)}</b>
                 <div style="font-size:12.5px;color:#64748b">${esc([p.categoria, p.subcategoria].filter(Boolean).join(' / '))}${p.marca ? ' · ' + esc(p.marca) : ''}${p.modelo ? ' · ' + esc(p.modelo) : ''}</div>
                 <div class="pub-chips"><span class="pub-chip">Contado ${dinero(p.precio)}</span>${pr ? `<span class="pub-chip">${dinero(pr.abono)} semanal · ${pr.meses} ${pr.meses === 1 ? 'mes' : 'meses'}</span><span class="pub-chip">Enganche ${dinero(pr.enganche)}</span>` : '<span class="pub-chip">Sin plan de crédito</span>'}<span class="pub-chip ${ex.ultima ? 'r' : ''}">${esc(ex.texto)}${ex.stock > 0 ? ' · ' + ex.stock + ' pz' : ''}</span>${imagenInfo(p).url && !imagenInfo(p).directa ? `<span class="pub-chip r" title="${esc(imagenInfo(p).aviso)}">⚠ Revisa el enlace de la foto</span>` : ''}</div></div></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pub-btn p" onclick="pubDisenar('${id}')">🎨 Hacer anuncio</button><button class="pub-btn mo" onclick="pubCopiarBrief('${id}')">🤖 Copiar pedido para la IA</button></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pub-btn p" onclick="pubDisenar('${id}')">🎨 Hacer anuncio</button><button class="pub-btn mo" onclick="pubCopiarBrief('${id}')">🤖 Copiar pedido para la IA</button><button class="pub-btn" onclick="pubDescargarFoto('${id}')">📷 Descargar foto</button></div>
               <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:800">✍️ Texto para Facebook, Instagram o WhatsApp</summary>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><button class="pub-btn" onclick="pubTexto('${id}','wa')">WhatsApp / estado</button><button class="pub-btn" onclick="pubTexto('${id}','fb')">Facebook / Instagram</button><button class="pub-btn" onclick="pubTexto('${id}','urgencia')">Con urgencia</button></div>
                 <textarea class="pub-in" id="pubTxt_${id}" rows="9" oninput="PUB_.textos['${id}']=this.value">${esc(PUB.textos[id])}</textarea>
@@ -563,6 +626,7 @@
                 <label class="pub-lbl">Estilo</label><select class="pub-in" onchange="PUB_.plantilla=this.value; PUB_.acento=''; renderPublicidad(true)">${opt(PLANTILLAS, PUB.plantilla)}</select>
                 <label class="pub-lbl">Color de acento</label><div style="display:flex;gap:8px;align-items:center"><input type="color" value="${esc(PUB.acento || PLANTILLAS[PUB.plantilla].acento)}" oninput="PUB_.acento=this.value; pubPreview()" style="width:52px;height:36px;border:none;background:none"><button class="pub-btn" onclick="PUB_.acento=''; renderPublicidad(true)">Restablecer</button></div>
                 <label class="pub-lbl">Mostrar</label>${chk('precio', 'Precio de contado')}${chk('abono', 'Abono semanal')}${chk('enganche', 'Enganche')}${chk('existencia', 'Existencia / últimas piezas')}${chk('categoria', 'Etiqueta de categoría')}
+                <label class="pub-lbl">Frase principal (arriba del anuncio crema)</label><input class="pub-in" value="${esc(PUB.cfg.titular)}" ${PUB.promocionId ? 'disabled title="Con una promoción elegida se usa el nombre de la promoción"' : ''} placeholder="Ej.: ¡ESTRENA HOY MISMO! (vacío = sin frase)" oninput="pubCfg('titular',this.value)">
                 <label class="pub-lbl">Texto de promoción (opcional)</label><input class="pub-in" value="${esc(PUB.promo)}" ${PUB.promocionId ? 'disabled title="Hay una promoción elegida: se usa su nombre y vigencia"' : ''} placeholder="${PUB.promocionId ? 'Usa el nombre y la vigencia de la promoción' : 'Ej.: Aparta con tu enganche'}" oninput="PUB_.promo=this.value; pubPreview()">
                 <label class="pub-lbl">Foto</label>
                 <div style="display:flex;gap:8px;flex-wrap:wrap"><label class="pub-btn" style="display:inline-block">📷 Subir otra foto<input type="file" accept="image/*" style="display:none" onchange="pubSubirFoto(this)"></label>${PUB.fotoLocal[String(p.id)] ? '<button class="pub-btn" onclick="delete PUB_.fotoLocal[PUB_.activo]; renderPublicidad(true)">Usar la del producto</button>' : ''}</div>
@@ -635,6 +699,17 @@
     window.pubSubirFoto = function (input) {
         const f = input.files && input.files[0]; if (!f || !PUB.activo) return;
         const r = new FileReader(); r.onload = () => { PUB.fotoLocal[String(PUB.activo)] = r.result; window.renderPublicidad(true); toast('Foto cargada ✔'); }; r.readAsDataURL(f);
+    };
+    window.pubDescargarFoto = async function (id) {
+        const p = productoPorId(id); if (!p || !p.imagen) return toast('Este producto no tiene foto.');
+        try {
+            const blob = await (await fetch(p.imagen, { mode: 'cors' })).blob();
+            const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = (sinAcentos(p.nombre).replace(/[^a-z0-9]+/g, '_').slice(0, 40) || 'producto') + '.' + ext;
+            document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+            toast('Foto descargada ✔ Adjúntala en tu IA');
+        } catch (e) { window.open(p.imagen, '_blank'); toast('Se abrió la foto: mantenla presionada o clic derecho > Guardar imagen'); }
     };
     window.pubCrear = function () { crearAnuncio(PUB.activo); };
     window.pubCopiarPaquete = function () { const s2 = seleccionados(); if (s2.length) copiar(paqueteClaude(s2), 'Datos copiados ✔'); };
