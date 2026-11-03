@@ -522,28 +522,27 @@
 
     function tabInfo() {
         const sel = seleccionados();
-        if (!sel.length) return '<div class="pub-card" style="text-align:center;color:#94a3b8;padding:36px">Selecciona uno o más productos para ver su información.</div>';
-        const global = `<div class="pub-card" style="margin-bottom:12px"><h3>2. Información para tu IA de diseño</h3>
-            <label class="pub-lbl">Estilo que quieres (opcional; va dentro del brief)</label>
-            <textarea class="pub-in" rows="2" placeholder="Ej.: moderno, fondo claro, colores verdes, estilo catálogo de tienda departamental…" oninput="PUB_.estilo=this.value">${esc(PUB.estilo)}</textarea>
-            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-              <button class="pub-btn p" onclick="pubCopiarPaquete()">🤝 Copiar paquete para Claude (${sel.length})</button>
-              <button class="pub-btn mo" onclick="pubCopiarBrief()">🤖 Copiar brief para IA (${sel.length})</button>
-              <button class="pub-btn az" onclick="pubCopiarFichas()">📋 Copiar fichas (${sel.length})</button>
-              <button class="pub-btn" onclick="pubDescargarTxt()">⬇️ Descargar .txt</button></div></div>`;
+        if (!sel.length) return '<div class="pub-card" style="text-align:center;color:#94a3b8;padding:36px">Elige uno o más productos a la izquierda para empezar.</div>';
+        const global = `<div class="pub-card" style="margin-bottom:12px"><h3>2. Tus productos</h3>
+            <label class="pub-lbl">¿Cómo quieres que se vea el anuncio? (opcional)</label>
+            <textarea class="pub-in" rows="2" placeholder="Ej.: en una calle, ambiente agradable, colores verdes…" oninput="PUB_.estilo=this.value">${esc(PUB.estilo)}</textarea>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="pub-btn mo" onclick="pubCopiarBrief()">🤖 Copiar pedido para la IA (${sel.length})</button></div>
+            <p style="font-size:12px;color:#64748b;margin:6px 0 0">Pega ese pedido en tu IA (ChatGPT, Gemini, Claude…) y adjunta la foto del producto.</p>
+            <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:800">Más opciones</summary>
+              <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="pub-btn az" onclick="pubCopiarFichas()">📋 Copiar datos de los productos</button><button class="pub-btn" onclick="pubDescargarTxt()">⬇️ Guardar en un archivo</button><button class="pub-btn" onclick="pubCopiarPaquete()">🤝 Copiar datos para Claude</button></div></details></div>`;
         const cards = sel.map(p => {
             const ex = existencia(p), pr = planPrincipal(p), id = esc(p.id);
             if (PUB.textos[id] == null) PUB.textos[id] = textoPublicacion(p, 'fb');
             return `<div class="pub-card" style="margin-bottom:12px"><div class="pub-prod"><img src="${esc(p.imagen || 'img/Logo.svg')}" alt="" onerror="this.src='img/Logo.svg'">
                 <div style="flex:1;min-width:0"><b style="font-size:15px">${esc(p.nombre)}</b>
                 <div style="font-size:12.5px;color:#64748b">${esc([p.categoria, p.subcategoria].filter(Boolean).join(' / '))}${p.marca ? ' · ' + esc(p.marca) : ''}${p.modelo ? ' · ' + esc(p.modelo) : ''}</div>
-                <div class="pub-chips"><span class="pub-chip">Contado ${dinero(p.precio)}</span>${pr ? `<span class="pub-chip">${dinero(pr.abono)} semanal · ${pr.meses} ${pr.meses === 1 ? 'mes' : 'meses'}</span><span class="pub-chip">Enganche ${dinero(pr.enganche)}</span>` : '<span class="pub-chip">Sin plan de crédito</span>'}<span class="pub-chip ${ex.ultima ? 'r' : ''}">${esc(ex.texto)}${ex.stock > 0 ? ' · ' + ex.stock + ' pz' : ''}</span>${imagenInfo(p).url && !imagenInfo(p).directa ? `<span class="pub-chip r" title="${esc(imagenInfo(p).aviso)}">⚠ Foto: enlace no directo</span>` : ''}</div></div></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pub-btn az" onclick="pubCopiarFicha('${id}')">📋 Ficha</button><button class="pub-btn mo" onclick="pubCopiarBrief('${id}')">🤖 Brief IA</button><button class="pub-btn p" onclick="pubDisenar('${id}')">🎨 Diseñar aquí</button></div>
-              <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:800">✍️ Texto para publicar</summary>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><button class="pub-btn" onclick="pubTexto('${id}','wa')">WhatsApp / estado</button><button class="pub-btn" onclick="pubTexto('${id}','fb')">Facebook / Instagram</button><button class="pub-btn" onclick="pubTexto('${id}','urgencia')">Urgencia</button></div>
+                <div class="pub-chips"><span class="pub-chip">Contado ${dinero(p.precio)}</span>${pr ? `<span class="pub-chip">${dinero(pr.abono)} semanal · ${pr.meses} ${pr.meses === 1 ? 'mes' : 'meses'}</span><span class="pub-chip">Enganche ${dinero(pr.enganche)}</span>` : '<span class="pub-chip">Sin plan de crédito</span>'}<span class="pub-chip ${ex.ultima ? 'r' : ''}">${esc(ex.texto)}${ex.stock > 0 ? ' · ' + ex.stock + ' pz' : ''}</span>${imagenInfo(p).url && !imagenInfo(p).directa ? `<span class="pub-chip r" title="${esc(imagenInfo(p).aviso)}">⚠ Revisa el enlace de la foto</span>` : ''}</div></div></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="pub-btn p" onclick="pubDisenar('${id}')">🎨 Hacer anuncio</button><button class="pub-btn mo" onclick="pubCopiarBrief('${id}')">🤖 Copiar pedido para la IA</button></div>
+              <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:800">✍️ Texto para Facebook, Instagram o WhatsApp</summary>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><button class="pub-btn" onclick="pubTexto('${id}','wa')">WhatsApp / estado</button><button class="pub-btn" onclick="pubTexto('${id}','fb')">Facebook / Instagram</button><button class="pub-btn" onclick="pubTexto('${id}','urgencia')">Con urgencia</button></div>
                 <textarea class="pub-in" id="pubTxt_${id}" rows="9" oninput="PUB_.textos['${id}']=this.value">${esc(PUB.textos[id])}</textarea>
                 <button class="pub-btn p" style="margin-top:6px" onclick="pubCopiarTexto('${id}')">📋 Copiar texto</button></details>
-              <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:800">Ver ficha completa</summary><pre class="pub-pre">${esc(fichaTexto(p))}</pre></details></div>`;
+              <details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:800">Ver todos los datos del producto</summary><pre class="pub-pre">${esc(fichaTexto(p))}</pre></details></div>`;
         }).join('');
         return global + cards;
     }
@@ -556,7 +555,7 @@
         const anchoPrev = PUB.formato === 'historia' ? 300 : 400, k = anchoPrev / F.w;
         const opt = (obj, cur) => Object.keys(obj).map(k2 => `<option value="${k2}" ${cur === k2 ? 'selected' : ''}>${esc(obj[k2].et)}</option>`).join('');
         const chk = (k2, t) => `<label style="font-size:13px;display:block;margin:4px 0"><input type="checkbox" ${PUB.op[k2] ? 'checked' : ''} onchange="PUB_.op.${k2}=this.checked; pubPreview()"> ${t}</label>`;
-        return `<div class="pub-card"><h3>2. Diseña el anuncio</h3>
+        return `<div class="pub-card"><h3>2. Arma tu anuncio</h3>
             <div style="display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:18px;align-items:start">
               <div>
                 <label class="pub-lbl">Producto</label><select class="pub-in" onchange="PUB_.activo=this.value; renderPublicidad(true)">${sel.map(x => `<option value="${esc(x.id)}" ${String(x.id) === PUB.activo ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>
@@ -573,8 +572,8 @@
                 <div style="font-size:12px;color:#64748b;margin-top:6px;text-align:center">Vista previa · se descarga a ${F.w}×${F.h}</div></div></div>
             <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="pub-btn p" id="pubBtnDescargar" onclick="pubCrear()">⬇️ Descargar / compartir este anuncio</button>
               ${sel.length > 1 ? `<button class="pub-btn az" id="pubBtnTodos" onclick="pubCrearTodos()">⬇️ Generar los ${sel.length} seleccionados</button>` : ''}</div>
-            <details style="margin-top:14px"><summary style="cursor:pointer;font-size:13px;font-weight:800">🤝 Pegar diseño de Claude → PNG (${F.w}×${F.h})</summary>
-              <p style="font-size:12px;color:#64748b;margin:6px 0">Copia el paquete en la pestaña "Información y textos", pégalo en Claude y pega aquí el HTML que te devuelva. Se exporta con el formato elegido arriba.</p>
+            <details style="margin-top:14px"><summary style="cursor:pointer;font-size:13px;font-weight:800">⚙️ Avanzado: pegar un diseño hecho por Claude (${F.w}×${F.h})</summary>
+              <p style="font-size:12px;color:#64748b;margin:6px 0">Usa "Copiar datos para Claude" (en Textos para publicar > Más opciones), pégalo en Claude y pega aquí el HTML que te devuelva. Se exporta con el formato elegido arriba.</p>
               <textarea class="pub-in" id="pubHtmlClaude" rows="6" placeholder="Pega aquí el HTML de Claude…"></textarea>
               <button class="pub-btn mo" id="pubBtnHtml" style="margin-top:6px" onclick="pubExportarHtml()">⬇️ Convertir a PNG</button></details></div>`;
     }
@@ -588,8 +587,15 @@
             <select class="pub-in" style="width:auto;min-width:240px;flex:1" onchange="PUB_.promocionId=this.value; renderPublicidad(true)"><option value="">Sin promoción (precios normales)</option>${lista.map(x => `<option value="${esc(x.id)}" ${String(x.id) === String(PUB.promocionId) ? 'selected' : ''}>${esc(x.nombre)} · ${x.tipo === 'contado' ? 'contado' : 'crédito'} · ${esc(PromocionesService.estado(x))}</option>`).join('')}</select>
             ${pr ? `<span class="pub-chip">${entran} de ${sel.length} seleccionados entran</span><button class="pub-btn" onclick="navA('promociones'); if (typeof renderPromociones === 'function') renderPromociones();">Ver promoción</button>` : '<span style="font-size:12px;color:#64748b">Elige una para anunciar con su precio o condiciones.</span>'}</div>`;
     }
+    function guiaSimple() {
+        return `<details class="pub-card" style="margin-bottom:12px;background:#f0fdf4;border-color:#bbf7d0" ${PUB.sel.size ? '' : 'open'}><summary style="cursor:pointer;font-weight:800;font-size:14px">¿Cómo funciona?</summary>
+            <ol style="margin:8px 0 0 18px;padding:0;font-size:13.5px;line-height:1.7"><li>Elige tus productos a la izquierda.</li>
+            <li><b>🎨 Hacer anuncio:</b> el sistema arma una imagen lista con tu foto, precio y WhatsApp, y la descargas.</li>
+            <li><b>✍️ Textos para publicar:</b> te escribe el mensaje para Facebook, Instagram o WhatsApp. Solo copias y pegas.</li>
+            <li><b>🤖 Copiar pedido para la IA:</b> si quieres otro ambiente (ej. el producto en una calle), pega ese pedido en tu IA junto con la foto.</li></ol></details>`;
+    }
     function panelDerecho() {
-        return selectorPromocion() + `<div class="pub-tabs"><button class="pub-tab ${PUB.tab === 'info' ? 'on' : ''}" onclick="PUB_.tab='info'; renderPublicidad(true)">📋 Información y textos</button><button class="pub-tab ${PUB.tab === 'diseno' ? 'on' : ''}" onclick="PUB_.tab='diseno'; renderPublicidad(true)">🎨 Diseño en el sistema</button></div>${PUB.tab === 'info' ? tabInfo() : tabDiseno()}`;
+        return guiaSimple() + selectorPromocion() + `<div class="pub-tabs"><button class="pub-tab ${PUB.tab === 'info' ? 'on' : ''}" onclick="PUB_.tab='info'; renderPublicidad(true)">✍️ Textos para publicar</button><button class="pub-tab ${PUB.tab === 'diseno' ? 'on' : ''}" onclick="PUB_.tab='diseno'; renderPublicidad(true)">🎨 Hacer anuncio</button></div>${PUB.tab === 'info' ? tabInfo() : tabDiseno()}`;
     }
     window.renderPublicidad = function (soloSeleccion) {
         const cont = $('publicidadContenido'); if (!cont) return;
@@ -618,7 +624,7 @@
     window.pubDisenar = function (id) { PUB.activo = String(id); PUB.tab = 'diseno'; window.renderPublicidad(true); };
     window.pubCopiarFicha = function (id) { const p = productoPorId(id); if (p) copiar(fichaTexto(p), 'Ficha copiada ✔'); };
     window.pubCopiarFichas = function () { const s = seleccionados(); copiar(s.map(fichaTexto).join('\n\n' + '─'.repeat(30) + '\n\n'), `${s.length} ficha(s) copiada(s) ✔`); };
-    window.pubCopiarBrief = function (id) { const s = id ? [productoPorId(id)].filter(Boolean) : seleccionados(); if (s.length) copiar(briefIA(s), 'Brief para IA copiado ✔'); };
+    window.pubCopiarBrief = function (id) { const s = id ? [productoPorId(id)].filter(Boolean) : seleccionados(); if (s.length) copiar(briefIA(s), 'Pedido copiado ✔ Pégalo en tu IA y adjunta la foto'); };
     window.pubTexto = function (id, estilo) { const p = productoPorId(id); if (!p) return; PUB.textos[String(id)] = textoPublicacion(p, estilo); const t = $('pubTxt_' + id); if (t) t.value = PUB.textos[String(id)]; };
     window.pubCopiarTexto = function (id) { const t = $('pubTxt_' + id); copiar(t ? t.value : (PUB.textos[String(id)] || ''), 'Texto copiado ✔'); };
     window.pubDescargarTxt = function () {
@@ -631,7 +637,7 @@
         const r = new FileReader(); r.onload = () => { PUB.fotoLocal[String(PUB.activo)] = r.result; window.renderPublicidad(true); toast('Foto cargada ✔'); }; r.readAsDataURL(f);
     };
     window.pubCrear = function () { crearAnuncio(PUB.activo); };
-    window.pubCopiarPaquete = function () { const s2 = seleccionados(); if (s2.length) copiar(paqueteClaude(s2), 'Paquete para Claude copiado ✔'); };
+    window.pubCopiarPaquete = function () { const s2 = seleccionados(); if (s2.length) copiar(paqueteClaude(s2), 'Datos copiados ✔'); };
     window.pubExportarHtml = function () { exportarHtmlLibre(); };
     window.pubCrearTodos = function () { crearTodos(); };
 
