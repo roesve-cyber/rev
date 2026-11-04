@@ -392,6 +392,29 @@ async function _enviarNotas(manual) {
   else if (!enviadas && manual && fallo) toast('No se pudo enviar todavía. Se reintentará solo.');
 }
 
+// ---- Borrador de la nota: se conserva en la memoria del teléfono (IndexedDB), uno por usuario y cuenta, hasta que se guarda la nota
+const claveBorrador = folio => 'borrador:' + (sesion ? sesion.uid : '') + ':' + folio;
+let _borTimer = null;
+function persistirBorrador() {   // con pausa de 0.4 s para no escribir en cada letra
+  const f = S.ficha; if (!f || !sesion) return;
+  const folio = f.folio, texto = String(f.borradorNota || '');
+  clearTimeout(_borTimer);
+  _borTimer = setTimeout(() => { KV.set(claveBorrador(folio), texto.trim() ? texto : null); }, 400);
+}
+function volcarBorrador() {   // inmediato: al salir de la ficha o cuando la app pasa a segundo plano
+  const f = S.ficha; if (!f || !sesion) return;
+  clearTimeout(_borTimer);
+  const ta = $('notaTexto'); if (ta) f.borradorNota = ta.value;
+  const texto = String(f.borradorNota || '');
+  KV.set(claveBorrador(f.folio), texto.trim() ? texto : null);
+}
+async function cargarBorrador(folio) {
+  const texto = await KV.get(claveBorrador(folio));
+  const f = S.ficha;
+  if (texto && f && f.folio === folio && !f.borradorNota) { f.borradorNota = String(texto); renderFicha(); }   // si ya empezó a escribir, no se pisa
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') volcarBorrador(); });
+
 let _guardandoNota = false;
 async function guardarNota() {
   const f = S.ficha; if (!f || !sesion || _guardandoNota) return;
@@ -411,6 +434,8 @@ async function guardarNota() {
     try { await COLA_NOTAS.agregar({ registro: nota, diferido: !navigator.onLine }); }
     catch (e) { console.error(e); toast('No se pudo guardar la nota en este celular. Inténtalo de nuevo.', 4000); return; }   // el texto se conserva en pantalla
     f.borradorNota = '';
+    clearTimeout(_borTimer);
+    await KV.set(claveBorrador(f.folio), null);   // la nota ya está a salvo en la cola: el borrador se elimina
     await pintarCola();
     await sincronizarNotas(false);
     const sigue = (await COLA_NOTAS.lista()).some(e => e.registro.id === nota.id);
@@ -452,7 +477,7 @@ function alternarDictado() {
       let t = ''; for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
       const e2 = $('notaTexto'); if (!e2) return;
       e2.value = _unirTexto(_dictBase, t).slice(0, MAX_NOTA);
-      if (S.ficha) S.ficha.borradorNota = e2.value;
+      if (S.ficha) { S.ficha.borradorNota = e2.value; persistirBorrador(); }
     };
     rec.onerror = ev => {
       const c = ev && ev.error;
@@ -906,13 +931,16 @@ function abonosOrdenados(c) {
 // ---------------------------------------------------------------- ficha de cuenta
 function abrirFicha(folio) {
   const r = S.porFolio[folio]; if (!r) return;
+  detenerDictado();
+  $('ficha').innerHTML = '';   // sin esto, el cuadro de nota de la ficha anterior seguiría en pantalla y su texto pasaría al nuevo cliente
   S.ficha = { folio, pagaresFull: null, historial: null };
   $('ficha').classList.remove('oculto'); document.body.style.overflow = 'hidden';
   empujar('ficha');
   renderFicha();
+  cargarBorrador(folio);
   cargarDetalleFicha(folio);
 }
-function quitarFicha() { $('ficha').classList.add('oculto'); S.ficha = null; document.body.style.overflow = S.clienteAbierto ? 'hidden' : ''; }
+function quitarFicha() { detenerDictado(); volcarBorrador(); $('ficha').classList.add('oculto'); S.ficha = null; document.body.style.overflow = S.clienteAbierto ? 'hidden' : ''; }
 function cerrarFicha() { if (_pila.includes('ficha')) history.back(); else quitarFicha(); }
 async function cargarDetalleFicha(folio) {
   if (!navigator.onLine) return;
@@ -1051,12 +1079,12 @@ function renderFicha() {
           `<div class="nota-hist"><small>${fechaHoraNota(n.fecha)} · 👤 ${esc(n.usuario || 'Sin usuario')}${n.capturaOffline ? ' · 📴 capturada sin señal' : ''}</small>${esc(n.texto)}</div>`).join('')
         : (pendNotas.length ? '' : '<div class="vacio" style="padding:12px">Sin notas.</div>')}
       <div class="nota-nueva">
-        <textarea id="notaTexto" rows="3" maxlength="${MAX_NOTA}" lang="es-MX" autocapitalize="sentences" placeholder="Escribe o dicta una nota de cobranza…" oninput="if (S.ficha) S.ficha.borradorNota = this.value">${esc(f.borradorNota || '')}</textarea>
+        <textarea id="notaTexto" rows="3" maxlength="${MAX_NOTA}" lang="es-MX" autocapitalize="sentences" placeholder="Escribe o dicta una nota de cobranza…" oninput="if (S.ficha) { S.ficha.borradorNota = this.value; persistirBorrador(); }">${esc(f.borradorNota || '')}</textarea>
         <div class="nota-acc">
           <button type="button" id="btnMic" class="nota-mic" onclick="alternarDictado()">🎤 Dictar</button>
           <button type="button" id="btnGuardarNota" class="nota-guardar" onclick="guardarNota()">Guardar nota</button>
         </div>
-        <small class="nota-ayuda">Se guarda con la fecha y hora de ahora y a nombre de ${esc(sesion ? sesion.nombre : '')}. Sin señal queda en este celular y se envía sola.</small>
+        <small class="nota-ayuda">Se guarda con la fecha y hora de ahora y a nombre de ${esc(sesion ? sesion.nombre : '')}. Lo que escribas sin guardar se conserva en este celular. Sin señal, la nota se envía sola después.</small>
       </div>
     </div>
 
