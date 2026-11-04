@@ -143,6 +143,17 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 .nota-hist { padding: 9px 0; border-bottom: 1px solid #eef2f7; font-size: 14px; line-height: 1.35; }
 .nota-hist small { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
 .nota-hist:last-child { border-bottom: 0; }
+.nota-hist.pend { background: #fffbeb; border-left: 3px solid #f59e0b; padding-left: 9px; }
+.nota-nueva { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.nota-nueva textarea { width: 100%; min-height: 88px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; font-size: 16px; line-height: 1.35; resize: vertical; }
+.nota-nueva textarea:focus { outline: 2px solid var(--brand-2); outline-offset: 0; border-color: var(--brand-2); }
+.nota-acc { display: flex; gap: 8px; margin-top: 8px; }
+.nota-mic { flex: 0 0 auto; padding: 12px 14px; border-radius: 12px; border: 1px solid #cbd5e1; background: #fff; font-weight: 800; font-size: 14px; }
+.nota-mic.grabando { background: #fee2e2; border-color: var(--danger); color: #991b1b; animation: notaPulso 1.2s ease-in-out infinite; }
+@keyframes notaPulso { 50% { box-shadow: 0 0 0 5px rgba(220, 38, 38, .18); } }
+.nota-guardar { flex: 1; padding: 12px; border-radius: 12px; background: var(--brand-2); color: #fff; font-weight: 800; font-size: 14px; }
+.nota-guardar:disabled { opacity: .6; }
+.nota-ayuda { display: block; margin-top: 6px; color: var(--muted); font-size: 11.5px; line-height: 1.3; }
 .mini-btn { color: var(--brand-2); font-weight: 800; font-size: 13px; text-transform: none; letter-spacing: 0; }
 
 /* ===== HOJAS INFERIORES (sheets) ===== */
@@ -311,6 +322,158 @@ const COLA = {
   marcar(id, cambios) { return this._mutar(l => l.map(e => String(e.registro.id) === String(id) ? { ...e, ...cambios } : e)); }
 };
 
+// ---------------------------------------------------------------- notas de cobranza (captura, dictado y envío sin señal)
+// Misma tabla y mismo formato que el sistema principal (CxcNotas.agregarComentario): posData/historialCobranza/registros/{id}
+// con { id, folio, clienteId, texto, fecha, usuario }. Cada nota se guarda PRIMERO en el celular y de ahí se envía; el id se
+// genera al capturar y la escritura usa ese mismo id, así que reintentar nunca duplica. La fecha es la de CAPTURA.
+const MAX_NOTA = 1000;
+const COLA_NOTAS = {
+  _cand: Promise.resolve(),
+  _mutar(fn) {
+    const p = this._cand.then(async () => { const lista = (await KV.leer('colaNotas')) || []; const nueva = fn(lista.slice()); await KV.guardar('colaNotas', nueva); return nueva; });
+    this._cand = p.catch(() => {});
+    return p;
+  },
+  async lista() { return (await KV.leer('colaNotas')) || []; },
+  agregar(entrada) { return this._mutar(l => { if (!l.some(e => String(e.registro.id) === String(entrada.registro.id))) l.push(entrada); return l; }); },
+  quitar(id) { return this._mutar(l => l.filter(e => String(e.registro.id) !== String(id))); },
+  marcar(id, cambios) { return this._mutar(l => l.map(e => String(e.registro.id) === String(id) ? { ...e, ...cambios } : e)); }
+};
+
+// Fecha y hora LOCAL de captura (la fecha viaja en ISO/UTC; fechaVisible tomaría el día UTC y de noche mostraría el día siguiente)
+function fechaHoraNota(v) {
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return M.fechaVisible(v);
+  return d.toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+async function escribirNota(n, diferida) {
+  const ts = Date.now();
+  const doc = M.limpiarParaFirestore({
+    id: n.id, folio: n.folio, clienteId: n.clienteId || null, texto: n.texto, fecha: n.fecha,
+    usuario: n.usuario, usuarioId: n.usuarioId || null, origen: 'cobranza-movil',
+    capturaOffline: !!diferida, fechaEnvio: new Date().toISOString()
+  });
+  await db.collection('posData').doc('historialCobranza').collection('registros').doc(String(n.id).replace(/\//g, '-').slice(0, 400)).set(doc);
+  // Lo que sigue es "de cortesía": la nota ya quedó guardada. Avisa al sistema principal para que la descargue en sus otros equipos.
+  try { await db.collection('posData').doc('historialCobranza').set({ _updatedAt: ts, _registroIndividual: true }, { merge: true }); } catch (e) { console.warn('marcador historialCobranza', e); }
+  try { await db.collection('posData').doc('_syncStatus').set({ _updatedAt: ts, tabla: 'historialCobranza', deviceId: 'cobranza-movil-' + (sesion?.uid || '').slice(0, 8) }, { merge: true }); } catch (e) { console.warn('syncStatus', e); }
+}
+
+let _sincNotasP = null;
+function sincronizarNotas(manual) {
+  if (!sesion || !db) return Promise.resolve();
+  if (_sincNotasP) return _sincNotasP.then(() => sincronizarNotas(manual));
+  _sincNotasP = _enviarNotas(manual).catch(e => console.error('Cola de notas:', e)).finally(() => { _sincNotasP = null; });
+  return _sincNotasP;
+}
+async function _enviarNotas(manual) {
+  const lista = await COLA_NOTAS.lista();
+  if (!lista.length) return;
+  if (!navigator.onLine) { if (manual) toast('Sin conexión: las notas se enviarán solas cuando haya señal.'); return; }
+  let enviadas = 0, fallo = null;
+  for (const e of lista) {
+    const n = e.registro;
+    try {
+      await conTimeout(escribirNota(n, e.diferido), 25000);
+      await COLA_NOTAS.quitar(n.id);
+      enviadas++;
+      const h = S.ficha && S.ficha.folio === n.folio ? S.ficha.historial : null;
+      if (Array.isArray(h) && !h.some(x => x && x.id === n.id)) h.push({ ...n, capturaOffline: !!e.diferido });
+    } catch (err) {
+      fallo = err; console.warn('No se pudo enviar la nota en cola:', err);
+      await COLA_NOTAS.marcar(n.id, { diferido: true, intentos: (e.intentos || 0) + 1, ultimoError: String(err && err.message || err).slice(0, 160), ultimoIntento: Date.now() }).catch(() => {});
+      if (esErrorDeRed(err)) break;   // sin señal real: se conserva el orden y se reintenta después
+    }
+  }
+  await pintarCola();
+  if (S.ficha) renderFicha();
+  if (enviadas && manual) toast(`✅ ${enviadas} nota(s) enviada(s)`, 3000);
+  else if (!enviadas && manual && fallo) toast('No se pudo enviar todavía. Se reintentará solo.');
+}
+
+let _guardandoNota = false;
+async function guardarNota() {
+  const f = S.ficha; if (!f || !sesion || _guardandoNota) return;
+  const ta = $('notaTexto');
+  const texto = String(ta ? ta.value : (f.borradorNota || '')).trim().slice(0, MAX_NOTA);
+  if (!texto) { toast('Escribe o dicta la nota primero.'); return; }
+  _guardandoNota = true;
+  detenerDictado();
+  const btn = $('btnGuardarNota'); if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try {
+    const r = S.porFolio[f.folio];
+    const nota = {
+      id: 'hc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      folio: f.folio, clienteId: (r && r.cuenta && r.cuenta.clienteId) || null,
+      texto, fecha: new Date().toISOString(), usuario: sesion.nombre, usuarioId: sesion.uid
+    };
+    try { await COLA_NOTAS.agregar({ registro: nota, diferido: !navigator.onLine }); }
+    catch (e) { console.error(e); toast('No se pudo guardar la nota en este celular. Inténtalo de nuevo.', 4000); return; }   // el texto se conserva en pantalla
+    f.borradorNota = '';
+    await pintarCola();
+    await sincronizarNotas(false);
+    const sigue = (await COLA_NOTAS.lista()).some(e => e.registro.id === nota.id);
+    await pintarCola();
+    toast(sigue ? '📴 Nota guardada en este celular; se enviará cuando haya señal' : '✅ Nota guardada', sigue ? 4000 : 2200);
+  } finally {
+    _guardandoNota = false;
+    if (S.ficha) renderFicha();
+  }
+}
+
+// ---- Dictado por voz (Web Speech API). Necesita internet: el reconocimiento lo hace el navegador en sus servidores.
+// Sin señal, o si el navegador no lo soporta, sirve el micrófono 🎤 del teclado del celular, que escribe en el mismo cuadro.
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let _rec = null, _dictando = false, _dictBase = '', _sinVoz = 0;
+function _unirTexto(base, extra) {
+  extra = String(extra || '').trim(); if (!extra) return base;
+  return (base ? String(base).replace(/\s+$/, '') + ' ' : '') + extra;
+}
+function pintarMic() {
+  const b = $('btnMic'); if (!b) return;
+  b.classList.toggle('grabando', _dictando);
+  b.textContent = _dictando ? '⏹ Detener' : '🎤 Dictar';
+}
+function alternarDictado() {
+  if (_dictando) { detenerDictado(); return; }
+  const ta = $('notaTexto'); if (!ta) return;
+  if (!SpeechRec) { toast('Este navegador no tiene dictado en la app. Toca el cuadro y usa el micrófono 🎤 del teclado.', 5000); ta.focus(); return; }
+  if (!navigator.onLine) { toast('El dictado necesita señal. Sin señal usa el micrófono 🎤 del teclado.', 4500); ta.focus(); return; }
+  _dictando = true; _sinVoz = 0; pintarMic();
+  const arrancar = () => {
+    if (!_dictando) return;
+    const el = $('notaTexto'); if (!el) { detenerDictado(); return; }
+    _dictBase = el.value;
+    const rec = new SpeechRec(); _rec = rec;
+    rec.lang = 'es-MX'; rec.continuous = false; rec.interimResults = true;   // sin "continuous": en Android repite palabras; se reinicia solo al terminar cada frase
+    rec.onresult = ev => {
+      _sinVoz = 0;
+      let t = ''; for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
+      const e2 = $('notaTexto'); if (!e2) return;
+      e2.value = _unirTexto(_dictBase, t).slice(0, MAX_NOTA);
+      if (S.ficha) S.ficha.borradorNota = e2.value;
+    };
+    rec.onerror = ev => {
+      const c = ev && ev.error;
+      if (c === 'no-speech') { if (++_sinVoz >= 2) { detenerDictado(); toast('No se escuchó nada. Toca 🎤 para intentar de nuevo.'); } return; }
+      if (c === 'aborted') return;
+      detenerDictado();
+      toast(c === 'not-allowed' || c === 'service-not-allowed' ? 'Sin permiso de micrófono. Actívalo en los permisos del navegador, o usa el micrófono 🎤 del teclado.'
+        : c === 'network' ? 'El dictado necesita señal. Usa el micrófono 🎤 del teclado.'
+        : c === 'audio-capture' ? 'No se detecta el micrófono.' : 'No se pudo dictar. Usa el micrófono 🎤 del teclado.', 5000);
+    };
+    rec.onend = () => { if (_dictando) setTimeout(arrancar, 150); else pintarMic(); };
+    try { rec.start(); } catch (e) { detenerDictado(); }
+  };
+  arrancar();
+}
+function detenerDictado() {
+  _dictando = false;
+  try { if (_rec) { _rec.onend = null; _rec.stop(); } } catch (e) { /* ok */ }
+  _rec = null; pintarMic();
+}
+
 // ---------------------------------------------------------------- sesión
 async function initFirebase() {
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -377,7 +540,8 @@ async function _entrar(user) {
 }
 async function cerrarSesionApp() {
   let n = 0; try { n = (await COLA.lista()).length; } catch (e) { return alert('No se pudo verificar si tienes abonos sin enviar. Reinténtalo.'); }
-  if (n) return alert(`Tienes ${n} abono(s) guardado(s) en este celular que aún no se envían a la bóveda. Conéctate y envíalos con el botón "Enviar ahora" antes de cerrar sesión.`);
+  let nn = 0; try { nn = (await COLA_NOTAS.lista()).length; } catch (e) { return alert('No se pudo verificar si tienes notas sin enviar. Reinténtalo.'); }
+  if (n || nn) return alert(`Tienes ${[n ? n + ' abono(s)' : '', nn ? nn + ' nota(s)' : ''].filter(Boolean).join(' y ')} guardado(s) en este celular que aún no se envían. Conéctate y envíalos con el botón "Enviar ahora" antes de cerrar sesión.`);
   if (confirm('¿Cerrar sesión?')) { const uid = sesion && sesion.uid; Promise.resolve(uid ? KV.set('perfil:' + uid, null) : null).then(() => auth.signOut()).finally(() => location.reload()); }
 }
 
@@ -468,11 +632,12 @@ function pintarEstado() {
 // Barra de abonos sin enviar (guardados en este celular)
 async function pintarCola() {
   const el = $('barraCola'); if (!el) return;
-  let l; try { l = await COLA.lista(); } catch (e) { return; }
-  S.cola = l;
-  if (!l.length) { el.classList.add('oculto'); return; }
+  let l, ln; try { l = await COLA.lista(); ln = await COLA_NOTAS.lista(); } catch (e) { return; }
+  S.cola = l; S.colaNotas = ln;
+  if (!l.length && !ln.length) { el.classList.add('oculto'); return; }
   const tot = l.reduce((t, e) => t + Number(e.registro.montoAbonado || 0), 0);
-  el.innerHTML = `📴 ${l.length} abono(s) sin enviar por ${dinero(tot)}, guardados en este celular. <button class="mini-btn" onclick="sincronizarCola(true)">Enviar ahora</button>`;
+  const partes = [l.length ? `${l.length} abono(s) sin enviar por ${dinero(tot)}` : '', ln.length ? `${ln.length} nota(s) sin enviar` : ''].filter(Boolean).join(' y ');
+  el.innerHTML = `📴 ${partes}, guardados en este celular. <button class="mini-btn" onclick="sincronizarCola(true)">Enviar ahora</button>`;
   el.classList.remove('oculto');
 }
 // Total y lista de abonos sin enviar de una cuenta
@@ -487,6 +652,7 @@ let _sincronizando = false;
 const conTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor')), ms))]);
 const esErrorDeRed = e => !navigator.onLine || /unavailable|deadline|offline|network|Sin respuesta/i.test(String((e && (e.code || '')) + ' ' + (e && e.message || e)));
 async function sincronizarCola(manual) {
+  sincronizarNotas(manual);   // las notas viajan por su propia cola (no dependen de la de abonos)
   if (_sincronizando || !sesion || !db) return;
   if (!navigator.onLine) { if (manual) toast('Sin conexión: los abonos se enviarán solos cuando haya señal.'); return; }
   _sincronizando = true;
@@ -821,6 +987,11 @@ function bloqueVisor(r) {
 
 function renderFicha() {
   const f = S.ficha; if (!f) return;
+  // El cuadro de nota se vuelve a dibujar con la ficha (p. ej. al terminar un envío): se conserva lo escrito y el foco
+  const _taPrev = $('notaTexto');
+  const _tenia = !!_taPrev && document.activeElement === _taPrev;
+  if (_taPrev) f.borradorNota = _taPrev.value;
+  const _selIni = _tenia ? _taPrev.selectionStart : null, _selFin = _tenia ? _taPrev.selectionEnd : null;
   const r = resumenFicha(), c = r.cuenta, k = r.contacto, plan = c.plan || {};
   const tel = telefono10(k.telefono);
   const [estCls] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris'];
@@ -829,6 +1000,10 @@ function renderFicha() {
   const listaAb = f.verTodosAbonos ? abonos : abonos.slice(0, MAX_AB);
   const bov = boveda(c.folio);
   const promesa = c.promesaPago && c.promesaPago.fecha;
+  const MAX_NT = 12;
+  const pendNotas = (S.colaNotas || []).filter(e => e.registro.folio === f.folio).sort((a, b) => String(b.registro.fecha).localeCompare(String(a.registro.fecha)));
+  const notasSrv = Array.isArray(f.historial) ? f.historial.slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))) : [];
+  const notasTodas = pendNotas.concat(notasSrv);
 
   $('ficha').innerHTML = `
     <div class="ficha-barra"><button onclick="cerrarFicha()" aria-label="Volver">‹</button><div><b>${esc(r.cliente)}</b><small>${esc(c.folio)} · ${esc(r.producto)}</small></div></div>
@@ -869,11 +1044,20 @@ function renderFicha() {
       ${abonos.length ? `<div class="fila" style="margin-top:6px"><span>Total abonado</span><b>${dinero(totalAb)}</b></div>` : ''}
     </div>
 
-    <div class="bloque"><h3>Notas de cobranza</h3>
-      ${f.historial === null ? '<div class="vacio" style="padding:12px">Cargando…</div>' :
-        f.historial.length ? f.historial.slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))).slice(0, 12).map(n =>
-          `<div class="nota-hist"><small>${M.fechaVisible(n.fecha)} · ${esc(n.usuario || '')}</small>${esc(n.texto)}</div>`).join('')
-        : '<div class="vacio" style="padding:12px">Sin notas.</div>'}
+    <div class="bloque"><h3>Notas de cobranza${notasTodas.length > MAX_NT ? ` <span class="mini-btn" onclick="S.ficha.verTodasNotas=!S.ficha.verTodasNotas; renderFicha()">${f.verTodasNotas ? 'Ver menos' : 'Ver todas · ' + notasTodas.length}</span>` : ''}</h3>
+      ${pendNotas.map(e => `<div class="nota-hist pend"><small>${fechaHoraNota(e.registro.fecha)} · 👤 ${esc(e.registro.usuario || '')} · 📴 Sin enviar</small>${esc(e.registro.texto)}</div>`).join('')}
+      ${f.historial === null ? `<div class="vacio" style="padding:12px">${navigator.onLine ? 'Cargando…' : 'Sin señal: las notas anteriores se ven al conectarte.'}</div>` :
+        notasSrv.length ? notasSrv.slice(0, f.verTodasNotas ? notasSrv.length : Math.max(0, MAX_NT - pendNotas.length)).map(n =>
+          `<div class="nota-hist"><small>${fechaHoraNota(n.fecha)} · 👤 ${esc(n.usuario || 'Sin usuario')}${n.capturaOffline ? ' · 📴 capturada sin señal' : ''}</small>${esc(n.texto)}</div>`).join('')
+        : (pendNotas.length ? '' : '<div class="vacio" style="padding:12px">Sin notas.</div>')}
+      <div class="nota-nueva">
+        <textarea id="notaTexto" rows="3" maxlength="${MAX_NOTA}" lang="es-MX" autocapitalize="sentences" placeholder="Escribe o dicta una nota de cobranza…" oninput="if (S.ficha) S.ficha.borradorNota = this.value">${esc(f.borradorNota || '')}</textarea>
+        <div class="nota-acc">
+          <button type="button" id="btnMic" class="nota-mic" onclick="alternarDictado()">🎤 Dictar</button>
+          <button type="button" id="btnGuardarNota" class="nota-guardar" onclick="guardarNota()">Guardar nota</button>
+        </div>
+        <small class="nota-ayuda">Se guarda con la fecha y hora de ahora y a nombre de ${esc(sesion ? sesion.nombre : '')}. Sin señal queda en este celular y se envía sola.</small>
+      </div>
     </div>
 
     <div class="acciones">
@@ -881,6 +1065,9 @@ function renderFicha() {
       <button class="img" onclick="compartirImagen('estado')">📤 Estado de cuenta</button>
       <button class="img" onclick="compartirImagen('visor')">📤 Opciones</button>
     </div>`;
+  const _taNueva = $('notaTexto');
+  if (_taNueva && _tenia) { _taNueva.focus(); try { _taNueva.setSelectionRange(_selIni, _selFin); } catch (e) { /* ok */ } }
+  pintarMic();
 }
 
 // ---------------------------------------------------------------- hoja inferior (abono)
@@ -1248,7 +1435,7 @@ function aplicarAtajo() {
   }
   pintarInstalar();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* ok */ }   // evita que el navegador borre la cola de abonos por falta de espacio
-  setInterval(() => { if (sesion && navigator.onLine) COLA.lista().then(l => { if (l.length) sincronizarCola(); }).catch(() => {}); }, 60000);
+  setInterval(() => { if (sesion && navigator.onLine) Promise.all([COLA.lista(), COLA_NOTAS.lista()]).then(([l, ln]) => { if (l.length || ln.length) sincronizarCola(); }).catch(() => {}); }, 60000);
   if (!navigator.onLine) $('avisoOffline').classList.remove('oculto');
   if (typeof firebase === 'undefined') {
     $('loginError').textContent = 'No se pudo cargar Firebase. Revisa tu conexión y recarga.';

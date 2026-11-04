@@ -3,7 +3,7 @@
 // mientras los datos siempre se piden a Firebase. Los DATOS de la cartera NO se guardan aquí:
 // la propia app los guarda en IndexedDB. Nunca intercepta Firebase/Firestore/Google.
 
-const CACHE_NAME = 'cobranza-shell-v2';
+const CACHE_NAME = 'cobranza-shell-v3';
 
 const SHELL_URLS = [
   '/cobranza/',
