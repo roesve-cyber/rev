@@ -124,6 +124,7 @@
     <div id="sub-cobranza" class="submenu oculto-submenu">
         <button onclick="navA('arc-v3'); renderARC_v3();">📊 ARC v3 (Análisis de Riesgo)</button>
         <button onclick="navA('reporte-rentabilidad-cartera'); if(typeof renderReporteRentabilidadCartera === 'function') renderReporteRentabilidadCartera();">💹 Rentabilidad de Cartera</button>
+        <button onclick="navA('reporte-kpis-cartera'); if(typeof renderKpisCartera === 'function') renderKpisCartera();">📈 KPIs de Cartera</button>
         <button onclick="navA('simulador-tasa-pronto-pago'); if(typeof renderSimuladorTasaProntoPago === 'function') renderSimuladorTasaProntoPago();">🧮 Simulador de Tasa y Pronto Pago</button>
         <button onclick="abrirCotizarLiquidacion()" style="color:#0f766e; font-weight:bold;">🧾 Cotizar Liquidación / Ampliar Plazo</button>
         <button onclick="navA('abonosdirectos')">💵 Aplicar Abono Directo</button>
@@ -762,6 +763,7 @@
     <div id="reporte-global-cliente" class="vista oculto"></div>
 
     <div id="reporte-rentabilidad-cartera" class="vista oculto"></div>
+    <div id="reporte-kpis-cartera" class="vista oculto"></div>
     <div id="simulador-tasa-pronto-pago" class="vista oculto"></div>
 
     <div id="reporte-cubo-ventas" class="vista oculto"></div>
@@ -1364,6 +1366,7 @@
 <script src="js/modules/estadoCuentaCliente.js?v=6"></script>
 <script src="js/modules/reporteGlobalCliente.js?v=1"></script>
 <script src="js/modules/reportes-rentabilidad-cartera.js?v=1"></script>
+<script src="js/modules/reportes-kpis-cartera.js?v=2"></script>
 <script src="js/modules/reportes-simulador-tasa.js?v=4"></script>
 <script src="js/modules/reportes-cubo-ventas.js?v=1"></script>
 <script src="js/modules/estadoCuentaBancaria.js?v=3"></script>
