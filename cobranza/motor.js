@@ -193,7 +193,7 @@
     // ------------------------------------------------------------------
     // _calcularEstadoCuenta (motor central de saldos)
     // ------------------------------------------------------------------
-    function estadoCuenta(c, pagaresFolio, hoy, riesgo) {
+    function estadoCuenta(c, pagaresFolio, hoy, riesgo, ultimoPagoCliente) {
         hoy = hoy || new Date();
         const pagares = (pagaresFolio || []).slice().sort((a, b) =>
             (fechaExacta(a.fechaVencimiento) || 0) - (fechaExacta(b.fechaVencimiento) || 0));
@@ -225,7 +225,9 @@
             estadoGeneral = 'Saldado';
             saldoTotal = 0;
         } else if (riesgo && typeof riesgo.analizarCuenta === 'function') {
-            analisis = riesgo.analizarCuenta(c, { hoy, pagaresSistema: pagares, saldoPreferente: saldoTotal });
+            // ultimoPagoCliente: pago más reciente del cliente en CUALQUIER folio (si es más nuevo que el
+            // de esta cuenta, la cuenta se clasifica con él). Ver CobranzaRiskService.ultimoPagoPorCliente.
+            analisis = riesgo.analizarCuenta(c, { hoy, pagaresSistema: pagares, saldoPreferente: saldoTotal, ultimoPagoCliente: ultimoPagoCliente || null });
             promesaVigente = !!analisis.promesa?.vigente;
             if (promesaVigente) estadoGeneral = 'Promesa';
             else if (analisis.key === 'bajo') estadoGeneral = 'Al corriente';
@@ -482,7 +484,7 @@
     function resumenCuenta(c, pagaresFolio, ctx) {
         const hoy = ctx?.hoy || new Date();
         const cfg = ctx?.cfg || null;
-        const estado = estadoCuenta(c, pagaresFolio, hoy, ctx?.riesgo);
+        const estado = estadoCuenta(c, pagaresFolio, hoy, ctx?.riesgo, ctx?.ultimoPagoCliente);
         const pendientes = estado.pagaresPendientes;
         const prox = pendientes[0] || null;
         const proximoMonto = prox ? (prox.estado === 'Parcial' ? Math.max(0, prox.monto - (prox.montoAbonado || 0)) : prox.monto) : 0;
