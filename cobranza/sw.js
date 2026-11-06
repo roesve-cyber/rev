@@ -3,7 +3,7 @@
 // mientras los datos siempre se piden a Firebase. Los DATOS de la cartera NO se guardan aquí:
 // la propia app los guarda en IndexedDB. Nunca intercepta Firebase/Firestore/Google.
 
-const CACHE_NAME = 'cobranza-shell-v3';
+const CACHE_NAME = 'cobranza-shell-v4';
 
 const SHELL_URLS = [
   '/cobranza/',
@@ -57,7 +57,7 @@ self.addEventListener('fetch', (event) => {
 
   // La app y su motor de cálculo cambian seguido: red primero (cada cambio se ve a la primera);
   // sin conexión se usa la copia guardada.
-  const redPrimero = url.pathname === '/cobranza/' || url.pathname === '/cobranza/index.html' || url.pathname === '/cobranza/motor.js';
+  const redPrimero = url.pathname === '/cobranza/' || url.pathname === '/cobranza/index.html' || url.pathname === '/cobranza/motor.js' || url.pathname === '/js/services/cobranza-risk-service.js';
   if (redPrimero) {
     event.respondWith(
       fetch(req).then((res) => {
