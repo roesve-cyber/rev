@@ -102,6 +102,39 @@
         return saldoDesdePagares(cuenta, pagares);
     }
 
+    // ------------------------------------------------------------------
+    // Cliente = unidad de cobranza. Un cliente con varios folios que abonó
+    // recientemente a CUALQUIERA de ellos se considera sano en todos (mismos
+    // umbrales de clasificar()). La clave es clienteId; si falta, el nombre
+    // sin acentos (igual que la agrupación de la app de cobranza).
+    // ------------------------------------------------------------------
+    function claveCliente(cuenta) {
+        const id = cuenta?.clienteId;
+        if (id !== undefined && id !== null && String(id).trim() !== '') return 'id:' + String(id).trim();
+        const nombre = String(cuenta?.nombre || cuenta?.clienteNombre || '')
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+        return nombre ? 'n:' + nombre : '';
+    }
+
+    // Mapa clave de cliente -> { fecha, folio, monto } del abono válido MÁS RECIENTE
+    // entre todas sus cuentas no canceladas (incluye saldadas e incobrables si vienen en la lista).
+    function ultimoPagoPorCliente(cuentas) {
+        const mapa = new Map();
+        (Array.isArray(cuentas) ? cuentas : []).forEach(cuenta => {
+            if (!cuenta || cuentaCancelada(cuenta)) return;
+            const clave = claveCliente(cuenta);
+            if (!clave) return;
+            const abonos = obtenerAbonos(cuenta);
+            if (!abonos.length) return;
+            const ultimo = abonos[abonos.length - 1];
+            const previo = mapa.get(clave);
+            if (!previo || ultimo.fecha > previo.fecha) {
+                mapa.set(clave, { fecha: ultimo.fecha, folio: String(cuenta.folio || cuenta.folioVenta || ''), monto: ultimo.monto });
+            }
+        });
+        return mapa;
+    }
+
     function promesaInfo(cuenta, hoy) {
         const fecha = parseFecha(cuenta?.promesaPago?.fecha || cuenta?.fechaPromesaPago || cuenta?.promesaFecha);
         if (!fecha) return { tiene: false, vigente: false, vencida: false, fecha: null };
@@ -142,12 +175,24 @@
         const abonos = obtenerAbonos(cuenta);
         const ultimo = abonos.length ? abonos[abonos.length - 1] : null;
         const fechaVenta = obtenerFechaVenta(cuenta);
-        const fechaReferencia = ultimo?.fecha || fechaVenta || hoy;
+        const folioPropio = String(cuenta?.folio || cuenta?.folioVenta || '');
+        const fechaReferenciaCuenta = ultimo?.fecha || fechaVenta || hoy;
         const sinPrimerPago = !ultimo;
+
+        // Pago más reciente del CLIENTE en otro folio: si es más nuevo que la referencia
+        // propia de la cuenta, manda él (el cliente está pagando, la cuenta se considera sana
+        // según los mismos umbrales de días).
+        const pagoCliente = opciones.ultimoPagoCliente || null;
+        const pagoOtraCuenta = (pagoCliente && pagoCliente.fecha
+            && String(pagoCliente.folio || '') !== folioPropio
+            && inicioDia(pagoCliente.fecha) > inicioDia(fechaReferenciaCuenta))
+            ? pagoCliente : null;
+
+        const fechaReferencia = pagoOtraCuenta ? pagoOtraCuenta.fecha : fechaReferenciaCuenta;
         const diasSinPago = diasEntre(fechaReferencia, hoy);
         const totalAbonado = abonos.reduce((s, a) => s + a.monto, 0);
         const promesa = promesaInfo(cuenta, hoy);
-        const base = clasificar(diasSinPago, sinPrimerPago);
+        const base = clasificar(diasSinPago, sinPrimerPago && !pagoOtraCuenta);
 
         const estadoCuenta = opciones.estadoCuenta || null;
         const pagaresVencidos = Array.isArray(estadoCuenta?.pagaresVencidos) ? estadoCuenta.pagaresVencidos : [];
@@ -189,7 +234,9 @@
             borde: base.borde,
             saldo,
             totalAbonado,
-            fechaUltimoPago: ultimo?.fecha || null,
+            fechaUltimoPago: pagoOtraCuenta ? pagoOtraCuenta.fecha : (ultimo?.fecha || null),
+            fechaUltimoPagoCuenta: ultimo?.fecha || null,
+            pagoClienteOtraCuenta: pagoOtraCuenta,
             fechaReferencia,
             diasSinPago,
             sinPrimerPago,
@@ -200,9 +247,12 @@
     }
 
     function analizarCartera(cuentas, pagaresSistema, opciones = {}) {
+        // El mapa se arma con TODAS las cuentas recibidas (aunque estén saldadas o marcadas
+        // incobrables): un abono a cualquiera de ellas cuenta como pago reciente del cliente.
+        const pagosCliente = opciones.ultimoPagoPorCliente || ultimoPagoPorCliente(cuentas);
         const items = (Array.isArray(cuentas) ? cuentas : [])
             .filter(c => c && !cuentaCancelada(c) && !cuentaIncobrable(c))
-            .map(cuenta => analizarCuenta(cuenta, { ...opciones, pagaresSistema }))
+            .map(cuenta => analizarCuenta(cuenta, { ...opciones, pagaresSistema, ultimoPagoCliente: pagosCliente.get(claveCliente(cuenta)) || null }))
             .filter(r => r.key !== 'saldado')
             .sort((a, b) => {
                 if (b.prioridad !== a.prioridad) return b.prioridad - a.prioridad;
@@ -245,6 +295,8 @@
     window.CobranzaRiskService = {
         parseFecha,
         inicioDia,
+        claveCliente,
+        ultimoPagoPorCliente,
         analizarCuenta,
         analizarCartera,
         formatearFecha
