@@ -30,6 +30,54 @@ function _cxcFolioEsConsecutivoNuevo(folio) {
     return /^VTA-\d{5}$/.test(String(folio || ''));
 }
 
+// Venta de la era previa a cupones (folio con timestamp "V-AAAAMMDD-..."). No genera cupon; en su lugar
+// rige la ESCALERA de pago adelantado (ver _cxcPrecioEscaleraVigente). Los folios de emergencia (-TMP-)
+// tampoco generan cupon, pero NO son de la era vieja, por eso no entran.
+function _cxcVentaEraPreCupones(folio) {
+    const f = String(folio || '');
+    return !_cxcFolioEsConsecutivoNuevo(f) && !/-TMP-/i.test(f);
+}
+
+// Precio de liquidacion anticipada de una venta previa a cupones. Misma regla que el cotizador
+// (cxc-cotizar-liquidacion.js) y que la app de cobranza (cobranza/motor.js):
+//   - Primer mes (hasta el dia 30): precio de CONTADO real (capital de contado - lo ya pagado).
+//   - Despues: el plazo en el que va = 1 + meses completos transcurridos despues de los 30 dias de
+//     contado (dia 31-60 = plan de 1 mes, 61-91 = 2 meses...), nunca mas que su plazo pactado.
+//   - Importe = total de ese plazo en la escalera de la cuenta - lo ya cubierto, sin pasar del saldo.
+// Escalera: la `saldosPorMes` congelada en la cuenta; si no es confiable, las tarifas actuales (origen 'actual').
+function _cxcPrecioEscaleraVigente(cuenta, ctx) {
+    const DIAS_MES = 30.44;
+    const { saldoActual, totalPagado, capitalContado, diasDesdeVenta, mesesPlan, periodicidad, fechaVenta } = ctx;
+    const fechaDia = n => new Date(fechaVenta.getTime() + n * 86400000);
+    if (diasDesdeVenta <= 30) {
+        const monto = Math.min(saldoActual, Math.max(0, capitalContado - totalPagado));
+        return { etapa: 'contado', mesesTarifa: 0, totalTarifa: capitalContado, monto, vigenteHasta: fechaDia(30), siguienteMonto: null, origen: 'contado' };
+    }
+    const mesPostContado = Math.max(1, Math.floor((diasDesdeVenta - 30) / DIAS_MES) + 1);
+    const congelada = Array.isArray(cuenta?.saldosPorMes)
+        ? cuenta.saldosPorMes.map(p => ({ meses: Number(p.meses), total: Number(p.total) })).filter(p => p.meses > 0 && p.total > 0).sort((a, b) => a.meses - b.meses)
+        : [];
+    const sana = congelada.length > 0 && congelada.every((p, i, arr) => i === 0 || p.total >= arr[i - 1].total - 0.01);
+    let planes = sana ? congelada : [];
+    if (!sana && typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad && capitalContado > 0) {
+        planes = CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad || 'semanal')
+            .map(p => ({ meses: Number(p.meses), total: Number(p.total) })).sort((a, b) => a.meses - b.meses);
+    }
+    const idx = planes.findIndex(p => p.meses >= mesPostContado && p.meses <= mesesPlan);
+    if (idx < 0) return null;
+    const plan = planes[idx];
+    const totalPlan = Number(cuenta?.plan?.total || 0);
+    const cubierto = totalPlan > 0 ? Math.max(0, totalPlan - saldoActual) : totalPagado;
+    const montoDe = pl => Math.min(saldoActual, Math.max(0, pl.total - cubierto));
+    const sig = planes.slice(idx + 1).find(p => p.meses <= mesesPlan);
+    return {
+        etapa: 'escalera', mesesTarifa: plan.meses, totalTarifa: plan.total, monto: montoDe(plan),
+        vigenteHasta: fechaDia(Math.ceil(30 + plan.meses * DIAS_MES) - 1),
+        siguienteMonto: sig ? montoDe(sig) : null, siguienteMeses: sig ? sig.meses : null,
+        origen: sana ? 'cuenta' : 'actual'
+    };
+}
+
 // 🎟️ Monto EXACTO del cupón de pronto pago para UN plazo específico (sep
 // 2026, decisión de Roberto -- corrige un error mío anterior). NO es un %
 // de puntos restado y aplicado sobre el total (eso estaba mal: tasa=3% menos
@@ -786,6 +834,29 @@ function _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono = 0) {
         };
     }
 
+    // 📜 Venta anterior a cupones: rige la ESCALERA (precio del plazo en el que va), sin cupón.
+    if (_cxcVentaEraPreCupones(cuenta.folio)) {
+        const esc = _cxcPrecioEscaleraVigente(cuenta, {
+            saldoActual, totalPagado, capitalContado, diasDesdeVenta, mesesPlan: mesesPlanOriginal, periodicidad, fechaVenta: fechaVentaDate
+        });
+        if (esc) {
+            return {
+                ...base,
+                aplica: esc.monto < saldoActual - 0.01,
+                liquidaria: base.montoAbono >= esc.monto - 0.01,
+                beneficio: 0,
+                montoLiquidacion: esc.monto,
+                faltante: Math.max(0, esc.monto - base.montoAbono),
+                tipo: 'escalera_vigente',
+                porcentajeCupon: 0,
+                escalera: esc,
+                mensaje: esc.etapa === 'contado'
+                    ? `Primer mes: se cobra el precio de contado real (${_cxcDinero(esc.monto)}); sin cupón.`
+                    : `Se cobra el precio del plazo en el que va (${esc.mesesTarifa} mes(es)): ${_cxcDinero(esc.monto)}; sin cupón.`
+            };
+        }
+    }
+
     const totalFinanciado = Number(cuenta?.plan?.total || 0);
     // 🎟️ Topado contra los demás plazos disponibles para este mismo capital y
     // periodicidad (ver _cxcCuponTopadoParaPlazo) -- así lo que se emite de
@@ -1237,6 +1308,21 @@ function _cxcResumenPoliticaPagoAnticipado(politica, esDirecto = false) {
         return {
             titulo: `Politica de pago anticipado: liquidacion dentro de plazo`,
             detalle: `Aun dentro de su plazo pactado. Se cobra el saldo nominal completo: ${_cxcDinero(politica.montoLiquidacion)}.${beneficioTxt}${politica.beneficio > 0.01 ? ` (${politica.porcentajeCupon}% del total financiado, como cupon.)` : ''}${moratorioTxt}`,
+            nota: modoTxt
+        };
+    }
+
+    if (politica.tipo === "escalera_vigente") {
+        const e = politica.escalera || {};
+        const fVence = e.vigenteHasta ? new Date(e.vigenteHasta).toLocaleDateString('es-MX') : '';
+        const que = e.etapa === 'contado' ? 'precio de contado real (primer mes)' : `precio del plazo en el que va (${e.mesesTarifa} mes(es))`;
+        const sig = (e.siguienteMonto != null && e.siguienteMonto > politica.montoLiquidacion + 0.01) ? ` Despues sube a ${_cxcDinero(e.siguienteMonto)} (plazo de ${e.siguienteMeses} meses).` : '';
+        const aviso = e.origen === 'actual' ? ' ATENCION: la cuenta no tiene escalera propia guardada; monto estimado con tarifas actuales, verificalo.' : '';
+        return {
+            titulo: `Politica de pago anticipado: ${e.etapa === 'contado' ? 'precio de contado' : 'precio del plazo vigente'} (venta anterior a cupones)`,
+            detalle: politica.aplica
+                ? `Se cobra el ${que}: ${_cxcDinero(politica.montoLiquidacion)} (saldo nominal ${_cxcDinero(politica.saldoActual)}). Sin cupon. Rige hasta el ${fVence}.${sig}${aviso}${moratorioTxt}`
+                : `Ya esta en el precio de su plazo: se liquida con el saldo vigente ${_cxcDinero(politica.saldoActual)}. Sin cupon.${moratorioTxt}`,
             nota: modoTxt
         };
     }
@@ -2288,6 +2374,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
 
     if (politicaAbono?.aplica && politicaAbono.liquidaria) {
         const esContado1Mes = politicaAbono.tipo === 'contado_1_mes';
+        const esEscalera = politicaAbono.tipo === 'escalera_vigente';
         // 🎟️ El beneficio se convierte en cupón SOLO para ventas nuevas (ver
         // CUPONES_FECHA_INICIO) -- las cuentas vigentes (vendidas antes) ya
         // traen una tasa más baja pactada; emitirles cupón encima afectaría
@@ -2304,6 +2391,8 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         const ventaEsNueva = _cxcFolioEsConsecutivoNuevo(cuenta.folio);
         const beneficioTxt = esContado1Mes
             ? `\nPlan de 1 mes: no genera cupón -- se cobra precio de contado real (sin el interés del plan).`
+            : esEscalera
+            ? `\nVenta anterior a cupones: se cobra ${politicaAbono.escalera?.etapa === 'contado' ? 'el precio de contado real (primer mes)' : `el precio del plazo en el que va (${politicaAbono.escalera?.mesesTarifa} mes(es))`}. Saldo nominal: ${_cxcDinero(politicaAbono.saldoActual)}. Sin cupón.${politicaAbono.escalera?.origen === 'actual' ? '\n⚠️ Sin escalera propia guardada: monto estimado con tarifas actuales.' : ''}`
             : (politicaAbono.beneficio > 0.01
                 ? (ventaEsNueva
                     ? `\nCupón por pago anticipado (${politicaAbono.porcentajeCupon}% del total financiado): ${_cxcDinero(politicaAbono.beneficio)}`
@@ -2314,6 +2403,8 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
             : "";
         const encabezado = esContado1Mes
             ? `LIQUIDACION A PRECIO DE CONTADO (PLAN 1 MES)\n\nMonto a cobrar: ${_cxcDinero(politicaAbono.montoLiquidacion)}`
+            : esEscalera
+            ? `LIQUIDACION A PRECIO DEL PLAZO VIGENTE\n\nMonto a cobrar: ${_cxcDinero(politicaAbono.montoLiquidacion)}`
             : `LIQUIDACION DENTRO DEL PLAZO PACTADO\n\nMonto a cobrar (saldo nominal, sin descuento): ${_cxcDinero(politicaAbono.montoLiquidacion)}`;
         if (confirm(`${encabezado}${beneficioTxt}${excesoTxt}\n\nConfirmas liquidar la cuenta?`)) {
             montoFinal = politicaAbono.montoLiquidacion;
@@ -2323,7 +2414,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
                 : null;
             // 🛡️ CORREGIDO: tipoPolitica se usaba más abajo sin declarar --
             // se declara aquí, junto con el resto del bloque que la usa.
-            const tipoPolitica = esContado1Mes ? 'Plan de 1 mes (precio de contado, sin cupón)' : 'Pago dentro del plazo pactado';
+            const tipoPolitica = esContado1Mes ? 'Plan de 1 mes (precio de contado, sin cupón)' : (esEscalera ? 'Precio del plazo vigente (venta anterior a cupones, sin cupón)' : 'Pago dentro del plazo pactado');
             // 🆕 Monto condonado (sin cupón) para el Estado de Resultados:
             // el ingreso financiero de esta venta ya se contó completo desde
             // el día de la venta -- si no hay cupón, esta diferencia nunca
@@ -2331,6 +2422,8 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
             montoCondonadoPolitica = (!cuponEmitido) ? Math.max(0, Number(saldoActual || 0) - Number(politicaAbono.montoLiquidacion || 0)) : 0;
             motivoCondonacionPolitica = esContado1Mes
                 ? 'Plan de 1 mes liquidado a precio de contado (sin cupón)'
+                : esEscalera
+                ? `Venta anterior a cupones liquidada a ${politicaAbono.escalera?.etapa === 'contado' ? 'precio de contado (primer mes)' : `precio del plazo vigente (${politicaAbono.escalera?.mesesTarifa} mes(es))`}, sin cupón`
                 : 'Cuenta vigente (de antes del cambio a cupones) liquidada dentro de plazo (sin cupón)';
             // 🔔 AVISO PUSH: confirma que el último pago quedó liquidado con
             // el descuento de pronto pago aplicado.
