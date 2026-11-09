@@ -141,6 +141,14 @@
 
     function folioEsConsecutivoNuevo(folio) { return /^VTA-\d{5}$/.test(String(folio || '')); }
 
+    // Venta de la era previa a cupones (folio con timestamp "V-AAAAMMDD-…"). No genera cupón; en su lugar rige la
+    // ESCALERA: quien liquida antes de su plazo paga el precio del plazo en el que va. Las ventas con folio de
+    // emergencia (-TMP-) también quedan sin cupón, pero NO son de la era vieja: no entran aquí.
+    function ventaEraPreCupones(folio) {
+        const f = String(folio || '');
+        return !folioEsConsecutivoNuevo(f) && !/-TMP-/i.test(f);
+    }
+
     function nombreCliente(c) { return c?.nombre || c?.clienteNombre || 'Cliente'; }
 
     function productoCuenta(c) {
@@ -391,6 +399,22 @@
                 mensaje: `Plan de 1 mes: no genera cupón; se cobra el precio de contado real (${dinero(montoLiquidacion)}).` };
         }
 
+        // 📜 Venta anterior a cupones: rige la escalera (precio del plazo en el que va), sin cupón.
+        if (ventaEraPreCupones(c.folio)) {
+            const esc = precioEscaleraVigente(c, saldoActual, pagado, diasDesdeVenta, cfg);
+            if (esc) {
+                return { ...base,
+                    aplica: esc.monto < saldoActual - 0.01,
+                    liquidaria: montoAbono >= esc.monto - 0.01,
+                    beneficio: 0, montoLiquidacion: esc.monto,
+                    faltante: Math.max(0, esc.monto - montoAbono),
+                    tipo: 'escalera_vigente', porcentajeCupon: 0, escalera: esc,
+                    mensaje: esc.etapa === 'contado'
+                        ? `Primer mes: se cobra el precio de contado real (${dinero(esc.monto)}); sin cupón.`
+                        : `Se cobra el precio del plazo en el que va (${esc.mesesTarifa} mes(es)): ${dinero(esc.monto)}; sin cupón.` };
+            }
+        }
+
         const totalFinanciado = Number(c?.plan?.total || 0);
         // Igual que el sistema: el beneficio se calcula siempre; el cupón solo se EMITE si la
         // venta es "nueva" (folio VTA-00000) -- ver emiteCupon abajo.
@@ -428,6 +452,44 @@
         const planes = sana ? congelada
             : ((CS && CS.calcularCreditoConPeriodicidad) ? CS.calcularCreditoConPeriodicidad(capitalContado, periodicidad, cfg || null) : []);
         return planes.slice().sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0));
+    }
+
+    // ------------------------------------------------------------------
+    // Escalera de pago adelantado (ventas previas a cupones). Misma regla que el cotizador de liquidación
+    // del sistema principal (cxc-cotizar-liquidacion.js):
+    //   · Primer mes (hasta el día 30)  -> precio de CONTADO real (capital de contado − lo ya pagado).
+    //   · Después: el plazo en el que va = 1 + meses completos transcurridos después de los 30 días de contado
+    //     (día 31-60 = plan de 1 mes, 61-91 = 2 meses…), nunca más que su plazo pactado.
+    //   · Importe = total de ese plazo en la escalera de la cuenta − lo ya cubierto, sin pasar del saldo vigente.
+    // Escalera: la `saldosPorMes` congelada en la cuenta; si no es confiable, las tarifas actuales (marcado en origen).
+    // ------------------------------------------------------------------
+    function precioEscaleraVigente(c, saldoActual, pagado, diasDesdeVenta, cfg) {
+        const DIAS_MES = 30.44;
+        const meses = mesesPlan(c);
+        const enganche = Number(c.engancheRecibido || c.enganche || 0);
+        const capitalContado = Math.max(0, importeContado(c) - enganche);
+        const fechaVenta = fechaVentaDate(c);
+        const fechaDia = n => new Date(fechaVenta.getTime() + n * MS_DIA);
+        if (diasDesdeVenta <= 30) {
+            const monto = Math.min(saldoActual, Math.max(0, capitalContado - pagado));
+            return { etapa: 'contado', mesesTarifa: 0, totalTarifa: capitalContado, monto, vigenteHasta: fechaDia(30), siguienteMonto: null, origen: 'contado' };
+        }
+        const mesPostContado = Math.max(1, Math.floor((diasDesdeVenta - 30) / DIAS_MES) + 1);
+        const planes = escaleraPlanes(c, cfg);
+        const idx = planes.findIndex(p => Number(p.meses) >= mesPostContado && Number(p.meses) <= meses);
+        if (idx < 0) return null;
+        const plan = planes[idx];
+        const totalPlan = Number(c?.plan?.total || 0);
+        const cubierto = totalPlan > 0 ? Math.max(0, totalPlan - saldoActual) : pagado;
+        const montoDe = pl => Math.min(saldoActual, Math.max(0, Number(pl.total) - cubierto));
+        const sig = planes.slice(idx + 1).find(p => Number(p.meses) <= meses);
+        const congelada = Array.isArray(c?.saldosPorMes) ? c.saldosPorMes : [];
+        const sana = congelada.length > 0 && congelada.slice().sort((a, b) => a.meses - b.meses)
+            .every((p, i, arr) => i === 0 || Number(p.total || 0) >= Number(arr[i - 1].total || 0) - 0.01);
+        return { etapa: 'escalera', mesesTarifa: Number(plan.meses), totalTarifa: Number(plan.total), monto: montoDe(plan),
+            vigenteHasta: fechaDia(Math.ceil(30 + Number(plan.meses) * DIAS_MES) - 1),
+            siguienteMonto: sig ? montoDe(sig) : null, siguienteMeses: sig ? Number(sig.meses) : null,
+            origen: sana ? 'cuenta' : 'actual' };
     }
 
     function proyectarSaltoPlazo(c, estado, cfg, hoy) {
@@ -569,7 +631,7 @@
         nombreCliente, productoCuenta, fechaVentaDate, importeContado, mesesPlan,
         moratoriosPendientes, abonosValidos, totalPagado,
         estadoCuenta, calcularCuponPronto, planesConCuponTopado, cuponTopadoParaPlazo,
-        estadoPlazoCuenta, evaluarPoliticaPagoAnticipado,
+        estadoPlazoCuenta, evaluarPoliticaPagoAnticipado, precioEscaleraVigente, ventaEraPreCupones,
         escaleraPlanes, escaleraVisor, proyectarSaltoPlazo, detectarSaltoPlazo,
         resumenCuenta, construirAbonoBoveda
     };

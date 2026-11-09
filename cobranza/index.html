@@ -592,7 +592,20 @@ function aplicarDatos(d) {
   recalcular();
 }
 
-function ultimoPagoDe(cuenta) { return S.ultimoPago.get(window.CobranzaRiskService.claveCliente(cuenta)) || null; }
+// Si el navegador aún tiene en caché la versión VIEJA de cobranza-risk-service.js (sin estas funciones), la app
+// sigue abriendo con los datos y solo omite la regla por cliente hasta que se actualice.
+function _RS() { return window.CobranzaRiskService || {}; }
+function claveClienteSeguro(cuenta) {
+  if (typeof _RS().claveCliente === 'function') return _RS().claveCliente(cuenta);
+  const id = cuenta && cuenta.clienteId;
+  return id != null && String(id).trim() !== '' ? 'id:' + id : (sinAcentos(M.nombreCliente(cuenta)) ? 'n:' + sinAcentos(M.nombreCliente(cuenta)) : '');
+}
+function ultimoPagoPorClienteSeguro(cuentas) {
+  if (typeof _RS().ultimoPagoPorCliente === 'function') return _RS().ultimoPagoPorCliente(cuentas);
+  console.warn('cobranza-risk-service.js desactualizado en caché: se omite la regla por cliente. Recarga la app.');
+  return new Map();
+}
+function ultimoPagoDe(cuenta) { return S.ultimoPago.get(claveClienteSeguro(cuenta)) || null; }
 function clientePorId(id) { return id == null ? null : S.clientes.find(c => String(c.id) === String(id)) || null; }
 function datosContacto(c) {
   const cl = clientePorId(c.clienteId) || {};
@@ -605,7 +618,7 @@ function recalcular() {
   S.pagaresPend.forEach(p => { (porFolio[p.folio] = porFolio[p.folio] || []).push(p); });
   // Un cliente que abonó recientemente a CUALQUIER folio se considera sano en todos (mismos umbrales de días).
   // El mapa se arma con todas las cuentas descargadas (activas e incobrables), no solo las que se listan.
-  S.ultimoPago = window.CobranzaRiskService.ultimoPagoPorCliente(S.cuentas);
+  S.ultimoPago = ultimoPagoPorClienteSeguro(S.cuentas);
   S.resumenes = S.cuentas.filter(M.esActiva).map(c => {
     const r = M.resumenCuenta(c, porFolio[c.folio] || [], { cfg: S.cfg, hoy, riesgo: window.CobranzaRiskService, ultimoPagoCliente: ultimoPagoDe(c) });
     r.cuenta = c; r.contacto = datosContacto(c); r.cliente = r.contacto.nombre;
@@ -749,11 +762,11 @@ window.addEventListener('popstate', () => {
 // ---------------------------------------------------------------- cartera (agrupada por CLIENTE)
 const PESO_ESTADO = { 'Crítico': 4, 'Atrasado': 3, 'Promesa': 2, 'Al corriente': 1 };
 function claveCliente(r) {
-  return window.CobranzaRiskService.claveCliente(r.cuenta) || 'n:' + sinAcentos(r.cliente);
+  return claveClienteSeguro(r.cuenta) || 'n:' + sinAcentos(r.cliente);
 }
 // ---- Guía de gestión: qué debe hacer el cobrador con este cliente y por qué
 const esUrgente = estado => estado === 'Atrasado' || estado === 'Crítico';
-function diasDesde(fecha) { const R = window.CobranzaRiskService; return Math.max(0, Math.floor((R.inicioDia(new Date()) - R.inicioDia(fecha)) / 86400000)); }
+function diasDesde(fecha) { const a = M.parseFecha(new Date()), b = M.parseFecha(fecha); if (!a || !b) return 0; const d0 = x => new Date(x.getFullYear(), x.getMonth(), x.getDate(), 12).getTime(); return Math.max(0, Math.floor((d0(a) - d0(b)) / 86400000)); }
 function haceTxt(d) { return d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} d`; }
 function guiaCliente(g) {
   const up = g.ultimoPago, otro = g.pagoEnOtroFolio;
@@ -1020,6 +1033,12 @@ function bloqueVisor(r) {
   if (P.tipo === 'pronto_pago_flat' && P.cuponDisponible) {
     adel = `<div class="visor-tarjeta v-verde"><div class="t">💸 Pago adelantado · liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
       <div class="s">Saldo vigente sin descuento. Además recibe un <b>cupón de ${dinero(P.beneficio)}</b> (${P.porcentajeCupon}% del total financiado) para su próxima compra, con vigencia de 3 meses.${r.moratorios > 0.01 ? `<br>Los moratorios (${dinero(r.moratorios)}) se cobran aparte.` : ''}</div></div>`;
+  } else if (P.tipo === 'escalera_vigente') {
+    const E = P.escalera || {}, ahorro = P.saldoActual - P.montoLiquidacion;
+    const que = E.etapa === 'contado' ? 'el <b>precio de contado real</b> (primer mes)' : `el <b>precio del plazo en el que va (${mesesTxt(E.mesesTarifa)})</b>`;
+    const sig = E.siguienteMonto != null && E.siguienteMonto > P.montoLiquidacion + 0.01 ? `<br>Después pasa a <b>${dinero(E.siguienteMonto)}</b> (plazo de ${mesesTxt(E.siguienteMeses)}).` : '';
+    adel = `<div class="visor-tarjeta ${P.aplica ? 'v-verde' : 'v-gris'}"><div class="t">💸 Pago adelantado · liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
+      <div class="s">${P.aplica ? `Se cobra ${que}: <b>${dinero(ahorro)} menos</b> que su saldo (${dinero(P.saldoActual)}). Sin cupón.<br>Este precio rige hasta el <b>${M.fechaVisible(E.vigenteHasta)}</b>.${sig}` : `Ya está en el precio de su plazo: se liquida con el saldo vigente. Sin cupón.`}${E.origen === 'actual' ? '<br>⚠️ Esta cuenta no tiene escalera propia guardada; el monto se estimó con las tarifas actuales. Confírmalo con administración antes de prometerlo.' : ''}${r.moratorios > 0.01 ? `<br>Los moratorios (${dinero(r.moratorios)}) se cobran aparte.` : ''}</div></div>`;
   } else if (P.tipo === 'contado_1_mes') {
     adel = `<div class="visor-tarjeta v-verde"><div class="t">💸 Pago adelantado · liquidar hoy</div><div class="g">${dinero(P.montoLiquidacion)}</div>
       <div class="s">Plan de 1 mes: se cobra el <b>precio de contado real</b>${P.aplica ? `, ${dinero(P.saldoActual - P.montoLiquidacion)} menos que el saldo` : ''}. No genera cupón.</div></div>`;
@@ -1223,7 +1242,7 @@ async function enviarAbono() {
     ? `Este abono, sumado a los ${dinero(totalCola)} que ya tienes sin enviar de esta cuenta, supera el saldo (${dinero(r.saldoNominal)}).`
     : `El abono no puede ser mayor al saldo (${dinero(r.saldoNominal)}). Si el cliente quiere liquidar, usa el monto del visor.`);
   if (pol.liquidaria || montoAcum >= Number(r.saldoNominal) - 0.01) {
-    return error(`${totalCola > 0.01 ? `Sumado a los ${dinero(totalCola)} que ya tienes sin enviar, este` : 'Este'} pago <b>liquida la cuenta</b>. Las liquidaciones (con su cupón o precio de contado) se registran en el sistema de la oficina para no perder el beneficio del cliente.<br><br>Monto para liquidar hoy: <b>${dinero(pol.montoLiquidacion)}</b>. Avisa a administración y comparte la cotización con el botón <b>📤 Opciones</b>.`);
+    return error(`${totalCola > 0.01 ? `Sumado a los ${dinero(totalCola)} que ya tienes sin enviar, este` : 'Este'} pago <b>liquida la cuenta</b>. Las liquidaciones (con su cupón, precio de contado o precio del plazo vigente) se registran en el sistema de la oficina para no perder el beneficio del cliente.<br><br>Monto para liquidar hoy: <b>${dinero(pol.montoLiquidacion)}</b>. Avisa a administración y comparte la cotización con el botón <b>📤 Opciones</b>.`);
   }
 
   // Candado de abonos del mismo día (igual que el sistema principal)
@@ -1349,6 +1368,7 @@ function htmlVisor(r) {
     partes.push(U.bloque(`<div style="display:flex;gap:8px;margin:12px 0 4px;">${caja('Plazo', mesesTxt(pl.mesesPlan))}${caja(pl.aunEnPlazo ? 'Vence' : 'Venció', M.fechaVisible(pl.fechaLimite))}${caja(pl.aunEnPlazo ? 'Faltan' : 'Estado', pl.aunEnPlazo ? pl.diasRestantes + (Math.abs(pl.diasRestantes) === 1 ? ' día' : ' días') : 'Vencido', pl.aunEnPlazo ? '#16a34a' : '#dc2626')}</div>`));
   }
   if (P.tipo === 'pronto_pago_flat' && P.cuponDisponible) partes.push(U.hero({ etiqueta: 'Si liquidas hoy pagas', valor: dinero(P.montoLiquidacion), nota: `Y recibes un cupón de ${dinero(P.beneficio)} (${P.porcentajeCupon}%) para tu próxima compra`, tono: 'verde' }));
+  else if (P.tipo === 'escalera_vigente') partes.push(U.hero({ etiqueta: P.escalera && P.escalera.etapa === 'contado' ? 'Si liquidas hoy pagas (contado)' : 'Si liquidas hoy pagas', valor: dinero(P.montoLiquidacion), nota: P.aplica ? `Ahorras ${dinero(P.saldoActual - P.montoLiquidacion)} contra tu saldo · precio vigente hasta el ${M.fechaVisible(P.escalera.vigenteHasta)}` : 'Saldo vigente de tu cuenta', tono: P.aplica ? 'verde' : 'azul' }));
   else if (P.tipo === 'contado_1_mes') partes.push(U.hero({ etiqueta: 'Si liquidas hoy pagas (contado)', valor: dinero(P.montoLiquidacion), nota: P.aplica ? `Ahorras ${dinero(P.saldoActual - P.montoLiquidacion)} contra tu saldo` : '', tono: 'verde' }));
   else partes.push(U.hero({ etiqueta: 'Si liquidas hoy pagas', valor: dinero(P.montoLiquidacion), nota: P.tipo === 'fuera_de_plazo' ? 'Saldo vigente' : 'Saldo vigente de tu cuenta', tono: 'azul' }));
   if (r.moratorios > 0.01) partes.push(U.nota({ texto: `Además tienes moratorios por ${dinero(r.moratorios)}.`, tono: 'ambar' }));
