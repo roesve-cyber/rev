@@ -135,6 +135,26 @@
         return mapa;
     }
 
+    // Para quien llama a analizarCuenta() folio por folio (cxc.js, reportes) sin tener a la mano el mapa de clientes:
+    // se arma solo con las cuentas del sistema (StorageService) y se reutiliza unos segundos, porque esos llamados
+    // suelen venir en ciclos sobre toda la cartera. Se invalida al aplicar un abono (invalidarCacheClientes).
+    let _cacheClientes = { ref: null, len: -1, t: 0, mapa: null };
+    function invalidarCacheClientes() { _cacheClientes = { ref: null, len: -1, t: 0, mapa: null }; }
+    function ultimoPagoClienteDe(cuenta, cuentas) {
+        let lista = cuentas;
+        if (!Array.isArray(lista)) {
+            if (typeof StorageService === 'undefined' || typeof StorageService.get !== 'function') return null;
+            try { lista = StorageService.get('cuentasPorCobrar', []); } catch (e) { return null; }
+        }
+        if (!Array.isArray(lista) || !lista.length) return null;
+        const ahora = Date.now();
+        const c = _cacheClientes;
+        if (!(c.ref === lista && c.len === lista.length && ahora - c.t < 2000 && c.mapa)) {
+            _cacheClientes = { ref: lista, len: lista.length, t: ahora, mapa: ultimoPagoPorCliente(lista) };
+        }
+        return _cacheClientes.mapa.get(claveCliente(cuenta)) || null;
+    }
+
     function promesaInfo(cuenta, hoy) {
         const fecha = parseFecha(cuenta?.promesaPago?.fecha || cuenta?.fechaPromesaPago || cuenta?.promesaFecha);
         if (!fecha) return { tiene: false, vigente: false, vencida: false, fecha: null };
@@ -182,7 +202,8 @@
         // Pago más reciente del CLIENTE en otro folio: si es más nuevo que la referencia
         // propia de la cuenta, manda él (el cliente está pagando, la cuenta se considera sana
         // según los mismos umbrales de días).
-        const pagoCliente = opciones.ultimoPagoCliente || null;
+        const pagoCliente = opciones.ultimoPagoCliente !== undefined ? (opciones.ultimoPagoCliente || null)
+            : (opciones.sinReglaCliente ? null : ultimoPagoClienteDe(cuenta));
         const pagoOtraCuenta = (pagoCliente && pagoCliente.fecha
             && String(pagoCliente.folio || '') !== folioPropio
             && inicioDia(pagoCliente.fecha) > inicioDia(fechaReferenciaCuenta))
@@ -297,6 +318,8 @@
         inicioDia,
         claveCliente,
         ultimoPagoPorCliente,
+        ultimoPagoClienteDe,
+        invalidarCacheClientes,
         analizarCuenta,
         analizarCartera,
         formatearFecha
