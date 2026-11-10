@@ -179,7 +179,7 @@ const _rc = {
             nivelRiesgo = riesgoUltimoPago.nivelRiesgo;
             colorRiesgo = riesgoUltimoPago.color;
             emojiRiesgo = riesgoUltimoPago.key === 'alerta' ? '!' : riesgoUltimoPago.key === 'alto' ? '!!' : riesgoUltimoPago.key === 'riesgo' ? '!' : 'OK';
-            ultimaFechaAbono = riesgoUltimoPago.fechaUltimoPago;
+            ultimaFechaAbono = ('fechaUltimoPagoCuenta' in riesgoUltimoPago) ? riesgoUltimoPago.fechaUltimoPagoCuenta : riesgoUltimoPago.fechaUltimoPago;
             diasSinPagar = riesgoUltimoPago.diasSinPago;
         }
 

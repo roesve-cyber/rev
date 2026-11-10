@@ -164,7 +164,10 @@
         const cubierto = totalPlan > 0 ? Math.max(0, totalPlan - saldoNominal) : abonos;
         const ajustes = r2(cubierto - abonos);
         const inicio = fechaInicioCupones();
-        const posterior = !!inicio && fVenta >= inicio;
+        // Mismo criterio que el cobro real (cxc.js): la venta es de la era previa a cupones si su folio NO es consecutivo
+        // (VTA-#####) ni de emergencia (-TMP-). La fecha de inicio de cupones solo se usa si cxc.js no está disponible.
+        const fEra = g('_cxcVentaEraPreCupones');
+        const posterior = fEra ? !fEra(folio) : (!!inicio && fVenta >= inicio);
         const esc_ = escalera(cuenta, capitalContado, periodicidad);
         const pagaresPend = leer('pagaresSistema', []).filter((p) => p.folio === folio && (p.estado === 'Pendiente' || p.estado === 'Parcial'));
         const montoVencido = Number(estado && estado.montoVencido || 0);
@@ -177,7 +180,10 @@
     function plazosPosibles(a) {
         if (a.posterior) return a.mesesPlan > 0 ? [a.mesesPlan] : [];
         if (!a.enPlazo) return a.mesesPlan > 0 ? [a.mesesPlan] : [];
-        return a.escalera.planes.filter((p) => p.meses >= a.mesPostContado && p.meses <= a.mesesPlan).map((p) => p.meses);
+        // Primer mes (hasta el día 30) de una venta anterior a cupones y a más de 1 mes: rige el precio de CONTADO
+        // (valor 0), igual que el cobro real. Los escalones siguen disponibles como comparativo.
+        const contado = (a.dias <= 30 && a.mesesPlan > 1) ? [0] : [];
+        return contado.concat(a.escalera.planes.filter((p) => p.meses >= a.mesPostContado && p.meses <= a.mesesPlan).map((p) => p.meses));
     }
 
     // Cotización para un plazo elegido
@@ -198,6 +204,14 @@
                     ? 'Con la regla de cupones, liquidar antes no baja el monto: paga el saldo completo y recibe un cupón.'
                     : 'Con la regla de cupones, liquidar antes no baja el monto: paga el saldo completo. Este plan no genera cupón.';
             }
+            return out;
+        }
+        // Primer mes: precio de contado real (capital de contado − lo ya pagado), nunca más que el saldo vigente
+        if (Number(meses) === 0) {
+            out.totalPlazo = a.capitalContado;
+            out.restante = Math.min(a.saldoNominal, Math.max(0, a.capitalContado - a.abonos));
+            out.totalFinal = a.enganche + a.capitalContado;
+            out.mensaje = 'Primer mes: se cobra el precio de contado real; sin cupón.';
             return out;
         }
         // Venta anterior a cupones: escalera congelada de la cuenta
@@ -228,6 +242,7 @@
     //  · Plazo ya vencido: no hay fecha límite; la cotización es solo de hoy.
     function fechaLimiteLiquidar(a, meses) {
         if (!a.enPlazo) return null;
+        if (Number(meses) === 0) return { fecha: new Date(a.fVenta.getTime() + 30 * 86400000), tipo: 'escalon' };
         if (a.posterior || Number(meses) >= a.mesesPlan) return { fecha: a.fVence, tipo: 'vence' };
         const ultimoDia = Math.ceil(30 + Number(meses) * DIAS_MES) - 1;
         return { fecha: new Date(a.fVenta.getTime() + ultimoDia * 86400000), tipo: 'escalon' };
@@ -403,16 +418,16 @@
         const a = analizar(S.folio);
         if (!a) { cont.innerHTML = html; return; }
         const plazos = plazosPosibles(a);
-        if (!plazos.includes(Number(S.meses))) S.meses = plazos.length ? plazos[0] : null;
-        const q = S.meses ? cotizar(a, Number(S.meses)) : null;
+        if (S.meses === null || S.meses === undefined || !plazos.includes(Number(S.meses))) S.meses = plazos.length ? plazos[0] : null;
+        const q = (S.meses !== null && S.meses !== undefined) ? cotizar(a, Number(S.meses)) : null;
 
         html += resumenCuenta(a);
         if (S.aviso) html += `<div style="margin-top:8px;font-size:13px;color:#166534;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;">${esc(S.aviso)}</div>`;
         const tab = (m, txt) => `<button onclick="_cqlModo('${m}')" style="flex:1;padding:10px;border:none;border-radius:8px;font-weight:bold;cursor:pointer;background:${S.modo === m ? '#0f766e' : '#e2e8f0'};color:${S.modo === m ? 'white' : '#475569'};">${txt}</button>`;
         html += `<div style="display:flex;gap:8px;margin-top:12px;">${tab('liquidar', '⏩ Liquidar antes')}${tab('ampliar', '⏪ Ampliar plazo')}</div>`;
         if (S.modo === 'ampliar') { cont.innerHTML = html + panelAmpliar(a); return; }
-        if (a.posterior) html += `<div style="margin-top:8px;font-size:12px;color:#7e22ce;background:#faf5ff;border-radius:8px;padding:8px 10px;">🎟️ Venta posterior al inicio de cupones (${esc(fmtFecha(a.inicio))}): aplica la regla vigente con cupón.</div>`;
-        else html += `<div style="margin-top:8px;font-size:12px;color:#475569;background:#f1f5f9;border-radius:8px;padding:8px 10px;">📜 Venta anterior a cupones (${esc(fmtFecha(a.inicio))}): se cotiza con la escalera de tarifas que tenía esta venta${a.escalera.origen === 'cuenta' ? ' (guardada en la cuenta)' : ''}. No genera cupón.</div>`;
+        if (a.posterior) html += `<div style="margin-top:8px;font-size:12px;color:#7e22ce;background:#faf5ff;border-radius:8px;padding:8px 10px;">🎟️ Venta con folio consecutivo (esquema de cupones): aplica la regla vigente con cupón.</div>`;
+        else html += `<div style="margin-top:8px;font-size:12px;color:#475569;background:#f1f5f9;border-radius:8px;padding:8px 10px;">📜 Venta anterior a cupones: se cotiza con la escalera de tarifas que tenía esta venta${a.escalera.origen === 'cuenta' ? ' (guardada en la cuenta)' : ''}. No genera cupón.</div>`;
         (q ? q.avisos : a.escalera.avisos).forEach((m) => { html += `<div style="margin-top:8px;font-size:12px;color:#b45309;background:#fffbeb;border-radius:8px;padding:8px 10px;">⚠️ ${esc(m)}</div>`; });
 
         if (a.saldoNominal <= 0.01) { cont.innerHTML = html + '<p style="margin-top:10px;font-weight:bold;color:#15803d;">La cuenta ya está liquidada.</p>'; return; }
@@ -421,9 +436,10 @@
         html += `<label style="display:block;margin-top:12px;font-size:12px;color:#475569;">${a.posterior || !a.enPlazo ? 'Plazo' : 'Liquidar a'}</label>
             <select onchange="_cqlElegirPlazo(this.value)" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;">` +
             plazos.map((m) => {
+                if (m === 0) return `<option value="0" ${Number(S.meses) === 0 && S.meses !== null ? 'selected' : ''}>Precio de contado (primer mes) · ${esc(dinero(a.capitalContado))}</option>`;
                 const p = a.escalera.planes.find((x) => x.meses === m);
                 const total = a.posterior ? a.totalPlan : (p ? p.total : null);
-                return `<option value="${m}" ${Number(S.meses) === m ? 'selected' : ''}>${m} mes${m === 1 ? '' : 'es'}${m === a.mesesPlan ? ' (pactado)' : ''}${total ? ' · total ' + esc(dinero(total)) : ''}</option>`;
+                return `<option value="${m}" ${Number(S.meses) === m && S.meses !== null ? 'selected' : ''}>${m} mes${m === 1 ? '' : 'es'}${m === a.mesesPlan ? ' (pactado)' : ''}${total ? ' · total ' + esc(dinero(total)) : ''}</option>`;
             }).join('') + '</select>';
         if (q) html += resultado(a, q);
         cont.innerHTML = html;
@@ -444,7 +460,7 @@
         if (q.liquidada || q.sinPlan) return `<p style="margin-top:12px;color:#b45309;">${esc(q.mensaje)}</p>`;
         const fila = (k, v, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed #e2e8f0;"><span style="color:#475569;">${k}</span><span style="${extra || 'font-weight:bold;'}">${v}</span></div>`;
         let h = `<div style="margin-top:12px;border:2px solid #0f766e;border-radius:12px;padding:14px;">
-            ${fila('Total del plan a ' + q.meses + ' mes' + (q.meses === 1 ? '' : 'es'), esc(dinero(q.totalPlazo)))}
+            ${fila(q.meses === 0 ? 'Precio de contado' : 'Total del plan a ' + q.meses + ' mes' + (q.meses === 1 ? '' : 'es'), esc(dinero(q.totalPlazo)))}
             ${fila('Enganche recibido', esc(dinero(a.enganche)), 'font-weight:normal;')}
             ${fila('Abonos recibidos', esc(dinero(a.abonos)), 'font-weight:normal;')}
             ${Math.abs(a.ajustes) > 0.01 ? fila('Otros ajustes aplicados (condonaciones, etc.)', esc(dinero(a.ajustes)), 'font-weight:normal;') : ''}
@@ -484,7 +500,7 @@
         });
     };
     window._cqlElegirCuenta = function (folio) { S.folio = folio || null; S.meses = null; render(); };
-    window._cqlElegirPlazo = function (m) { S.meses = Number(m) || null; render(); };
+    window._cqlElegirPlazo = function (m) { S.meses = (m === '' || m === null || m === undefined || isNaN(Number(m))) ? null : Number(m); render(); };
     window._cqlModo = function (m) { S.modo = m === 'ampliar' ? 'ampliar' : 'liquidar'; S.aviso = ''; render(); };
     window._cqlElegirPlazoAmp = function (m) { S.mesesAmp = Number(m) || null; render(); };
     window._cqlConfirmarAmpliacion = function () {
@@ -544,8 +560,8 @@
             return Object.assign(base, { amp, plan, r, fechas: fechasAmpliacion(a, r, hoy), avisos: amp.avisos });
         }
         const plazos = plazosPosibles(a);
-        const meses = plazos.includes(Number(S.meses)) ? Number(S.meses) : plazos[0];
-        if (!meses) return null;
+        const meses = (S.meses !== null && S.meses !== undefined && plazos.includes(Number(S.meses))) ? Number(S.meses) : plazos[0];
+        if (meses === null || meses === undefined) return null;
         const q = cotizar(a, meses);
         if (!q || q.restante === undefined) return null;
         return Object.assign(base, { q, limite: fechaLimiteLiquidar(a, q.meses), avisos: q.avisos });
@@ -607,8 +623,8 @@
 
         const { q, limite } = ctx;
         const opcion = [
-            ['Liquidando a', `${q.meses} mes(es)${q.meses === a.mesesPlan ? ' (plazo pactado)' : ''}`],
-            [`Total del plan a ${q.meses} mes(es)`, dinero(q.totalPlazo)],
+            [q.meses === 0 ? 'Liquidando a' : 'Liquidando a', q.meses === 0 ? 'precio de contado (primer mes)' : `${q.meses} mes(es)${q.meses === a.mesesPlan ? ' (plazo pactado)' : ''}`],
+            [q.meses === 0 ? 'Precio de contado' : `Total del plan a ${q.meses} mes(es)`, dinero(q.totalPlazo)],
             ['Total final de la compra (enganche + plan)', dinero(q.totalFinal)]
         ];
         if (!a.posterior && a.saldoNominal - q.restante > 0.01) opcion.push(['Ahorro contra su saldo vigente', dinero(a.saldoNominal - q.restante), 'fuerte']);
@@ -622,7 +638,7 @@
             : ['Vigencia de esta cotización', 'Solo hoy · ' + fmtFecha(ctx.hoy)]);
         return {
             titulo: 'Cotización de liquidación', subtitulo: 'Liquidación anticipada', color: '#0f766e', fondo: '#ecfdf5',
-            tituloOpcion: `Si liquida a ${q.meses} mes(es)`,
+            tituloOpcion: q.meses === 0 ? 'Si liquida en su primer mes (precio de contado)' : `Si liquida a ${q.meses} mes(es)`,
             hero: { etiqueta: 'Importe restante a cubrir', valor: dinero(q.restante) },
             compra, cuenta, opcion, colOpcion: 'Liquidar',
             comparativo: [

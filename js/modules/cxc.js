@@ -2888,6 +2888,8 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
                 resultado: { yaAplicado: false, cuentaAct, reactivadaDeIncobrable: !!infoIncobrable, infoIncobrable }
             };
         });
+        // El pago más reciente del cliente cambió: el semáforo de sus demás folios debe recalcularse ya, no esperar la caché.
+        try { window.CobranzaRiskService?.invalidarCacheClientes?.(); } catch (_) { /* no bloquea el abono */ }
     } catch (e) {
         // 🛡️ El dinero YA entró a caja (_ingresarCuenta arriba tuvo éxito),
         // pero la actualización de la cuenta por cobrar / pagarés falló al
@@ -5515,6 +5517,8 @@ window.aplicarMoratorioManual = aplicarMoratorioManual;
 window.exentarMoratorio = exentarMoratorio;
 window.actualizarAvisoPoliticaAbono = actualizarAvisoPoliticaAbono;
 window._cxcEvaluarPoliticaPagoAnticipado = _cxcEvaluarPoliticaPagoAnticipado;
+window._cxcFolioEsConsecutivoNuevo = _cxcFolioEsConsecutivoNuevo;
+window._cxcVentaEraPreCupones = _cxcVentaEraPreCupones;
 window.procesarAbonoAvanzado = procesarAbonoAvanzado;
 window.generarTicketAbonoTermico = generarTicketAbonoTermico;
 window.reimprimirTicketAbono = reimprimirTicketAbono;
