@@ -77,6 +77,7 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 .chip { flex: 0 0 auto; padding: 8px 13px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--line); font-size: 13px; font-weight: 800; color: #334155; white-space: nowrap; }
 .chip.activo { background: var(--brand); border-color: var(--brand); color: #fff; }
 .lista { padding: 4px 14px 12px; display: grid; gap: 10px; }
+.sec-inc { margin: 16px 4px 8px; font-size: 12.5px; font-weight: 800; color: var(--muted); }
 .vacio { text-align: center; color: var(--muted); padding: 34px 10px; font-size: 14px; }
 
 .cta { background: var(--surface); border-radius: var(--r); padding: 13px 14px; box-shadow: 0 2px 10px rgba(15,23,42,.06); border-left: 6px solid #cbd5e1; cursor: pointer; }
@@ -168,6 +169,12 @@ label.campo-label { display: block; font-size: 11.5px; font-weight: 800; letter-
 .seg button { padding: 12px; border-radius: 12px; border: 2px solid var(--line); font-weight: 800; }
 .seg button.activo { border-color: var(--brand-2); background: #e8eefc; color: var(--brand); }
 .error-caja { background: #fef2f2; color: #991b1b; border-radius: 12px; padding: 11px 12px; font-size: 13.5px; margin-top: 12px; line-height: 1.4; }
+.cond { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.cond > div { background: #f1f5f9; border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.cond > .w2 { grid-column: 1 / -1; }
+.cond small { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: var(--muted); }
+.cond b { display: block; margin-top: 2px; font-size: 14px; line-height: 1.25; overflow-wrap: anywhere; }
+.cond em { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); margin-top: 1px; }
 .aviso-ok { background: #f0fdf4; color: #166534; border-radius: 12px; padding: 11px 12px; font-size: 13.5px; margin-top: 12px; line-height: 1.4; }
 .cta .guia { margin-top: 8px; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
 .cta .guia b { display: block; color: var(--ink); font-size: 13.5px; font-weight: 800; }
@@ -632,6 +639,14 @@ function recalcular() {
     return b.saldo - a.saldo;
   });
   S.porFolio = {}; S.resumenes.forEach(r => { S.porFolio[r.folio] = r; });
+  // Cuentas INCOBRABLES: igual que en el sistema, no salen en la lista, KPIs ni semáforo, pero se encuentran al buscar
+  // por cliente/folio y SÍ pueden recibir abono (al autorizarse en la bóveda la cuenta vuelve a cobranza normal).
+  S.incobrables = S.cuentas.filter(c => c && !M.cuentaCancelada(c) && !M.cuentaSaldada(c) && M.esIncobrable(c)).map(c => {
+    const r = M.resumenCuenta(c, porFolio[c.folio] || [], { cfg: S.cfg, hoy, riesgo: window.CobranzaRiskService, ultimoPagoCliente: ultimoPagoDe(c) });
+    r.cuenta = c; r.contacto = datosContacto(c); r.cliente = r.contacto.nombre; r.incobrable = true;
+    return r;
+  }).filter(r => r.saldo > 0.01);
+  S.incobrables.forEach(r => { S.porFolio[r.folio] = r; });
   S.grupos = agruparPorCliente(S.resumenes);
   S.mapaGrupos = {}; S.grupos.forEach(g => { S.mapaGrupos[g.clave] = g; });
   renderTodo();
@@ -825,7 +840,7 @@ function chipDefs() {
     { k: 'todas', t: 'Todos', n: G.length, f: () => true },
     { k: 'criticos', t: '🚨 Críticos', n: G.filter(g => g.estadoGeneral === 'Crítico').length, f: g => g.estadoGeneral === 'Crítico' },
     { k: 'atrasados', t: '🟠 Atrasados', n: G.filter(g => g.estadoGeneral === 'Atrasado').length, f: g => g.estadoGeneral === 'Atrasado' },
-    { k: 'semana', t: '📅 Vencen en 7 días', n: G.filter(enSemana).length, f: enSemana },
+    { k: 'semana', t: '📅 Abono esta semana', n: G.filter(enSemana).length, f: enSemana },
     { k: 'promesas', t: '📝 Promesas', n: G.filter(g => g.promesa).length, f: g => g.promesa },
     { k: 'plazo', t: '⏳ Plazo por vencer', n: G.filter(porVencer).length, f: porVencer },
     { k: 'multi', t: '👥 Varias cuentas', n: G.filter(g => g.n > 1).length, f: g => g.n > 1 }
@@ -849,11 +864,11 @@ function renderChips() {
   $('chips').innerHTML = chipDefs().map(c => `<button class="chip ${S.filtro === c.k ? 'activo' : ''}" onclick="S.filtro='${c.k}'; renderChips(); renderLista()">${c.t} · ${c.n}</button>`).join('');
 }
 const COLOR_ESTADO = { 'Al corriente': ['p-verde', '#16a34a'], 'Atrasado': ['p-amarillo', '#d97706'], 'Crítico': ['p-rojo', '#dc2626'], 'Promesa': ['p-azul', '#2563eb'] };
-// El importe vencido solo se marca en rojo si el cliente de verdad está atrasado/crítico; si está al corriente
-// (pagó recientemente) se muestra como dato informativo, sin alarma.
+// El importe de atraso solo se marca en rojo si el cliente de verdad está atrasado/crítico (por sus abonos); si está al
+// corriente (pagó recientemente) se muestra como dato informativo, sin alarma. Solo se muestra el IMPORTE, no días ni fechas.
 function pillVencido(monto, dias, estado) {
-  return esUrgente(estado) ? `<span class="pill p-rojo">Para regularizar ${dinero(monto)} · ${dias} d de atraso</span>`
-    : `<span class="pill p-gris">Vencido ${dinero(monto)} · ${dias} d</span>`;
+  return esUrgente(estado) ? `<span class="pill p-rojo">Para regularizar ${dinero(monto)}</span>`
+    : `<span class="pill p-gris">Atraso ${dinero(monto)}</span>`;
 }
 function pillPlazoDe(plazo) {
   if (!plazo) return '';
@@ -866,7 +881,7 @@ function pillPlazo(r) { return pillPlazoDe(r.plazo); }
 function tarjetaCuenta(r, opc) {
   const [cls, borde] = COLOR_ESTADO[r.estado.estadoGeneral] || ['p-gris', '#94a3b8'];
   const prox = r.regularizar ? pillVencido(r.regularizar.monto, r.regularizar.dias, r.estado.estadoGeneral)
-    : (r.proximo ? `<span class="pill p-gris">Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</span>` : '');
+    : (r.proximo ? `<span class="pill p-gris">Próx. abono ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</span>` : '');
   const titulo = opc && opc.sinNombre ? r.producto : r.cliente;
   const sub = opc && opc.sinNombre ? r.folio : `${r.folio} · ${r.producto}`;
   return `<div class="cta" style="border-left-color:${borde}" onclick="abrirFicha('${esc(r.folio).replace(/'/g, '')}')">
@@ -875,6 +890,15 @@ function tarjetaCuenta(r, opc) {
     <div class="l2"><span class="pill ${cls}">${esc(r.estado.estadoGeneral)}</span>
       ${prox}${pillPlazo(r)}</div></div>`;
 }
+// Tarjeta de cuenta INCOBRABLE (solo aparece al buscar)
+function tarjetaIncobrable(r) {
+  const dias = r.riesgo && r.riesgo.diasSinPago != null ? `<span class="pill p-gris">Sin pagar ${r.riesgo.diasSinPago} d</span>` : '';
+  return `<div class="cta" style="border-left-color:#64748b" onclick="abrirFicha('${esc(r.folio).replace(/'/g, '')}')">
+    <div class="l1"><div><div class="nom">${esc(r.cliente)}</div><div class="fol">${esc(r.folio)} · ${esc(r.producto)}</div></div>
+      <div class="saldo">${dinero(r.saldo)}</div></div>
+    <div class="guia"><b>⛔ Incobrable · puedes registrar su abono</b>Al autorizarse en la bóveda vuelve a cobranza normal</div>
+    <div class="l2"><span class="pill p-gris">⛔ Incobrable</span>${dias}</div></div>`;
+}
 // Tarjeta de CLIENTE (la unidad de la lista): suma todas sus cuentas
 function tarjetaCliente(g) {
   const [cls, borde] = COLOR_ESTADO[g.estadoGeneral] || ['p-gris', '#94a3b8'];
@@ -882,7 +906,7 @@ function tarjetaCliente(g) {
   const sub = unica ? `${unica.folio} · ${unica.producto}`
     : `${g.n} cuentas · ${g.resumenes.slice(0, 2).map(r => r.folio).join(', ')}${g.n > 2 ? ' +' + (g.n - 2) : ''}`;
   const prox = g.vencido > 0.01 ? pillVencido(g.vencido, g.diasAtraso, g.estadoGeneral)
-    : (g.proximo ? `<span class="pill p-gris">Próx. ${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</span>` : '');
+    : (g.proximo ? `<span class="pill p-gris">Próx. abono ${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</span>` : '');
   const plazo = g.plazoCercano ? pillPlazoDe(g.plazoCercano.plazo) : (g.algunaPasoPlazo ? '<span class="pill p-gris">Pasó su plazo</span>' : '');
   const gu = guiaCliente(g);
   return `<div class="cta" style="border-left-color:${borde}" data-k="${esc(g.clave)}" onclick="abrirCliente(this.dataset.k)">
@@ -899,7 +923,12 @@ function renderLista() {
     sinAcentos(g.nombre).includes(q) ||
     g.resumenes.some(r => sinAcentos(r.folio).includes(q) || sinAcentos(r.producto).includes(q)) ||
     (qDig.length >= 3 && g.resumenes.some(r => telefono10(r.contacto.telefono).includes(qDig))));
-  $('lista').innerHTML = lista.length ? lista.map(tarjetaCliente).join('') : '<div class="vacio">No hay clientes con este filtro.</div>';
+  // Las incobrables solo se muestran al buscar (por cliente, folio, producto o teléfono), sin importar el filtro activo
+  const inc = !q ? [] : (S.incobrables || []).filter(r => sinAcentos(r.cliente).includes(q) || sinAcentos(r.folio).includes(q) || sinAcentos(r.producto).includes(q) ||
+    (qDig.length >= 3 && telefono10(r.contacto.telefono).includes(qDig)));
+  $('lista').innerHTML = (lista.length || inc.length)
+    ? lista.map(tarjetaCliente).join('') + (inc.length ? `<div class="sec-inc">⛔ Cuentas incobrables · ${inc.length}</div>${inc.map(tarjetaIncobrable).join('')}` : '')
+    : '<div class="vacio">No hay clientes con este filtro.</div>';
 }
 
 // ---------------------------------------------------------------- ficha del CLIENTE (varias cuentas)
@@ -920,12 +949,12 @@ function renderCliente() {
   $('clienteVista').innerHTML = `
     <div class="ficha-barra"><button onclick="cerrarCliente()" aria-label="Volver">‹</button><div><b>${esc(g.nombre)}</b><small>${g.n} cuentas con saldo</small></div></div>
     <div class="bloque">
-      <div class="hero"><small>Saldo total del cliente</small><b style="color:${g.vencido > 0.01 ? 'var(--danger)' : 'var(--ink)'}">${dinero(g.saldo)}</b>
+      <div class="hero"><small>Saldo total del cliente</small><b style="color:${esUrgente(g.estadoGeneral) ? 'var(--danger)' : 'var(--ink)'}">${dinero(g.saldo)}</b>
         <div style="margin-top:6px"><span class="pill ${estCls}">${esc(g.estadoGeneral)}</span></div></div>
       <div class="${esUrgente(g.estadoGeneral) ? 'aviso-caja' : 'aviso-ok'}" style="margin-top:0"><b>${esc(gu.accion)}</b><br>${esc(gu.motivo)}</div>
       ${g.vencido > 0.01
-        ? `<div class="fila"><span>${esUrgente(g.estadoGeneral) ? 'Para regularizar' : 'Pagarés vencidos'}<br><small style="color:var(--muted)">todas sus cuentas</small></span><b style="color:${esUrgente(g.estadoGeneral) ? 'var(--danger)' : 'var(--ink)'}">${dinero(g.vencido)}<br><small style="font-weight:600">vencido desde ${M.fechaVisible(g.desdeVencido)} · ${g.diasAtraso} d de atraso</small></b></div>`
-        : (g.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</b></div>` : '')}
+        ? `<div class="fila"><span>${esUrgente(g.estadoGeneral) ? 'Para regularizar' : 'Importe atrasado'}<br><small style="color:var(--muted)">todas sus cuentas</small></span><b style="color:${esUrgente(g.estadoGeneral) ? 'var(--danger)' : 'var(--ink)'}">${dinero(g.vencido)}</b></div>`
+        : (g.proximo ? `<div class="fila"><span>Próximo abono</span><b>${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}</b></div>` : '')}
       ${g.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(g.moratorios)}</b></div>` : ''}
       <div class="contacto" style="margin-top:10px">
         ${tel ? `<a href="tel:+52${tel}">📞 Llamar</a><a class="wa" href="https://wa.me/52${tel}" target="_blank" rel="noopener">💬 WhatsApp</a>` : '<a style="opacity:.45;pointer-events:none">📞 Sin teléfono</a><a style="opacity:.45;pointer-events:none">💬 —</a>'}
@@ -947,7 +976,7 @@ function renderRutas() {
     const saldo = rs.reduce((s, r) => s + r.saldo, 0), venc = rs.reduce((s, r) => s + r.vencido, 0);
     return `<div class="bloque" style="margin:0"><h3>${esc(ru.nombre)} <span class="mini-btn" onclick="S.rutaAbierta=(S.rutaAbierta==='${ru.id}'?null:'${ru.id}'); renderRutas()">${S.rutaAbierta == ru.id ? 'Ocultar' : 'Ver'}</span></h3>
       <div class="fila"><span>Clientes con saldo</span><b>${gs.length}${rs.length !== gs.length ? ` (${rs.length} cuentas)` : ''}</b></div>
-      <div class="fila"><span>Saldo / Vencido</span><b>${dinero(saldo)} / ${dinero(venc)}</b></div>
+      <div class="fila"><span>Saldo / Atraso</span><b>${dinero(saldo)} / ${dinero(venc)}</b></div>
       ${S.rutaAbierta == ru.id ? `<div class="lista" style="padding:10px 0 0">${gs.length ? gs.map(tarjetaCliente).join('') : '<div class="vacio">Ningún cliente de esta ruta tiene saldo.</div>'}</div>` : ''}</div>`;
   }).join('');
 }
@@ -1096,12 +1125,22 @@ function renderFicha() {
   $('ficha').innerHTML = `
     <div class="ficha-barra"><button onclick="cerrarFicha()" aria-label="Volver">‹</button><div><b>${esc(r.cliente)}</b><small>${esc(c.folio)} · ${esc(r.producto)}</small></div></div>
     <div class="bloque">
-      <div class="hero"><small>Saldo por cobrar</small><b style="color:${r.vencido > 0.01 ? 'var(--danger)' : 'var(--ink)'}">${dinero(r.saldo)}</b>
-        <div style="margin-top:6px"><span class="pill ${estCls}">${esc(r.estado.estadoGeneral)}</span>${promesa ? ` <span class="pill p-azul">Promesa ${M.fechaVisible(promesa)}</span>` : ''}</div></div>
+      <div class="hero"><small>Saldo por cobrar</small><b style="color:${esUrgente(r.estado.estadoGeneral) ? 'var(--danger)' : 'var(--ink)'}">${dinero(r.saldo)}</b>
+        <div style="margin-top:6px">${r.incobrable ? '<span class="pill p-gris">⛔ Incobrable</span>' : `<span class="pill ${estCls}">${esc(r.estado.estadoGeneral)}</span>`}${promesa ? ` <span class="pill p-azul">Promesa ${M.fechaVisible(promesa)}</span>` : ''}</div></div>
+      <div class="cond">
+        <div class="w2"><small>Producto</small><b>${esc(r.producto)}</b></div>
+        <div><small>Fecha de venta</small><b>${M.fechaVisible(M.fechaVentaDate(c))}</b></div>
+        <div><small>Plazo</small><b>${plan.meses ? mesesTxt(plan.meses) : '-'}${plan.pagos ? ' · ' + esc(plan.pagos) + ' pagos' : ''}</b>${r.plazo && r.plazo.fechaLimite ? `<em>${r.plazo.aunEnPlazo ? 'Vence' : 'Venció'} ${M.fechaVisible(r.plazo.fechaLimite)}</em>` : ''}</div>
+        <div><small>Enganche</small><b>${dinero(c.engancheRecibido != null ? c.engancheRecibido : (c.enganche || 0))}</b></div>
+        <div><small>Total del plan</small><b>${dinero(plan.total || plan.totalTeorico || c.saldoOriginal)}</b><em>sin enganche</em></div>
+        <div><small>Total abonado</small><b>${dinero(r.estado.totalAbonado)}</b></div>
+        <div><small>Saldo</small><b>${dinero(r.saldo)}</b></div>
+      </div>
+      ${r.incobrable ? '<div class="aviso-caja" style="margin-top:0">⛔ <b>Cuenta incobrable.</b> Sí puedes registrar su abono: al autorizarse en la bóveda la cuenta sale de incobrable y vuelve a cobranza normal.</div>' : ''}
       ${r.riesgo && r.riesgo.pagoClienteOtraCuenta && !esUrgente(r.estado.estadoGeneral) ? `<div class="aviso-ok" style="margin-top:0">✅ Al corriente: el cliente pagó ${dinero(r.riesgo.pagoClienteOtraCuenta.monto)} el ${M.fechaVisible(r.riesgo.pagoClienteOtraCuenta.fecha)} en ${esc(r.riesgo.pagoClienteOtraCuenta.folio)}.</div>` : ''}
       ${r.regularizar
-        ? `<div class="fila"><span>${esUrgente(r.estado.estadoGeneral) ? 'Para regularizar' : 'Pagarés vencidos'}</span><b style="color:${esUrgente(r.estado.estadoGeneral) ? 'var(--danger)' : 'var(--ink)'}">${dinero(r.regularizar.monto)}<br><small style="font-weight:600">vencido desde ${M.fechaVisible(r.regularizar.desde)} · ${r.regularizar.dias} d de atraso</small></b></div>`
-        : (r.proximo ? `<div class="fila"><span>Próximo pago</span><b>${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</b></div>` : '')}
+        ? `<div class="fila"><span>${esUrgente(r.estado.estadoGeneral) ? 'Para regularizar' : 'Importe atrasado'}</span><b style="color:${esUrgente(r.estado.estadoGeneral) ? 'var(--danger)' : 'var(--ink)'}">${dinero(r.regularizar.monto)}</b></div>`
+        : (r.proximo ? `<div class="fila"><span>Próximo abono</span><b>${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}</b></div>` : '')}
       ${r.moratorios > 0.01 ? `<div class="fila"><span>Moratorios</span><b>${dinero(r.moratorios)}</b></div>` : ''}
       <div class="fila"><span>Abono ${esc(c.periodicidad || 'semanal')}</span><b>${dinero(plan.abono)}</b></div>
       ${avisoColaFicha(c.folio)}
@@ -1116,12 +1155,7 @@ function renderFicha() {
     <div class="bloque"><h3>🔭 Visor de plazo y pago adelantado</h3>${bloqueVisor(r)}
       <button class="btn-sec" style="width:100%;margin-top:10px" onclick="compartirImagen('visor')">📤 Enviar opciones por WhatsApp (imagen)</button></div>
 
-    <div class="bloque"><h3>Cuenta</h3>
-      <div class="fila"><span>Venta</span><b>${M.fechaVisible(M.fechaVentaDate(c))}</b></div>
-      <div class="fila"><span>Plan</span><b>${plan.meses ? mesesTxt(plan.meses) : '-'} · ${esc(plan.pagos || '-')} pagos</b></div>
-      <div class="fila"><span>Total del plan</span><b>${dinero(plan.total || plan.totalTeorico || c.saldoOriginal)}</b></div>
-      <div class="fila"><span>Enganche</span><b>${dinero(c.engancheRecibido || 0)}</b></div>
-      <div class="fila"><span>Total abonado</span><b>${dinero(r.estado.totalAbonado)}</b></div>
+    <div class="bloque"><h3>Más datos</h3>
       <div class="fila"><span>Vendedor</span><b>${esc(c.vendedorNombre || '-')}</b></div>
       ${c.observacionCartera ? `<div class="fila"><span>Observación</span><b>${esc(c.observacionCartera)}</b></div>` : ''}
     </div>
@@ -1347,7 +1381,6 @@ function htmlEstadoCuenta(r) {
       ['Plan', `${plan.meses ? mesesTxt(plan.meses) : '-'} · ${plan.pagos || '-'} pagos ${c.periodicidad || 'semanal'}es`],
       ['Abono', { texto: dinero(plan.abono), fuerte: true }], ['Total abonado', dinero(r.estado.totalAbonado)],
       r.regularizar ? ['Para regularizar', { texto: dinero(r.regularizar.monto), color: '#dc2626', fuerte: true }] : null,
-      r.regularizar ? ['Vencido desde', `${M.fechaVisible(r.regularizar.desde)} · ${r.regularizar.dias} d`] : null,
       r.moratorios > 0.01 ? ['Moratorios', dinero(r.moratorios)] : null
     ]),
     ab.length ? U.seccion(`Abonos (${ab.length})`) + U.filas(lista.map(a => [M.fechaVisible(a.fecha), { texto: dinero(a.monto), fuerte: true }])) : '',
@@ -1403,8 +1436,8 @@ function htmlEstadoCliente(g) {
   const items = g.resumenes.map(r => {
     const ab = abonosOrdenados(r.cuenta);
     return U.item({
-      titulo: r.producto, marca: r.regularizar ? `Atraso de ${r.regularizar.dias} días` : '',
-      izquierda: r.regularizar ? `Para regularizar ${dinero(r.regularizar.monto)}` : (r.proximo ? `Próx. ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}` : 'Sin pagos pendientes'), derecha: dinero(r.saldo)
+      titulo: r.producto, marca: r.regularizar ? 'Con atraso' : '',
+      izquierda: r.regularizar ? `Para regularizar ${dinero(r.regularizar.monto)}` : (r.proximo ? `Próx. abono ${M.fechaVisible(r.proximo.fecha)} · ${dinero(r.proximo.monto)}` : 'Sin pagos pendientes'), derecha: dinero(r.saldo)
     }) + (ab.length ? U.filas(ab.slice(0, 3).map(a => ['Abono ' + M.fechaVisible(a.fecha), dinero(a.monto)])) + (ab.length > 3 ? `<div style="font-size:12.5px;color:#94a3b8;padding:4px 2px 0">y ${ab.length - 3} abonos anteriores</div>` : '') : '') + '<div style="height:12px"></div>';
   }).join('');
   const cuerpo = [
@@ -1412,9 +1445,8 @@ function htmlEstadoCliente(g) {
     U.hero({ etiqueta: 'Saldo total', valor: dinero(g.saldo), nota: `${g.n} cuentas con saldo`, tono: g.vencido > 0.01 ? 'rojo' : 'azul' }),
     U.filas([
       g.vencido > 0.01 ? ['Para regularizar', { texto: dinero(g.vencido), color: '#dc2626', fuerte: true }] : null,
-      g.vencido > 0.01 ? ['Vencido desde', `${M.fechaVisible(g.desdeVencido)} · ${g.diasAtraso} d`] : null,
       g.moratorios > 0.01 ? ['Moratorios', dinero(g.moratorios)] : null,
-      g.vencido <= 0.01 && g.proximo ? ['Próximo pago', { texto: `${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}`, fuerte: true }] : null
+      g.vencido <= 0.01 && g.proximo ? ['Próximo abono', { texto: `${M.fechaVisible(g.proximo.fecha)} · ${dinero(g.proximo.monto)}`, fuerte: true }] : null
     ]),
     U.seccion('Tus cuentas'), items,
     U.nota({ texto: 'Documento informativo con la información de tus cuentas a la fecha de hoy. Para aclaraciones comunícate con la tienda.', tono: 'gris' }),
