@@ -1199,6 +1199,33 @@ window.renderConsultaInventario = function() {
  .filter(m => !m.anulado);
  const ocs = window.ordenesCompra || [];
  const estadoPedidoPorProd = {};
+
+ // 🔒 Reservas activas de apartados por producto (fuente: reservasInventario).
+ // Existencia DISPONIBLE PARA VENTA = stock fisico - reservado (nunca negativa).
+ const reservadoPorProdCiv = {};
+ (typeof window.obtenerReservasInventario === 'function' ? window.obtenerReservasInventario() : []).forEach(r => {
+ if (!r || r.estado !== 'Activa' || !r.productoId) return;
+ reservadoPorProdCiv[String(r.productoId)] = (reservadoPorProdCiv[String(r.productoId)] || 0) + (Number(r.cantidad) || 0);
+ });
+ const _reservadoCiv = p => Math.min(Number(p.stock) || 0, reservadoPorProdCiv[String(p.id)] || 0);
+ const _disponibleCiv = p => Math.max(0, (Number(p.stock) || 0) - (reservadoPorProdCiv[String(p.id)] || 0));
+
+ // Costo promedio (misma regla de siempre: entradas del kardex, o costo base), memoizado.
+ const _costoPromCache = new Map();
+ const _costoPromedioCiv = p => {
+ const k = String(p.id);
+ if (_costoPromCache.has(k)) return _costoPromCache.get(k);
+ let totalCosto = 0, totalCantidadEntrada = 0;
+ kardex.filter(m => String(m.productoId) === k && m.tipoBase === 'entrada').forEach(mov => {
+ const cantidadEntrada = Number(mov.cantidad || 0);
+ totalCosto += Number(mov.costoUnitario || 0) * cantidadEntrada;
+ totalCantidadEntrada += cantidadEntrada;
+ });
+ const costoBase = Number(p.costo || p.precioCompra || _invCostoHistoricoProducto(p.id) || 0);
+ const c = totalCantidadEntrada > 0 && totalCosto > 0 ? (totalCosto / totalCantidadEntrada) : costoBase;
+ _costoPromCache.set(k, c);
+ return c;
+ };
  
  ocs.forEach(oc => {
  if (!oc.articulos) return;
@@ -1231,7 +1258,9 @@ window.renderConsultaInventario = function() {
  const coincideBusqueda = !q || texto.includes(q);
  const coincideCat = (cat === 'todos' || cat === 'todas' || p.categoria === cat);
  const coincideSub = (sub === 'todos' || sub === 'todas' || p.subcategoria === sub);
- const coincideStock = stockFiltro === 'todos' ? true : (stockFiltro === 'con' ? (p.stock > 0) : (p.stock <= 0));
+ const coincideStock = stockFiltro === 'todos' ? true
+ : (stockFiltro === 'con' ? (p.stock > 0)
+ : (stockFiltro === 'disponible' ? (_disponibleCiv(p) > 0) : (p.stock <= 0)));
  const coincideProveedor = provFiltro === 'todos'
  ? true
  : (provFiltro === 'sin_proveedor' ? !_invTextoNormalizado(proveedorProducto) : _invTextoNormalizado(proveedorProducto) === _invTextoNormalizado(provFiltro));
@@ -1255,25 +1284,37 @@ window.renderConsultaInventario = function() {
 
  // ---- KPIs + seleccion en lote (compartidos con la pestaña "Resumen por categoría") ----
  const totalSkusCiv = productosFiltrados.length;
- const totalUnidadesCiv = productosFiltrados.reduce((s, p) => s + (Number(p.stock) || 0), 0);
- const sinStockCountCiv = productosFiltrados.filter(p => (Number(p.stock) || 0) <= 0).length;
- const stockBajoCountCiv = productosFiltrados.filter(p => { const s = Number(p.stock) || 0; return s > 0 && s <= window.GP_STOCK_BAJO_UMBRAL; }).length;
+ // Unidades / Sin stock / Stock bajo se calculan sobre lo DISPONIBLE PARA VENTA (fisico - reservado).
+ const totalFisicasCiv = productosFiltrados.reduce((s, p) => s + (Number(p.stock) || 0), 0);
+ const totalReservadasCiv = productosFiltrados.reduce((s, p) => s + _reservadoCiv(p), 0);
+ const totalUnidadesCiv = productosFiltrados.reduce((s, p) => s + _disponibleCiv(p), 0);
+ // La consignacion (mercancia que aun no es mia) NO entra en la valuacion.
+ const valorDisponibleCiv = productosFiltrados.reduce((s, p) => {
+ const disp = _disponibleCiv(p);
+ const consig = Math.min(disp, Number(consignacionPendientePorProd[p.id] || 0));
+ return s + (disp - consig) * _costoPromedioCiv(p);
+ }, 0);
+ const sinStockCountCiv = productosFiltrados.filter(p => _disponibleCiv(p) <= 0).length;
+ const stockBajoCountCiv = productosFiltrados.filter(p => { const s = _disponibleCiv(p); return s > 0 && s <= window.GP_STOCK_BAJO_UMBRAL; }).length;
  const pedidoPendienteCountCiv = productosFiltrados.filter(p => (estadoPedidoPorProd[p.id] || 'ninguno') === 'pendiente').length;
 
- const kpiCiv = (label, valor, color, icono = '📦') => `
+ const kpiCiv = (label, valor, color, icono = '📦', sub = '') => `
  <div style="background:white; border:1px solid #e2e8f0; border-left:4px solid ${color}; border-radius:10px; padding:12px 14px; min-width:150px; flex:1; box-shadow:0 1px 3px rgba(15,23,42,0.04);">
  <div style="display:flex;align-items:center;gap:6px;">
  <span style="font-size:13px;">${icono}</span>
  <span style="font-size:10px; font-weight:900; letter-spacing:.03em; color:#64748b; text-transform:uppercase;">${label}</span>
  </div>
  <div style="font-size:22px; font-weight:900; color:${color}; margin-top:4px;">${valor}</div>
+ ${sub ? `<div style="font-size:10px; color:#94a3b8; margin-top:2px;">${sub}</div>` : ''}
  </div>`;
  const kpisHtmlCiv = `
  <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
  ${kpiCiv('SKUs listados', totalSkusCiv, '#0f172a', '🏷️')}
- ${kpiCiv('Unidades totales', totalUnidadesCiv, '#1e40af', '📦')}
- ${kpiCiv('Sin stock', sinStockCountCiv, sinStockCountCiv > 0 ? '#dc2626' : '#16a34a', '⛔')}
- ${kpiCiv('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCountCiv, stockBajoCountCiv > 0 ? '#d97706' : '#16a34a', '⚠️')}
+ ${kpiCiv('Unidades totales', totalUnidadesCiv, '#1e40af', '📦', 'disponibles para venta · ' + totalFisicasCiv + ' fisicas')}
+ ${kpiCiv('Reservadas (apartados)', totalReservadasCiv, totalReservadasCiv > 0 ? '#1d4ed8' : '#94a3b8', '🔒', 'siguen en bodega hasta la entrega')}
+ ${kpiCiv('Valuacion disponible', (typeof dinero === 'function' ? dinero(valorDisponibleCiv) : valorDisponibleCiv), '#0f766e', '💲', 'costo prom. × disponibles propios (sin consignacion)')}
+ ${kpiCiv('Sin stock', sinStockCountCiv, sinStockCountCiv > 0 ? '#dc2626' : '#16a34a', '⛔', 'sin disponible para venta')}
+ ${kpiCiv('Stock bajo (≤' + window.GP_STOCK_BAJO_UMBRAL + ')', stockBajoCountCiv, stockBajoCountCiv > 0 ? '#d97706' : '#16a34a', '⚠️', 'sobre disponible')}
  ${kpiCiv('Con pedido pendiente', pedidoPendienteCountCiv, pedidoPendienteCountCiv > 0 ? '#0284c7' : '#94a3b8', '🚚')}
  </div>`;
 
@@ -1317,7 +1358,7 @@ window.renderConsultaInventario = function() {
  { key: 'provFiltro', id: 'filtroProvInv', label: 'Proveedor', defaultValue: 'todos', options: { sin_proveedor: 'Sin proveedor' } },
  { key: 'cat', id: 'filtroCatInv', label: 'Categoria', defaultValue: 'todos' },
  { key: 'sub', id: 'filtroSubInv', label: 'Subcategoria', defaultValue: 'todos' },
- { key: 'stockFiltro', id: 'filtroStockInv', label: 'Stock', defaultValue: 'todos', options: { con: 'Con stock', sin: 'Sin stock' } },
+ { key: 'stockFiltro', id: 'filtroStockInv', label: 'Stock', defaultValue: 'todos', options: { con: 'Con stock', disponible: 'Disponible para venta', sin: 'Sin stock' } },
  { key: 'pedidoFiltro', id: 'filtroPedidoInv', label: 'Pedido', defaultValue: 'todos', options: { pendiente: 'Pedido pendiente', baja: 'Pendiente baja' } },
  { key: 'ubiFiltro', id: 'filtroUbiInv', label: 'Ubicacion', defaultValue: 'todos', options: { sin_asignar: 'Sin asignar' } }
  ], 'renderConsultaInventario');
@@ -1352,28 +1393,24 @@ window.renderConsultaInventario = function() {
  productosFiltrados.forEach(p => {
  const proveedorProducto = _invProveedorProducto(p);
  // Logica de Costo Promedio
- const entradas = kardex.filter(m => String(m.productoId) === String(p.id) && m.tipoBase === 'entrada');
- let totalCosto = 0, totalCantidadEntrada = 0;
- entradas.forEach(mov => {
- const cantidadEntrada = Number(mov.cantidad || 0);
- totalCosto += Number(mov.costoUnitario || 0) * cantidadEntrada;
- totalCantidadEntrada += cantidadEntrada;
- });
- const costoBase = Number(p.costo || p.precioCompra || _invCostoHistoricoProducto(p.id) || 0);
- const costoPromedio = totalCantidadEntrada > 0 && totalCosto > 0 ? (totalCosto / totalCantidadEntrada) : costoBase;
- const valorTotal = (p.stock || 0) * costoPromedio;
-
- totalGlobalUnidades += (p.stock || 0);
- totalGlobalPesos += valorTotal;
+ const costoPromedio = _costoPromedioCiv(p);
+ // Con el filtro "Disponible para venta" la tabla (cantidad, valuacion y totales)
+ // se calcula solo sobre lo no reservado; en cualquier otro caso sigue siendo fisico.
+ const modoDisponibleCiv = stockFiltro === 'disponible';
+ const stockBaseCiv = modoDisponibleCiv ? _disponibleCiv(p) : (Number(p.stock) || 0);
+ totalGlobalUnidades += stockBaseCiv;
 
  // Division propio vs consignacion para este producto. Se topa al stock
  // actual por si algun ajuste manual dejo el pendiente de consignacion
  // por encima de las piezas que realmente hay en el sistema.
- const stockGeneralProd = Number(p.stock) || 0;
+ const stockGeneralProd = stockBaseCiv;
  const stockConsignacionProd = Math.min(stockGeneralProd, Number(consignacionPendientePorProd[p.id] || 0));
  const stockPropioProd = Math.max(0, stockGeneralProd - stockConsignacionProd);
  const valorPropioProd = stockPropioProd * costoPromedio;
  const valorConsignacionProd = stockConsignacionProd * costoPromedio;
+ // Valuacion = solo inventario propio; la consignacion se ve pero no se valua.
+ const valorTotal = valorPropioProd;
+ totalGlobalPesos += valorPropioProd;
 
  subtotalUnidadesPropio += stockPropioProd;
  subtotalPesosPropio += valorPropioProd;
@@ -1402,7 +1439,7 @@ window.renderConsultaInventario = function() {
  }
 
  // Detectar stock huerfano (stock general mayor a la suma de las variantes)
- const stockGeneral = stockGeneralProd;
+ const stockGeneral = Number(p.stock) || 0; // fisico: el desglose por ubicacion y el stock huerfano siempre son fisicos
  const stockSinAsignar = stockGeneral - totalStockVariantes;
 
  // Panel de Asignacion Rapida
@@ -1441,12 +1478,15 @@ window.renderConsultaInventario = function() {
  <div style="font-size:11px; color:#475569; margin-top:3px;">Proveedor: <b>${_kardexEsc(proveedorProducto || 'Sin proveedor')}</b></div>
  </td>
  <td style="padding:12px; text-align:center;">
- <span style="font-size:18px; font-weight:bold; color:${stockGeneral>0?'#16a34a':'#dc2626'}">${stockGeneral}</span>
+ <span style="font-size:18px; font-weight:bold; color:${stockGeneralProd>0?'#16a34a':'#dc2626'}">${stockGeneralProd}</span>
  ${stockConsignacionProd > 0 ? `<div style="margin-top:4px;"><span style="font-size:10px;font-weight:bold;color:#854d0e;background:#fef3c7;padding:2px 7px;border-radius:10px;">${stockConsignacionProd} en consignacion</span></div>` : ''}
+ ${modoDisponibleCiv ? `<div style="margin-top:4px;"><span style="font-size:10px;color:#64748b;">${Number(p.stock) || 0} fisica(s)</span></div>` : ''}
+ ${typeof window.invBadgesReservaSegunda === 'function' ? window.invBadgesReservaSegunda(p) : ''}
  </td>
  <td style="padding:12px;">${desgloseHtml}</td>
  <td style="padding:12px; text-align:right;">
  <div style="font-weight:bold;">${typeof dinero === 'function' ? dinero(valorTotal) : valorTotal}</div>
+ ${valorConsignacionProd > 0 ? `<div style="font-size:10px;color:#854d0e;">+ ${typeof dinero === 'function' ? dinero(valorConsignacionProd) : valorConsignacionProd} en consignacion (no valuada)</div>` : ''}
  <div style="font-size:11px; color:#94a3b8;">Costo: ${typeof dinero === 'function' ? dinero(costoPromedio) : costoPromedio}</div>
  </td>
  <td style="padding:12px; text-align:center; line-height:1.2;">
@@ -1476,7 +1516,7 @@ window.renderConsultaInventario = function() {
  </tr>
  <tr style="border-bottom:1px solid #e2e8f0;">
  <td></td>
- <td style="padding:12px 15px; text-align:right; color:#854d0e;">Subtotal en consignacion:</td>
+ <td style="padding:12px 15px; text-align:right; color:#854d0e;">Subtotal en consignacion (no entra en la valuacion):</td>
  <td style="padding:12px 15px; text-align:center; font-size:15px; color:#854d0e;">${subtotalUnidadesConsignacion}</td>
  <td></td>
  <td style="padding:12px 15px; text-align:right; font-size:15px; color:#854d0e;">${fmtDinero(subtotalPesosConsignacion)}</td>
@@ -1485,7 +1525,7 @@ window.renderConsultaInventario = function() {
  </tr>
  <tr>
  <td></td>
- <td style="padding:15px; text-align:right;">GRAN TOTAL:</td>
+ <td style="padding:15px; text-align:right;">GRAN TOTAL${stockFiltro === 'disponible' ? ' (disponible para venta)' : ''}:<div style="font-size:10px;font-weight:normal;color:#64748b;">Unidades con consignacion · valuacion solo del inventario propio</div></td>
  <td style="padding:15px; text-align:center; font-size:18px; color:#16a34a;">${totalGlobalUnidades}</td>
  <td></td>
  <td style="padding:15px; text-align:right; font-size:18px; color:#1e40af;">${fmtDinero(totalGlobalPesos)}</td>
@@ -1985,7 +2025,7 @@ function renderInventario(listaAMostrar = (window.productos || [])) {
  </div>
  </div>
  </td>
- <td style="padding:11px; text-align:center;"><span style="font-size:16px; font-weight:900; color:${colorStock};">${stock}</span></td>
+ <td style="padding:11px; text-align:center;"><span style="font-size:16px; font-weight:900; color:${colorStock};">${stock}</span>${typeof window.invBadgesReservaSegunda === 'function' ? window.invBadgesReservaSegunda(p) : ''}</td>
  <td style="padding:11px; text-align:right; font-weight:bold;">${typeof dinero === 'function' ? dinero(p.precio) : p.precio}</td>
  <td style="padding:11px; text-align:center;">
  <label style="position:relative;display:inline-block;width:38px;height:21px;cursor:pointer;" title="${f.activo ? 'Activo -- clic para desactivar' : 'Inactivo -- clic para activar'}">
