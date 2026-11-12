@@ -2331,8 +2331,27 @@ function _gpPrecio6Meses(precioContado) {
  } catch (e) { return null; }
 }
 
+// Filtros de la pestaña "Resumen por categoría" (valores por defecto: con stock, ambos tipos, no resguardado).
+window._gpResumenFiltros = window._gpResumenFiltros || { stock: 'con', tipo: 'ambos', resg: 'no' };
+
 function _gpConstruirArbolCategorias() {
+ const filtros = window._gpResumenFiltros || { stock: 'con', tipo: 'ambos', resg: 'no' };
  const ventasPorProducto = _gpVentasPorProducto();
+
+ // Consignacion pendiente por producto (piezas que estan en la tienda pero aun no son mias).
+ const consigPend = {};
+ (typeof StorageService !== 'undefined' ? (StorageService.get('consignacionesActivas', []) || []) : []).forEach(c => {
+ if (!c || !c.productoId) return;
+ const pend = Number(c.cantidadPendiente || 0);
+ if (pend > 0) consigPend[String(c.productoId)] = (consigPend[String(c.productoId)] || 0) + pend;
+ });
+ // Piezas resguardadas para apartados (reservas activas) por producto.
+ const resPend = {};
+ (typeof obtenerReservasInventario === 'function' ? (obtenerReservasInventario() || []) : []).forEach(r => {
+ if (!r || r.estado !== 'Activa' || !r.productoId) return;
+ resPend[String(r.productoId)] = (resPend[String(r.productoId)] || 0) + (Number(r.cantidad) || 0);
+ });
+
  const arbol = {};
  (window.productos || []).forEach(p => {
  const cat = (p.categoria || 'Sin categoría').trim() || 'Sin categoría';
@@ -2340,20 +2359,41 @@ function _gpConstruirArbolCategorias() {
  const vp = ventasPorProducto[String(p.id)] || { piezasVendidas: 0, importeVenta: 0, montoRecuperado: 0 };
  const precioContado = Number(p.precio) || 0;
 
+ // --- Reparto de las piezas fisicas: propio/consignacion x resguardado/libre ---
+ // Supuesto: las piezas resguardadas se toman primero del inventario propio y, si no alcanzan, de la consignacion.
+ const S = Math.max(0, Number(p.stock) || 0);
+ const C = Math.min(S, consigPend[String(p.id)] || 0);
+ const P = S - C;
+ const R = Math.min(S, resPend[String(p.id)] || 0);
+ const Rp = Math.min(P, R), Rc = R - Rp;
+ const Lp = P - Rp, Lc = C - Rc;
+ const pick = (resg, resguardado, libre, total) => resg === 'si' ? resguardado : (resg === 'no' ? libre : total);
+
+ let q, qConsig;
+ if (filtros.tipo === 'propio') { q = pick(filtros.resg, Rp, Lp, P); qConsig = 0; }
+ else if (filtros.tipo === 'consig') { q = pick(filtros.resg, Rc, Lc, C); qConsig = q; }
+ else { q = pick(filtros.resg, R, Lp + Lc, S); qConsig = pick(filtros.resg, Rc, Lc, C); }
+ // Valuacion: la consignacion no se valua cuando se mezcla con inventario propio ("Ambos").
+ const qVal = filtros.tipo === 'ambos' ? pick(filtros.resg, Rp, Lp, P) : q;
+
+ if (filtros.stock === 'con' && q <= 0) return;
+ if (filtros.stock === 'sin' && q > 0) return;
+
  if (!arbol[cat]) arbol[cat] = {};
  if (!arbol[cat][sub]) arbol[cat][sub] = [];
  arbol[cat][sub].push({
  id: p.id,
  nombre: p.nombre || '(sin nombre)',
- stock: Number(p.stock) || 0,
+ stock: q,
+ qConsig,
  // 🛡️ Valor del inventario: SOLO piezas con existencia (stock 0 o negativo no suma).
- stockPos: Math.max(0, Number(p.stock) || 0),
+ stockPos: q,
  costo: Number(p.costo) || 0,
  precioContado,
  precio6: _gpPrecio6Meses(precioContado),
- valorCosto: Math.max(0, Number(p.stock) || 0) * (Number(p.costo) || 0),
- valorContado: Math.max(0, Number(p.stock) || 0) * precioContado,
- valor6: Math.max(0, Number(p.stock) || 0) * (Number(_gpPrecio6Meses(precioContado)) || 0),
+ valorCosto: qVal * (Number(p.costo) || 0),
+ valorContado: qVal * precioContado,
+ valor6: qVal * (Number(_gpPrecio6Meses(precioContado)) || 0),
  piezasVendidas: vp.piezasVendidas,
  importeVenta: vp.importeVenta,
  montoRecuperado: vp.montoRecuperado,
@@ -2363,6 +2403,12 @@ function _gpConstruirArbolCategorias() {
  });
  return arbol;
 }
+
+window._gpSetFiltroResumen = function(clave, valor) {
+ window._gpResumenFiltros = window._gpResumenFiltros || { stock: 'con', tipo: 'ambos', resg: 'no' };
+ window._gpResumenFiltros[clave] = valor;
+ renderResumenCategorias();
+};
 
 function _gpSumar(lista, campo) { return lista.reduce((s, x) => s + (Number(x[campo]) || 0), 0); }
 
@@ -2374,6 +2420,16 @@ function renderResumenCategorias() {
  const money = v => typeof dinero === 'function' ? dinero(v) : Number(v || 0).toFixed(2);
  // Importe de inventario: si no hay existencia (importe 0) no se muestra dinero, solo un guion.
  const moneyInv = v => (Number(v) > 0.004 ? money(v) : '<span style="color:#cbd5e1;">—</span>');
+
+ const frGp = window._gpResumenFiltros || { stock: 'con', tipo: 'ambos', resg: 'no' };
+ const selGp = (clave, etiqueta, opciones) => `<div><label style="font-size:11px;font-weight:900;color:#475569;">${etiqueta}</label><select onchange="_gpSetFiltroResumen('${clave}', this.value)" style="width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:6px;">${opciones.map(([v, t]) => `<option value="${v}" ${frGp[clave] === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`;
+ const barraFiltrosGp = `
+ <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:10px;">
+ ${selGp('stock', 'STOCK', [['con', 'Con stock'], ['sin', 'Sin stock'], ['todos', 'Todos']])}
+ ${selGp('tipo', 'TIPO DE INVENTARIO', [['ambos', 'Ambos (propio y consignación)'], ['propio', 'Propio'], ['consig', 'A consignación']])}
+ ${selGp('resg', 'RESGUARDO PARA APARTADO', [['no', 'No resguardado'], ['si', 'Resguardado'], ['ambos', 'Ambos']])}
+ </div>
+ <p style="color:#64748b;font-size:11.5px;margin:0 0 12px;">Los filtros definen qué piezas se cuentan en Stock y en los importes. Con "Ambos" tipos, la consignación se cuenta en piezas pero no se valúa (elige "A consignación" para ver su valor). Las piezas resguardadas se descuentan primero del inventario propio.</p>`;
 
  const fila = (nivel, clave, expandKey, celdas, tieneHijos) => {
  const indent = nivel * 22;
@@ -2435,7 +2491,7 @@ function renderResumenCategorias() {
  <td style="padding:9px 12px 9px 56px; color:#334155;">
  <span style="text-decoration:underline; text-decoration-color:#cbd5e1;">${p.nombre}</span>${p.esUnicaCompra ? ' <span title="Compra única" style="font-size:11px;">🔒</span>' : ''}${p.activo ? '' : ' <span style="font-size:10px;color:#991b1b;font-weight:bold;">(inactivo)</span>'}
  </td>
- <td style="padding:9px;text-align:center;color:${p.stock <= 0 ? '#dc2626' : '#0f172a'};font-weight:bold;">${p.stock}</td>
+ <td style="padding:9px;text-align:center;color:${p.stock <= 0 ? '#dc2626' : '#0f172a'};font-weight:bold;">${p.stock}${p.qConsig > 0 && frGp.tipo === 'ambos' ? `<div style="font-size:10px;color:#854d0e;font-weight:400;">${p.qConsig} en consignación</div>` : ''}</td>
  <td style="padding:9px;text-align:right;">${p.stockPos > 0 ? money(p.valorCosto) + `<div style="font-size:10px;color:#94a3b8;">${money(p.costo)} c/u</div>` : '<span style="color:#cbd5e1;">—</span>'}</td>
  <td style="padding:9px;text-align:right;font-weight:bold;">${p.stockPos > 0 ? money(p.valorContado) + `<div style="font-size:10px;color:#94a3b8;font-weight:400;">${money(p.precioContado)} c/u</div>` : '<span style="color:#cbd5e1;">—</span>'}</td>
  <td style="padding:9px;text-align:right;color:#7c3aed;">${p.stockPos > 0 && p.precio6 != null ? money(p.valor6) + `<div style="font-size:10px;color:#94a3b8;">${money(p.precio6)} c/u</div>` : '<span style="color:#cbd5e1;">—</span>'}</td>
@@ -2450,7 +2506,7 @@ function renderResumenCategorias() {
  const todosLosProductosGp = Object.values(arbol).flatMap(subs => Object.values(subs).flat());
  const totalFilaGp = todosLosProductosGp.length ? `
  <tr style="background:#1e293b; color:white; font-weight:900;">
- <td style="padding:12px;">TOTAL INVENTARIO (solo productos con existencia)</td>
+ <td style="padding:12px;">TOTAL INVENTARIO (según los filtros)</td>
  <td style="padding:12px;text-align:center;">${_gpSumar(todosLosProductosGp, 'stockPos')}</td>
  <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'valorCosto'))}</td>
  <td style="padding:12px;text-align:right;">${money(_gpSumar(todosLosProductosGp, 'valorContado'))}</td>
@@ -2461,10 +2517,11 @@ function renderResumenCategorias() {
  </tr>` : '';
 
  if (Object.keys(arbol).length === 0) {
- filasHtml = `<tr><td colspan="8" style="text-align:center;color:gray;padding:20px;">No hay productos en el catálogo.</td></tr>`;
+ filasHtml = `<tr><td colspan="8" style="text-align:center;color:gray;padding:20px;">No hay productos con estos filtros.</td></tr>`;
  }
 
  cont.innerHTML = `
+ ${barraFiltrosGp}
  <p style="color:#64748b;font-size:12.5px;margin:0 0 12px;">
  Click en una fila de categoría o subcategoría para expandir. Costo, precio contado y precio a 6 meses son el valor de lo que TIENES en existencia (piezas en stock × costo o precio unitario); un producto sin stock no suma. "Precio a 6 meses" se calcula con una tasa fija de ${GP_TASA_MENSUAL_6M}% mensual (interés simple) -- las ventas reales usan la tasa que captures en cada caso. "Monto recuperado" en ventas a crédito con varios artículos es un reparto proporcional del cobro de esa cuenta, no un rastreo peso por peso.
  </p>
