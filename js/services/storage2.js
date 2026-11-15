@@ -82,6 +82,13 @@ const StorageService = {
         'prestamosOtorgados'
     ]),
 
+    // Tablas donde "nube vacía" puede ser un estado real (Bóveda de Autorizaciones).
+    _tablasNubeVaciaValida: new Set([
+        'ventasPendientes',
+        'abonosPendientes',
+        'solicitudesClientesPendientes'
+    ]),
+
     _tablasCriticasConDatos: new Set([
         'productos',
         'clientes',
@@ -335,6 +342,14 @@ const StorageService = {
             : payload;
 
         if (this._tablasTipoLista.has(tabla)) {
+            // 🛡️ Formato canónico que escribe set()/removerPorPredicado: { data: [...], _updatedAt }.
+            // Si `data` ya es un arreglo, ES la lista (aunque esté vacía). Sin este atajo,
+            // {data: []} caía en _objetoConIndicesNumericos(), que toma el valor `[]` como
+            // "un registro" y devolvía [[]]: un registro fantasma que reaparecía en cada sync
+            // aunque se descartara (Bóveda: "1 registro incompleto").
+            if (payload && typeof payload === 'object' && Array.isArray(payload.data)) {
+                return payload.data.map(item => this._restaurarDesdeFirestore(item));
+            }
             const listaForzada = this._forzarListaFirestore(payload);
             if (Array.isArray(listaForzada) && listaForzada.length > 0) return listaForzada;
 
@@ -1194,6 +1209,11 @@ const StorageService = {
     // incompletos sin id), con la misma sincronización inmediata y transaccional de removeAtomo.
     // Se usa cuando un item no tiene un id con el cual identificarlo.
     async removerPorPredicado(key, predicado) {
+        // 🛡️ Cancelar cualquier subida con debounce pendiente de esta tabla: llevaría la
+        // lista VIEJA (con el registro) y pisaría este borrado en la nube.
+        if (this._syncTimers[key]) { clearTimeout(this._syncTimers[key]); delete this._syncTimers[key]; }
+        delete this._syncPendienteData[key];
+
         let lista = this.get(key, []);
         if (!Array.isArray(lista)) lista = [];
         const nueva = lista.filter(i => !predicado(i));
@@ -1210,9 +1230,16 @@ const StorageService = {
                 await window._db.runTransaction(async (transaction) => {
                     const doc = await transaction.get(docRef);
                     if (!doc.exists) return;
-                    const data = doc.data().data || [];
-                    const filtrado = data.filter(i => !predicado(i));
-                    transaction.update(docRef, { data: filtrado, _updatedAt: tsAhora });
+                    // El documento puede traer el arreglo en otra forma (mapa/objeto o con
+                    // arreglos envueltos): se normaliza igual que al descargar, se evalúa el
+                    // predicado sobre el item restaurado y se conserva el item crudo de la nube.
+                    const crudo = doc.data().data;
+                    const eraArreglo = Array.isArray(crudo);
+                    let data = eraArreglo ? crudo : this._forzarListaFirestore(crudo);
+                    if (!Array.isArray(data)) data = [];
+                    // Arreglo crudo: items sin tocar. Otra forma: ya vienen restaurados, se re-limpian al escribir.
+                    const filtrado = data.filter(i => !predicado(eraArreglo ? this._restaurarDesdeFirestore(i) : i));
+                    transaction.update(docRef, { data: eraArreglo ? filtrado : this._limpiarParaFirestore(filtrado), _updatedAt: tsAhora });
                 });
                 await this._marcarCambioRemoto(key, tsAhora);
             } catch (e) {
@@ -1805,8 +1832,14 @@ const StorageService = {
             }
 
             const datosLocalesActuales = this.get(tabla, null);
+            // 🛡️ En las tablas de la Bóveda una nube vacía y MÁS NUEVA que el local (ya se
+            // comprobó arriba con tsFirebase > tsLocal) es legítima: significa que se
+            // aprobó/rechazó/descartó el último pendiente en otro dispositivo. Conservar el
+            // local aquí dejaba una copia vieja que luego se re-subía y resucitaba el registro.
+            const nubeVaciaEsValida = this._tablasNubeVaciaValida.has(tabla);
             if (
                 !forzarDescarga &&
+                !nubeVaciaEsValida &&
                 Array.isArray(datosRestaurados) &&
                 datosRestaurados.length === 0 &&
                 Array.isArray(datosLocalesActuales) &&
