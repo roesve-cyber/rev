@@ -2761,7 +2761,9 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         deudaInicial: deudaInicialReal,
         abonoAnterior: _abonoAnterior ? { monto: Number(_abonoAnterior.monto || 0), fecha: _abonoAnterior.fecha || '' } : null,
         numeroDePago: _numeroDePago,
-        cuponEmitido
+        cuponEmitido,
+        liquidacionPorPolitica,
+        montoCondonadoPolitica
         });
     } catch (err) {
         procesoOk = false;
@@ -3159,7 +3161,7 @@ window.ejecutarAbonoAutorizadoReal = async function(a) {
 function generarTicketAbonoTermico(datosAbono) {
     const { folio, folioAbono, fecha, cliente, montoAbono, saldoAnterior, nuevoSaldo,
         pagaresRestantes, etiquetaCuenta, cuentaDestino, empresa, articulos, totalVenta, enganche, metodoCobro,
-        abonoAnterior, numeroDePago, deudaInicial, cuponEmitido } = datosAbono;
+        abonoAnterior, numeroDePago, deudaInicial, cuponEmitido, liquidacionPorPolitica, montoCondonadoPolitica } = datosAbono;
 
     // Fallback (totalVenta - enganche) solo para llamadas viejas que no pasen
     // deudaInicial explícito: es incorrecto si la cuenta tiene intereses,
@@ -3176,8 +3178,10 @@ function generarTicketAbonoTermico(datosAbono) {
     let mensajeEstado = '';
     let mensajeClase = 'mensaje-ok';
     if (nuevoSaldo <= 0.01) {
-        mensajeEstado = `🎉 ¡Cuenta liquidada! Gracias por su compromiso, ${esc(cliente.nombre)}. ¡Hasta pronto!`;
-        mensajeClase = 'mensaje-ok';
+        const provisional = /pendiente aut/i.test(String(cuentaDestino || etiquetaCuenta || ''))
+            ? '<small>Recibo provisional: sujeto a autorización</small>' : '';
+        mensajeEstado = `✔ CUENTA LIQUIDADA<small>Gracias por su compromiso, ${esc(cliente.nombre)}. ¡Hasta pronto!</small>${provisional}`;
+        mensajeClase = 'liquidada';
     } else if (vencidos.length > 0) {
         const montoVencido = vencidos.reduce((s, p) => s + p.monto, 0);
         mensajeEstado = `Le recordamos amablemente que tiene ${vencidos.length} pago(s) con fecha vencida por un total de ${dineroFmt(montoVencido)}. Le agradecemos su pronta atención. 🙏`;
@@ -3187,10 +3191,22 @@ function generarTicketAbonoTermico(datosAbono) {
         mensajeClase = 'mensaje-ok';
     }
 
+    // 🏆 Beneficio por pago anticipado: cuando se liquida con precio de política (sin cupón)
+    // el cliente debe ver claramente cuánto ahorró.
+    const ahorroPolitica = Number(montoCondonadoPolitica || 0);
+    const beneficioLiquidacionHTML = (nuevoSaldo <= 0.01 && liquidacionPorPolitica && ahorroPolitica > 0.01 && !cuponEmitido) ? `
+        <div class="beneficio">
+            <div class="negrita">💸 PAGO ANTICIPADO</div>
+            <div>Su saldo era <b>${dineroFmt(Number(montoAbono || 0) + ahorroPolitica)}</b></div>
+            <div>Usted pagó <b>${dineroFmt(montoAbono)}</b></div>
+            <div class="ahorro">¡AHORRÓ ${dineroFmt(ahorroPolitica)}!</div>
+        </div>` : '';
+
     const cuponHTML = cuponEmitido ? `
-        <div class="seccion-titulo">🎟️ CUPÓN DE SALDO A FAVOR</div>
-        <div style="border:1px dashed #000;padding:6px;font-size:10px;text-align:center;margin:6px 0;">
-            <div style="font-size:14px;font-weight:bold;">${esc(cuponEmitido.codigo)} — ${dineroFmt(cuponEmitido.montoOriginal)}</div>
+        <div class="seccion-titulo" style="font-size:12px;">🎟️ CUPÓN DE SALDO A FAVOR</div>
+        <div style="border:3px double #000;padding:8px;font-size:11px;text-align:center;margin:6px 0;">
+            <div style="font-size:20px;font-weight:bold;">${dineroFmt(cuponEmitido.montoOriginal)}</div>
+            <div style="font-size:13px;font-weight:bold;">${esc(cuponEmitido.codigo)}</div>
             <div>Por su pago anticipado. Aplíquelo en su próxima compra (contado, crédito o apartado).</div>
             <div style="font-weight:bold;">Vigente hasta el ${new Date(cuponEmitido.fechaVencimiento).toLocaleDateString('es-MX')}</div>
             <div>No es reembolsable en efectivo.</div>
@@ -3215,6 +3231,20 @@ function generarTicketAbonoTermico(datosAbono) {
                 : (estadoPlazo.ventaEsNueva && estadoPlazo.cuponSiLiquidaHoy > 0.01
                     ? `<div class="mensaje-ok" style="margin:6px 0;">🎟️ Recuerde: si liquida su cuenta dentro de su plazo pactado (le quedan ${estadoPlazo.diasRestantes} día(s)), recibe un cupón de saldo a favor de aprox. ${dineroFmt(estadoPlazo.cuponSiLiquidaHoy)} (${estadoPlazo.porcentajeCupon}% del total financiado), aplicable en su siguiente compra.</div>`
                     : '');
+        }
+        // 💸 Ventas anteriores a cupones: no hay cupón, pero sí precio escalonado de
+        // liquidación (contado el primer mes, luego el precio del plazo en el que va).
+        // Mismo cálculo que el modal de abono y la app de cobranza.
+        if (!avisoCuponHTML && typeof _cxcEvaluarPoliticaPagoAnticipado === 'function') {
+            const pol = _cxcEvaluarPoliticaPagoAnticipado(folio, 0);
+            if (pol && pol.tipo === 'escalera_vigente' && pol.aplica) {
+                const E = pol.escalera || {};
+                const ahorro = pol.saldoActual - pol.montoLiquidacion;
+                const sube = (E.siguienteMonto != null && E.siguienteMonto > pol.montoLiquidacion + 0.01)
+                    ? ` Después de esa fecha el precio sube a ${dineroFmt(E.siguienteMonto)}.` : '';
+                const hasta = E.vigenteHasta ? ` Este precio es válido hasta el ${_cxcFechaVista(E.vigenteHasta)}.` : '';
+                avisoCuponHTML = `<div class="mensaje-ok" style="margin:6px 0;">💸 Recuerde: si liquida su cuenta hoy paga solo ${dineroFmt(pol.montoLiquidacion)} (ahorra ${dineroFmt(ahorro)} contra su saldo de ${dineroFmt(pol.saldoActual)}).${hasta}${sube}</div>`;
+            }
         }
     }
 
@@ -3252,6 +3282,10 @@ function generarTicketAbonoTermico(datosAbono) {
         table { width: 100%; border-collapse: collapse; font-size: 10px; }
         th { background: #e8e8e8; padding: 3px 5px; text-align: left; }
         .seccion-titulo { background: #000; color: #fff; padding: 3px 6px; font-weight: bold; font-size: 10px; margin: 5px 0 3px 0; }
+        .liquidada { background: #000; color: #fff; padding: 12px 6px; font-size: 20px; font-weight: bold; text-align: center; letter-spacing: 1px; margin: 8px 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .liquidada small { display: block; font-size: 10px; font-weight: normal; letter-spacing: 0; margin-top: 4px; }
+        .beneficio { border: 3px double #000; padding: 8px; font-size: 12px; text-align: center; margin: 8px 0; }
+        .beneficio .ahorro { font-size: 22px; font-weight: bold; margin-top: 4px; }
         .mensaje-ok { border: 1px dashed #000; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
         .mensaje-atraso { background: #000; color: #fff; padding: 6px; font-size: 10px; text-align: center; margin: 6px 0; }
         #ticket-contenido { background: #ffffff; padding: 10px; padding-bottom: 20px; box-sizing: border-box; }
@@ -3294,6 +3328,7 @@ function generarTicketAbonoTermico(datosAbono) {
     ${numeroDePago ? `<div style="font-size:10px; color:#444; margin-top:4px;">Pago n.º ${esc(String(numeroDePago))}${abonoAnterior ? ` &nbsp;·&nbsp; Abono anterior: ${dineroFmt(abonoAnterior.monto)}${abonoAnterior.fecha ? ' (' + esc(abonoAnterior.fecha) + ')' : ''}` : ''}</div>` : ''}
     <hr>
     <div class="${mensajeClase}">${mensajeEstado}</div>
+    ${beneficioLiquidacionHTML}
     ${cuponHTML}
     ${avisoCuponHTML}
     <hr>
@@ -3366,7 +3401,9 @@ function reimprimirTicketAbono(folio, indexAbono) {
         // saldoOriginal, NO el precio de contado menos el enganche.
         deudaInicial: Number(cuenta.plan?.total || cuenta.saldoOriginal || (Number(cuenta.totalContadoOriginal || 0) - Number(cuenta.engancheRecibido || 0))),
         abonoAnterior: _abonoAnteriorReimpresion ? { monto: Number(_abonoAnteriorReimpresion.monto || 0), fecha: _abonoAnteriorReimpresion.fecha || '' } : null,
-        numeroDePago: _numeroDePagoReimpresion
+        numeroDePago: _numeroDePagoReimpresion,
+        liquidacionPorPolitica: !!abono.liquidacionPorPolitica,
+        montoCondonadoPolitica: Number(abono.montoCondonadoPolitica || 0)
         // Nota: "saldo antes de este abono" no se reconstruye aquí porque una
         // reimpresión puede pedirse mucho después, con abonos posteriores ya
         // aplicados; el ticket usa su fallback (nuevoSaldo + monto) que es
