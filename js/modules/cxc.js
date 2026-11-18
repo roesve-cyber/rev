@@ -1894,6 +1894,244 @@ window.cambiarPestanaCobranza = function(pestana) {
     renderCuentasXCobrar();
 };
 
+// ===================================================================
+// 🧭 GUÍA DE ABONO (pago anticipado + salto de plazo)
+// ===================================================================
+// El vendedor veía el monto de liquidación solo hasta que tecleaba el
+// saldo completo, y en ventas anteriores a cupones el modal decía solo
+// "no genera cupón" sin mencionar el precio escalonado que sí aplica.
+// Esta guía muestra, ANTES de capturar el monto y mientras lo captura,
+// lo mismo que muestra el visor de la app de cobranza (cobranza/index.html,
+// bloqueVisor): plazo, "liquidar hoy", incremento de plazo.
+// No contiene reglas nuevas: todo sale de _cxcEvaluarPoliticaPagoAnticipado
+// y de _cxcProyectarSaltoPlazo (espejo de proyectarSaltoPlazo de cobranza/motor.js).
+function _cxcMesesTxt(n) {
+    n = Number(n) || 0;
+    return `${n} mes${n === 1 ? '' : 'es'}`;
+}
+
+// Escalera de la cuenta: tabla congelada si es sana, si no tarifas actuales
+// (mismo criterio que _cxcDetectarSaltoPlazo / cobranza escaleraPlanes).
+function _cxcEscaleraPlanesCuenta(cuenta) {
+    const enganche = Number(cuenta.engancheRecibido || cuenta.enganche || 0);
+    const capitalContado = Math.max(0, _cxcImporteContadoCuenta(cuenta) - enganche);
+    const periodicidad = cuenta.periodicidad || 'semanal';
+    const congelada = Array.isArray(cuenta?.saldosPorMes) ? cuenta.saldosPorMes.slice() : [];
+    const sana = congelada.length > 0 && congelada.slice()
+        .sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0))
+        .every((p, i, arr) => i === 0 || Number(p.total || 0) >= Number(arr[i - 1].total || 0) - 0.01);
+    const planes = sana ? congelada
+        : ((typeof CalculatorService !== 'undefined' && CalculatorService.calcularCreditoConPeriodicidad)
+            ? CalculatorService.calcularCreditoConPeriodicidad(capitalContado, periodicidad) : []);
+    return planes.slice().sort((a, b) => Number(a.meses || 0) - Number(b.meses || 0));
+}
+
+// Salto de plazo "proyectado": calcula el escalón siguiente aunque el plazo
+// todavía no venza (para avisar), y marca yaPaso cuando de verdad ya pasó.
+// Espejo de proyectarSaltoPlazo() en cobranza/motor.js para que ambas pantallas
+// muestren exactamente el mismo cargo.
+function _cxcProyectarSaltoPlazo(cuenta) {
+    if (!cuenta || cuenta.estado === 'Cancelado' || cuenta.incobrable) return null;
+    const estado = typeof window._calcularEstadoCuenta === 'function' ? window._calcularEstadoCuenta(cuenta.folio) : null;
+    const saldoActual = Number(estado?.saldoTotal ?? cuenta.saldoActual ?? 0) - Number(estado?.saldoMoratorios || 0);
+    if (saldoActual <= 0.01) return null;
+    const meses = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    if (meses <= 0 || meses >= 6) return null;
+
+    const fechaVenta = _cxcFechaVentaDate(cuenta);
+    const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVenta) / 86400000));
+    const yaPaso = diasDesdeVenta >= meses * 30.44;
+    const mesesNuevo = meses + 1;
+    const planNuevo = _cxcEscaleraPlanesCuenta(cuenta).find(p => Number(p.meses || 0) === mesesNuevo);
+    if (!planNuevo) return null;
+
+    // En cuentas migradas plan.total puede no existir: se parte de totalTeorico
+    // para no mostrar un cargo falso (igual que la app de cobranza).
+    const totalSistema = Number(cuenta?.plan?.total || 0);
+    const totalActual = totalSistema || Number(cuenta?.plan?.totalTeorico || 0);
+    const totalNuevo = Number(planNuevo.total || 0);
+    const diferencia = totalNuevo - totalActual;
+    if (totalNuevo - totalSistema <= 0.01 || diferencia <= 0.01) return null;
+
+    return {
+        folio: cuenta.folio, mesesActual: meses, mesesNuevo, totalActual, totalNuevo, diferencia,
+        estimadoDesdeTeorico: !totalSistema, saldoActual, nuevoSaldoEstimado: saldoActual + diferencia,
+        diasDesdeVenta, yaPaso,
+        fechaLimite: new Date(fechaVenta.getTime() + Math.round(meses * 30.44) * 86400000)
+    };
+}
+
+// Todo lo que la guía necesita saber de una cuenta, en un solo lugar.
+function _cxcGuiaAbonoModelo(folio, monto = 0) {
+    const cuenta = StorageService.get("cuentasPorCobrar", []).find(c => c.folio === folio);
+    if (!cuenta) return null;
+    const politica = _cxcEvaluarPoliticaPagoAnticipado(folio, monto);
+    if (!politica) return null;
+    const meses = Number(cuenta?.plan?.meses || cuenta?.plazoMeses || cuenta?.meses || 0);
+    const fechaVenta = _cxcFechaVentaDate(cuenta);
+    const diasDesdeVenta = Math.max(0, Math.floor((new Date() - fechaVenta) / 86400000));
+    const diasRestantes = meses > 0 ? Math.ceil(meses * 30.44 - diasDesdeVenta) : null;
+    const estadoPlazo = _cxcEstadoPlazoCuenta(cuenta);
+    const enAut = StorageService.get("abonosPendientes", [])
+        .filter(a => (a.folioCXC || a.folioApartado) === folio && _cxcAbonoEnAutorizacion(a));
+    const saltoEnCola = StorageService.get("saltosPlazoPendientes", [])
+        .find(p => p.folio === folio && p.estado === 'Pendiente') || null;
+    return {
+        cuenta, politica, meses, fechaVenta, diasRestantes,
+        semaforo: estadoPlazo?.semaforo || 'gris',
+        fechaLimite: meses > 0 ? new Date(fechaVenta.getTime() + Math.round(meses * 30.44) * 86400000) : null,
+        cuponDisponible: politica.tipo === 'pronto_pago_flat' && politica.beneficio > 0.01 && _cxcFolioEsConsecutivoNuevo(cuenta.folio),
+        salto: _cxcProyectarSaltoPlazo(cuenta),
+        saltoEnCola,
+        enAutorizacion: { n: enAut.length, monto: enAut.reduce((s, a) => s + Number(a.montoAbonado || a.monto || 0), 0) }
+    };
+}
+
+// Bloque fijo (antes de capturar el monto): plazo, liquidar hoy, incremento de plazo.
+function _cxcGuiaAbonoVisorHTML(folio) {
+    const G = _cxcGuiaAbonoModelo(folio, 0);
+    if (!G) return '';
+    const P = G.politica;
+    const d = _cxcDinero;
+    const col = { verde: '#166534', amarillo: '#d97706', rojo: '#dc2626', gris: '#64748b' };
+    const fondo = { verde: '#f0fdf4', amarillo: '#fffbeb', rojo: '#fef2f2', gris: '#f8fafc' };
+    const tarjeta = (tono, titulo, grande, cuerpo, boton = '') => `
+        <div style="background:${fondo[tono]};border:1px solid ${col[tono]}33;border-left:4px solid ${col[tono]};border-radius:8px;padding:11px 14px;margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:800;color:${col[tono]};text-transform:uppercase;letter-spacing:.03em;">${titulo}</div>
+            ${grande ? `<div style="font-size:20px;font-weight:900;color:${col[tono]};margin-top:2px;">${grande}</div>` : ''}
+            <div style="font-size:12.5px;color:#374151;margin-top:4px;line-height:1.45;">${cuerpo}</div>
+            ${boton}
+        </div>`;
+    const partes = [];
+    const morTxt = P.moratoriosPendientesMonto > 0.01
+        ? `<br>Los moratorios (${d(P.moratoriosPendientesMonto)}) se cobran aparte.` : '';
+
+    // 1) Plazo pactado
+    if (G.meses > 0 && G.diasRestantes !== null && P.saldoActual > 0.01) {
+        const aun = G.diasRestantes > 0;
+        partes.push(tarjeta(G.semaforo, `⏱️ Plazo pactado · ${_cxcMesesTxt(G.meses)}`,
+            aun ? `${G.diasRestantes} días restantes` : `Venció hace ${Math.abs(G.diasRestantes)} días`,
+            `Fecha límite: <b>${_cxcFechaVista(G.fechaLimite)}</b> (venta del ${_cxcFechaVista(G.fechaVenta)}).`));
+    }
+
+    // 2) Liquidar hoy
+    if (P.saldoActual > 0.01) {
+        const usar = `<button type="button" onclick="_cxcUsarMontoLiquidacion('${folio}', ${Number(P.montoLiquidacion).toFixed(2)})"
+            style="margin-top:8px;padding:8px 12px;border-radius:7px;border:1px solid #16a34a;background:white;color:#166534;font-weight:800;font-size:12.5px;cursor:pointer;">Usar este monto (${d(P.montoLiquidacion)})</button>`;
+        let t = 'gris', titulo = '💸 Pago adelantado · liquidar hoy', cuerpo = '';
+        if (P.tipo === 'pronto_pago_flat' && G.cuponDisponible) {
+            t = 'verde';
+            cuerpo = `Saldo vigente sin descuento. Además recibe un <b>cupón de ${d(P.beneficio)}</b> (${P.porcentajeCupon}% del total financiado) para su próxima compra.${morTxt}`;
+        } else if (P.tipo === 'escalera_vigente') {
+            const E = P.escalera || {};
+            const ahorro = P.saldoActual - P.montoLiquidacion;
+            const que = E.etapa === 'contado' ? 'el <b>precio de contado real</b> (primer mes)' : `el <b>precio del plazo en el que va (${_cxcMesesTxt(E.mesesTarifa)})</b>`;
+            const sig = (E.siguienteMonto != null && E.siguienteMonto > P.montoLiquidacion + 0.01)
+                ? `<br>Después pasa a <b>${d(E.siguienteMonto)}</b> (plazo de ${_cxcMesesTxt(E.siguienteMeses)}).` : '';
+            t = P.aplica ? 'verde' : 'gris';
+            cuerpo = (P.aplica
+                ? `Se cobra ${que}: <b>${d(ahorro)} menos</b> que su saldo (${d(P.saldoActual)}). Sin cupón.<br>Este precio rige hasta el <b>${_cxcFechaVista(E.vigenteHasta)}</b>.${sig}`
+                : `Ya está en el precio de su plazo: se liquida con el saldo vigente. Sin cupón.`)
+                + (E.origen === 'actual' ? '<br>⚠️ Esta cuenta no tiene escalera propia guardada; el monto se estimó con las tarifas actuales. Confírmalo con administración antes de prometerlo.' : '') + morTxt;
+        } else if (P.tipo === 'contado_1_mes') {
+            t = 'verde';
+            cuerpo = `Plan de 1 mes: se cobra el <b>precio de contado real</b>${P.aplica ? `, ${d(P.saldoActual - P.montoLiquidacion)} menos que el saldo` : ''}. No genera cupón.${morTxt}`;
+        } else if (P.tipo === 'pronto_pago_flat') {
+            cuerpo = `Dentro de su plazo, se liquida con el saldo vigente. Esta venta <b>no genera cupón</b>.${morTxt}`;
+        } else {
+            titulo = '💸 Liquidar hoy';
+            cuerpo = `Ya pasó su plazo pactado: se liquida el saldo vigente, sin cupón.${morTxt}`;
+        }
+        partes.push(tarjeta(t, titulo, d(P.montoLiquidacion), cuerpo, usar));
+    }
+
+    // 3) Incremento de plazo (salto)
+    const S = G.salto;
+    if (S) {
+        const est = S.estimadoDesdeTeorico ? ' (estimado)' : '';
+        if (S.yaPaso) {
+            const cola = G.saltoEnCola
+                ? `Ya está en la cola de confirmación del administrador.`
+                : `Aún no está en la cola de confirmación del administrador.`;
+            partes.push(tarjeta('rojo', '📈 Incremento de plazo · ya aplica', `+${d(S.diferencia)}${est}`,
+                `Ya pasó su plazo de ${_cxcMesesTxt(S.mesesActual)}: pasaría a <b>${_cxcMesesTxt(S.mesesNuevo)}</b> (total ${d(S.totalActual)} → ${d(S.totalNuevo)}). Saldo ${d(S.saldoActual)} → <b>${d(S.nuevoSaldoEstimado)}</b>.<br>${cola} Administración confirma cada cambio; este abono no lo aplica.`));
+        } else {
+            partes.push(tarjeta('amarillo', '📈 Si no liquida a tiempo', `+${d(S.diferencia)}${est}`,
+                `Después del <b>${_cxcFechaVista(S.fechaLimite)}</b> pasaría de ${_cxcMesesTxt(S.mesesActual)} a <b>${_cxcMesesTxt(S.mesesNuevo)}</b>: total ${d(S.totalActual)} → ${d(S.totalNuevo)}, saldo ${d(S.saldoActual)} → ${d(S.nuevoSaldoEstimado)}.`));
+        }
+    } else if (G.meses >= 6 && P.saldoActual > 0.01) {
+        partes.push(tarjeta('gris', '📈 Incremento de plazo', '', 'Ya está en el plazo máximo (6 meses): no tiene otro escalón.'));
+    }
+    return partes.join('');
+}
+
+// Estado dinámico: qué pasa con el monto que el vendedor va tecleando.
+function _cxcGuiaAbonoEstadoHTML(folio, monto) {
+    const m = Number(monto) || 0;
+    if (m <= 0) return '';
+    const G = _cxcGuiaAbonoModelo(folio, m);
+    if (!G) return '';
+    const P = G.politica, d = _cxcDinero;
+    const caja = (fg, bg, borde, html) => `<div style="background:${bg};color:${fg};padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:13px;border-left:4px solid ${borde};line-height:1.45;">${html}</div>`;
+    const notas = [];
+    if (G.enAutorizacion.n > 0) notas.push(`⏳ Hay ${G.enAutorizacion.n} abono(s) por ${d(G.enAutorizacion.monto)} en autorización de este folio que todavía <b>no</b> se descuentan del saldo mostrado.`);
+    if (P.moratoriosPendientesMonto > 0.01) notas.push(`Moratorios pendientes ${d(P.moratoriosPendientesMonto)}: se cobran aparte, no están en este monto.`);
+    const fechaCap = document.getElementById('fechaAbonoInput')?.value;
+    const hoyInput = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : '';
+    if (fechaCap && hoyInput && fechaCap !== hoyInput) notas.push(`📅 La política se calcula con la fecha de <b>hoy</b>, no con la fecha de pago capturada (${_cxcFechaCorta(fechaCap)}).`);
+    const notasHTML = notas.length ? `<br><span style="font-size:12px;">${notas.join('<br>')}</span>` : '';
+
+    const maximo = Math.max(P.saldoActual, P.montoLiquidacion);
+    if (m > maximo + 0.01) {
+        return caja('#991b1b', '#fee2e2', '#dc2626', `<b>MONTO MAYOR AL PERMITIDO</b><br>El máximo que se puede cobrar es <b>${d(maximo)}</b>. El sistema no dejará aplicar este abono.${notasHTML}`);
+    }
+
+    if (P.liquidaria) {
+        const exceso = m > P.montoLiquidacion + 0.01
+            ? `<br>Capturaste <b>${d(m)}</b>; se aplicará el monto de política (<b>${d(P.montoLiquidacion)}</b>).` : '';
+        const ahorro = P.saldoActual - P.montoLiquidacion;
+        let titulo, detalle;
+        if (P.tipo === 'contado_1_mes') {
+            titulo = 'LIQUIDA A PRECIO DE CONTADO (PLAN 1 MES)';
+            detalle = `Se cobran <b>${d(P.montoLiquidacion)}</b>${ahorro > 0.01 ? `, ${d(ahorro)} menos que su saldo` : ''}. Sin cupón.`;
+        } else if (P.tipo === 'escalera_vigente') {
+            const E = P.escalera || {};
+            titulo = E.etapa === 'contado' ? 'LIQUIDA A PRECIO DE CONTADO (PRIMER MES)' : `LIQUIDA A PRECIO DEL PLAZO VIGENTE (${_cxcMesesTxt(E.mesesTarifa)})`;
+            detalle = `Se cobran <b>${d(P.montoLiquidacion)}</b>${ahorro > 0.01 ? `, ${d(ahorro)} menos que su saldo (${d(P.saldoActual)})` : ''}. Sin cupón.`
+                + (E.vigenteHasta ? `<br>Este precio rige hasta el <b>${_cxcFechaVista(E.vigenteHasta)}</b>.` : '');
+        } else if (P.tipo === 'pronto_pago_flat') {
+            titulo = 'LIQUIDA DENTRO DE PLAZO';
+            detalle = `Se cobra el saldo nominal <b>${d(P.montoLiquidacion)}</b>, sin descuento. `
+                + (G.cuponDisponible ? `El cliente recibe un <b>cupón de ${d(P.beneficio)}</b> (${P.porcentajeCupon}% del total financiado).` : `Esta venta no genera cupón.`);
+        } else {
+            titulo = 'LIQUIDACIÓN DE SALDO';
+            detalle = `Este abono liquida el saldo vigente de la cuenta (<b>${d(P.montoLiquidacion)}</b>).`;
+        }
+        return caja('#166534', '#dcfce7', '#15803d', `<b>${titulo}</b><br>${detalle}${exceso}<br><span style="font-weight:700;">Se aplica igual en abono directo y en Bóveda.</span>${notasHTML}`);
+    }
+
+    // Abono parcial: ¿cuánto falta y qué ganaría al liquidar?
+    const restante = Math.max(0, P.saldoActual - m);
+    const hayBeneficio = (P.tipo === 'escalera_vigente' && P.aplica) || (P.tipo === 'contado_1_mes' && P.aplica) || (P.tipo === 'pronto_pago_flat' && G.cuponDisponible);
+    if (hayBeneficio) {
+        const premio = P.tipo === 'pronto_pago_flat' ? ` y recibir un cupón de <b>${d(P.beneficio)}</b>` : ` (ahorra ${d(P.saldoActual - P.montoLiquidacion)})`;
+        return caja('#92400e', '#fef3c7', '#d97706', `<b>Abono parcial.</b> Para liquidar hoy${premio} faltan <b>${d(P.faltante)}</b> (monto de liquidación ${d(P.montoLiquidacion)}).<br>Si queda así, el saldo pendiente será ${d(restante)}.${G.salto && G.salto.yaPaso ? `<br>⚠️ Su plazo ya venció: sigue pendiente el incremento a ${_cxcMesesTxt(G.salto.mesesNuevo)} (+${d(G.salto.diferencia)}).` : ''}${notasHTML}`);
+    }
+    return caja('#334155', '#f1f5f9', '#94a3b8', `<b>Abono parcial.</b> Saldo pendiente después de este abono: <b>${d(restante)}</b>.${G.salto && G.salto.yaPaso ? `<br>⚠️ Su plazo ya venció: sigue pendiente el incremento a ${_cxcMesesTxt(G.salto.mesesNuevo)} (+${d(G.salto.diferencia)}).` : ''}${notasHTML}`);
+}
+
+window._cxcUsarMontoLiquidacion = function(folio, monto) {
+    const inp = document.getElementById('montoAbono');
+    if (!inp) return;
+    inp.value = Number(monto).toFixed(2);
+    actualizarAvisoPoliticaAbono(folio);
+    inp.focus();
+};
+window._cxcProyectarSaltoPlazo = _cxcProyectarSaltoPlazo;
+window._cxcGuiaAbonoModelo = _cxcGuiaAbonoModelo;
+window._cxcGuiaAbonoVisorHTML = _cxcGuiaAbonoVisorHTML;
+window._cxcGuiaAbonoEstadoHTML = _cxcGuiaAbonoEstadoHTML;
+
 // ==========================================
 // 3. LOGICA DE ABONOS Y POLÍTICAS
 // ==========================================
@@ -2058,9 +2296,6 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
     } else {
         selectorCuentasHTML = `<select id="cuentaOrigen_abono" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"><option value="efectivo">💵 Efectivo Principal</option></select>`;
     }
-    const politicaInicial = _cxcEvaluarPoliticaPagoAnticipado(folio, 0);
-    const resumenPoliticaInicial = _cxcResumenPoliticaPagoAnticipado(politicaInicial, esDirecto);
-
     const modalHTML = `
         <div data-modal="abono-avanzado" style="position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:6000; display:flex; justify-content:center; align-items:flex-start; overflow-y:auto; padding:20px;">
             <div style="background:white; border-radius:15px; width:100%; max-width:600px; overflow:hidden;">
@@ -2079,18 +2314,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                     </div>
                 </div>
 
-                ${(() => {
-                    const estadoPlazo = _cxcEstadoPlazoCuenta(cuenta);
-                    if (!estadoPlazo) return '';
-                    const coloresPorSemaforo = { rojo: '#dc2626', amarillo: '#d97706', verde: '#166534', gris: '#64748b' };
-                    const fondosPorSemaforo = { rojo: '#fef2f2', amarillo: '#fffbeb', verde: '#f0fdf4', gris: '#f8fafc' };
-                    const emoji = { rojo: '🔴', amarillo: '🟡', verde: '🟢', gris: '⚪' };
-                    return `
-                    <div class="abn-plazo" style="background:${fondosPorSemaforo[estadoPlazo.semaforo]};border:1px solid ${coloresPorSemaforo[estadoPlazo.semaforo]}33;border-left:4px solid ${coloresPorSemaforo[estadoPlazo.semaforo]};border-radius:8px;padding:12px 15px;margin-bottom:16px;">
-                        <div style="font-weight:bold;color:${coloresPorSemaforo[estadoPlazo.semaforo]};">${emoji[estadoPlazo.semaforo]} ${estadoPlazo.diasRestantes} dia(s) para liquidar dentro de plazo</div>
-                        <div style="font-size:13px;color:#374151;margin-top:4px;">${estadoPlazo.esPlan1Mes ? `💵 Plan de 1 mes: no genera cupón -- si liquida a tiempo se respeta el precio de contado.` : (estadoPlazo.ventaEsNueva ? `🎟️ Si liquida hoy: cupón de <b>${_cxcDinero(estadoPlazo.cuponSiLiquidaHoy)}</b> (${estadoPlazo.porcentajeCupon}% del total financiado).` : `Venta vigente (de antes del cambio a cupones) -- no genera cupón al liquidar.`)}${estadoPlazo.mesesNuevoSiBrinca ? ` Si no liquida, brinca a ${estadoPlazo.mesesNuevoSiBrinca} meses.` : ''}</div>
-                    </div>`;
-                })()}
+                <div class="abn-plazo" id="guiaAbonoVisor">${_cxcGuiaAbonoVisorHTML(folio)}</div>
 
                 ${(() => {
                     const clienteId = cuenta.clienteId || cuenta.cliente?.id;
@@ -2119,7 +2343,7 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                 <div class="abn-captura" style="display:grid; grid-template-columns: 1fr 1.5fr; gap:10px; margin-bottom:15px;">
                     <div>
                         <label style="display:block; margin-bottom:5px; font-weight:bold; color:#374151;">📅 Fecha de pago:</label>
-                        <input type="date" id="fechaAbonoInput" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0])}" 
+                        <input type="date" id="fechaAbonoInput" onchange="actualizarAvisoPoliticaAbono('${folio}')" value="${window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : (window.getFechaLocalMX ? window.getFechaLocalMX(new Date()) : new Date().toISOString().split('T')[0])}" 
                             style="padding:12px; font-size:16px; border:2px solid #e2e8f0; border-radius:8px; width:100%; box-sizing:border-box;">
                     </div>
                     <div>
@@ -2149,16 +2373,6 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
                 </div>
                 ` : ''}
 
-                <div class="abn-politica" style="background:#fffbeb; padding:15px; border-radius:8px; border-left:5px solid #f59e0b; margin-bottom:20px;">
-                    <strong style="color:#92400e;">${resumenPoliticaInicial.titulo}</strong>
-                    <p style="margin:8px 0 0 0; font-size:14px; color:#78350f; line-height:1.45;">
-                        ${resumenPoliticaInicial.detalle}
-                    </p>
-                    <p style="margin:8px 0 0 0; font-size:12px; color:#92400e; line-height:1.45; font-weight:700;">
-                        ${resumenPoliticaInicial.nota}
-                    </p>
-                </div>
-
                 <div class="abn-botones" style="display:flex; gap:10px;">
                     <button id="btnConfirmarAbonoAvanzado" onclick="procesarAbonoAvanzado('${folio}', ${original}, ${saldo}, ${aplicaPoliticaContado}, '${modoAplicacion}')" 
                             style="flex:2; padding:15px; background:${esDirecto ? '#0f766e' : '#22c55e'}; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">
@@ -2179,46 +2393,13 @@ function abrirModalAbonoAvanzado(folio, opciones = {}) {
 function actualizarAvisoPoliticaAbono(folio) {
     const avisoDiv = document.getElementById("avisoPoliticaAbono");
     if (!avisoDiv) return;
-
     const montoAbono = parseFloat(document.getElementById("montoAbono")?.value) || 0;
-    if (montoAbono <= 0) {
+    try {
+        avisoDiv.innerHTML = _cxcGuiaAbonoEstadoHTML(folio, montoAbono);
+    } catch (e) {
+        console.error('Guía de abono:', e);
         avisoDiv.innerHTML = "";
-        return;
     }
-
-    const politica = _cxcEvaluarPoliticaPagoAnticipado(folio, montoAbono);
-    if (!politica) {
-        avisoDiv.innerHTML = "";
-        return;
-    }
-
-    const beneficioHTML = politica.beneficio > 0.01
-        ? `<br>Beneficio para el cliente: <b>${_cxcDinero(politica.beneficio)}</b>.`
-        : "";
-    const montoPoliticaHTML = `Monto correcto por politica: <b>${_cxcDinero(politica.montoLiquidacion)}</b>.`;
-    const reglaHTML = `<br><span style="font-weight:700;">Esta regla se aplicara igual si el abono es directo o si se envia a Boveda.</span>`;
-
-    if (politica.aplica && politica.liquidaria) {
-        const titulo = "LIQUIDACION DENTRO DE PLAZO";
-        const excesoHTML = montoAbono > politica.montoLiquidacion + 0.01
-            ? `<br>Capturaste <b>${_cxcDinero(montoAbono)}</b>; se aplicara el monto de politica.`
-            : "";
-        avisoDiv.innerHTML = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #15803d;"><b>${titulo}</b><br>${montoPoliticaHTML}${beneficioHTML}${excesoHTML}${reglaHTML}</div>`;
-        return;
-    }
-
-    if (politica.aplica && politica.faltante > 0.01) {
-        const titulo = "Liquidacion dentro de plazo";
-        avisoDiv.innerHTML = `<div style="background:#fef3c7; color:#92400e; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #d97706;"><b>${titulo}:</b> agrega <b>${_cxcDinero(politica.faltante)}</b> para liquidar con esta politica.<br>${montoPoliticaHTML}${beneficioHTML}${reglaHTML}</div>`;
-        return;
-    }
-
-    if (politica.liquidaria) {
-        avisoDiv.innerHTML = `<div style="background:#dcfce7; color:#166534; padding:10px; border-radius:6px; margin-bottom:15px; font-size:13px; border-left:4px solid #15803d;"><b>LIQUIDACION DE SALDO</b><br>Este abono liquida el saldo vigente de la cuenta.</div>`;
-        return;
-    }
-
-    avisoDiv.innerHTML = "";
 }
 
 // 🛡️ INTERCEPTOR MAKER-CHECKER ABONOS: Pone el Abono en cuarentena y emite ticket
