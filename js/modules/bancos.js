@@ -347,7 +347,7 @@ window.abrirHistorialMSI = function(id) {
     const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
     const totalDeuda = parseFloat(String(deuda.total || 0).replace(/[$,]/g, ''));
     const yaPagado = parseFloat(deuda.montoPagado || 0);
-    const pct = Math.min(100, (yaPagado / totalDeuda) * 100).toFixed(0);
+    const pct = totalDeuda > 0 ? Math.min(100, (yaPagado / totalDeuda) * 100).toFixed(0) : '0';
     const pagosHechos = deuda.pagosRealizados || 0;
 
     // 1. DIBUJAR CALENDARIO CON ESTADOS REALES + ACCIÓN POR CUOTA
@@ -424,6 +424,7 @@ window.abrirHistorialMSI = function(id) {
                     <h3 style="margin:0; color:#1e40af; font-size:24px;">🏦 ${deuda.banco}</h3>
                     <p style="margin:5px 0 0 0; color:#0f172a; font-weight:bold; font-size:16px;">${deuda.producto || deuda.concepto}</p>
                     ${deuda.reembolsoProveedor?.activo ? `<p style="margin:8px 0 0 0; font-size:12px; color:#6b21a8; background:#ede9fe; padding:6px 10px; border-radius:6px; display:inline-block;">🔄 Reembolsada por proveedor: ${dinero(deuda.reembolsoProveedor.monto)} el ${window.formatearFechaCortaMX(deuda.reembolsoProveedor.fecha)} a ${deuda.reembolsoProveedor.cuentaEtiqueta} — el banco sigue cobrando las cuotas pendientes.${deuda.reembolsoProveedor.recepcionesCanceladas?.length ? ' El producto pendiente de recibir fue cancelado (no llegará stock).' : ''}</p>` : ''}
+                    ${deuda.cancelacionProveedor?.activo ? `<p style="margin:8px 0 0 0; font-size:12px; color:#991b1b; background:#fee2e2; padding:6px 10px; border-radius:6px; display:inline-block;">🛑 Compra cancelada por el proveedor (${window.formatearFechaCortaMX ? window.formatearFechaCortaMX(deuda.cancelacionProveedor.fecha) : deuda.cancelacionProveedor.fecha}): ${dinero(deuda.cancelacionProveedor.monto)}. ${deuda.cancelacionProveedor.completa ? 'Las cuotas pendientes ya no se cobran.' : 'Las cuotas pendientes se ajustaron.'}${deuda.cancelacionProveedor.devolucionPagado > 0.01 ? ` Por lo ya pagado te deben devolver ${dinero(deuda.cancelacionProveedor.devolucionPagado)}${deuda.cancelacionProveedor.ingreso ? ' (ya registrado en caja)' : ''}.` : ''} <button onclick="deshacerCancelacionCompraMSI(${deuda.id})" style="margin-left:6px;padding:2px 8px;background:none;border:1px solid #fecaca;color:#b91c1c;border-radius:5px;cursor:pointer;font-size:11px;">↩ Deshacer cancelación</button></p>` : ''}
                     <div style="margin-top:8px;">
                         ${deuda.reembolsoProveedor?.activo
                             ? `<button onclick="deshacerReembolsoProveedorMSI(${deuda.id})" style="padding:4px 10px; background:none; border:1px solid #fecaca; color:#b91c1c; border-radius:5px; cursor:pointer; font-size:12px;">↩ Deshacer marca de reembolso</button>`
@@ -675,6 +676,452 @@ window.deshacerReembolsoProveedorMSI = function(id) {
     if (document.querySelector('[data-modal="historial-msi"]')) abrirHistorialMSI(id);
 };
 
+// ── Compra MSI CANCELADA por el proveedor (el banco cancela el plan) ─────────
+// Escenario: compraste directo a MSI, el proveedor te canceló el pedido y te
+// devolvió el dinero (normalmente como bonificación a la tarjeta). El plan MSI
+// ya no se cobra, pero el sistema lo seguía mostrando como deuda y en el flujo
+// de caja. Aquí se cancela el plan: se quitan las cuotas pendientes (o se
+// reducen si la cancelación fue parcial), se cancela la recepción pendiente
+// y queda todo reversible con "Deshacer cancelación".
+// (Distinto de "Marcar reembolso de proveedor", que es cuando el proveedor te
+// devuelve a una cuenta pero el banco SIGUE cobrando las cuotas.)
+function _msiEsc(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function _msiNum(v) { return parseFloat(String(v || 0).replace(/[$,]/g, '')) || 0; }
+function _msiRedondear(n) { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
+
+// La deuda MSI ligada a una recepción: por compraId (compra directa) o por recepcionId.
+function _msiDeudaDeRecepcion(rec) {
+    if (!rec) return null;
+    const cuentas = StorageService.get("cuentasMSI", []);
+    return cuentas.find(c => rec.compraId != null && c.compraId != null && String(c.compraId) === String(rec.compraId))
+        || cuentas.find(c => c.recepcionId != null && String(c.recepcionId) === String(rec.id))
+        || null;
+}
+window._msiDeudaDeRecepcion = _msiDeudaDeRecepcion;
+
+// Calcula cómo quedaría el plan al cancelar `montoCancelado` (sin guardar nada).
+function _msiCalcularCancelacion(deuda, montoCancelado) {
+    const cal = JSON.parse(JSON.stringify(deuda.calendario || []));
+    const res = _msiCalcularResumen(deuda);
+    const pend = cal.filter(p => p.estado !== 'Pagado');
+    const saldoCuotas = pend.reduce((s, p) => s + Math.max(0, _msiNum(p.monto) - _msiNum(p.montoAbonado)), 0);
+    const monto = Math.max(0, Math.min(_msiNum(montoCancelado), res.totalDeuda));
+    const reducido = Math.min(monto, saldoCuotas);
+    const exceso = Math.max(0, monto - reducido); // lo que cae sobre cuotas YA pagadas
+    const completa = saldoCuotas > 0.01 ? reducido >= saldoCuotas - 0.01 : true;
+    let nuevo;
+    if (completa) {
+        // se conservan las pagadas y, si hubo un pago parcial, solo lo ya abonado
+        nuevo = cal.filter(p => p.estado === 'Pagado').concat(
+            pend.filter(p => _msiNum(p.montoAbonado) > 0.005).map(p => ({ ...p, monto: _msiNum(p.montoAbonado), estado: 'Pagado' }))
+        );
+    } else {
+        const factor = 1 - (reducido / saldoCuotas);
+        nuevo = cal.map(p => {
+            if (p.estado === 'Pagado') return p;
+            const abonado = _msiNum(p.montoAbonado);
+            const saldoP = Math.max(0, _msiNum(p.monto) - abonado);
+            return { ...p, monto: _msiRedondear(abonado + saldoP * factor) };
+        });
+        const objetivo = _msiRedondear(saldoCuotas - reducido);
+        const lista = nuevo.filter(p => p.estado !== 'Pagado');
+        const suma = lista.reduce((s, p) => s + Math.max(0, _msiNum(p.monto) - _msiNum(p.montoAbonado)), 0);
+        if (lista.length) lista[lista.length - 1].monto = _msiRedondear(_msiNum(lista[lista.length - 1].monto) + (objetivo - suma));
+    }
+    nuevo.sort((a, b) => (a.n || 0) - (b.n || 0));
+    const pendNuevo = nuevo.filter(p => p.estado !== 'Pagado');
+    const saldoNuevo = pendNuevo.reduce((s, p) => s + Math.max(0, _msiNum(p.monto) - _msiNum(p.montoAbonado)), 0);
+    return {
+        monto, reducido, exceso, completa, calendarioNuevo: nuevo,
+        cuotasCanceladas: completa ? pend.length : 0,
+        saldoCuotasAntes: saldoCuotas, saldoCuotasDespues: saldoNuevo,
+        totalNuevo: _msiRedondear(res.yaPagado + saldoNuevo),
+        cuotaNueva: pendNuevo.length ? _msiNum(pendNuevo[0].monto) : 0,
+        yaPagado: res.yaPagado
+    };
+}
+
+// Todo el detalle de la compra a partir de una recepción pendiente.
+function _msiDetalleCompraDeRecepcion(rec) {
+    const compras = StorageService.get("compras", []);
+    const recepciones = StorageService.get("recepciones", []);
+    const compra = compras.find(c => rec.compraId != null && String(c.id) === String(rec.compraId)) || null;
+    const hermanas = rec.compraId != null ? recepciones.filter(r => String(r.compraId) === String(rec.compraId)) : [rec];
+    return { compra, hermanas: hermanas.length ? hermanas : [rec], deuda: _msiDeudaDeRecepcion(rec) };
+}
+
+window.abrirModalCancelacionCompraMSI = function(recepcionId) {
+    if (typeof _comprasRequireAdmin === 'function' && !_comprasRequireAdmin('Cancelar compra MSI por el proveedor')) return;
+    const recepciones = StorageService.get("recepciones", []);
+    const rec = recepciones.find(r => String(r.id) === String(recepcionId));
+    if (!rec) return alert("❌ Esa recepción ya no existe.");
+    const { compra, hermanas, deuda } = _msiDetalleCompraDeRecepcion(rec);
+    if (!deuda) return alert("Esta recepción no está ligada a ninguna compra a MSI.");
+    document.querySelector('[data-modal="cancelacion-msi"]')?.remove();
+
+    const res = _msiCalcularResumen(deuda);
+    const hoyTxt = window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0];
+    const fechaCompra = deuda.fechaCompra || compra?.fechaISO || '';
+    const dias = fechaCompra ? Math.max(0, Math.floor((new Date() - new Date(fechaCompra + 'T12:00:00')) / 86400000)) : null;
+    const pagadas = (deuda.calendario || []).filter(p => p.estado === 'Pagado').length;
+    const fechaVista = f => window.formatearFechaCortaMX ? window.formatearFechaCortaMX(f) : f;
+
+    const filasArt = hermanas.map(h => {
+        const pedida = Number(h.cantidadTotal || 0), recibida = Number(h.cantidadRecibida || 0), pend = Number(h.cantidadPendiente || 0);
+        const costo = Number(h.costoUnitario || 0);
+        const esEsta = String(h.id) === String(rec.id);
+        const estado = h.estatus === 'Cancelada' ? '<span style="color:#b91c1c;">Cancelada</span>' : (pend > 0 ? '<span style="color:#c2410c;font-weight:bold;">Pendiente</span>' : '<span style="color:#15803d;">Recibida</span>');
+        return `<tr style="${esEsta ? 'background:#fef3c7;font-weight:bold;' : ''}">
+            <td style="padding:6px;border-bottom:1px solid #f1f5f9;">${_msiEsc(h.productoNombre)}${h.color && h.color !== 'General' ? `<br><small style="color:#64748b;">${_msiEsc(h.color)}</small>` : ''}${esEsta ? '<br><small style="color:#92400e;">← la que estás revisando</small>' : ''}</td>
+            <td style="padding:6px;border-bottom:1px solid #f1f5f9;text-align:center;">${pedida}</td>
+            <td style="padding:6px;border-bottom:1px solid #f1f5f9;text-align:center;">${recibida}</td>
+            <td style="padding:6px;border-bottom:1px solid #f1f5f9;text-align:center;">${pend}</td>
+            <td style="padding:6px;border-bottom:1px solid #f1f5f9;text-align:right;">${costo > 0 ? dinero(costo) : '—'}</td>
+            <td style="padding:6px;border-bottom:1px solid #f1f5f9;text-align:center;">${estado}</td></tr>`;
+    }).join('');
+
+    const filasCuotas = (deuda.calendario || []).map(p => {
+        const estado = p.estado === 'Pagado' ? '<span style="color:#15803d;font-weight:bold;">Pagada</span>' : (p.estado === 'Parcial' ? '<span style="color:#c2410c;">Parcial</span>' : '<span style="color:#475569;">Pendiente</span>');
+        return `<tr><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">${p.n}</td><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">${fechaVista(p.fecha)}</td><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;">${dinero(_msiNum(p.monto))}</td><td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">${estado}</td></tr>`;
+    }).join('');
+
+    const yaCancelada = !!deuda.cancelacionProveedor?.activo;
+    const yaReembolsada = !!deuda.reembolsoProveedor?.activo;
+    const bloqueo = yaCancelada
+        ? 'Este plan MSI ya tiene una cancelación registrada. Deshazla desde Seguimiento de Compras MSI si necesitas cambiarla.'
+        : (yaReembolsada ? 'Este plan ya tiene marcado un reembolso de proveedor (el banco sigue cobrando). Deshaz esa marca primero desde Seguimiento de Compras MSI.' : '');
+
+    const html = `
+    <div data-modal="cancelacion-msi" style="position:fixed;inset:0;background:rgba(15,23,42,0.85);z-index:99999;display:flex;justify-content:center;align-items:flex-start;padding:20px;overflow-y:auto;">
+      <div style="background:white;border-radius:14px;width:100%;max-width:640px;padding:22px;box-shadow:0 25px 50px -12px rgba(0,0,0,.5);">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:14px;">
+            <div>
+                <h3 style="margin:0;color:#7f1d1d;">🧾 ¿Es la compra que te cancelaron?</h3>
+                <div style="font-size:12px;color:#64748b;margin-top:3px;">Revisa que los datos coincidan con el pedido que cancelaron antes de continuar.</div>
+            </div>
+            <button onclick="document.querySelector('[data-modal=cancelacion-msi]')?.remove()" style="background:#f1f5f9;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:bold;">✕</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:14px;font-size:13px;">
+            <div><small style="color:#64748b;">Folio de compra</small><br><b>${_msiEsc(compra?.folio || '—')}</b></div>
+            <div><small style="color:#64748b;">Fecha de compra</small><br><b>${fechaCompra ? fechaVista(fechaCompra) : _msiEsc(rec.fechaPedido || '—')}</b>${dias !== null ? `<br><small style="color:#64748b;">hace ${dias} día(s)</small>` : ''}</div>
+            <div><small style="color:#64748b;">Proveedor</small><br><b>${_msiEsc(rec.proveedor || compra?.proveedor || '—')}</b></div>
+            <div><small style="color:#64748b;">Total de la compra</small><br><b>${dinero(Number(compra?.total ?? deuda.total ?? 0))}</b></div>
+            <div><small style="color:#64748b;">Tarjeta</small><br><b>🏦 ${_msiEsc(deuda.banco)}</b></div>
+            <div><small style="color:#64748b;">Plan</small><br><b>${deuda.meses} meses · ${dinero(_msiNum(deuda.cuotaMensual))}/mes</b></div>
+        </div>
+
+        <h4 style="margin:0 0 6px 0;font-size:13px;color:#334155;text-transform:uppercase;">📦 Artículos de la compra</h4>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;overflow-x:auto;margin-bottom:14px;">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+                <thead style="background:#f1f5f9;"><tr><th style="padding:6px;text-align:left;">Producto</th><th>Pedidas</th><th>Recibidas</th><th>Pend.</th><th style="text-align:right;">Costo u.</th><th>Estado</th></tr></thead>
+                <tbody>${filasArt}</tbody>
+            </table>
+        </div>
+
+        <h4 style="margin:0 0 6px 0;font-size:13px;color:#334155;text-transform:uppercase;">💳 Plan MSI hoy</h4>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:6px;">
+            <span>Pagadas: <b>${pagadas} de ${(deuda.calendario || []).length}</b></span>
+            <span>Pagado: <b style="color:#15803d;">${dinero(res.yaPagado)}</b></span>
+            <span>Saldo pendiente: <b style="color:#dc2626;">${dinero(res.saldo)}</b></span>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:10px;max-height:150px;overflow-y:auto;margin-bottom:16px;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead style="background:#f1f5f9;"><tr><th style="padding:5px 8px;text-align:left;">#</th><th style="text-align:left;">Fecha</th><th style="text-align:right;">Monto</th><th>Estado</th></tr></thead>
+                <tbody>${filasCuotas || '<tr><td colspan="4" style="padding:10px;text-align:center;color:#94a3b8;">Sin cuotas</td></tr>'}</tbody>
+            </table>
+        </div>
+
+        ${bloqueo ? `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;padding:12px;font-size:13px;">${bloqueo}</div>` : `
+        <div style="border-top:2px solid #fecaca;padding-top:14px;">
+            <h4 style="margin:0 0 8px 0;color:#7f1d1d;">🛑 ¿Qué pasó con el dinero?</h4>
+            <div style="font-size:13px;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                <label style="display:block;margin-bottom:6px;"><input type="radio" name="msiCancModo" value="banco" checked onchange="_msiCancActualizar(${rec.id})"> <b>El banco canceló el plan</b> (la devolución fue a la tarjeta): las cuotas pendientes dejan de cobrarse</label>
+                <label style="display:block;"><input type="radio" name="msiCancModo" value="cuenta" onchange="_msiCancActualizar(${rec.id})"> <b>El proveedor me devolvió el dinero a una cuenta y el banco SIGUE cobrando</b> las cuotas: entra el dinero y las cuotas se quedan igual</label>
+            </div>
+            <div style="font-size:13px;margin-bottom:10px;">
+                <label style="display:block;margin-bottom:4px;"><input type="radio" name="msiCancAlcance" value="toda" checked onchange="_msiCancActualizar(${rec.id})"> Se canceló <b>toda la compra</b> (todas las recepciones pendientes)</label>
+                <label style="display:block;"><input type="radio" name="msiCancAlcance" value="este" onchange="_msiCancActualizar(${rec.id})"> Solo se canceló <b>este producto</b></label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div><label style="font-size:12px;font-weight:bold;">Monto cancelado / devuelto</label>
+                    <input type="number" id="msiCancMonto" step="0.01" min="0" oninput="_msiCancActualizar(${rec.id}, true)" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>
+                <div><label style="font-size:12px;font-weight:bold;">Fecha de cancelación</label>
+                    <input type="date" id="msiCancFecha" value="${hoyTxt}" style="width:100%;padding:9px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;"></div>
+            </div>
+            <div id="msiCancPreview" style="margin-top:10px;"></div>
+            <div id="msiReembBox" style="display:none;margin-top:10px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px;font-size:12.5px;">
+                <label style="font-weight:bold;">¿A qué cuenta entró la devolución?</label>
+                ${window._buildSelectorCuentas ? window._buildSelectorCuentas('msiReembCuenta', false) : ''}
+            </div>
+            <div id="msiCancIngresoBox" style="display:none;margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:12.5px;">
+                <label><input type="checkbox" id="msiCancIngresoChk" onchange="document.getElementById('msiCancIngresoCuenta').style.display=this.checked?'block':'none'"> Lo ya pagado me lo devolvieron a una cuenta (registrar ingreso)</label>
+                <div id="msiCancIngresoCuenta" style="display:none;margin-top:6px;">${window._buildSelectorCuentas ? window._buildSelectorCuentas('msiCancCuenta', false) : ''}</div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px;">
+                <button id="msiCancBtnConfirmar" onclick="confirmarCancelacionCompraMSI(${rec.id})" style="flex:1;padding:12px;background:#b91c1c;color:white;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">✅ Sí, es esta: cancelar plan MSI</button>
+                <button onclick="document.querySelector('[data-modal=cancelacion-msi]')?.remove()" style="padding:12px 18px;background:#e2e8f0;color:#475569;border:none;border-radius:8px;cursor:pointer;">No es esta</button>
+            </div>
+            <div style="font-size:11.5px;color:#64748b;margin-top:8px;">En ambos casos la recepción pendiente se cancela sin agregar stock y todo se puede deshacer desde Seguimiento de Compras MSI.</div>
+        </div>`}
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    if (!bloqueo) _msiCancActualizar(rec.id);
+};
+
+// Monto sugerido según el alcance: toda la compra (si nada se ha recibido, el plan completo)
+// o el costo de lo pendiente.
+function _msiCancMontoSugerido(rec, deuda, alcance) {
+    const { hermanas } = _msiDetalleCompraDeRecepcion(rec);
+    const costoPend = h => Number(h.cantidadPendiente || 0) * Number(h.costoUnitario || 0);
+    if (alcance === 'este') return _msiRedondear(costoPend(rec));
+    const nadaRecibido = hermanas.every(h => Number(h.cantidadRecibida || 0) === 0);
+    if (nadaRecibido) return _msiRedondear(_msiCalcularResumen(deuda).totalDeuda);
+    return _msiRedondear(hermanas.filter(h => h.estatus === 'Pendiente').reduce((s, h) => s + costoPend(h), 0));
+}
+
+window._msiCancActualizar = function(recepcionId, soloPreview = false) {
+    const rec = StorageService.get("recepciones", []).find(r => String(r.id) === String(recepcionId));
+    const deuda = _msiDeudaDeRecepcion(rec);
+    if (!rec || !deuda) return;
+    const alcance = document.querySelector('input[name="msiCancAlcance"]:checked')?.value || 'toda';
+    const inp = document.getElementById('msiCancMonto');
+    if (!inp) return;
+    if (!soloPreview) inp.value = _msiCancMontoSugerido(rec, deuda, alcance).toFixed(2);
+    const modo = document.querySelector('input[name="msiCancModo"]:checked')?.value || 'banco';
+    const calc = _msiCalcularCancelacion(deuda, parseFloat(inp.value) || 0);
+    const prev = document.getElementById('msiCancPreview');
+    const box = document.getElementById('msiCancIngresoBox');
+    const boxCuenta = document.getElementById('msiReembBox');
+    const btn = document.getElementById('msiCancBtnConfirmar');
+    if (boxCuenta) boxCuenta.style.display = modo === 'cuenta' ? 'block' : 'none';
+    if (btn) btn.textContent = modo === 'cuenta' ? '✅ Sí, es esta: registrar devolución' : '✅ Sí, es esta: cancelar plan MSI';
+    if (modo === 'cuenta') {
+        const res = _msiCalcularResumen(deuda);
+        const cuotasPend = (deuda.calendario || []).filter(p => p.estado !== 'Pagado').length;
+        if (box) box.style.display = 'none';
+        prev.innerHTML = (parseFloat(inp.value) || 0) > 0.01
+            ? `<div style="background:#f5f3ff;border:1px solid #ddd6fe;color:#4c1d95;border-radius:8px;padding:10px;font-size:13px;line-height:1.5;">Entran <b>${dinero(parseFloat(inp.value) || 0)}</b> a la cuenta que elijas como devolución.<br>Las cuotas <b>no cambian</b>: el banco sigue cobrando ${cuotasPend} cuota(s) pendiente(s) por ${dinero(res.saldo)}.</div>`
+            : '<div style="color:#94a3b8;font-size:12.5px;">Captura el monto devuelto.</div>';
+        return;
+    }
+    if (calc.monto <= 0.01) { prev.innerHTML = '<div style="color:#94a3b8;font-size:12.5px;">Captura el monto cancelado para ver cómo queda el plan.</div>'; if (box) box.style.display = 'none'; return; }
+    const lineas = [];
+    if (calc.completa) {
+        lineas.push(`Se <b>cancelan ${calc.cuotasCanceladas} cuota(s) pendiente(s)</b> por ${dinero(calc.saldoCuotasAntes)}. El plan ya no genera cobros.`);
+    } else {
+        lineas.push(`Las cuotas pendientes bajan de ${dinero(calc.saldoCuotasAntes)} a <b>${dinero(calc.saldoCuotasDespues)}</b> (cuota de ${dinero(calc.cuotaNueva)}).`);
+    }
+    if (calc.exceso > 0.01) lineas.push(`Ya habías pagado ${dinero(calc.exceso)} de lo cancelado: ese dinero te lo debe devolver el proveedor/banco (queda anotado como pendiente de devolución).`);
+    prev.innerHTML = `<div style="background:#fffbeb;border:1px solid #fde68a;color:#78350f;border-radius:8px;padding:10px;font-size:13px;line-height:1.5;">${lineas.join('<br>')}</div>`;
+    if (box) box.style.display = calc.exceso > 0.01 ? 'block' : 'none';
+};
+
+// Devolución del proveedor a una cuenta mientras el banco SIGUE cobrando las cuotas:
+// entra el dinero a caja y las cuotas no se tocan. Misma estructura de datos que
+// confirmarReembolsoProveedorMSI (reembolsoProveedor), así "Deshacer marca de reembolso" funciona igual.
+function _msiRegistrarDevolucionDesdeRecepcion({ rec, deuda, idx, cuentasMSI, recepciones, alcance, monto, fecha }) {
+    const sel = document.getElementById('msiReembCuenta');
+    const cuentaId = sel?.value;
+    const cuentaEtiqueta = sel?.options?.[sel.selectedIndex]?.text || cuentaId;
+    if (!cuentaId) return alert("⚠️ Selecciona a qué cuenta entró la devolución.");
+    const totalDeuda = _msiCalcularResumen(deuda).totalDeuda;
+    if (monto > totalDeuda + 0.01) return alert(`⚠️ El monto (${dinero(monto)}) no puede ser mayor al total de la compra a MSI (${dinero(totalDeuda)}).`);
+    const cuotasPend = (deuda.calendario || []).filter(p => p.estado !== 'Pagado').length;
+    if (!confirm(`Compra: ${deuda.producto || deuda.concepto || 'MSI'}\nTarjeta: ${deuda.banco}\n\nEntran ${dinero(monto)} a "${cuentaEtiqueta}" como devolución del proveedor.\nLas ${cuotasPend} cuota(s) pendiente(s) del banco NO cambian: se siguen pagando normal.\nSe cancela la recepción pendiente (${alcance === 'este' ? 'solo este producto' : 'toda la compra'}) sin agregar stock.\n\n¿Continuar?`)) return;
+    if (typeof window._ingresarCuenta !== 'function') return alert("No se pudo registrar: el módulo de caja no está disponible.");
+    const idOperacion = `MSI-${deuda.id}-REEMBOLSO-${Date.now()}`;
+    const ok = window._ingresarCuenta({
+        monto, cuentaId, etiqueta: cuentaEtiqueta,
+        concepto: `Reembolso de proveedor — compra MSI no entregada: ${deuda.banco}: ${deuda.producto || 'Compra'}`,
+        referencia: `MSI-${deuda.id}`, idOperacion
+    });
+    if (!ok) return alert(`No se pudo registrar el ingreso a "${cuentaEtiqueta}" (¿ya no existe esa cuenta?). Nada se guardó.`);
+
+    const { hermanas } = _msiDetalleCompraDeRecepcion(rec);
+    const aCancelar = alcance === 'este' ? [rec] : hermanas;
+    const recepcionesCanceladas = [];
+    aCancelar.forEach(h => {
+        const r = recepciones.find(x => String(x.id) === String(h.id));
+        if (r && r.estatus === 'Pendiente') {
+            recepcionesCanceladas.push({ id: r.id, cantidadPendienteOriginal: r.cantidadPendiente, estatusOriginal: r.estatus });
+            r.estatus = 'Cancelada';
+            r.motivoCancelacion = 'Reembolso de proveedor — producto nunca entregado';
+            r.fechaCancelacion = fecha;
+            r.cantidadPendiente = 0;
+        }
+    });
+    deuda.reembolsoProveedor = { activo: true, monto, fecha, cuentaId, cuentaEtiqueta, idOperacion, recepcionesCanceladas };
+    cuentasMSI[idx] = deuda;
+    StorageService.set("cuentasMSI", cuentasMSI);
+    StorageService.set("recepciones", recepciones);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_REEMBOLSO_PROVEEDOR', modulo: 'Compras', entidad: 'cuentaMSI', entidadId: String(deuda.id),
+            detalle: `Reembolso de proveedor registrado desde Recepciones: ${dinero(monto)} a "${cuentaEtiqueta}" por compra MSI no entregada (${deuda.banco} — ${deuda.producto || 'Compra'}). Las mensualidades del banco siguen su curso.${recepcionesCanceladas.length ? ` ${recepcionesCanceladas.length} recepción(es) cancelada(s) sin stock.` : ''}`,
+            monto, severidad: 'alerta', datos: { cuentaMSI: deuda, reembolso: { monto, fecha, cuentaId, cuentaEtiqueta }, recepcionesCanceladas }
+        });
+    }
+    document.querySelector('[data-modal="cancelacion-msi"]')?.remove();
+    alert(`✅ Devolución registrada. Las cuotas del banco se siguen pagando normal.${recepcionesCanceladas.length ? '\n\nLa recepción pendiente se canceló (sin agregar stock).' : ''}`);
+    if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+    if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
+}
+
+window.confirmarCancelacionCompraMSI = function(recepcionId) {
+    if (typeof _comprasRequireAdmin === 'function' && !_comprasRequireAdmin('Cancelar compra MSI por el proveedor')) return;
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const recepciones = StorageService.get("recepciones", []);
+    const rec = recepciones.find(r => String(r.id) === String(recepcionId));
+    if (!rec) return alert("❌ Esa recepción ya no existe.");
+    const deuda0 = _msiDeudaDeRecepcion(rec);
+    if (!deuda0) return alert("Esta recepción no está ligada a ninguna compra a MSI.");
+    const idx = cuentasMSI.findIndex(c => String(c.id) === String(deuda0.id));
+    const deuda = cuentasMSI[idx];
+    if (deuda.cancelacionProveedor?.activo || deuda.reembolsoProveedor?.activo) return alert("Este plan ya tiene una cancelación o un reembolso registrado.");
+
+    const alcance = document.querySelector('input[name="msiCancAlcance"]:checked')?.value || 'toda';
+    const monto = parseFloat(document.getElementById('msiCancMonto')?.value) || 0;
+    const fecha = document.getElementById('msiCancFecha')?.value || (window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0]);
+    const modo = document.querySelector('input[name="msiCancModo"]:checked')?.value || 'banco';
+    if (monto <= 0.01) return alert("⚠️ Captura el monto cancelado.");
+    const res = _msiCalcularResumen(deuda);
+    if (modo === 'cuenta') return _msiRegistrarDevolucionDesdeRecepcion({ rec, deuda, idx, cuentasMSI, recepciones, alcance, monto, fecha });
+    if (monto > res.totalDeuda + 0.01) return alert(`⚠️ El monto (${dinero(monto)}) no puede ser mayor al total de la compra a MSI (${dinero(res.totalDeuda)}).`);
+
+    const calc = _msiCalcularCancelacion(deuda, monto);
+    const quiereIngreso = !!document.getElementById('msiCancIngresoChk')?.checked && calc.exceso > 0.01;
+    const sel = document.getElementById('msiCancCuenta');
+    const cuentaId = sel?.value, cuentaEtiqueta = sel?.options?.[sel.selectedIndex]?.text || cuentaId;
+    if (quiereIngreso && !cuentaId) return alert("⚠️ Selecciona la cuenta donde entró la devolución.");
+
+    const resumenTxt = `Compra: ${deuda.producto || deuda.concepto || 'MSI'}\nTarjeta: ${deuda.banco}\nMonto cancelado: ${dinero(calc.monto)}\n\n` +
+        (calc.completa ? `Se cancelan ${calc.cuotasCanceladas} cuota(s) pendiente(s) por ${dinero(calc.saldoCuotasAntes)}.` : `Cuotas pendientes: ${dinero(calc.saldoCuotasAntes)} → ${dinero(calc.saldoCuotasDespues)}.`) +
+        (calc.exceso > 0.01 ? `\nYa pagado que te deben devolver: ${dinero(calc.exceso)}${quiereIngreso ? ` (se ingresa a ${cuentaEtiqueta})` : ''}.` : '') +
+        `\n\nSe cancelará(n) la(s) recepción(es) pendiente(s) (${alcance === 'este' ? 'solo este producto' : 'toda la compra'}) sin agregar stock.\n\n¿Continuar?`;
+    if (!confirm(resumenTxt)) return;
+
+    // 1) Ingreso de lo ya pagado (si aplica) -- primero, para no dejar nada a medias si falla
+    let ingreso = null;
+    if (quiereIngreso) {
+        if (typeof window._ingresarCuenta !== 'function') return alert("No se pudo registrar: el módulo de caja no está disponible.");
+        const idOperacion = `MSI-${deuda.id}-CANC-${Date.now()}`;
+        const ok = window._ingresarCuenta({
+            monto: calc.exceso, cuentaId, etiqueta: cuentaEtiqueta,
+            concepto: `Devolución por compra MSI cancelada: ${deuda.banco}: ${deuda.producto || 'Compra'}`,
+            referencia: `MSI-${deuda.id}`, idOperacion
+        });
+        if (!ok) return alert(`No se pudo registrar el ingreso a "${cuentaEtiqueta}". Nada se guardó.`);
+        ingreso = { monto: calc.exceso, cuentaId, cuentaEtiqueta, idOperacion };
+    }
+
+    // 2) Recepciones pendientes a cancelar
+    const { hermanas } = _msiDetalleCompraDeRecepcion(rec);
+    const aCancelar = alcance === 'este' ? [rec] : hermanas;
+    const recepcionesCanceladas = [];
+    aCancelar.forEach(h => {
+        const r = recepciones.find(x => String(x.id) === String(h.id));
+        if (r && r.estatus === 'Pendiente') {
+            recepcionesCanceladas.push({ id: r.id, cantidadPendienteOriginal: r.cantidadPendiente, estatusOriginal: r.estatus });
+            r.estatus = 'Cancelada';
+            r.cantidadPendienteOriginal = r.cantidadPendiente;
+            r.cantidadPendiente = 0;
+            r.motivoCancelacion = 'Compra cancelada por el proveedor (plan MSI cancelado)';
+            r.fechaCancelacion = fecha;
+        }
+    });
+
+    // 3) Plan MSI: se guarda la foto del estado anterior para poder deshacer
+    const antes = {
+        calendario: JSON.parse(JSON.stringify(deuda.calendario || [])),
+        total: deuda.total, cuotaMensual: deuda.cuotaMensual,
+        montoPagado: deuda.montoPagado, pagosRealizados: deuda.pagosRealizados
+    };
+    deuda.montoPagado = res.yaPagado;          // se congela lo ya pagado antes de tocar cuotas
+    deuda.calendario = calc.calendarioNuevo;
+    deuda.total = calc.totalNuevo;
+    if (!calc.completa && calc.cuotaNueva > 0) deuda.cuotaMensual = calc.cuotaNueva;
+    deuda.cancelacionProveedor = {
+        activo: true, completa: calc.completa, fecha, alcance, monto: calc.monto,
+        reducido: calc.reducido, devolucionPagado: calc.exceso, ingreso,
+        recepcionesCanceladas, antes, registradoEn: new Date().toISOString()
+    };
+    cuentasMSI[idx] = deuda;
+    StorageService.set("cuentasMSI", cuentasMSI);
+    StorageService.set("recepciones", recepciones);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_COMPRA_CANCELADA_PROVEEDOR', modulo: 'Compras', entidad: 'cuentaMSI', entidadId: String(deuda.id),
+            detalle: `Compra MSI cancelada por el proveedor: ${deuda.banco} — ${deuda.producto || 'Compra'}. Monto cancelado ${dinero(calc.monto)}; ${calc.completa ? `${calc.cuotasCanceladas} cuota(s) pendiente(s) canceladas` : `cuotas pendientes de ${dinero(calc.saldoCuotasAntes)} a ${dinero(calc.saldoCuotasDespues)}`}.${calc.exceso > 0.01 ? ` Pendiente de devolución por lo ya pagado: ${dinero(calc.exceso)}.` : ''}${recepcionesCanceladas.length ? ` ${recepcionesCanceladas.length} recepción(es) cancelada(s) sin stock.` : ''}`,
+            monto: calc.monto, severidad: 'alerta', datos: { cancelacion: deuda.cancelacionProveedor }
+        });
+    }
+
+    document.querySelector('[data-modal="cancelacion-msi"]')?.remove();
+    alert(`✅ Compra cancelada. ${calc.completa ? 'El plan MSI ya no genera cobros.' : 'Las cuotas pendientes se ajustaron.'}${recepcionesCanceladas.length ? '\n\nLa recepción pendiente también se canceló (sin agregar stock).' : ''}`);
+    if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+    if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+    if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
+};
+
+window.deshacerCancelacionCompraMSI = function(id) {
+    if (typeof _comprasRequireAdmin === 'function' && !_comprasRequireAdmin('Deshacer cancelación de compra MSI')) return;
+    const cuentasMSI = StorageService.get("cuentasMSI", []);
+    const idx = cuentasMSI.findIndex(c => String(c.id) === String(id));
+    if (idx === -1) return;
+    const deuda = cuentasMSI[idx];
+    const c = deuda.cancelacionProveedor;
+    if (!c?.activo) return;
+    if (!confirm(`¿Deshacer la cancelación de esta compra MSI?\n\nVuelven las cuotas pendientes del plan${c.ingreso ? ` y se saca de nuevo ${dinero(c.ingreso.monto)} de "${c.ingreso.cuentaEtiqueta}"` : ''}${c.recepcionesCanceladas?.length ? `, y la mercancía vuelve a "Recepciones Pendientes"` : ''}.`)) return;
+
+    if (c.ingreso) {
+        if (typeof window._egresarCuenta !== 'function') return alert("No se pudo deshacer: el módulo de caja no está disponible.");
+        const ok = window._egresarCuenta({
+            monto: c.ingreso.monto, cuentaId: c.ingreso.cuentaId, etiqueta: c.ingreso.cuentaEtiqueta,
+            concepto: `Reversión de devolución por compra MSI cancelada: ${deuda.banco}: ${deuda.producto || 'Compra'}`,
+            referencia: `MSI-${deuda.id}`, idOperacion: `${c.ingreso.idOperacion}-REV`
+        });
+        if (!ok) return alert(`No se pudo revertir el ingreso en "${c.ingreso.cuentaEtiqueta}". La cancelación NO se deshizo.`);
+    }
+    if (Array.isArray(c.recepcionesCanceladas) && c.recepcionesCanceladas.length) {
+        const recepciones = StorageService.get("recepciones", []);
+        c.recepcionesCanceladas.forEach(rc => {
+            const r = recepciones.find(x => String(x.id) === String(rc.id));
+            if (r && r.estatus === 'Cancelada') {
+                r.estatus = rc.estatusOriginal || 'Pendiente';
+                r.cantidadPendiente = rc.cantidadPendienteOriginal;
+                delete r.cantidadPendienteOriginal; delete r.motivoCancelacion; delete r.fechaCancelacion;
+            }
+        });
+        StorageService.set("recepciones", recepciones);
+    }
+    const a = c.antes || {};
+    deuda.calendario = a.calendario || deuda.calendario;
+    deuda.total = a.total ?? deuda.total;
+    deuda.cuotaMensual = a.cuotaMensual ?? deuda.cuotaMensual;
+    if (a.montoPagado === undefined) delete deuda.montoPagado; else deuda.montoPagado = a.montoPagado;
+    deuda.cancelacionProveedor = { activo: false };
+    cuentasMSI[idx] = deuda;
+    StorageService.set("cuentasMSI", cuentasMSI);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_COMPRA_CANCELADA_PROVEEDOR_DESHECHA', modulo: 'Compras', entidad: 'cuentaMSI', entidadId: String(id),
+            detalle: `Cancelación de compra MSI deshecha: ${deuda.banco} — ${deuda.producto || 'Compra'}. Se restauró el plan de cuotas.`,
+            monto: c.monto, severidad: 'alerta', datos: { cancelacionDeshecha: c }
+        });
+    }
+    renderCuentasMSI();
+    if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI();
+    if (typeof window.renderRecepciones === 'function') window.renderRecepciones();
+    if (document.querySelector('[data-modal="historial-msi"]')) abrirHistorialMSI(id);
+};
+
 // ===== SEGUIMIENTO DE COMPRAS MSI — lista dinámica con filtros y análisis =====
 // El detalle (calendario de cuotas, pagos, reembolso) YA NO va inline aquí;
 // vive en abrirHistorialMSI(), que se abre al seleccionar un producto de la
@@ -695,8 +1142,11 @@ function _msiCalcularResumen(c) {
     const porcentaje = totalDeuda > 0 ? Math.min(100, (yaPagado / totalDeuda) * 100) : 0;
     const estaTerminado = yaPagado >= totalDeuda - 0.5;
     const reembolsada = !!c.reembolsoProveedor?.activo;
-    const estado = reembolsada ? 'Reembolsada' : (estaTerminado ? 'Liquidada' : 'Activa');
-    return { totalDeuda, cuota, yaPagado, saldo, porcentaje, estaTerminado, reembolsada, estado };
+    // Compra cancelada por el proveedor y plan MSI cancelado (ver abrirModalCancelacionCompraMSI)
+    const cancelada = !!(c.cancelacionProveedor?.activo && c.cancelacionProveedor.completa);
+    const canceladaParcial = !!(c.cancelacionProveedor?.activo && !c.cancelacionProveedor.completa);
+    const estado = reembolsada ? 'Reembolsada' : (cancelada ? 'Cancelada' : (estaTerminado ? 'Liquidada' : 'Activa'));
+    return { totalDeuda, cuota, yaPagado, saldo, porcentaje, estaTerminado, reembolsada, cancelada, canceladaParcial, estado };
 }
 
 function renderCuentasMSI() {
@@ -744,7 +1194,7 @@ function renderCuentasMSI() {
     // ── Barra de filtros ─────────────────────────────────────────────────
     const opcionesBanco = ['Todos', ...bancosDisponibles].map(b =>
         `<option value="${b}" ${F.banco === b ? 'selected' : ''}>${b}</option>`).join('');
-    const opcionesEstado = ['Todos', 'Activa', 'Liquidada', 'Reembolsada'].map(e =>
+    const opcionesEstado = ['Todos', 'Activa', 'Liquidada', 'Reembolsada', 'Cancelada'].map(e =>
         `<option value="${e}" ${F.estado === e ? 'selected' : ''}>${e === 'Todos' ? 'Todos los estados' : e}</option>`).join('');
     const opcionesOrden = [
         ['saldoDesc', 'Mayor saldo pendiente'],
@@ -805,9 +1255,11 @@ function renderCuentasMSI() {
     html += `<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">${filtradas.length} de ${cuentasMSI.length} compra${cuentasMSI.length === 1 ? '' : 's'}</div>`;
 
     html += filtradas.map(({ c, r }) => {
-        const colorBarra = r.estado === 'Liquidada' ? '#16a34a' : (r.estado === 'Reembolsada' ? '#7c3aed' : '#3498db');
+        const colorBarra = r.estado === 'Liquidada' ? '#16a34a' : (r.estado === 'Reembolsada' ? '#7c3aed' : (r.estado === 'Cancelada' ? '#b91c1c' : '#3498db'));
         const badgeEstado = r.estado === 'Liquidada'
             ? '<span style="background:#d1fae5; color:#065f46; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">✅ Liquidada</span>'
+            : r.estado === 'Cancelada'
+                ? '<span style="background:#fee2e2; color:#991b1b; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">🛑 Cancelada</span>'
             : r.estado === 'Reembolsada'
                 ? '<span style="background:#ede9fe; color:#6b21a8; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">🔄 Reembolsada</span>'
                 : '<span style="background:#dbeafe; color:#1e40af; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:bold;">⏳ Activa</span>';

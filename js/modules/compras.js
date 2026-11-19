@@ -972,10 +972,18 @@ function renderRecepciones() {
             <tbody>`;
 
     pendientes.forEach(r => {
+        // Compras directas a MSI: si el proveedor canceló el pedido, desde aquí se revisa
+        // el detalle de la compra y se cancela el plan MSI (ya no se sigue cobrando).
+        const deudaMSI = (typeof window._msiDeudaDeRecepcion === 'function') ? window._msiDeudaDeRecepcion(r) : null;
+        const lineaMSI = deudaMSI ? `<br><small style="color:#1e40af;">💳 ${deudaMSI.banco} · ${deudaMSI.meses} meses${deudaMSI.cancelacionProveedor?.activo ? ' · <b style="color:#b91c1c;">cancelada</b>' : ''}</small>` : '';
+        const btnMSI = (deudaMSI && !deudaMSI.cancelacionProveedor?.activo) ? `
+                    <button onclick="abrirModalCancelacionCompraMSI(${r.id})" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:8px; border-radius:5px; cursor:pointer;" title="El proveedor canceló esta compra a MSI: ver detalle y cancelar el plan">
+                        🧾 Cancelada por proveedor
+                    </button>` : '';
         html += `
             <tr>
                 <td>${r.fechaPedido}<br><strong>${r.proveedor}</strong></td>
-                <td>${r.productoNombre}<br><small>Pago: ${r.metodoPago}</small></td>
+                <td>${r.productoNombre}<br><small>Pago: ${r.metodoPago}</small>${lineaMSI}</td>
                 <td>${r.cantidadTotal}</td>
                 <td style="color:red; font-weight:bold;">${r.cantidadPendiente}</td>
                 <td style="white-space:nowrap;">
@@ -984,7 +992,7 @@ function renderRecepciones() {
                     </button>
                     <button onclick="cancelarRecepcionPendiente(${r.id})" style="background:none; color:#dc2626; border:1px solid #fecaca; padding:8px; border-radius:5px; cursor:pointer;" title="Cancelar — el producto no va a llegar">
                         ✕ Cancelar
-                    </button>
+                    </button>${btnMSI}
                 </td>
             </tr>`;
     });
