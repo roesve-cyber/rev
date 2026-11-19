@@ -956,7 +956,7 @@ function renderRecepciones() {
     let pendientes = recs.filter(r => r.estatus === "Pendiente");
 
     if (pendientes.length === 0) {
-        contenedor.innerHTML = "<p style='text-align:center; padding:20px;'>✅ No hay mercancía pendiente de recibir.</p>";
+        contenedor.innerHTML = "<p style='text-align:center; padding:20px;'>✅ No hay mercancía pendiente de recibir.</p>" + _recepcionesRecibidasHTML(recs);
         return;
     }
 
@@ -997,8 +997,125 @@ function renderRecepciones() {
             </tr>`;
     });
 
-    contenedor.innerHTML = html + "</tbody></table>";
+    contenedor.innerHTML = html + "</tbody></table>" + _recepcionesRecibidasHTML(recs);
 }
+
+// ── Recibidas recientemente: permite regresar a pendiente algo que se marcó como recibido por error ──
+function _recepcionesRecibidasHTML(recs) {
+    const recibidas = (recs || [])
+        .filter(r => r.estatus === "Completado" && Number(r.cantidadRecibida || 0) > 0 && !r.esConsignacion && r.productoId)
+        .sort((a, b) => Number(b.id) - Number(a.id))
+        .slice(0, 15);
+    if (recibidas.length === 0) return '';
+    const filas = recibidas.map(r => `
+        <tr>
+            <td>${r.fechaPedido || ''}<br><strong>${r.proveedor || ''}</strong></td>
+            <td>${r.productoNombre}<br><small>${r.color && r.color !== 'General' ? r.color + ' · ' : ''}${r.ubicacion && r.ubicacion !== 'General' ? '📍 ' + r.ubicacion : ''}</small></td>
+            <td style="text-align:center;">${r.cantidadRecibida}</td>
+            <td style="white-space:nowrap;">
+                <button onclick="regresarRecepcionAPendiente(${r.id})" style="background:#fff7ed; color:#9a3412; border:1px solid #fdba74; padding:7px 10px; border-radius:5px; cursor:pointer;" title="Se marcó como recibido por error: sacar del inventario y regresar a pendientes">
+                    ↩ Regresar a pendiente
+                </button>
+            </td>
+        </tr>`).join('');
+    return `
+        <details style="margin-top:22px;">
+            <summary style="cursor:pointer; font-weight:bold; color:#475569;">📦 Recibidas recientemente (${recibidas.length}) — ¿se marcó una como recibida por error?</summary>
+            <table class="tabla-admin" style="margin-top:10px;">
+                <thead><tr><th>Fecha / Proveedor</th><th>Producto</th><th>Recibidas</th><th>Acción</th></tr></thead>
+                <tbody>${filas}</tbody>
+            </table>
+        </details>`;
+}
+
+// ── Regresar una recepción a "pendiente" (se marcó como recibida por error) ──
+// Caso típico: compra directa registrada con "ingreso inmediato" cuando la mercancía
+// aún no llega. Saca esas unidades del inventario (stock general + variante), deja una
+// SALIDA de corrección en el kardex (queda rastro, no se borra nada) y la recepción
+// vuelve a Pendientes con todo lo recibido por llegar.
+window.regresarRecepcionAPendiente = function(idRecepcion) {
+    if (!_comprasRequireAdmin('Regresar recepción a pendiente')) return;
+    const recs = StorageService.get("recepciones", []);
+    const rec = recs.find(r => r.id == idRecepcion);
+    if (!rec) return alert("❌ Esa recepción ya no existe.");
+    const recibida = Number(rec.cantidadRecibida || 0);
+    if (recibida <= 0) return alert("Esa recepción no tiene unidades recibidas.");
+    if (rec.esConsignacion) return alert("Las recepciones de consignación no se pueden regresar desde aquí (generan registros de consignación). Contacta a soporte.");
+    if (!rec.productoId) return alert("Esta recepción no está ligada a un producto del catálogo.");
+
+    const entrada = prompt(`¿Cuántas unidades regresar a pendiente?\n\n${rec.productoNombre}\nRecibidas: ${recibida}`, String(recibida));
+    if (entrada === null) return;
+    const cant = parseInt(entrada, 10);
+    if (isNaN(cant) || cant <= 0 || cant > recibida) return alert(`⚠️ Captura una cantidad entre 1 y ${recibida}.`);
+
+    const productos = StorageService.get("productos", []);
+    const prod = productos.find(p => String(p.id) === String(rec.productoId));
+    if (!prod) return alert("❌ El producto ya no existe en el catálogo.");
+
+    // Validar que las unidades SIGAN en inventario (si ya se vendieron o movieron no se puede sacar)
+    const color = String(rec.color || 'General'), ubi = String(rec.ubicacion || 'General');
+    const variante = (prod.variantes || []).find(v =>
+        String(v.color || 'General').toUpperCase() === color.toUpperCase() &&
+        String(v.ubicacion || 'General').toUpperCase() === ubi.toUpperCase());
+    const stockVar = Number(variante?.stock) || 0;
+    const stockGen = Number(prod.stock) || 0;
+    if (!variante || stockVar < cant || stockGen < cant) {
+        return alert(`❌ No se puede sacar del inventario.\n\nSe necesitan ${cant} pieza(s) de "${prod.nombre}" en ${color} / ${ubi}, pero hay ${stockVar} en esa ubicación (stock general: ${stockGen}).\n\nSi ya se vendieron o se movieron de ubicación, no se pueden regresar a pendiente.`);
+    }
+
+    const costoNota = (Number(prod.costo) === Number(rec.costoUnitario) && Number(rec.costoUnitario) > 0)
+        ? `\n\n⚠️ El costo actual del producto (${dinero(prod.costo)}) coincide con esta compra. Si al registrarla subió el costo y se recalculó el precio, eso NO se revierte automáticamente: revísalo en el producto.` : '';
+    if (!confirm(`¿Regresar a Recepciones Pendientes?\n\n${prod.nombre}\nUnidades: ${cant}\nProveedor: ${rec.proveedor}\n\nSe descuentan del inventario (${color} / ${ubi}) y quedan por recibir. En el kardex queda una salida de corrección.${costoNota}`)) return;
+
+    const resultado = ajustarStockVariante(productos, rec.productoId, cant, {
+        color, ubicacion: ubi, modo: 'salida',
+        concepto: `Corrección: recepción marcada como recibida por error — ${rec.proveedor}`
+    });
+    if (!resultado.ok) return alert(`❌ No se pudo descontar el inventario (${resultado.motivo || 'error'}). Nada se guardó.`);
+
+    const movs = StorageService.get("movimientosInventario", []);
+    const costoU = Number(rec.costoUnitario || rec.costo || 0);
+    movs.push({
+        id: Date.now() + Math.random(),
+        productoId: String(rec.productoId),
+        productoNombre: rec.productoNombre || prod.nombre,
+        tipo: 'salida',
+        cantidad: cant,
+        costoUnitario: costoU, costo: costoU, precioCompra: costoU,
+        valor: cant * costoU,
+        proveedor: rec.proveedor || '',
+        referencia: rec.folio || rec.compraId || `REC-${rec.id}`,
+        compraId: rec.compraId || null,
+        ubicacion: ubi, color,
+        esCorreccion: true,
+        concepto: `Corrección: recepción marcada como recibida por error — regresa a Recepciones Pendientes (${rec.proveedor})`,
+        fecha: window.formatearFechaCortaMX ? window.formatearFechaCortaMX(new Date()) : new Date().toLocaleDateString(),
+        fechaISO: window.localISO ? window.localISO(new Date()) : new Date().toISOString()
+    });
+
+    rec.cantidadRecibida = recibida - cant;
+    rec.cantidadPendiente = Number(rec.cantidadPendiente || 0) + cant;
+    rec.estatus = "Pendiente";
+    rec.correcciones = [...(rec.correcciones || []), {
+        tipo: 'regreso_a_pendiente', cantidad: cant,
+        fecha: window.obtenerHoyInputMX ? window.obtenerHoyInputMX() : new Date().toISOString().split('T')[0]
+    }];
+
+    StorageService.set("productos", productos);
+    StorageService.set("movimientosInventario", movs);
+    StorageService.set("recepciones", recs);
+
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'RECEPCION_REGRESADA_A_PENDIENTE', modulo: 'Compras', entidad: 'recepcion', entidadId: String(idRecepcion),
+            detalle: `Recepción regresada a pendiente: ${rec.productoNombre} (${rec.proveedor}), ${cant} unidad(es) sacadas de ${color} / ${ubi}. Salida de corrección en kardex.`,
+            severidad: 'alerta', datos: { recepcion: rec, cantidad: cant }
+        });
+    }
+    alert(`✅ Listo. ${cant} unidad(es) salieron del inventario y la recepción volvió a Pendientes.`);
+    renderRecepciones();
+    if (typeof window.renderInventario === 'function') window.renderInventario();
+};
 
 // ── Cancelar una recepción pendiente que ya no va a llegar ──────────────────
 // Independiente de cualquier flujo de MSI/reembolso — esto es directo: el
