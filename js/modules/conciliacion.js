@@ -134,13 +134,12 @@ function renderConciliacionMSI() {
                     <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">SELECCIONAR BANCO:</label>
                     <select id="selMSIBanco" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesBancos}</select>
                 </div>
-                <div style="flex:1; min-width:150px;">
+                <div style="flex:1; min-width:200px;">
                     <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">MES DE ESTADO DE CUENTA:</label>
-                    <select id="selMSIMes" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesMeses}</select>
-                </div>
-                <div style="flex:0 0 110px; min-width:100px;">
-                    <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">AÑO:</label>
-                    <select id="selMSIAnio" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesAnios}</select>
+                    <div style="display:flex; gap:8px;">
+                        <select id="selMSIMes" style="flex:1; min-width:0; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesMeses}</select>
+                        <select id="selMSIAnio" style="width:88px; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesAnios}</select>
+                    </div>
                 </div>
             </div>
 
