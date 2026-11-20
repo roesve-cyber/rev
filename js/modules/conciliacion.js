@@ -7,7 +7,8 @@ function renderConciliacionMSI() {
     // --- Helpers Locales Blindados ---
     const fmtDinero = v => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(v) || 0);
     const fmtFecha = d => {
-        const dt = new Date(d);
+        // 'YYYY-MM-DD' se toma como fecha local (a mediodía): new Date('2026-12-01') es UTC y en México salía 30 NOV
+        const dt = (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) ? new Date(d + 'T12:00:00') : new Date(d);
         if (isNaN(dt.getTime())) return String(d);
         return new Intl.DateTimeFormat('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).format(dt).toUpperCase();
     };
@@ -40,12 +41,15 @@ function renderConciliacionMSI() {
     const diaLimite = (infoTarjeta && parseInt(infoTarjeta.diaLimite) > 0) ? parseInt(infoTarjeta.diaLimite) : 0;
     const pagaMismoMes = diaLimite > diaCorte;
 
-    // Ventana de FECHAS DE PAGO que se concilian en el mes seleccionado
+    // Ventana de FECHAS DE PAGO que se concilian en el mes seleccionado.
+    // Tarjetas que pagan el mismo mes: el MES calendario completo. No se usan días de corte porque
+    // las fechas guardadas de las compras no siempre traen el día de pago (hay compras con día 1, 4, 5
+    // y 18) y el historial de la compra ya interpreta cada cuota por su mes.
     const fechaInicio = pagaMismoMes
-        ? new Date(anioReferencia, mesReferencia, diaCorte, 0, 0, 0)
+        ? new Date(anioReferencia, mesReferencia, 1, 0, 0, 0)
         : new Date(anioReferencia, mesReferencia - 1, diaCorte - 1, 0, 0, 0);
     const fechaFin = pagaMismoMes
-        ? new Date(anioReferencia, mesReferencia + 1, diaCorte - 1, 23, 59, 59)
+        ? new Date(anioReferencia, mesReferencia + 1, 0, 23, 59, 59)
         : new Date(anioReferencia, mesReferencia, diaCorte, 23, 59, 59);
 
     // Periodo que se muestra: para las que pagan el mismo mes, el periodo facturado real del
