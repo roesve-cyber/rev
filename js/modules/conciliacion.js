@@ -21,8 +21,8 @@ function renderConciliacionMSI() {
     const anioReferencia = window._filtroMSIAnio || new Date().getFullYear();
 
     // 2. Cálculo Inteligente del Periodo Bancario
-    const infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSeleccionado)
-        || (window.buscarBancoPorValor ? window.buscarBancoPorValor(bancoSeleccionado) : null);
+    const infoTarjeta = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(bancoSeleccionado) : tarjetasConfig.find(t => t.banco === bancoSeleccionado))
+        || (window.buscarBancoPorValor ? window.buscarBancoPorValor(bancoSeleccionado, 'credito') : null);
 
     // El día de corte sale SIEMPRE del banco configurado: no se inventa uno.
     const diaCorte = (infoTarjeta && parseInt(infoTarjeta.diaCorte) > 0) ? parseInt(infoTarjeta.diaCorte) : 0;

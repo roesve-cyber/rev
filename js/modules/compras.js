@@ -4728,7 +4728,7 @@ function guardarCompraDirectaFinal() {
         let cuentasBancos = StorageService.get("cuentasMSI", []);
         let tarjetasConfig = StorageService.get("tarjetasConfig", []);
         
-        let infoTarjeta = tarjetasConfig.find(t => t.banco === bancoSel) || {};
+        let infoTarjeta = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(bancoSel) : tarjetasConfig.find(t => t.banco === bancoSel)) || {};
         let diaCorte = parseInt(infoTarjeta.diaCorte) || 15;
         let diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5);
 

@@ -228,7 +228,7 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
     let deudasNivel2 = window._msiFiltroBanco === 'Todos' ? deudas : deudas.filter(d => d.banco === window._msiFiltroBanco);
 
     deudasNivel2.forEach(deuda => {
-        const configBanco = tarjetasConfig.find(t => t.banco === deuda.banco) || { diaLimite: 1 };
+        const configBanco = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(deuda.banco) : tarjetasConfig.find(t => t.banco === deuda.banco)) || { diaLimite: 1 };
         const diaLimite = parseInt(configBanco.diaLimite) || 1;
         const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
 
@@ -340,7 +340,7 @@ window.abrirHistorialMSI = function(id) {
 
     document.querySelector('[data-modal="historial-msi"]')?.remove();
 
-    const configBanco = tarjetasConfig.find(t => t.banco === deuda.banco) || { diaLimite: 1 };
+    const configBanco = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(deuda.banco) : tarjetasConfig.find(t => t.banco === deuda.banco)) || { diaLimite: 1 };
     const diaLimite = parseInt(configBanco.diaLimite) || 1;
     const hoy = new Date(); hoy.setHours(0,0,0,0);
 
@@ -2446,7 +2446,7 @@ function procesarPagoTarjetaGlobal(banco) {
     const tarjetasConfig = StorageService.get("tarjetasConfig", []);
     
     // Obtenemos el día límite del banco para saber las fechas exactas
-    const configBanco = tarjetasConfig.find(t => t.banco === banco) || { diaLimite: 1 };
+    const configBanco = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(banco) : tarjetasConfig.find(t => t.banco === banco)) || { diaLimite: 1 };
     const diaLimite = parseInt(configBanco.diaLimite) || 1;
 
     // =========================================================================
@@ -2739,6 +2739,10 @@ window.confirmarGuardadoBanco = function(tipo, index) {
     // mismo tipo con el mismo nombre harían ambiguo el reconocimiento por nombre.
     const choque = tarjetas.some((t, i) => i !== index && String(t.banco || '').toUpperCase() === nombre && String(t.tipo || '') === tipo);
     if (choque) return alert(`⚠️ Ya existe un banco "${nombre}" de este tipo.`);
+    // Mismo nombre que una cuenta de OTRO tipo (p. ej. crédito con el nombre de una cuenta de débito):
+    // compras a MSI, conciliación y pagos de corte identifican al banco por nombre.
+    const otroTipo = tarjetas.find((t, i) => i !== index && String(t.banco || '').toUpperCase() === nombre && String(t.tipo || 'credito') !== tipo);
+    if (otroTipo && !confirm(`⚠️ Ya existe una cuenta de ${otroTipo.tipo === 'debito' ? 'DÉBITO' : 'CRÉDITO'} llamada "${nombre}".\n\nLas compras a MSI y la conciliación reconocen cada tarjeta por su nombre; para evitar confusiones usa un nombre distinto (por ejemplo "${nombre} TDC").\n\n¿Guardar de todos modos con el mismo nombre?`)) return;
 
     const previo = (index !== null && tarjetas[index]) ? tarjetas[index] : null;
     // 🔑 idCuenta se crea UNA vez y nunca cambia al editar o renombrar. Si se renombra, el
