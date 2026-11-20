@@ -32,10 +32,30 @@ function renderConciliacionMSI() {
     }
     
     // Matemáticas de fecha exactas (Si el corte es el 12: del 11 del mes pasado al 12 actual)
-    const fechaInicio = new Date(anioReferencia, mesReferencia - 1, diaCorte - 1, 0, 0, 0);
-    const fechaFin = new Date(anioReferencia, mesReferencia, diaCorte, 23, 59, 59);
+    // Tarjetas que CORTAN Y PAGAN EN EL MISMO MES (el día de pago es posterior al de corte,
+    // p. ej. corte 7 y pago 18): la mensualidad de un estado de cuenta se paga ese mismo mes.
+    // Antes la ventana (del corte anterior al corte del mes) dejaba el pago del 18 de noviembre
+    // dentro del estado de DICIEMBRE, y todos los números de pago salían un estado de cuenta
+    // tarde frente al banco. El resto de las tarjetas (pago en el mes siguiente al corte) no cambia.
+    const diaLimite = (infoTarjeta && parseInt(infoTarjeta.diaLimite) > 0) ? parseInt(infoTarjeta.diaLimite) : 0;
+    const pagaMismoMes = diaLimite > diaCorte;
 
-    const periodoStr = `${fmtFecha(fechaInicio)} al ${fmtFecha(fechaFin)}`;
+    // Ventana de FECHAS DE PAGO que se concilian en el mes seleccionado
+    const fechaInicio = pagaMismoMes
+        ? new Date(anioReferencia, mesReferencia, diaCorte, 0, 0, 0)
+        : new Date(anioReferencia, mesReferencia - 1, diaCorte - 1, 0, 0, 0);
+    const fechaFin = pagaMismoMes
+        ? new Date(anioReferencia, mesReferencia + 1, diaCorte - 1, 23, 59, 59)
+        : new Date(anioReferencia, mesReferencia, diaCorte, 23, 59, 59);
+
+    // Periodo que se muestra: para las que pagan el mismo mes, el periodo facturado real del
+    // estado de cuenta (día siguiente al corte anterior hasta el corte de este mes).
+    const periodoStr = pagaMismoMes
+        ? `${fmtFecha(new Date(anioReferencia, mesReferencia - 1, diaCorte + 1))} al ${fmtFecha(new Date(anioReferencia, mesReferencia, diaCorte))}`
+        : `${fmtFecha(fechaInicio)} al ${fmtFecha(fechaFin)}`;
+    const detalleCorteStr = pagaMismoMes
+        ? `Corte: Día ${diaCorte} · Pago: ${fmtFecha(new Date(anioReferencia, mesReferencia, diaLimite))}`
+        : `Corte: Día ${diaCorte}`;
 
     // 3. Filtrar mensualidades en el periodo
     let mensualidadesEnPeriodo = [];
@@ -94,7 +114,7 @@ function renderConciliacionMSI() {
                 <div>
                     <h2 style="margin:0; color:#1e293b;">🏦 Conciliación MSI: ${bancoSeleccionado}</h2>
                     <div style="background:#e0f2fe; color:#0369a1; padding:8px 15px; border-radius:6px; display:inline-block; margin-top:10px; font-weight:bold; font-size:14px;">
-                        📅 Periodo facturado: ${periodoStr} <span style="color:#0284c7; font-size:12px; margin-left:8px;">(Corte: Día ${diaCorte})</span>
+                        📅 Periodo facturado: ${periodoStr} <span style="color:#0284c7; font-size:12px; margin-left:8px;">(${detalleCorteStr})</span>
                     </div>
                 </div>
                 <button onclick="window.abrirModalComisionBancaria('${bancoSeleccionado}')" style="padding:10px 16px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; border-radius:8px; cursor:pointer; font-weight:bold; font-size:13px; white-space:nowrap;">🏷️ + Comisión Bancaria</button>
