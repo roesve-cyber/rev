@@ -1892,31 +1892,40 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
     // Cada bloque es un documento HTML AUTÓNOMO para poder descargarlo
     // directo con TicketService. Una línea por cliente.
     // ============================================================
-    const construirBloqueCelular = (bloque) => {
-        let contador = 0;
-        const filasHtml = bloque.clientes.map(c => {
-            contador++;
-            return `
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid #e2e8f0;">
-                <div style="min-width:0;flex:1;">
-                    <div style="font-weight:bold;font-size:12.5px;line-height:1.2;">${contador}. ${c.nombre}</div>
-                    <div style="font-size:10px;color:${c.ultimoPagoStr === 'Sin abonos' ? '#7f1d1d' : '#64748b'};">Últ. pago: ${c.ultimoPagoStr}</div>
-                </div>
-                <div style="font-weight:900;font-size:15px;color:#dc2626;white-space:nowrap;">${_rc.fmt(c.saldo)}</div>
-            </div>`;
-        }).join('');
-
-        return `
-        <div style="max-width:380px;margin:0 auto;padding:10px 4px;">
-            <div style="text-align:center;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:6px;">
-                <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
-                <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-                <div style="font-weight:900;font-size:14px;color:#1e40af;margin-top:6px;">📅 ${bloque.etiqueta}</div>
-                <div style="font-size:10px;color:#64748b;">${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''} · ${_rc.fmt(bloque.saldoBloque)}</div>
-            </div>
-            ${filasHtml}
+    // Fecha corta (d/m/aa) para ganar ancho en el celular.
+    const fechaCortaImg = (f) => f ? `${f.getDate()}/${f.getMonth() + 1}/${String(f.getFullYear()).slice(2)}` : 'Sin abonos';
+    const filasCompactasHtml = (bloque) => bloque.clientes.map(c => `
+        <div style="display:flex;align-items:baseline;gap:6px;padding:4px 2px;border-bottom:1px solid #e2e8f0;line-height:1.2;">
+            <div style="flex:1;min-width:0;font-weight:bold;font-size:11.5px;">${c.nombre}</div>
+            <div style="width:54px;text-align:right;font-size:10px;color:${c.ultimaFechaAbonoCliente ? '#64748b' : '#7f1d1d'};white-space:nowrap;">${fechaCortaImg(c.ultimaFechaAbonoCliente)}</div>
+            <div style="width:72px;text-align:right;font-weight:900;font-size:11.5px;color:#dc2626;white-space:nowrap;">${_rc.fmt(c.saldo)}</div>
+        </div>`).join('');
+    const encabezadoBloqueHtml = (bloque) => `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;padding:3px 2px;border-bottom:1px solid #93c5fd;font-size:10.5px;font-weight:900;color:#1e40af;">
+            <span>📅 ${bloque.etiqueta} · ${bloque.clientes.length}</span>
+            <span>${_rc.fmt(bloque.saldoBloque)}</span>
         </div>`;
-    };
+    const encabezadoImagenHtml = (subtitulo) => `
+        <div style="border-bottom:2px solid #1e40af;padding-bottom:5px;margin-bottom:2px;">
+            <div style="font-weight:900;font-size:14px;">Ruta de Cobranza · Mi Pueblito</div>
+            <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX')} · ${subtitulo}</div>
+            <div style="display:flex;gap:6px;margin-top:4px;font-size:9px;font-weight:bold;color:#94a3b8;"><div style="flex:1;">CLIENTE</div><div style="width:54px;text-align:right;">ÚLT. PAGO</div><div style="width:72px;text-align:right;">SALDO</div></div>
+        </div>`;
+
+    // Imagen de UN mes (también es el HTML de su PDF media carta).
+    const construirBloqueCelular = (bloque) => `
+        <div style="max-width:380px;margin:0 auto;padding:8px 4px;">
+            ${encabezadoImagenHtml(`${bloque.etiqueta} · ${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''} · ${_rc.fmt(bloque.saldoBloque)}`)}
+            ${filasCompactasHtml(bloque)}
+        </div>`;
+
+    // Imagen de TODA la ruta en una sola tira compacta (reemplaza el
+    // reacomodo automático de la tabla carta, que la volvía tarjetas gigantes).
+    const htmlImagenRuta = `
+        <div style="max-width:380px;margin:0 auto;padding:8px 4px;">
+            ${encabezadoImagenHtml(`${clientes.length} clientes · ${_rc.fmt(saldoTotalRuta)}`)}
+            ${bloques.map(b => encabezadoBloqueHtml(b) + filasCompactasHtml(b)).join('')}
+        </div>`;
 
     const fecha = hoy.toISOString().slice(0, 10);
     const bloquesConHtml = bloques.map(b => ({ ...b, htmlStandalone: construirBloqueCelular(b) }));
@@ -1929,53 +1938,54 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
     // se guarda de verdad aunque parezca generarse. descargarPdf/descargarImagen
     // corren en ESTA misma ventana (con un iframe oculto por dentro), que es
     // el camino que sí funciona para guardar en el teléfono.
-    _cobranzaMostrarSelectorFormato({ htmlCarta, bloques: bloquesConHtml, fecha, totalClientes: clientes.length });
+    _cobranzaMostrarSelectorFormato({ htmlCarta, htmlImagenRuta, bloques: bloquesConHtml, fecha, totalClientes: clientes.length });
 }
 
 // Modal de selección de formato para la Ruta de Cobranza (ver nota arriba de
 // por qué esto reemplazó abrir un popup con su propio botón "Guardar imagen").
-function _cobranzaMostrarSelectorFormato({ htmlCarta, bloques, fecha, totalClientes }) {
+function _cobranzaMostrarSelectorFormato({ htmlCarta, htmlImagenRuta, bloques, fecha, totalClientes }) {
     if (!window.TicketService) {
         alert('No se encontró el motor de documentos (TicketService). Recarga la página e intenta de nuevo.');
         return;
     }
     document.querySelector('[data-modal="cobranza-formato"]')?.remove();
 
-    window._cobBloquesPendientes = bloques;
     window._cobFechaPendiente = fecha;
 
-    const filasBloques = bloques.map((b, i) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">
-            <div>
-                <div style="font-weight:900;font-size:12.5px;">📅 ${b.etiqueta}</div>
-                <div style="font-size:10.5px;color:#64748b;">${b.clientes.length} cliente${b.clientes.length > 1 ? 's' : ''}</div>
-            </div>
-            <div style="display:flex;gap:6px;">
-                <button onclick="_cobDescargarBloque(${i},'pdf')" style="padding:8px 12px;border:0;border-radius:6px;background:#1e40af;color:white;font-weight:bold;cursor:pointer;font-size:11px;">📥 PDF</button>
-                <button onclick="_cobDescargarBloque(${i},'imagen')" style="padding:8px 12px;border:0;border-radius:6px;background:#047857;color:white;font-weight:bold;cursor:pointer;font-size:11px;">🖼️ Imagen</button>
-            </div>
-        </div>`).join('');
-
+    // Solo dos acciones: WhatsApp (imagen compacta de toda la ruta, ya con los
+    // bloques por mes adentro) y PDF / otros (PDF, imagen descargada, imprimir).
     document.body.insertAdjacentHTML('beforeend', `
         <div data-modal="cobranza-formato" style="position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:120000;display:flex;align-items:center;justify-content:center;padding:18px;">
-            <div style="width:100%;max-width:460px;max-height:85vh;overflow-y:auto;background:white;border-radius:10px;padding:22px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
-                <h3 style="margin:0;color:#0f172a;">Generar Ruta de Cobranza</h3>
+            <div style="width:100%;max-width:380px;max-height:85vh;overflow-y:auto;background:white;border-radius:10px;padding:22px;box-shadow:0 24px 55px rgba(15,23,42,.3);">
+                <h3 style="margin:0;color:#0f172a;">Ruta de Cobranza</h3>
                 <p style="margin:6px 0 16px;color:#64748b;font-size:12.5px;">${totalClientes} cliente(s) · ${fecha}</p>
 
-                <div style="font-size:11px;font-weight:900;color:#475569;margin-bottom:8px;">📄 HOJA CARTA</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:18px;">
-                    <button onclick="_cobDescargarCarta('pdf')" style="padding:12px 6px;border:0;border-radius:7px;background:#1e40af;color:white;font-weight:900;cursor:pointer;font-size:12px;">📥 PDF</button>
-                    <button onclick="_cobDescargarCarta('imagen')" style="padding:12px 6px;border:0;border-radius:7px;background:#047857;color:white;font-weight:900;cursor:pointer;font-size:12px;">🖼️ Imagen</button>
-                    <button onclick="_cobDescargarCarta('ver')" style="padding:12px 6px;border:0;border-radius:7px;background:#7c3aed;color:white;font-weight:900;cursor:pointer;font-size:12px;">👁️ Ver / Imprimir</button>
+                <button onclick="_cobEnviarWhatsApp()" style="width:100%;padding:14px;border:0;border-radius:8px;background:#16a34a;color:white;font-weight:900;cursor:pointer;font-size:14px;">💬 Enviar por WhatsApp</button>
+                <button onclick="_cobToggleOtros()" style="width:100%;margin-top:10px;padding:14px;border:0;border-radius:8px;background:#1e40af;color:white;font-weight:900;cursor:pointer;font-size:14px;">📄 PDF / otros</button>
+
+                <div data-cob-otros style="display:none;margin-top:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                    <button onclick="_cobDescargarCarta('pdf')" style="width:100%;padding:10px;border:0;border-radius:6px;background:#eff6ff;color:#1e40af;font-weight:bold;cursor:pointer;font-size:12.5px;text-align:left;">📥 Descargar PDF</button>
+                    <button onclick="_cobDescargarCarta('imagen')" style="width:100%;margin-top:6px;padding:10px;border:0;border-radius:6px;background:#ecfdf5;color:#047857;font-weight:bold;cursor:pointer;font-size:12.5px;text-align:left;">🖼️ Descargar imagen</button>
+                    <button onclick="_cobDescargarCarta('ver')" style="width:100%;margin-top:6px;padding:10px;border:0;border-radius:6px;background:#f5f3ff;color:#7c3aed;font-weight:bold;cursor:pointer;font-size:12.5px;text-align:left;">👁️ Ver / Imprimir</button>
                 </div>
 
-                <div style="font-size:11px;font-weight:900;color:#475569;margin-bottom:8px;">📱 IMAGEN PARA CELULAR — por mes</div>
-                ${filasBloques}
-
-                <button onclick="document.querySelector('[data-modal=\\'cobranza-formato\\']')?.remove()" style="width:100%;margin-top:8px;padding:10px;border:0;border-radius:7px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
-                <p style="margin:10px 0 0;font-size:10px;color:#94a3b8;">PDF/Imagen se descargan directo a tu dispositivo. "Ver/Imprimir" abre una vista previa en otra pestaña.</p>
+                <button onclick="document.querySelector('[data-modal=\\'cobranza-formato\\']')?.remove()" style="width:100%;margin-top:14px;padding:10px;border:0;border-radius:7px;background:#e2e8f0;color:#334155;font-weight:bold;cursor:pointer;">Cerrar</button>
             </div>
         </div>`);
+
+    window._cobToggleOtros = function() {
+        const box = document.querySelector('[data-cob-otros]');
+        if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    };
+
+    // En celular abre el menú de compartir (WhatsApp); en escritorio descarga la imagen.
+    window._cobEnviarWhatsApp = function() {
+        window.TicketService.descargarImagen(htmlImagenRuta, {
+            title: `Ruta de Cobranza ${window._cobFechaPendiente}`,
+            filename: `ruta-cobranza-${window._cobFechaPendiente}`,
+            imageHtml: htmlImagenRuta
+        });
+    };
 
     window._cobDescargarCarta = function(formato) {
         const fname = `ruta-cobranza-${window._cobFechaPendiente}`;
@@ -1983,21 +1993,9 @@ function _cobranzaMostrarSelectorFormato({ htmlCarta, bloques, fecha, totalClien
         if (formato === 'pdf') {
             window.TicketService.descargarPdf(htmlCarta, { title: titulo, filename: fname, pageSize: 'letter' });
         } else if (formato === 'imagen') {
-            window.TicketService.descargarImagen(htmlCarta, { title: titulo, filename: fname });
+            window.TicketService.descargarImagen(htmlCarta, { title: titulo, filename: fname, imageHtml: htmlImagenRuta });
         } else {
             window.TicketService.openDocument(htmlCarta, { title: titulo, filename: fname, pageSize: 'letter', thermal: false });
-        }
-    };
-
-    window._cobDescargarBloque = function(i, formato) {
-        const b = window._cobBloquesPendientes?.[i];
-        if (!b) return;
-        const fname = `ruta-cobranza-celular-${b.key}-${window._cobFechaPendiente}`;
-        const titulo = `Ruta de Cobranza ${b.etiqueta}`;
-        if (formato === 'pdf') {
-            window.TicketService.descargarPdf(b.htmlStandalone, { title: titulo, filename: fname, pageSize: 'half-letter' });
-        } else {
-            window.TicketService.descargarImagen(b.htmlStandalone, { title: titulo, filename: fname });
         }
     };
 }
