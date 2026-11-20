@@ -106,6 +106,15 @@ function renderConciliacionMSI() {
     const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     const opcionesMeses = meses.map((m, i) => `<option value="${i}" ${i == mesReferencia ? 'selected' : ''}>${m}</option>`).join('');
 
+    // Años disponibles: todos los que aparecen en los calendarios de pago, el actual y el siguiente
+    const aniosSet = new Set([new Date().getFullYear(), new Date().getFullYear() + 1, anioReferencia]);
+    cuentasMSI.forEach(c => (c.calendario || []).forEach(p => {
+        const y = parseInt(String(p.fecha || '').slice(0, 4), 10);
+        if (y >= 2000 && y <= 2100) aniosSet.add(y);
+    }));
+    const opcionesAnios = [...aniosSet].sort((a, b) => a - b)
+        .map(y => `<option value="${y}" ${y === anioReferencia ? 'selected' : ''}>${y}</option>`).join('');
+
     // 5. Renderizar Interfaz
     cont.innerHTML = `
         <div style="background:white; padding:25px; border-radius:12px; box-shadow:0 4px 6px rgba(0,0,0,0.05); position: relative;">
@@ -128,6 +137,10 @@ function renderConciliacionMSI() {
                 <div style="flex:1; min-width:150px;">
                     <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">MES DE ESTADO DE CUENTA:</label>
                     <select id="selMSIMes" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesMeses}</select>
+                </div>
+                <div style="flex:0 0 110px; min-width:100px;">
+                    <label style="display:block; font-size:11px; font-weight:bold; color:#64748b; margin-bottom:5px;">AÑO:</label>
+                    <select id="selMSIAnio" style="width:100%; padding:10px; border-radius:8px; border:1px solid #cbd5e1; font-weight:bold;">${opcionesAnios}</select>
                 </div>
             </div>
 
@@ -205,6 +218,7 @@ function renderConciliacionMSI() {
 
     document.getElementById('selMSIBanco').onchange = (e) => { window._filtroMSIBanco = e.target.value; renderConciliacionMSI(); };
     document.getElementById('selMSIMes').onchange = (e) => { window._filtroMSIMes = parseInt(e.target.value); renderConciliacionMSI(); };
+    document.getElementById('selMSIAnio').onchange = (e) => { window._filtroMSIAnio = parseInt(e.target.value); renderConciliacionMSI(); };
 }
 
 window.toggleConciliacionMSI = function(ctaId, numeroMes, valor) {
