@@ -1786,114 +1786,35 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
         return { base, ventas };
     });
 
-    // 2. Plazo pactado y salto de plazo por antigüedad (NO moratorios — es
-    //    otra pieza aparte). _cxcDetectarSaltoPlazo(cuenta) en cxc.js es la
-    //    MISMA función que usa Bóveda: si ya pasó su plazo pactado, recotiza
-    //    al SIGUIENTE escalón de la escalera sobre el capital original de la
-    //    venta. Es de solo lectura aquí — no toca saltosPlazoPendientes ni
-    //    Bóveda, solo proyecta. Tope: nunca pasa de 6 meses.
-    const evaluarPlazo = (v) => {
-        const saldoNominal = Number(v.sne?.saldoActual ?? v.saldoActual ?? 0);
-        const fechaFinal = typeof window._cxcFechaFinalCredito === 'function'
-            ? window._cxcFechaFinalCredito(v, null) : null;
-        const mesesPlan = Number(v.plan?.meses || v.plazoMeses || v.meses || 0);
-        const diasVencidos = fechaFinal ? Math.floor((hoy - fechaFinal) / 86400000) : 0;
-        const vencido = diasVencidos > 0;
-        const salto = vencido && typeof window._cxcDetectarSaltoPlazo === 'function'
-            ? window._cxcDetectarSaltoPlazo(v)
-            : null;
-        const diferenciaSalto = salto ? Number(salto.diferencia || 0) : 0;
-        return {
-            saldoNominal, fechaFinal, mesesPlan, vencido, diasVencidos,
-            mesesNuevo: salto ? salto.mesesNuevo : null,
-            diferenciaSalto,
-            saldoSiSalta: saldoNominal + diferenciaSalto,
-            enTopePlazo: vencido && !salto && mesesPlan >= 6
-        };
-    };
-
-    // 3. Último abono: fecha (SNE) + monto (nuevo, mismo filtro de abonos
-    //    cancelados que usa calcularSNE, para que ambos coincidan).
-    const ultimoAbono = (v) => {
-        const abonos = (v.abonos || []).filter(a => !a.cancelado && !a.canceladoPorVenta && !a.canceladoPorApartado);
-        const conFecha = abonos
-            .map(a => ({ monto: Number(a.monto || 0), fecha: _rc.parseFecha(a.fecha || a.fechaAbono) }))
-            .filter(a => a.fecha);
-        if (!conFecha.length) return null;
-        conFecha.sort((a, b) => b.fecha - a.fecha);
-        return conFecha[0];
-    };
-
-    // 4. Estructura de datos que alimenta AMBOS formatos
+    // 2. Estructura mínima por cliente. La ruta es solo un índice de quién
+    //    visitar y en qué orden: el detalle de cada cobro (artículos, plazo,
+    //    abonos, teléfono, dirección) ya lo ve el gestor en la app de cobranza.
+    //    Por eso aquí solo viaja: nombre, fecha del último pago y saldo.
     const clientes = clientesRaw.map(({ base, ventas }) => {
-        const fechaVentaBase = _rc.parseFecha(base.fechaVenta || base.fechaIso || base.fecha);
-        // 📅 Más reciente primero: cuando un cliente tiene varias ventas,
-        // se listan de la más nueva a la más vieja.
-        const ventasOrdenadas = ventas.slice().sort((a, b) => {
-            const fa = _rc.parseFecha(a.fechaVenta || a.fechaIso || a.fecha)?.getTime() || 0;
-            const fb = _rc.parseFecha(b.fechaVenta || b.fechaIso || b.fecha)?.getTime() || 0;
-            return fb - fa;
-        });
-        const filas = ventasOrdenadas.map(v => {
-            const s = v.sne || {};
-            const plazo = evaluarPlazo(v);
-            const ult = ultimoAbono(v);
-            let articulosText = 'Sin detalle de artículos';
-            if (v.articulos && v.articulos.length > 0) {
-                articulosText = v.articulos.map(a => `${a.cantidad || 1}x ${a.nombre || a.productoNombre || '-'}`).join(', ');
-            }
-            return {
-                fechaVentaStr: formatearFecha(v.fechaVenta || v.fechaIso || v.fecha),
-                articulosText,
-                abonado: Number(s.totalPagado || 0),
-                saldo: plazo.saldoNominal,
-                mesesPlan: plazo.mesesPlan,
-                fechaFinalStr: plazo.fechaFinal ? formatearFecha(plazo.fechaFinal) : null,
-                vencido: plazo.vencido,
-                diasVencidos: plazo.diasVencidos,
-                mesesNuevo: plazo.mesesNuevo,
-                diferenciaSalto: plazo.diferenciaSalto,
-                saldoSiSalta: plazo.saldoSiSalta,
-                enTopePlazo: plazo.enTopePlazo,
-                ultimaFechaAbono: s.ultimaFechaAbono || null,
-                ultAbonoFechaStr: s.ultimaFechaAbono ? formatearFecha(s.ultimaFechaAbono) : 'Sin abonos',
-                ultAbonoMontoStr: ult ? _rc.fmt(ult.monto) : '—',
-                diasSinPagoStr: s.diasSinPagar === 9999 ? 'Sin abonos' : `${s.diasSinPagar} días`
-            };
-        });
+        // Saldo del cliente = suma de todas sus ventas activas (mismo saldo
+        // nominal SNE que usaba la ruta antes, ahora sin desglose por venta).
+        const saldo = ventas.reduce((sum, v) => sum + Number(v.sne?.saldoActual ?? v.saldoActual ?? 0), 0);
 
-        const totalAbonado = filas.reduce((s, f) => s + f.abonado, 0);
-        const totalSaldo = filas.reduce((s, f) => s + f.saldo, 0);
-        const totalSiSalta = filas.reduce((s, f) => s + f.saldoSiSalta, 0);
-        const tieneSalto = filas.some(f => f.diferenciaSalto > 0);
-
-        // Último abono del CLIENTE = el más reciente entre TODAS sus ventas
-        // (si tiene 2+ cuentas, cada una pudo abonar en fechas distintas).
-        // Esto alimenta el bloque de mes (ver punto 5) y va aparte de
-        // ultAbonoFechaStr/Monto por venta, que sigue siendo por cuenta.
-        const fechasAbonoCliente = filas.map(f => f.ultimaFechaAbono).filter(Boolean);
-        const ultimaFechaAbonoCliente = fechasAbonoCliente.length
-            ? new Date(Math.max(...fechasAbonoCliente.map(f => f.getTime())))
+        // Último pago del CLIENTE = el más reciente entre TODAS sus ventas.
+        // Alimenta el bloque de mes (punto 3) y la columna "Último pago".
+        const fechasAbono = ventas
+            .map(v => v.sne?.ultimaFechaAbono)
+            .filter(f => f && !isNaN(new Date(f).getTime()))
+            .map(f => new Date(f));
+        const ultimaFechaAbonoCliente = fechasAbono.length
+            ? new Date(Math.max(...fechasAbono.map(f => f.getTime())))
             : null;
 
         return {
             nombre: base.nombre || base.clienteNombre || 'Sin nombre',
-            telefono: base.telefono || 'N/D',
-            direccion: base.direccion || 'N/D',
-            fechaVentaBase,
             ultimaFechaAbonoCliente,
-            filas,
-            multiVenta: filas.length > 1,
-            totalAbonado, totalSaldo, totalSiSalta, tieneSalto
+            ultimoPagoStr: ultimaFechaAbonoCliente ? formatearFecha(ultimaFechaAbonoCliente) : 'Sin abonos',
+            saldo
         };
     });
 
-    const haySaltosEnRuta = clientes.some(c => c.tieneSalto);
-
-    // 5. Bloques por mes DEL ÚLTIMO ABONO (no de la venta) — así el cobrador
-    //    agrupa por "cuándo pagó por última vez", que es lo que de verdad
-    //    ayuda a planear la ruta. Sin abonos registrados cae en su propio
-    //    bloque "SIN ABONOS" al final, en vez de mezclarse por fecha de venta.
+    // 3. Bloques por mes DEL ÚLTIMO ABONO (antigüedad de cobro). Sin abonos
+    //    registrados cae en su propio bloque "SIN ABONOS" al final.
     const bloqueClave = (fecha) => fecha && !isNaN(fecha.getTime())
         ? `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`
         : 'sin-abonos';
@@ -1913,65 +1834,29 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
             const fa = a.ultimaFechaAbonoCliente?.getTime() || 0;
             const fb = b.ultimaFechaAbonoCliente?.getTime() || 0;
             return fb - fa;
-        })
+        }),
+        saldoBloque: bloquesMap[key].reduce((sum, c) => sum + c.saldo, 0)
     }));
+    const saldoTotalRuta = clientes.reduce((sum, c) => sum + c.saldo, 0);
 
     // ============================================================
-    // FORMATO A — Hoja tamaño carta (tabla, para llevar impresa)
+    // FORMATO A — Hoja tamaño carta (tabla compacta, para imprimir)
     // ============================================================
     let contadorGlobal = 0;
     const seccionesCartaHtml = bloques.map(bloque => {
         const filasBloqueHtml = bloque.clientes.map(c => {
             contadorGlobal++;
-            const i = contadorGlobal;
-            const filasVenta = c.filas.map((f, idx) => {
-                const etiquetaVenta = c.multiVenta ? `<div style="color:#475569;font-size:9.5px;">↳ Venta ${idx + 1} · ${f.articulosText}</div>` : '';
-                const plazoHtml = f.fechaFinalStr
-                    ? (f.vencido
-                        ? `<div style="color:#dc2626;font-weight:bold;">🔴 Venció hace ${f.diasVencidos}d (${f.fechaFinalStr})</div>${f.diferenciaSalto > 0 ? `<div style="color:#dc2626;font-size:9px;">Si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)} (+${_rc.fmt(f.diferenciaSalto)})</div>` : (f.enTopePlazo ? `<div style="color:#94a3b8;font-size:9px;">Ya en tope de plazo (6m)</div>` : '')}`
-                        : `<div style="color:#16a34a;">🟢 Vence ${f.fechaFinalStr} (${f.mesesPlan || '?'}m)</div>`)
-                    : `<div style="color:#94a3b8;">Plazo N/D</div>`;
-                return `
-                <tr style="border-bottom:${idx === c.filas.length - 1 && !c.multiVenta ? '2px solid #cbd5e1' : '1px solid #e2e8f0'};">
-                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;font-weight:bold;font-size:13px;vertical-align:top;">${i}</td>` : ''}
-                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:8px 4px;vertical-align:top;">
-                        <div style="font-weight:900;font-size:12.5px;">${c.nombre}</div>
-                        <div style="font-size:9.5px;color:#475569;">📞 ${c.telefono}</div>
-                        <div style="font-size:9.5px;color:#475569;">📍 ${c.direccion}</div>
-                        ${!c.multiVenta ? `<div style="font-size:9.5px;color:#475569;margin-top:2px;">🛒 ${c.filas[0].articulosText}</div>` : ''}
-                    </td>` : ''}
-                    <td style="padding:6px 4px;font-size:10px;vertical-align:top;">
-                        <div>F. Venta: <b>${f.fechaVentaStr}</b></div>
-                        ${etiquetaVenta}
-                        ${plazoHtml}
-                    </td>
-                    <td style="padding:6px 4px;font-size:10.5px;text-align:right;vertical-align:top;color:#16a34a;font-weight:bold;">${_rc.fmt(f.abonado)}</td>
-                    <td style="padding:6px 4px;font-size:11px;text-align:right;vertical-align:top;color:#dc2626;font-weight:bold;">${_rc.fmt(f.saldo)}</td>
-                    <td style="padding:6px 4px;font-size:10px;vertical-align:top;">
-                        <div>${f.ultAbonoFechaStr}</div>
-                        <div style="color:#475569;">${f.ultAbonoMontoStr}</div>
-                    </td>
-                    <td style="padding:6px 4px;font-size:10px;text-align:center;vertical-align:top;font-weight:bold;color:${f.diasSinPagoStr === 'Sin abonos' ? '#7f1d1d' : (parseInt(f.diasSinPagoStr) > 30 ? '#7f1d1d' : '#c2410c')};">${f.diasSinPagoStr}</td>
-                    ${idx === 0 ? `<td rowspan="${c.filas.length + (c.multiVenta ? 1 : 0)}" style="padding:6px 4px;width:90px;vertical-align:top;">
-                        <div style="border-bottom:1px solid #94a3b8;height:20px;margin-bottom:8px;"></div>
-                        <div style="border-bottom:1px solid #94a3b8;height:20px;"></div>
-                    </td>` : ''}
-                </tr>`;
-            }).join('');
-
-            const filaTotal = c.multiVenta ? `
-                <tr style="border-bottom:2px solid #cbd5e1;background:#f1f5f9;">
-                    <td style="padding:5px 4px;font-weight:900;font-size:10px;" colspan="2">TOTAL CLIENTE (${c.filas.length} ventas)</td>
-                    <td style="padding:5px 4px;text-align:right;font-weight:900;color:#16a34a;font-size:10.5px;">${_rc.fmt(c.totalAbonado)}</td>
-                    <td style="padding:5px 4px;text-align:right;font-weight:900;color:#dc2626;font-size:11px;">${_rc.fmt(c.totalSaldo)}${c.tieneSalto ? `<div style="font-size:8.5px;font-weight:normal;">si sube de plazo: ${_rc.fmt(c.totalSiSalta)}</div>` : ''}</td>
-                    <td colspan="2"></td>
-                </tr>` : '';
-
-            return filasVenta + filaTotal;
+            return `
+            <tr style="border-bottom:1px solid #e2e8f0;page-break-inside:avoid;">
+                <td style="padding:4px 4px;font-size:10px;color:#64748b;width:22px;">${contadorGlobal}</td>
+                <td style="padding:4px 4px;font-size:12px;font-weight:bold;">${c.nombre}</td>
+                <td style="padding:4px 4px;font-size:11.5px;width:90px;color:${c.ultimoPagoStr === 'Sin abonos' ? '#7f1d1d' : '#334155'};">${c.ultimoPagoStr}</td>
+                <td style="padding:4px 4px;font-size:12px;text-align:right;width:90px;font-weight:900;color:#dc2626;">${_rc.fmt(c.saldo)}</td>
+            </tr>`;
         }).join('');
 
         return `
-        <tr><td colspan="8" style="padding:10px 4px 4px;font-weight:900;font-size:11px;color:#1e40af;border-bottom:1px solid #93c5fd;">📅 ${bloque.etiqueta} · ${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''}</td></tr>
+        <tr><td colspan="4" style="padding:10px 4px 4px;font-weight:900;font-size:11px;color:#1e40af;border-bottom:1px solid #93c5fd;">📅 ${bloque.etiqueta} · ${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''}</td></tr>
         ${filasBloqueHtml}`;
     }).join('');
 
@@ -1986,90 +1871,50 @@ function _cobranzaConstruirYAbrir(ventasFlat) {
             </div>
             <div style="font-size:10px;color:#64748b;text-align:right;">
                 Fecha emisión: <b>${hoy.toLocaleDateString('es-MX')}</b><br>
-                Clientes: <b>${clientes.length}</b>
+                Clientes: <b>${clientes.length}</b> · Saldo: <b>${_rc.fmt(saldoTotalRuta)}</b>
             </div>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:10px;">
+        <table style="width:100%;border-collapse:collapse;">
             <thead>
                 <tr style="background:#f8fafc;text-align:left;border-bottom:2px solid #cbd5e1;">
-                    <th style="padding:6px 4px;width:16px;">#</th>
-                    <th style="padding:6px 4px;">Cliente</th>
-                    <th style="padding:6px 4px;">Venta / Plazo</th>
-                    <th style="padding:6px 4px;text-align:right;">Abonado</th>
-                    <th style="padding:6px 4px;text-align:right;">Saldo</th>
-                    <th style="padding:6px 4px;">Último abono</th>
-                    <th style="padding:6px 4px;text-align:center;">Días s/pago</th>
-                    <th style="padding:6px 4px;">Firma / notas</th>
+                    <th style="padding:5px 4px;font-size:10px;">#</th>
+                    <th style="padding:5px 4px;font-size:10px;">Cliente</th>
+                    <th style="padding:5px 4px;font-size:10px;">Último pago</th>
+                    <th style="padding:5px 4px;font-size:10px;text-align:right;">Saldo</th>
                 </tr>
             </thead>
             <tbody>${seccionesCartaHtml}</tbody>
         </table>
-        ${haySaltosEnRuta ? `<p style="font-size:9px;color:#94a3b8;margin-top:8px;">* "Si sube de plazo" muestra a cuánto subiría el saldo si se aplica el salto de plazo al siguiente escalón (mismo cálculo que usa el sistema: recotiza sobre el capital original de la venta). No sube automáticamente — requiere que tú lo confirmes en Bóveda.</p>` : ''}
     `;
 
     // ============================================================
-    // FORMATO B — Imagen vertical optimizada para celular, por
-    // bloques de mes (para no perderse en listas largas). Cada bloque se
-    // arma como un documento HTML AUTÓNOMO (no vive dentro de una ventana
-    // emergente) para poder descargarlo directo con TicketService.
+    // FORMATO B — Imagen vertical para celular, por bloques de mes.
+    // Cada bloque es un documento HTML AUTÓNOMO para poder descargarlo
+    // directo con TicketService. Una línea por cliente.
     // ============================================================
     const construirBloqueCelular = (bloque) => {
         let contador = 0;
-        const tarjetasHtml = bloque.clientes.map(c => {
+        const filasHtml = bloque.clientes.map(c => {
             contador++;
-            const ventasHtml = c.multiVenta ? c.filas.map((f, idx) => `
-                <div style="background:#f8fafc;border-radius:6px;padding:7px 9px;margin-top:${idx === 0 ? 8 : 6}px;font-size:10.5px;">
-                    <div style="display:flex;justify-content:space-between;">
-                        <span>Venta ${idx + 1} · ${f.articulosText} (${f.fechaVentaStr})</span>
-                        <span style="color:#dc2626;font-weight:bold;">${_rc.fmt(f.saldo)}</span>
-                    </div>
-                    <div style="color:#64748b;font-size:9.5px;">Últ. abono ${f.ultAbonoFechaStr} · ${f.ultAbonoMontoStr} · ${f.diasSinPagoStr}</div>
-                    ${f.fechaFinalStr ? `<div style="font-size:9.5px;margin-top:2px;color:${f.vencido ? '#dc2626' : '#16a34a'};font-weight:bold;">
-                        ${f.vencido ? `🔴 Venció hace ${f.diasVencidos}d` : `🟢 Vence ${f.fechaFinalStr}`}
-                        ${f.diferenciaSalto > 0 ? ` · si sube a ${f.mesesNuevo}m: ${_rc.fmt(f.saldoSiSalta)}` : ''}
-                    </div>` : ''}
-                </div>`).join('') : '';
-
-            const unaVenta = !c.multiVenta ? c.filas[0] : null;
-
             return `
-            <div style="border:1px solid #e2e8f0;border-radius:8px;padding:11px;margin-bottom:10px;">
-                <div style="font-weight:900;font-size:14px;">${contador}. ${c.nombre}</div>
-                <div style="font-size:10.5px;color:#475569;margin-top:2px;">📞 ${c.telefono} · 📍 ${c.direccion}</div>
-                ${unaVenta ? `
-                <div style="font-size:10.5px;color:#475569;">🛒 ${unaVenta.articulosText} · Venta: ${unaVenta.fechaVentaStr}</div>
-                <div style="display:flex;justify-content:space-between;margin-top:8px;">
-                    <div><div style="font-size:9px;color:#64748b;">SALDO</div><div style="font-size:19px;font-weight:900;color:#dc2626;">${_rc.fmt(unaVenta.saldo)}</div></div>
-                    <div style="text-align:right;"><div style="font-size:9px;color:#64748b;">ABONADO</div><div style="font-size:14px;font-weight:900;color:#16a34a;">${_rc.fmt(unaVenta.abonado)}</div></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid #e2e8f0;">
+                <div style="min-width:0;flex:1;">
+                    <div style="font-weight:bold;font-size:12.5px;line-height:1.2;">${contador}. ${c.nombre}</div>
+                    <div style="font-size:10px;color:${c.ultimoPagoStr === 'Sin abonos' ? '#7f1d1d' : '#64748b'};">Últ. pago: ${c.ultimoPagoStr}</div>
                 </div>
-                <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px dashed #e2e8f0;font-size:10px;">
-                    <span>Últ. abono: <b>${unaVenta.ultAbonoFechaStr} · ${unaVenta.ultAbonoMontoStr}</b></span>
-                    <span style="font-weight:bold;color:${unaVenta.diasSinPagoStr === 'Sin abonos' ? '#7f1d1d' : '#c2410c'};">${unaVenta.diasSinPagoStr}</span>
-                </div>
-                ${unaVenta.fechaFinalStr ? `<div style="margin-top:6px;font-size:10.5px;font-weight:bold;color:${unaVenta.vencido ? '#dc2626' : '#16a34a'};">
-                    ${unaVenta.vencido ? `🔴 Plazo venció hace ${unaVenta.diasVencidos} días` : `🟢 Plazo vence ${unaVenta.fechaFinalStr}`}
-                    ${unaVenta.diferenciaSalto > 0 ? `<div style="font-size:10px;">Si sube a ${unaVenta.mesesNuevo} meses: ${_rc.fmt(unaVenta.saldoSiSalta)} (+${_rc.fmt(unaVenta.diferenciaSalto)})</div>` : (unaVenta.enTopePlazo ? `<div style="font-size:10px;color:#94a3b8;">Ya en tope de plazo (6m)</div>` : '')}
-                </div>` : ''}
-                ` : `
-                ${ventasHtml}
-                <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid #cbd5e1;">
-                    <span style="font-weight:900;font-size:12px;">TOTAL CLIENTE</span>
-                    <span style="font-weight:900;font-size:17px;color:#dc2626;">${_rc.fmt(c.totalSaldo)}</span>
-                </div>
-                ${c.tieneSalto ? `<div style="text-align:right;font-size:10px;color:#dc2626;">si suben de plazo: ${_rc.fmt(c.totalSiSalta)}</div>` : ''}
-                `}
+                <div style="font-weight:900;font-size:15px;color:#dc2626;white-space:nowrap;">${_rc.fmt(c.saldo)}</div>
             </div>`;
         }).join('');
 
         return `
         <div style="max-width:380px;margin:0 auto;padding:10px 4px;">
-            <div style="text-align:center;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:10px;">
+            <div style="text-align:center;border-bottom:2px solid #1e40af;padding-bottom:6px;margin-bottom:6px;">
                 <div style="font-weight:900;font-size:15px;">Ruta de Cobranza</div>
                 <div style="font-size:10px;color:#64748b;">${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
                 <div style="font-weight:900;font-size:14px;color:#1e40af;margin-top:6px;">📅 ${bloque.etiqueta}</div>
-                <div style="font-size:10px;color:#64748b;">${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''}</div>
+                <div style="font-size:10px;color:#64748b;">${bloque.clientes.length} cliente${bloque.clientes.length > 1 ? 's' : ''} · ${_rc.fmt(bloque.saldoBloque)}</div>
             </div>
-            ${tarjetasHtml}
+            ${filasHtml}
         </div>`;
     };
 
