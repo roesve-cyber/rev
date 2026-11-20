@@ -210,6 +210,20 @@ window.movimientoPerteneceACuenta = function(mov, aliases) {
         return null;
     };
 
+    // 💳 Tarjeta de CRÉDITO por nombre de banco. Cuando existe una cuenta de débito con el
+    // mismo nombre (p. ej. "ISABEL SANTANDER" débito y crédito), buscar solo por nombre devolvía
+    // la de débito (día de corte 0): la tarjeta de crédito no aparecía bien y la conciliación
+    // pedía fecha de corte. Aquí NUNCA se devuelve una cuenta de débito.
+    window.buscarTarjetaCreditoPorBanco = function (nombre) {
+        const v = norm(nombre);
+        if (!v) return null;
+        const lista = leerTarjetas().filter((e) => e && typeof e === 'object' && (!e.tipo || String(e.tipo).toLowerCase() === 'credito'));
+        return lista.find((e) => norm(e.banco) === v)
+            || lista.find((e) => Array.isArray(e.nombresAnteriores) && e.nombresAnteriores.some((n) => norm(n) === v))
+            || lista.find((e) => e.idCuenta && norm(e.idCuenta) === v)
+            || null;
+    };
+
     // Idempotente: marca con idCuenta a los bancos que aún no lo tienen y copia el
     // idCuenta a los registros derivados de cuentas-bancarias. Devuelve true si cambió algo.
     window.asegurarIdsBancos = function () {
