@@ -57,6 +57,7 @@ function renderConciliacionMSI() {
     const periodoStr = pagaMismoMes
         ? `${fmtFecha(new Date(anioReferencia, mesReferencia - 1, diaCorte + 1))} al ${fmtFecha(new Date(anioReferencia, mesReferencia, diaCorte))}`
         : `${fmtFecha(fechaInicio)} al ${fmtFecha(fechaFin)}`;
+    const analisisFechas = pagaMismoMes ? _concAnalizarCalendariosMSI(bancoSeleccionado, diaCorte, diaLimite) : { lista: [], hayRespaldo: false };
     const detalleCorteStr = pagaMismoMes
         ? `Corte: Día ${diaCorte} · Pago: ${fmtFecha(new Date(anioReferencia, mesReferencia, diaLimite))}`
         : `Corte: Día ${diaCorte}`;
@@ -129,6 +130,8 @@ function renderConciliacionMSI() {
                     <div style="background:#e0f2fe; color:#0369a1; padding:8px 15px; border-radius:6px; display:inline-block; margin-top:10px; font-weight:bold; font-size:14px;">
                         📅 Periodo facturado: ${periodoStr} <span style="color:#0284c7; font-size:12px; margin-left:8px;">(${detalleCorteStr})</span>
                     </div>
+                    <!-- La corrección automática por regla (abrirModalCorregirFechasMSI) queda disponible solo por consola; el flujo se corrige con el estado de cuenta (scripts/mercadopago_fechas.js) -->
+                    ${analisisFechas.hayRespaldo ? `<div style="margin-top:8px;"><button onclick="deshacerCorreccionFechasMSI('${bancoSeleccionado}')" style="padding:6px 12px; background:none; color:#64748b; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; font-size:12px;">↩ Deshacer corrección de fechas</button></div>` : ''}
                 </div>
                 <button onclick="window.abrirModalComisionBancaria('${bancoSeleccionado}')" style="padding:10px 16px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; border-radius:8px; cursor:pointer; font-weight:bold; font-size:13px; white-space:nowrap;">🏷️ + Comisión Bancaria</button>
             </div>
@@ -223,6 +226,123 @@ function renderConciliacionMSI() {
     document.getElementById('selMSIMes').onchange = (e) => { window._filtroMSIMes = parseInt(e.target.value); renderConciliacionMSI(); };
     document.getElementById('selMSIAnio').onchange = (e) => { window._filtroMSIAnio = parseInt(e.target.value); renderConciliacionMSI(); };
 }
+
+// ===================================================================
+// 🛠️ CORRECCIÓN DE FECHAS DE CALENDARIOS (tarjetas que pagan el mismo mes)
+// ===================================================================
+// Con la ventana anterior de la conciliación, los pagos de estas tarjetas salían un estado de cuenta
+// tarde; para compensarlo se movieron fechas a mano con "Reprogramar" (cascada): quedaron compras con
+// dos pagos en el mismo mes o con todo el calendario un mes antes. Ahora la conciliación usa el MES de
+// pago, así que esas fechas movidas salen en el mes equivocado. Esta herramienta recalcula el mes de
+// cada pago con la MISMA regla con la que el sistema genera el calendario al registrar la compra
+// (corte/pago de la tarjeta + fecha de compra). Solo cambia fechas: montos, estatus y conciliados
+// quedan igual. Es reversible.
+function _concMesesLargo() { return ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]; }
+function _concEtiquetaMes(idx) { return `${_concMesesLargo()[((idx % 12) + 12) % 12]} ${Math.floor(idx / 12)}`; }
+
+function _concAnalizarCalendariosMSI(banco, diaCorte, diaLimite) {
+    const cuentas = StorageService.get("cuentasMSI", []);
+    const brincoPago = diaCorte > diaLimite ? 1 : 0;
+    const lista = [];
+    let hayRespaldo = false;
+    cuentas.forEach(c => {
+        if (c.banco !== banco) return;
+        if (Array.isArray(c.calendarioAntesCorreccionFechas)) hayRespaldo = true;
+        const cal = c.calendario || [];
+        if (!cal.length || c.migracionAutomatica || c.esComisionBancaria) return;
+        const fc = String(c.fechaCompra || '');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fc)) return;
+        const [y, m, d] = fc.split('-').map(Number);
+        const primero = y * 12 + (m - 1) + (d > diaCorte ? 1 : 0) + brincoPago;
+        const cambios = [];
+        cal.forEach((p, i) => {
+            const mm = String(p.fecha || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (!mm) return;
+            const guardado = Number(mm[1]) * 12 + (Number(mm[2]) - 1);
+            const esperado = primero + i;
+            if (guardado !== esperado) cambios.push({ i, n: p.n || p.numero || (i + 1), guardado, esperado, dia: Number(mm[3]) });
+        });
+        if (cambios.length) lista.push({ id: c.id, concepto: c.concepto || c.producto || 'Compra MSI', fechaCompra: fc, total: cal.length, cambios, primero });
+    });
+    return { lista, hayRespaldo };
+}
+
+window.abrirModalCorregirFechasMSI = function(banco) {
+    const tarjeta = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(banco) : null) || {};
+    const { lista } = _concAnalizarCalendariosMSI(banco, parseInt(tarjeta.diaCorte) || 0, parseInt(tarjeta.diaLimite) || 0);
+    document.querySelector('[data-modal="corregir-fechas-msi"]')?.remove();
+    if (!lista.length) return alert("✅ Los calendarios de esta tarjeta ya están en orden.");
+    const filas = lista.map(a => {
+        const resumen = a.cambios.slice(0, 4).map(c => `#${c.n}: ${_concEtiquetaMes(c.guardado)} → <b>${_concEtiquetaMes(c.esperado)}</b>`).join(' · ') + (a.cambios.length > 4 ? ` · … (${a.cambios.length - 4} más)` : '');
+        return `<label style="display:flex; gap:10px; align-items:flex-start; padding:10px; border-bottom:1px solid #f1f5f9; cursor:pointer;">
+            <input type="checkbox" class="chkCorregirFechaMSI" value="${a.id}" checked style="margin-top:3px;">
+            <div style="font-size:12.5px; line-height:1.5;">
+                <b>${String(a.concepto).replace(/</g, '&lt;')}</b> <span style="color:#64748b;">· compra ${a.fechaCompra} · ${a.total} pagos</span><br>
+                <span style="color:#475569;">${a.cambios.length} pago(s) cambian de mes: ${resumen}</span>
+            </div></label>`;
+    }).join('');
+    document.body.insertAdjacentHTML('beforeend', `
+    <div data-modal="corregir-fechas-msi" style="position:fixed; inset:0; background:rgba(15,23,42,0.85); z-index:99999; display:flex; justify-content:center; align-items:flex-start; padding:20px; overflow-y:auto;">
+        <div style="background:white; border-radius:14px; width:100%; max-width:680px; padding:22px;">
+            <h3 style="margin:0 0 6px 0; color:#92400e;">🛠️ Corregir fechas de calendarios · ${banco}</h3>
+            <p style="font-size:12.5px; color:#475569; margin:0 0 12px 0;">Estas compras tienen pagos fuera del mes que les corresponde según el corte (${tarjeta.diaCorte}) y el pago (${tarjeta.diaLimite}) de la tarjeta, normalmente por haber movido fechas con “Reprogramar”. Solo se cambia el <b>mes</b> de cada pago; montos, estatus y conciliados no se tocan. Se puede deshacer.</p>
+            <div style="border:1px solid #e2e8f0; border-radius:10px; max-height:50vh; overflow-y:auto;">${filas}</div>
+            <div style="display:flex; gap:10px; margin-top:14px;">
+                <button onclick="aplicarCorreccionFechasMSI('${banco}')" style="flex:1; padding:12px; background:#d97706; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">✅ Corregir las seleccionadas</button>
+                <button onclick="this.closest('[data-modal]').remove()" style="padding:12px 18px; background:#e2e8f0; color:#475569; border:none; border-radius:8px; cursor:pointer;">Cancelar</button>
+            </div>
+        </div>
+    </div>`);
+};
+
+window.aplicarCorreccionFechasMSI = function(banco) {
+    const ids = [...document.querySelectorAll('.chkCorregirFechaMSI')].filter(x => x.checked).map(x => String(x.value));
+    if (!ids.length) return alert("Selecciona al menos una compra.");
+    const tarjeta = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(banco) : null) || {};
+    const { lista } = _concAnalizarCalendariosMSI(banco, parseInt(tarjeta.diaCorte) || 0, parseInt(tarjeta.diaLimite) || 0);
+    const cuentas = StorageService.get("cuentasMSI", []);
+    let pagosCambiados = 0, compras = 0;
+    lista.filter(a => ids.includes(String(a.id))).forEach(a => {
+        const c = cuentas.find(x => String(x.id) === String(a.id));
+        if (!c) return;
+        c.calendarioAntesCorreccionFechas = (c.calendario || []).map(p => p.fecha);   // respaldo para deshacer
+        a.cambios.forEach(ch => {
+            const idx = ch.esperado, y = Math.floor(idx / 12), mes = ((idx % 12) + 12) % 12;
+            const ult = new Date(y, mes + 1, 0).getDate();
+            const dia = Math.min(ch.dia, ult);
+            c.calendario[ch.i].fecha = `${y}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+            pagosCambiados++;
+        });
+        compras++;
+    });
+    StorageService.set("cuentasMSI", cuentas);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_FECHAS_CALENDARIO_CORREGIDAS', modulo: 'Conciliación', entidad: 'cuentaMSI', entidadId: banco,
+            detalle: `Corrección de fechas de calendarios MSI de ${banco}: ${pagosCambiados} pago(s) en ${compras} compra(s) movidos al mes que les corresponde. Solo fechas; reversible.`,
+            severidad: 'alerta'
+        });
+    }
+    document.querySelector('[data-modal="corregir-fechas-msi"]')?.remove();
+    alert(`✅ Listo: ${pagosCambiados} pago(s) de ${compras} compra(s) quedaron en el mes que les corresponde.`);
+    renderConciliacionMSI();
+};
+
+window.deshacerCorreccionFechasMSI = function(banco) {
+    const cuentas = StorageService.get("cuentasMSI", []);
+    const conRespaldo = cuentas.filter(c => c.banco === banco && Array.isArray(c.calendarioAntesCorreccionFechas));
+    if (!conRespaldo.length) return;
+    if (!confirm(`¿Deshacer la corrección de fechas de ${banco}?\n\nSe restauran las fechas anteriores de ${conRespaldo.length} compra(s).`)) return;
+    conRespaldo.forEach(c => {
+        c.calendarioAntesCorreccionFechas.forEach((f, i) => { if (c.calendario[i]) c.calendario[i].fecha = f; });
+        delete c.calendarioAntesCorreccionFechas;
+    });
+    StorageService.set("cuentasMSI", cuentas);
+    if (window.AuditService?.log) {
+        window.AuditService.log({ accion: 'MSI_FECHAS_CALENDARIO_RESTAURADAS', modulo: 'Conciliación', entidad: 'cuentaMSI', entidadId: banco, detalle: `Se restauraron las fechas originales de ${conRespaldo.length} compra(s) de ${banco}.`, severidad: 'alerta' });
+    }
+    renderConciliacionMSI();
+};
 
 window.toggleConciliacionMSI = function(ctaId, numeroMes, valor) {
     const cuentasMSI = StorageService.get("cuentasMSI", []);
