@@ -222,7 +222,12 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
     });
     htmlNivel1 += `</div></div>`;
 
-    // 3. RECOPILAR CUOTAS (Leyendo directamente el estado real)
+    // 3. RECOPILAR CUOTAS — MISMO DATO QUE LA CONCILIACIÓN
+    // Antes esta vista descartaba toda cuota con estado 'Pagado'. Si un pago de corte
+    // barría cuotas que la Conciliación (cuadrada con el estado de cuenta) ubica en un
+    // mes posterior, ese mes aparecía más bajo que el estado de cuenta. Ahora el total
+    // del mes = TODOS los cargos del calendario del mes (p.monto, igual que Conciliación)
+    // y se separa lo ya pagado por adelantado de lo que realmente falta por pagar.
     let cronogramaGlobal = {};
     const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
     let deudasNivel2 = window._msiFiltroBanco === 'Todos' ? deudas : deudas.filter(d => d.banco === window._msiFiltroBanco);
@@ -230,35 +235,51 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
     deudasNivel2.forEach(deuda => {
         const configBanco = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(deuda.banco) : tarjetasConfig.find(t => t.banco === deuda.banco)) || { diaLimite: 1 };
         const diaLimite = parseInt(configBanco.diaLimite) || 1;
-        const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, ''));
+        const cuotaOriginal = parseFloat(String(deuda.cuotaMensual || 0).replace(/[$,]/g, '')) || 0;
 
         (deuda.calendario || []).forEach((pago) => {
-            if (pago.estado !== 'Pagado') {
-                // Descontamos lo parcial si existe
-                let abonado = parseFloat(pago.montoAbonado || 0);
-                let saldoPendienteDeEstaCuota = cuotaOriginal - abonado;
+            if (!pago || !pago.fecha) return;
+            const montoCuota = parseFloat(pago.monto) > 0 ? parseFloat(pago.monto) : cuotaOriginal;
+            if (!(montoCuota > 0)) return;
 
-                if (saldoPendienteDeEstaCuota > 0) {
-                    const partes = pago.fecha.split('-');
-                    let anioPago = parseInt(partes[0]);
-                    let mesPago = parseInt(partes[1]) - 1;
-                    
-                    const fechaPagoReal = new Date(anioPago, mesPago, diaLimite, 0, 0, 0);
-                    const mesClave = `${anioPago}-${String(mesPago + 1).padStart(2, '0')}`;
+            const estaPagada = pago.estado === 'Pagado';
+            const abonado = estaPagada ? montoCuota : Math.min(montoCuota, parseFloat(pago.montoAbonado || 0) || 0);
+            const saldoPendienteDeEstaCuota = Math.max(0, montoCuota - abonado);
 
-                    if (!cronogramaGlobal[mesClave]) cronogramaGlobal[mesClave] = { total: 0, detalles: [] };
-                    cronogramaGlobal[mesClave].total += saldoPendienteDeEstaCuota;
-                    cronogramaGlobal[mesClave].detalles.push({ 
-                        deuda, 
-                        pago, 
-                        cuotaOriginal: cuotaOriginal,
-                        cuotaPendienteReal: saldoPendienteDeEstaCuota,
-                        fechaExigible: fechaPagoReal,
-                        esParcial: pago.estado === 'Parcial'
-                    });
-                }
-            }
+            const partes = String(pago.fecha).split('-');
+            const anioPago = parseInt(partes[0]);
+            const mesPago = parseInt(partes[1]) - 1;
+            if (isNaN(anioPago) || isNaN(mesPago)) return;
+
+            const fechaPagoReal = new Date(anioPago, mesPago, diaLimite, 0, 0, 0);
+            const mesClave = `${anioPago}-${String(mesPago + 1).padStart(2, '0')}`;
+            // Lo abonado a una cuota cuya fecha de cobro aún no llega = pagado por adelantado
+            const adelantado = (abonado > 0.005 && fechaPagoReal > hoy) ? abonado : 0;
+
+            if (!cronogramaGlobal[mesClave]) cronogramaGlobal[mesClave] = { bruto: 0, pendiente: 0, adelantado: 0, detalles: [] };
+            const g = cronogramaGlobal[mesClave];
+            g.bruto += montoCuota;
+            g.pendiente += saldoPendienteDeEstaCuota;
+            g.adelantado += adelantado;
+            g.detalles.push({
+                deuda,
+                pago,
+                cuotaOriginal: montoCuota,
+                cuotaPendienteReal: saldoPendienteDeEstaCuota,
+                fechaExigible: fechaPagoReal,
+                esParcial: pago.estado === 'Parcial',
+                estaPagada: saldoPendienteDeEstaCuota <= 0.005,
+                adelantado
+            });
         });
+    });
+
+    // Solo se muestran los meses que tienen algo por pagar o algo pagado por adelantado.
+    // (Meses ya cerrados y saldados no son flujo.) Un mes visible conserva TODOS sus cargos
+    // para que su total sea el mismo que el de la Conciliación.
+    Object.keys(cronogramaGlobal).forEach(clave => {
+        const g = cronogramaGlobal[clave];
+        if (g.pendiente <= 0.005 && g.adelantado <= 0.005) delete cronogramaGlobal[clave];
     });
 
     // 4. NIVEL 2: FILTROS DE MESES
@@ -273,7 +294,8 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
         const isActivo = window._msiFiltroMes === clave;
         htmlNivel2 += `<div onclick="renderDashboardMSI(null, '${clave}')" style="cursor:pointer; min-width:110px; padding:10px; border-radius:8px; border:2px solid ${isActivo ? '#10b981' : '#e2e8f0'}; background:${isActivo ? '#ecfdf5' : 'white'}; text-align:center;">
             <div style="font-size:11px; color:#6b7280; font-weight:bold; text-transform:uppercase;">📅 ${mesesNombre[parseInt(mes)-1]} ${anio.substring(2)}</div>
-            <div style="font-weight:900; font-size:14px; color:#059669;">${dinero(cronogramaGlobal[clave].total)}</div>
+            <div style="font-weight:900; font-size:14px; color:#059669;">${dinero(cronogramaGlobal[clave].bruto)}</div>
+            ${cronogramaGlobal[clave].adelantado > 0.005 ? `<div style="font-size:10px; color:#92400e; font-weight:bold;">Por pagar ${dinero(cronogramaGlobal[clave].pendiente)}</div>` : ''}
         </div>`;
     });
     htmlNivel2 += `</div></div>`;
@@ -286,10 +308,15 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
         if (window._msiFiltroMes !== 'Todos' && window._msiFiltroMes !== clave) return;
         hayPagosNivel3 = true;
         const [anio, mes] = clave.split('-');
-        htmlNivel3 += `<div style="background:#f1f5f9; padding:8px 15px; font-size:11px; font-weight:bold; color:#475569; border-bottom:1px solid #e2e8f0; text-transform:uppercase; letter-spacing:1px;">Cobros del mes: ${mesesNombre[parseInt(mes)-1]} ${anio}</div>`;
+        const gMes = cronogramaGlobal[clave];
+        const yaPagadoMes = gMes.bruto - gMes.pendiente;
+        htmlNivel3 += `<div style="background:#f1f5f9; padding:8px 15px; font-size:11px; font-weight:bold; color:#475569; border-bottom:1px solid #e2e8f0; text-transform:uppercase; letter-spacing:1px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+            <span>Cobros del mes: ${mesesNombre[parseInt(mes)-1]} ${anio}</span>
+            <span style="text-transform:none; letter-spacing:0;">Cargos ${dinero(gMes.bruto)}${yaPagadoMes > 0.005 ? ` · Ya pagado −${dinero(yaPagadoMes)} · <span style="color:#b45309;">Por pagar ${dinero(gMes.pendiente)}</span>` : ''}</span>
+        </div>`;
         
         cronogramaGlobal[clave].detalles.sort((a,b) => a.fechaExigible - b.fechaExigible).forEach((det) => {
-            const estaVencida = det.fechaExigible < hoy;
+            const estaVencida = !det.estaPagada && det.fechaExigible < hoy;
             const numCuota = det.pago.n || det.pago.numero;
             const totalCuotas = det.deuda.meses || det.deuda.plazo;
             const nombreProd = det.deuda.producto || det.deuda.concepto || 'Compra MSI';
@@ -302,9 +329,12 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
                         <br><small style="color:#64748b;">${nombreProd} (Cuota ${numCuota}/${totalCuotas}) | 🏦 ${det.deuda.banco}</small>
                     </div>
                     <div style="text-align:right;">
+                        ${det.estaPagada ? `
+                        <div style="font-weight:900; color:#94a3b8; font-size:16px;">${dinero(det.cuotaOriginal)}</div>
+                        <div style="color:#166534; background:#dcfce7; border-radius:4px; font-weight:bold; font-size:9px; padding:2px 4px; display:inline-block; margin-top:2px;">${det.adelantado > 0.005 ? '✅ PAGADO POR ADELANTADO' : '✅ PAGADO'}</div>` : `
                         <div style="font-weight:900; color:${estaVencida ? '#dc2626' : '#059669'}; font-size:16px;">
                             ${estaVencida ? '⚠️ ' : ''}${dinero(det.cuotaPendienteReal)}
-                        </div>
+                        </div>`}
                         ${estaVencida ? `<div style="color:white; background:#dc2626; border-radius:4px; font-weight:bold; font-size:9px; padding:2px 4px; display:inline-block; margin-top:2px;">VENCIDA</div>` : ''}
                     </div>
                 </div>`;

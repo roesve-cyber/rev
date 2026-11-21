@@ -1,5 +1,50 @@
 // ===== MÓDULO EXCLUSIVO DE CONCILIACIÓN MSI POR FECHA DE CORTE =====
 
+// Todo cambio hecho desde la Conciliación (marcar, reprogramar, eliminar, reasignar, corregir fechas)
+// debe verse de inmediato en el Flujo MSI y en Cuentas MSI: ambas leen el mismo `cuentasMSI`.
+// Una cuota que ya estaba marcada como pagada (porque un pago de corte la alcanzó cuando estaba en
+// un mes anterior) y que la Conciliación mueve a un estado de cuenta POSTERIOR y aún no vencido, deja
+// de estar pagada: ese estado de cuenta todavía no se cubre. No se toca el dinero ni el historial de
+// pagos de corte; solo el estado de la cuota. Devuelve las cuotas liberadas.
+function _concLiberarCuotasMovidas(cuenta, fechasAntes) {
+    const liberadas = [];
+    const hoyISO = new Date().toISOString().slice(0, 10);
+    (cuenta.calendario || []).forEach((p, i) => {
+        const antes = fechasAntes[i], ahora = String(p.fecha || '');
+        if (!antes || !ahora || ahora <= antes) return;
+        if (ahora.slice(0, 7) <= String(antes).slice(0, 7)) return;      // solo si cambia a un mes posterior
+        if (ahora <= hoyISO) return;                                      // el nuevo mes ya venció: se deja como está
+        if (p.estado !== 'Pagado' && p.estado !== 'Parcial') return;
+        liberadas.push({ n: p.n || p.numero || (i + 1), monto: parseFloat(p.monto) || 0, estadoAnterior: p.estado, montoAbonadoAnterior: p.montoAbonado });
+        p.estado = 'Pendiente';
+        p.montoAbonado = 0;
+    });
+    if (liberadas.length) {
+        const cuotaRef = parseFloat(String(cuenta.cuotaMensual || 0).replace(/[$,]/g, '')) || 0;
+        let pagado = 0, liquidadas = 0;
+        cuenta.calendario.forEach(pg => {
+            const m = parseFloat(pg.monto) > 0 ? parseFloat(pg.monto) : cuotaRef;
+            if (pg.estado === 'Pagado') { pagado += m; liquidadas++; }
+            else if (pg.estado === 'Parcial') pagado += parseFloat(pg.montoAbonado || 0) || 0;
+        });
+        cuenta.montoPagado = pagado;
+        cuenta.pagosRealizados = liquidadas;
+        if (window.AuditService?.log) {
+            window.AuditService.log({
+                accion: 'MSI_CUOTAS_LIBERADAS_POR_REPROGRAMACION', modulo: 'Conciliación', entidad: 'cuentaMSI', entidadId: cuenta.id,
+                detalle: `${cuenta.concepto || cuenta.producto}: ${liberadas.length} cuota(s) pagadas pasaron a un estado de cuenta posterior y quedaron pendientes. El dinero de pagos de corte no se modificó.`,
+                severidad: 'alerta', datos: { liberadas }
+            });
+        }
+    }
+    return liberadas;
+}
+
+function _concRefrescarFlujoMSI() {
+    try { if (typeof window.renderDashboardMSI === 'function') window.renderDashboardMSI(); } catch (e) { console.error('Refresco Flujo MSI:', e); }
+    try { if (typeof renderCuentasMSI === 'function') renderCuentasMSI(); } catch (e) { console.error('Refresco Cuentas MSI:', e); }
+}
+
 function renderConciliacionMSI() {
     const cont = document.getElementById('contenedorConciliacion');
     if (!cont) return;
@@ -306,6 +351,7 @@ window.aplicarCorreccionFechasMSI = function(banco) {
         const c = cuentas.find(x => String(x.id) === String(a.id));
         if (!c) return;
         c.calendarioAntesCorreccionFechas = (c.calendario || []).map(p => p.fecha);   // respaldo para deshacer
+        const fechasAntesCorr = c.calendarioAntesCorreccionFechas.slice();
         a.cambios.forEach(ch => {
             const idx = ch.esperado, y = Math.floor(idx / 12), mes = ((idx % 12) + 12) % 12;
             const ult = new Date(y, mes + 1, 0).getDate();
@@ -313,6 +359,7 @@ window.aplicarCorreccionFechasMSI = function(banco) {
             c.calendario[ch.i].fecha = `${y}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
             pagosCambiados++;
         });
+        _concLiberarCuotasMovidas(c, fechasAntesCorr);
         compras++;
     });
     StorageService.set("cuentasMSI", cuentas);
@@ -326,6 +373,7 @@ window.aplicarCorreccionFechasMSI = function(banco) {
     document.querySelector('[data-modal="corregir-fechas-msi"]')?.remove();
     alert(`✅ Listo: ${pagosCambiados} pago(s) de ${compras} compra(s) quedaron en el mes que les corresponde.`);
     renderConciliacionMSI();
+    _concRefrescarFlujoMSI();
 };
 
 window.deshacerCorreccionFechasMSI = function(banco) {
@@ -342,6 +390,7 @@ window.deshacerCorreccionFechasMSI = function(banco) {
         window.AuditService.log({ accion: 'MSI_FECHAS_CALENDARIO_RESTAURADAS', modulo: 'Conciliación', entidad: 'cuentaMSI', entidadId: banco, detalle: `Se restauraron las fechas originales de ${conRespaldo.length} compra(s) de ${banco}.`, severidad: 'alerta' });
     }
     renderConciliacionMSI();
+    _concRefrescarFlujoMSI();
 };
 
 window.toggleConciliacionMSI = function(ctaId, numeroMes, valor) {
@@ -356,6 +405,7 @@ window.toggleConciliacionMSI = function(ctaId, numeroMes, valor) {
         }
     }
     renderConciliacionMSI();
+    _concRefrescarFlujoMSI();
 };
 
 window.abrirModalReprogramarConciliacion = function(cuentaId, indexMensualidad, fechaActual) {
@@ -387,6 +437,7 @@ window.ejecutarReprogramacionConciliacion = function(cuentaId, indexMensualidad)
     if (!cuenta) return;
 
     let calendario = cuenta.calendario;
+    const fechasAntes = calendario.map(p => p.fecha);
     let fechaBase = new Date(nuevaFechaStr + "T12:00:00");
     let mesActual = fechaBase.getMonth();
     let anioActual = fechaBase.getFullYear();
@@ -402,10 +453,12 @@ window.ejecutarReprogramacionConciliacion = function(cuentaId, indexMensualidad)
         mesActual++; 
     }
 
+    const liberadas = _concLiberarCuotasMovidas(cuenta, fechasAntes);
     StorageService.set("cuentasMSI", cuentasMSI);
     document.querySelector('[data-modal="repro-concilia"]').remove();
-    alert("✅ Calendario MSI actualizado en cascada correctamente.");
-    renderConciliacionMSI(); 
+    alert("✅ Calendario MSI actualizado en cascada correctamente." + (liberadas.length ? `\n\n↩ ${liberadas.length} cuota(s) que estaban pagadas pasaron a un estado de cuenta posterior y quedaron PENDIENTES.` : ""));
+    renderConciliacionMSI();
+    _concRefrescarFlujoMSI();
 };
 // --- MOTOR DE ELIMINACIÓN EN CASCADA DESDE CONCILIACIÓN ---
 window.eliminarMensualidadesEnCascada = function(cuentaId, indexMensualidad, numeroMes) {
@@ -449,11 +502,25 @@ window.eliminarMensualidadesEnCascada = function(cuentaId, indexMensualidad, num
         if (cuenta.plazo) cuenta.plazo = cuotasConservadas.length;
         cuenta.total = nuevoTotalMonto;
 
+        // Lo pagado y el conteo de cuotas pagadas se recalculan sobre las cuotas que se conservan
+        // (misma regla que procesarPagoTarjetaGlobal, paso 4). Antes quedaban con el valor anterior y
+        // la Deuda Global del Flujo MSI no reflejaba la eliminación.
+        const cuotaRef = parseFloat(String(cuenta.cuotaMensual || 0).replace(/[$,]/g, '')) || 0;
+        let pagadoConservado = 0, cuotasLiquidadasConservadas = 0;
+        cuotasConservadas.forEach(pg => {
+            const montoPg = parseFloat(pg.monto) > 0 ? parseFloat(pg.monto) : cuotaRef;
+            if (pg.estado === 'Pagado') { pagadoConservado += montoPg; cuotasLiquidadasConservadas++; }
+            else if (pg.estado === 'Parcial') { pagadoConservado += parseFloat(pg.montoAbonado || 0) || 0; }
+        });
+        cuenta.montoPagado = pagadoConservado;
+        cuenta.pagosRealizados = cuotasLiquidadasConservadas;
+
         StorageService.set("cuentasMSI", cuentasMSI);
         alert(`✅ Cascada ejecutada. Se purgaron las últimas ${cuotasAEliminar} cuotas con éxito.`);
     }
 
     if (typeof renderConciliacionMSI === 'function') renderConciliacionMSI();
+    _concRefrescarFlujoMSI();
 };
 // --- MOTOR DE REASIGNACIÓN BANCARIA (CONCILIACIÓN) ---
 window.abrirModalReasignarBanco = function(cuentaId) {
@@ -637,7 +704,7 @@ window.ejecutarReasignacionBanco = function(cuentaId) {
         
         // Refrescamos la interfaz automáticamente
         if (typeof renderConciliacionMSI === 'function') renderConciliacionMSI();
-        if (typeof renderCuentasMSI === 'function') renderCuentasMSI();
+        _concRefrescarFlujoMSI();
     }
 };
 window.renderConciliacion = renderConciliacionMSI;
