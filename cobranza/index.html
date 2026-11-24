@@ -1132,7 +1132,7 @@ function renderFicha() {
         <div><small>Fecha de venta</small><b>${M.fechaVisible(M.fechaVentaDate(c))}</b></div>
         <div><small>Plazo</small><b>${plan.meses ? mesesTxt(plan.meses) : '-'}${plan.pagos ? ' · ' + esc(plan.pagos) + ' pagos' : ''}</b>${r.plazo && r.plazo.fechaLimite ? `<em>${r.plazo.aunEnPlazo ? 'Vence' : 'Venció'} ${M.fechaVisible(r.plazo.fechaLimite)}</em>` : ''}</div>
         <div><small>Enganche</small><b>${dinero(c.engancheRecibido != null ? c.engancheRecibido : (c.enganche || 0))}</b></div>
-        <div><small>Total del plan</small><b>${dinero(plan.total || plan.totalTeorico || c.saldoOriginal)}</b><em>sin enganche</em></div>
+        <div><small>Total del plan</small><b>${dinero(plan.total || M.totalMigrado(c) || c.saldoOriginal)}</b><em>sin enganche</em></div>
         <div><small>Total abonado</small><b>${dinero(r.estado.totalAbonado)}</b></div>
         <div><small>Saldo</small><b>${dinero(r.saldo)}</b></div>
       </div>
