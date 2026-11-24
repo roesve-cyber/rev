@@ -1,111 +1,81 @@
-﻿// sw.js — Service Worker MMP POS
-try {
-  importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
-  importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
-} catch (err) {
-  console.warn('No se pudieron cargar scripts de Firebase Messaging:', err);
-}
+// Service Worker exclusivo de la app de cobranza (/cobranza/).
+// Objetivo: que la app abra al instante aunque haya poca señal en ruta (interfaz desde caché),
+// mientras los datos siempre se piden a Firebase. Los DATOS de la cartera NO se guardan aquí:
+// la propia app los guarda en IndexedDB. Nunca intercepta Firebase/Firestore/Google.
 
-var CACHE_NAME = 'mmp-pos-v73';
-var ASSETS = [
-  '/',
-  '/index.html',
-  '/estilos.css?v=5',
-  '/manifest.json'
+const CACHE_NAME = 'cobranza-shell-v5';
+
+const SHELL_URLS = [
+  '/cobranza/',
+  '/cobranza/index.html',
+  '/cobranza/manifest.json',
+  '/cobranza/motor.js',
+  '/cobranza/icons/favicon-32.png',
+  '/cobranza/icons/apple-touch-180.png',
+  '/cobranza/icons/icon-192.png',
+  '/cobranza/icons/icon-512.png',
+  '/cobranza/icons/maskable-192.png',
+  '/cobranza/icons/maskable-512.png',
+  '/img/Logo.svg',
+  '/js/services/calculator.js',
+  '/js/services/cobranza-risk-service.js',
+  '/js/services/imagen-whatsapp.js',
+  '/js/vendor/html2canvas.min.js',
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js'
 ];
 
-var firebaseConfig = {
-  apiKey: "AIzaSyALvu7jMIiwJy2zY96fmeQR9M_tLR6mDUI",
-  authDomain: "mmpueblito-8fb29.firebaseapp.com",
-  projectId: "mmpueblito-8fb29",
-  storageBucket: "mmpueblito-8fb29.firebasestorage.app",
-  messagingSenderId: "32950655624",
-  appId: "1:32950655624:web:42a8657431319f9a25dd3d"
-};
-
-try {
-  firebase.initializeApp(firebaseConfig);
-  var messaging = firebase.messaging();
-  messaging.onBackgroundMessage(function(payload) {
-    var title = (payload.notification && payload.notification.title) || (payload.data && payload.data.title) || 'Boveda de autorizaciones';
-    var body = (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || 'Tienes un pendiente por revisar.';
-    var url = (payload.data && payload.data.url) || '/?view=autorizaciones';
-    self.registration.showNotification(title, {
-      body: body,
-      icon: '/img/icon-192.png',
-      badge: '/img/badge-96.png',
-      tag: 'boveda-autorizaciones',
-      data: { url: url }
-    });
-  });
-} catch (err) {
-  console.warn('Firebase Messaging no disponible en SW:', err);
-}
-
-self.addEventListener('install', function(e) {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(ASSETS);
-    }).catch(function(err) {
-      console.warn('SW cache error:', err);
-    })
-  );
+self.addEventListener('install', (event) => {
   self.skipWaiting();
-});
-
-self.addEventListener('activate', function(e) {
-  e.waitUntil(
-    caches.keys().then(function(keys) {
-      return Promise.all(keys.filter(function(k){ return k !== CACHE_NAME; }).map(function(k){ return caches.delete(k); }));
-    })
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', function(e) {
-  // Solo cachear GET requests
-  if (e.request.method !== 'GET') return;
-  e.respondWith(
-    fetch(e.request).catch(function() {
-      // Sin red: primero la copia exacta; si no existe y es una página, la pantalla principal guardada.
-      // 🛡️ respondWith() exige SIEMPRE un Response: si no hay nada que devolver se responde 504
-      // (antes devolvía undefined y el navegador marcaba "Failed to convert value to 'Response'").
-      return caches.match(e.request).then(function(copia) {
-        if (copia) return copia;
-        if (e.request.mode === 'navigate') {
-          return caches.match('/index.html').then(function(inicio) {
-            return inicio || caches.match('/');
-          }).then(function(inicio) {
-            return inicio || new Response('Sin conexión. Vuelve a intentarlo cuando regrese el internet.', { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
-          });
-        }
-        return new Response('', { status: 504, statusText: 'Gateway Timeout' });
-      });
-    })
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => Promise.all(SHELL_URLS.map((url) => cache.add(url).catch(() => null))))
   );
 });
 
-self.addEventListener('notificationclick', function(e) {
-  e.notification.close();
-  var url = (e.notification.data && e.notification.data.url) || '/?view=autorizaciones';
-  e.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      for (var i = 0; i < clientList.length; i++) {
-        var client = clientList[i];
-        if ('focus' in client) {
-          client.navigate(url);
-          return client.focus();
-        }
-      }
-      return clients.openWindow(url);
-    })
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
 
+  const url = new URL(req.url);
+  const esApiDeGoogle = /(^|\.)googleapis\.com$/.test(url.hostname)
+    || /(^|\.)google\.com$/.test(url.hostname)
+    || /firebaseio\.com$/.test(url.hostname)
+    || /firebaseinstallations\.googleapis\.com$/.test(url.hostname);
+  if (esApiDeGoogle) return;
 
+  const esArchivoDelCascaron = SHELL_URLS.includes(req.url) || SHELL_URLS.includes(url.pathname);
+  if (!esArchivoDelCascaron) return;
 
+  // La app y su motor de cálculo cambian seguido: red primero (cada cambio se ve a la primera);
+  // sin conexión se usa la copia guardada.
+  const redPrimero = url.pathname === '/cobranza/' || url.pathname === '/cobranza/index.html' || url.pathname === '/cobranza/motor.js' || url.pathname === '/js/services/cobranza-risk-service.js';
+  if (redPrimero) {
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.ok) { const copia = res.clone(); caches.open(CACHE_NAME).then((c) => c.put(req, copia)).catch(() => {}); }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
 
-
-
-
+  // El resto (íconos, SDK de Firebase, vendors) cambia poco: caché primero y se actualiza en segundo plano.
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      const actualizar = fetch(req).then((res) => {
+        if (res && res.ok) { const copia = res.clone(); caches.open(CACHE_NAME).then((c) => c.put(req, copia)).catch(() => {}); }
+        return res;
+      }).catch(() => cached);
+      return cached || actualizar;
+    })
+  );
+});
