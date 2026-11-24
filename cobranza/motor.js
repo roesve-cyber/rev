@@ -173,6 +173,14 @@
 
     function mesesPlan(c) { return Number(c?.plan?.meses || c?.plazoMeses || c?.meses || 0); }
 
+    // Total que debe el cliente en una cuenta MIGRADA (sin plan.total): el total de la venta migrada,
+    // menos el enganche. NO es plan.totalTeorico (abono x pagos de la reconciliación manual), que
+    // incluía un financiamiento que nunca se cargó al saldo y quedaba por encima del total real.
+    function totalMigrado(c) {
+        const contado = Number(c?.totalContadoOriginal || 0) > 0 ? Number(c.totalContadoOriginal) : importeContado(c);
+        return Math.max(0, contado - Number(c?.engancheRecibido ?? c?.enganche ?? 0));
+    }
+
     function moratoriosPendientes(c) {
         return (c?.cargosMoratorios || [])
             .filter(m => !m.cancelado && !m.anulado)
@@ -509,10 +517,10 @@
         if (!planNuevo) return null;
         // 🛡️ El sistema principal usa plan.total; en cuentas migradas ese campo no existe y su
         // "diferencia" sale igual al total completo. Aquí, para no mostrar un cargo falso al
-        // cobrador, se parte de plan.totalTeorico cuando falta plan.total (diferenciaSistema
+        // cobrador, se parte del total real de la venta migrada cuando falta plan.total (diferenciaSistema
         // conserva el valor que calcularía el sistema principal).
         const totalSistema = Number(c?.plan?.total || 0);
-        const totalActual = totalSistema || Number(c?.plan?.totalTeorico || 0);
+        const totalActual = totalSistema || totalMigrado(c);
         const totalNuevo = Number(planNuevo.total || 0);
         const diferencia = totalNuevo - totalActual;
         const diferenciaSistema = totalNuevo - totalSistema;
@@ -531,13 +539,20 @@
     // Tabla del visor: todos los plazos del escalón, marcando el actual y el siguiente
     function escaleraVisor(c, cfg) {
         const meses = mesesPlan(c);
-        const totalActual = Number(c?.plan?.total || 0);
-        return escaleraPlanes(c, cfg).map(p => ({
-            meses: Number(p.meses), total: Number(p.total || 0),
-            esActual: Number(p.meses) === meses,
-            esSiguiente: Number(p.meses) === meses + 1,
-            diferencia: Number(p.total || 0) - totalActual
-        }));
+        // Cuenta migrada: no existe plan.total; la fila "suyo" muestra lo que realmente debe (no la tarifa
+        // vigente) y la columna "vs. el suyo" se calcula contra ese total.
+        const totalSistema = Number(c?.plan?.total || 0);
+        const totalActual = totalSistema || totalMigrado(c);
+        return escaleraPlanes(c, cfg).map(p => {
+            const esActual = Number(p.meses) === meses;
+            const total = (!totalSistema && esActual && totalActual > 0) ? totalActual : Number(p.total || 0);
+            return {
+                meses: Number(p.meses), total,
+                esActual,
+                esSiguiente: Number(p.meses) === meses + 1,
+                diferencia: total - totalActual
+            };
+        });
     }
 
     // ------------------------------------------------------------------
@@ -628,7 +643,7 @@
         esc, dinero, parseFecha, fechaCorta, fechaVisible, localISO, fechaInputHoy,
         limpiarParaFirestore, restaurarDesdeFirestore,
         cuentaCancelada, esIncobrable, cuentaSaldada, esActiva, folioEsConsecutivoNuevo,
-        nombreCliente, productoCuenta, fechaVentaDate, importeContado, mesesPlan,
+        nombreCliente, productoCuenta, fechaVentaDate, importeContado, mesesPlan, totalMigrado,
         moratoriosPendientes, abonosValidos, totalPagado,
         estadoCuenta, calcularCuponPronto, planesConCuponTopado, cuponTopadoParaPlazo,
         estadoPlazoCuenta, evaluarPoliticaPagoAnticipado, precioEscaleraVigente, ventaEraPreCupones,
