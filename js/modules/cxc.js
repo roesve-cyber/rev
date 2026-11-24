@@ -1945,10 +1945,11 @@ function _cxcProyectarSaltoPlazo(cuenta) {
     const planNuevo = _cxcEscaleraPlanesCuenta(cuenta).find(p => Number(p.meses || 0) === mesesNuevo);
     if (!planNuevo) return null;
 
-    // En cuentas migradas plan.total puede no existir: se parte de totalTeorico
-    // para no mostrar un cargo falso (igual que la app de cobranza).
+    // En cuentas migradas plan.total no existe: el total que debe el cliente es el de la venta migrada
+    // (totalContadoOriginal menos enganche), igual que la app de cobranza. plan.totalTeorico ya no se usa.
     const totalSistema = Number(cuenta?.plan?.total || 0);
-    const totalActual = totalSistema || Number(cuenta?.plan?.totalTeorico || 0);
+    const totalMigrado = Math.max(0, Number(cuenta?.totalContadoOriginal || 0) - Number(cuenta?.engancheRecibido ?? cuenta?.enganche ?? 0));
+    const totalActual = totalSistema || totalMigrado;
     const totalNuevo = Number(planNuevo.total || 0);
     const diferencia = totalNuevo - totalActual;
     if (totalNuevo - totalSistema <= 0.01 || diferencia <= 0.01) return null;
