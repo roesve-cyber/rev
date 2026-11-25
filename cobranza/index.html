@@ -851,14 +851,19 @@ function renderTodo() {
   if (S.vista === 'Rutas') renderRutas();
   if (S.vista === 'Abonos') renderAbonos();
 }
+// Los importes AGREGADOS de la cartera (total de cartera, subtotales por gestionar y de rutas) solo los ve el administrador.
+// Cobradores y demás roles ven el número de clientes/cuentas y los datos de cada cuenta individual.
+const verTotalesCartera = () => String(sesion?.rol || '').toLowerCase() === 'admin';
 function renderKpis() {
-  const R = S.resumenes;
+  const R = S.resumenes, verTotales = verTotalesCartera();
   const saldo = R.reduce((s, r) => s + r.saldo, 0);
   const gest = S.grupos.filter(g => esUrgente(g.estadoGeneral)), saldoGest = gest.reduce((s, g) => s + g.saldo, 0);
   $('kpis').innerHTML = `
-    <div class="kpi"><small>Clientes</small><b>${S.grupos.length}</b><small style="text-transform:none;font-weight:600">${R.length} cuentas</small></div>
-    <div class="kpi"><small>Cartera</small><b>${dineroCorto(saldo)}</b></div>
-    <div class="kpi"><small>Por gestionar</small><b style="color:${gest.length ? 'var(--danger)' : 'var(--ink)'}">${gest.length}</b><small style="text-transform:none;font-weight:600">${dineroCorto(saldoGest)}</small></div>`;
+    <div class="kpi"><small>Clientes</small><b>${S.grupos.length}</b>${verTotales ? `<small style="text-transform:none;font-weight:600">${R.length} cuentas</small>` : ''}</div>
+    ${verTotales
+      ? `<div class="kpi"><small>Cartera</small><b>${dineroCorto(saldo)}</b></div>`
+      : `<div class="kpi"><small>Cuentas</small><b>${R.length}</b></div>`}
+    <div class="kpi"><small>Por gestionar</small><b style="color:${gest.length ? 'var(--danger)' : 'var(--ink)'}">${gest.length}</b>${verTotales ? `<small style="text-transform:none;font-weight:600">${dineroCorto(saldoGest)}</small>` : ''}</div>`;
 }
 function renderChips() {
   $('chips').innerHTML = chipDefs().map(c => `<button class="chip ${S.filtro === c.k ? 'activo' : ''}" onclick="S.filtro='${c.k}'; renderChips(); renderLista()">${c.t} · ${c.n}</button>`).join('');
@@ -976,7 +981,7 @@ function renderRutas() {
     const saldo = rs.reduce((s, r) => s + r.saldo, 0), venc = rs.reduce((s, r) => s + r.vencido, 0);
     return `<div class="bloque" style="margin:0"><h3>${esc(ru.nombre)} <span class="mini-btn" onclick="S.rutaAbierta=(S.rutaAbierta==='${ru.id}'?null:'${ru.id}'); renderRutas()">${S.rutaAbierta == ru.id ? 'Ocultar' : 'Ver'}</span></h3>
       <div class="fila"><span>Clientes con saldo</span><b>${gs.length}${rs.length !== gs.length ? ` (${rs.length} cuentas)` : ''}</b></div>
-      <div class="fila"><span>Saldo / Atraso</span><b>${dinero(saldo)} / ${dinero(venc)}</b></div>
+      ${verTotalesCartera() ? `<div class="fila"><span>Saldo / Atraso</span><b>${dinero(saldo)} / ${dinero(venc)}</b></div>` : ''}
       ${S.rutaAbierta == ru.id ? `<div class="lista" style="padding:10px 0 0">${gs.length ? gs.map(tarjetaCliente).join('') : '<div class="vacio">Ningún cliente de esta ruta tiene saldo.</div>'}</div>` : ''}</div>`;
   }).join('');
 }
