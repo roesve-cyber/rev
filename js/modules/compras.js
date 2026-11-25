@@ -4258,6 +4258,64 @@ function abrirModalCompraDirectaMulti() {
           </div>
         </div>
 
+        <div style="margin-bottom:12px; padding:12px; background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:bold;color:#075985;">
+                <input type="checkbox" id="cdDividirPago" onchange="_cdToggleDividirPago()" style="width:18px;height:18px;accent-color:#0284c7;">
+                💳💵 Dividir el pago en 2 formas de pago (contado y/o tarjeta a MSI, en cualquier combinación)
+            </label>
+            <div id="cdPanelPagoDividido" style="display:none;margin-top:10px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:white;border:1px solid #cbd5e1;border-radius:8px;padding:10px;">
+                <div style="font-size:12px;font-weight:bold;color:#1e40af;margin-bottom:6px;">FORMA DE PAGO 1</div>
+                <select id="cdPago1Tipo" onchange="_cdActualizarPagoDividido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                    <option value="contado">Contado (efectivo o débito)</option>
+                    <option value="tarjeta_msi">Tarjeta a MSI</option>
+                </select>
+                <div id="cdPago1Contado" style="margin-top:8px;">
+                    <label style="font-size:11px;font-weight:bold;color:#374151;">🏦 CUENTA DE ORIGEN</label>
+                    <select id="cdPago1Cuenta" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;"></select>
+                </div>
+                <div id="cdPago1Msi" style="display:none;margin-top:8px;">
+                    <div style="display:flex;gap:8px;">
+                        <div style="flex:1;"><label style="font-size:11px;font-weight:bold;color:#374151;">BANCO MSI</label>
+                            <select id="cdPago1Banco" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;"></select></div>
+                        <div style="width:80px;"><label style="font-size:11px;font-weight:bold;color:#374151;">MESES</label>
+                            <input type="number" id="cdPago1Meses" value="12" min="1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;box-sizing:border-box;"></div>
+                    </div>
+                </div>
+                <div style="margin-top:8px;">
+                    <label style="font-size:11px;font-weight:bold;color:#374151;">MONTO</label>
+                    <input type="number" id="cdPago1Monto" min="0" step="0.01" placeholder="0.00" oninput="_cdActualizarPagoDividido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;box-sizing:border-box;">
+                </div>
+            </div>
+            <div style="background:white;border:1px solid #cbd5e1;border-radius:8px;padding:10px;">
+                <div style="font-size:12px;font-weight:bold;color:#1e40af;margin-bottom:6px;">FORMA DE PAGO 2</div>
+                <select id="cdPago2Tipo" onchange="_cdActualizarPagoDividido()" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+                    <option value="contado">Contado (efectivo o débito)</option>
+                    <option value="tarjeta_msi">Tarjeta a MSI</option>
+                </select>
+                <div id="cdPago2Contado" style="margin-top:8px;">
+                    <label style="font-size:11px;font-weight:bold;color:#374151;">🏦 CUENTA DE ORIGEN</label>
+                    <select id="cdPago2Cuenta" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;"></select>
+                </div>
+                <div id="cdPago2Msi" style="display:none;margin-top:8px;">
+                    <div style="display:flex;gap:8px;">
+                        <div style="flex:1;"><label style="font-size:11px;font-weight:bold;color:#374151;">BANCO MSI</label>
+                            <select id="cdPago2Banco" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;"></select></div>
+                        <div style="width:80px;"><label style="font-size:11px;font-weight:bold;color:#374151;">MESES</label>
+                            <input type="number" id="cdPago2Meses" value="12" min="1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-top:3px;box-sizing:border-box;"></div>
+                    </div>
+                </div>
+                <div style="margin-top:8px;">
+                    <label style="font-size:11px;font-weight:bold;color:#374151;">MONTO</label>
+                    <input type="number" id="cdPago2Monto" readonly style="width:100%;padding:8px;border:1px solid #e5e7eb;border-radius:6px;margin-top:3px;box-sizing:border-box;background:#f3f4f6;font-weight:bold;">
+                </div>
+            </div>
+                </div>
+                <div id="cdResumenPagoDividido" style="margin-top:8px;font-size:12px;color:#075985;"></div>
+            </div>
+        </div>
+
         <div style="margin-bottom:10px;">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:bold;color:#92400e;background:#fffbeb;border:1px solid #fde68a;padding:8px 10px;border-radius:6px;">
                 <input type="checkbox" id="cdEsGasto" onchange="_cdToggleModoGasto()" style="width:16px;height:16px;accent-color:#d97706;">
@@ -4321,15 +4379,135 @@ function abrirModalCompraDirectaMulti() {
     window._opcionesUbiCD = selUbi;
     
     _poblarCuentasOrigen('cdCuentaOrigen');
+    _poblarCuentasOrigen('cdPago1Cuenta');
+    _poblarCuentasOrigen('cdPago2Cuenta');
     
     const selectBanco = document.getElementById("cdBancoMSI");
     if (selectBanco) {
         const tarjetasConfig = StorageService.get("tarjetasConfig", []);
         const bancosMSI = tarjetasConfig.filter(t => !t.tipo || t.tipo === "credito");
         selectBanco.innerHTML = bancosMSI.map(t => `<option value="${t.banco}">${t.banco}</option>`).join('');
+        ['cdPago1Banco', 'cdPago2Banco'].forEach(id => {
+            const sb = document.getElementById(id);
+            if (sb) sb.innerHTML = selectBanco.innerHTML;
+        });
     }
 
     _renderTablaArticulosCompraDirecta();
+}
+
+// ===== PAGO DIVIDIDO EN COMPRA DIRECTA =====
+// Algunos proveedores permiten pagar una compra con 2 formas de pago, sin límite de combinación:
+// contado (efectivo o débito) + tarjeta a MSI, MSI + MSI, contado + contado, etc.
+function _cdToggleDividirPago() {
+    const on = !!document.getElementById('cdDividirPago')?.checked;
+    const panel = document.getElementById('cdPanelPagoDividido');
+    if (panel) panel.style.display = on ? 'block' : 'none';
+    // Mientras el pago está dividido se ocultan los campos de la forma de pago única
+    const celdaMetodo = document.getElementById('cdMetodoPago')?.parentElement;
+    const celdaDestino = document.getElementById('divCuentaCD')?.parentElement;
+    if (celdaMetodo) celdaMetodo.style.display = on ? 'none' : '';
+    if (celdaDestino) celdaDestino.style.display = on ? 'none' : '';
+    _cdActualizarPagoDividido();
+}
+
+function _cdActualizarPagoDividido() {
+    [1, 2].forEach(k => {
+        const tipo = document.getElementById(`cdPago${k}Tipo`)?.value;
+        const c = document.getElementById(`cdPago${k}Contado`), m = document.getElementById(`cdPago${k}Msi`);
+        if (c) c.style.display = tipo === 'contado' ? 'block' : 'none';
+        if (m) m.style.display = tipo === 'tarjeta_msi' ? 'block' : 'none';
+    });
+    const total = (window._articulosCompraDirecta || []).reduce((s, a) => s + (Number(a.subtotal) || 0), 0);
+    const m1 = parseFloat(document.getElementById('cdPago1Monto')?.value) || 0;
+    const resto = Math.round((total - m1) * 100) / 100;
+    const i2 = document.getElementById('cdPago2Monto');
+    if (i2) i2.value = resto > 0 ? resto.toFixed(2) : '0.00';
+    const r = document.getElementById('cdResumenPagoDividido');
+    if (r) r.textContent = (m1 > 0 && resto <= 0)
+        ? '⚠️ El monto de la forma de pago 1 no puede cubrir todo el total: debe quedar un resto para la forma de pago 2.'
+        : 'La forma de pago 2 cubre el resto. Si aplicas saldo a favor del proveedor, se descuenta primero y el resto se calcula sobre lo que falte por pagar.';
+}
+
+// Lee y valida las 2 formas de pago. totalAPagar = total de la compra menos saldo a favor aplicado.
+function _cdLeerPagosDivididos(totalAPagar) {
+    const r2 = n => Math.round(n * 100) / 100;
+    if (!(totalAPagar > 0)) return { ok: false, error: '⚠️ El saldo a favor ya cubre toda la compra: no hay nada que dividir. Desmarca "Dividir el pago".' };
+    const m1 = r2(parseFloat(document.getElementById('cdPago1Monto')?.value) || 0);
+    if (!(m1 > 0) || m1 >= totalAPagar - 0.005) return { ok: false, error: `⚠️ El monto de la forma de pago 1 debe ser mayor a $0 y menor al total a pagar (${dinero(totalAPagar)}).` };
+    const montos = [m1, r2(totalAPagar - m1)];
+    const pagos = [];
+    for (let k = 1; k <= 2; k++) {
+        const tipo = document.getElementById(`cdPago${k}Tipo`)?.value;
+        if (tipo === 'contado') {
+            const sel = document.getElementById(`cdPago${k}Cuenta`);
+            const cuentaId = sel?.value || '';
+            if (!cuentaId) return { ok: false, error: `⚠️ Elige la cuenta de origen de la forma de pago ${k}.` };
+            pagos.push({ tipo: 'contado', monto: montos[k - 1], cuenta: cuentaId, etiqueta: sel.options[sel.selectedIndex]?.text || cuentaId });
+        } else if (tipo === 'tarjeta_msi') {
+            const banco = document.getElementById(`cdPago${k}Banco`)?.value || '';
+            const meses = parseInt(document.getElementById(`cdPago${k}Meses`)?.value) || 0;
+            if (!banco) return { ok: false, error: `⚠️ Elige el banco de la forma de pago ${k}.` };
+            if (meses < 1) return { ok: false, error: `⚠️ Indica los meses de la forma de pago ${k}.` };
+            pagos.push({ tipo: 'tarjeta_msi', monto: montos[k - 1], banco, meses });
+        } else {
+            return { ok: false, error: `⚠️ Elige el tipo de la forma de pago ${k}.` };
+        }
+    }
+    return { ok: true, pagos };
+}
+
+function _cdSumaPagos(pagos, tipo) {
+    return Math.round(pagos.filter(p => p.tipo === tipo).reduce((t, p) => t + p.monto, 0) * 100) / 100;
+}
+
+function _cdTextoPagosDivididos(pagos) {
+    return pagos.map((p, i) => p.tipo === 'contado'
+        ? `${i + 1}) Contado ${dinero(p.monto)} desde ${p.etiqueta}`
+        : `${i + 1}) MSI ${dinero(p.monto)} · ${p.banco} a ${p.meses} meses`).join('\n');
+}
+
+// Registra cada forma de pago: contado -> _egresarCuenta; tarjeta MSI -> cuenta en cuentasMSI (mismo calendario que la compra a MSI normal).
+function _cdAplicarPagosDivididos({ pagos, idCompraUnico, fechaStr, fechaFormatMX, conceptoCombinado, nombresProductos }) {
+    const fallos = [];
+    let cuentasBancos = StorageService.get('cuentasMSI', []);
+    const tarjetasConfig = StorageService.get('tarjetasConfig', []);
+    let huboMSI = false;
+    pagos.forEach((p, i) => {
+        const etiquetaParte = `pago ${i + 1} de ${pagos.length}`;
+        if (p.tipo === 'contado') {
+            const ok = window._egresarCuenta({
+                monto: p.monto, cuentaId: p.cuenta, etiqueta: p.etiqueta,
+                concepto: `${conceptoCombinado} (${etiquetaParte})`, referencia: `COMPRA-${idCompraUnico}-P${i + 1}`
+            });
+            if (!ok) fallos.push(`${dinero(p.monto)} de "${p.etiqueta || p.cuenta}"`);
+            return;
+        }
+        const infoTarjeta = (window.buscarTarjetaCreditoPorBanco ? window.buscarTarjetaCreditoPorBanco(p.banco) : tarjetasConfig.find(t => t.banco === p.banco)) || {};
+        const diaCorte = parseInt(infoTarjeta.diaCorte) || 15;
+        const diaPago = parseInt(infoTarjeta.diaLimite || infoTarjeta.diaPago || 5);
+        const cuotaMensual = parseFloat((p.monto / p.meses).toFixed(2));
+        const partes = fechaStr.split('-');
+        const anioCompra = parseInt(partes[0]), mesCompra = parseInt(partes[1]) - 1, diaCompra = parseInt(partes[2]);
+        const mesPrimerPago = mesCompra + (diaCompra > diaCorte ? 1 : 0) + (diaCorte > diaPago ? 1 : 0);
+        const calendario = [];
+        for (let n = 1; n <= p.meses; n++) {
+            const f = new Date(anioCompra, mesPrimerPago + (n - 1), diaPago, 12, 0, 0);
+            calendario.push({
+                n, fecha: `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}`,
+                monto: cuotaMensual, estado: 'Pendiente', montoAbonado: 0, conciliado: false
+            });
+        }
+        cuentasBancos.push({
+            id: idCompraUnico + 3 + i, compraId: idCompraUnico, banco: p.banco,
+            concepto: `${conceptoCombinado} (${etiquetaParte})`, producto: nombresProductos,
+            total: p.monto, meses: p.meses, cuotaMensual, fecha: fechaFormatMX, fechaCompra: fechaStr,
+            calendario, pagosRealizados: 0
+        });
+        huboMSI = true;
+    });
+    if (huboMSI) StorageService.set('cuentasMSI', cuentasBancos);
+    return fallos;
 }
 
 // Alterna entre "buscar producto de catálogo" y "capturar un gasto suelto"
@@ -4443,6 +4621,7 @@ function _renderTablaArticulosCompraDirecta() {
         <tbody>${rows}</tbody>
     </table>`;
     document.getElementById('cdTotal').textContent = dinero(total);
+    if (typeof _cdActualizarPagoDividido === 'function') _cdActualizarPagoDividido();
     const nota = document.getElementById('cdNotaGastos');
     if (nota) nota.textContent = totalGastos > 0 ? `🧾 De este total, ${dinero(totalGastos)} son gastos de operación (no entran a inventario).` : '';
 }
@@ -4471,9 +4650,10 @@ function guardarCompraDirectaFinal() {
         }
     }
     
-    const metodoPago = document.getElementById('cdMetodoPago').value;
+    const dividirPago = !!document.getElementById('cdDividirPago')?.checked;
+    const metodoPago = dividirPago ? 'mixto' : document.getElementById('cdMetodoPago').value;
     const comboPago = document.getElementById("cdMetodoPago");
-    const formaPagoTexto = comboPago.options[comboPago.selectedIndex].text;
+    const formaPagoTexto = dividirPago ? 'Pago dividido' : comboPago.options[comboPago.selectedIndex].text;
 
     const cuentaOrigenId = document.getElementById('cdCuentaOrigen')?.value || "efectivo";
     const cuentaOrigenNombre = document.getElementById('cdCuentaOrigen')?.options[document.getElementById('cdCuentaOrigen').selectedIndex]?.text || "Efectivo";
@@ -4504,8 +4684,16 @@ function guardarCompraDirectaFinal() {
         }
     }
 
+    // Pago dividido: se valida ANTES de confirmar y de tocar cualquier dato.
+    let pagosDivididos = null;
+    if (dividirPago) {
+        const lectura = _cdLeerPagosDivididos(totalAPagarReal);
+        if (!lectura.ok) return alert(lectura.error);
+        pagosDivididos = lectura.pagos;
+    }
+
     const msjConfirmar = `¿Deseas registrar esta compra?\n\nProveedor: ${prov.nombre}\nCosto Total: ${dinero(totalCompra)}\n${montoUsadoDelSaldo > 0 ? 'Saldo a favor aplicado: -' + dinero(montoUsadoDelSaldo) + '\n' : ''}Total a pagar: ${dinero(totalAPagarReal)}\nMétodo: ${formaPagoTexto}\nInventario: ${ingresoInmediato ? 'ENTRA AHORA ✅' : 'A RECEPCIONES ⏳'}`;
-    if (!confirm(msjConfirmar)) return;
+    if (!confirm(msjConfirmar + (pagosDivididos ? '\n\nPago dividido:\n' + _cdTextoPagosDivididos(pagosDivididos) : ''))) return;
 
     // Si usó el saldo, lo descontamos de la base de datos
     if (montoUsadoDelSaldo > 0) {
@@ -4647,11 +4835,12 @@ function guardarCompraDirectaFinal() {
         fechaISO: fechaStr,
         articulos: arts,
         metodo: metodoPago,
-        saldoPendiente: metodoPago !== 'contado' ? totalAPagarReal : 0,
-        pagado: metodoPago === 'contado' ? totalAPagarReal : 0,
-        totalPagado: metodoPago === 'contado' ? totalAPagarReal : 0,
+        saldoPendiente: pagosDivididos ? _cdSumaPagos(pagosDivididos, 'tarjeta_msi') : (metodoPago !== 'contado' ? totalAPagarReal : 0),
+        pagado: pagosDivididos ? _cdSumaPagos(pagosDivididos, 'contado') : (metodoPago === 'contado' ? totalAPagarReal : 0),
+        totalPagado: pagosDivididos ? _cdSumaPagos(pagosDivididos, 'contado') : (metodoPago === 'contado' ? totalAPagarReal : 0),
         pago: metodoPago === 'contado' ? { monto: totalAPagarReal, metodo: metodoPago, cuenta: cuentaOrigenId, etiqueta: cuentaOrigenNombre } : null,
-        saldoFavorAplicado: montoUsadoDelSaldo || 0
+        saldoFavorAplicado: montoUsadoDelSaldo || 0,
+        ...(pagosDivididos ? { pagos: pagosDivididos, formaPagoTexto: 'Pago dividido: ' + pagosDivididos.map(p => p.tipo === 'contado' ? `Contado ${dinero(p.monto)}` : `MSI ${p.banco} ${dinero(p.monto)}`).join(' + ') } : {})
     };
     comprasList.push(nuevaCompra);
 
@@ -4662,7 +4851,12 @@ function guardarCompraDirectaFinal() {
     // Creamos la etiqueta perfecta para tu conciliación
     const conceptoCombinado = `Compra: ${nombresProductos} (Prov: ${prov.nombre})`;
 
-    if (metodoPago === "contado") {
+    if (metodoPago === 'mixto') {
+        const fallosDivididos = _cdAplicarPagosDivididos({ pagos: pagosDivididos, idCompraUnico, fechaStr, fechaFormatMX, conceptoCombinado, nombresProductos });
+        if (fallosDivididos.length) {
+            alert(`⚠️ La mercancía SÍ se registró en inventario, pero NO se pudo descontar: ${fallosDivididos.join(', ')} porque la cuenta no existe.\n\nRegistra ese egreso manualmente en Bancos.`);
+        }
+    } else if (metodoPago === "contado") {
         if (totalAPagarReal > 0) {
             const _egresoOkContadoMulti = window._egresarCuenta({
                 monto: totalAPagarReal, cuentaId: cuentaOrigenId, etiqueta: cuentaOrigenNombre,
@@ -4966,7 +5160,7 @@ function renderCuentasPorPagar() {
                     ${fechaVenta}<br>
                     <strong style="cursor:pointer; color:#2980b9; text-decoration:underline;" onclick="verDetalleCompra('${c.id}')">${c.proveedor || 'General'}</strong>
                 </td>
-                <td><small>${c.metodo || c.formaPagoTexto || '-'}</small></td>
+                <td><small>${c.metodo === 'mixto' ? (c.formaPagoTexto || 'Pago dividido') : (c.metodo || c.formaPagoTexto || '-')}</small></td>
                 <td>${dinero(c.total)}</td>
                 <td style="color:red; font-weight:bold;">${dinero(c.saldoPendiente)}</td>
                 <td>
