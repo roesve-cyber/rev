@@ -1168,8 +1168,113 @@ const StorageService = {
     },
 
     // 🚀 MOTOR DE TRANSACCIONES ATÓMICAS PARA LA BÓVEDA
-    // Agrega un item a una tabla crítica con sincronización inmediata a Firebase
-    async pushAtomo(key, item) {
+    //
+    // 📮 COLA DE SALIDA (outbox) -- por qué existe:
+    // Antes, si la transacción de pushAtomo fallaba (sin señal, error del servidor), solo hacía
+    // console.warn: el registro quedaba ÚNICAMENTE en el celular, quien llamaba no se enteraba y
+    // la bitácora decía "enviado a la bóveda". Después, un syncAll() que bajaba el arreglo de la
+    // nube (más nuevo que el local) reemplazaba la copia local completa y el registro se perdía
+    // en silencio (caso real: abono de $2,000 de Hiali, 24-nov-2026).
+    // Ahora: (1) pushAtomo devuelve si realmente subió; (2) si no subió, el registro queda en una
+    // cola local persistente (`_outbox_<tabla>`, prefijo "_" = nunca sube ni baja de Firebase ni
+    // entra a respaldos) que se reintenta sola; (3) syncAll nunca descarta lo que sigue en cola.
+    _tablasConOutbox: new Set(['abonosPendientes', 'ventasPendientes']),
+    _outboxFlushEnCurso: null,
+
+    // Misma regla de identidad que actualizarAtomo/removeAtomo: idCuarentena o, si no hay, id.
+    _idRegistroBoveda(item) {
+        return String(item?.idCuarentena ?? item?.id ?? '');
+    },
+
+    _outboxLeer(key) {
+        const lista = this._cache[`_outbox_${key}`];
+        return Array.isArray(lista) ? lista : [];
+    },
+
+    _outboxTotal() {
+        let total = 0;
+        this._tablasConOutbox.forEach(key => { total += this._outboxLeer(key).length; });
+        return total;
+    },
+
+    async _outboxGuardar(key, lista) {
+        const k = `_outbox_${key}`;
+        this._cache[k] = lista;
+        try {
+            if (this._usandoLocalForage) await localforage.setItem(k, lista);
+            else localStorage.setItem(k, JSON.stringify(lista));
+        } catch (e) {
+            console.error(`No se pudo guardar la cola de salida de "${key}":`, e);
+        }
+    },
+
+    async _outboxAgregar(key, item, aviso) {
+        const id = this._idRegistroBoveda(item);
+        const lista = this._outboxLeer(key).filter(e => this._idRegistroBoveda(e?.item) !== id);
+        lista.push({ item, aviso: aviso || null, encoladoEn: Date.now(), intentos: 0 });
+        await this._outboxGuardar(key, lista);
+    },
+
+    // Si un registro se quita A PROPÓSITO (removeAtomo / removerPorPredicado), también sale de la
+    // cola: de lo contrario el reintento lo resucitaría en la nube.
+    async _outboxQuitar(key, debeQuitarse) {
+        const lista = this._outboxLeer(key);
+        if (!lista.length) return;
+        const restantes = lista.filter(e => !debeQuitarse(e?.item));
+        if (restantes.length !== lista.length) await this._outboxGuardar(key, restantes);
+    },
+
+    // Agrega UN registro al arreglo-único de Firestore, de forma IDEMPOTENTE: si el id ya está en
+    // el servidor (p. ej. un intento anterior sí llegó aunque se agotó el tiempo de espera) no lo
+    // vuelve a insertar. Devuelve { ok: true, estado: 'agregado' | 'yaExistia' } o { ok: false, error }.
+    async _subirItemAtomo(key, item, ts) {
+        if (navigator.onLine === false) {
+            return { ok: false, error: new Error('Sin conexión a internet') };
+        }
+        const id = this._idRegistroBoveda(item);
+        const itemLimpio = this._limpiarParaFirestore(item, true);
+        const docRef = window._db.collection('posData').doc(key);
+        try {
+            const transaccion = window._db.runTransaction(async (transaction) => {
+                const doc = await transaction.get(docRef);
+                if (!doc.exists) {
+                    transaction.set(docRef, { data: [itemLimpio], _updatedAt: ts });
+                    return 'agregado';
+                }
+                const crudo = doc.data().data;
+                // Si el documento trae el arreglo en otra forma NO se toca (escribir aquí lo pisaría).
+                if (crudo !== undefined && crudo !== null && !Array.isArray(crudo)) {
+                    throw new Error(`El documento "${key}" tiene un formato inesperado; no se modificó.`);
+                }
+                const data = Array.isArray(crudo) ? crudo : [];
+                if (data.some(i => this._idRegistroBoveda(i) === id)) return 'yaExistia';
+                data.push(itemLimpio);
+                transaction.update(docRef, { data: data, _updatedAt: ts });
+                return 'agregado';
+            });
+            // Sin tope, con señal intermitente la espera puede ser larga: a los 20 s se da por no
+            // confirmado (y si luego sí llega, el reintento lo detecta como 'yaExistia').
+            let temporizador;
+            const tiempoAgotado = new Promise((_, rechazar) => {
+                temporizador = setTimeout(() => rechazar(new Error('Tiempo de espera agotado al subir a la nube')), 20000);
+            });
+            let estado;
+            try { estado = await Promise.race([transaccion, tiempoAgotado]); }
+            finally { clearTimeout(temporizador); }
+            await this._marcarCambioRemoto(key, ts);
+            return { ok: true, estado };
+        } catch (e) {
+            return { ok: false, error: e };
+        }
+    },
+
+    // Agrega un item a una tabla crítica con sincronización inmediata a Firebase.
+    // Devuelve { subioANube, encolado?, soloLocal?, yaExistia?, error? }:
+    //  - subioANube: true  => ya está en la nube.
+    //  - soloLocal:  true  => no hay Firebase en este entorno (pruebas locales); no hay nube a la cual subir.
+    //  - encolado:   true  => NO llegó a la nube; quedó en la cola de salida y se reintentará solo.
+    // `opciones.aviso`: payload de notificarBovedaAutorizacion que se dispara cuando por fin llegue.
+    async pushAtomo(key, item, opciones = {}) {
         // 1. Guardado local instantáneo para que la pantalla del usuario no se congele
         let currentList = this.get(key, []);
         if (!Array.isArray(currentList)) currentList = [];
@@ -1181,28 +1286,124 @@ const StorageService = {
         this._cache[`_ts_${key}`] = tsAhora;
         await localforage.setItem(`_ts_${key}`, tsAhora).catch(() => {});
 
+        // Entorno local de pruebas (firebase-config.js): no hay nube, no hay nada que reintentar.
+        if (!window._firebaseActivo) return { subioANube: false, soloLocal: true };
+
         // 2. Transacción Quirúrgica en Firebase (SIN DEBOUNCE)
-        if (window._firebaseActivo && window._db) {
-            const itemLimpio = this._limpiarParaFirestore(item, true);
-            const docRef = window._db.collection('posData').doc(key);
-            try {
-                await window._db.runTransaction(async (transaction) => {
-                    const doc = await transaction.get(docRef);
-                    if (!doc.exists) {
-                        transaction.set(docRef, { data: [itemLimpio], _updatedAt: tsAhora });
-                    } else {
-                        let data = doc.data().data || [];
-                        data.push(itemLimpio);
-                        transaction.update(docRef, { data: data, _updatedAt: tsAhora });
-                    }
-                });
-                await this._marcarCambioRemoto(key, tsAhora);
-                console.log(`✅ pushAtomo: ${key} sincronizado INMEDIATAMENTE a Firebase`);
-            } catch (e) { 
-                console.warn(`⚠️ pushAtomo fallo para ${key}, pero datos guardados localmente:`, e); 
-                this._notificarFalloSync(key, e);
-            }
+        const res = window._db
+            ? await this._subirItemAtomo(key, item, tsAhora)
+            : { ok: false, error: new Error('Firestore todavía no está listo en este dispositivo') };
+
+        if (res.ok) {
+            console.log(`✅ pushAtomo: ${key} sincronizado INMEDIATAMENTE a Firebase`);
+            return { subioANube: true, yaExistia: res.estado === 'yaExistia' };
         }
+
+        console.warn(`⚠️ pushAtomo no pudo subir a ${key}; queda en la cola de salida de este dispositivo:`, res.error);
+        const encolar = this._tablasConOutbox.has(key);
+        if (encolar) await this._outboxAgregar(key, item, opciones.aviso);
+        // No se llama _notificarFalloSync: quien llama recibe { subioANube:false } y avisa al usuario
+        // con un mensaje específico (y bloquea el ticket), en vez de la alerta genérica de una sola vez.
+        return { subioANube: false, encolado: encolar, error: res.error };
+    },
+
+    // Reintenta lo que quedó en la cola de salida. Seguro de llamar muchas veces: no hace nada si no
+    // hay sesión, no hay red o ya hay un reintento en curso. Devuelve { enviados, pendientes }.
+    async vaciarOutbox(motivo = 'manual') {
+        if (!window._firebaseActivo || !window._db || !window._auth?.currentUser) return { enviados: 0, pendientes: this._outboxTotal() };
+        if (navigator.onLine === false) return { enviados: 0, pendientes: this._outboxTotal() };
+        if (this._outboxTotal() === 0) return { enviados: 0, pendientes: 0 };
+        if (this._outboxFlushEnCurso) return this._outboxFlushEnCurso;
+
+        this._outboxFlushEnCurso = (async () => {
+            let enviados = 0;
+            for (const key of this._tablasConOutbox) {
+                const cola = this._outboxLeer(key).slice();
+                if (!cola.length) continue;
+                const resueltos = new Set();
+                const fallidos = new Map();
+                for (const entrada of cola) {
+                    const id = this._idRegistroBoveda(entrada?.item);
+                    const local = this.get(key, []);
+                    // Se envía la versión VIGENTE local (pudo resolverse mientras esperaba en cola).
+                    const vigente = Array.isArray(local) ? local.find(i => this._idRegistroBoveda(i) === id) : null;
+                    if (!vigente) { resueltos.add(id); continue; } // se quitó a propósito: no se resucita
+                    const res = await this._subirItemAtomo(key, vigente, Date.now());
+                    if (res.ok) {
+                        resueltos.add(id);
+                        if (res.estado === 'agregado') {
+                            enviados++;
+                            this._outboxPostEnvio(key, vigente, entrada);
+                        }
+                    } else {
+                        fallidos.set(id, String(res.error?.message || res.error || ''));
+                    }
+                }
+                // Se relee la cola por si se encoló algo mientras se enviaba; solo se quitan los resueltos.
+                const actual = this._outboxLeer(key)
+                    .filter(e => !resueltos.has(this._idRegistroBoveda(e?.item)))
+                    .map(e => {
+                        const id = this._idRegistroBoveda(e?.item);
+                        return fallidos.has(id)
+                            ? { ...e, intentos: Number(e.intentos || 0) + 1, ultimoError: fallidos.get(id), ultimoIntento: Date.now() }
+                            : e;
+                    });
+                await this._outboxGuardar(key, actual);
+            }
+            if (enviados) {
+                console.log(`📮 Cola de salida (${motivo}): ${enviados} registro(s) llegaron a la bóveda.`);
+                try { this._refrescarVistaActualPostSync?.(); } catch (e) {}
+            }
+            return { enviados, pendientes: this._outboxTotal() };
+        })();
+
+        try { return await this._outboxFlushEnCurso; }
+        finally { this._outboxFlushEnCurso = null; }
+    },
+
+    // Lo que corresponde hacer cuando un registro en cola por fin llega: dejar constancia en la
+    // bitácora y avisar a Auditoría (la notificación original se había retenido a propósito).
+    _outboxPostEnvio(key, item, entrada) {
+        try {
+            if (window.AuditService?.log) {
+                window.AuditService.log({
+                    accion: 'BOVEDA_PENDIENTE_REENVIADO',
+                    modulo: 'Sincronización',
+                    entidad: key === 'abonosPendientes' ? 'abono' : 'venta',
+                    entidadId: item?.folioCXC || item?.folioApartado || item?.args?.[5] || this._idRegistroBoveda(item),
+                    detalle: 'Registro que había quedado solo en este dispositivo llegó a la bóveda de autorizaciones',
+                    monto: Number(item?.montoAbonado ?? item?.totalVenta ?? 0) || 0,
+                    severidad: 'info',
+                    datos: { tabla: key, intentos: Number(entrada?.intentos || 0), encoladoEn: entrada?.encoladoEn || null }
+                });
+            }
+        } catch (e) { console.warn('Bitácora de reenvío:', e); }
+        try {
+            if (entrada?.aviso && typeof window.notificarBovedaAutorizacion === 'function') {
+                const p = window.notificarBovedaAutorizacion(entrada.aviso);
+                if (p && typeof p.catch === 'function') p.catch(() => {});
+            }
+        } catch (e) { console.warn('Aviso de reenvío:', e); }
+    },
+
+    // Al bajar la tabla de la nube (syncAll) NO se descarta lo que este dispositivo aún no logró
+    // subir: se vuelve a agregar al arreglo descargado.
+    _outboxConservarEnDescarga(key, descargados) {
+        const cola = this._outboxLeer(key);
+        if (!cola.length || !Array.isArray(descargados)) return descargados;
+        const enNube = new Set(descargados.map(i => this._idRegistroBoveda(i)));
+        const local = this.get(key, []);
+        const resultado = descargados.slice();
+        let conservados = 0;
+        for (const entrada of cola) {
+            const id = this._idRegistroBoveda(entrada?.item);
+            if (!id || enNube.has(id)) continue;
+            const vigente = (Array.isArray(local) ? local.find(i => this._idRegistroBoveda(i) === id) : null) || entrada.item;
+            resultado.push(vigente);
+            conservados++;
+        }
+        if (conservados) console.warn(`📮 ${key}: se conservaron ${conservados} registro(s) local(es) que aún no llegan a la nube.`);
+        return resultado;
     },
 
     // Quita de una tabla crítica TODOS los items que cumplan un criterio (p. ej. registros
@@ -1219,6 +1420,7 @@ const StorageService = {
         const nueva = lista.filter(i => !predicado(i));
         const quitadosLocal = lista.length - nueva.length;
         await this._guardarLocalDirecto(key, nueva);
+        await this._outboxQuitar(key, predicado);
 
         const tsAhora = Date.now();
         this._cache[`_ts_${key}`] = tsAhora;
@@ -1258,6 +1460,7 @@ const StorageService = {
         if (!Array.isArray(currentList)) currentList = [];
         currentList = currentList.filter(i => String(i.idCuarentena || i.id) !== String(idValue));
         await this._guardarLocalDirecto(key, currentList);
+        await this._outboxQuitar(key, i => String(i?.idCuarentena || i?.id) === String(idValue));
 
         // 🛡️ Registrar timestamp local INMEDIATAMENTE
         const tsAhora = Date.now();
@@ -1811,10 +2014,15 @@ const StorageService = {
                 }
             }
 
-            const datosRestaurados = this._asegurarTablaLista(
+            let datosRestaurados = this._asegurarTablaLista(
                 tabla,
                 this._normalizarTablaDesdeFirestore(tabla, payload)
             );
+            // 📮 Bóveda: lo que este dispositivo aún no logró subir NO se descarta al reemplazar el
+            // arreglo local por el de la nube (así se perdió el abono de Hiali el 24-nov-2026).
+            if (this._tablasConOutbox.has(tabla) && Array.isArray(datosRestaurados)) {
+                datosRestaurados = this._outboxConservarEnDescarga(tabla, datosRestaurados);
+            }
             this._logTablaFirebase(tabla, datosRestaurados);
             if (Array.isArray(datosRestaurados) && datosRestaurados.length === 0) {
                 this._logPayloadVacio(tabla, payload);
@@ -1879,6 +2087,8 @@ const StorageService = {
         }
 
         try {
+            // 📮 Antes de bajar nada, se intenta subir lo que quedó en la cola de salida.
+            try { await this.vaciarOutbox('syncAll'); } catch (e) { console.warn('Cola de salida (syncAll):', e); }
             console.log("⬇️ Descargando datos dinámicos de Firebase...");
 
             const forzarDescarga = !!(opciones && opciones.forzarDescarga);
@@ -2023,9 +2233,10 @@ const StorageService = {
             console.warn('No se pudo escuchar cambios remotos de Firebase:', err);
         });
 
-        window.addEventListener('focus', () => this.verificarCambiosRemotosLigero('focus'));
+        window.addEventListener('focus', () => { this.vaciarOutbox('focus').catch(() => {}); this.verificarCambiosRemotosLigero('focus'); });
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
+                this.vaciarOutbox('visibility').catch(() => {});
                 this.verificarCambiosRemotosLigero('visibility');
             } else {
                 // 🛡️ La pestaña se va a segundo plano (o el usuario cambió de
@@ -2046,7 +2257,10 @@ const StorageService = {
         // ya se disparó por visibilitychange simplemente no encuentra nada
         // que hacer aquí.
         window.addEventListener('pagehide', () => this._flushSyncPendiente());
-        window.addEventListener('online', () => this.verificarCambiosRemotosLigero('online'));
+        window.addEventListener('online', () => { this.vaciarOutbox('online').catch(() => {}); this.verificarCambiosRemotosLigero('online'); });
+        // 📮 Reintento de la cola de salida: al abrir la app y cada 30 s mientras haya algo pendiente.
+        setTimeout(() => this.vaciarOutbox('inicio').catch(() => {}), 3000);
+        setInterval(() => { if (this._outboxTotal() > 0) this.vaciarOutbox('intervalo').catch(() => {}); }, 30 * 1000);
         // Red de seguridad: cada 2 min (y solo con la pestaña visible) se lee UN documento.
         // Antes era una descarga completa de todas las tablas cada 60 segundos. La diferencia
         // de costo entre 2 y 10 minutos es insignificante (lectura de 1 documento), así que se
