@@ -213,6 +213,12 @@ function renderConciliacionMSI() {
                 </div>
             </div>
 
+            <style>
+                .conc-acc-btn { background:transparent; border:1px solid transparent; border-radius:6px; padding:3px 6px; cursor:pointer; font-size:10.5px; font-weight:500; color:#94a3b8; transition:.15s; }
+                .conc-acc-btn:hover { background:#f1f5f9; border-color:#e2e8f0; color:#334155; }
+                .conc-acc-info:hover { background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8; }
+                .conc-acc-peligro:hover { background:#fff1f2; border-color:#fecdd3; color:#e11d48; }
+            </style>
             <div style="overflow-x:auto;">
                 <table style="width:100%; border-collapse:collapse;">
                     <thead>
@@ -244,19 +250,11 @@ function renderConciliacionMSI() {
                                            style="width:20px; height:20px; cursor:pointer; accent-color:#10b981;">
                                 </td>
                                 <td style="padding:12px; text-align:center;">
-                                    <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
-    <button onclick="abrirModalReprogramarConciliacion('${m.parent_id}', ${m.index_cal}, '${m.fecha}')" 
-            style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#475569;">
-        ✏️ Reprogramar
-    </button>
-    <button onclick="window.abrirModalReasignarBanco('${m.parent_id}')" 
-            style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#1d4ed8;">
-        🏦 Reasignar
-    </button>
-    <button onclick="window.eliminarMensualidadesEnCascada('${m.parent_id}', ${m.index_cal}, '${m.numero_ms}')" 
-            style="background:#fff1f2; border:1px solid #fecdd3; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:11px; font-weight:bold; color:#e11d48;">
-        ❌ Eliminar
-    </button>
+                                    <div style="display:flex; gap:2px; justify-content:center; flex-wrap:wrap;">
+    ${(!m.esComision && Number(m.numero_ms) === 1 && m.index_cal === 0) ? `<button class="conc-acc-btn conc-acc-info" title="Corregir el plazo (meses) de esta compra: reconstruye toda la escalera" onclick="window.abrirModalCorregirMesesMSI('${m.parent_id}')">🔧 Corregir meses</button>` : ''}
+    <button class="conc-acc-btn" onclick="abrirModalReprogramarConciliacion('${m.parent_id}', ${m.index_cal}, '${m.fecha}')">✏️ Reprogramar</button>
+    <button class="conc-acc-btn conc-acc-info" onclick="window.abrirModalReasignarBanco('${m.parent_id}')">🏦 Reasignar</button>
+    <button class="conc-acc-btn conc-acc-peligro" onclick="window.eliminarMensualidadesEnCascada('${m.parent_id}', ${m.index_cal}, '${m.numero_ms}')">❌ Eliminar</button>
 </div>
                                 </td>
                             </tr>
@@ -406,6 +404,120 @@ window.toggleConciliacionMSI = function(ctaId, numeroMes, valor) {
     }
     renderConciliacionMSI();
     _concRefrescarFlujoMSI();
+};
+
+// ===== CORREGIR MESES (PLAZO) DE UNA COMPRA MSI — solo desde la mensualidad 1 =====
+// Reconstruye TODA la escalera: N mensualidades de (total / N), con fechas mensuales a partir de la fecha de la mensualidad 1.
+function _concFechaMesN(fechaBaseISO, k) {
+    const [y, m, d] = String(fechaBaseISO).split('-').map(Number);
+    const dest = new Date(y, m - 1 + k, 1, 12, 0, 0);
+    const ultimo = new Date(dest.getFullYear(), dest.getMonth() + 1, 0).getDate();
+    dest.setDate(Math.min(d, ultimo));
+    return `${dest.getFullYear()}-${String(dest.getMonth() + 1).padStart(2, '0')}-${String(dest.getDate()).padStart(2, '0')}`;
+}
+
+// Devuelve el motivo por el que NO se puede corregir (o '' si sí se puede).
+function _concMotivoNoCorregirMeses(cuenta) {
+    if (!cuenta || !Array.isArray(cuenta.calendario) || cuenta.calendario.length === 0) return 'La compra no tiene calendario.';
+    if (cuenta.esComisionBancaria) return 'Las comisiones bancarias no tienen plazo que corregir.';
+    if (cuenta.reembolsoProveedor?.activo || cuenta.cancelacionProveedor?.activo) return 'La compra tiene un reembolso o una cancelación del proveedor registrada.';
+    const num = v => parseFloat(String(v ?? 0).replace(/[$,]/g, '')) || 0;
+    const conPago = cuenta.calendario.filter(p => p.estado === 'Pagado' || p.estado === 'Parcial' || num(p.montoAbonado) > 0).length;
+    if (conPago > 0 || num(cuenta.montoPagado) > 0 || Number(cuenta.pagosRealizados) > 0)
+        return 'La compra ya tiene mensualidades pagadas o con abono. Corregir el plazo cambiaría historia pagada.';
+    const p1 = cuenta.calendario[0];
+    if (Number(p1.n || p1.numero) !== 1) return 'La corrección solo se hace desde la mensualidad 1.';
+    return '';
+}
+
+window.abrirModalCorregirMesesMSI = function(cuentaId) {
+    const cuentas = StorageService.get('cuentasMSI', []);
+    const cuenta = cuentas.find(c => String(c.id) === String(cuentaId));
+    if (!cuenta) return alert('No se encontró la compra.');
+    const motivo = _concMotivoNoCorregirMeses(cuenta);
+    if (motivo) return alert('🚫 No se puede corregir el plazo.\n\n' + motivo);
+    const mesesActual = Number(cuenta.plazo || cuenta.meses || cuenta.calendario.length);
+    const fmt = n => '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    document.querySelector('[data-modal="corregir-meses-msi"]')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+    <div data-modal="corregir-meses-msi" style="position:fixed; inset:0; background:rgba(15,23,42,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px);">
+        <div style="background:white; padding:26px; border-radius:16px; width:92%; max-width:430px; box-shadow:0 20px 25px rgba(0,0,0,0.2); max-height:92vh; overflow-y:auto;">
+            <h3 style="margin:0 0 6px 0; color:#1d4ed8;">🔧 Corregir meses de la compra</h3>
+            <p style="margin:0 0 4px 0; font-size:13px; font-weight:bold; color:#1e293b;">${(cuenta.concepto || cuenta.producto || 'Compra MSI')}</p>
+            <p style="margin:0 0 14px 0; font-size:12px; color:#64748b;">${cuenta.banco} · hoy: ${mesesActual} meses de ${fmt(cuenta.cuotaMensual)} · total ${fmt(cuenta.total)}</p>
+            <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:4px;">Meses correctos:</label>
+            <input type="number" id="cmMesesNuevos" min="1" max="60" value="${mesesActual}" oninput="window._concPrevCorregirMeses('${cuenta.id}')" style="width:100%; padding:10px; border:2px solid #cbd5e1; border-radius:8px; margin-bottom:12px; font-size:16px; box-sizing:border-box;">
+            <label style="font-size:12px; font-weight:bold; color:#475569; display:block; margin-bottom:4px;">Total de la compra a repartir:</label>
+            <input type="number" id="cmTotal" min="0" step="0.01" value="${Number(cuenta.total || 0)}" oninput="window._concPrevCorregirMeses('${cuenta.id}')" style="width:100%; padding:10px; border:2px solid #cbd5e1; border-radius:8px; margin-bottom:6px; font-size:16px; box-sizing:border-box;">
+            <p style="margin:0 0 12px 0; font-size:11px; color:#64748b;">Verifica que sea el total real de la compra (si antes eliminaste mensualidades, el total pudo haber bajado).</p>
+            <div id="cmPrevia" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px; font-size:12px; color:#1e3a8a; margin-bottom:12px;"></div>
+            <p style="margin:0 0 16px 0; font-size:11px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px;">Se reconstruye toda la escalera con la fecha de la mensualidad 1 como punto de partida. Las fechas que hayas reprogramado en las demás mensualidades se pierden y todas quedan como no conciliadas.</p>
+            <div style="display:flex; gap:10px;">
+                <button onclick="window.aplicarCorreccionMesesMSI('${cuenta.id}')" style="flex:2; padding:12px; background:#1d4ed8; color:white; border:none; border-radius:8px; font-weight:bold; cursor:pointer;">Aplicar corrección</button>
+                <button onclick="this.closest('[data-modal]').remove()" style="flex:1; padding:12px; background:#f1f5f9; border:none; border-radius:8px; cursor:pointer; color:#475569; font-weight:bold;">Cancelar</button>
+            </div>
+        </div>
+    </div>`);
+    window._concPrevCorregirMeses(cuenta.id);
+};
+
+window._concPrevCorregirMeses = function(cuentaId) {
+    const cuenta = StorageService.get('cuentasMSI', []).find(c => String(c.id) === String(cuentaId));
+    const box = document.getElementById('cmPrevia');
+    if (!cuenta || !box) return;
+    const n = parseInt(document.getElementById('cmMesesNuevos')?.value) || 0;
+    const total = parseFloat(document.getElementById('cmTotal')?.value) || 0;
+    if (n < 1 || n > 60 || total <= 0) { box.textContent = 'Captura meses (1 a 60) y un total mayor a cero.'; return; }
+    const fmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const cuota = Math.round((total / n) * 100) / 100;
+    const f1 = cuenta.calendario[0].fecha;
+    box.innerHTML = `Quedará: <b>${n} mensualidades de ${fmt(cuota)}</b><br>Primera: ${f1} · Última: ${_concFechaMesN(f1, n - 1)}`;
+};
+
+window.aplicarCorreccionMesesMSI = function(cuentaId) {
+    const cuentas = StorageService.get('cuentasMSI', []);
+    const cuenta = cuentas.find(c => String(c.id) === String(cuentaId));
+    if (!cuenta) return alert('No se encontró la compra.');
+    const motivo = _concMotivoNoCorregirMeses(cuenta);
+    if (motivo) return alert('🚫 No se puede corregir el plazo.\n\n' + motivo);
+
+    const n = parseInt(document.getElementById('cmMesesNuevos')?.value) || 0;
+    const total = Math.round((parseFloat(document.getElementById('cmTotal')?.value) || 0) * 100) / 100;
+    if (n < 1 || n > 60) return alert('⚠️ Los meses deben estar entre 1 y 60.');
+    if (!(total > 0)) return alert('⚠️ El total debe ser mayor a cero.');
+    const mesesAntes = Number(cuenta.plazo || cuenta.meses || cuenta.calendario.length);
+    if (n === mesesAntes && Math.abs(total - Number(cuenta.total || 0)) < 0.005) return alert('No hay cambios que aplicar.');
+
+    const cuota = Math.round((total / n) * 100) / 100;
+    const f1 = cuenta.calendario[0].fecha;
+    const fmt = v => '$' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (!confirm(`¿Corregir el plazo de esta compra?\n\n${cuenta.concepto || cuenta.producto} (${cuenta.banco})\nAntes: ${mesesAntes} meses de ${fmt(cuenta.cuotaMensual)} · total ${fmt(cuenta.total)}\nDespués: ${n} meses de ${fmt(cuota)} · total ${fmt(total)}\n\nSe reconstruye toda la escalera y todas las mensualidades quedan sin conciliar.`)) return;
+
+    const respaldo = { fecha: new Date().toISOString(), mesesAntes, cuotaAntes: cuenta.cuotaMensual, totalAntes: cuenta.total, calendarioAntes: cuenta.calendario };
+    cuenta.ajustesMeses = (cuenta.ajustesMeses || []).concat([respaldo]).slice(-3);
+    cuenta.calendario = Array.from({ length: n }, (_, i) => ({
+        n: i + 1, fecha: _concFechaMesN(f1, i), monto: cuota, estado: 'Pendiente', montoAbonado: 0, conciliado: false
+    }));
+    cuenta.meses = n;
+    if (cuenta.plazo !== undefined) cuenta.plazo = n;
+    cuenta.cuotaMensual = cuota;
+    cuenta.total = total;
+    cuenta.pagosRealizados = 0;
+    cuenta.montoPagado = 0;
+    delete cuenta.calendarioAntesCorreccionFechas;   // el respaldo de fechas anterior ya no corresponde a esta escalera
+
+    StorageService.set('cuentasMSI', cuentas);
+    if (window.AuditService?.log) {
+        window.AuditService.log({
+            accion: 'MSI_MESES_CORREGIDOS', modulo: 'Conciliación', entidad: 'cuentaMSI', entidadId: cuenta.id,
+            detalle: `${cuenta.concepto || cuenta.producto} (${cuenta.banco}): plazo corregido de ${mesesAntes} a ${n} meses; mensualidad ${fmt(cuota)}; total ${fmt(total)}. Sin pagos registrados. Respaldo en ajustesMeses.`,
+            severidad: 'alerta'
+        });
+    }
+    document.querySelector('[data-modal="corregir-meses-msi"]')?.remove();
+    renderConciliacionMSI();
+    _concRefrescarFlujoMSI();
+    alert(`✅ Plazo corregido: ${n} meses de ${fmt(cuota)}.\nVuelve a marcar las mensualidades que cuadren con tu estado de cuenta.`);
 };
 
 window.abrirModalReprogramarConciliacion = function(cuentaId, indexMensualidad, fechaActual) {
