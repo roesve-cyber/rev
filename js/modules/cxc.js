@@ -2660,36 +2660,63 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
         motivoCondonacionPolitica: motivoCondonacionPolitica
     };
 
+    // 🛡️ Se ESPERA a que la nube confirme el envío (o a que el abono quede en la cola de salida
+    // del dispositivo, que se reintenta sola). Antes pushAtomo se disparaba sin esperar ni revisar
+    // el resultado: si la subida fallaba, la bitácora igual decía "enviado a la bóveda", se
+    // imprimía el recibo y el abono se perdía (caso Hiali, 24-nov-2026).
+    let bloquearTicketPorNube = false;
     if (!esDirecto) {
-        StorageService.pushAtomo("abonosPendientes", cuarentena);
+        if (window._enviandoAbonoBoveda) return; // doble toque mientras se confirma el envío
+        window._enviandoAbonoBoveda = true;
+        const _clienteAviso = _cxcNombreClienteVigente(cuenta);
+        const _avisoBoveda = {
+            tipo: 'abono',
+            id: `abono-${cuarentena.id}`,
+            titulo: 'Abono pendiente en Boveda',
+            cuerpo: `${_clienteAviso} - ${_cxcDinero(montoFinal)}`,
+            folio,
+            cliente: _clienteAviso,
+            monto: montoFinal
+        };
+        let envioBoveda;
+        try {
+            envioBoveda = await StorageService.pushAtomo("abonosPendientes", cuarentena, { aviso: _avisoBoveda });
+        } catch (errEnvio) {
+            console.error('Error al enviar el abono a la bóveda:', errEnvio);
+            envioBoveda = { subioANube: false, error: errEnvio };
+        } finally {
+            window._enviandoAbonoBoveda = false;
+        }
+        const llegoABoveda = !!(envioBoveda?.subioANube || envioBoveda?.soloLocal);
+        bloquearTicketPorNube = !llegoABoveda;
         if (window.AuditService?.log) {
             window.AuditService.log({
-                accion: 'BOVEDA_ABONO_PENDIENTE',
+                accion: llegoABoveda ? 'BOVEDA_ABONO_PENDIENTE' : 'BOVEDA_ABONO_EN_COLA',
                 modulo: 'CxC',
                 entidad: 'abono',
                 entidadId: folio,
-                detalle: `Abono enviado a la bóveda de autorizaciones`,
+                detalle: llegoABoveda
+                    ? `Abono enviado a la bóveda de autorizaciones`
+                    : `Abono capturado pero NO llegó a la nube: quedó en la cola de este dispositivo`,
                 monto: montoFinal,
                 severidad: 'riesgo',
                 datos: {
-                    clienteNombre: _cxcNombreClienteVigente(cuenta),
+                    clienteNombre: _clienteAviso,
                     cuentaId: cuentaId,
                     etiquetaCuenta: etiqueta,
                     medioPago,
-                    estatus: 'Pendiente'
+                    estatus: 'Pendiente',
+                    subioANube: llegoABoveda,
+                    ...(llegoABoveda ? {} : {
+                        encoladoEnDispositivo: !!envioBoveda?.encolado,
+                        motivoFalla: String(envioBoveda?.error?.message || '')
+                    })
                 }
             });
         }
-        if (typeof window.notificarBovedaAutorizacion === 'function') {
-            window.notificarBovedaAutorizacion({
-                tipo: 'abono',
-                id: `abono-${cuarentena.id}`,
-                titulo: 'Abono pendiente en Boveda',
-                cuerpo: `${_cxcNombreClienteVigente(cuenta)} - ${_cxcDinero(montoFinal)}`,
-                folio,
-                cliente: _cxcNombreClienteVigente(cuenta),
-                monto: montoFinal
-            });
+        // Si no llegó, el aviso a Auditoría se retiene: la cola lo dispara cuando el abono por fin llegue.
+        if (llegoABoveda && typeof window.notificarBovedaAutorizacion === 'function') {
+            window.notificarBovedaAutorizacion(_avisoBoveda);
         }
     }
 
@@ -2745,7 +2772,7 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
             cuenta.plan?.total || cuenta.saldoOriginal || (precioContadoReal - Number(cuenta.engancheRecibido || cuenta.enganche || 0))
         );
 
-        ticketEmitido = generarTicketAbonoTermico({
+        ticketEmitido = bloquearTicketPorNube ? false : generarTicketAbonoTermico({
         folio,
         cliente: { nombre: _cxcNombreClienteVigente(cuenta), telefono: cuenta.telefono || '', direccion: cuenta.direccion || '' },
         montoAbono: montoFinal,
@@ -2778,6 +2805,10 @@ async function _procesarAbonoAvanzadoAsync(folio, montoOriginal, saldoActual, ap
     if (typeof renderCuentasIncobrables === 'function') renderCuentasIncobrables();
     if (typeof renderPanelAutorizaciones === 'function') renderPanelAutorizaciones();
     if (!procesoOk) return;
+    if (bloquearTicketPorNube) {
+        alert(`⚠️ ABONO SIN CONFIRMAR EN LA NUBE\n\nEl abono de ${_cxcDinero(montoFinal)} (folio ${folio}) quedó guardado SOLO en este dispositivo. Se enviará solo a la bóveda de autorizaciones en cuanto haya conexión.\n\nNO se imprimió el ticket. NO entregues recibo hasta que el abono aparezca en la bóveda de autorizaciones.`);
+        return;
+    }
     if (!ticketEmitido) {
         alert(esDirecto
             ? "Abono directo aplicado correctamente, pero el navegador bloqueo el ticket. Habilita ventanas emergentes y reimprimelo desde el estado de cuenta."
@@ -5331,7 +5362,31 @@ window.ejecutarConversionCredito = function(folio, saldoRestante, totalAbonado) 
     const cuarentenaNormalizada = typeof window._normalizarVentaPendienteFirestore === "function"
         ? window._normalizarVentaPendienteFirestore(cuarentena)
         : cuarentena;
-    StorageService.pushAtomo("ventasPendientes", cuarentenaNormalizada);
+    // 📮 pushAtomo ahora devuelve si realmente subió; si no, queda en la cola de salida y se
+    // reintenta solo. Aquí no se bloquea el ticket (no hay reimpresión de ventas pendientes y la
+    // conversión ya no se pierde), pero sí se deja constancia en bitácora y se avisa.
+    const _folioConversion = folio;
+    const _clienteConversion = cliente.nombre;
+    const _totalConversion = totalContado;
+    StorageService.pushAtomo("ventasPendientes", cuarentenaNormalizada)
+        .catch(err => ({ subioANube: false, error: err }))
+        .then(envio => {
+            const llego = !!(envio?.subioANube || envio?.soloLocal);
+            if (llego) return;
+            try {
+                window.AuditService?.log?.({
+                    accion: 'BOVEDA_VENTA_EN_COLA',
+                    modulo: 'CxC',
+                    entidad: 'venta',
+                    entidadId: _folioConversion,
+                    detalle: 'Conversión a crédito capturada pero NO llegó a la nube: quedó en la cola de este dispositivo',
+                    monto: _totalConversion,
+                    severidad: 'riesgo',
+                    datos: { clienteNombre: _clienteConversion, subioANube: false, encoladoEnDispositivo: !!envio?.encolado, motivoFalla: String(envio?.error?.message || '') }
+                });
+            } catch (e) { console.warn('Bitácora conversión en cola:', e); }
+            alert(`⚠️ CONVERSIÓN SIN CONFIRMAR EN LA NUBE\n\nLa conversión a crédito del folio ${_folioConversion} quedó guardada SOLO en este dispositivo y se enviará sola a la bóveda en cuanto haya conexión.\n\nNo cierres sesión ni limpies este navegador hasta que aparezca en la bóveda de autorizaciones.`);
+        });
 
     if (ap) ap.estado = "Conversión a Crédito Pendiente";
     if (vnt) vnt.estado = "Conversión a Crédito Pendiente";

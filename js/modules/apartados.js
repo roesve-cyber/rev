@@ -670,7 +670,7 @@ function cerrarModalAbonoApartado() {
     if (modal) modal.style.display = 'none';
 }
 
-function registrarAbonoApartadoDesdeModal() {
+async function registrarAbonoApartadoDesdeModal() {
     const folio = document.getElementById('abonoFolioApartado').value;
     const monto = parseFloat(document.getElementById('abonoMontoApartado').value);
     const fecha = document.getElementById('abonoFechaApartado').value;
@@ -740,7 +740,37 @@ function registrarAbonoApartadoDesdeModal() {
         nuevoSaldoEstimado,
         estado: 'Pendiente'
     };
-    StorageService.pushAtomo("abonosPendientes", cuarentenaAbono);
+    // 🛡️ Se ESPERA la confirmación de la nube (o la cola de salida del dispositivo). Si no llegó,
+    // NO se imprime el recibo provisional: antes se imprimía aunque el abono se perdiera.
+    if (window._enviandoAbonoApartadoBoveda) return; // doble toque mientras se confirma
+    window._enviandoAbonoApartadoBoveda = true;
+    let envioAbonoApt;
+    try {
+        envioAbonoApt = await StorageService.pushAtomo("abonosPendientes", cuarentenaAbono);
+    } catch (errEnvio) {
+        console.error('Error al enviar el abono de apartado a la bóveda:', errEnvio);
+        envioAbonoApt = { subioANube: false, error: errEnvio };
+    } finally {
+        window._enviandoAbonoApartadoBoveda = false;
+    }
+    if (!(envioAbonoApt?.subioANube || envioAbonoApt?.soloLocal)) {
+        try {
+            window.AuditService?.log?.({
+                accion: 'BOVEDA_ABONO_EN_COLA',
+                modulo: 'Apartados',
+                entidad: 'abono',
+                entidadId: folio,
+                detalle: 'Abono de apartado capturado pero NO llegó a la nube: quedó en la cola de este dispositivo',
+                monto: monto,
+                severidad: 'riesgo',
+                datos: { clienteNombre: ap.clienteNombre || 'Cliente', cuentaId, etiquetaCuenta, subioANube: false, encoladoEnDispositivo: !!envioAbonoApt?.encolado, motivoFalla: String(envioAbonoApt?.error?.message || '') }
+            });
+        } catch (e) { console.warn('Bitácora abono apartado en cola:', e); }
+        alert(`⚠️ ABONO SIN CONFIRMAR EN LA NUBE\n\nEl abono de ${dinero(monto)} (apartado ${folio}) quedó guardado SOLO en este dispositivo. Se enviará solo a la bóveda de autorizaciones en cuanto haya conexión.\n\nNO se imprimió el recibo. NO entregues recibo hasta que el abono aparezca en la bóveda de autorizaciones.`);
+        cerrarModalAbonoApartado();
+        renderApartados();
+        return;
+    }
 
     // Aquí ap.abonos todavía NO incluye este abono (va a la cuarentena de
     // la Bóveda, no se hace push directo), así que el "anterior" es

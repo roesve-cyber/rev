@@ -2571,36 +2571,57 @@ function procesarVentaFinal(metodoPago, totalContado, enganche, saldoAFinanciar,
     // normalizarlo entero y volver a subirlo — eso arriesgaba pisar la
     // aprobación/rechazo de OTRA venta que otro dispositivo acababa de resolver
     // justo en ese instante.
-    StorageService.pushAtomo("ventasPendientes", _normalizarVentaPendienteFirestore(cuarentena));
-    if (window.AuditService?.log) {
-        window.AuditService.log({
-            accion: 'BOVEDA_VENTA_PENDIENTE',
-            modulo: 'Ventas',
-            entidad: 'venta',
-            entidadId: folioVenta,
-            detalle: `Venta enviada a la bóveda de autorizaciones`,
-            monto: totalContado,
-            severidad: 'riesgo',
-            datos: {
-                clienteId: clienteSeleccionado?.id || null,
-                clienteNombre: clienteSeleccionado?.nombre || null,
-                metodoPago,
-                enganche,
-                estatus: 'Pendiente'
+    // 📮 pushAtomo ahora devuelve si realmente subió; si no, queda en la cola de salida del
+    // dispositivo y se reintenta solo. NO se espera aquí (el flujo de caja/entrega no se detiene:
+    // no hay reimpresión de ventas pendientes y la venta ya no se pierde), pero la bitácora ya no
+    // dice "enviada a la bóveda" cuando no lo fue, y se avisa al usuario.
+    // Los valores se capturan ANTES: al terminar el flujo se limpian clienteSeleccionado y carrito.
+    const _envioVentaCliente = clienteSeleccionado?.nombre || null;
+    const _envioVentaClienteId = clienteSeleccionado?.id || null;
+    const _envioVentaFolio = folioVenta;
+    const _envioVentaTotal = totalContado;
+    const _avisoVentaBoveda = {
+        tipo: 'venta',
+        id: `venta-${folioVenta}`,
+        titulo: 'Venta pendiente en Boveda',
+        cuerpo: `${clienteSeleccionado.nombre || 'Cliente'} - ${typeof dinero === 'function' ? dinero(totalContado) : totalContado}`,
+        folio: folioVenta,
+        cliente: clienteSeleccionado.nombre,
+        total: totalContado
+    };
+    StorageService.pushAtomo("ventasPendientes", _normalizarVentaPendienteFirestore(cuarentena), { aviso: _avisoVentaBoveda })
+        .catch(err => ({ subioANube: false, error: err }))
+        .then(envio => {
+            const llego = !!(envio?.subioANube || envio?.soloLocal);
+            try {
+                window.AuditService?.log?.({
+                    accion: llego ? 'BOVEDA_VENTA_PENDIENTE' : 'BOVEDA_VENTA_EN_COLA',
+                    modulo: 'Ventas',
+                    entidad: 'venta',
+                    entidadId: _envioVentaFolio,
+                    detalle: llego
+                        ? `Venta enviada a la bóveda de autorizaciones`
+                        : `Venta capturada pero NO llegó a la nube: quedó en la cola de este dispositivo`,
+                    monto: _envioVentaTotal,
+                    severidad: 'riesgo',
+                    datos: {
+                        clienteId: _envioVentaClienteId,
+                        clienteNombre: _envioVentaCliente,
+                        metodoPago,
+                        enganche,
+                        estatus: 'Pendiente',
+                        subioANube: llego,
+                        ...(llego ? {} : { encoladoEnDispositivo: !!envio?.encolado, motivoFalla: String(envio?.error?.message || '') })
+                    }
+                });
+            } catch (e) { console.warn('Bitácora de venta a bóveda:', e); }
+            if (llego) {
+                // Si no llegó, el aviso a Auditoría se retiene: la cola lo dispara cuando la venta llegue.
+                if (typeof window.notificarBovedaAutorizacion === 'function') window.notificarBovedaAutorizacion(_avisoVentaBoveda);
+            } else {
+                alert(`⚠️ VENTA SIN CONFIRMAR EN LA NUBE\n\nLa venta ${_envioVentaFolio} quedó guardada SOLO en este dispositivo y se enviará sola a la bóveda de autorizaciones en cuanto haya conexión.\n\nLos documentos ya se emitieron. No cierres sesión ni limpies este navegador hasta que la venta aparezca en la bóveda.`);
             }
         });
-    }
-    if (typeof window.notificarBovedaAutorizacion === 'function') {
-        window.notificarBovedaAutorizacion({
-            tipo: 'venta',
-            id: `venta-${folioVenta}`,
-            titulo: 'Venta pendiente en Boveda',
-            cuerpo: `${clienteSeleccionado.nombre || 'Cliente'} - ${typeof dinero === 'function' ? dinero(totalContado) : totalContado}`,
-            folio: folioVenta,
-            cliente: clienteSeleccionado.nombre,
-            total: totalContado
-        });
-    }
 
     // 3. Emitir documentos operativos aunque la venta quede en cuarentena.
     // La cuarentena es administrativa; no debe detener caja ni entrega.
