@@ -1448,7 +1448,8 @@ window.renderCobranzaMensual = function() {
         if (k) mesesSet.add(k);
     });
 
-    const meses = [...mesesSet].sort();
+    // Más reciente primero (la tabla y la gráfica van de lo más nuevo a lo más atrasado)
+    const meses = [...mesesSet].sort().reverse();
     if (!meses.length) {
         cont.innerHTML = `<div style="padding:50px;text-align:center;background:white;border-radius:16px;margin:20px 0;">
             <p style="color:#94a3b8;">No hay datos suficientes para generar este reporte.</p></div>`;
@@ -1473,8 +1474,41 @@ window.renderCobranzaMensual = function() {
         const numVentasCredito = ventas.filter(v =>
             _rc.mesKey(v.fechaVenta || v.fechaIso) === mes && v.metodoPago !== 'contado').length;
 
-        return { mes, capitalNuevo, enganches, cobranzaReal, numAbonos, numVentasCredito };
+        const tasa = capitalNuevo > 0 ? cobranzaReal / capitalNuevo * 100 : 0;
+        const neta = cobranzaReal - enganches;
+        return { mes, capitalNuevo, enganches, cobranzaReal, numAbonos, numVentasCredito, tasa, neta };
     });
+
+    // Datos para el cuadro que aparece al pasar el mouse por cada barra (mismos datos que la tabla)
+    window._rcmDatos = datos;
+    window._rcmTip = function(ev, i) {
+        const d = (window._rcmDatos || [])[i];
+        if (!d) return;
+        let tip = document.getElementById('rcm-tip');
+        if (!tip) {
+            tip = document.createElement('div');
+            tip.id = 'rcm-tip';
+            tip.style.cssText = 'position:fixed;z-index:99999;pointer-events:none;background:#0f172a;color:white;padding:10px 12px;border-radius:8px;font-size:12px;box-shadow:0 8px 20px rgba(0,0,0,.3);min-width:210px;line-height:1.6;font-family:system-ui,sans-serif;';
+            document.body.appendChild(tip);
+        }
+        const colorTasa = d.tasa >= 80 ? '#4ade80' : d.tasa >= 50 ? '#fbbf24' : '#f87171';
+        const colorNeta = d.neta > d.capitalNuevo * 0.15 ? '#4ade80' : '#f87171';
+        const fila = (t, v, c) => `<div style="display:flex;justify-content:space-between;gap:16px;"><span style="color:#94a3b8;">${t}</span><b${c ? ` style="color:${c}"` : ''}>${v}</b></div>`;
+        tip.innerHTML = `<div style="font-weight:900;font-size:13px;margin-bottom:4px;">${_rc.mesLabel(d.mes)}</div>`
+            + fila('Ventas crédito', d.numVentasCredito)
+            + fila('Capital colocado', _rc.fmt(d.capitalNuevo), '#93c5fd')
+            + fila('Enganches', _rc.fmt(d.enganches))
+            + fila('Cobranza real', _rc.fmt(d.cobranzaReal), '#4ade80')
+            + fila('Nº abonos', d.numAbonos)
+            + fila('Tasa recup.', _rc.pct(d.tasa), colorTasa)
+            + fila('Cobr. neta s/enganche', _rc.fmt(d.neta), colorNeta);
+        tip.style.display = 'block';
+        const x = (ev.clientX || 0), y = (ev.clientY || 0);
+        const w = tip.offsetWidth, h = tip.offsetHeight;
+        tip.style.left = Math.max(8, Math.min(x + 14, window.innerWidth - w - 8)) + 'px';
+        tip.style.top = Math.max(8, (y + 14 + h > window.innerHeight) ? y - h - 14 : y + 14) + 'px';
+    };
+    window._rcmTipOff = function() { const t = document.getElementById('rcm-tip'); if (t) t.style.display = 'none'; };
 
     const maxColocado = Math.max(...datos.map(d => d.capitalNuevo), 1);
     const maxCobranza = Math.max(...datos.map(d => d.cobranzaReal), 1);
@@ -1493,12 +1527,14 @@ window.renderCobranzaMensual = function() {
         const h1 = d.capitalNuevo / maxBar * chartH;
         const h2 = d.cobranzaReal / maxBar * chartH;
         const tasa = d.capitalNuevo > 0 ? Math.round(d.cobranzaReal / d.capitalNuevo * 100) : 0;
-        return `
-            <rect x="${x}" y="${chartH - h1}" width="${barW}" height="${h1}" fill="#3b82f6" rx="3" opacity=".85"/>
-            <rect x="${x + barW + gap}" y="${chartH - h2}" width="${barW}" height="${h2}" fill="#16a34a" rx="3" opacity=".85"/>
+        return `<g class="rcm-g" onmousemove="_rcmTip(event, ${i})" onmouseleave="_rcmTipOff()" onclick="_rcmTip(event, ${i})">
+            <rect class="rcm-hit" x="${x - 8}" y="0" width="${barW * 2 + gap + 16}" height="${chartH + 30}" fill="transparent"/>
+            <rect class="rcm-bar" x="${x}" y="${chartH - h1}" width="${barW}" height="${h1}" fill="#3b82f6" rx="3" opacity=".85"/>
+            <rect class="rcm-bar" x="${x + barW + gap}" y="${chartH - h2}" width="${barW}" height="${h2}" fill="#16a34a" rx="3" opacity=".85"/>
             <text x="${x + barW + gap / 2}" y="${chartH + 14}" text-anchor="middle" font-size="8" fill="#64748b">${_rc.mesLabel(d.mes).split(' ')[0]}</text>
+            <text x="${x + barW + gap / 2}" y="${chartH + 25}" text-anchor="middle" font-size="7" fill="#94a3b8">${_rc.mesLabel(d.mes).split(' ').slice(1).join(' ')}</text>
             ${tasa > 0 ? `<text x="${x + barW + gap / 2}" y="${chartH - Math.max(h1, h2) - 4}" text-anchor="middle" font-size="8" fill="${tasa >= 80 ? '#16a34a' : tasa >= 50 ? '#f59e0b' : '#dc2626'}" font-weight="bold">${tasa}%</text>` : ''}
-        `;
+        </g>`;
     }).join('');
 
     const filas = datos.map(d => {
@@ -1565,7 +1601,8 @@ window.renderCobranzaMensual = function() {
                 <span><span style="display:inline-block;width:12px;height:12px;background:#16a34a;border-radius:2px;margin-right:5px;"></span>Cobranza Real</span>
                 <span style="color:#64748b;">% = tasa de recuperación mensual</span>
             </div>
-            <svg width="${Math.max(chartW, 400)}" height="${chartH + 30}" style="overflow:visible;">
+            <style>.rcm-g{cursor:pointer}.rcm-g:hover .rcm-hit{fill:rgba(14,165,233,.10)}.rcm-g:hover .rcm-bar{opacity:1;filter:brightness(1.1)}</style>
+            <svg width="${Math.max(chartW, 400)}" height="${chartH + 34}" style="overflow:visible;">
                 ${barras}
             </svg>
         </div>
