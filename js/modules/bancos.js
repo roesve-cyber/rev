@@ -274,12 +274,12 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
         });
     });
 
-    // Solo se muestran los meses que tienen algo por pagar o algo pagado por adelantado.
-    // (Meses ya cerrados y saldados no son flujo.) Un mes visible conserva TODOS sus cargos
-    // para que su total sea el mismo que el de la Conciliación.
+    // El Flujo muestra lo que FALTA POR PAGAR: la cifra de cada mes baja conforme se registran pagos.
+    // Solo aparecen los meses con saldo pendiente; lo ya cubierto (pagado por adelantado) se indica
+    // como dato secundario en el detalle del mes, sin sumarlo a la cifra principal.
     Object.keys(cronogramaGlobal).forEach(clave => {
         const g = cronogramaGlobal[clave];
-        if (g.pendiente <= 0.005 && g.adelantado <= 0.005) delete cronogramaGlobal[clave];
+        if (g.pendiente <= 0.005) delete cronogramaGlobal[clave];
     });
 
     // 4. NIVEL 2: FILTROS DE MESES
@@ -294,8 +294,7 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
         const isActivo = window._msiFiltroMes === clave;
         htmlNivel2 += `<div onclick="renderDashboardMSI(null, '${clave}')" style="cursor:pointer; min-width:110px; padding:10px; border-radius:8px; border:2px solid ${isActivo ? '#10b981' : '#e2e8f0'}; background:${isActivo ? '#ecfdf5' : 'white'}; text-align:center;">
             <div style="font-size:11px; color:#6b7280; font-weight:bold; text-transform:uppercase;">📅 ${mesesNombre[parseInt(mes)-1]} ${anio.substring(2)}</div>
-            <div style="font-weight:900; font-size:14px; color:#059669;">${dinero(cronogramaGlobal[clave].bruto)}</div>
-            ${cronogramaGlobal[clave].adelantado > 0.005 ? `<div style="font-size:10px; color:#92400e; font-weight:bold;">Por pagar ${dinero(cronogramaGlobal[clave].pendiente)}</div>` : ''}
+            <div style="font-weight:900; font-size:14px; color:#059669;">${dinero(cronogramaGlobal[clave].pendiente)}</div>
         </div>`;
     });
     htmlNivel2 += `</div></div>`;
@@ -312,10 +311,10 @@ window.renderDashboardMSI = function(bancoSelect = null, mesSelect = null) {
         const yaPagadoMes = gMes.bruto - gMes.pendiente;
         htmlNivel3 += `<div style="background:#f1f5f9; padding:8px 15px; font-size:11px; font-weight:bold; color:#475569; border-bottom:1px solid #e2e8f0; text-transform:uppercase; letter-spacing:1px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
             <span>Cobros del mes: ${mesesNombre[parseInt(mes)-1]} ${anio}</span>
-            <span style="text-transform:none; letter-spacing:0;">Cargos ${dinero(gMes.bruto)}${yaPagadoMes > 0.005 ? ` · Ya pagado −${dinero(yaPagadoMes)} · <span style="color:#b45309;">Por pagar ${dinero(gMes.pendiente)}</span>` : ''}</span>
+            <span style="text-transform:none; letter-spacing:0;"><span style="color:#b45309;">Por pagar ${dinero(gMes.pendiente)}</span>${yaPagadoMes > 0.005 ? ` <span style="color:#94a3b8; font-weight:600;">· ${dinero(yaPagadoMes)} ya cubierto</span>` : ''}</span>
         </div>`;
         
-        cronogramaGlobal[clave].detalles.sort((a,b) => a.fechaExigible - b.fechaExigible).forEach((det) => {
+        cronogramaGlobal[clave].detalles.filter(det => !det.estaPagada).sort((a,b) => a.fechaExigible - b.fechaExigible).forEach((det) => {
             const estaVencida = !det.estaPagada && det.fechaExigible < hoy;
             const numCuota = det.pago.n || det.pago.numero;
             const totalCuotas = det.deuda.meses || det.deuda.plazo;
